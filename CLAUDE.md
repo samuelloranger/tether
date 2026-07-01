@@ -24,6 +24,8 @@ Run from repo root:
 - `bun start:server` — run built server
 
 Server typecheck: `bun --cwd apps/server typecheck`.
+
+**Run the backend as a background daemon:** `apps/server/cli.ts` (bin name `tether`). Install once by symlinking it onto PATH (`ln -sf "$PWD/apps/server/cli.ts" ~/.local/bin/tether`), then from anywhere: `tether start | stop | restart | status | logs`. It spawns `bun run src/server/index.ts` detached (cwd pinned to `apps/server`, so `config/` + db stay there); pid + log live in `~/.tether/`. Honors `TETHER_PORT` / `TETHER_DB_PATH`.
 Native iOS build: `cd apps/mobile && npx expo run:ios --device` (dev build to a connected device; Expo Go doesn't support SDK 57).
 
 There are **no tests** in this repo. There is no test runner configured.

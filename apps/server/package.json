@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "tether": "./cli.ts"
+  },
   "scripts": {
     "dev": "bun run --watch src/server/index.ts",
     "build": "bun build src/server/index.ts --outdir dist --target bun",
