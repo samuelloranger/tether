@@ -114,3 +114,7 @@ export function getLogs(sessionId: string, sinceId = 0): TerminalLog[] {
 export function clearLogs(sessionId: string) {
   db.query('DELETE FROM terminal_logs WHERE session_id = $sessionId').run({ $sessionId: sessionId });
 }
+
+export function setSessionStatus(id: string, status: 'running' | 'stopped') {
+  db.query('UPDATE sessions SET status = $status WHERE id = $id').run({ $id: id, $status: status });
+}
