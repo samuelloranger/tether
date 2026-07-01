@@ -31,3 +31,6 @@ apps/mobile/android/
 # SQLite WAL sidecars
 apps/server/config/*.db-wal
 apps/server/config/*.db-shm
+
+# Root-level runtime state (rcfile/db written when server runs from repo root)
+/config/
