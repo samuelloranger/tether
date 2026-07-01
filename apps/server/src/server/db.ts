@@ -149,6 +149,12 @@ export function setSessionStatus(id: string, status: 'running' | 'stopped') {
   db.query('UPDATE sessions SET status = $status WHERE id = $id').run({ $id: id, $status: status });
 }
 
+// Fully remove a session (row + its logs) so it disappears from the list.
+export function deleteSession(id: string) {
+  clearLogs(id);
+  db.query('DELETE FROM sessions WHERE id = $id').run({ $id: id });
+}
+
 export interface SessionRow extends Session {
   last_output_at: string | null;
 }
