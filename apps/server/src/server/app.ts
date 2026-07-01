@@ -93,6 +93,13 @@ app.get(
             // 1. Ensure the PTY process is active (auto-start if needed)
             startSession(sessionId, process.env.SHELL || 'bash', cols, rows);
 
+            // 1b. If the client's sinceId predates pruned rows, the replay has a
+            // hole — tell the client to wipe its emulator before the replay.
+            const sess = getSession(sessionId);
+            if (sinceId > 0 && sess && sinceId < sess.pruned_before) {
+              ws.send(JSON.stringify({ type: 'reset' }));
+            }
+
             // 2. Catch up the client: stream any logs missed since the provided log ID
             const missedLogs = getLogs(sessionId, sinceId);
             console.log(`Streaming ${missedLogs.length} missed logs to client...`);
