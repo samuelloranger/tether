@@ -123,6 +123,14 @@ export default function App() {
   const entryFor = (id: string): SessionEntry =>
     cache.touch(id, () => ({ term: new TerminalEmulator(numCols || 80, numRows || 24), sinceId: 0, lastAppliedId: 0 }));
 
+  // Send only when the socket is actually OPEN. `connectionStatus` (React state)
+  // lags the real socket state — e.g. mid-switch the new socket is CONNECTING —
+  // so guarding on it throws INVALID_STATE_ERR. readyState is the source of truth.
+  const wsSend = (obj: unknown) => {
+    const s = ws.current;
+    if (s && s.readyState === WebSocket.OPEN) s.send(JSON.stringify(obj));
+  };
+
   // When the remote enables mouse reporting (TUIs like Claude Code), translate
   // vertical swipes into scroll-wheel events so the app scrolls its own history.
   const panResponder = useRef(
@@ -144,7 +152,7 @@ export default function App() {
         const wheel = (btn: number) => {
           const col = Math.max(1, Math.floor((e?.term.cols ?? 80) / 2));
           const row = Math.max(1, Math.floor((e?.term.rows ?? 24) / 2));
-          ws.current?.send(JSON.stringify({ type: 'input', text: `\x1b[<${btn};${col};${row}M` }));
+          wsSend({ type: 'input', text: `\x1b[<${btn};${col};${row}M` });
         };
         while (wheelAccum.current >= STEP) { wheel(64); wheelAccum.current -= STEP; } // drag down → older
         while (wheelAccum.current <= -STEP) { wheel(65); wheelAccum.current += STEP; } // drag up → newer
@@ -323,9 +331,7 @@ export default function App() {
   // fills the viewport. Re-runs when the fit changes or the socket connects.
   useEffect(() => {
     cache.get(activeIdRef.current)?.term.resize(numCols, numRows);
-    if (ws.current && connectionStatus === 'connected') {
-      ws.current.send(JSON.stringify({ type: 'resize', cols: numCols, rows: numRows }));
-    }
+    wsSend({ type: 'resize', cols: numCols, rows: numRows });
     scheduleRender();
   }, [numCols, numRows, connectionStatus, activeId]);
 
@@ -361,9 +367,7 @@ export default function App() {
   };
 
   const sendInput = (text: string) => {
-    if (ws.current && connectionStatus === 'connected') {
-      ws.current.send(JSON.stringify({ type: 'input', text }));
-    }
+    wsSend({ type: 'input', text });
   };
 
   // Type straight into the terminal: forward each keystroke to the PTY as it is
