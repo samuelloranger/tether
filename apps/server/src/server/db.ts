@@ -44,6 +44,11 @@ const migrations = [
     name: 'session_name',
     up: `ALTER TABLE sessions ADD COLUMN name TEXT;`,
   },
+  {
+    version: 3,
+    name: 'pruned_watermark',
+    up: `ALTER TABLE sessions ADD COLUMN pruned_before INTEGER NOT NULL DEFAULT 0;`,
+  },
 ];
 
 export function runMigrations() {
@@ -83,13 +88,23 @@ const LOG_CAP = 2000;
 const insertCounts = new Map<string, number>();
 
 export function pruneLogs(sessionId: string, cap = LOG_CAP) {
-  db.query(
-    `DELETE FROM terminal_logs
-     WHERE session_id = $id AND id <= (
-       SELECT id FROM terminal_logs WHERE session_id = $id
-       ORDER BY id DESC LIMIT 1 OFFSET $cap
-     )`,
-  ).run({ $id: sessionId, $cap: cap });
+  const cut = db
+    .query(
+      `SELECT id FROM terminal_logs WHERE session_id = $id
+       ORDER BY id DESC LIMIT 1 OFFSET $cap`,
+    )
+    .get({ $id: sessionId, $cap: cap }) as { id: number } | null;
+  if (!cut) return;
+  db.query('DELETE FROM terminal_logs WHERE session_id = $id AND id <= $cut').run({
+    $id: sessionId,
+    $cut: cut.id,
+  });
+  // Watermark lets the WS gateway detect a client whose sinceId predates the
+  // prune (gap in replay) and tell it to reset instead of rendering a hole.
+  db.query('UPDATE sessions SET pruned_before = $cut WHERE id = $id AND pruned_before < $cut').run({
+    $id: sessionId,
+    $cut: cut.id,
+  });
 }
 
 export interface Session {
@@ -98,6 +113,7 @@ export interface Session {
   status: 'running' | 'stopped';
   created_at: string;
   name: string | null;
+  pruned_before: number;
 }
 
 export interface TerminalLog {
@@ -153,6 +169,12 @@ export function clearLogs(sessionId: string) {
 
 export function setSessionStatus(id: string, status: 'running' | 'stopped') {
   db.query('UPDATE sessions SET status = $status WHERE id = $id').run({ $id: id, $status: status });
+}
+
+// Called once at boot: any session still marked running belonged to a previous
+// server process — its PTY is gone.
+export function resetRunningSessions() {
+  db.query(`UPDATE sessions SET status = 'stopped' WHERE status = 'running'`).run();
 }
 
 export function renameSession(id: string, name: string | null) {
