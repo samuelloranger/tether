@@ -1082,6 +1082,21 @@ function AppInner() {
 
               <View style={styles.utilityGroupDivider} />
 
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[H')}>
+                <Text style={styles.utilityBtnText}>Home</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[F')}>
+                <Text style={styles.utilityBtnText}>End</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[5~')}>
+                <Text style={styles.utilityBtnText}>PgUp</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[6~')}>
+                <Text style={styles.utilityBtnText}>PgDn</Text>
+              </TouchableOpacity>
+
+              <View style={styles.utilityGroupDivider} />
+
               <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={handlePaste} accessibilityRole="button" accessibilityLabel="Paste">
                 <Feather name="clipboard" size={17} color="#cbd5e1" />
               </TouchableOpacity>
