@@ -738,7 +738,14 @@ function AppInner() {
                   Ctrl
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\t')}>
+              <TouchableOpacity
+                style={styles.utilityBtn}
+                onPress={() => sendInput('\t')}
+                onLongPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  sendInput('\x1b[Z');
+                }}
+              >
                 <Text style={styles.utilityBtnText}>Tab</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b')}>
