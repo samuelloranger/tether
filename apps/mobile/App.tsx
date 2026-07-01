@@ -34,6 +34,7 @@ const KEY_SERVER_IP = 'tether_server_ip';
 const KEY_PORT = 'tether_port';
 const KEY_SESSION_ID = 'tether_session_id';
 const KEY_HISTORY = 'tether_history';
+const KEY_FONT = 'tether_font_size';
 
 // Zero-width sentinel kept in the capture field so it's never "empty" — lets iOS
 // fire onChangeText for Backspace even with nothing typed yet.
@@ -194,7 +195,7 @@ function AppInner() {
   // is resized to match. CHAR_RATIO ~ monospace advance width / font size.
   const { width: winWidth } = useWindowDimensions();
   const CHAR_RATIO = 0.6;
-  const fontSize = 11;
+  const [fontSize, setFontSize] = useState(11);
   const lineHeight = Math.round(fontSize * 1.3);
   const gridWidth = winWidth - 12;
   const numCols = Math.max(20, Math.floor(gridWidth / (fontSize * CHAR_RATIO)));
@@ -370,6 +371,22 @@ function AppInner() {
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  // Load persisted font size once on mount.
+  useEffect(() => {
+    AsyncStorage.getItem(KEY_FONT).then((v) => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 8 && n <= 24) setFontSize(n);
+    });
+  }, []);
+
+  const changeFontSize = (delta: number) => {
+    setFontSize((prev) => {
+      const next = Math.min(24, Math.max(8, prev + delta));
+      AsyncStorage.setItem(KEY_FONT, String(next));
+      return next;
+    });
+  };
 
   const refreshSessions = async () => {
     try {
@@ -776,6 +793,25 @@ function AppInner() {
                   <Feather name="edit-2" size={16} color="#cbd5e1" />
                   <Text style={styles.menuRowText}>Rename terminal</Text>
                 </TouchableOpacity>
+                <View style={styles.menuRow}>
+                  <Feather name="type" size={16} color="#cbd5e1" />
+                  <Text style={[styles.menuRowText, { flex: 1 }]}>Font size</Text>
+                  <TouchableOpacity
+                    style={styles.fontStepBtn}
+                    onPress={() => changeFontSize(-1)}
+                    accessibilityLabel="Decrease font size"
+                  >
+                    <Text style={styles.fontStepText}>−</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.fontSizeValue}>{fontSize}</Text>
+                  <TouchableOpacity
+                    style={styles.fontStepBtn}
+                    onPress={() => changeFontSize(1)}
+                    accessibilityLabel="Increase font size"
+                  >
+                    <Text style={styles.fontStepText}>+</Text>
+                  </TouchableOpacity>
+                </View>
                 <TouchableOpacity
                   style={styles.menuRow}
                   onPress={() => {
@@ -1195,6 +1231,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  fontStepBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fontStepText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#e2e8f0',
+  },
+  fontSizeValue: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#e2e8f0',
   },
   menuBackdrop: {
     flex: 1,
