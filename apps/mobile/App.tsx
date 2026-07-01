@@ -35,6 +35,7 @@ const KEY_PORT = 'tether_port';
 const KEY_SESSION_ID = 'tether_session_id';
 const KEY_HISTORY = 'tether_history';
 const KEY_FONT = 'tether_font_size';
+const KEY_SNIPPETS = 'tether_snippets';
 
 // Zero-width sentinel kept in the capture field so it's never "empty" — lets iOS
 // fire onChangeText for Backspace even with nothing typed yet.
@@ -172,6 +173,9 @@ function AppInner() {
   const [renameText, setRenameText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<TextInput | null>(null);
+  const [snippets, setSnippets] = useState<string[]>([]);
+  const [snippetsModalOpen, setSnippetsModalOpen] = useState(false);
+  const [snippetDraft, setSnippetDraft] = useState('');
 
   // Multi-session state
   const cache = useRef(new SessionCache(3)).current;
@@ -388,6 +392,40 @@ function AppInner() {
       AsyncStorage.setItem(KEY_FONT, String(next));
       return next;
     });
+  };
+
+  // Load persisted snippets once on mount.
+  useEffect(() => {
+    AsyncStorage.getItem(KEY_SNIPPETS).then((v) => {
+      if (!v) return;
+      try {
+        const parsed = JSON.parse(v);
+        if (Array.isArray(parsed)) setSnippets(parsed.filter((s) => typeof s === 'string'));
+      } catch {
+        // ignore malformed storage
+      }
+    });
+  }, []);
+
+  const persistSnippets = (next: string[]) => {
+    setSnippets(next);
+    AsyncStorage.setItem(KEY_SNIPPETS, JSON.stringify(next));
+  };
+
+  const addSnippet = () => {
+    const s = snippetDraft.trim();
+    if (!s) return;
+    persistSnippets([...snippets, s]);
+    setSnippetDraft('');
+  };
+
+  const removeSnippet = (index: number) => {
+    persistSnippets(snippets.filter((_, i) => i !== index));
+  };
+
+  const sendSnippet = (s: string) => {
+    setSnippetsModalOpen(false);
+    sendInput(s);
   };
 
   const refreshSessions = async () => {
@@ -841,6 +879,16 @@ function AppInner() {
                   style={styles.menuRow}
                   onPress={() => {
                     setMenuOpen(false);
+                    setSnippetsModalOpen(true);
+                  }}
+                >
+                  <Feather name="terminal" size={16} color="#cbd5e1" />
+                  <Text style={styles.menuRowText}>Snippets</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuRow}
+                  onPress={() => {
+                    setMenuOpen(false);
                     hardResetSession();
                   }}
                 >
@@ -882,6 +930,55 @@ function AppInner() {
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.renameBtn} onPress={submitRename}>
                     <Text style={[styles.renameBtnText, { color: '#22d3ee' }]}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </Pressable>
+            </Pressable>
+          </Modal>
+
+          {/* Snippets Modal */}
+          <Modal
+            visible={snippetsModalOpen}
+            animationType="fade"
+            transparent
+            onRequestClose={() => setSnippetsModalOpen(false)}
+          >
+            <Pressable style={styles.menuBackdrop} onPress={() => setSnippetsModalOpen(false)}>
+              <Pressable style={styles.renamePanel} onPress={() => {}}>
+                <Text style={styles.renameTitle}>Snippets</Text>
+                {snippets.length === 0 && (
+                  <Text style={styles.snippetEmpty}>No snippets yet. Add one below.</Text>
+                )}
+                {snippets.map((s, i) => (
+                  <View key={`${s}-${i}`} style={styles.snippetRow}>
+                    <TouchableOpacity style={styles.snippetSend} onPress={() => sendSnippet(s)}>
+                      <Text style={styles.snippetText} numberOfLines={1}>
+                        {s}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.snippetDelete}
+                      onPress={() => removeSnippet(i)}
+                      accessibilityLabel={`Delete snippet ${s}`}
+                    >
+                      <Feather name="x" size={16} color="#94a3b8" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={styles.snippetAddRow}>
+                  <TextInput
+                    style={[styles.renameInput, { flex: 1 }]}
+                    value={snippetDraft}
+                    onChangeText={setSnippetDraft}
+                    placeholder="New snippet (e.g. git status)"
+                    placeholderTextColor="#64748b"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    onSubmitEditing={addSnippet}
+                    keyboardAppearance="dark"
+                  />
+                  <TouchableOpacity style={styles.snippetAddBtn} onPress={addSnippet}>
+                    <Feather name="plus" size={18} color="#22d3ee" />
                   </TouchableOpacity>
                 </View>
               </Pressable>
@@ -1293,6 +1390,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#e2e8f0',
+  },
+  snippetEmpty: {
+    color: '#64748b',
+    fontSize: 13,
+  },
+  snippetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  snippetSend: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  snippetText: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontFamily: MONO,
+  },
+  snippetDelete: {
+    padding: 8,
+  },
+  snippetAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  snippetAddBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   menuBackdrop: {
     flex: 1,
