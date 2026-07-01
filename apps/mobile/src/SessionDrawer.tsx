@@ -1,5 +1,15 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Pressable } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  Pressable,
+  Animated,
+  AccessibilityInfo,
+} from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
 export interface DrawerSession {
   id: string;
@@ -17,6 +27,9 @@ interface SessionDrawerProps {
   onClose: () => void;
 }
 
+const PANEL_W = 264;
+const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
+
 function isRecentlyActive(ts: string | null): boolean {
   if (!ts) return false;
   // SQLite CURRENT_TIMESTAMP is UTC "YYYY-MM-DD HH:MM:SS"; treat as UTC.
@@ -33,48 +46,120 @@ export function SessionDrawer({
   onKill,
   onClose,
 }: SessionDrawerProps) {
-  if (!visible) return null;
+  const [mounted, setMounted] = useState(visible);
+  const reduceMotion = useRef(false);
+  const tx = useRef(new Animated.Value(visible ? 0 : -PANEL_W)).current;
+  const fade = useRef(new Animated.Value(visible ? 1 : 0)).current;
+
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((r) => {
+        reduceMotion.current = r;
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // Slide the panel in from the left + fade the scrim; exit is quicker than
+    // enter (feels responsive). Reduced-motion snaps without animating.
+    if (visible) {
+      setMounted(true);
+      if (reduceMotion.current) {
+        tx.setValue(0);
+        fade.setValue(1);
+        return;
+      }
+      Animated.parallel([
+        Animated.timing(tx, { toValue: 0, duration: 240, useNativeDriver: true }),
+        Animated.timing(fade, { toValue: 1, duration: 240, useNativeDriver: true }),
+      ]).start();
+    } else if (mounted) {
+      if (reduceMotion.current) {
+        setMounted(false);
+        return;
+      }
+      Animated.parallel([
+        Animated.timing(tx, { toValue: -PANEL_W, duration: 160, useNativeDriver: true }),
+        Animated.timing(fade, { toValue: 0, duration: 160, useNativeDriver: true }),
+      ]).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
+    }
+  }, [visible]);
+
+  if (!mounted) return null;
+
   return (
     <View style={styles.overlay}>
-      <Pressable style={styles.scrim} onPress={onClose} />
-      <View style={styles.panel}>
-        <Text style={styles.title}>Terminals</Text>
-        <ScrollView style={styles.list}>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
+        <Pressable
+          style={styles.scrim}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close terminal list"
+        />
+      </Animated.View>
+
+      <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
+        <View style={styles.header}>
+          <Feather name="terminal" size={14} color="#818cf8" />
+          <Text style={styles.title}>Terminals</Text>
+        </View>
+
+        <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
           {sessions.map((s) => {
             const active = s.id === activeId;
             const live = active || isRecentlyActive(s.last_output_at);
+            const dotColor = s.status === 'stopped' ? '#64748b' : live ? '#22c55e' : '#334155';
             return (
               <View key={s.id} style={[styles.row, active && styles.rowActive]}>
-                <TouchableOpacity style={styles.rowMain} onPress={() => onSelect(s.id)}>
-                  <View
-                    style={[
-                      styles.dot,
-                      { backgroundColor: s.status === 'stopped' ? '#64748b' : live ? '#34d399' : '#334155' },
-                    ]}
-                  />
+                <TouchableOpacity
+                  style={styles.rowMain}
+                  activeOpacity={0.6}
+                  onPress={() => onSelect(s.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Terminal ${s.id}${s.status === 'stopped' ? ', stopped' : live ? ', active' : ', idle'}`}
+                >
+                  <View style={[styles.dot, { backgroundColor: dotColor }]} />
                   <Text style={[styles.name, active && styles.nameActive]}>{s.id}</Text>
                   {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.kill} onPress={() => onKill(s.id)}>
-                  <Text style={styles.killText}>✕</Text>
+                <TouchableOpacity
+                  style={styles.kill}
+                  hitSlop={HIT}
+                  activeOpacity={0.6}
+                  onPress={() => onKill(s.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Kill terminal ${s.id}`}
+                >
+                  <Feather name="x" size={16} color="#f87171" />
                 </TouchableOpacity>
               </View>
             );
           })}
         </ScrollView>
-        <TouchableOpacity style={styles.newBtn} onPress={onNew}>
-          <Text style={styles.newBtnText}>+ New terminal</Text>
+
+        <TouchableOpacity
+          style={styles.newBtn}
+          activeOpacity={0.8}
+          onPress={onNew}
+          accessibilityRole="button"
+          accessibilityLabel="New terminal"
+        >
+          <Feather name="plus" size={16} color="#fff" />
+          <Text style={styles.newBtnText}>New terminal</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', zIndex: 100 },
-  scrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+  scrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   panel: {
-    width: 260,
+    width: PANEL_W,
     backgroundColor: '#0b0f19',
     borderRightWidth: 1,
     borderRightColor: 'rgba(255,255,255,0.1)',
@@ -85,13 +170,13 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
   },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   title: {
     color: '#94a3b8',
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 12,
   },
   list: { flex: 1 },
   row: {
@@ -99,22 +184,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 8,
     marginBottom: 4,
+    minHeight: 44,
     backgroundColor: 'rgba(255,255,255,0.02)',
   },
   rowActive: { backgroundColor: 'rgba(99,102,241,0.15)' },
-  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', padding: 10 },
-  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 11 },
+  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
   name: { color: '#cbd5e1', fontFamily: 'Courier', fontSize: 13 },
   nameActive: { color: '#818cf8', fontWeight: '700' },
   stopped: { color: '#64748b', fontSize: 10, marginLeft: 8 },
-  kill: { padding: 10 },
-  killText: { color: '#f87171', fontSize: 14 },
+  kill: { paddingHorizontal: 12, paddingVertical: 11, alignItems: 'center', justifyContent: 'center' },
   newBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     marginVertical: 12,
-    paddingVertical: 12,
+    paddingVertical: 13,
     borderRadius: 8,
     backgroundColor: '#4f46e5',
-    alignItems: 'center',
   },
   newBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
 });
