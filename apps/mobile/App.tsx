@@ -163,6 +163,7 @@ function AppInner() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
+  const [ctrlArmed, setCtrlArmed] = useState(false);
 
   // Multi-session state
   const cache = useRef(new SessionCache(3)).current;
@@ -481,6 +482,15 @@ function AppInner() {
   // firing on iOS even before anything is typed.
   const handleKeyPress = (e: { nativeEvent: { key: string } }) => {
     const key = e.nativeEvent.key;
+    if (ctrlArmed) {
+      setCtrlArmed(false);
+      if (/^[a-zA-Z]$/.test(key)) {
+        sendInput(String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64));
+        autoScroll.current = true;
+        return;
+      }
+      // Non-letter while armed: fall through and handle normally, modifier dropped.
+    }
     if (key === 'Backspace') sendInput('\x7f');
     else if (key.length === 1) sendInput(key); // printable char (incl. space)
     autoScroll.current = true;
@@ -718,19 +728,18 @@ function AppInner() {
           <View style={styles.utilityBar}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.utilityScroll}>
               <TouchableOpacity
-                style={styles.utilityBtn}
+                style={[styles.utilityBtn, ctrlArmed && styles.utilityBtnActive]}
                 onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  sendInput('\x03');
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setCtrlArmed((v) => !v);
                 }}
               >
-                <Text style={[styles.utilityBtnText, styles.utilityBtnTextDanger]}>Ctrl+C</Text>
+                <Text style={[styles.utilityBtnText, ctrlArmed && styles.utilityBtnTextActive]}>
+                  Ctrl
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\t')}>
                 <Text style={styles.utilityBtnText}>Tab</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x04')}>
-                <Text style={styles.utilityBtnText}>Ctrl+D</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b')}>
                 <Text style={styles.utilityBtnText}>Esc</Text>
@@ -1024,6 +1033,12 @@ const styles = StyleSheet.create({
   },
   utilityBtnTextDanger: {
     color: '#f87171',
+  },
+  utilityBtnActive: {
+    backgroundColor: '#22d3ee',
+  },
+  utilityBtnTextActive: {
+    color: '#0b0f19',
   },
   utilityIconBtn: {
     width: 40,
