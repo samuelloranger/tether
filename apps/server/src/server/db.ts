@@ -39,6 +39,11 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_terminal_logs_session ON terminal_logs(session_id);
     `,
   },
+  {
+    version: 2,
+    name: 'session_name',
+    up: `ALTER TABLE sessions ADD COLUMN name TEXT;`,
+  },
 ];
 
 export function runMigrations() {
@@ -92,6 +97,7 @@ export interface Session {
   command: string;
   status: 'running' | 'stopped';
   created_at: string;
+  name: string | null;
 }
 
 export interface TerminalLog {
@@ -147,6 +153,10 @@ export function clearLogs(sessionId: string) {
 
 export function setSessionStatus(id: string, status: 'running' | 'stopped') {
   db.query('UPDATE sessions SET status = $status WHERE id = $id').run({ $id: id, $status: status });
+}
+
+export function renameSession(id: string, name: string | null) {
+  db.query('UPDATE sessions SET name = $name WHERE id = $id').run({ $id: id, $name: name });
 }
 
 // Fully remove a session (row + its logs) so it disappears from the list.

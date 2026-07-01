@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
-import { getLogs, getSession, listSessions } from './db';
+import { getLogs, getSession, listSessions, renameSession } from './db';
 import {
   killSession,
   resizeSession,
@@ -52,6 +52,15 @@ app.post('/api/sessions/kill', async (c) => {
 
   const killed = killSession(sessionId);
   return c.json({ ok: killed });
+});
+
+app.post('/api/sessions/rename', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const id = body.id as string | undefined;
+  if (!id) return c.json({ ok: false, error: 'missing id' }, 400);
+  const trimmed = typeof body.name === 'string' ? body.name.trim() : '';
+  renameSession(id, trimmed.length ? trimmed : null);
+  return c.json({ ok: true });
 });
 
 // Fetch log history for a session (e.g. for full reload)

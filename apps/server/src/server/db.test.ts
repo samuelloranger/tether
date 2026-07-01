@@ -1,5 +1,12 @@
 // Run: TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/server/db.test.ts
-import { addTerminalLog, getLogs, listSessions, pruneLogs, upsertSession } from './db';
+import {
+  addTerminalLog,
+  getLogs,
+  listSessions,
+  pruneLogs,
+  renameSession,
+  upsertSession,
+} from './db';
 
 let pass = 0;
 function ok(cond: boolean, msg: string) {
@@ -30,6 +37,18 @@ function ok(cond: boolean, msg: string) {
   ok(logs.length === 10, `prune keeps 10 rows, got ${logs.length}`);
   ok(logs[logs.length - 1].chunk === 'line 49', 'newest row retained');
   ok(logs[0].chunk === 'line 40', 'oldest retained is line 40');
+}
+
+// renameSession sets and clears the name
+{
+  upsertSession('term-rename', 'bash', 'running');
+  renameSession('term-rename', 'my build');
+  const named = listSessions().find((r) => r.id === 'term-rename');
+  ok(named!.name === 'my build', 'name is set after rename');
+
+  renameSession('term-rename', null);
+  const cleared = listSessions().find((r) => r.id === 'term-rename');
+  ok(cleared!.name == null, 'name is null after clearing');
 }
 
 console.log(`\n  ${pass} assertions passed\n`);
