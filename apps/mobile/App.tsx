@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -25,8 +25,6 @@ import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal
 const KEY_SERVER_IP = 'tether_server_ip';
 const KEY_PORT = 'tether_port';
 const KEY_SESSION_ID = 'tether_session_id';
-const KEY_COLS = 'tether_cols';
-const KEY_ROWS = 'tether_rows';
 const KEY_HISTORY = 'tether_history';
 
 // Zero-width sentinel kept in the capture field so it's never "empty" — lets iOS
@@ -40,16 +38,44 @@ function runToStyle(s: CellStyle): TextStyle {
   if (s.bold) style.fontWeight = 'bold';
   if (s.italic) style.fontStyle = 'italic';
   if (s.underline) style.textDecorationLine = 'underline';
+  if (s.caret) {
+    // Block caret: accent background, dark glyph for contrast.
+    style.backgroundColor = '#818cf8';
+    style.color = '#0b0f19';
+  }
   return style;
 }
+
+// Memoized terminal row. Props are shallow-compared; the emulator reuses the
+// same `row` object for unchanged lines, so continuous TUI repaints only
+// re-render the handful of rows that actually changed.
+const TermRow = React.memo(function TermRow({
+  row,
+  fontSize,
+  lineHeight,
+  width,
+}: {
+  row: RenderRow;
+  fontSize: number;
+  lineHeight: number;
+  width: number;
+}) {
+  return (
+    <Text style={[styles.termLine, { fontSize, lineHeight, width }]} numberOfLines={1}>
+      {row.runs.map((run, i) => (
+        <Text key={i} style={runToStyle(run.style)}>
+          {run.text}
+        </Text>
+      ))}
+    </Text>
+  );
+});
 
 export default function App() {
   // Connection states
   const [serverIp, setServerIp] = useState('192.168.50.30');
   const [port, setPort] = useState('8085');
   const [sessionId, setSessionId] = useState('default');
-  const [cols, setCols] = useState('80');
-  const [rows, setRows] = useState('24');
 
   // UI states
   const [isConfiguring, setIsConfiguring] = useState(true);
@@ -114,7 +140,7 @@ export default function App() {
         mouseOnRef.current = term.current.mouseOn;
         setMouseOn(term.current.mouseOn);
       }
-    }, 16);
+    }, 33); // ~30fps: enough for a terminal, halves render load vs 60fps
   };
 
   const resetTerminal = () => {
@@ -140,21 +166,17 @@ export default function App() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const [savedIp, savedPort, savedSession, savedCols, savedRows, savedHistory] =
+        const [savedIp, savedPort, savedSession, savedHistory] =
           await Promise.all([
             AsyncStorage.getItem(KEY_SERVER_IP),
             AsyncStorage.getItem(KEY_PORT),
             AsyncStorage.getItem(KEY_SESSION_ID),
-            AsyncStorage.getItem(KEY_COLS),
-            AsyncStorage.getItem(KEY_ROWS),
             AsyncStorage.getItem(KEY_HISTORY),
           ]);
 
         if (savedIp) setServerIp(savedIp);
         if (savedPort) setPort(savedPort);
         if (savedSession) setSessionId(savedSession);
-        if (savedCols) setCols(savedCols);
-        if (savedRows) setRows(savedRows);
         if (savedHistory) setCommandHistory(JSON.parse(savedHistory));
 
         if (savedIp) setIsConfiguring(false);
@@ -264,8 +286,6 @@ export default function App() {
         [KEY_SERVER_IP, serverIp],
         [KEY_PORT, port],
         [KEY_SESSION_ID, sessionId],
-        [KEY_COLS, cols],
-        [KEY_ROWS, rows],
       ]);
       resetTerminal();
       setIsConfiguring(false);
@@ -321,11 +341,6 @@ export default function App() {
     }
   };
 
-  const clearLogs = () => {
-    term.current.reset();
-    setScreen(term.current.getSnapshot());
-  };
-
   const hardResetSession = () => {
     Alert.alert(
       'Hard Reset',
@@ -359,14 +374,11 @@ export default function App() {
     autoScroll.current = distanceFromBottom < 40;
   };
 
-  const renderRow = ({ item }: { item: RenderRow }) => (
-    <Text style={[styles.termLine, { fontSize, lineHeight, width: gridWidth }]} numberOfLines={1}>
-      {item.runs.map((run, i) => (
-        <Text key={i} style={runToStyle(run.style)}>
-          {run.text}
-        </Text>
-      ))}
-    </Text>
+  const renderRow = useCallback(
+    ({ item }: { item: RenderRow }) => (
+      <TermRow row={item} fontSize={fontSize} lineHeight={lineHeight} width={gridWidth} />
+    ),
+    [fontSize, lineHeight, gridWidth],
   );
 
   return (
@@ -420,27 +432,6 @@ export default function App() {
               autoCorrect={false}
             />
 
-            <View style={styles.rowInputs}>
-              <View style={styles.halfInput}>
-                <Text style={styles.inputLabel}>Columns</Text>
-                <TextInput
-                  style={styles.configInput}
-                  value={cols}
-                  onChangeText={setCols}
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.halfInput}>
-                <Text style={styles.inputLabel}>Rows</Text>
-                <TextInput
-                  style={styles.configInput}
-                  value={rows}
-                  onChangeText={setRows}
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-
             <TouchableOpacity style={styles.connectBtn} onPress={saveConfig}>
               <Text style={styles.connectBtnText}>Establish Tether Connection</Text>
             </TouchableOpacity>
@@ -478,10 +469,6 @@ export default function App() {
                   <Text style={styles.badgeTextOffline}>Offline</Text>
                 </View>
               )}
-
-              <TouchableOpacity style={styles.headerBtn} onPress={clearLogs}>
-                <Text style={styles.headerBtnText}>Clear</Text>
-              </TouchableOpacity>
 
               <TouchableOpacity style={styles.headerBtn} onPress={hardResetSession}>
                 <Text style={[styles.headerBtnText, styles.headerBtnTextDanger]}>Reset</Text>

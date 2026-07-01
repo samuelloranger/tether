@@ -10,6 +10,11 @@ mkdirSync(DB_DIR, { recursive: true });
 
 export const db = new Database(DB_PATH, { create: true });
 
+// WAL + relaxed sync: terminal logs are written on every PTY chunk (incl. each
+// keystroke echo). Default rollback-journal fsyncs per insert, adding latency to
+// the echo path. WAL removes per-write fsync — much lower input latency.
+db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+
 // --- Migrations System ---
 const migrations = [
   {

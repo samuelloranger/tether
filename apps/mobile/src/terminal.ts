@@ -16,6 +16,7 @@ export interface CellStyle {
   italic?: boolean;
   underline?: boolean;
   inverse?: boolean;
+  caret?: boolean;
 }
 
 interface Cell extends CellStyle {
@@ -89,6 +90,10 @@ export class TerminalEmulator {
   // UI forward swipes as scroll-wheel events so TUIs scroll their own history.
   mouseOn = false;
 
+  // Cursor visibility (DECTCEM ?25). Shown for shells; TUIs hide it (?25l) and
+  // draw their own, so the caret only renders when the app wants it visible.
+  cursorVisible = true;
+
   private state: ParserState = 'ground';
   private params = '';
   private intermediate = '';
@@ -110,6 +115,8 @@ export class TerminalEmulator {
     this.scrollBot = this.rows - 1;
     this.pen = {};
     this.mouseOn = false;
+    this.cursorVisible = true;
+    this.prevRows = [];
     this.state = 'ground';
     this.params = '';
     this.intermediate = '';
@@ -342,9 +349,10 @@ export class TerminalEmulator {
         this.setAltScreen(on);
       } else if (m === 1000 || m === 1002 || m === 1003) {
         this.mouseOn = on; // mouse reporting enabled/disabled
+      } else if (m === 25) {
+        this.cursorVisible = on; // DECTCEM
       }
-      // 25 (cursor visibility), 2004 (bracketed paste), 2026 (sync), 1 (app
-      // cursor) — no visible effect in this renderer, ignored.
+      // 2004 (bracketed paste), 2026 (sync), 1 (app cursor) — ignored.
     }
   }
 
@@ -517,17 +525,35 @@ export class TerminalEmulator {
   }
 
   // --- Render snapshot ---
+  private prevRows: RenderRow[] = [];
+
+  // Returns one RenderRow per line, REUSING the previous frame's object for any
+  // row whose content is unchanged. Referential stability lets a memoized row
+  // component skip re-rendering — critical when a TUI repaints continuously
+  // (e.g. Claude Code's spinner) so only changed rows cost anything.
   getSnapshot(): RenderRow[] {
     const lines = [...this.scrollback, ...this.screen];
-    return lines.map((line) => ({ runs: this.mergeRuns(line) }));
+    // The caret sits at the cursor cell on the current screen row (when visible).
+    const caretRow = this.cursorVisible ? this.scrollback.length + this.cy : -1;
+    const caretCol = Math.min(this.cx, this.cols - 1); // cx can sit at cols (pending wrap)
+    const out: RenderRow[] = new Array(lines.length);
+    for (let i = 0; i < lines.length; i++) {
+      const runs = this.mergeRuns(lines[i], i === caretRow ? caretCol : -1);
+      const prev = this.prevRows[i];
+      out[i] = prev && runsEqual(prev.runs, runs) ? prev : { runs };
+    }
+    this.prevRows = out;
+    return out;
   }
 
-  private mergeRuns(line: Cell[]): RenderRun[] {
-    // Trim trailing blanks so empty tails don't paint background.
+  private mergeRuns(line: Cell[], caretCol = -1): RenderRun[] {
+    // Trim trailing blanks so empty tails don't paint background — but never trim
+    // past the caret, so the cursor still renders at end of line.
     let end = line.length;
     while (end > 0 && line[end - 1].ch === ' ' && !line[end - 1].bg && !line[end - 1].inverse) {
       end--;
     }
+    if (caretCol >= 0) end = Math.max(end, caretCol + 1);
     if (end === 0) return [{ text: ' ', style: {} }];
 
     const runs: RenderRun[] = [];
@@ -535,7 +561,8 @@ export class TerminalEmulator {
     for (let x = 0; x < end; x++) {
       const cell = line[x];
       const style = this.cellStyle(cell);
-      if (cur && sameStyle(cur.style, style)) {
+      if (x === caretCol) style.caret = true; // isolate the caret cell into its own run
+      if (cur && !style.caret && sameStyle(cur.style, style)) {
         cur.text += cell.ch;
       } else {
         cur = { text: cell.ch, style };
@@ -569,6 +596,15 @@ function sameStyle(a: CellStyle, b: CellStyle): boolean {
     a.bg === b.bg &&
     !!a.bold === !!b.bold &&
     !!a.italic === !!b.italic &&
-    !!a.underline === !!b.underline
+    !!a.underline === !!b.underline &&
+    !!a.caret === !!b.caret
   );
+}
+
+function runsEqual(a: RenderRun[], b: RenderRun[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].text !== b[i].text || !sameStyle(a[i].style, b[i].style)) return false;
+  }
+  return true;
 }
