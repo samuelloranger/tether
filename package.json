@@ -4,12 +4,10 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "apps/*",
-    "apps/server/src/web"
+    "apps/*"
   ],
   "scripts": {
     "dev:server": "bun --cwd apps/server dev",
-    "dev:web": "bun --cwd apps/server/src/web dev",
     "dev:mobile": "bun --cwd apps/mobile start",
     "build:server": "bun --cwd apps/server build",
     "start:server": "bun --cwd apps/server start",
