@@ -1,26 +1,40 @@
 {
   "expo": {
-    "name": "tether-mobile",
+    "name": "Tether",
     "slug": "tether-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "scheme": "tether",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#05070e",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.samuelloranger.tether-mobile"
+      "bundleIdentifier": "com.samuelloranger.tether-mobile",
+      "buildNumber": "1"
     },
     "android": {
+      "package": "com.samuelloranger.tethermobile",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#05070e"
       },
       "predictiveBackGestureEnabled": false
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#05070e",
+          "dark": {
+            "image": "./assets/icon.png",
+            "backgroundColor": "#05070e"
+          }
+        }
+      ]
+    ]
   }
 }
