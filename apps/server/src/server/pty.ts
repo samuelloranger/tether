@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { addTerminalLog, clearLogs, setSessionStatus, upsertSession } from './db';
+import { addTerminalLog, deleteSession, upsertSession } from './db';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
 // first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
@@ -167,10 +167,9 @@ export function killSession(id: string) {
     instance.process.kill();
     instances.delete(id);
   }
-  // Mark stopped (without wiping the stored command) and clear scrollback so a
-  // restarted session starts with a clean screen instead of replaying history.
-  setSessionStatus(id, 'stopped');
-  clearLogs(id);
+  // Fully remove the session (row + logs) so it disappears from the list — an
+  // explicit kill means "gone", not "stopped but still shown".
+  deleteSession(id);
   return instance ? true : false;
 }
 
