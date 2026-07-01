@@ -34,7 +34,8 @@
             "backgroundColor": "#05070e"
           }
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }

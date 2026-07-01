@@ -25,6 +25,7 @@ interface SessionDrawerProps {
   onNew: () => void;
   onKill: (id: string) => void;
   onClose: () => void;
+  onSettings: () => void;
 }
 
 const PANEL_W = 264;
@@ -45,6 +46,7 @@ export function SessionDrawer({
   onNew,
   onKill,
   onClose,
+  onSettings,
 }: SessionDrawerProps) {
   const [mounted, setMounted] = useState(visible);
   const reduceMotion = useRef(false);
@@ -104,6 +106,16 @@ export function SessionDrawer({
         <View style={styles.header}>
           <Feather name="terminal" size={14} color="#818cf8" />
           <Text style={styles.title}>Terminals</Text>
+          <TouchableOpacity
+            style={styles.settingsBtn}
+            hitSlop={HIT}
+            activeOpacity={0.6}
+            onPress={onSettings}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
+            <Feather name="settings" size={15} color="#94a3b8" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
@@ -171,6 +183,7 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  settingsBtn: { marginLeft: 'auto', padding: 4 },
   title: {
     color: '#94a3b8',
     fontSize: 11,
