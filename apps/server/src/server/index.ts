@@ -1,5 +1,5 @@
-import { app } from './app';
 import { websocket } from 'hono/bun';
+import { app } from './app';
 
 const PORT = Number(process.env.TETHER_PORT ?? 8085);
 

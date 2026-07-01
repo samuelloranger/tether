@@ -22,22 +22,58 @@ function sgrToCss(codes: string): string {
     else if (code === 4) style += 'text-decoration: underline;';
     // Foreground standard colors
     else if (code >= 30 && code <= 37) {
-      const colors = ['#1e1e24', '#f87171', '#34d399', '#fbbf24', '#60a5fa', '#c084fc', '#22d3ee', '#e5e7eb'];
+      const colors = [
+        '#1e1e24',
+        '#f87171',
+        '#34d399',
+        '#fbbf24',
+        '#60a5fa',
+        '#c084fc',
+        '#22d3ee',
+        '#e5e7eb',
+      ];
       style += `color: ${colors[code - 30]};`;
     }
     // Foreground high-intensity colors
     else if (code >= 90 && code <= 97) {
-      const colors = ['#9ca3af', '#ef4444', '#10b981', '#f59e0b', '#3b82f6', '#a855f7', '#06b6d4', '#ffffff'];
+      const colors = [
+        '#9ca3af',
+        '#ef4444',
+        '#10b981',
+        '#f59e0b',
+        '#3b82f6',
+        '#a855f7',
+        '#06b6d4',
+        '#ffffff',
+      ];
       style += `color: ${colors[code - 90]};`;
     }
     // Background standard colors
     else if (code >= 40 && code <= 47) {
-      const bgColors = ['#111827', '#991b1b', '#065f46', '#92400e', '#1e40af', '#6b21a8', '#155e75', '#374151'];
+      const bgColors = [
+        '#111827',
+        '#991b1b',
+        '#065f46',
+        '#92400e',
+        '#1e40af',
+        '#6b21a8',
+        '#155e75',
+        '#374151',
+      ];
       style += `background-color: ${bgColors[code - 40]};`;
     }
     // Background high-intensity colors
     else if (code >= 100 && code <= 107) {
-      const bgColors = ['#4b5563', '#dc2626', '#16a34a', '#d97706', '#2563eb', '#9333ea', '#0891b2', '#9ca3af'];
+      const bgColors = [
+        '#4b5563',
+        '#dc2626',
+        '#16a34a',
+        '#d97706',
+        '#2563eb',
+        '#9333ea',
+        '#0891b2',
+        '#9ca3af',
+      ];
       style += `background-color: ${bgColors[code - 100]};`;
     }
   }
@@ -79,8 +115,5 @@ export function ansiToHtml(ansiStr: string): string {
   if (openSpan) out += '</span>';
 
   // Normalize carriage returns and line feeds
-  return out
-    .replace(/\r\n/g, '<br/>')
-    .replace(/\n/g, '<br/>')
-    .replace(/\r/g, '');
+  return out.replace(/\r\n/g, '<br/>').replace(/\n/g, '<br/>').replace(/\r/g, '');
 }

@@ -1,7 +1,7 @@
-import { addTerminalLog, upsertSession, clearLogs, setSessionStatus } from './db';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { addTerminalLog, clearLogs, setSessionStatus, upsertSession } from './db';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
 // first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
@@ -12,7 +12,7 @@ const BASHRC = [
   '[ -f ~/.bashrc ] && source ~/.bashrc',
   '_tether_pwd() {',
   '  local tilde="~" p out="" seg i=0 n',
-  '  p="${PWD/#$HOME/$tilde}"',  // via var so ~ is not re-expanded back to $HOME
+  '  p="${PWD/#$HOME/$tilde}"', // via var so ~ is not re-expanded back to $HOME
   '  local -a parts',
   '  IFS=/ read -ra parts <<< "$p"',
   '  n=${#parts[@]}',
@@ -36,7 +36,9 @@ writeFileSync(RC_PATH, BASHRC);
 
 interface SessionInstance {
   process: any;
-  subscribers: Set<(data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number; id?: number }) => void>;
+  subscribers: Set<
+    (data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number; id?: number }) => void
+  >;
 }
 
 const instances = new Map<string, SessionInstance>();
@@ -45,7 +47,7 @@ export function startSession(
   id: string,
   command: string = 'bash',
   cols: number = 80,
-  rows: number = 24
+  rows: number = 24,
 ) {
   if (instances.has(id)) {
     return instances.get(id)!;
@@ -74,7 +76,7 @@ export function startSession(
       rows,
       data(terminal, uint8Array) {
         const text = decoder.decode(uint8Array, { stream: true });
-        
+
         // Write to DB and capture insert row ID
         const logId = addTerminalLog(id, text);
 
@@ -146,7 +148,7 @@ export function resizeSession(id: string, cols: number, rows: number) {
 
 export function subscribeToSession(
   id: string,
-  callback: (data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number }) => void
+  callback: (data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number }) => void,
 ) {
   const instance = instances.get(id);
   if (instance) {
