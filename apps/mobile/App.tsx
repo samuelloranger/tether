@@ -6,15 +6,20 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  FlatList,
+  Pressable,
+  PanResponder,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   SafeAreaView,
   Alert,
   ActivityIndicator,
-  Keyboard,
+  useWindowDimensions,
+  type TextStyle,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { parseAnsi, TextSegment } from './src/ansi';
+import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -24,9 +29,18 @@ const KEY_COLS = 'tether_cols';
 const KEY_ROWS = 'tether_rows';
 const KEY_HISTORY = 'tether_history';
 
-interface LogMessage {
-  id: number;
-  segments: TextSegment[];
+// Zero-width sentinel kept in the capture field so it's never "empty" — lets iOS
+// fire onChangeText for Backspace even with nothing typed yet.
+const SENT = '\u200b';
+
+function runToStyle(s: CellStyle): TextStyle {
+  const style: TextStyle = {};
+  if (s.fg) style.color = s.fg;
+  if (s.bg) style.backgroundColor = s.bg;
+  if (s.bold) style.fontWeight = 'bold';
+  if (s.italic) style.fontStyle = 'italic';
+  if (s.underline) style.textDecorationLine = 'underline';
+  return style;
 }
 
 export default function App() {
@@ -36,76 +50,154 @@ export default function App() {
   const [sessionId, setSessionId] = useState('default');
   const [cols, setCols] = useState('80');
   const [rows, setRows] = useState('24');
-  
+
   // UI states
   const [isConfiguring, setIsConfiguring] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
-  const [logs, setLogs] = useState<LogMessage[]>([]);
-  const [inputText, setInputText] = useState('');
+  const [screen, setScreen] = useState<RenderRow[]>([]);
+  const [inputText, setInputText] = useState(SENT);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [sinceId, setSinceId] = useState(0);
+  const [termHeight, setTermHeight] = useState(0);
+  const [mouseOn, setMouseOn] = useState(false);
 
   // References
   const ws = useRef<WebSocket | null>(null);
-  const scrollViewRef = useRef<ScrollView | null>(null);
+  const listRef = useRef<FlatList<RenderRow> | null>(null);
+  const inputRef = useRef<TextInput | null>(null);
   const reconnectTimeout = useRef<any>(null);
-  const isConnected = useRef(false);
+  const term = useRef(new TerminalEmulator(80, 24));
+  const sinceId = useRef(0);
+  const lastAppliedId = useRef(0);
+  const autoScroll = useRef(true);
+  const renderScheduled = useRef(false);
+  const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
+  const wheelAccum = useRef(0);
+  const lastDy = useRef(0);
+
+  // When the remote enables mouse reporting (TUIs like Claude Code), translate
+  // vertical swipes into scroll-wheel events so the app scrolls its own history.
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        mouseOnRef.current && Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 4,
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        mouseOnRef.current && Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 4,
+      onPanResponderGrant: () => {
+        lastDy.current = 0;
+        wheelAccum.current = 0;
+      },
+      onPanResponderMove: (_, g) => {
+        const STEP = 22;
+        const delta = g.dy - lastDy.current;
+        lastDy.current = g.dy;
+        wheelAccum.current += delta;
+        const wheel = (btn: number) => {
+          const col = Math.max(1, Math.floor(term.current.cols / 2));
+          const row = Math.max(1, Math.floor(term.current.rows / 2));
+          ws.current?.send(JSON.stringify({ type: 'input', text: `\x1b[<${btn};${col};${row}M` }));
+        };
+        while (wheelAccum.current >= STEP) { wheel(64); wheelAccum.current -= STEP; } // drag down → older
+        while (wheelAccum.current <= -STEP) { wheel(65); wheelAccum.current += STEP; } // drag up → newer
+      },
+    })
+  ).current;
+
+  // Coalesce many PTY chunks into one render per frame.
+  const scheduleRender = () => {
+    if (renderScheduled.current) return;
+    renderScheduled.current = true;
+    setTimeout(() => {
+      renderScheduled.current = false;
+      setScreen(term.current.getSnapshot());
+      if (term.current.mouseOn !== mouseOnRef.current) {
+        mouseOnRef.current = term.current.mouseOn;
+        setMouseOn(term.current.mouseOn);
+      }
+    }, 16);
+  };
+
+  const resetTerminal = () => {
+    term.current.reset();
+    sinceId.current = 0;
+    lastAppliedId.current = 0;
+    setScreen(term.current.getSnapshot());
+  };
+
+  // --- Terminal sizing ---
+  // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
+  // fills the viewport with no wrapping and no horizontal scroll. The remote PTY
+  // is resized to match. CHAR_RATIO ~ monospace advance width / font size.
+  const { width: winWidth } = useWindowDimensions();
+  const CHAR_RATIO = 0.6;
+  const fontSize = 11;
+  const lineHeight = Math.round(fontSize * 1.3);
+  const gridWidth = winWidth - 12;
+  const numCols = Math.max(20, Math.floor(gridWidth / (fontSize * CHAR_RATIO)));
+  const numRows = termHeight ? Math.max(6, Math.floor((termHeight - 12) / lineHeight)) : 24;
 
   // 1. Load saved config on mount
   useEffect(() => {
     async function loadConfig() {
       try {
-        const savedIp = await AsyncStorage.getItem(KEY_SERVER_IP);
-        const savedPort = await AsyncStorage.getItem(KEY_PORT);
-        const savedSession = await AsyncStorage.getItem(KEY_SESSION_ID);
-        const savedCols = await AsyncStorage.getItem(KEY_COLS);
-        const savedRows = await AsyncStorage.getItem(KEY_ROWS);
-        const savedHistory = await AsyncStorage.getItem(KEY_HISTORY);
+        const [savedIp, savedPort, savedSession, savedCols, savedRows, savedHistory] =
+          await Promise.all([
+            AsyncStorage.getItem(KEY_SERVER_IP),
+            AsyncStorage.getItem(KEY_PORT),
+            AsyncStorage.getItem(KEY_SESSION_ID),
+            AsyncStorage.getItem(KEY_COLS),
+            AsyncStorage.getItem(KEY_ROWS),
+            AsyncStorage.getItem(KEY_HISTORY),
+          ]);
 
         if (savedIp) setServerIp(savedIp);
         if (savedPort) setPort(savedPort);
         if (savedSession) setSessionId(savedSession);
         if (savedCols) setCols(savedCols);
         if (savedRows) setRows(savedRows);
-        if (savedHistory) {
-          setCommandHistory(JSON.parse(savedHistory));
-        }
+        if (savedHistory) setCommandHistory(JSON.parse(savedHistory));
 
-        // Auto-connect if we have saved IP
-        if (savedIp) {
-          setIsConfiguring(false);
-        }
+        if (savedIp) setIsConfiguring(false);
       } catch (e) {
         console.error('Failed to load configuration:', e);
       }
     }
 
     loadConfig();
-
-    return () => {
-      disconnect();
-    };
+    return () => disconnect();
   }, []);
 
-  // 2. Manage WebSockets
+  // Size the emulator (and the remote PTY) to the on-screen grid so the shell
+  // fills the viewport. Re-runs when the fit changes or the socket connects.
   useEffect(() => {
-    if (!isConfiguring) {
-      connect();
-    } else {
-      disconnect();
+    term.current.resize(numCols, numRows);
+    if (ws.current && connectionStatus === 'connected') {
+      ws.current.send(JSON.stringify({ type: 'resize', cols: numCols, rows: numRows }));
     }
+    scheduleRender();
+  }, [numCols, numRows, connectionStatus]);
 
-    return () => {
-      disconnect();
-    };
+  // 2. Manage WebSocket connection
+  useEffect(() => {
+    if (!isConfiguring) connect();
+    else disconnect();
+    return () => disconnect();
   }, [isConfiguring, sessionId]);
+
+  // Stick to the bottom when the keyboard opens (view shrinks, no new content).
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      autoScroll.current = true;
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => sub.remove();
+  }, []);
 
   const connect = () => {
     disconnect();
 
     setConnectionStatus('connecting');
-    const wsUrl = `ws://${serverIp}:${port}/api/ws?sessionId=${sessionId}&sinceId=${sinceId}&cols=${cols}&rows=${rows}`;
+    const wsUrl = `ws://${serverIp}:${port}/api/ws?sessionId=${sessionId}&sinceId=${sinceId.current}&cols=${numCols}&rows=${numRows}`;
     console.log(`Connecting to WebSocket: ${wsUrl}`);
 
     const socket = new WebSocket(wsUrl);
@@ -113,44 +205,23 @@ export default function App() {
     socket.onopen = () => {
       console.log('Tether WebSocket connected');
       setConnectionStatus('connected');
-      isConnected.current = true;
     };
 
     socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'output') {
-          // Parse ANSI codes to styled Text segments
-          const segments = parseAnsi(msg.chunk);
-          
+          // Dedup: the server replays logs with ids > sinceId on (re)connect.
           if (msg.id) {
-            setSinceId(msg.id);
-            setLogs((prevLogs) => {
-              // Avoid duplicates
-              if (prevLogs.some((l) => l.id === msg.id)) return prevLogs;
-              const newLogs = [...prevLogs, { id: msg.id, segments }];
-              return newLogs.slice(-800); // limit local log array length
-            });
-          } else {
-            // Live logs fallback
-            setLogs((prevLogs) => {
-              const newLogs = [...prevLogs, { id: Date.now(), segments }];
-              return newLogs.slice(-800);
-            });
+            if (msg.id <= lastAppliedId.current) return;
+            lastAppliedId.current = msg.id;
+            sinceId.current = msg.id;
           }
+          term.current.write(msg.chunk);
+          scheduleRender();
         } else if (msg.type === 'exit') {
-          setLogs((prevLogs) => [
-            ...prevLogs,
-            {
-              id: Date.now(),
-              segments: [
-                {
-                  text: `\n[Process exited with code ${msg.exitCode}]\n`,
-                  style: { color: '#ef4444', fontWeight: 'bold' },
-                },
-              ],
-            },
-          ]);
+          term.current.write(`\r\n\x1b[31m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
+          scheduleRender();
         }
       } catch (e) {
         console.error('Failed to handle WebSocket message:', e);
@@ -160,15 +231,10 @@ export default function App() {
     socket.onclose = () => {
       console.log('Tether WebSocket disconnected');
       setConnectionStatus('disconnected');
-      isConnected.current = false;
       ws.current = null;
 
-      // Exponential backoff reconnect
       if (!isConfiguring) {
-        console.log('Scheduling reconnect in 3s...');
-        reconnectTimeout.current = setTimeout(() => {
-          connect();
-        }, 3000);
+        reconnectTimeout.current = setTimeout(connect, 3000);
       }
     };
 
@@ -188,20 +254,20 @@ export default function App() {
       ws.current.close();
       ws.current = null;
     }
-    isConnected.current = false;
     setConnectionStatus('disconnected');
   };
 
-  // 3. Command Interactions
+  // 3. Command interactions
   const saveConfig = async () => {
     try {
-      await AsyncStorage.setItem(KEY_SERVER_IP, serverIp);
-      await AsyncStorage.setItem(KEY_PORT, port);
-      await AsyncStorage.setItem(KEY_SESSION_ID, sessionId);
-      await AsyncStorage.setItem(KEY_COLS, cols);
-      await AsyncStorage.setItem(KEY_ROWS, rows);
-      setSinceId(0);
-      setLogs([]);
+      await AsyncStorage.multiSet([
+        [KEY_SERVER_IP, serverIp],
+        [KEY_PORT, port],
+        [KEY_SESSION_ID, sessionId],
+        [KEY_COLS, cols],
+        [KEY_ROWS, rows],
+      ]);
+      resetTerminal();
       setIsConfiguring(false);
     } catch (e) {
       Alert.alert('Error', 'Failed to save configuration');
@@ -214,22 +280,24 @@ export default function App() {
     }
   };
 
-  const sendShortcut = (text: string) => {
-    sendInput(text);
+  // Type straight into the terminal: forward each keystroke to the PTY as it is
+  // pressed (the shell echoes it back for display). The capture field is pinned
+  // to a zero-width sentinel so nothing accumulates locally and Backspace keeps
+  // firing on iOS even before anything is typed.
+  const handleKeyPress = (e: { nativeEvent: { key: string } }) => {
+    const key = e.nativeEvent.key;
+    if (key === 'Backspace') sendInput('\x7f');
+    else if (key.length === 1) sendInput(key); // printable char (incl. space)
+    autoScroll.current = true;
   };
 
+  const resetField = () => setInputText(SENT);
+
+  // Return key: send carriage return (raw-mode TUIs like Claude Code expect \r).
   const handleSend = () => {
-    if (!inputText.trim()) return;
-
-    // Save to history
-    const newHistory = [inputText, ...commandHistory.filter((h) => h !== inputText)].slice(0, 50);
-    setCommandHistory(newHistory);
-    AsyncStorage.setItem(KEY_HISTORY, JSON.stringify(newHistory));
-    setHistoryIndex(-1);
-
-    // Send with newline
-    sendInput(inputText + '\n');
-    setInputText('');
+    autoScroll.current = true;
+    sendInput('\r');
+    resetField();
   };
 
   const navigateHistory = (direction: 'up' | 'down') => {
@@ -253,16 +321,9 @@ export default function App() {
     }
   };
 
-  const triggerResize = (newCols: number, newRows: number) => {
-    setCols(String(newCols));
-    setRows(String(newRows));
-    if (ws.current && connectionStatus === 'connected') {
-      ws.current.send(JSON.stringify({ type: 'resize', cols: newCols, rows: newRows }));
-    }
-  };
-
   const clearLogs = () => {
-    setLogs([]);
+    term.current.reset();
+    setScreen(term.current.getSnapshot());
   };
 
   const hardResetSession = () => {
@@ -275,8 +336,7 @@ export default function App() {
           text: 'Restart',
           style: 'destructive',
           onPress: async () => {
-            clearLogs();
-            setSinceId(0);
+            resetTerminal();
             try {
               await fetch(`http://${serverIp}:${port}/api/sessions/kill`, {
                 method: 'POST',
@@ -292,6 +352,22 @@ export default function App() {
       ]
     );
   };
+
+  const onScroll = (e: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    autoScroll.current = distanceFromBottom < 40;
+  };
+
+  const renderRow = ({ item }: { item: RenderRow }) => (
+    <Text style={[styles.termLine, { fontSize, lineHeight, width: gridWidth }]} numberOfLines={1}>
+      {item.runs.map((run, i) => (
+        <Text key={i} style={runToStyle(run.style)}>
+          {run.text}
+        </Text>
+      ))}
+    </Text>
+  );
 
   return (
     <SafeAreaView style={styles.appContainer}>
@@ -310,14 +386,13 @@ export default function App() {
           </View>
 
           <View style={styles.formContainer}>
-            <Text style={styles.inputLabel}>Server IP Address</Text>
+            <Text style={styles.inputLabel}>Server IP / Host</Text>
             <TextInput
               style={styles.configInput}
               value={serverIp}
               onChangeText={setServerIp}
               placeholder="e.g. 192.168.50.30"
               placeholderTextColor="#64748b"
-              keyboardType="numeric"
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -375,7 +450,6 @@ export default function App() {
         /* Terminal Client Screen */
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           style={styles.terminalContainer}
         >
           {/* Header Panel */}
@@ -408,7 +482,7 @@ export default function App() {
               <TouchableOpacity style={styles.headerBtn} onPress={clearLogs}>
                 <Text style={styles.headerBtnText}>Clear</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity style={styles.headerBtn} onPress={hardResetSession}>
                 <Text style={[styles.headerBtnText, styles.headerBtnTextDanger]}>Reset</Text>
               </TouchableOpacity>
@@ -428,104 +502,102 @@ export default function App() {
             </View>
           )}
 
-          {/* Logs scroll port */}
-          <ScrollView
-            ref={scrollViewRef}
+          {/* Terminal grid — vertical FlatList inside a horizontal ScrollView so
+              wide (e.g. 80-col) output stays legible and scrolls sideways.
+              Tapping it focuses the hidden capture field to bring up the keyboard. */}
+          <View
             style={styles.terminalScroll}
-            contentContainerStyle={styles.terminalContent}
-            onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+            onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
+            {...panResponder.panHandlers}
           >
-            <View style={styles.preText}>
-              {logs.map((log) => (
-                <Text key={log.id}>
-                  {log.segments.map((seg, segIdx) => (
-                    <Text
-                      key={segIdx}
-                      style={[
-                        styles.terminalMono,
-                        seg.style.color ? { color: seg.style.color } : null,
-                        seg.style.fontWeight === 'bold' ? { fontWeight: 'bold' } : null,
-                        seg.style.fontStyle === 'italic' ? { fontStyle: 'italic' } : null,
-                        seg.style.textDecorationLine === 'underline' ? { textDecorationLine: 'underline' } : null,
-                        seg.style.backgroundColor ? { backgroundColor: seg.style.backgroundColor } : null,
-                      ]}
-                    >
-                      {seg.text}
-                    </Text>
-                  ))}
-                </Text>
-              ))}
-            </View>
-          </ScrollView>
+            <Pressable style={{ flex: 1 }} onPress={() => inputRef.current?.focus()}>
+              <FlatList
+                ref={listRef}
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.terminalContent}
+                data={screen}
+                renderItem={renderRow}
+                keyExtractor={(_, i) => String(i)}
+                onScroll={onScroll}
+                scrollEventThrottle={100}
+                scrollEnabled={!mouseOn}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="none"
+                onContentSizeChange={() => {
+                  if (autoScroll.current) listRef.current?.scrollToEnd({ animated: false });
+                }}
+                initialNumToRender={40}
+                windowSize={11}
+                removeClippedSubviews
+              />
+            </Pressable>
+          </View>
 
           {/* Mobile Terminal Shortcuts Utility Bar */}
           <View style={styles.utilityBar}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.utilityScroll}>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendShortcut('\x03')}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.utilityScroll}>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x03')}>
                 <Text style={[styles.utilityBtnText, styles.utilityBtnTextDanger]}>Ctrl+C</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendShortcut('\t')}>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\t')}>
                 <Text style={styles.utilityBtnText}>Tab</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendShortcut('\x04')}>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x04')}>
                 <Text style={styles.utilityBtnText}>Ctrl+D</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendShortcut('\x1b')}>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b')}>
                 <Text style={styles.utilityBtnText}>Esc</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityIconBtn} onPress={() => navigateHistory('up')}>
-                <Text style={styles.utilityIconText}>▲</Text>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[A')}>
+                <Text style={styles.utilityBtnText}>↑</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityIconBtn} onPress={() => navigateHistory('down')}>
-                <Text style={styles.utilityIconText}>▼</Text>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[B')}>
+                <Text style={styles.utilityBtnText}>↓</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[D')}>
+                <Text style={styles.utilityBtnText}>←</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[C')}>
+                <Text style={styles.utilityBtnText}>→</Text>
               </TouchableOpacity>
 
-              <View style={styles.resizeSpacer} />
-              
-              <TouchableOpacity style={[styles.resizeBtn, cols === '80' && styles.resizeBtnActive]} onPress={() => triggerResize(80, 24)}>
-                <Text style={[styles.resizeBtnText, cols === '80' && styles.resizeBtnTextActive]}>80x24</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.resizeBtn, cols === '120' && styles.resizeBtnActive]} onPress={() => triggerResize(120, 35)}>
-                <Text style={[styles.resizeBtnText, cols === '120' && styles.resizeBtnTextActive]}>120x35</Text>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => Keyboard.dismiss()}>
+                <Text style={styles.utilityBtnText}>Hide ⌨</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
 
-          {/* Send Input Bar */}
-          <View style={styles.inputBar}>
-            <View style={styles.inputBoxContainer}>
-              <TextInput
-                style={styles.terminalInput}
-                value={inputText}
-                onChangeText={setInputText}
-                placeholder="Type command or agent prompt response..."
-                placeholderTextColor="#475569"
-                onSubmitEditing={handleSend}
-                autoCapitalize="none"
-                autoCorrect={false}
-                blurOnSubmit={false}
-              />
-              <TouchableOpacity
-                style={[styles.sendBtn, connectionStatus !== 'connected' && styles.sendBtnDisabled]}
-                onPress={handleSend}
-                disabled={connectionStatus !== 'connected'}
-              >
-                <Text style={styles.sendBtnText}>Send</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          {/* Hidden keyboard-capture field: tapping the terminal focuses it, so
+              typing goes straight into the terminal (the shell echoes it back).
+              No visible input box. */}
+          <TextInput
+            ref={inputRef}
+            style={styles.hiddenInput}
+            value={inputText}
+            onKeyPress={handleKeyPress}
+            onChangeText={resetField}
+            onSubmitEditing={handleSend}
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            autoComplete="off"
+            blurOnSubmit={false}
+            keyboardAppearance="dark"
+          />
         </KeyboardAvoidingView>
       )}
     </SafeAreaView>
   );
 }
 
+const MONO = Platform.OS === 'ios' ? 'Courier' : 'monospace';
+
 const styles = StyleSheet.create({
   appContainer: {
     flex: 1,
     backgroundColor: '#070a13',
   },
-  
+
   /* Config Screen Styles */
   configContainer: {
     flex: 1,
@@ -547,7 +619,7 @@ const styles = StyleSheet.create({
   },
   configLogoIcon: {
     fontSize: 32,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontFamily: MONO,
     fontWeight: 'bold',
     color: '#818cf8',
   },
@@ -587,7 +659,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     marginBottom: 16,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontFamily: MONO,
   },
   rowInputs: {
     flexDirection: 'row',
@@ -730,19 +802,14 @@ const styles = StyleSheet.create({
   },
   terminalScroll: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: '#05070e',
   },
   terminalContent: {
-    paddingBottom: 24,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
   },
-  preText: {
-    flexDirection: 'column',
-  },
-  terminalMono: {
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    fontSize: 12,
-    lineHeight: 16,
+  termLine: {
+    fontFamily: MONO,
     color: '#cbd5e1',
   },
   utilityBar: {
@@ -765,24 +832,24 @@ const styles = StyleSheet.create({
   utilityBtnText: {
     fontSize: 10,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontFamily: MONO,
     color: '#cbd5e1',
   },
   utilityBtnTextDanger: {
     color: '#f87171',
   },
   utilityIconBtn: {
-    padding: 5,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
     borderRadius: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     marginRight: 4,
     justifyContent: 'center',
     alignItems: 'center',
-    width: 26,
-    height: 24,
   },
   utilityIconText: {
     fontSize: 10,
+    fontFamily: MONO,
     color: '#cbd5e1',
   },
   resizeSpacer: {
@@ -800,7 +867,7 @@ const styles = StyleSheet.create({
   },
   resizeBtnText: {
     fontSize: 9,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontFamily: MONO,
     color: '#64748b',
   },
   resizeBtnTextActive: {
@@ -822,12 +889,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 2,
   },
+  hiddenInput: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  inputPrompt: {
+    color: '#34d399',
+    fontFamily: MONO,
+    fontSize: 16,
+    fontWeight: '700',
+    marginRight: 8,
+  },
   terminalInput: {
     flex: 1,
     color: '#e2e8f0',
     fontSize: 16,
     paddingVertical: 8,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontFamily: MONO,
   },
   sendBtn: {
     paddingVertical: 6,
