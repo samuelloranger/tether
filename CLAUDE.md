@@ -11,7 +11,7 @@ Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY s
 - `apps/server/` — Bun + Hono backend (`tether`). PTY launcher + SQLite logger + static file server.
   - `src/server/` — `index.ts` (Bun.serve entry), `app.ts` (Hono routes + WS gateway), `pty.ts` (process lifecycle), `db.ts` (bun:sqlite + migrations).
   - `src/web/` — Svelte 5 + Vite web client (its own workspace, `web`).
-- `apps/mobile/` — Expo RN client (`tether-mobile`). Single-file `App.tsx` + `src/ansi.ts`.
+- `apps/mobile/` — Expo RN client (`tether-mobile`). `App.tsx` (UI + session management) + `src/terminal.ts` (VT emulator), `src/sessionCache.ts` (LRU tab cache), `src/SessionDrawer.tsx` (tab drawer).
 
 ## Commands
 
@@ -51,7 +51,7 @@ The **same PTY process survives client disconnects** — that's the whole point 
 
 - Formatting is Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100. Run `bun format` before committing.
 - `bun:sqlite` uses `$name` named params. Schema changes go through the `migrations` array in `db.ts` (versioned, idempotent) — never edit an applied migration; append a new one.
-- ANSI parsing is duplicated: `apps/server/src/web/src/lib/ansi.ts` (→ HTML) and `apps/mobile/src/ansi.ts` (→ styled RN Text segments). Keep the two color palettes in sync if you touch either.
+- Terminal rendering differs by client: the web client uses `apps/server/src/web/src/lib/ansi.ts` (ANSI → HTML, line-append); the mobile client uses a full VT emulator `apps/mobile/src/terminal.ts` (grid + scrollback, handles cursor addressing / alt-screen / caret).
 - DB and runtime state live in `apps/server/config/*.db` (gitignored). Override paths with `TETHER_DB_PATH`, port with `TETHER_PORT`.
 - Web client detects the Vite dev port (`5173`) and rewrites the WS host to `:8085`; in production it uses the same origin.
 - **Mobile only:** before writing Expo code, read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ (per `apps/mobile/AGENTS.md`). Expo 57 / RN 0.86 / React 19.
