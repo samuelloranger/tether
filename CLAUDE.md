@@ -4,13 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY shell processes, streams their output over WebSocket, and logs every byte to SQLite so clients can reconnect and replay missed output. Two clients talk to it: a Svelte 5 web PWA (served by the same server) and an Expo React Native mobile app.
+Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY shell processes, streams their output over WebSocket, and logs every byte to SQLite so clients can reconnect and replay missed output. The client is an Expo React Native mobile app (the server is API/WebSocket-only — no web client).
 
 ## Monorepo layout (Bun workspaces)
 
-- `apps/server/` — Bun + Hono backend (`tether`). PTY launcher + SQLite logger + static file server.
+- `apps/server/` — Bun + Hono backend (`tether`). PTY launcher + SQLite logger + API/WS.
   - `src/server/` — `index.ts` (Bun.serve entry), `app.ts` (Hono routes + WS gateway), `pty.ts` (process lifecycle), `db.ts` (bun:sqlite + migrations).
-  - `src/web/` — Svelte 5 + Vite web client (its own workspace, `web`).
 - `apps/mobile/` — Expo RN client (`tether-mobile`). `App.tsx` (UI + session management) + `src/terminal.ts` (VT emulator), `src/sessionCache.ts` (LRU tab cache), `src/SessionDrawer.tsx` (tab drawer).
 
 ## Commands
@@ -18,16 +17,14 @@ Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY s
 Run from repo root:
 - `bun install` — install/link all workspaces
 - `bun dev:server` — backend on `:8085` (binds `0.0.0.0`), watch mode
-- `bun dev:web` — Vite dev on `:5173`, proxies `/api` (+ WS) to `:8085`
 - `bun dev:mobile` — Expo Metro bundler
 - `bun lint` — Biome check (server) + Expo lint (mobile)
 - `bun format` — `biome check --write` (server only)
-- `bun build:server` — builds web then bundles server to `apps/server/dist`
+- `bun build:server` — bundle server to `apps/server/dist`
 - `bun start:server` — run built server
 
-Server typecheck (both server + web tsconfigs): `bun --cwd apps/server typecheck`.
-Web-only check: `bun --cwd apps/server/src/web check` (svelte-check).
-Native iOS build: `cd apps/mobile && npx expo prebuild` (generates `ios/`, then Xcode).
+Server typecheck: `bun --cwd apps/server typecheck`.
+Native iOS build: `cd apps/mobile && npx expo run:ios --device` (dev build to a connected device; Expo Go doesn't support SDK 57).
 
 There are **no tests** in this repo. There is no test runner configured.
 
@@ -51,9 +48,8 @@ The **same PTY process survives client disconnects** — that's the whole point 
 
 - Formatting is Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100. Run `bun format` before committing.
 - `bun:sqlite` uses `$name` named params. Schema changes go through the `migrations` array in `db.ts` (versioned, idempotent) — never edit an applied migration; append a new one.
-- Terminal rendering differs by client: the web client uses `apps/server/src/web/src/lib/ansi.ts` (ANSI → HTML, line-append); the mobile client uses a full VT emulator `apps/mobile/src/terminal.ts` (grid + scrollback, handles cursor addressing / alt-screen / caret).
+- Terminal rendering: the mobile client uses a full VT emulator `apps/mobile/src/terminal.ts` (grid + scrollback, cursor addressing / alt-screen / caret). Icons are Feather from `@expo/vector-icons`.
 - DB and runtime state live in `apps/server/config/*.db` (gitignored). Override paths with `TETHER_DB_PATH`, port with `TETHER_PORT`.
-- Web client detects the Vite dev port (`5173`) and rewrites the WS host to `:8085`; in production it uses the same origin.
 - **Mobile only:** before writing Expo code, read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ (per `apps/mobile/AGENTS.md`). Expo 57 / RN 0.86 / React 19.
 
 ## Security note

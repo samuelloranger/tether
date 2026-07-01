@@ -1,11 +1,8 @@
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
-import { getLogs, getSession, listSessions, upsertSession } from './db';
+import { getLogs, getSession, listSessions } from './db';
 import {
-  getActiveSession,
   killSession,
   resizeSession,
   startSession,
@@ -15,7 +12,7 @@ import {
 
 const app = new Hono();
 
-// Enable CORS for frontend development
+// API/WebSocket-only server (mobile client). CORS open for LAN access.
 app.use(
   '*',
   cors({
@@ -25,8 +22,8 @@ app.use(
   }),
 );
 
-const WEB_DIST = path.join(process.cwd(), 'src', 'web', 'dist');
-const INDEX_PATH = path.join(WEB_DIST, 'index.html');
+// Health/root
+app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
 
 // --- HTTP API Routes ---
 
@@ -155,40 +152,5 @@ app.get(
     };
   }),
 );
-
-// --- Serving Frontend Static Files (Bun direct file system streaming) ---
-async function serveStatic(c: any) {
-  const resolved = path.resolve(WEB_DIST, `.${c.req.path}`);
-  if (resolved !== WEB_DIST && !resolved.startsWith(WEB_DIST + path.sep)) {
-    return c.notFound();
-  }
-  const file = Bun.file(resolved);
-  if (!(await file.exists())) return c.notFound();
-
-  c.header('Content-Type', file.type || 'application/octet-stream');
-
-  if (c.req.path === '/sw.js' || c.req.path === '/manifest.webmanifest') {
-    c.header('Cache-Control', 'no-cache');
-  } else {
-    c.header('Cache-Control', 'public, max-age=31536000, immutable');
-  }
-  return c.body(file.stream());
-}
-
-app.get('/assets/*', serveStatic);
-app.get('/favicon.svg', serveStatic);
-app.get('/icons.svg', serveStatic);
-app.get('/manifest.webmanifest', serveStatic);
-app.get('/sw.js', serveStatic);
-
-// Catch-all route to serve Svelte frontend (HTML5 routing)
-app.get('*', async (c) => {
-  const html = await readFile(INDEX_PATH, 'utf-8').catch(() => null);
-  if (!html) {
-    return c.text('Tether frontend not built. Run "bun run build" first.', 503);
-  }
-  c.header('Cache-Control', 'no-cache');
-  return c.html(html);
-});
 
 export { app };
