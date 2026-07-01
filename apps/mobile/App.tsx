@@ -20,6 +20,8 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal';
+import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
+import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -29,7 +31,7 @@ const KEY_HISTORY = 'tether_history';
 
 // Zero-width sentinel kept in the capture field so it's never "empty" — lets iOS
 // fire onChangeText for Backspace even with nothing typed yet.
-const SENT = '\u200b';
+const SENT = '​';
 
 function runToStyle(s: CellStyle): TextStyle {
   const style: TextStyle = {};
@@ -75,7 +77,6 @@ export default function App() {
   // Connection states
   const [serverIp, setServerIp] = useState('192.168.50.30');
   const [port, setPort] = useState('8085');
-  const [sessionId, setSessionId] = useState('default');
 
   // UI states
   const [isConfiguring, setIsConfiguring] = useState(true);
@@ -87,19 +88,39 @@ export default function App() {
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
 
+  // Multi-session state
+  const cache = useRef(new SessionCache(3)).current;
+  const [activeId, setActiveId] = useState('term-1');
+  const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
+
   // References
   const ws = useRef<WebSocket | null>(null);
   const listRef = useRef<FlatList<RenderRow> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const reconnectTimeout = useRef<any>(null);
-  const term = useRef(new TerminalEmulator(80, 24));
-  const sinceId = useRef(0);
-  const lastAppliedId = useRef(0);
   const autoScroll = useRef(true);
   const renderScheduled = useRef(false);
   const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
   const wheelAccum = useRef(0);
   const lastDy = useRef(0);
+
+  // --- Terminal sizing ---
+  // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
+  // fills the viewport with no wrapping and no horizontal scroll. The remote PTY
+  // is resized to match. CHAR_RATIO ~ monospace advance width / font size.
+  const { width: winWidth } = useWindowDimensions();
+  const CHAR_RATIO = 0.6;
+  const fontSize = 11;
+  const lineHeight = Math.round(fontSize * 1.3);
+  const gridWidth = winWidth - 12;
+  const numCols = Math.max(20, Math.floor(gridWidth / (fontSize * CHAR_RATIO)));
+  const numRows = termHeight ? Math.max(6, Math.floor((termHeight - 12) / lineHeight)) : 24;
+
+  // Helper to get/create the cache entry for a given id, sized to the current grid.
+  const entryFor = (id: string): SessionEntry =>
+    cache.touch(id, () => ({ term: new TerminalEmulator(numCols || 80, numRows || 24), sinceId: 0, lastAppliedId: 0 }));
 
   // When the remote enables mouse reporting (TUIs like Claude Code), translate
   // vertical swipes into scroll-wheel events so the app scrolls its own history.
@@ -118,9 +139,10 @@ export default function App() {
         const delta = g.dy - lastDy.current;
         lastDy.current = g.dy;
         wheelAccum.current += delta;
+        const e = cache.get(activeIdRef.current);
         const wheel = (btn: number) => {
-          const col = Math.max(1, Math.floor(term.current.cols / 2));
-          const row = Math.max(1, Math.floor(term.current.rows / 2));
+          const col = Math.max(1, Math.floor((e?.term.cols ?? 80) / 2));
+          const row = Math.max(1, Math.floor((e?.term.rows ?? 24) / 2));
           ws.current?.send(JSON.stringify({ type: 'input', text: `\x1b[<${btn};${col};${row}M` }));
         };
         while (wheelAccum.current >= STEP) { wheel(64); wheelAccum.current -= STEP; } // drag down → older
@@ -135,135 +157,68 @@ export default function App() {
     renderScheduled.current = true;
     setTimeout(() => {
       renderScheduled.current = false;
-      setScreen(term.current.getSnapshot());
-      if (term.current.mouseOn !== mouseOnRef.current) {
-        mouseOnRef.current = term.current.mouseOn;
-        setMouseOn(term.current.mouseOn);
+      const e = cache.get(activeIdRef.current);
+      if (!e) return;
+      setScreen(e.term.getSnapshot());
+      if (e.term.mouseOn !== mouseOnRef.current) {
+        mouseOnRef.current = e.term.mouseOn;
+        setMouseOn(e.term.mouseOn);
       }
     }, 33); // ~30fps: enough for a terminal, halves render load vs 60fps
   };
 
   const resetTerminal = () => {
-    term.current.reset();
-    sinceId.current = 0;
-    lastAppliedId.current = 0;
-    setScreen(term.current.getSnapshot());
+    const e = cache.get(activeIdRef.current);
+    if (e) {
+      e.term.reset();
+      e.sinceId = 0;
+      e.lastAppliedId = 0;
+      setScreen(e.term.getSnapshot());
+    }
   };
-
-  // --- Terminal sizing ---
-  // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
-  // fills the viewport with no wrapping and no horizontal scroll. The remote PTY
-  // is resized to match. CHAR_RATIO ~ monospace advance width / font size.
-  const { width: winWidth } = useWindowDimensions();
-  const CHAR_RATIO = 0.6;
-  const fontSize = 11;
-  const lineHeight = Math.round(fontSize * 1.3);
-  const gridWidth = winWidth - 12;
-  const numCols = Math.max(20, Math.floor(gridWidth / (fontSize * CHAR_RATIO)));
-  const numRows = termHeight ? Math.max(6, Math.floor((termHeight - 12) / lineHeight)) : 24;
-
-  // 1. Load saved config on mount
-  useEffect(() => {
-    async function loadConfig() {
-      try {
-        const [savedIp, savedPort, savedSession, savedHistory] =
-          await Promise.all([
-            AsyncStorage.getItem(KEY_SERVER_IP),
-            AsyncStorage.getItem(KEY_PORT),
-            AsyncStorage.getItem(KEY_SESSION_ID),
-            AsyncStorage.getItem(KEY_HISTORY),
-          ]);
-
-        if (savedIp) setServerIp(savedIp);
-        if (savedPort) setPort(savedPort);
-        if (savedSession) setSessionId(savedSession);
-        if (savedHistory) setCommandHistory(JSON.parse(savedHistory));
-
-        if (savedIp) setIsConfiguring(false);
-      } catch (e) {
-        console.error('Failed to load configuration:', e);
-      }
-    }
-
-    loadConfig();
-    return () => disconnect();
-  }, []);
-
-  // Size the emulator (and the remote PTY) to the on-screen grid so the shell
-  // fills the viewport. Re-runs when the fit changes or the socket connects.
-  useEffect(() => {
-    term.current.resize(numCols, numRows);
-    if (ws.current && connectionStatus === 'connected') {
-      ws.current.send(JSON.stringify({ type: 'resize', cols: numCols, rows: numRows }));
-    }
-    scheduleRender();
-  }, [numCols, numRows, connectionStatus]);
-
-  // 2. Manage WebSocket connection
-  useEffect(() => {
-    if (!isConfiguring) connect();
-    else disconnect();
-    return () => disconnect();
-  }, [isConfiguring, sessionId]);
-
-  // Stick to the bottom when the keyboard opens (view shrinks, no new content).
-  useEffect(() => {
-    const sub = Keyboard.addListener('keyboardDidShow', () => {
-      autoScroll.current = true;
-      listRef.current?.scrollToEnd({ animated: true });
-    });
-    return () => sub.remove();
-  }, []);
 
   const connect = () => {
     disconnect();
-
+    const id = activeIdRef.current;
+    const e = entryFor(id);
     setConnectionStatus('connecting');
-    const wsUrl = `ws://${serverIp}:${port}/api/ws?sessionId=${sessionId}&sinceId=${sinceId.current}&cols=${numCols}&rows=${numRows}`;
-    console.log(`Connecting to WebSocket: ${wsUrl}`);
+    const wsUrl = `ws://${serverIp}:${port}/api/ws?sessionId=${id}&sinceId=${e.sinceId}&cols=${numCols}&rows=${numRows}`;
 
     const socket = new WebSocket(wsUrl);
 
-    socket.onopen = () => {
-      console.log('Tether WebSocket connected');
-      setConnectionStatus('connected');
-    };
+    socket.onopen = () => setConnectionStatus('connected');
 
     socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        const ent = cache.get(id);
+        if (!ent) return;
         if (msg.type === 'output') {
           // Dedup: the server replays logs with ids > sinceId on (re)connect.
           if (msg.id) {
-            if (msg.id <= lastAppliedId.current) return;
-            lastAppliedId.current = msg.id;
-            sinceId.current = msg.id;
+            if (msg.id <= ent.lastAppliedId) return;
+            ent.lastAppliedId = msg.id;
+            ent.sinceId = msg.id;
           }
-          term.current.write(msg.chunk);
-          scheduleRender();
+          ent.term.write(msg.chunk);
+          if (id === activeIdRef.current) scheduleRender();
         } else if (msg.type === 'exit') {
-          term.current.write(`\r\n\x1b[31m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
-          scheduleRender();
+          ent.term.write(`\r\n\x1b[31m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
+          if (id === activeIdRef.current) scheduleRender();
         }
-      } catch (e) {
-        console.error('Failed to handle WebSocket message:', e);
+      } catch (err) {
+        console.error('ws message error:', err);
       }
     };
 
     socket.onclose = () => {
-      console.log('Tether WebSocket disconnected');
       setConnectionStatus('disconnected');
       ws.current = null;
-
-      if (!isConfiguring) {
+      if (!isConfiguring && activeIdRef.current === id) {
         reconnectTimeout.current = setTimeout(connect, 3000);
       }
     };
-
-    socket.onerror = (e) => {
-      console.log('Tether WebSocket error:', e);
-    };
-
+    socket.onerror = (e2) => console.log('ws error:', e2);
     ws.current = socket;
   };
 
@@ -279,13 +234,123 @@ export default function App() {
     setConnectionStatus('disconnected');
   };
 
+  // Switch to a different session
+  const switchTo = (id: string) => {
+    setDrawerOpen(false);
+    if (id === activeIdRef.current && ws.current) return;
+    disconnect();
+    activeIdRef.current = id;
+    setActiveId(id);
+    AsyncStorage.setItem(KEY_SESSION_ID, id);
+    const e = entryFor(id); // creates fresh if uncached; resizes handled by effect
+    setScreen(e.term.getSnapshot()); // instant paint of last-known screen
+    autoScroll.current = true;
+    connect();
+  };
+
+  const newTerminal = () => {
+    const existing = drawerSessions.map((s) => s.id);
+    switchTo(nextTermId(existing.length ? existing : cache.ids()));
+  };
+
+  const killActiveOr = async (id: string) => {
+    try {
+      await fetch(`http://${serverIp}:${port}/api/sessions/kill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+    } catch {}
+    cache.delete(id);
+    const remaining = drawerSessions.filter((s) => s.id !== id).map((s) => s.id);
+    await refreshSessions();
+    if (id === activeIdRef.current) switchTo(remaining[0] ?? 'term-1');
+  };
+
+  // Keep activeIdRef synced when activeId changes (belt-and-suspenders)
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  const refreshSessions = async () => {
+    try {
+      const res = await fetch(`http://${serverIp}:${port}/api/sessions`);
+      const rows = (await res.json()) as DrawerSession[];
+      setDrawerSessions(rows);
+    } catch {}
+  };
+
+  // Poll the session list every 4s while foregrounded.
+  useEffect(() => {
+    if (isConfiguring) return;
+    refreshSessions();
+    const iv = setInterval(refreshSessions, 4000);
+    return () => clearInterval(iv);
+  }, [isConfiguring, serverIp, port]);
+
+  // 1. Load saved config on mount
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const [savedIp, savedPort, savedSession, savedHistory] =
+          await Promise.all([
+            AsyncStorage.getItem(KEY_SERVER_IP),
+            AsyncStorage.getItem(KEY_PORT),
+            AsyncStorage.getItem(KEY_SESSION_ID),
+            AsyncStorage.getItem(KEY_HISTORY),
+          ]);
+
+        if (savedIp) setServerIp(savedIp);
+        if (savedPort) setPort(savedPort);
+        if (savedSession) {
+          setActiveId(savedSession);
+          activeIdRef.current = savedSession;
+        }
+        if (savedHistory) setCommandHistory(JSON.parse(savedHistory));
+
+        if (savedIp) setIsConfiguring(false);
+      } catch (e) {
+        console.error('Failed to load configuration:', e);
+      }
+    }
+
+    loadConfig();
+    return () => disconnect();
+  }, []);
+
+  // Size the emulator (and the remote PTY) to the on-screen grid so the shell
+  // fills the viewport. Re-runs when the fit changes or the socket connects.
+  useEffect(() => {
+    cache.get(activeIdRef.current)?.term.resize(numCols, numRows);
+    if (ws.current && connectionStatus === 'connected') {
+      ws.current.send(JSON.stringify({ type: 'resize', cols: numCols, rows: numRows }));
+    }
+    scheduleRender();
+  }, [numCols, numRows, connectionStatus, activeId]);
+
+  // 2. Manage WebSocket connection
+  useEffect(() => {
+    if (!isConfiguring) connect();
+    else disconnect();
+    return () => disconnect();
+  }, [isConfiguring, activeId]);
+
+  // Stick to the bottom when the keyboard opens (view shrinks, no new content).
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      autoScroll.current = true;
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => sub.remove();
+  }, []);
+
   // 3. Command interactions
   const saveConfig = async () => {
     try {
       await AsyncStorage.multiSet([
         [KEY_SERVER_IP, serverIp],
         [KEY_PORT, port],
-        [KEY_SESSION_ID, sessionId],
+        [KEY_SESSION_ID, activeId],
       ]);
       resetTerminal();
       setIsConfiguring(false);
@@ -356,7 +421,7 @@ export default function App() {
               await fetch(`http://${serverIp}:${port}/api/sessions/kill`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: sessionId }),
+                body: JSON.stringify({ id: activeId }),
               });
               connect();
             } catch (e) {
@@ -421,17 +486,6 @@ export default function App() {
               autoCorrect={false}
             />
 
-            <Text style={styles.inputLabel}>Session Name</Text>
-            <TextInput
-              style={styles.configInput}
-              value={sessionId}
-              onChangeText={setSessionId}
-              placeholder="e.g. default"
-              placeholderTextColor="#64748b"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
             <TouchableOpacity style={styles.connectBtn} onPress={saveConfig}>
               <Text style={styles.connectBtnText}>Establish Tether Connection</Text>
             </TouchableOpacity>
@@ -445,11 +499,13 @@ export default function App() {
         >
           {/* Header Panel */}
           <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => { refreshSessions(); setDrawerOpen(true); }}>
+              <Text style={styles.headerBtnText}>≡</Text>
+            </TouchableOpacity>
+
             <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>Tether Console</Text>
-              <Text style={styles.headerSubtitle}>
-                {serverIp}:{port}
-              </Text>
+              <Text style={styles.headerTitle}>{activeId}</Text>
+              <Text style={styles.headerSubtitle}>{serverIp}:{port}</Text>
             </View>
 
             <View style={styles.headerControls}>
@@ -519,6 +575,17 @@ export default function App() {
               />
             </Pressable>
           </View>
+
+          {/* Session Drawer (overlay) */}
+          <SessionDrawer
+            visible={drawerOpen}
+            sessions={drawerSessions}
+            activeId={activeId}
+            onSelect={switchTo}
+            onNew={newTerminal}
+            onKill={killActiveOr}
+            onClose={() => setDrawerOpen(false)}
+          />
 
           {/* Mobile Terminal Shortcuts Utility Bar */}
           <View style={styles.utilityBar}>
@@ -685,6 +752,8 @@ const styles = StyleSheet.create({
   },
   headerInfo: {
     flexDirection: 'column',
+    flex: 1,
+    marginHorizontal: 8,
   },
   headerTitle: {
     fontSize: 13,
