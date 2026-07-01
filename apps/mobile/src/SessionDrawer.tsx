@@ -15,6 +15,7 @@ export interface DrawerSession {
   id: string;
   status: 'running' | 'stopped';
   last_output_at: string | null;
+  name?: string | null;
 }
 
 interface SessionDrawerProps {
@@ -134,7 +135,7 @@ export function SessionDrawer({
                   accessibilityLabel={`Terminal ${s.id}${s.status === 'stopped' ? ', stopped' : live ? ', active' : ', idle'}`}
                 >
                   <View style={[styles.dot, { backgroundColor: dotColor }]} />
-                  <Text style={[styles.name, active && styles.nameActive]}>{s.id}</Text>
+                  <Text style={[styles.name, active && styles.nameActive]}>{s.name || s.id}</Text>
                   {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
                 </TouchableOpacity>
                 <TouchableOpacity

@@ -166,6 +166,9 @@ function AppInner() {
   const [mouseOn, setMouseOn] = useState(false);
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const [selectionViewOpen, setSelectionViewOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [renameText, setRenameText] = useState('');
 
   // Multi-session state
   const cache = useRef(new SessionCache(3)).current;
@@ -538,6 +541,30 @@ function AppInner() {
     }
   };
 
+  const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
+
+  const openRename = () => {
+    setRenameText(drawerSessions.find((s) => s.id === activeId)?.name || '');
+    setMenuOpen(false);
+    setRenameModalOpen(true);
+  };
+
+  const submitRename = async () => {
+    const id = activeId;
+    const name = renameText.trim();
+    setRenameModalOpen(false);
+    try {
+      await fetch(`http://${serverIp}:${port}/api/sessions/rename`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, name }),
+      });
+      await refreshSessions();
+    } catch (err) {
+      Alert.alert('Rename failed', String(err));
+    }
+  };
+
   const hardResetSession = () => {
     Alert.alert(
       'Hard Reset',
@@ -645,7 +672,7 @@ function AppInner() {
             </TouchableOpacity>
 
             <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>{activeId}</Text>
+              <Text style={styles.headerTitle}>{activeName}</Text>
               <Text style={styles.headerSubtitle}>{serverIp}:{port}</Text>
             </View>
 
@@ -671,11 +698,11 @@ function AppInner() {
                 style={styles.headerBtn}
                 activeOpacity={0.6}
                 hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                onPress={hardResetSession}
+                onPress={() => setMenuOpen(true)}
                 accessibilityRole="button"
-                accessibilityLabel="Restart this terminal"
+                accessibilityLabel="Terminal menu"
               >
-                <Feather name="refresh-cw" size={17} color="#f87171" />
+                <Feather name="more-vertical" size={19} color="#cbd5e1" />
               </TouchableOpacity>
             </View>
           </View>
@@ -735,6 +762,70 @@ function AppInner() {
             onClose={() => setDrawerOpen(false)}
             onSettings={() => { setDrawerOpen(false); setIsConfiguring(true); }}
           />
+
+          {/* Overflow menu (header ⋯) */}
+          <Modal
+            visible={menuOpen}
+            animationType="fade"
+            transparent
+            onRequestClose={() => setMenuOpen(false)}
+          >
+            <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
+              <Pressable style={styles.menuPanel} onPress={() => {}}>
+                <TouchableOpacity style={styles.menuRow} onPress={openRename}>
+                  <Feather name="edit-2" size={16} color="#cbd5e1" />
+                  <Text style={styles.menuRowText}>Rename terminal</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuRow}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    hardResetSession();
+                  }}
+                >
+                  <Feather name="refresh-cw" size={16} color="#f87171" />
+                  <Text style={[styles.menuRowText, { color: '#f87171' }]}>Restart terminal</Text>
+                </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          </Modal>
+
+          {/* Rename Modal */}
+          <Modal
+            visible={renameModalOpen}
+            animationType="fade"
+            transparent
+            onRequestClose={() => setRenameModalOpen(false)}
+          >
+            <Pressable style={styles.menuBackdrop} onPress={() => setRenameModalOpen(false)}>
+              <Pressable style={styles.renamePanel} onPress={() => {}}>
+                <Text style={styles.renameTitle}>Rename terminal</Text>
+                <TextInput
+                  style={styles.renameInput}
+                  value={renameText}
+                  onChangeText={setRenameText}
+                  placeholder={activeId}
+                  placeholderTextColor="#64748b"
+                  autoFocus
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onSubmitEditing={submitRename}
+                  keyboardAppearance="dark"
+                />
+                <View style={styles.renameBtns}>
+                  <TouchableOpacity
+                    style={styles.renameBtn}
+                    onPress={() => setRenameModalOpen(false)}
+                  >
+                    <Text style={styles.renameBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.renameBtn} onPress={submitRename}>
+                    <Text style={[styles.renameBtnText, { color: '#22d3ee' }]}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </Pressable>
+            </Pressable>
+          </Modal>
 
           {/* Fullscreen selectable-text view (long-press the terminal to open) */}
           <Modal
@@ -1104,6 +1195,73 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  menuPanel: {
+    alignSelf: 'flex-end',
+    marginTop: 60,
+    marginRight: 12,
+    minWidth: 200,
+    backgroundColor: '#0b0f19',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 6,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  menuRowText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#cbd5e1',
+  },
+  renamePanel: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#0b0f19',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 20,
+    gap: 14,
+  },
+  renameTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#e2e8f0',
+  },
+  renameInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#e2e8f0',
+    fontSize: 15,
+  },
+  renameBtns: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 20,
+  },
+  renameBtn: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  renameBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
   },
   selectionViewContainer: {
     flex: 1,
