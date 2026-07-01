@@ -1,31 +1,29 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+import { getLogs, getSession, listSessions, upsertSession } from './db';
 import {
-  getSession,
-  upsertSession,
-  getLogs,
-  db
-} from './db';
-import {
-  startSession,
-  writeToSession,
-  resizeSession,
-  subscribeToSession,
+  getActiveSession,
   killSession,
-  getActiveSession
+  resizeSession,
+  startSession,
+  subscribeToSession,
+  writeToSession,
 } from './pty';
 
 const app = new Hono();
 
 // Enable CORS for frontend development
-app.use('*', cors({
-  origin: '*',
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(
+  '*',
+  cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+  }),
+);
 
 const WEB_DIST = path.join(process.cwd(), 'src', 'web', 'dist');
 const INDEX_PATH = path.join(WEB_DIST, 'index.html');
@@ -34,8 +32,7 @@ const INDEX_PATH = path.join(WEB_DIST, 'index.html');
 
 // List all sessions (active or stopped) from DB
 app.get('/api/sessions', (c) => {
-  const sessions = db.query('SELECT * FROM sessions ORDER BY created_at DESC').all();
-  return c.json(sessions);
+  return c.json(listSessions());
 });
 
 // Start or get a session
@@ -100,7 +97,7 @@ app.get(
                     type: 'output',
                     id: log.id,
                     chunk: log.chunk,
-                  })
+                  }),
                 );
               } catch (sendErr) {
                 console.error(`Failed to send log ${log.id} to client:`, sendErr);
@@ -117,14 +114,14 @@ app.get(
                       type: 'output',
                       chunk: data.chunk,
                       id: data.id,
-                    })
+                    }),
                   );
                 } else if (data.type === 'exit') {
                   ws.send(
                     JSON.stringify({
                       type: 'exit',
                       exitCode: data.exitCode,
-                    })
+                    }),
                   );
                 }
               } catch (wsErr) {
@@ -156,7 +153,7 @@ app.get(
         unsubscribe();
       },
     };
-  })
+  }),
 );
 
 // --- Serving Frontend Static Files (Bun direct file system streaming) ---
@@ -167,9 +164,9 @@ async function serveStatic(c: any) {
   }
   const file = Bun.file(resolved);
   if (!(await file.exists())) return c.notFound();
-  
+
   c.header('Content-Type', file.type || 'application/octet-stream');
-  
+
   if (c.req.path === '/sw.js' || c.req.path === '/manifest.webmanifest') {
     c.header('Cache-Control', 'no-cache');
   } else {
