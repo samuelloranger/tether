@@ -1,0 +1,19 @@
+{
+  "name": "tether-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "apps/server/src/web"
+  ],
+  "scripts": {
+    "dev:server": "bun --cwd apps/server dev",
+    "dev:web": "bun --cwd apps/server/src/web dev",
+    "dev:mobile": "bun --cwd apps/mobile start",
+    "build:server": "bun --cwd apps/server build",
+    "start:server": "bun --cwd apps/server start",
+    "lint": "bun --cwd apps/server lint && bun --cwd apps/mobile lint",
+    "format": "bun --cwd apps/server format"
+  }
+}

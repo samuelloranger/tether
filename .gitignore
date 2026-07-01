@@ -1,0 +1,29 @@
+# Dependency directories
+node_modules/
+apps/**/node_modules/
+
+# Build outputs
+dist/
+apps/server/dist/
+apps/server/src/web/dist/
+
+# Local databases and runtime state
+config/*.db
+config/*.db-journal
+apps/server/config/*.db
+apps/server/config/*.db-journal
+
+# Environment files
+.env
+.env.local
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Expo build folders
+apps/mobile/.expo/
+apps/mobile/ios/
+apps/mobile/android/
