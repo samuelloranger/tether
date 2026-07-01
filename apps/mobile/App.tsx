@@ -19,6 +19,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Feather } from '@expo/vector-icons';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal';
 import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
 import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
@@ -499,8 +500,15 @@ export default function App() {
         >
           {/* Header Panel */}
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => { refreshSessions(); setDrawerOpen(true); }}>
-              <Text style={styles.headerBtnText}>≡</Text>
+            <TouchableOpacity
+              style={styles.headerBtn}
+              activeOpacity={0.6}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={() => { refreshSessions(); setDrawerOpen(true); }}
+              accessibilityRole="button"
+              accessibilityLabel="Open terminal list"
+            >
+              <Feather name="menu" size={20} color="#cbd5e1" />
             </TouchableOpacity>
 
             <View style={styles.headerInfo}>
@@ -526,12 +534,26 @@ export default function App() {
                 </View>
               )}
 
-              <TouchableOpacity style={styles.headerBtn} onPress={hardResetSession}>
-                <Text style={[styles.headerBtnText, styles.headerBtnTextDanger]}>Reset</Text>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                activeOpacity={0.6}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                onPress={hardResetSession}
+                accessibilityRole="button"
+                accessibilityLabel="Restart this terminal"
+              >
+                <Feather name="refresh-cw" size={17} color="#f87171" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.headerBtn, styles.headerBtnActive]} onPress={() => setIsConfiguring(true)}>
-                <Text style={[styles.headerBtnText, styles.headerBtnTextActive]}>Config</Text>
+              <TouchableOpacity
+                style={[styles.headerBtn, styles.headerBtnActive]}
+                activeOpacity={0.6}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                onPress={() => setIsConfiguring(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Settings"
+              >
+                <Feather name="settings" size={17} color="#818cf8" />
               </TouchableOpacity>
             </View>
           </View>
@@ -602,21 +624,21 @@ export default function App() {
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b')}>
                 <Text style={styles.utilityBtnText}>Esc</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[A')}>
-                <Text style={styles.utilityBtnText}>↑</Text>
+              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[A')} accessibilityRole="button" accessibilityLabel="Arrow up">
+                <Feather name="arrow-up" size={15} color="#cbd5e1" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[B')}>
-                <Text style={styles.utilityBtnText}>↓</Text>
+              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[B')} accessibilityRole="button" accessibilityLabel="Arrow down">
+                <Feather name="arrow-down" size={15} color="#cbd5e1" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[D')}>
-                <Text style={styles.utilityBtnText}>←</Text>
+              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[D')} accessibilityRole="button" accessibilityLabel="Arrow left">
+                <Feather name="arrow-left" size={15} color="#cbd5e1" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[C')}>
-                <Text style={styles.utilityBtnText}>→</Text>
+              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[C')} accessibilityRole="button" accessibilityLabel="Arrow right">
+                <Feather name="arrow-right" size={15} color="#cbd5e1" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => Keyboard.dismiss()}>
-                <Text style={styles.utilityBtnText}>Hide ⌨</Text>
+              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => Keyboard.dismiss()} accessibilityRole="button" accessibilityLabel="Hide keyboard">
+                <Feather name="chevron-down" size={16} color="#cbd5e1" />
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -895,8 +917,9 @@ const styles = StyleSheet.create({
     color: '#f87171',
   },
   utilityIconBtn: {
-    paddingVertical: 5,
-    paddingHorizontal: 8,
+    minWidth: 34,
+    height: 28,
+    paddingHorizontal: 6,
     borderRadius: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     marginRight: 4,
