@@ -45,7 +45,7 @@ const instances = new Map<string, SessionInstance>();
 
 export function startSession(
   id: string,
-  command: string = 'bash',
+  command: string = process.env.SHELL || 'bash',
   cols: number = 80,
   rows: number = 24,
 ) {
@@ -62,9 +62,10 @@ export function startSession(
 
   // Spawn the child process using Bun's native PTY support.
   // For bash, load our rcfile for the fish-like prompt (still sources the user's
-  // ~/.bashrc). Any other command runs as-is. TERM enables 256-color output.
-  // ponytail: bash-only default; a user wanting zsh/fish sets `command` instead.
-  const args = command === 'bash' ? ['bash', '--rcfile', RC_PATH, '-i'] : [command];
+  // ~/.bashrc). Any other command runs as-is (e.g. the user's $SHELL, so fish
+  // abbreviations etc. load from their own config). TERM enables 256-color output.
+  const isBash = path.basename(command) === 'bash';
+  const args = isBash ? ['bash', '--rcfile', RC_PATH, '-i'] : [command, '-i'];
   const proc = Bun.spawn(args, {
     cwd: process.env.HOME || homedir(),
     env: {

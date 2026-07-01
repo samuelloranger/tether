@@ -36,7 +36,7 @@ app.get('/api/sessions', (c) => {
 app.post('/api/sessions/start', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const sessionId = body.id || 'default';
-  const command = body.command || 'bash';
+  const command = body.command || process.env.SHELL || 'bash';
   const cols = Number(body.cols || 80);
   const rows = Number(body.rows || 24);
 
@@ -82,7 +82,7 @@ app.get(
         setTimeout(() => {
           try {
             // 1. Ensure the PTY process is active (auto-start if needed)
-            startSession(sessionId, 'bash', cols, rows);
+            startSession(sessionId, process.env.SHELL || 'bash', cols, rows);
 
             // 2. Catch up the client: stream any logs missed since the provided log ID
             const missedLogs = getLogs(sessionId, sinceId);

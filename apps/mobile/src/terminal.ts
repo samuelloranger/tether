@@ -66,7 +66,7 @@ function blankLine(cols: number): Cell[] {
   return Array.from({ length: cols }, blankCell);
 }
 
-type ParserState = 'ground' | 'esc' | 'escInt' | 'csi' | 'osc' | 'oscEsc';
+type ParserState = 'ground' | 'esc' | 'escInt' | 'csi' | 'osc' | 'oscEsc' | 'dcs' | 'dcsEsc';
 
 export class TerminalEmulator {
   cols: number;
@@ -166,6 +166,18 @@ export class TerminalEmulator {
         case 'oscEsc':
           this.state = 'ground'; // drop ST terminator
           break;
+        case 'dcs':
+          if (code === 0x07) this.state = 'ground';
+          else if (code === 0x1b) this.state = 'dcsEsc';
+          break;
+        case 'dcsEsc':
+          // Proper ST terminator (ESC \) drops it. Anything else means the DCS
+          // never got terminated (seen in the wild from a corrupted Warp
+          // shell-integration string) — treat this ESC as the start of a new
+          // sequence instead of swallowing it, so the parser recovers.
+          if (ch === '\\') this.state = 'ground';
+          else this.esc(ch);
+          break;
       }
     }
   }
@@ -198,6 +210,9 @@ export class TerminalEmulator {
         return;
       case ']':
         this.state = 'osc';
+        return;
+      case 'P':
+        this.state = 'dcs';
         return;
       case '(':
       case ')':
