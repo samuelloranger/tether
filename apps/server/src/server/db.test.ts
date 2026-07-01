@@ -2,9 +2,11 @@
 import {
   addTerminalLog,
   getLogs,
+  getSession,
   listSessions,
   pruneLogs,
   renameSession,
+  resetRunningSessions,
   upsertSession,
 } from './db';
 
@@ -49,6 +51,30 @@ function ok(cond: boolean, msg: string) {
   renameSession('term-rename', null);
   const cleared = listSessions().find((r) => r.id === 'term-rename');
   ok(cleared!.name == null, 'name is null after clearing');
+}
+
+// pruneLogs records the high-water mark of pruned ids
+{
+  upsertSession('term-wm', 'bash', 'running');
+  for (let i = 0; i < 30; i++) addTerminalLog('term-wm', `w${i}`);
+  const before = getLogs('term-wm', 0);
+  pruneLogs('term-wm', 10);
+  const after = getLogs('term-wm', 0);
+  const sess = getSession('term-wm');
+  ok(after.length === 10, 'watermark prune keeps 10 rows');
+  ok(sess!.pruned_before === before[before.length - 11].id, 'pruned_before = highest pruned id');
+
+  // pruning again with nothing to prune must not lower the watermark
+  pruneLogs('term-wm', 10);
+  ok(getSession('term-wm')!.pruned_before === sess!.pruned_before, 'watermark stable when no-op');
+}
+
+// resetRunningSessions marks every running session stopped
+{
+  upsertSession('term-orphan', 'bash', 'running');
+  resetRunningSessions();
+  const row = listSessions().find((r) => r.id === 'term-orphan');
+  ok(row!.status === 'stopped', 'orphan reset marks running sessions stopped');
 }
 
 console.log(`\n  ${pass} assertions passed\n`);
