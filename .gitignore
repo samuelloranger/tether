@@ -34,3 +34,5 @@ apps/server/config/*.db-shm
 
 # Root-level runtime state (rcfile/db written when server runs from repo root)
 /config/
+
+apps/server/config/
