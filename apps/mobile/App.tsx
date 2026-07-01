@@ -170,6 +170,8 @@ function AppInner() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [renameText, setRenameText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<TextInput | null>(null);
 
   // Multi-session state
   const cache = useRef(new SessionCache(3)).current;
@@ -484,6 +486,25 @@ function AppInner() {
       .map((r) => r.runs.map((run) => run.text).join(''))
       .join('\n')
       .replace(/\n+$/, '');
+
+  // Transcript filtered to lines matching the search query (case-insensitive);
+  // full transcript when the query is empty.
+  const getSearchText = () => {
+    const full = getFullText();
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return full;
+    return full
+      .split('\n')
+      .filter((line) => line.toLowerCase().includes(q))
+      .join('\n');
+  };
+
+  const openSearch = () => {
+    setMenuOpen(false);
+    setSearchQuery('');
+    setSelectionViewOpen(true);
+    setTimeout(() => searchInputRef.current?.focus(), 250);
+  };
 
   // Long-press the terminal to open a fullscreen, natively-selectable view
   // of everything currently visible + scrollback, instead of copying
@@ -812,6 +833,10 @@ function AppInner() {
                     <Text style={styles.fontStepText}>+</Text>
                   </TouchableOpacity>
                 </View>
+                <TouchableOpacity style={styles.menuRow} onPress={openSearch}>
+                  <Feather name="search" size={16} color="#cbd5e1" />
+                  <Text style={styles.menuRowText}>Search output</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.menuRow}
                   onPress={() => {
@@ -867,7 +892,10 @@ function AppInner() {
           <Modal
             visible={selectionViewOpen}
             animationType="slide"
-            onRequestClose={() => setSelectionViewOpen(false)}
+            onRequestClose={() => {
+              setSelectionViewOpen(false);
+              setSearchQuery('');
+            }}
           >
             <SafeAreaView style={styles.selectionViewContainer}>
               <View style={styles.selectionViewHeader}>
@@ -883,7 +911,10 @@ function AppInner() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.selectionViewHeaderBtn}
-                    onPress={() => setSelectionViewOpen(false)}
+                    onPress={() => {
+                      setSelectionViewOpen(false);
+                      setSearchQuery('');
+                    }}
                     accessibilityRole="button"
                     accessibilityLabel="Close"
                   >
@@ -891,14 +922,25 @@ function AppInner() {
                   </TouchableOpacity>
                 </View>
               </View>
+              <TextInput
+                ref={searchInputRef}
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Filter lines…"
+                placeholderTextColor="#64748b"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardAppearance="dark"
+              />
               {selectionViewOpen && (
                 <TextInput
                   style={styles.selectionViewText}
-                  value={getFullText()}
+                  value={getSearchText()}
                   editable={false}
                   multiline
                   scrollEnabled
-                  selection={{ start: getFullText().length, end: getFullText().length }}
+                  selection={{ start: getSearchText().length, end: getSearchText().length }}
                 />
               )}
             </SafeAreaView>
@@ -1349,6 +1391,16 @@ const styles = StyleSheet.create({
   selectionViewHeaderBtnText: {
     color: '#22d3ee',
     fontWeight: '600',
+    fontSize: 14,
+  },
+  searchInput: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    color: '#e2e8f0',
     fontSize: 14,
   },
   selectionViewText: {
