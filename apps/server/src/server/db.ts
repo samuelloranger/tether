@@ -6,6 +6,7 @@ const DB_PATH = process.env.TETHER_DB_PATH ?? path.join(DB_DIR, 'tether.db');
 
 // Ensure the config directory exists
 import { mkdirSync } from 'node:fs';
+
 mkdirSync(DB_DIR, { recursive: true });
 
 export const db = new Database(DB_PATH, { create: true });
@@ -91,7 +92,11 @@ export function getSession(id: string): Session | null {
   return db.query('SELECT * FROM sessions WHERE id = $id').get({ $id: id }) as Session | null;
 }
 
-export function upsertSession(id: string, command: string, status: 'running' | 'stopped' = 'running') {
+export function upsertSession(
+  id: string,
+  command: string,
+  status: 'running' | 'stopped' = 'running',
+) {
   db.query(`
     INSERT INTO sessions (id, command, status)
     VALUES ($id, $command, $status)
@@ -100,26 +105,46 @@ export function upsertSession(id: string, command: string, status: 'running' | '
 }
 
 export function addTerminalLog(sessionId: string, chunk: string): number {
-  const result = db.query(`
+  const result = db
+    .query(`
     INSERT INTO terminal_logs (session_id, chunk)
     VALUES ($sessionId, $chunk)
-  `).run({ $sessionId: sessionId, $chunk: chunk });
+  `)
+    .run({ $sessionId: sessionId, $chunk: chunk });
   return Number(result.lastInsertRowid);
 }
 
 export function getLogs(sessionId: string, sinceId = 0): TerminalLog[] {
-  return db.query(`
+  return db
+    .query(`
     SELECT id, session_id, chunk, created_at
     FROM terminal_logs
     WHERE session_id = $sessionId AND id > $sinceId
     ORDER BY id ASC
-  `).all({ $sessionId: sessionId, $sinceId: sinceId }) as TerminalLog[];
+  `)
+    .all({ $sessionId: sessionId, $sinceId: sinceId }) as TerminalLog[];
 }
 
 export function clearLogs(sessionId: string) {
-  db.query('DELETE FROM terminal_logs WHERE session_id = $sessionId').run({ $sessionId: sessionId });
+  db.query('DELETE FROM terminal_logs WHERE session_id = $sessionId').run({
+    $sessionId: sessionId,
+  });
 }
 
 export function setSessionStatus(id: string, status: 'running' | 'stopped') {
   db.query('UPDATE sessions SET status = $status WHERE id = $id').run({ $id: id, $status: status });
+}
+
+export interface SessionRow extends Session {
+  last_output_at: string | null;
+}
+
+export function listSessions(): SessionRow[] {
+  return db
+    .query(
+      `SELECT s.*,
+        (SELECT MAX(created_at) FROM terminal_logs WHERE session_id = s.id) AS last_output_at
+       FROM sessions s ORDER BY s.created_at DESC`,
+    )
+    .all() as SessionRow[];
 }
