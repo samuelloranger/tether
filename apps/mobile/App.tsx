@@ -380,10 +380,12 @@ function AppInner() {
 
   // Load persisted font size once on mount.
   useEffect(() => {
-    AsyncStorage.getItem(KEY_FONT).then((v) => {
-      const n = Number(v);
-      if (Number.isFinite(n) && n >= 8 && n <= 24) setFontSize(n);
-    });
+    AsyncStorage.getItem(KEY_FONT)
+      .then((v) => {
+        const n = Number(v);
+        if (Number.isFinite(n) && n >= 8 && n <= 24) setFontSize(n);
+      })
+      .catch(() => {});
   }, []);
 
   const changeFontSize = (delta: number) => {
@@ -396,15 +398,17 @@ function AppInner() {
 
   // Load persisted snippets once on mount.
   useEffect(() => {
-    AsyncStorage.getItem(KEY_SNIPPETS).then((v) => {
-      if (!v) return;
-      try {
-        const parsed = JSON.parse(v);
-        if (Array.isArray(parsed)) setSnippets(parsed.filter((s) => typeof s === 'string'));
-      } catch {
-        // ignore malformed storage
-      }
-    });
+    AsyncStorage.getItem(KEY_SNIPPETS)
+      .then((v) => {
+        if (!v) return;
+        try {
+          const parsed = JSON.parse(v);
+          if (Array.isArray(parsed)) setSnippets(parsed.filter((s) => typeof s === 'string'));
+        } catch {
+          // ignore malformed storage
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const persistSnippets = (next: string[]) => {
