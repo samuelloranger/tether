@@ -74,6 +74,19 @@ runMigrations();
 
 // --- DB Helper Functions ---
 
+const LOG_CAP = 2000;
+const insertCounts = new Map<string, number>();
+
+export function pruneLogs(sessionId: string, cap = LOG_CAP) {
+  db.query(
+    `DELETE FROM terminal_logs
+     WHERE session_id = $id AND id <= (
+       SELECT id FROM terminal_logs WHERE session_id = $id
+       ORDER BY id DESC LIMIT 1 OFFSET $cap
+     )`,
+  ).run({ $id: sessionId, $cap: cap });
+}
+
 export interface Session {
   id: string;
   command: string;
@@ -106,11 +119,11 @@ export function upsertSession(
 
 export function addTerminalLog(sessionId: string, chunk: string): number {
   const result = db
-    .query(`
-    INSERT INTO terminal_logs (session_id, chunk)
-    VALUES ($sessionId, $chunk)
-  `)
+    .query(`INSERT INTO terminal_logs (session_id, chunk) VALUES ($sessionId, $chunk)`)
     .run({ $sessionId: sessionId, $chunk: chunk });
+  const n = (insertCounts.get(sessionId) ?? 0) + 1;
+  insertCounts.set(sessionId, n);
+  if (n % 200 === 0) pruneLogs(sessionId);
   return Number(result.lastInsertRowid);
 }
 
