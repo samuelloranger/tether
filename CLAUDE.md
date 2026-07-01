@@ -45,6 +45,8 @@ The server's PTY relies on `Bun.spawn(..., { terminal: {...} })` and `proc.termi
 
 The **same PTY process survives client disconnects** — that's the whole point ("tether"). Killing is explicit via `POST /api/sessions/kill`.
 
+**Mobile multi-terminal model:** The mobile app manages multiple sessions as drawer-based tabs; the server's session list (`GET /api/sessions`, which includes `last_output_at`) is the source of truth. Only the active terminal holds a live WebSocket and emulator; switching detaches background sessions (PTY keeps running server-side) and uses an LRU cache (cap 3) for instant reattach. `terminal_logs` is capped per session (~2000 rows, pruned every 200 inserts) to bound replay overhead.
+
 ## Conventions & gotchas
 
 - Formatting is Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100. Run `bun format` before committing.
