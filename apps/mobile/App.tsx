@@ -12,14 +12,18 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Platform,
-  SafeAreaView,
   Alert,
   ActivityIndicator,
   useWindowDimensions,
   type TextStyle,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import { Feather } from '@expo/vector-icons';
+import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
+import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal';
 import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
 import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
@@ -39,8 +43,11 @@ function runToStyle(s: CellStyle): TextStyle {
   if (s.fg) style.color = s.fg;
   if (s.bg) style.backgroundColor = s.bg;
   if (s.bold) style.fontWeight = 'bold';
+  if (s.dim) style.opacity = 0.55;
   if (s.italic) style.fontStyle = 'italic';
-  if (s.underline) style.textDecorationLine = 'underline';
+  if (s.underline && s.strike) style.textDecorationLine = 'underline line-through';
+  else if (s.underline) style.textDecorationLine = 'underline';
+  else if (s.strike) style.textDecorationLine = 'line-through';
   if (s.caret) {
     // Block caret: accent background, dark glyph for contrast.
     style.backgroundColor = '#818cf8';
@@ -64,17 +71,85 @@ const TermRow = React.memo(function TermRow({
   width: number;
 }) {
   return (
-    <Text style={[styles.termLine, { fontSize, lineHeight, width }]} numberOfLines={1}>
-      {row.runs.map((run, i) => (
-        <Text key={i} style={runToStyle(run.style)}>
-          {run.text}
-        </Text>
-      ))}
-    </Text>
+    <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
+      <Text style={[styles.termLine, { fontSize, lineHeight, width }]} numberOfLines={1}>
+        {row.runs.map((run, i) => (
+          <Text key={i} style={runToStyle(run.style)}>
+            {run.text}
+          </Text>
+        ))}
+      </Text>
+    </View>
+  );
+});
+
+// Directional pad, styled after the arrow clusters in Blink/Termius: one
+// capsule with three segments (left | up-over-down | right) instead of four
+// separate buttons — reads as a single control and halves the width four
+// loose buttons would cost in an already-tight toolbar.
+const ArrowCluster = React.memo(function ArrowCluster({
+  onArrow,
+}: {
+  onArrow: (dir: 'A' | 'B' | 'C' | 'D') => void;
+}) {
+  return (
+    <View style={styles.arrowCluster}>
+      <TouchableOpacity
+        style={styles.arrowSeg}
+        activeOpacity={0.6}
+        onPress={() => onArrow('D')}
+        accessibilityRole="button"
+        accessibilityLabel="Arrow left"
+      >
+        <Feather name="chevron-left" size={18} color="#cbd5e1" />
+      </TouchableOpacity>
+      <View style={styles.arrowVDivider} />
+      <View style={styles.arrowMid}>
+        <TouchableOpacity
+          style={styles.arrowMidHalf}
+          activeOpacity={0.6}
+          onPress={() => onArrow('A')}
+          accessibilityRole="button"
+          accessibilityLabel="Arrow up"
+        >
+          <Feather name="chevron-up" size={15} color="#cbd5e1" />
+        </TouchableOpacity>
+        <View style={styles.arrowHDivider} />
+        <TouchableOpacity
+          style={styles.arrowMidHalf}
+          activeOpacity={0.6}
+          onPress={() => onArrow('B')}
+          accessibilityRole="button"
+          accessibilityLabel="Arrow down"
+        >
+          <Feather name="chevron-down" size={15} color="#cbd5e1" />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.arrowVDivider} />
+      <TouchableOpacity
+        style={styles.arrowSeg}
+        activeOpacity={0.6}
+        onPress={() => onArrow('C')}
+        accessibilityRole="button"
+        accessibilityLabel="Arrow right"
+      >
+        <Feather name="chevron-right" size={18} color="#cbd5e1" />
+      </TouchableOpacity>
+    </View>
   );
 });
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppInner />
+    </SafeAreaProvider>
+  );
+}
+
+function AppInner() {
+  const [fontsLoaded] = useFonts({ FiraCode_400Regular });
+
   // Connection states
   const [serverIp, setServerIp] = useState('192.168.50.30');
   const [port, setPort] = useState('8085');
@@ -121,7 +196,15 @@ export default function App() {
 
   // Helper to get/create the cache entry for a given id, sized to the current grid.
   const entryFor = (id: string): SessionEntry =>
-    cache.touch(id, () => ({ term: new TerminalEmulator(numCols || 80, numRows || 24), sinceId: 0, lastAppliedId: 0 }));
+    cache.touch(id, () => {
+      const term = new TerminalEmulator(numCols || 80, numRows || 24);
+      // Only the active session holds a live socket, so replies from a
+      // backgrounded session's emulator have nowhere to go — drop them.
+      term.onReply = (text) => {
+        if (id === activeIdRef.current) wsSend({ type: 'input', text });
+      };
+      return { term, sinceId: 0, lastAppliedId: 0 };
+    });
 
   // Send only when the socket is actually OPEN. `connectionStatus` (React state)
   // lags the real socket state — e.g. mid-switch the new socket is CONNECTING —
@@ -263,6 +346,7 @@ export default function App() {
   };
 
   const killActiveOr = async (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       await fetch(`http://${serverIp}:${port}/api/sessions/kill`, {
         method: 'POST',
@@ -370,6 +454,27 @@ export default function App() {
     wsSend({ type: 'input', text });
   };
 
+  // Long-press the terminal to copy everything currently visible (screen +
+  // whatever's rendered from scrollback). No text-selection UI — matches the
+  // "copy this pane" gesture most mobile terminal apps use instead.
+  const handleCopyScreen = async () => {
+    const text = screen
+      .map((r) => r.runs.map((run) => run.text).join(''))
+      .join('\n')
+      .replace(/\n+$/, '');
+    if (!text) return;
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Copied', 'Terminal contents copied to clipboard.');
+  };
+
+  const handlePaste = async () => {
+    const text = await Clipboard.getStringAsync();
+    if (!text) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const e = cache.get(activeIdRef.current);
+    sendInput(e?.term.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text);
+  };
+
   // Type straight into the terminal: forward each keystroke to the PTY as it is
   // pressed (the shell echoes it back for display). The capture field is pinned
   // to a zero-width sentinel so nothing accumulates locally and Backspace keeps
@@ -451,6 +556,8 @@ export default function App() {
     [fontSize, lineHeight, gridWidth],
   );
 
+  if (!fontsLoaded) return null;
+
   return (
     <SafeAreaView style={styles.appContainer}>
       {isConfiguring ? (
@@ -508,7 +615,7 @@ export default function App() {
               style={styles.headerBtn}
               activeOpacity={0.6}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              onPress={() => { refreshSessions(); setDrawerOpen(true); }}
+              onPress={() => { Keyboard.dismiss(); refreshSessions(); setDrawerOpen(true); }}
               accessibilityRole="button"
               accessibilityLabel="Open terminal list"
             >
@@ -548,17 +655,6 @@ export default function App() {
               >
                 <Feather name="refresh-cw" size={17} color="#f87171" />
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.headerBtn, styles.headerBtnActive]}
-                activeOpacity={0.6}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                onPress={() => setIsConfiguring(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Settings"
-              >
-                <Feather name="settings" size={17} color="#818cf8" />
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -579,7 +675,11 @@ export default function App() {
             onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
             {...panResponder.panHandlers}
           >
-            <Pressable style={{ flex: 1 }} onPress={() => inputRef.current?.focus()}>
+            <Pressable
+              style={{ flex: 1 }}
+              onPress={() => inputRef.current?.focus()}
+              onLongPress={handleCopyScreen}
+            >
               <FlatList
                 ref={listRef}
                 style={{ flex: 1 }}
@@ -611,12 +711,19 @@ export default function App() {
             onNew={newTerminal}
             onKill={killActiveOr}
             onClose={() => setDrawerOpen(false)}
+            onSettings={() => { setDrawerOpen(false); setIsConfiguring(true); }}
           />
 
           {/* Mobile Terminal Shortcuts Utility Bar */}
           <View style={styles.utilityBar}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.utilityScroll}>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x03')}>
+              <TouchableOpacity
+                style={styles.utilityBtn}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  sendInput('\x03');
+                }}
+              >
                 <Text style={[styles.utilityBtnText, styles.utilityBtnTextDanger]}>Ctrl+C</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\t')}>
@@ -628,21 +735,23 @@ export default function App() {
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b')}>
                 <Text style={styles.utilityBtnText}>Esc</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[A')} accessibilityRole="button" accessibilityLabel="Arrow up">
-                <Feather name="arrow-up" size={15} color="#cbd5e1" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[B')} accessibilityRole="button" accessibilityLabel="Arrow down">
-                <Feather name="arrow-down" size={15} color="#cbd5e1" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[D')} accessibilityRole="button" accessibilityLabel="Arrow left">
-                <Feather name="arrow-left" size={15} color="#cbd5e1" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => sendInput('\x1b[C')} accessibilityRole="button" accessibilityLabel="Arrow right">
-                <Feather name="arrow-right" size={15} color="#cbd5e1" />
-              </TouchableOpacity>
 
+              <View style={styles.utilityGroupDivider} />
+
+              <ArrowCluster
+                onArrow={(dir) => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  sendInput(`\x1b[${dir}`);
+                }}
+              />
+
+              <View style={styles.utilityGroupDivider} />
+
+              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={handlePaste} accessibilityRole="button" accessibilityLabel="Paste">
+                <Feather name="clipboard" size={17} color="#cbd5e1" />
+              </TouchableOpacity>
               <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => Keyboard.dismiss()} accessibilityRole="button" accessibilityLabel="Hide keyboard">
-                <Feather name="chevron-down" size={16} color="#cbd5e1" />
+                <Feather name="chevron-down" size={18} color="#cbd5e1" />
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -670,7 +779,7 @@ export default function App() {
   );
 }
 
-const MONO = Platform.OS === 'ios' ? 'Courier' : 'monospace';
+const MONO = 'FiraCode_400Regular'; // wide box-drawing/braille/powerline glyph coverage vs. Courier
 
 const styles = StyleSheet.create({
   appContainer: {
@@ -802,11 +911,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     marginLeft: 6,
   },
-  headerBtnActive: {
-    backgroundColor: 'rgba(99, 102, 241, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(99, 102, 241, 0.3)',
-  },
   headerBtnText: {
     fontSize: 11,
     fontWeight: '600',
@@ -898,21 +1002,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0f19',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.05)',
-    paddingVertical: 6,
+    paddingVertical: 8,
   },
   utilityScroll: {
     paddingHorizontal: 12,
     alignItems: 'center',
+    gap: 6,
   },
   utilityBtn: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    marginRight: 4,
+    height: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   utilityBtnText: {
-    fontSize: 10,
+    fontSize: 13,
     fontWeight: '700',
     fontFamily: MONO,
     color: '#cbd5e1',
@@ -921,12 +1026,10 @@ const styles = StyleSheet.create({
     color: '#f87171',
   },
   utilityIconBtn: {
-    minWidth: 34,
-    height: 28,
-    paddingHorizontal: 6,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    marginRight: 4,
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -934,6 +1037,41 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: MONO,
     color: '#cbd5e1',
+  },
+  utilityGroupDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginHorizontal: 2,
+  },
+  arrowCluster: {
+    flexDirection: 'row',
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    overflow: 'hidden',
+  },
+  arrowSeg: {
+    width: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowMid: {
+    width: 34,
+  },
+  arrowMidHalf: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowVDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  arrowHDivider: {
+    height: 1,
+    marginHorizontal: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   resizeSpacer: {
     width: 12,

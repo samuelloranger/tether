@@ -13,8 +13,10 @@ export interface CellStyle {
   fg?: string;
   bg?: string;
   bold?: boolean;
+  dim?: boolean;
   italic?: boolean;
   underline?: boolean;
+  strike?: boolean;
   inverse?: boolean;
   caret?: boolean;
 }
@@ -94,6 +96,16 @@ export class TerminalEmulator {
   // draw their own, so the caret only renders when the app wants it visible.
   cursorVisible = true;
 
+  // Set by the app via ?2004h/l (bracketed paste). Read by the UI to decide
+  // whether to wrap pasted text in \x1b[200~...\x1b[201~ before sending.
+  bracketedPaste = false;
+
+  // Wired by the UI to the live input channel. The emulator calls this for
+  // sequences that expect a reply (DSR cursor report, DA identify) — without
+  // it, apps that query the terminal and wait on the answer (readline, some
+  // prompts) stall until their internal timeout.
+  onReply: ((data: string) => void) | null = null;
+
   private state: ParserState = 'ground';
   private params = '';
   private intermediate = '';
@@ -116,6 +128,7 @@ export class TerminalEmulator {
     this.pen = {};
     this.mouseOn = false;
     this.cursorVisible = true;
+    this.bracketedPaste = false;
     this.prevRows = [];
     this.state = 'ground';
     this.params = '';
@@ -354,7 +367,18 @@ export class TerminalEmulator {
       case 'm':
         this.applySgr();
         break;
-      // 'n', 'c', 't', etc. (device reports) — ignored; nothing to reply on
+      case 'n':
+        // DSR — device status report. 5 = "are you ok", 6 = cursor position.
+        if (!priv && p[0] === 6) this.onReply?.(`\x1b[${this.cy + 1};${this.cx + 1}R`);
+        else if (!priv && p[0] === 5) this.onReply?.('\x1b[0n');
+        break;
+      case 'c':
+        // DA — device attributes. '>' (secondary DA) lands in params too since
+        // it's in the 0x3c-0x3f intermediate range consumed by csi().
+        if (this.params.startsWith('>')) this.onReply?.('\x1b[>0;0;0c');
+        else if (!priv) this.onReply?.('\x1b[?1;2c');
+        break;
+      // 't', etc. (window ops) — ignored; nothing to reply on
     }
   }
 
@@ -366,8 +390,10 @@ export class TerminalEmulator {
         this.mouseOn = on; // mouse reporting enabled/disabled
       } else if (m === 25) {
         this.cursorVisible = on; // DECTCEM
+      } else if (m === 2004) {
+        this.bracketedPaste = on;
       }
-      // 2004 (bracketed paste), 2026 (sync), 1 (app cursor) — ignored.
+      // 2026 (sync), 1 (app cursor) — ignored.
     }
   }
 
@@ -509,13 +535,19 @@ export class TerminalEmulator {
       const c = codes[i];
       if (c === 0) this.pen = {};
       else if (c === 1) this.pen.bold = true;
+      else if (c === 2) this.pen.dim = true;
       else if (c === 3) this.pen.italic = true;
       else if (c === 4) this.pen.underline = true;
       else if (c === 7) this.pen.inverse = true;
-      else if (c === 22) this.pen.bold = false;
+      else if (c === 9) this.pen.strike = true;
+      else if (c === 22) {
+        this.pen.bold = false;
+        this.pen.dim = false;
+      }
       else if (c === 23) this.pen.italic = false;
       else if (c === 24) this.pen.underline = false;
       else if (c === 27) this.pen.inverse = false;
+      else if (c === 29) this.pen.strike = false;
       else if (c >= 30 && c <= 37) this.pen.fg = PALETTE[c - 30];
       else if (c === 39) this.pen.fg = undefined;
       else if (c >= 40 && c <= 47) this.pen.bg = PALETTE[c - 40];
@@ -599,8 +631,10 @@ export class TerminalEmulator {
     const style: CellStyle = { fg };
     if (bg) style.bg = bg;
     if (cell.bold) style.bold = true;
+    if (cell.dim) style.dim = true;
     if (cell.italic) style.italic = true;
     if (cell.underline) style.underline = true;
+    if (cell.strike) style.strike = true;
     return style;
   }
 }
@@ -610,8 +644,10 @@ function sameStyle(a: CellStyle, b: CellStyle): boolean {
     a.fg === b.fg &&
     a.bg === b.bg &&
     !!a.bold === !!b.bold &&
+    !!a.dim === !!b.dim &&
     !!a.italic === !!b.italic &&
     !!a.underline === !!b.underline &&
+    !!a.strike === !!b.strike &&
     !!a.caret === !!b.caret
   );
 }

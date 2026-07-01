@@ -118,4 +118,47 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(runs.find((r) => r.text === 'IDX')?.style.fg, '#ff0000', '256-color 38;5;196');
 }
 
+// 12. Dim + strikethrough SGR
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}[2mDim${E}[22m${E}[9mStrike${E}[29mPlain`);
+  const runs = t.getSnapshot()[0].runs;
+  eq(runs.find((r) => r.text === 'Dim')?.style.dim, true, 'dim flag');
+  eq(!!runs.find((r) => r.text === 'Strike')?.style.dim, false, '22 clears dim');
+  eq(runs.find((r) => r.text === 'Strike')?.style.strike, true, 'strike flag');
+  eq(!!runs.find((r) => r.text === 'Plain')?.style.strike, false, '29 clears strike');
+}
+
+// 13. DSR cursor position report replies over onReply
+{
+  const t = new TerminalEmulator(80, 24);
+  let reply = '';
+  t.onReply = (data) => {
+    reply = data;
+  };
+  t.write(`line1\r\nabc${E}[6n`); // cursor at row 1 (0-based), col 3
+  eq(reply, `${E}[2;4R`, 'DSR cursor position report');
+}
+
+// 14. Primary DA replies over onReply
+{
+  const t = new TerminalEmulator(80, 24);
+  let reply = '';
+  t.onReply = (data) => {
+    reply = data;
+  };
+  t.write(`${E}[c`);
+  eq(reply, `${E}[?1;2c`, 'primary DA reply');
+}
+
+// 15. Bracketed paste mode tracked (?2004h/l)
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.bracketedPaste, false, 'bracketed paste off by default');
+  t.write(`${E}[?2004h`);
+  eq(t.bracketedPaste, true, 'bracketed paste enabled');
+  t.write(`${E}[?2004l`);
+  eq(t.bracketedPaste, false, 'bracketed paste disabled');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

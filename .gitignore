@@ -36,3 +36,6 @@ apps/server/config/*.db-shm
 /config/
 
 apps/server/config/
+
+# CodeGraph local index
+.codegraph/
