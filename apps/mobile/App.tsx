@@ -15,6 +15,7 @@ import {
   Alert,
   ActivityIndicator,
   useWindowDimensions,
+  Modal,
   type TextStyle,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -164,6 +165,7 @@ function AppInner() {
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
   const [ctrlArmed, setCtrlArmed] = useState(false);
+  const [selectionViewOpen, setSelectionViewOpen] = useState(false);
 
   // Multi-session state
   const cache = useRef(new SessionCache(3)).current;
@@ -455,14 +457,24 @@ function AppInner() {
     wsSend({ type: 'input', text });
   };
 
-  // Long-press the terminal to copy everything currently visible (screen +
-  // whatever's rendered from scrollback). No text-selection UI — matches the
-  // "copy this pane" gesture most mobile terminal apps use instead.
-  const handleCopyScreen = async () => {
-    const text = screen
+  // Full plain-text transcript (visible screen + scrollback) for the
+  // selectable view and the Copy All fallback.
+  const getFullText = () =>
+    screen
       .map((r) => r.runs.map((run) => run.text).join(''))
       .join('\n')
       .replace(/\n+$/, '');
+
+  // Long-press the terminal to open a fullscreen, natively-selectable view
+  // of everything currently visible + scrollback, instead of copying
+  // straight to the clipboard.
+  const openSelectionView = () => {
+    if (!getFullText()) return;
+    setSelectionViewOpen(true);
+  };
+
+  const handleCopyAll = async () => {
+    const text = getFullText();
     if (!text) return;
     await Clipboard.setStringAsync(text);
     Alert.alert('Copied', 'Terminal contents copied to clipboard.');
@@ -688,7 +700,7 @@ function AppInner() {
             <Pressable
               style={{ flex: 1 }}
               onPress={() => inputRef.current?.focus()}
-              onLongPress={handleCopyScreen}
+              onLongPress={openSelectionView}
             >
               <FlatList
                 ref={listRef}
@@ -723,6 +735,47 @@ function AppInner() {
             onClose={() => setDrawerOpen(false)}
             onSettings={() => { setDrawerOpen(false); setIsConfiguring(true); }}
           />
+
+          {/* Fullscreen selectable-text view (long-press the terminal to open) */}
+          <Modal
+            visible={selectionViewOpen}
+            animationType="slide"
+            onRequestClose={() => setSelectionViewOpen(false)}
+          >
+            <SafeAreaView style={styles.selectionViewContainer}>
+              <View style={styles.selectionViewHeader}>
+                <Text style={styles.selectionViewTitle}>Select Text</Text>
+                <View style={styles.selectionViewHeaderBtns}>
+                  <TouchableOpacity
+                    style={styles.selectionViewHeaderBtn}
+                    onPress={handleCopyAll}
+                    accessibilityRole="button"
+                    accessibilityLabel="Copy all"
+                  >
+                    <Text style={styles.selectionViewHeaderBtnText}>Copy All</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.selectionViewHeaderBtn}
+                    onPress={() => setSelectionViewOpen(false)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close"
+                  >
+                    <Feather name="x" size={20} color="#cbd5e1" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {selectionViewOpen && (
+                <TextInput
+                  style={styles.selectionViewText}
+                  value={getFullText()}
+                  editable={false}
+                  multiline
+                  scrollEnabled
+                  selection={{ start: getFullText().length, end: getFullText().length }}
+                />
+              )}
+            </SafeAreaView>
+          </Modal>
 
           {/* Mobile Terminal Shortcuts Utility Bar */}
           <View style={styles.utilityBar}>
@@ -1054,6 +1107,46 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  selectionViewContainer: {
+    flex: 1,
+    backgroundColor: '#070a13',
+  },
+  selectionViewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  selectionViewTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#e2e8f0',
+  },
+  selectionViewHeaderBtns: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  selectionViewHeaderBtn: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  selectionViewHeaderBtnText: {
+    color: '#22d3ee',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  selectionViewText: {
+    flex: 1,
+    padding: 16,
+    fontFamily: MONO,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#cbd5e1',
   },
   utilityIconText: {
     fontSize: 10,
