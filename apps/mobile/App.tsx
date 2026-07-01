@@ -1091,9 +1091,6 @@ const styles = StyleSheet.create({
     fontFamily: MONO,
     color: '#cbd5e1',
   },
-  utilityBtnTextDanger: {
-    color: '#f87171',
-  },
   utilityBtnActive: {
     backgroundColor: '#22d3ee',
   },
