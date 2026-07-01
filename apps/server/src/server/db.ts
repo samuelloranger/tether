@@ -142,6 +142,7 @@ export function clearLogs(sessionId: string) {
   db.query('DELETE FROM terminal_logs WHERE session_id = $sessionId').run({
     $sessionId: sessionId,
   });
+  insertCounts.delete(sessionId);
 }
 
 export function setSessionStatus(id: string, status: 'running' | 'stopped') {
