@@ -27,3 +27,7 @@ Thumbs.db
 apps/mobile/.expo/
 apps/mobile/ios/
 apps/mobile/android/
+
+# SQLite WAL sidecars
+apps/server/config/*.db-wal
+apps/server/config/*.db-shm
