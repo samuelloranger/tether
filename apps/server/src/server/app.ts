@@ -84,7 +84,7 @@ app.get(
     let unsubscribe = () => {};
 
     return {
-      onOpen(event, ws) {
+      onOpen(_event, ws) {
         console.log(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
 
         // Yield execution to let Hono/Bun complete the protocol upgrade before writing
@@ -160,7 +160,7 @@ app.get(
         }, 30);
       },
 
-      onMessage(event, ws) {
+      onMessage(event, _ws) {
         try {
           const msg = JSON.parse(event.data as string);
           if (msg.type === 'input') {

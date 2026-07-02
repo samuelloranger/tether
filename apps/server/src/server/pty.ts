@@ -181,16 +181,38 @@ function sendFrame(id: string, frame: object): boolean {
   }
 }
 
+// Concurrent startSession(id) calls (e.g. overlapping WS reconnects) must not
+// each spawn their own holder: instances.set(id, ...) only happens once attach()
+// actually connects, so a synchronous instances.get(id) check alone can't stop
+// two racing callers from both missing it and both spawning a duplicate holder.
+const pendingStarts = new Map<string, Promise<SessionInstance>>();
+
 export async function startSession(
   id: string,
   command: string = process.env.SHELL || 'bash',
   cols: number = 80,
   rows: number = 24,
 ) {
-  const dims = clampDims(cols, rows);
   const existing = instances.get(id);
   if (existing) return existing;
 
+  const pending = pendingStarts.get(id);
+  if (pending) return pending;
+
+  const promise = doStartSession(id, command, cols, rows).finally(() => {
+    pendingStarts.delete(id);
+  });
+  pendingStarts.set(id, promise);
+  return promise;
+}
+
+async function doStartSession(
+  id: string,
+  command: string,
+  cols: number,
+  rows: number,
+): Promise<SessionInstance> {
+  const dims = clampDims(cols, rows);
   upsertSession(id, command, 'running');
 
   // A holder may already be running from before a server restart — reattach.
