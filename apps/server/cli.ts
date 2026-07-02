@@ -39,10 +39,17 @@ function start(): void {
     return;
   }
   const out = openSync(LOG_FILE, 'a');
+  // Scrub Claude Code agent vars: a daemon (re)started from an agent's Bash
+  // tool would otherwise leak CLAUDE_CODE_CHILD_SESSION into every tether
+  // shell, making `claude` inside them a hidden child session (breaks /resume).
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) {
+    if (k.startsWith('CLAUDE')) delete env[k];
+  }
   // detached + own stdio + unref = survives this CLI process exiting.
   const child = spawn('bun', ['run', SERVER_ENTRY], {
     cwd: SERVER_DIR,
-    env: process.env,
+    env,
     detached: true,
     stdio: ['ignore', out, out],
   });

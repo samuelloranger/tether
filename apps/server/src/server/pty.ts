@@ -48,6 +48,18 @@ mkdirSync(HOLDERS_DIR, { recursive: true });
 
 const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
 
+// If the daemon was (re)started from inside a Claude Code Bash tool, its env
+// carries CLAUDE_CODE_CHILD_SESSION etc. Shells inheriting those make any
+// `claude` run inside a tether terminal register as a hidden child session —
+// invisible to /resume. Tether shells must look like fresh login shells.
+export function scrubAgentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  for (const k of Object.keys(out)) {
+    if (k.startsWith('CLAUDE')) delete out[k];
+  }
+  return out;
+}
+
 interface SessionInstance {
   sock: Socket;
   subscribers: Set<
@@ -200,7 +212,7 @@ export async function startSession(
   const holder = spawn(
     process.execPath,
     ['run', HOLDER_PATH, sockPath, String(dims.cols), String(dims.rows), homedir(), ...args],
-    { detached: true, stdio: ['ignore', logFd, logFd], env: process.env },
+    { detached: true, stdio: ['ignore', logFd, logFd], env: scrubAgentEnv(process.env) },
   );
   holder.unref();
 
