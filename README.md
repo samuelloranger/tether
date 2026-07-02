@@ -8,14 +8,6 @@
 curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | bash
 ```
 
-While this repo is private, pass a GitHub token (e.g. `gh auth token`):
-
-```bash
-TOKEN=$(gh auth token)
-curl -fsSL -H "Authorization: Bearer $TOKEN" \
-  https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | GITHUB_TOKEN=$TOKEN bash
-```
-
 The installer checks/installs Bun (**≥ 1.3.14** — required for PTY support), downloads the server to `~/.tether/app`, symlinks the `tether` CLI into `~/.local/bin`, and starts the daemon on port `8085`. Re-running it upgrades in place; your sessions and data (`config/`) are preserved.
 
 ```bash
@@ -32,16 +24,23 @@ Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`. Installer overrides
 - **Replay** — every byte is logged to SQLite; reconnecting clients catch up from where they left off, with no output lost while the server was down.
 - **Mobile client** — multi-session tabs, full VT emulator (TUIs, box drawing, CJK/emoji), key repeat, search, snippets.
 
-## Mobile app
+## Mobile app (iOS)
 
-Expo React Native (SDK 57 — Expo Go is **not** supported; use a dev build):
+Grab `tether.ipa` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and sideload it with [AltStore](https://altstore.io):
+
+1. Install [AltServer](https://altstore.io) on your Mac or PC and use it to put AltStore on your iPhone (one-time setup; needs your Apple ID, which signs apps for your own device).
+2. Download `tether.ipa` from the Releases page onto the phone.
+3. In AltStore: **My Apps → + →** pick `tether.ipa`. AltStore re-signs and installs it.
+4. Free Apple IDs sign apps for 7 days — AltStore auto-refreshes whenever it can reach AltServer on your network.
+
+Point the app at your server's IP and port on first launch.
+
+**Building from source instead** (Expo SDK 57 — Expo Go is *not* supported; use a dev build):
 
 ```bash
 cd apps/mobile
 npx expo run:ios --device
 ```
-
-Point it at your server's IP and port on first launch.
 
 ## Development
 
