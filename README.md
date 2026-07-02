@@ -1,59 +1,65 @@
-# Tether Monorepo 📱🔌
+# Tether 📱🔌
 
-> Persistent terminal agent console containing the Hono backend server and Expo React Native mobile client.
+> A persistent remote-shell console: real PTY shells on your server, streamed to your phone over WebSocket. Shells keep running when you disconnect — and survive server restarts.
 
-This repository is organized as a monorepo utilizing Bun workspaces.
+## Install the server (no clone needed)
 
----
-
-## 📂 Repository Structure
-
-*   `apps/server/`: Bun + Hono backend server (Pty launcher & SQLite logger) and Svelte 5 web client.
-*   `apps/mobile/`: Expo React Native mobile client with AsyncStorage configuration persistence and custom ANSI-to-native Text parser.
-
----
-
-## 🚀 Quick Start
-
-### 1. Install all dependencies
-From the root of the repository, run:
 ```bash
-bun install
-```
-*Bun workspaces will automatically resolve, link, and hoist package dependencies across all workspaces.*
-
-### 2. Launch Development
-*   **Start the Hono backend:**
-    ```bash
-    bun dev:server
-    ```
-    This launches the backend server on port `8085` (exposed locally to `0.0.0.0`).
-*   **Start the Svelte Web client (Vite dev server):**
-    ```bash
-    bun dev:web
-    ```
-    Exposed on port `5173`. Proxies `/api` and WebSocket events to the backend on `8085`.
-*   **Start the Expo mobile packager:**
-    ```bash
-    bun dev:mobile
-    ```
-    Exposes the Metro bundler. Scan the QR code with your iOS Expo Go app to test it.
-
----
-
-## 📦 Production & Native Builds
-
-### Backend Server
-To compile the production assets and bundle the server:
-```bash
-bun build:server
-bun start:server
+curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | bash
 ```
 
-### Expo Native iOS Client
-To generate the native Xcode workspace on your Mac:
+While this repo is private, pass a GitHub token (e.g. `gh auth token`):
+
+```bash
+TOKEN=$(gh auth token)
+curl -fsSL -H "Authorization: Bearer $TOKEN" \
+  https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | GITHUB_TOKEN=$TOKEN bash
+```
+
+The installer checks/installs Bun (**≥ 1.3.14** — required for PTY support), downloads the server to `~/.tether/app`, symlinks the `tether` CLI into `~/.local/bin`, and starts the daemon on port `8085`. Re-running it upgrades in place; your sessions and data (`config/`) are preserved.
+
+```bash
+tether start | stop | restart | status | logs
+```
+
+Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`. Installer overrides: `TETHER_REF`, `TETHER_HOME`, `TETHER_BIN`.
+
+> **Security:** the server exposes an **unauthenticated shell** on `0.0.0.0`. Anyone who can reach the port gets a shell. Keep it LAN-only or behind a VPN/tunnel.
+
+## What you get
+
+- **Persistent sessions** — each shell runs in a detached holder process. Client disconnects, server restarts, even `tether restart` upgrades: the shell (and whatever runs in it) keeps going.
+- **Replay** — every byte is logged to SQLite; reconnecting clients catch up from where they left off, with no output lost while the server was down.
+- **Mobile client** — multi-session tabs, full VT emulator (TUIs, box drawing, CJK/emoji), key repeat, search, snippets.
+
+## Mobile app
+
+Expo React Native (SDK 57 — Expo Go is **not** supported; use a dev build):
+
 ```bash
 cd apps/mobile
-npx expo prebuild
+npx expo run:ios --device
 ```
-This generates the native `apps/mobile/ios` directory. Open the workspace in Xcode, configure your signing credentials, compile the IPA, and install it on your device via AltStore.
+
+Point it at your server's IP and port on first launch.
+
+## Development
+
+Bun-workspaces monorepo: `apps/server` (Bun + Hono + bun:sqlite) and `apps/mobile` (Expo RN).
+
+```bash
+bun install          # link all workspaces
+bun dev:server       # backend on :8085, watch mode
+bun dev:mobile       # Expo Metro bundler
+bun lint             # Biome (server) + Expo lint (mobile)
+bun format           # biome check --write (server)
+```
+
+Tests are plain assert scripts:
+
+```bash
+cd apps/server && TETHER_DB_PATH=/tmp/tether-test.db bun run src/server/db.test.ts
+cd apps/mobile && bun run src/terminal.test.ts
+```
+
+See `CLAUDE.md` for architecture notes (data flow, holder processes, conventions).
