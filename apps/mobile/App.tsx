@@ -90,6 +90,47 @@ const TermRow = React.memo(function TermRow({
 // capsule with three segments (left | up-over-down | right) instead of four
 // separate buttons — reads as a single control and halves the width four
 // loose buttons would cost in an already-tight toolbar.
+// Press-and-hold repeat for navigation keys: fire once on press, then repeat
+// after 350ms at 60ms — mirrors hardware key-repeat.
+function RepeatBtn({
+  onFire,
+  style,
+  label,
+  children,
+}: {
+  onFire: () => void;
+  style: object;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const delay = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iv = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stop = () => {
+    if (delay.current) clearTimeout(delay.current);
+    if (iv.current) clearInterval(iv.current);
+    delay.current = null;
+    iv.current = null;
+  };
+  useEffect(() => stop, []);
+  return (
+    <TouchableOpacity
+      style={style}
+      activeOpacity={0.6}
+      onPressIn={() => {
+        onFire();
+        delay.current = setTimeout(() => {
+          iv.current = setInterval(onFire, 60);
+        }, 350);
+      }}
+      onPressOut={stop}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+}
+
 const ArrowCluster = React.memo(function ArrowCluster({
   onArrow,
 }: {
@@ -97,47 +138,23 @@ const ArrowCluster = React.memo(function ArrowCluster({
 }) {
   return (
     <View style={styles.arrowCluster}>
-      <TouchableOpacity
-        style={styles.arrowSeg}
-        activeOpacity={0.6}
-        onPress={() => onArrow('D')}
-        accessibilityRole="button"
-        accessibilityLabel="Arrow left"
-      >
+      <RepeatBtn style={styles.arrowSeg} label="Arrow left" onFire={() => onArrow('D')}>
         <Feather name="chevron-left" size={18} color="#cbd5e1" />
-      </TouchableOpacity>
+      </RepeatBtn>
       <View style={styles.arrowVDivider} />
       <View style={styles.arrowMid}>
-        <TouchableOpacity
-          style={styles.arrowMidHalf}
-          activeOpacity={0.6}
-          onPress={() => onArrow('A')}
-          accessibilityRole="button"
-          accessibilityLabel="Arrow up"
-        >
+        <RepeatBtn style={styles.arrowMidHalf} label="Arrow up" onFire={() => onArrow('A')}>
           <Feather name="chevron-up" size={15} color="#cbd5e1" />
-        </TouchableOpacity>
+        </RepeatBtn>
         <View style={styles.arrowHDivider} />
-        <TouchableOpacity
-          style={styles.arrowMidHalf}
-          activeOpacity={0.6}
-          onPress={() => onArrow('B')}
-          accessibilityRole="button"
-          accessibilityLabel="Arrow down"
-        >
+        <RepeatBtn style={styles.arrowMidHalf} label="Arrow down" onFire={() => onArrow('B')}>
           <Feather name="chevron-down" size={15} color="#cbd5e1" />
-        </TouchableOpacity>
+        </RepeatBtn>
       </View>
       <View style={styles.arrowVDivider} />
-      <TouchableOpacity
-        style={styles.arrowSeg}
-        activeOpacity={0.6}
-        onPress={() => onArrow('C')}
-        accessibilityRole="button"
-        accessibilityLabel="Arrow right"
-      >
+      <RepeatBtn style={styles.arrowSeg} label="Arrow right" onFire={() => onArrow('C')}>
         <Feather name="chevron-right" size={18} color="#cbd5e1" />
-      </TouchableOpacity>
+      </RepeatBtn>
     </View>
   );
 });
@@ -1086,6 +1103,9 @@ function AppInner() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b')}>
                 <Text style={styles.utilityBtnText}>Esc</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[3~')}>
+                <Text style={styles.utilityBtnText}>Del</Text>
               </TouchableOpacity>
 
               <View style={styles.utilityGroupDivider} />
