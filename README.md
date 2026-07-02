@@ -41,11 +41,20 @@ Install via [AltStore](https://altstore.io) (one-time setup: install AltServer o
 
 Point the app at your server's IP and port on first launch.
 
-**Building from source instead** (Expo SDK 57 — Expo Go is *not* supported; use a dev build):
+## Mobile app (Android)
+
+Grab `tether-vX.Y.Z.apk` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and install it (allow installs from your browser when prompted).
+
+For automatic updates, add this repo to [Obtainium](https://github.com/ImranR98/Obtainium): **Add App →** `https://github.com/samuelloranger/tether` — it tracks releases and updates the APK for you.
+
+## Building the app from source
+
+Expo SDK 57 — Expo Go is *not* supported; use a dev build:
 
 ```bash
 cd apps/mobile
-npx expo run:ios --device
+npx expo run:ios --device   # iOS (Mac + Xcode)
+npx expo run:android        # Android (device or emulator)
 ```
 
 ## Development
