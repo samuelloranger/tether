@@ -178,11 +178,30 @@ export class TerminalEmulator {
   resize(cols: number, rows: number) {
     if (cols === this.cols && rows === this.rows) return;
     this.cols = cols;
+    // Rows: shrink moves TOP lines into scrollback so the bottom (where the
+    // prompt lives) stays visible — this runs on every keyboard show/hide.
+    // Grow pulls them back. Alt-screen apps repaint on SIGWINCH, so there we
+    // just truncate/pad. No column reflow (xterm doesn't reflow either).
+    while (this.screen.length > rows) {
+      if (!this.inAlt && this.cy > 0) {
+        const top = this.screen.shift()!;
+        this.scrollback.push(top);
+        if (this.scrollback.length > MAX_SCROLLBACK) this.scrollback.shift();
+        this.cy--;
+      } else {
+        this.screen.pop();
+      }
+    }
+    while (this.screen.length < rows) {
+      if (!this.inAlt && this.scrollback.length > 0) {
+        this.screen.unshift(this.scrollback.pop()!);
+        this.cy++;
+      } else {
+        this.screen.push(blankLine(cols));
+      }
+    }
     this.rows = rows;
-    // Reflow is complex; reset the screen dimensions and keep scrollback.
-    this.screen = Array.from({ length: rows }, (_, r) =>
-      this.screen[r] ? this.fitLine(this.screen[r], cols) : blankLine(cols),
-    );
+    this.screen = this.screen.map((l) => this.fitLine(l, cols));
     this.cx = Math.min(this.cx, cols - 1);
     this.cy = Math.min(this.cy, rows - 1);
     this.scrollTop = 0;
