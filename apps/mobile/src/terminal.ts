@@ -73,6 +73,14 @@ type ParserState = 'ground' | 'esc' | 'escInt' | 'csi' | 'osc' | 'oscEsc' | 'dcs
 // ponytail: coarse wcwidth — the wide CJK/Hangul/emoji blocks only; combining
 // marks and ambiguous-width chars are treated as narrow. Upgrade to a full
 // wcwidth table if East-Asian alignment bugs surface.
+// DEC Special Graphics (ESC ( 0) — the VT100 line-drawing set TUIs use for
+// borders (htop, less, dialog). Unmapped chars pass through.
+const DEC_GRAPHICS: Record<string, string> = {
+  '`': '◆', a: '▒', f: '°', g: '±', j: '┘', k: '┐', l: '┌', m: '└',
+  n: '┼', o: '⎺', p: '⎻', q: '─', r: '⎼', s: '⎽', t: '├', u: '┤',
+  v: '┴', w: '┬', x: '│', y: '≤', z: '≥', '{': 'π', '|': '≠', '}': '£', '~': '·',
+};
+
 function charWidth(cp: number): 1 | 2 {
   if (
     (cp >= 0x1100 && cp <= 0x115f) ||
@@ -107,6 +115,10 @@ export class TerminalEmulator {
   private cy = 0;
   private savedCx = 0;
   private savedCy = 0;
+  private g0: 'ascii' | 'dec' = 'ascii';
+  private g1: 'ascii' | 'dec' = 'ascii';
+  private shiftOut = false; // SO selects G1, SI back to G0
+  private escTarget: 'g0' | 'g1' | null = null;
   private scrollTop = 0;
   private scrollBot = 0;
 
@@ -157,6 +169,10 @@ export class TerminalEmulator {
     this.state = 'ground';
     this.params = '';
     this.intermediate = '';
+    this.g0 = 'ascii';
+    this.g1 = 'ascii';
+    this.shiftOut = false;
+    this.escTarget = null;
   }
 
   resize(cols: number, rows: number) {
@@ -190,9 +206,16 @@ export class TerminalEmulator {
         case 'esc':
           this.esc(ch);
           break;
-        case 'escInt':
-          this.state = 'ground'; // consume charset designator byte
+        case 'escInt': {
+          if (this.escTarget) {
+            const set = ch === '0' ? 'dec' : 'ascii';
+            if (this.escTarget === 'g0') this.g0 = set;
+            else this.g1 = set;
+            this.escTarget = null;
+          }
+          this.state = 'ground';
           break;
+        }
         case 'csi':
           this.csi(ch, code);
           break;
@@ -232,6 +255,10 @@ export class TerminalEmulator {
       this.cx = Math.min(this.cols - 1, (Math.floor(this.cx / 8) + 1) * 8);
     } else if (code === 0x07) {
       // bell, ignore
+    } else if (code === 0x0e) {
+      this.shiftOut = true; // SO
+    } else if (code === 0x0f) {
+      this.shiftOut = false; // SI
     } else if (code >= 0x20) {
       this.putChar(ch);
     }
@@ -253,8 +280,12 @@ export class TerminalEmulator {
         return;
       case '(':
       case ')':
+        this.escTarget = ch === '(' ? 'g0' : 'g1';
+        this.state = 'escInt';
+        return;
       case '*':
       case '+':
+        this.escTarget = null; // G2/G3 unsupported — consume designator only
         this.state = 'escInt';
         return;
       case '7':
@@ -450,6 +481,8 @@ export class TerminalEmulator {
   }
 
   private putChar(ch: string) {
+    const active = this.shiftOut ? this.g1 : this.g0;
+    if (active === 'dec') ch = DEC_GRAPHICS[ch] ?? ch;
     const w = charWidth(ch.codePointAt(0)!);
     if (this.cx + w > this.cols) {
       this.cx = 0;

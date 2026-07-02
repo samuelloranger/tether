@@ -189,4 +189,18 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(row.startsWith('X'), true, 'narrow overwrite lands at col 1');
 }
 
+// 19. DEC special graphics: ESC(0 maps jklmnqtuvwx to box glyphs, ESC(B restores
+{
+  const t = new TerminalEmulator(20, 4);
+  t.write(`${E}(0lqk${E}(B done`);
+  eq(line(t, 0), '┌─┐ done', 'DEC line-drawing on G0');
+}
+
+// 20. SO/SI shift between G0 and a DEC G1
+{
+  const t = new TerminalEmulator(20, 4);
+  t.write(`${E})0plain\x0eq\x0fplain`); // designate G1=dec, SO, draw, SI
+  eq(line(t, 0), 'plain─plain', 'SO selects DEC G1, SI restores G0');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
