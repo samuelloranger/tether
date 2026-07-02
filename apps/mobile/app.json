@@ -28,11 +28,7 @@
           "image": "./assets/icon.png",
           "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#05070e",
-          "dark": {
-            "image": "./assets/icon.png",
-            "backgroundColor": "#05070e"
-          }
+          "backgroundColor": "#05070e"
         }
       ],
       "expo-font"

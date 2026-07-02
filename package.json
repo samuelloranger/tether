@@ -13,5 +13,8 @@
     "start:server": "bun --cwd apps/server start",
     "lint": "bun --cwd apps/server lint && bun --cwd apps/mobile lint",
     "format": "bun --cwd apps/server format"
+  },
+  "dependencies": {
+    "bun-types": "^1.3.14"
   }
 }
