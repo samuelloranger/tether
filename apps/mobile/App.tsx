@@ -18,7 +18,7 @@ import {
   Modal,
   type TextStyle,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -181,6 +181,7 @@ export default function App() {
 
 function AppInner() {
   const [fontsLoaded] = useFonts({ FiraCode_400Regular });
+  const insets = useSafeAreaInsets();
 
   // Connection states
   const [serverIp, setServerIp] = useState('192.168.50.30');
@@ -188,6 +189,11 @@ function AppInner() {
 
   // UI states
   const [isConfiguring, setIsConfiguring] = useState(true);
+  // Tracks whether we've ever connected — reopening Settings must not tear the
+  // socket down; only an actual address/port change (in saveConfig) reconnects it.
+  const [ready, setReady] = useState(false);
+  const readyRef = useRef(false);
+  const lastConnectedRef = useRef({ ip: serverIp, port });
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
   const [screen, setScreen] = useState<RenderRow[]>([]);
   const [inputText, setInputText] = useState(SENT);
@@ -316,6 +322,7 @@ function AppInner() {
 
   const connect = () => {
     disconnect();
+    lastConnectedRef.current = { ip: serverIp, port };
     const id = activeIdRef.current;
     const e = entryFor(id);
     setConnectionStatus('connecting');
@@ -360,7 +367,7 @@ function AppInner() {
       if (ws.current !== socket) return; // stale socket — a newer connection owns state
       setConnectionStatus('disconnected');
       ws.current = null;
-      if (!isConfiguring && activeIdRef.current === id) {
+      if (readyRef.current && activeIdRef.current === id) {
         reconnectTimeout.current = setTimeout(connect, 3000);
       }
     };
@@ -504,7 +511,12 @@ function AppInner() {
           setActiveId(savedSession);
           activeIdRef.current = savedSession;
         }
-        if (savedIp) setIsConfiguring(false);
+        if (savedIp) {
+          lastConnectedRef.current = { ip: savedIp, port: savedPort || port };
+          readyRef.current = true;
+          setIsConfiguring(false);
+          setReady(true);
+        }
       } catch (e) {
         console.error('Failed to load configuration:', e);
       }
@@ -522,12 +534,14 @@ function AppInner() {
     scheduleRender();
   }, [numCols, numRows, connectionStatus, activeId]);
 
-  // 2. Manage WebSocket connection
+  // 2. Manage WebSocket connection — reconnects on session switch. Opening
+  // Settings does NOT tear this down; only an address/port change (saveConfig)
+  // or an actual session switch touches the socket.
   useEffect(() => {
-    if (!isConfiguring) connect();
-    else disconnect();
+    if (!ready) return;
+    connect();
     return () => disconnect();
-  }, [isConfiguring, activeId]);
+  }, [ready, activeId]);
 
   // Stick to the bottom when the keyboard opens (view shrinks, no new content).
   useEffect(() => {
@@ -546,8 +560,16 @@ function AppInner() {
         [KEY_PORT, port],
         [KEY_SESSION_ID, activeId],
       ]);
-      resetTerminal();
+      const addressChanged =
+        serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port;
       setIsConfiguring(false);
+      if (!readyRef.current) {
+        readyRef.current = true;
+        setReady(true);
+      } else if (addressChanged) {
+        resetTerminal();
+        connect();
+      }
     } catch (e) {
       Alert.alert('Error', 'Failed to save configuration');
     }
@@ -882,15 +904,17 @@ function AppInner() {
             transparent
             onRequestClose={() => setMenuOpen(false)}
           >
-            <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
-              <Pressable style={styles.menuPanel} onPress={() => {}}>
+            <Pressable style={styles.overflowMenuBackdrop} onPress={() => setMenuOpen(false)}>
+              <Pressable style={[styles.menuPanel, { marginTop: insets.top + 52 }]} onPress={() => {}}>
                 <TouchableOpacity style={styles.menuRow} onPress={openRename}>
                   <Feather name="edit-2" size={16} color="#cbd5e1" />
                   <Text style={styles.menuRowText}>Rename terminal</Text>
                 </TouchableOpacity>
                 <View style={styles.menuRow}>
                   <Feather name="type" size={16} color="#cbd5e1" />
-                  <Text style={[styles.menuRowText, { flex: 1 }]}>Font size</Text>
+                  <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
+                    Font size
+                  </Text>
                   <TouchableOpacity
                     style={styles.fontStepBtn}
                     onPress={() => changeFontSize(-1)}
@@ -1030,7 +1054,7 @@ function AppInner() {
               setSearchQuery('');
             }}
           >
-            <SafeAreaView style={styles.selectionViewContainer}>
+            <View style={[styles.selectionViewContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
               <View style={styles.selectionViewHeader}>
                 <Text style={styles.selectionViewTitle}>Select Text</Text>
                 <View style={styles.selectionViewHeaderBtns}>
@@ -1076,7 +1100,7 @@ function AppInner() {
                   selection={{ start: searchText.length, end: searchText.length }}
                 />
               )}
-            </SafeAreaView>
+            </View>
           </Modal>
 
           {/* Mobile Terminal Shortcuts Utility Bar */}
@@ -1489,11 +1513,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 32,
   },
+  overflowMenuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+  },
   menuPanel: {
     alignSelf: 'flex-end',
-    marginTop: 60,
     marginRight: 12,
-    minWidth: 200,
+    minWidth: 240,
     backgroundColor: '#0b0f19',
     borderRadius: 12,
     borderWidth: 1,

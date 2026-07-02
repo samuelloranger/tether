@@ -16,7 +16,7 @@ for (const id of await reattachHolders()) {
 
 console.log(`Tether server listening on :${PORT}`);
 
-const server = Bun.serve({
+const _server = Bun.serve({
   port: PORT,
   hostname: '0.0.0.0',
   fetch: app.fetch,
