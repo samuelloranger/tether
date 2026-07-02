@@ -92,6 +92,7 @@ app.get(
           try {
             // 1. Ensure the PTY process is active (auto-start if needed)
             startSession(sessionId, process.env.SHELL || 'bash', cols, rows);
+            resizeSession(sessionId, cols, rows);
 
             // 1b. If the client's sinceId predates pruned rows, the replay has a
             // hole — tell the client to wipe its emulator before the replay.

@@ -43,12 +43,24 @@ interface SessionInstance {
 
 const instances = new Map<string, SessionInstance>();
 
+// PTY dims from the network are untrusted: NaN/0/huge values wedge or crash the
+// terminal. Clamp to a sane envelope.
+export function clampDims(cols: unknown, rows: unknown): { cols: number; rows: number } {
+  const c = Math.floor(Number(cols));
+  const r = Math.floor(Number(rows));
+  return {
+    cols: Number.isFinite(c) ? Math.min(500, Math.max(2, c)) : 80,
+    rows: Number.isFinite(r) ? Math.min(200, Math.max(2, r)) : 24,
+  };
+}
+
 export function startSession(
   id: string,
   command: string = process.env.SHELL || 'bash',
   cols: number = 80,
   rows: number = 24,
 ) {
+  const dims = clampDims(cols, rows);
   if (instances.has(id)) {
     return instances.get(id)!;
   }
@@ -73,8 +85,8 @@ export function startSession(
       TERM: 'xterm-256color',
     },
     terminal: {
-      cols,
-      rows,
+      cols: dims.cols,
+      rows: dims.rows,
       data(terminal, uint8Array) {
         const text = decoder.decode(uint8Array, { stream: true });
 
@@ -137,8 +149,9 @@ export function writeToSession(id: string, text: string) {
 export function resizeSession(id: string, cols: number, rows: number) {
   const instance = instances.get(id);
   if (instance && instance.process.terminal) {
+    const dims = clampDims(cols, rows);
     try {
-      instance.process.terminal.resize(cols, rows);
+      instance.process.terminal.resize(dims.cols, dims.rows);
       return true;
     } catch (e) {
       console.error(`Failed to resize terminal for session "${id}":`, e);
@@ -149,7 +162,12 @@ export function resizeSession(id: string, cols: number, rows: number) {
 
 export function subscribeToSession(
   id: string,
-  callback: (data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number }) => void,
+  callback: (data: {
+    type: 'output' | 'exit';
+    chunk?: string;
+    exitCode?: number;
+    id?: number;
+  }) => void,
 ) {
   const instance = instances.get(id);
   if (instance) {
