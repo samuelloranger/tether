@@ -70,9 +70,6 @@ function blankLine(cols: number): Cell[] {
 
 type ParserState = 'ground' | 'esc' | 'escInt' | 'csi' | 'osc' | 'oscEsc' | 'dcs' | 'dcsEsc';
 
-// ponytail: coarse wcwidth — the wide CJK/Hangul/emoji blocks only; combining
-// marks and ambiguous-width chars are treated as narrow. Upgrade to a full
-// wcwidth table if East-Asian alignment bugs surface.
 // DEC Special Graphics (ESC ( 0) — the VT100 line-drawing set TUIs use for
 // borders (htop, less, dialog). Unmapped chars pass through.
 const DEC_GRAPHICS: Record<string, string> = {
@@ -81,6 +78,9 @@ const DEC_GRAPHICS: Record<string, string> = {
   v: '┴', w: '┬', x: '│', y: '≤', z: '≥', '{': 'π', '|': '≠', '}': '£', '~': '·',
 };
 
+// ponytail: coarse wcwidth — the wide CJK/Hangul/emoji blocks only; combining
+// marks and ambiguous-width chars are treated as narrow. Upgrade to a full
+// wcwidth table if East-Asian alignment bugs surface.
 function charWidth(cp: number): 1 | 2 {
   if (
     (cp >= 0x1100 && cp <= 0x115f) ||
