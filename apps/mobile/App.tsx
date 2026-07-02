@@ -683,7 +683,9 @@ function AppInner() {
   const onScroll = (e: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    autoScroll.current = distanceFromBottom < 40;
+    // Re-arm auto-scroll only at the true bottom; 40px "near bottom" used to
+    // yank the viewport away while reading history during streaming output.
+    autoScroll.current = distanceFromBottom < 8;
   };
 
   const renderRow = useCallback(
@@ -825,6 +827,9 @@ function AppInner() {
                 renderItem={renderRow}
                 keyExtractor={(_, i) => String(i)}
                 onScroll={onScroll}
+                onScrollBeginDrag={() => {
+                  autoScroll.current = false;
+                }}
                 scrollEventThrottle={100}
                 scrollEnabled={!mouseOn}
                 keyboardShouldPersistTaps="handled"
