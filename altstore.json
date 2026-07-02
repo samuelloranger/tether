@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.2",
+          "date": "2026-07-02",
+          "localizedDescription": "Mostly bugfixes\r\n\r\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.0.0...v1.0.2",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.2/tether-v1.0.2.ipa",
+          "size": 10369732,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.0",
           "date": "2026-07-02",
           "localizedDescription": "Initial release.\n\n**Server**\n- Persistent PTY sessions in detached holder processes — shells survive server restarts and upgrades\n- SQLite replay with prune watermark + client reset frames; no output lost across reboots\n- One-line installer (see README)\n\n**Mobile**\n- Multi-session tabs, full VT emulator: wide CJK/emoji cells, DEC box drawing, scrollback-preserving resize\n- Key repeat, Del key, blinking cursor, output search, snippets\n- Reconnect race fixed; scroll pinning that doesn't fight you",
