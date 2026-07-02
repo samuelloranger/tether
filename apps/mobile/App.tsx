@@ -223,6 +223,7 @@ function AppInner() {
   const inputRef = useRef<TextInput | null>(null);
   const reconnectTimeout = useRef<any>(null);
   const autoScroll = useRef(true);
+  const lastContentHeight = useRef(0);
   const [blinkOn, setBlinkOn] = useState(true);
   useEffect(() => {
     const iv = setInterval(() => setBlinkOn((v) => !v), 530);
@@ -317,6 +318,7 @@ function AppInner() {
       e.sinceId = 0;
       e.lastAppliedId = 0;
       setScreen(e.term.getSnapshot());
+      lastContentHeight.current = 0;
     }
   };
 
@@ -397,6 +399,7 @@ function AppInner() {
     const e = entryFor(id); // creates fresh if uncached; resizes handled by effect
     setScreen(e.term.getSnapshot()); // instant paint of last-known screen
     autoScroll.current = true;
+    lastContentHeight.current = 0;
     connect();
   };
 
@@ -717,7 +720,17 @@ function AppInner() {
 
   const onScroll = (e: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    const contentHeight = contentSize.height;
+
+    // If the content height changed, this scroll event is likely triggered by
+    // new messages being added to the log/scrollback. Do not update autoScroll
+    // status based on this transient offset (which hasn't caught up to the bottom yet).
+    if (contentHeight !== lastContentHeight.current) {
+      lastContentHeight.current = contentHeight;
+      return;
+    }
+
+    const distanceFromBottom = contentHeight - layoutMeasurement.height - contentOffset.y;
     // Re-arm auto-scroll only at the true bottom; 40px "near bottom" used to
     // yank the viewport away while reading history during streaming output.
     autoScroll.current = distanceFromBottom < 8;
