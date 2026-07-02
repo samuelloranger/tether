@@ -1,0 +1,31 @@
+{
+  "name": "Tether",
+  "identifier": "com.samuelloranger.tether",
+  "subtitle": "Persistent remote-shell console",
+  "description": "Real PTY shells on your server, streamed to your phone. Sessions survive disconnects and server restarts.",
+  "iconURL": "https://raw.githubusercontent.com/samuelloranger/tether/main/apps/mobile/assets/icon.png",
+  "website": "https://github.com/samuelloranger/tether",
+  "apps": [
+    {
+      "name": "Tether",
+      "bundleIdentifier": "com.samuelloranger.tether-mobile",
+      "developerName": "Samuel Loranger",
+      "subtitle": "Your shells, on your phone",
+      "localizedDescription": "Persistent remote-shell console. Multi-session tabs, full VT emulator (TUIs, box drawing, CJK/emoji), key repeat, search, snippets. Shells keep running when you disconnect — and survive server restarts.",
+      "iconURL": "https://raw.githubusercontent.com/samuelloranger/tether/main/apps/mobile/assets/icon.png",
+      "tintColor": "#818cf8",
+      "category": "developer",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "date": "2026-07-02",
+          "localizedDescription": "Initial release.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.0/tether.ipa",
+          "size": 0,
+          "minOSVersion": "15.1"
+        }
+      ]
+    }
+  ],
+  "news": []
+}

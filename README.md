@@ -26,12 +26,18 @@ Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`. Installer overrides
 
 ## Mobile app (iOS)
 
-Grab `tether.ipa` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and sideload it with [AltStore](https://altstore.io):
+Install via [AltStore](https://altstore.io) (one-time setup: install AltServer on your Mac/PC and use it to put AltStore on your iPhone — it signs apps with your own Apple ID):
 
-1. Install [AltServer](https://altstore.io) on your Mac or PC and use it to put AltStore on your iPhone (one-time setup; needs your Apple ID, which signs apps for your own device).
-2. Download `tether.ipa` from the Releases page onto the phone.
-3. In AltStore: **My Apps → + →** pick `tether.ipa`. AltStore re-signs and installs it.
-4. Free Apple IDs sign apps for 7 days — AltStore auto-refreshes whenever it can reach AltServer on your network.
+1. In AltStore: **Sources → + →** add this source:
+
+   ```
+   https://raw.githubusercontent.com/samuelloranger/tether/main/altstore.json
+   ```
+
+2. Tether appears in **Browse** — install it from there. Updates show up in AltStore automatically when a new release is published.
+3. Free Apple IDs sign apps for 7 days — AltStore auto-refreshes whenever it can reach AltServer on your network.
+
+(Manual alternative: grab `tether.ipa` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and open it via **My Apps → +** in AltStore.)
 
 Point the app at your server's IP and port on first launch.
 
