@@ -117,6 +117,20 @@ export function startSession(
 
   // Handle termination
   proc.exited.then((code) => {
+    // Flush any buffered partial multi-byte sequence the streaming decoder is
+    // still holding (PTY died mid-emoji) so the tail isn't silently dropped.
+    const tail = decoder.decode();
+    if (tail) {
+      const logId = addTerminalLog(id, tail);
+      const live = instances.get(id);
+      if (live) {
+        for (const sub of live.subscribers) {
+          try {
+            sub({ type: 'output', chunk: tail, id: logId });
+          } catch {}
+        }
+      }
+    }
     console.log(`PTY process for session "${id}" exited with code ${code}`);
     upsertSession(id, command, 'stopped');
 
