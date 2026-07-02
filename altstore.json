@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.3",
+          "date": "2026-07-02",
+          "localizedDescription": "## What's new\n- Tappable URLs in terminal output — tap any http(s) link to open it in the browser.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.3/tether-v1.0.3.ipa",
+          "size": 10370180,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.2",
           "date": "2026-07-02",
           "localizedDescription": "Mostly bugfixes\r\n\r\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.0.0...v1.0.2",
