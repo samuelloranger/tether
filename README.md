@@ -37,7 +37,7 @@ Install via [AltStore](https://altstore.io) (one-time setup: install AltServer o
 2. Tether appears in **Browse** — install it from there. Updates show up in AltStore automatically when a new release is published.
 3. Free Apple IDs sign apps for 7 days — AltStore auto-refreshes whenever it can reach AltServer on your network.
 
-(Manual alternative: grab `tether.ipa` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and open it via **My Apps → +** in AltStore.)
+(Manual alternative: grab `tether-vX.Y.Z.ipa` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and open it via **My Apps → +** in AltStore.)
 
 Point the app at your server's IP and port on first launch.
 
