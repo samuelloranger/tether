@@ -1,12 +1,18 @@
 import { websocket } from 'hono/bun';
 import { app } from './app';
-import { resetRunningSessions } from './db';
+import { resetRunningSessions, setSessionStatus } from './db';
+import { reattachHolders } from './pty';
 
 const PORT = Number(process.env.TETHER_PORT ?? 8085);
 
-// A previous server process may have died with sessions still marked running;
-// their PTYs are gone, so reflect reality before serving the session list.
+// A previous server process may have died with sessions still marked running.
+// Their PTYs live in detached holder processes, so first reattach to the ones
+// that survived, then mark whatever is left as stopped.
 resetRunningSessions();
+for (const id of await reattachHolders()) {
+  setSessionStatus(id, 'running');
+  console.log(`Reattached to surviving session "${id}"`);
+}
 
 console.log(`Tether server listening on :${PORT}`);
 
