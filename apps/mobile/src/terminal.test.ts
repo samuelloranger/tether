@@ -203,4 +203,25 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(line(t, 0), 'plain─plain', 'SO selects DEC G1, SI restores G0');
 }
 
+// 21. Row shrink keeps the bottom (prompt) lines, moving top lines to scrollback
+{
+  const t = new TerminalEmulator(80, 5);
+  t.write('one\r\ntwo\r\nthree\r\nfour\r\nprompt$');
+  t.resize(80, 3);
+  eq(screenText(t), 'one\ntwo\nthree\nfour\nprompt$', 'shrink loses nothing overall');
+  // cursor must still sit on the prompt line: overwrite check
+  t.write(' X');
+  eq(screenText(t).endsWith('prompt$ X'), true, 'cursor tracked to the prompt after shrink');
+}
+
+// 22. Row grow pulls lines back out of scrollback
+{
+  const t = new TerminalEmulator(80, 3);
+  t.write('a\r\nb\r\nc\r\nd\r\ne'); // rows a,b in scrollback; c,d,e on screen
+  t.resize(80, 5);
+  eq(screenText(t), 'a\nb\nc\nd\ne', 'grow restores scrollback rows to screen');
+  t.write('!');
+  eq(screenText(t).endsWith('e!'), true, 'cursor tracked after grow');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
