@@ -41,7 +41,7 @@ const KEY_SNIPPETS = 'tether_snippets';
 // fire onChangeText for Backspace even with nothing typed yet.
 const SENT = '​';
 
-function runToStyle(s: CellStyle): TextStyle {
+function runToStyle(s: CellStyle, caretOn = true): TextStyle {
   const style: TextStyle = {};
   if (s.fg) style.color = s.fg;
   if (s.bg) style.backgroundColor = s.bg;
@@ -51,7 +51,7 @@ function runToStyle(s: CellStyle): TextStyle {
   if (s.underline && s.strike) style.textDecorationLine = 'underline line-through';
   else if (s.underline) style.textDecorationLine = 'underline';
   else if (s.strike) style.textDecorationLine = 'line-through';
-  if (s.caret) {
+  if (s.caret && caretOn) {
     // Block caret: accent background, dark glyph for contrast.
     style.backgroundColor = '#818cf8';
     style.color = '#0b0f19';
@@ -62,29 +62,42 @@ function runToStyle(s: CellStyle): TextStyle {
 // Memoized terminal row. Props are shallow-compared; the emulator reuses the
 // same `row` object for unchanged lines, so continuous TUI repaints only
 // re-render the handful of rows that actually changed.
-const TermRow = React.memo(function TermRow({
-  row,
-  fontSize,
-  lineHeight,
-  width,
-}: {
-  row: RenderRow;
-  fontSize: number;
-  lineHeight: number;
-  width: number;
-}) {
-  return (
-    <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
-      <Text style={[styles.termLine, { fontSize, lineHeight, width }]} numberOfLines={1}>
-        {row.runs.map((run, i) => (
-          <Text key={i} style={runToStyle(run.style)}>
-            {run.text}
-          </Text>
-        ))}
-      </Text>
-    </View>
-  );
-});
+const rowHasCaret = (row: RenderRow) => row.runs.some((r) => r.style.caret);
+
+const TermRow = React.memo(
+  function TermRow({
+    row,
+    fontSize,
+    lineHeight,
+    width,
+    blinkOn,
+  }: {
+    row: RenderRow;
+    fontSize: number;
+    lineHeight: number;
+    width: number;
+    blinkOn: boolean;
+  }) {
+    return (
+      <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
+        <Text style={[styles.termLine, { fontSize, lineHeight, width }]} numberOfLines={1}>
+          {row.runs.map((run, i) => (
+            <Text key={i} style={runToStyle(run.style, blinkOn)}>
+              {run.text}
+            </Text>
+          ))}
+        </Text>
+      </View>
+    );
+  },
+  (prev, next) =>
+    prev.row === next.row &&
+    prev.fontSize === next.fontSize &&
+    prev.lineHeight === next.lineHeight &&
+    prev.width === next.width &&
+    // Blink only invalidates the row that actually contains the caret.
+    (prev.blinkOn === next.blinkOn || !rowHasCaret(next.row)),
+);
 
 // Directional pad, styled after the arrow clusters in Blink/Termius: one
 // capsule with three segments (left | up-over-down | right) instead of four
@@ -207,6 +220,11 @@ function AppInner() {
   const inputRef = useRef<TextInput | null>(null);
   const reconnectTimeout = useRef<any>(null);
   const autoScroll = useRef(true);
+  const [blinkOn, setBlinkOn] = useState(true);
+  useEffect(() => {
+    const iv = setInterval(() => setBlinkOn((v) => !v), 530);
+    return () => clearInterval(iv);
+  }, []);
   const renderScheduled = useRef(false);
   const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
   const wheelAccum = useRef(0);
@@ -707,9 +725,15 @@ function AppInner() {
 
   const renderRow = useCallback(
     ({ item }: { item: RenderRow }) => (
-      <TermRow row={item} fontSize={fontSize} lineHeight={lineHeight} width={gridWidth} />
+      <TermRow
+        row={item}
+        fontSize={fontSize}
+        lineHeight={lineHeight}
+        width={gridWidth}
+        blinkOn={blinkOn}
+      />
     ),
-    [fontSize, lineHeight, gridWidth],
+    [fontSize, lineHeight, gridWidth, blinkOn],
   );
 
   if (!fontsLoaded) return null;
