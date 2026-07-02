@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -33,7 +33,6 @@ import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
 const KEY_SERVER_IP = 'tether_server_ip';
 const KEY_PORT = 'tether_port';
 const KEY_SESSION_ID = 'tether_session_id';
-const KEY_HISTORY = 'tether_history';
 const KEY_FONT = 'tether_font_size';
 const KEY_SNIPPETS = 'tether_snippets';
 
@@ -192,8 +191,6 @@ function AppInner() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
   const [screen, setScreen] = useState<RenderRow[]>([]);
   const [inputText, setInputText] = useState(SENT);
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
   const [ctrlArmed, setCtrlArmed] = useState(false);
@@ -495,13 +492,11 @@ function AppInner() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const [savedIp, savedPort, savedSession, savedHistory] =
-          await Promise.all([
-            AsyncStorage.getItem(KEY_SERVER_IP),
-            AsyncStorage.getItem(KEY_PORT),
-            AsyncStorage.getItem(KEY_SESSION_ID),
-            AsyncStorage.getItem(KEY_HISTORY),
-          ]);
+        const [savedIp, savedPort, savedSession] = await Promise.all([
+          AsyncStorage.getItem(KEY_SERVER_IP),
+          AsyncStorage.getItem(KEY_PORT),
+          AsyncStorage.getItem(KEY_SESSION_ID),
+        ]);
 
         if (savedIp) setServerIp(savedIp);
         if (savedPort) setPort(savedPort);
@@ -509,8 +504,6 @@ function AppInner() {
           setActiveId(savedSession);
           activeIdRef.current = savedSession;
         }
-        if (savedHistory) setCommandHistory(JSON.parse(savedHistory));
-
         if (savedIp) setIsConfiguring(false);
       } catch (e) {
         console.error('Failed to load configuration:', e);
@@ -572,9 +565,9 @@ function AppInner() {
       .join('\n')
       .replace(/\n+$/, '');
 
-  // Transcript filtered to lines matching the search query (case-insensitive);
-  // full transcript when the query is empty.
-  const getSearchText = () => {
+  // Transcript filtered to lines matching the query — memoized: the previous
+  // version re-split the whole scrollback on every keystroke and every render.
+  const searchText = useMemo(() => {
     const full = getFullText();
     const q = searchQuery.trim().toLowerCase();
     if (!q) return full;
@@ -582,7 +575,7 @@ function AppInner() {
       .split('\n')
       .filter((line) => line.toLowerCase().includes(q))
       .join('\n');
-  };
+  }, [screen, searchQuery]);
 
   const openSearch = () => {
     setMenuOpen(false);
@@ -607,7 +600,13 @@ function AppInner() {
   };
 
   const handlePaste = async () => {
-    const text = await Clipboard.getStringAsync();
+    let text = '';
+    try {
+      text = await Clipboard.getStringAsync();
+    } catch {
+      Alert.alert('Paste failed', 'Could not read the clipboard.');
+      return;
+    }
     if (!text) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const e = cache.get(activeIdRef.current);
@@ -641,27 +640,6 @@ function AppInner() {
     autoScroll.current = true;
     sendInput('\r');
     resetField();
-  };
-
-  const navigateHistory = (direction: 'up' | 'down') => {
-    if (commandHistory.length === 0) return;
-
-    if (direction === 'up') {
-      if (historyIndex < commandHistory.length - 1) {
-        const nextIdx = historyIndex + 1;
-        setHistoryIndex(nextIdx);
-        setInputText(commandHistory[nextIdx]);
-      }
-    } else {
-      if (historyIndex > 0) {
-        const nextIdx = historyIndex - 1;
-        setHistoryIndex(nextIdx);
-        setInputText(commandHistory[nextIdx]);
-      } else if (historyIndex === 0) {
-        setHistoryIndex(-1);
-        setInputText('');
-      }
-    }
   };
 
   const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
@@ -1091,11 +1069,11 @@ function AppInner() {
               {selectionViewOpen && (
                 <TextInput
                   style={styles.selectionViewText}
-                  value={getSearchText()}
+                  value={searchText}
                   editable={false}
                   multiline
                   scrollEnabled
-                  selection={{ start: getSearchText().length, end: getSearchText().length }}
+                  selection={{ start: searchText.length, end: searchText.length }}
                 />
               )}
             </SafeAreaView>
