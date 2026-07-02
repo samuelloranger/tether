@@ -1,7 +1,9 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { addTerminalLog, deleteSession, upsertSession } from './db';
+import type { Socket } from 'bun';
+import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
 // first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
@@ -34,8 +36,20 @@ const BASHRC = [
 mkdirSync(RC_DIR, { recursive: true });
 writeFileSync(RC_PATH, BASHRC);
 
+// Each session's PTY lives in a detached holder process (holder.ts) so shells
+// survive tether server restarts; we speak newline-delimited JSON to it over a
+// unix socket (see holder.ts for the frame shapes). Holders live next to the
+// DB so a TETHER_DB_PATH override (tests) gets its own isolated set.
+const HOLDERS_DIR = process.env.TETHER_DB_PATH
+  ? path.join(path.dirname(process.env.TETHER_DB_PATH), 'holders')
+  : path.join(RC_DIR, 'holders');
+const HOLDER_PATH = path.join(import.meta.dir, 'holder.ts');
+mkdirSync(HOLDERS_DIR, { recursive: true });
+
+const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
+
 interface SessionInstance {
-  process: any;
+  sock: Socket;
   subscribers: Set<
     (data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number; id?: number }) => void
   >;
@@ -54,124 +68,191 @@ export function clampDims(cols: unknown, rows: unknown): { cols: number; rows: n
   };
 }
 
-export function startSession(
+function broadcast(
+  id: string,
+  data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number; id?: number },
+) {
+  const inst = instances.get(id);
+  if (!inst) return;
+  for (const sub of inst.subscribers) {
+    try {
+      sub(data);
+    } catch (err) {
+      console.error(`Error notifying subscriber for session "${id}":`, err);
+    }
+  }
+}
+
+// Connect to a session's holder socket and wire its frames into the existing
+// log + broadcast pipeline. Resolves once attached; rejects if nothing listens.
+function attach(id: string): Promise<SessionInstance> {
+  // Per-session streaming decoder: buffers incomplete multi-byte UTF-8 sequences
+  // across PTY read chunks so split emoji/wide glyphs don't decode to U+FFFD (�).
+  const decoder = new TextDecoder('utf-8');
+  let lineBuf = '';
+  let exited = false;
+
+  const handleLine = (line: string) => {
+    let msg: { t: string; d?: string; code?: number };
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (msg.t === 'o' && msg.d) {
+      const text = decoder.decode(Buffer.from(msg.d, 'base64'), { stream: true });
+      if (!text) return;
+      const logId = addTerminalLog(id, text);
+      broadcast(id, { type: 'output', chunk: text, id: logId });
+    } else if (msg.t === 'x') {
+      exited = true;
+      // Flush any buffered partial multi-byte sequence the streaming decoder is
+      // still holding (PTY died mid-emoji) so the tail isn't silently dropped.
+      const tail = decoder.decode();
+      if (tail) {
+        const logId = addTerminalLog(id, tail);
+        broadcast(id, { type: 'output', chunk: tail, id: logId });
+      }
+      console.log(`PTY process for session "${id}" exited with code ${msg.code}`);
+      const sess = getSession(id);
+      upsertSession(id, sess?.command ?? 'bash', 'stopped');
+      broadcast(id, { type: 'exit', exitCode: msg.code });
+      instances.get(id)?.subscribers.clear();
+      instances.delete(id);
+    }
+  };
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    Bun.connect({
+      unix: sockPathFor(id),
+      socket: {
+        open(sock) {
+          settled = true;
+          const instance: SessionInstance = { sock, subscribers: new Set() };
+          instances.set(id, instance);
+          resolve(instance);
+        },
+        data(_sock, buf) {
+          lineBuf += buf.toString('utf8');
+          let nl = lineBuf.indexOf('\n');
+          while (nl !== -1) {
+            const line = lineBuf.slice(0, nl);
+            lineBuf = lineBuf.slice(nl + 1);
+            nl = lineBuf.indexOf('\n');
+            if (line) handleLine(line);
+          }
+        },
+        close() {
+          // Holder gone without an exit frame = it crashed or was killed hard.
+          // Drop the instance so the next startSession spawns a fresh holder.
+          if (!exited && instances.get(id)?.sock && instances.delete(id)) {
+            console.log(`Holder link for session "${id}" closed unexpectedly`);
+          }
+        },
+        error() {},
+      },
+    }).catch((err) => {
+      if (!settled) reject(err);
+    });
+  });
+}
+
+function sendFrame(id: string, frame: object): boolean {
+  const instance = instances.get(id);
+  if (!instance) return false;
+  try {
+    instance.sock.write(`${JSON.stringify(frame)}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function startSession(
   id: string,
   command: string = process.env.SHELL || 'bash',
   cols: number = 80,
   rows: number = 24,
 ) {
   const dims = clampDims(cols, rows);
-  if (instances.has(id)) {
-    return instances.get(id)!;
-  }
+  const existing = instances.get(id);
+  if (existing) return existing;
 
-  // Ensure session exists in DB
   upsertSession(id, command, 'running');
 
-  // Per-session streaming decoder: buffers incomplete multi-byte UTF-8 sequences
-  // across PTY read chunks so split emoji/wide glyphs don't decode to U+FFFD (�).
-  const decoder = new TextDecoder('utf-8');
+  // A holder may already be running from before a server restart — reattach.
+  try {
+    return await attach(id);
+  } catch {}
 
-  // Spawn the child process using Bun's native PTY support.
+  // No live holder: spawn one, detached so it outlives this server process.
   // For bash, load our rcfile for the fish-like prompt (still sources the user's
   // ~/.bashrc). Any other command runs as-is (e.g. the user's $SHELL, so fish
-  // abbreviations etc. load from their own config). TERM enables 256-color output.
+  // abbreviations etc. load from their own config).
   const isBash = path.basename(command) === 'bash';
   const args = isBash ? ['bash', '--rcfile', RC_PATH, '-i'] : [command, '-i'];
-  const proc = Bun.spawn(args, {
-    cwd: process.env.HOME || homedir(),
-    env: {
-      ...process.env,
-      TERM: 'xterm-256color',
-    },
-    terminal: {
-      cols: dims.cols,
-      rows: dims.rows,
-      data(terminal, uint8Array) {
-        const text = decoder.decode(uint8Array, { stream: true });
+  const sockPath = sockPathFor(id);
+  try {
+    unlinkSync(sockPath); // stale socket from a dead holder
+  } catch {}
+  const logFd = openSync(path.join(HOLDERS_DIR, `${id}.log`), 'a');
+  const holder = spawn(
+    process.execPath,
+    ['run', HOLDER_PATH, sockPath, String(dims.cols), String(dims.rows), homedir(), ...args],
+    { detached: true, stdio: ['ignore', logFd, logFd], env: process.env },
+  );
+  holder.unref();
 
-        // Write to DB and capture insert row ID
-        const logId = addTerminalLog(id, text);
-
-        // Notify active subscribers
-        const inst = instances.get(id);
-        if (inst) {
-          for (const sub of inst.subscribers) {
-            try {
-              sub({ type: 'output', chunk: text, id: logId });
-            } catch (err) {
-              console.error(`Error sending PTY output to session subscriber "${id}":`, err);
-            }
-          }
-        }
-      },
-    },
-  });
-
-  const instance: SessionInstance = {
-    process: proc,
-    subscribers: new Set(),
-  };
-
-  instances.set(id, instance);
-
-  // Handle termination
-  proc.exited.then((code) => {
-    // Flush any buffered partial multi-byte sequence the streaming decoder is
-    // still holding (PTY died mid-emoji) so the tail isn't silently dropped.
-    const tail = decoder.decode();
-    if (tail) {
-      const logId = addTerminalLog(id, tail);
-      const live = instances.get(id);
-      if (live) {
-        for (const sub of live.subscribers) {
-          try {
-            sub({ type: 'output', chunk: tail, id: logId });
-          } catch {}
-        }
-      }
+  // Wait for the holder's socket to accept us (bun startup + listen).
+  let lastErr: unknown;
+  for (let i = 0; i < 25; i++) {
+    await Bun.sleep(80);
+    try {
+      return await attach(id);
+    } catch (err) {
+      lastErr = err;
     }
-    console.log(`PTY process for session "${id}" exited with code ${code}`);
-    upsertSession(id, command, 'stopped');
+  }
+  upsertSession(id, command, 'stopped');
+  throw new Error(`holder for session "${id}" never came up: ${lastErr}`);
+}
 
-    const inst = instances.get(id);
-    if (inst) {
-      for (const sub of inst.subscribers) {
-        try {
-          sub({ type: 'exit', exitCode: code });
-        } catch (err) {
-          console.error(`Error sending PTY exit to session subscriber "${id}":`, err);
-        }
-      }
-      inst.subscribers.clear();
+// Reconnect to holders that survived a server restart. Returns the session ids
+// that are still live so boot code can mark them running again.
+export async function reattachHolders(): Promise<string[]> {
+  const live: string[] = [];
+  let socks: string[] = [];
+  try {
+    socks = readdirSync(HOLDERS_DIR).filter((f) => f.endsWith('.sock'));
+  } catch {
+    return live;
+  }
+  for (const f of socks) {
+    const id = f.slice(0, -'.sock'.length);
+    try {
+      await attach(id);
+      live.push(id);
+    } catch {
+      // Dead holder leftovers — clean up so they don't shadow future spawns.
+      try {
+        unlinkSync(path.join(HOLDERS_DIR, f));
+      } catch {}
+      try {
+        unlinkSync(path.join(HOLDERS_DIR, `${f}.pid`));
+      } catch {}
     }
-    instances.delete(id);
-  });
-
-  return instance;
+  }
+  return live;
 }
 
 export function writeToSession(id: string, text: string) {
-  const instance = instances.get(id);
-  if (instance && instance.process.terminal) {
-    instance.process.terminal.write(text);
-    return true;
-  }
-  return false;
+  return sendFrame(id, { t: 'i', d: Buffer.from(text, 'utf8').toString('base64') });
 }
 
 export function resizeSession(id: string, cols: number, rows: number) {
-  const instance = instances.get(id);
-  if (instance && instance.process.terminal) {
-    const dims = clampDims(cols, rows);
-    try {
-      instance.process.terminal.resize(dims.cols, dims.rows);
-      return true;
-    } catch (e) {
-      console.error(`Failed to resize terminal for session "${id}":`, e);
-    }
-  }
-  return false;
+  const dims = clampDims(cols, rows);
+  return sendFrame(id, { t: 'r', c: dims.cols, r: dims.rows });
 }
 
 export function subscribeToSession(
@@ -195,14 +276,22 @@ export function subscribeToSession(
 
 export function killSession(id: string) {
   const instance = instances.get(id);
-  if (instance) {
-    instance.process.kill();
-    instances.delete(id);
+  const hadInstance = sendFrame(id, { t: 'k' });
+  if (instance) instances.delete(id);
+  // Fallback for holders we aren't attached to (or that ignore the frame).
+  if (!hadInstance) {
+    try {
+      const pid = Number(readFileSync(`${sockPathFor(id)}.pid`, 'utf8'));
+      if (pid > 0) process.kill(pid, 'SIGTERM');
+    } catch {}
   }
+  try {
+    unlinkSync(path.join(HOLDERS_DIR, `${id}.log`));
+  } catch {}
   // Fully remove the session (row + logs) so it disappears from the list — an
   // explicit kill means "gone", not "stopped but still shown".
   deleteSession(id);
-  return instance ? true : false;
+  return hadInstance;
 }
 
 export function getActiveSession(id: string) {

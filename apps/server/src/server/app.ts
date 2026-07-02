@@ -40,7 +40,7 @@ app.post('/api/sessions/start', async (c) => {
   const cols = Number(body.cols || 80);
   const rows = Number(body.rows || 24);
 
-  startSession(sessionId, command, cols, rows);
+  await startSession(sessionId, command, cols, rows);
   const session = getSession(sessionId);
   return c.json({ ok: true, session });
 });
@@ -88,10 +88,12 @@ app.get(
         console.log(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
 
         // Yield execution to let Hono/Bun complete the protocol upgrade before writing
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
-            // 1. Ensure the PTY process is active (auto-start if needed)
-            startSession(sessionId, process.env.SHELL || 'bash', cols, rows);
+            // 1. Ensure the PTY process is active (auto-start or holder reattach).
+            // Everything after this await runs synchronously, so no PTY frame can
+            // slip in between the replay read and the subscribe below.
+            await startSession(sessionId, process.env.SHELL || 'bash', cols, rows);
             resizeSession(sessionId, cols, rows);
 
             // 1b. If the client's sinceId predates pruned rows, the replay has a
