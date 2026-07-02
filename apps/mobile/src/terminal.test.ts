@@ -161,4 +161,32 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(t.bracketedPaste, false, 'bracketed paste disabled');
 }
 
+// 16. Wide chars (CJK/emoji) occupy two cells
+{
+  const t = new TerminalEmulator(10, 4);
+  let reply = '';
+  t.onReply = (d) => {
+    reply = d;
+  };
+  t.write(`你好${E}[6n`); // 2 wide chars -> cursor col 5 (1-based)
+  eq(line(t, 0), '你好', 'CJK text renders');
+  eq(reply, `${E}[1;5R`, 'wide chars advance cursor by 2');
+}
+
+// 17. Wide char wraps instead of splitting at the right edge
+{
+  const t = new TerminalEmulator(4, 3);
+  t.write('abc你'); // cx=3, width-2 char cannot fit in col 3 -> wraps
+  eq(line(t, 0), 'abc', 'row 0 keeps narrow chars');
+  eq(line(t, 1), '你', 'wide char wrapped whole to row 1');
+}
+
+// 18. Overwriting narrow-over-wide keeps column alignment
+{
+  const t = new TerminalEmulator(10, 4);
+  t.write(`你${E}[1;1HX`); // overwrite first half of the wide char
+  const row = line(t, 0);
+  eq(row.startsWith('X'), true, 'narrow overwrite lands at col 1');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

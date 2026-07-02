@@ -70,6 +70,30 @@ function blankLine(cols: number): Cell[] {
 
 type ParserState = 'ground' | 'esc' | 'escInt' | 'csi' | 'osc' | 'oscEsc' | 'dcs' | 'dcsEsc';
 
+// ponytail: coarse wcwidth — the wide CJK/Hangul/emoji blocks only; combining
+// marks and ambiguous-width chars are treated as narrow. Upgrade to a full
+// wcwidth table if East-Asian alignment bugs surface.
+function charWidth(cp: number): 1 | 2 {
+  if (
+    (cp >= 0x1100 && cp <= 0x115f) ||
+    (cp >= 0x2e80 && cp <= 0x303e) ||
+    (cp >= 0x3041 && cp <= 0x33ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xa000 && cp <= 0xa4cf) ||
+    (cp >= 0xac00 && cp <= 0xd7a3) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) ||
+    (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1f300 && cp <= 0x1faff) ||
+    (cp >= 0x20000 && cp <= 0x3fffd)
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
 export class TerminalEmulator {
   cols: number;
   rows: number;
@@ -426,12 +450,18 @@ export class TerminalEmulator {
   }
 
   private putChar(ch: string) {
-    if (this.cx >= this.cols) {
+    const w = charWidth(ch.codePointAt(0)!);
+    if (this.cx + w > this.cols) {
       this.cx = 0;
       this.lineFeed();
     }
     this.screen[this.cy][this.cx] = { ch, ...this.pen };
-    this.cx++;
+    // Wide glyphs own two cells: the second is a zero-width filler so column
+    // math (cursor addressing, erase) stays aligned. mergeRuns concats '' away.
+    if (w === 2 && this.cx + 1 < this.cols) {
+      this.screen[this.cy][this.cx + 1] = { ch: '', ...this.pen };
+    }
+    this.cx += w;
   }
 
   private lineFeed() {
