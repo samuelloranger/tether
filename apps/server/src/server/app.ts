@@ -121,6 +121,15 @@ app.get(
 
             // 3. Subscribe client to real-time process output
             unsubscribe = subscribeToSession(sessionId, (data) => {
+              // ponytail: no queueing for slow clients — if the socket's send
+              // buffer blows past 4MB, close it; reconnect replays via sinceId.
+              const raw = ws.raw as { getBufferedAmount?: () => number } | undefined;
+              if (raw?.getBufferedAmount && raw.getBufferedAmount() > 4_000_000) {
+                try {
+                  ws.close();
+                } catch {}
+                return;
+              }
               try {
                 if (data.type === 'output') {
                   ws.send(
