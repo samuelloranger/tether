@@ -3,6 +3,7 @@ import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { getLogs, getSession, listSessions, renameSession } from './db';
 import {
+  getDefaultShell,
   killSession,
   resizeSession,
   startSession,
@@ -36,7 +37,7 @@ app.get('/api/sessions', (c) => {
 app.post('/api/sessions/start', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const sessionId = body.id || 'default';
-  const command = body.command || process.env.SHELL || 'bash';
+  const command = body.command || getDefaultShell();
   const cols = Number(body.cols || 80);
   const rows = Number(body.rows || 24);
 
@@ -93,7 +94,7 @@ app.get(
             // 1. Ensure the PTY process is active (auto-start or holder reattach).
             // Everything after this await runs synchronously, so no PTY frame can
             // slip in between the replay read and the subscribe below.
-            await startSession(sessionId, process.env.SHELL || 'bash', cols, rows);
+            await startSession(sessionId, getDefaultShell(), cols, rows);
             resizeSession(sessionId, cols, rows);
 
             // 1b. If the client's sinceId predates pruned rows, the replay has a

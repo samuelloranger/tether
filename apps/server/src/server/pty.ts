@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
@@ -187,9 +187,23 @@ function sendFrame(id: string, frame: object): boolean {
 // two racing callers from both missing it and both spawning a duplicate holder.
 const pendingStarts = new Map<string, Promise<SessionInstance>>();
 
+export function getDefaultShell(): string {
+  try {
+    const username = userInfo().username;
+    const passwd = readFileSync('/etc/passwd', 'utf8');
+    for (const line of passwd.split('\n')) {
+      const parts = line.split(':');
+      if (parts[0] === username && parts[6]) {
+        return parts[6];
+      }
+    }
+  } catch {}
+  return process.env.SHELL || 'bash';
+}
+
 export async function startSession(
   id: string,
-  command: string = process.env.SHELL || 'bash',
+  command: string = getDefaultShell(),
   cols: number = 80,
   rows: number = 24,
 ) {
