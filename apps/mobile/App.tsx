@@ -294,6 +294,7 @@ function AppInner() {
     socket.onopen = () => setConnectionStatus('connected');
 
     socket.onmessage = (event) => {
+      if (ws.current !== socket) return;
       try {
         const msg = JSON.parse(event.data);
         const ent = cache.get(id);
@@ -310,6 +311,13 @@ function AppInner() {
         } else if (msg.type === 'exit') {
           ent.term.write(`\r\n\x1b[31m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
           if (id === activeIdRef.current) scheduleRender();
+        } else if (msg.type === 'reset') {
+          // Server pruned past our sinceId — replay would have a hole. Wipe and
+          // let the full replay that follows rebuild the screen from scratch.
+          ent.term.reset();
+          ent.sinceId = 0;
+          ent.lastAppliedId = 0;
+          if (id === activeIdRef.current) scheduleRender();
         }
       } catch (err) {
         console.error('ws message error:', err);
@@ -317,6 +325,7 @@ function AppInner() {
     };
 
     socket.onclose = () => {
+      if (ws.current !== socket) return; // stale socket — a newer connection owns state
       setConnectionStatus('disconnected');
       ws.current = null;
       if (!isConfiguring && activeIdRef.current === id) {
@@ -332,10 +341,9 @@ function AppInner() {
       clearTimeout(reconnectTimeout.current);
       reconnectTimeout.current = null;
     }
-    if (ws.current) {
-      ws.current.close();
-      ws.current = null;
-    }
+    const s = ws.current;
+    ws.current = null;
+    if (s) s.close();
     setConnectionStatus('disconnected');
   };
 
