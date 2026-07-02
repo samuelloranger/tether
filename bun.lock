@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "tether-monorepo",
+      "dependencies": {
+        "bun-types": "^1.3.14",
+      },
     },
     "apps/mobile": {
       "name": "tether-mobile",
@@ -18,6 +21,7 @@
         "expo-haptics": "~57.0.0",
         "expo-splash-screen": "~57.0.1",
         "expo-status-bar": "~57.0.0",
+        "expo-system-ui": "~57.0.0",
         "react": "19.2.3",
         "react-native": "0.86.0",
         "react-native-safe-area-context": "~5.7.0",
@@ -489,6 +493,8 @@
     "expo-splash-screen": ["expo-splash-screen@57.0.1", "", { "dependencies": { "@expo/config-plugins": "~57.0.1", "@expo/image-utils": "^0.11.0", "xml2js": "0.6.0" }, "peerDependencies": { "expo": "*" } }, "sha512-fUKsRXp+9VI3velrxSdE7nmF5kVIHqXNd/o+qDS8wlFV/S5DlC49W1USDXh3QEDMJOX6hIcZ21B24hapxSOx6g=="],
 
     "expo-status-bar": ["expo-status-bar@57.0.0", "", { "peerDependencies": { "expo": "*", "react": "*", "react-native": "*" } }, "sha512-wq1fDVAjfrzCj67hOcvEkGpgRrb6xVI7oSA3bfsQ08SFk8il7vGixJq+xyEbtdcrI9CDiNKQrT3ZIjgnyGbbBA=="],
+
+    "expo-system-ui": ["expo-system-ui@57.0.0", "", { "dependencies": { "@react-native/normalize-colors": "0.86.0", "debug": "^4.3.2" }, "peerDependencies": { "expo": "*", "react-native": "*", "react-native-web": "*" }, "optionalPeers": ["react-native-web"] }, "sha512-jkGRY0RQsncEhaCPdoiNbRCPAe8q5kFrrMbkiLr7p0oFMMY8LOviSKBpUXLnuwzM1gHC/J531tntrhj+nwpFZA=="],
 
     "exponential-backoff": ["exponential-backoff@3.1.3", "", {}, "sha512-ZgEeZXj30q+I0EN+CbSSpIyPaJ5HVQD18Z1m+u1FXbAeT94mr1zw50q4q6jiiC447Nl/YTcIYSAftiGqetwXCA=="],
 
