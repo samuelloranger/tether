@@ -315,13 +315,20 @@ export class TerminalEmulator {
         this.cx = this.savedCx;
         this.cy = this.savedCy;
         break;
+      case 'D':
+        this.lineFeed(); // IND — index (line feed without carriage return)
+        break;
+      case 'E':
+        this.lineFeed(); // NEL — next line
+        this.cx = 0;
+        break;
       case 'M':
         this.reverseIndex();
         break;
       case 'c':
         this.reset();
         return;
-      // '=', '>', 'D', 'E', etc. — ignore
+      // '=', '>', etc. — ignore
     }
     this.state = 'ground';
   }
@@ -343,8 +350,7 @@ export class TerminalEmulator {
   }
 
   private nums(def: number): number[] {
-    const priv = this.params.startsWith('?');
-    const raw = priv ? this.params.slice(1) : this.params;
+    const raw = /^[<=>?]/.test(this.params) ? this.params.slice(1) : this.params;
     if (!raw) return [def];
     return raw.split(';').map((p) => {
       const n = parseInt(p, 10);
@@ -353,7 +359,16 @@ export class TerminalEmulator {
   }
 
   private dispatchCsi(final: string) {
-    const priv = this.params.startsWith('?');
+    // Sequences with intermediate bytes (CSI Ps SP q cursor style, CSI Ps SP A
+    // scroll-right, CSI ! p soft reset, ...) share final bytes with plain ANSI
+    // actions but mean something else entirely. None are implemented — ignore
+    // them wholesale rather than misdispatch (SP A would run as cursor-up).
+    if (this.intermediate) return;
+    // Private parameter prefix byte (0x3c-0x3f): '?' DEC modes, and '<' '=' '>'
+    // used by the kitty keyboard protocol / XTMODKEYS / XTVERSION. A prefixed
+    // sequence is never the plain ANSI action with the same final byte.
+    const prefix = /^[<=>?]/.test(this.params) ? this.params[0] : '';
+    const priv = prefix === '?';
     const p = this.nums(0);
     const n = Math.max(1, p[0] || 1);
 
@@ -425,12 +440,21 @@ export class TerminalEmulator {
         this.cy = this.scrollTop;
         break;
       case 's':
-        this.savedCx = this.cx;
-        this.savedCy = this.cy;
+        // Plain CSI s = save cursor. CSI ? Ps s is XTSAVE (private mode save).
+        if (!prefix) {
+          this.savedCx = this.cx;
+          this.savedCy = this.cy;
+        }
         break;
       case 'u':
-        this.cx = this.savedCx;
-        this.cy = this.savedCy;
+        // Plain CSI u = restore cursor. CSI < u / CSI > Ps u / CSI = Ps u /
+        // CSI ? u are the kitty keyboard protocol (pop/push/set/query) —
+        // claude emits CSI < u on exit; treating it as restore-cursor
+        // teleported the cursor into the old transcript.
+        if (!prefix) {
+          this.cx = this.savedCx;
+          this.cy = this.savedCy;
+        }
         break;
       case 'h':
         if (priv) this.setMode(p, true);
@@ -439,7 +463,8 @@ export class TerminalEmulator {
         if (priv) this.setMode(p, false);
         break;
       case 'm':
-        this.applySgr();
+        // CSI > Ps m is XTMODKEYS, CSI ? Ps m is XTQMODKEYS — not SGR.
+        if (!prefix) this.applySgr();
         break;
       case 'n':
         // DSR — device status report. 5 = "are you ok", 6 = cursor position.
@@ -447,10 +472,11 @@ export class TerminalEmulator {
         else if (!priv && p[0] === 5) this.onReply?.('\x1b[0n');
         break;
       case 'c':
-        // DA — device attributes. '>' (secondary DA) lands in params too since
-        // it's in the 0x3c-0x3f intermediate range consumed by csi().
-        if (this.params.startsWith('>')) this.onReply?.('\x1b[>0;0;0c');
-        else if (!priv) this.onReply?.('\x1b[?1;2c');
+        // DA — device attributes. Plain = primary, '>' = secondary. '=' is
+        // tertiary DA — answering it with the primary string confuses the
+        // querying app, so stay silent (like the ignored '?' form).
+        if (prefix === '>') this.onReply?.('\x1b[>0;0;0c');
+        else if (!prefix) this.onReply?.('\x1b[?1;2c');
         break;
       // 't', etc. (window ops) — ignored; nothing to reply on
     }
