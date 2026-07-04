@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.4",
+          "date": "2026-07-04",
+          "localizedDescription": "Fix: exiting Claude Code with double Ctrl+C no longer leaves stale terminal UI on screen (kitty keyboard protocol CSI misparse). Hardened the terminal emulator against private-prefixed / intermediate-byte CSI sequences; added IND/NEL. See #1.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.4/tether-v1.0.4.ipa",
+          "size": 10370343,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.3",
           "date": "2026-07-02",
           "localizedDescription": "## What's new\n- Tappable URLs in terminal output — tap any http(s) link to open it in the browser.",
