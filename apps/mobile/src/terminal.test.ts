@@ -224,4 +224,111 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(screenText(t).endsWith('e!'), true, 'cursor tracked after grow');
 }
 
+// --- Private-prefixed / lookalike CSI sequences (kitty keyboard protocol, XTMODKEYS) ---
+
+// 23. Plain CSI s / CSI u still save and restore the cursor
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write(`${E}[2;3H${E}[s`); // move to row 2 col 3 (0-based row 1 col 2), save
+  t.write(`${E}[5;1H`); // wander away
+  t.write(`${E}[uX`); // restore + probe
+  eq(line(t, 1), '  X', 'CSI u restores the saved cursor');
+}
+
+// 24. CSI < u (kitty keyboard pop) does NOT restore the cursor
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write(`${E}[4;1H${E}[<uX`); // cursor row 4, kitty pop must be a no-op
+  eq(line(t, 3), 'X', 'CSI < u leaves the cursor in place');
+  eq(line(t, 0), '', 'CSI < u did not teleport to the origin');
+}
+
+// 25. CSI > 1 u (kitty keyboard push) does NOT restore the cursor
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write(`${E}[4;1H${E}[>1uX`);
+  eq(line(t, 3), 'X', 'CSI > 1 u leaves the cursor in place');
+}
+
+// 26. CSI ? u (kitty keyboard query) does NOT restore the cursor
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write(`${E}[4;1H${E}[?uX`);
+  eq(line(t, 3), 'X', 'CSI ? u leaves the cursor in place');
+}
+
+// 27. CSI ? s (XTSAVE) does NOT overwrite the saved cursor
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write(`${E}[2;3H${E}[s`); // save at row 2
+  t.write(`${E}[5;1H${E}[?1s`); // XTSAVE private mode — must not re-save here
+  t.write(`${E}[uX`);
+  eq(line(t, 1), '  X', 'CSI ? s does not overwrite the saved cursor');
+}
+
+// 28. CSI > 4 m (XTMODKEYS) does NOT reset SGR attributes
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write(`${E}[1m${E}[>4mX`); // bold on, then XTMODKEYS — pen must be untouched
+  const xRun = t.getSnapshot()[0].runs.find((r) => r.text.includes('X'));
+  eq(xRun?.style.bold, true, 'CSI > 4 m does not reset SGR');
+}
+
+// 29. CSI with an intermediate byte is ignored, not misdispatched
+{
+  const t = new TerminalEmulator(20, 5);
+  // CSI 2 SP A is xterm scroll-right; without the guard it misfires as cursor-up-2.
+  t.write(`${E}[4;1H${E}[2 AX`);
+  eq(line(t, 3), 'X', 'CSI with intermediate byte is ignored');
+}
+
+// 30. DECSCUSR (CSI Ps SP q) is ignored
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write(`${E}[4;1H${E}[6 qX`); // vim sets cursor style with this
+  eq(line(t, 3), 'X', 'DECSCUSR is ignored');
+}
+
+// 31. Tertiary DA (CSI = c) is silent; primary and secondary still reply
+{
+  const t = new TerminalEmulator(20, 5);
+  const replies: string[] = [];
+  t.onReply = (d) => replies.push(d);
+  t.write(`${E}[=c`);
+  eq(replies, [], 'tertiary DA (CSI = c) gets no reply');
+  t.write(`${E}[c`);
+  eq(replies, [`${E}[?1;2c`], 'primary DA still replies');
+  t.write(`${E}[>c`);
+  eq(replies, [`${E}[?1;2c`, `${E}[>0;0;0c`], 'secondary DA still replies');
+}
+
+// 32. ESC D (IND) scrolls like a line feed at the bottom margin
+{
+  const t = new TerminalEmulator(20, 3);
+  t.write('one\r\ntwo\r\nthree'); // cursor on the bottom row after "three"
+  t.write(`${E}D`); // IND at the bottom -> scroll up one line
+  t.write('X');
+  eq(screenText(t).endsWith('X'), true, 'IND scrolls and advances the row');
+  eq(screenText(t).includes('one'), true, 'IND pushed the top line to scrollback');
+}
+
+// 33. ESC E (NEL) moves to the next line, column 0
+{
+  const t = new TerminalEmulator(20, 3);
+  t.write(`abc${E}EX`);
+  eq(line(t, 1), 'X', 'NEL moves to the next line, column 0');
+}
+
+// 34. Claude exit tail: the prompt lands below the last frame, not mid-screen
+{
+  const t = new TerminalEmulator(40, 10);
+  // Minimal reconstruction of the observed exit stream: UI box on rows 6-7,
+  // cursor parked below it, then the real exit sequence claude emits.
+  t.write(`${E}[7;1H> input box\r\n exit hint\r\n`);
+  t.write(`${E}(B${E}[>4m${E}[<u${E}[?2004l${E}[?25h${E}7${E}[r${E}8`);
+  t.write('user@host ~> ');
+  eq(line(t, 8).includes('user@host'), true, 'prompt lands directly below the frame');
+  eq(line(t, 0).includes('user@host'), false, 'exit did not teleport the prompt to the top');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
