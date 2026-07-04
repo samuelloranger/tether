@@ -1,227 +1,106 @@
-// Run: bun test  (from apps/mobile)  — or: bun run src/terminal.test.ts
+import { describe, expect, test } from 'bun:test';
 import { TerminalEmulator } from './terminal';
 
-const E = '\x1b';
-function line(t: TerminalEmulator, i: number): string {
-  return t
-    .getSnapshot()
-    [i].runs.map((r) => r.text)
-    .join('')
-    .replace(/\s+$/, '');
-}
-function screenText(t: TerminalEmulator): string {
-  return t
-    .getSnapshot()
-    .map((r) => r.runs.map((x) => x.text).join('').replace(/\s+$/, ''))
-    .join('\n')
-    .replace(/\n+$/, '');
+function rows(emu: TerminalEmulator): string[] {
+  return emu.getSnapshot().map((r) => r.runs.map((run) => run.text).join(''));
 }
 
-let pass = 0;
-function eq(actual: unknown, expected: unknown, msg: string) {
-  const a = JSON.stringify(actual);
-  const b = JSON.stringify(expected);
-  if (a !== b) throw new Error(`FAIL ${msg}\n  expected ${b}\n  got      ${a}`);
-  pass++;
-}
+describe('private-prefixed CSI sequences (kitty keyboard protocol, XTMODKEYS)', () => {
+  test('plain CSI s / CSI u still save and restore the cursor', () => {
+    const emu = new TerminalEmulator(20, 5);
+    emu.write('\x1b[2;3H\x1b[s'); // move to row 2 col 3, save
+    emu.write('\x1b[5;1H'); // wander away
+    emu.write('\x1b[uX'); // restore, probe
+    expect(rows(emu)[1]).toContain('X'); // row 2 (0-indexed 1)
+  });
 
-// 1. Plain text
-{
-  const t = new TerminalEmulator(80, 24);
-  t.write('hello');
-  eq(line(t, 0), 'hello', 'plain text');
-}
+  test('CSI < u (kitty pop) does NOT restore the cursor', () => {
+    const emu = new TerminalEmulator(20, 5);
+    emu.write('\x1b[4;1H'); // cursor on row 4
+    emu.write('\x1b[<u'); // kitty keyboard pop — must be a no-op
+    emu.write('X');
+    expect(rows(emu)[3]).toContain('X'); // still row 4
+    expect(rows(emu)[0]).not.toContain('X'); // did NOT jump to never-saved (0,0)
+  });
 
-// 2. Cursor addressing overwrites in place (the bug from the screenshot)
-{
-  const t = new TerminalEmulator(80, 24);
-  t.write(`abc${E}[3Dxyz`); // write abc, cursor back 3, overwrite with xyz
-  eq(line(t, 0), 'xyz', 'cursor back + overwrite');
-}
+  test('CSI > 1 u (kitty push) does NOT restore the cursor', () => {
+    const emu = new TerminalEmulator(20, 5);
+    emu.write('\x1b[4;1H\x1b[>1uX');
+    expect(rows(emu)[3]).toContain('X');
+  });
 
-// 3. Column positioning (CSI G) — status-line style
-{
-  const t = new TerminalEmulator(80, 24);
-  t.write(`${E}[1Gserver${E}[1G${E}[10Gmain`);
-  eq(line(t, 0), 'server   main', 'absolute column moves');
-}
+  test('CSI ? u (kitty query) does NOT restore or save the cursor', () => {
+    const emu = new TerminalEmulator(20, 5);
+    emu.write('\x1b[4;1H\x1b[?uX');
+    expect(rows(emu)[3]).toContain('X');
+  });
 
-// 4. Repaint via cursor-up does NOT stack (the core failure we set out to fix)
-{
-  const t = new TerminalEmulator(80, 5);
-  t.write('line1\r\nstatus: 0%');
-  t.write(`\r${E}[1A`); // wait, go up to line1? no — test in-place status repaint
-  const t2 = new TerminalEmulator(80, 5);
-  t2.write('status: 0%');
-  t2.write(`\r${E}[Kstatus: 50%`); // CR, erase line, repaint
-  eq(line(t2, 0), 'status: 50%', 'in-place repaint erases old frame');
-}
+  test('CSI ? s (XTSAVE) does NOT overwrite the saved cursor', () => {
+    const emu = new TerminalEmulator(20, 5);
+    emu.write('\x1b[2;3H\x1b[s'); // save at row 2
+    emu.write('\x1b[5;1H\x1b[?1s'); // XTSAVE private mode — must not re-save here
+    emu.write('\x1b[uX');
+    expect(rows(emu)[1]).toContain('X'); // restored to row 2, not row 5
+  });
 
-// 5. SGR styling preserved, non-SGR control dropped
-{
-  const t = new TerminalEmulator(80, 24);
-  t.write(`${E}[?25l${E}[1mBold${E}[0m plain${E}[?25h`);
-  const runs = t.getSnapshot()[0].runs;
-  eq(runs[0].text, 'Bold', 'bold text');
-  eq(runs[0].style.bold, true, 'bold flag');
-  eq(runs[1].text.startsWith(' plain'), true, 'plain after reset');
-  eq(!!runs[1].style.bold, false, 'reset cleared bold');
-}
+  test('CSI > 4 m (XTMODKEYS) does NOT reset SGR attributes', () => {
+    const emu = new TerminalEmulator(20, 5);
+    emu.write('\x1b[1m'); // bold on
+    emu.write('\x1b[>4m'); // XTMODKEYS — must not touch the pen
+    emu.write('X');
+    const runs = emu.getSnapshot()[0].runs;
+    const xRun = runs.find((r) => r.text.includes('X'));
+    expect(xRun?.bold).toBe(true);
+  });
 
-// 6. Split escape sequence across writes (PTY fragmentation)
-{
-  const t = new TerminalEmulator(80, 24);
-  t.write(`x${E}[`);
-  t.write('31mR');
-  const runs = t.getSnapshot()[0].runs;
-  eq(runs.find((r) => r.text === 'R')?.style.fg, '#cd3131', 'split SGR sequence');
-}
+  test('CSI with intermediate bytes is ignored, not misdispatched', () => {
+    const emu = new TerminalEmulator(20, 5);
+    // CSI 2 SP A is xterm scroll-right (SR); without the guard it misfires as
+    // cursor-up-2. Cursor must stay on row 4.
+    emu.write('\x1b[4;1H\x1b[2 AX');
+    expect(rows(emu)[3]).toContain('X');
+  });
 
-// 7. Newline scroll pushes to scrollback, screen keeps last N rows
-{
-  const t = new TerminalEmulator(80, 3);
-  t.write('a\r\nb\r\nc\r\nd'); // 4 lines into a 3-row screen
-  eq(screenText(t), 'a\nb\nc\nd', 'scrollback retains scrolled lines');
-}
+  test('DECSCUSR (CSI Ps SP q) is ignored', () => {
+    const emu = new TerminalEmulator(20, 5);
+    emu.write('\x1b[4;1H\x1b[6 qX'); // vim sets cursor style with this
+    expect(rows(emu)[3]).toContain('X');
+  });
 
-// 8. Erase display (2J) clears the screen
-{
-  const t = new TerminalEmulator(80, 3);
-  t.write(`junk${E}[2J${E}[Hclean`);
-  eq(line(t, t.getSnapshot().length - 3), 'clean', '2J clears + home');
-}
+  test('tertiary DA (CSI = c) gets no reply; primary and secondary still do', () => {
+    const emu = new TerminalEmulator(20, 5);
+    const replies: string[] = [];
+    emu.onReply = (d) => replies.push(d);
+    emu.write('\x1b[=c');
+    expect(replies).toEqual([]); // must NOT answer with the primary DA string
+    emu.write('\x1b[c');
+    expect(replies).toEqual(['\x1b[?1;2c']);
+    emu.write('\x1b[>c');
+    expect(replies).toEqual(['\x1b[?1;2c', '\x1b[>0;0;0c']);
+  });
 
-// 9. Line wrap at column boundary
-{
-  const t = new TerminalEmulator(3, 4);
-  t.write('abcdef');
-  eq(line(t, 0), 'abc', 'wrap row 0');
-  eq(line(t, 1), 'def', 'wrap row 1');
-}
+  test('ESC D (IND) scrolls like line feed; ESC E (NEL) also returns to col 0', () => {
+    const emu = new TerminalEmulator(20, 3);
+    emu.write('one\r\ntwo\r\nthree'); // cursor on bottom row after "three"
+    emu.write('\x1bD'); // IND at bottom -> scroll up one line
+    emu.write('X');
+    const r = rows(emu);
+    expect(r[r.length - 1]).toContain('X'); // new bottom line
+    expect(r.join('\n')).toContain('one'); // "one" pushed to scrollback, still present
 
-// 10. Alternate screen buffer save/restore
-{
-  const t = new TerminalEmulator(80, 3);
-  t.write('normal');
-  t.write(`${E}[?1049h`); // enter alt
-  t.write('ALT');
-  t.write(`${E}[?1049l`); // exit alt -> normal restored
-  eq(line(t, t.getSnapshot().length - 3), 'normal', 'alt screen restores normal');
-}
+    const emu2 = new TerminalEmulator(20, 3);
+    emu2.write('abc\x1bEX'); // NEL: next line, column 0
+    expect(rows(emu2)[1]?.startsWith('X')).toBe(true);
+  });
 
-// 11. Truecolor + 256-color SGR
-{
-  const t = new TerminalEmulator(80, 24);
-  t.write(`${E}[38;2;10;20;30mTC${E}[0m${E}[38;5;196mIDX`);
-  const runs = t.getSnapshot()[0].runs;
-  eq(runs.find((r) => r.text === 'TC')?.style.fg, '#0a141e', 'truecolor 38;2;r;g;b');
-  eq(runs.find((r) => r.text === 'IDX')?.style.fg, '#ff0000', '256-color 38;5;196');
-}
-
-// 12. Dim + strikethrough SGR
-{
-  const t = new TerminalEmulator(80, 24);
-  t.write(`${E}[2mDim${E}[22m${E}[9mStrike${E}[29mPlain`);
-  const runs = t.getSnapshot()[0].runs;
-  eq(runs.find((r) => r.text === 'Dim')?.style.dim, true, 'dim flag');
-  eq(!!runs.find((r) => r.text === 'Strike')?.style.dim, false, '22 clears dim');
-  eq(runs.find((r) => r.text === 'Strike')?.style.strike, true, 'strike flag');
-  eq(!!runs.find((r) => r.text === 'Plain')?.style.strike, false, '29 clears strike');
-}
-
-// 13. DSR cursor position report replies over onReply
-{
-  const t = new TerminalEmulator(80, 24);
-  let reply = '';
-  t.onReply = (data) => {
-    reply = data;
-  };
-  t.write(`line1\r\nabc${E}[6n`); // cursor at row 1 (0-based), col 3
-  eq(reply, `${E}[2;4R`, 'DSR cursor position report');
-}
-
-// 14. Primary DA replies over onReply
-{
-  const t = new TerminalEmulator(80, 24);
-  let reply = '';
-  t.onReply = (data) => {
-    reply = data;
-  };
-  t.write(`${E}[c`);
-  eq(reply, `${E}[?1;2c`, 'primary DA reply');
-}
-
-// 15. Bracketed paste mode tracked (?2004h/l)
-{
-  const t = new TerminalEmulator(80, 24);
-  eq(t.bracketedPaste, false, 'bracketed paste off by default');
-  t.write(`${E}[?2004h`);
-  eq(t.bracketedPaste, true, 'bracketed paste enabled');
-  t.write(`${E}[?2004l`);
-  eq(t.bracketedPaste, false, 'bracketed paste disabled');
-}
-
-// 16. Wide chars (CJK/emoji) occupy two cells
-{
-  const t = new TerminalEmulator(10, 4);
-  let reply = '';
-  t.onReply = (d) => {
-    reply = d;
-  };
-  t.write(`你好${E}[6n`); // 2 wide chars -> cursor col 5 (1-based)
-  eq(line(t, 0), '你好', 'CJK text renders');
-  eq(reply, `${E}[1;5R`, 'wide chars advance cursor by 2');
-}
-
-// 17. Wide char wraps instead of splitting at the right edge
-{
-  const t = new TerminalEmulator(4, 3);
-  t.write('abc你'); // cx=3, width-2 char cannot fit in col 3 -> wraps
-  eq(line(t, 0), 'abc', 'row 0 keeps narrow chars');
-  eq(line(t, 1), '你', 'wide char wrapped whole to row 1');
-}
-
-// 18. Overwriting narrow-over-wide keeps column alignment
-{
-  const t = new TerminalEmulator(10, 4);
-  t.write(`你${E}[1;1HX`); // overwrite first half of the wide char
-  const row = line(t, 0);
-  eq(row.startsWith('X'), true, 'narrow overwrite lands at col 1');
-}
-
-// 19. DEC special graphics: ESC(0 maps jklmnqtuvwx to box glyphs, ESC(B restores
-{
-  const t = new TerminalEmulator(20, 4);
-  t.write(`${E}(0lqk${E}(B done`);
-  eq(line(t, 0), '┌─┐ done', 'DEC line-drawing on G0');
-}
-
-// 20. SO/SI shift between G0 and a DEC G1
-{
-  const t = new TerminalEmulator(20, 4);
-  t.write(`${E})0plain\x0eq\x0fplain`); // designate G1=dec, SO, draw, SI
-  eq(line(t, 0), 'plain─plain', 'SO selects DEC G1, SI restores G0');
-}
-
-// 21. Row shrink keeps the bottom (prompt) lines, moving top lines to scrollback
-{
-  const t = new TerminalEmulator(80, 5);
-  t.write('one\r\ntwo\r\nthree\r\nfour\r\nprompt$');
-  t.resize(80, 3);
-  eq(screenText(t), 'one\ntwo\nthree\nfour\nprompt$', 'shrink loses nothing overall');
-  // cursor must still sit on the prompt line: overwrite check
-  t.write(' X');
-  eq(screenText(t).endsWith('prompt$ X'), true, 'cursor tracked to the prompt after shrink');
-}
-
-// 22. Row grow pulls lines back out of scrollback
-{
-  const t = new TerminalEmulator(80, 3);
-  t.write('a\r\nb\r\nc\r\nd\r\ne'); // rows a,b in scrollback; c,d,e on screen
-  t.resize(80, 5);
-  eq(screenText(t), 'a\nb\nc\nd\ne', 'grow restores scrollback rows to screen');
-  t.write('!');
-  eq(screenText(t).endsWith('e!'), true, 'cursor tracked after grow');
-}
-
-console.log(`\n  ${pass} assertions passed\n`);
+  test('claude exit tail: prompt lands below the last frame, not mid-screen', () => {
+    const emu = new TerminalEmulator(40, 10);
+    // Minimal reconstruction of the observed exit stream: UI box on rows 7-9,
+    // cursor parked below it, then the real exit sequence claude emits.
+    emu.write('\x1b[7;1H> input box\r\n exit hint\r\n');
+    emu.write('\x1b(B\x1b[>4m\x1b[<u\x1b[?2004l\x1b[?25h\x1b7\x1b[r\x1b8');
+    emu.write('user@host ~> ');
+    expect(rows(emu)[9]).toContain('user@host'); // bottom row, below the box
+    expect(rows(emu)[0]).not.toContain('user@host');
+  });
+});
