@@ -468,8 +468,11 @@ export class TerminalEmulator {
         break;
       case 'n':
         // DSR — device status report. 5 = "are you ok", 6 = cursor position.
-        if (!priv && p[0] === 6) this.onReply?.(`\x1b[${this.cy + 1};${this.cx + 1}R`);
-        else if (!priv && p[0] === 5) this.onReply?.('\x1b[0n');
+        // Only plain DSR; CSI > Ps n (key-modifier control) and CSI ? Ps n
+        // (DEC DSR) are private — replying to them injects a bogus cursor
+        // report into the PTY.
+        if (!prefix && p[0] === 6) this.onReply?.(`\x1b[${this.cy + 1};${this.cx + 1}R`);
+        else if (!prefix && p[0] === 5) this.onReply?.('\x1b[0n');
         break;
       case 'c':
         // DA — device attributes. Plain = primary, '>' = secondary. '=' is

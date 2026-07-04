@@ -331,4 +331,17 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(line(t, 0).includes('user@host'), false, 'exit did not teleport the prompt to the top');
 }
 
+// 35. Private DSR (CSI > Ps n / CSI ? Ps n) does NOT emit a cursor report
+{
+  const t = new TerminalEmulator(80, 24);
+  const replies: string[] = [];
+  t.onReply = (d) => replies.push(d);
+  t.write(`${E}[>6n`); // key-modifier control — must not reply
+  eq(replies, [], 'CSI > 6 n emits no reply');
+  t.write(`${E}[?6n`); // DEC DSR — must not reply
+  eq(replies, [], 'CSI ? 6 n emits no reply');
+  t.write(`line1\r\nabc${E}[6n`); // plain DSR still replies
+  eq(replies, [`${E}[2;4R`], 'plain CSI 6 n still reports the cursor');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
