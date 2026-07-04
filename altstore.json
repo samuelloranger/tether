@@ -19,9 +19,9 @@
         {
           "version": "1.0.4",
           "date": "2026-07-04",
-          "localizedDescription": "Fix: exiting Claude Code with double Ctrl+C no longer leaves stale terminal UI on screen (kitty keyboard protocol CSI misparse). Hardened the terminal emulator against private-prefixed / intermediate-byte CSI sequences; added IND/NEL. See #1.",
+          "localizedDescription": "Fix: exiting Claude Code with double Ctrl+C no longer leaves stale terminal UI on screen (kitty keyboard protocol CSI misparse). Hardened the terminal emulator against private-prefixed / intermediate-byte CSI sequences; added IND/NEL; and (post-review) stopped replying to private DSR controls (CSI >n) that would inject bogus input into the PTY. See #1.",
           "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.4/tether-v1.0.4.ipa",
-          "size": 10370343,
+          "size": 10370346,
           "minOSVersion": "15.1"
         },
         {
