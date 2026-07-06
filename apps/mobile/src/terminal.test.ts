@@ -1,5 +1,6 @@
 // Run: bun test  (from apps/mobile)  — or: bun run src/terminal.test.ts
 import { TerminalEmulator } from './terminal';
+import { computeLinkSpans, splitRunByLinks, urlColumns } from './links';
 
 const E = '\x1b';
 function line(t: TerminalEmulator, i: number): string {
@@ -342,6 +343,78 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(replies, [], 'CSI ? 6 n emits no reply');
   t.write(`line1\r\nabc${E}[6n`); // plain DSR still replies
   eq(replies, [`${E}[2;4R`], 'plain CSI 6 n still reports the cursor');
+}
+
+// 36. Autowrap marks the leaving row as soft-wrapped; explicit newline does not
+{
+  const t = new TerminalEmulator(20, 5);
+  t.write('https://example.com/abcdefghij'); // 30 chars into a 20-col screen
+  const snap = t.getSnapshot();
+  eq(snap[0].wrapped, true, 'row that overflowed is soft-wrapped');
+  eq(snap[1].wrapped, false, 'continuation row is not itself wrapped');
+}
+
+// 37. Hard newline is not a soft-wrap
+{
+  const t = new TerminalEmulator(40, 5);
+  t.write('short\r\nnext');
+  eq(t.getSnapshot()[0].wrapped, false, 'row ended by \\n is not soft-wrapped');
+}
+
+// 38. computeLinkSpans reconstructs a URL split across a soft-wrap
+{
+  const url = 'https://example.com/abcdefghij';
+  const rows = [url.slice(0, 20), url.slice(20)]; // as the 20-col grid would split it
+  const spans = computeLinkSpans(rows, [true, false]);
+  eq(spans[0], [{ start: 0, end: 20, url }], 'first fragment carries the full URL');
+  eq(spans[1], [{ start: 0, end: 10, url }], 'second fragment carries the full URL');
+}
+
+// 39. Hard-newline'd lines are not joined into one link
+{
+  const spans = computeLinkSpans(['http://a.com', 'http://b.com'], [false, false]);
+  eq(spans[0], [{ start: 0, end: 12, url: 'http://a.com' }], 'line A its own link');
+  eq(spans[1], [{ start: 0, end: 12, url: 'http://b.com' }], 'line B its own link');
+}
+
+// 40. A URL wrapping across three rows resolves whole on every fragment
+{
+  const url = 'https://example.com/' + 'x'.repeat(25); // 45 chars
+  const rows = [url.slice(0, 20), url.slice(20, 40), url.slice(40)];
+  const spans = computeLinkSpans(rows, [true, true, false]);
+  eq(spans[0][0].url, url, 'row 0 fragment -> full URL');
+  eq(spans[1][0].url, url, 'row 1 fragment -> full URL');
+  eq(spans[2][0].url, url, 'row 2 fragment -> full URL');
+}
+
+// 41. End-to-end: emulator autowrap + computeLinkSpans give one full URL
+{
+  const url = 'https://example.com/abcdefghij';
+  const t = new TerminalEmulator(20, 5);
+  t.write(url);
+  const snap = t.getSnapshot();
+  const texts = snap.map((r) => r.runs.map((x) => x.text).join(''));
+  const spans = computeLinkSpans(texts, snap.map((r) => r.wrapped));
+  eq(spans[0][0]?.url, url, 'row 0 resolves the full wrapped URL');
+  eq(spans[1][0]?.url, url, 'row 1 resolves the full wrapped URL');
+}
+
+// 42. splitRunByLinks isolates the link portion of a run, tagging it with the url
+{
+  const url = 'http://x.io';
+  const spans = computeLinkSpans([`see ${url} now`], [false]);
+  const urlAt = urlColumns(spans[0]);
+  const segs = splitRunByLinks(`see ${url} now`, 0, urlAt);
+  eq(segs, [{ text: 'see ' }, { text: url, url }, { text: ' now' }], 'link split out with url');
+}
+
+// 43. splitRunByLinks respects a run's column offset within the row
+{
+  const url = 'http://x.io';
+  // Row text is 'ab' + url; the link occupies columns 2..12. A run starting at
+  // column 2 should surface the whole url as one tagged segment.
+  const urlAt = urlColumns(computeLinkSpans([`ab${url}`], [false])[0]);
+  eq(splitRunByLinks(url, 2, urlAt), [{ text: url, url }], 'offset run maps to the url');
 }
 
 console.log(`\n  ${pass} assertions passed\n`);
