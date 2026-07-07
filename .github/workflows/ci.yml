@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Lint (biome + tsc)
+        run: bun lint
+
+      - name: Server tests
+        run: bun run src/server/db.test.ts
+        working-directory: apps/server
+        env:
+          TETHER_DB_PATH: /tmp/tether-ci.db
+
+      - name: Mobile tests
+        run: bun run src/terminal.test.ts
+        working-directory: apps/mobile
