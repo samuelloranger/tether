@@ -5,6 +5,7 @@
 <h1 align="center">Tether</h1>
 
 <p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/samuelloranger/tether" alt="License: GPL-3.0" /></a>
   <a href="https://github.com/samuelloranger/tether/releases"><img src="https://img.shields.io/github/v/release/samuelloranger/tether" alt="Latest release" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/release.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/release.yml/badge.svg" alt="Release builds" /></a>
   <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android-blue" alt="Platforms: iOS and Android" />
@@ -87,3 +88,7 @@ cd apps/mobile && bun run src/terminal.test.ts
 ```
 
 See `CLAUDE.md` for architecture notes (data flow, holder processes, conventions).
+
+## License
+
+[GPL-3.0](./LICENSE)
