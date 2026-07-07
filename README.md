@@ -1,6 +1,16 @@
-# Tether 📱🔌
+<p align="center">
+  <img src="apps/mobile/assets/icon.png" width="96" alt="Tether icon" />
+</p>
 
-> A persistent remote-shell console: real PTY shells on your server, streamed to your phone over WebSocket. Shells keep running when you disconnect — and survive server restarts.
+<h1 align="center">Tether</h1>
+
+<p align="center">
+  <a href="https://github.com/samuelloranger/tether/releases"><img src="https://img.shields.io/github/v/release/samuelloranger/tether" alt="Latest release" /></a>
+  <a href="https://github.com/samuelloranger/tether/actions/workflows/release.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/release.yml/badge.svg" alt="Release builds" /></a>
+  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android-blue" alt="Platforms: iOS and Android" />
+</p>
+
+A persistent remote-shell console: real PTY shells on your server, streamed to your phone over WebSocket. Shells keep running when you disconnect — and survive server restarts.
 
 ## Install the server (no clone needed)
 
