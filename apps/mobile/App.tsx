@@ -1128,7 +1128,6 @@ function AppInner() {
                   editable={false}
                   multiline
                   scrollEnabled
-                  selection={{ start: searchText.length, end: searchText.length }}
                 />
               )}
             </View>
