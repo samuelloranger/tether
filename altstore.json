@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.5",
+          "date": "2026-07-07",
+          "localizedDescription": "Fix: the Select Text (copy) screen no longer scrolls up and down endlessly — it now sits still so you can select and copy.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.5/tether-v1.0.5.ipa",
+          "size": 10370343,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.4",
           "date": "2026-07-04",
           "localizedDescription": "Fix: exiting Claude Code with double Ctrl+C no longer leaves stale terminal UI on screen (kitty keyboard protocol CSI misparse). Hardened the terminal emulator against private-prefixed / intermediate-byte CSI sequences; added IND/NEL. See #1.",
