@@ -19,9 +19,9 @@
         {
           "version": "1.0.5",
           "date": "2026-07-07",
-          "localizedDescription": "Fix: the Select Text (copy) screen no longer scrolls up and down endlessly — it now sits still so you can select and copy.",
+          "localizedDescription": "Fix: the **Select Text** (copy) screen no longer scrolls up and down endlessly — it now sits still so you can select and copy.\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.0.4...v1.0.5",
           "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.5/tether-v1.0.5.ipa",
-          "size": 10370343,
+          "size": 10370285,
           "minOSVersion": "15.1"
         },
         {
