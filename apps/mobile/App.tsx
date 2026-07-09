@@ -27,6 +27,7 @@ import { Feather } from '@expo/vector-icons';
 import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
 import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal';
+import { splitRunByLinks, urlColumns } from './src/links';
 import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
 import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
 
@@ -63,7 +64,6 @@ function runToStyle(s: CellStyle, caretOn = true): TextStyle {
 // same `row` object for unchanged lines, so continuous TUI repaints only
 // re-render the handful of rows that actually changed.
 const rowHasCaret = (row: RenderRow) => row.runs.some((r) => r.style.caret);
-const URL_RE = /(https?:\/\/[^\s]+)/g;
 
 const TermRow = React.memo(
   function TermRow({
@@ -79,28 +79,33 @@ const TermRow = React.memo(
     width: number;
     blinkOn: boolean;
   }) {
+    // Column → full URL, from spans the emulator resolved across soft-wrapped
+    // rows. A wrapped link's fragments each carry the WHOLE url, so tapping any
+    // fragment (on either row) opens the complete link.
+    const urlAt = urlColumns(row.links);
+
+    let col = 0;
     return (
       <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
         <Text style={[styles.termLine, { fontSize, lineHeight, width }]} numberOfLines={1}>
           {row.runs.map((run, i) => {
             const st = runToStyle(run.style, blinkOn);
-            // ponytail: split on http(s) URLs so matches become tappable; doesn't span run boundaries
-            return run.text.includes('http') ? (
-              run.text.split(URL_RE).map((part, j) =>
-                part.startsWith('http') ? (
-                  <Text key={`${i}-${j}`} style={[st, styles.link]} onPress={() => Linking.openURL(part)}>
-                    {part}
-                  </Text>
-                ) : (
-                  <Text key={`${i}-${j}`} style={st}>
-                    {part}
-                  </Text>
-                ),
-              )
-            ) : (
-              <Text key={i} style={st}>
-                {run.text}
-              </Text>
+            const segs = splitRunByLinks(run.text, col, urlAt);
+            col += run.text.length;
+            return segs.map((seg, j) =>
+              seg.url ? (
+                <Text
+                  key={`${i}-${j}`}
+                  style={[st, styles.link]}
+                  onPress={() => Linking.openURL(seg.url!)}
+                >
+                  {seg.text}
+                </Text>
+              ) : (
+                <Text key={`${i}-${j}`} style={st}>
+                  {seg.text}
+                </Text>
+              ),
             );
           })}
         </Text>
