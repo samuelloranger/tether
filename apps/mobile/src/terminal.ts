@@ -1,3 +1,5 @@
+import { computeLinkSpans, type LinkSpan } from './links';
+
 // A compact VT100/xterm terminal emulator: consumes the raw PTY byte stream and
 // maintains a screen grid + scrollback so cursor-addressed output (prompts,
 // status lines, TUIs like vim / Claude Code) renders correctly instead of being
@@ -32,6 +34,11 @@ export interface RenderRun {
 
 export interface RenderRow {
   runs: RenderRun[];
+  // True when this row's logical line continues on the next row (soft-wrap, not
+  // a real newline) — used to rejoin URLs split across the grid width.
+  wrapped: boolean;
+  // Link spans (column ranges → full URL) resolved across any soft-wrapped rows.
+  links: LinkSpan[];
 }
 
 const DEFAULT_FG = '#cbd5e1';
@@ -111,6 +118,12 @@ export class TerminalEmulator {
   private alt: Cell[][] | null = null; // saved normal screen while in alt buffer
   private inAlt = false;
 
+  // Lines whose content overflowed the width and continued on the next row
+  // (soft-wrap). Keyed on the line array itself so membership follows the line
+  // through splice/shift/scrollUp with no parallel bookkeeping; a fresh
+  // blankLine (clear/scroll) is naturally absent, so its flag reads false.
+  private wrappedLines = new WeakSet<Cell[]>();
+
   private cx = 0;
   private cy = 0;
   private savedCx = 0;
@@ -156,6 +169,7 @@ export class TerminalEmulator {
   reset() {
     this.screen = Array.from({ length: this.rows }, () => blankLine(this.cols));
     this.scrollback = [];
+    this.wrappedLines = new WeakSet();
     this.alt = null;
     this.inAlt = false;
     this.cx = this.cy = this.savedCx = this.savedCy = 0;
@@ -533,6 +547,9 @@ export class TerminalEmulator {
     if (active === 'dec') ch = DEC_GRAPHICS[ch] ?? ch;
     const w = charWidth(ch.codePointAt(0)!);
     if (this.cx + w > this.cols) {
+      // The row we're leaving continues here — mark it soft-wrapped so a URL
+      // split across the width can be rejoined at render time.
+      this.wrappedLines.add(this.screen[this.cy]);
       this.cx = 0;
       this.lineFeed();
     }
@@ -597,6 +614,8 @@ export class TerminalEmulator {
 
   private eraseLine(mode: number) {
     const line = this.screen[this.cy];
+    // An erased line is no longer a full soft-wrap continuation.
+    this.wrappedLines.delete(line);
     if (mode === 0) for (let x = this.cx; x < this.cols; x++) line[x] = blankCell();
     else if (mode === 1) for (let x = 0; x <= this.cx; x++) line[x] = blankCell();
     else if (mode === 2) for (let x = 0; x < this.cols; x++) line[x] = blankCell();
@@ -694,11 +713,22 @@ export class TerminalEmulator {
     // The caret sits at the cursor cell on the current screen row (when visible).
     const caretRow = this.cursorVisible ? this.scrollback.length + this.cy : -1;
     const caretCol = Math.min(this.cx, this.cols - 1); // cx can sit at cols (pending wrap)
+    const rowRuns = lines.map((l, i) => this.mergeRuns(l, i === caretRow ? caretCol : -1));
+    const wrapped = lines.map((l) => this.wrappedLines.has(l));
+    // Resolve URLs over logical lines (joining soft-wrapped rows) so a link
+    // split across the width is tappable — as a whole — on every fragment.
+    const texts = rowRuns.map((runs) => runs.map((r) => r.text).join(''));
+    const links = computeLinkSpans(texts, wrapped);
     const out: RenderRow[] = new Array(lines.length);
     for (let i = 0; i < lines.length; i++) {
-      const runs = this.mergeRuns(lines[i], i === caretRow ? caretCol : -1);
       const prev = this.prevRows[i];
-      out[i] = prev && runsEqual(prev.runs, runs) ? prev : { runs };
+      out[i] =
+        prev &&
+        prev.wrapped === wrapped[i] &&
+        runsEqual(prev.runs, rowRuns[i]) &&
+        linksEqual(prev.links, links[i])
+          ? prev
+          : { runs: rowRuns[i], wrapped: wrapped[i], links: links[i] };
     }
     this.prevRows = out;
     return out;
@@ -767,6 +797,14 @@ function runsEqual(a: RenderRun[], b: RenderRun[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i].text !== b[i].text || !sameStyle(a[i].style, b[i].style)) return false;
+  }
+  return true;
+}
+
+function linksEqual(a: LinkSpan[], b: LinkSpan[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].start !== b[i].start || a[i].end !== b[i].end || a[i].url !== b[i].url) return false;
   }
   return true;
 }
