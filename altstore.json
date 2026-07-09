@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.6",
+          "date": "2026-07-09",
+          "localizedDescription": "## What's Changed\n* feat(mobile): links survive line-break by @samuelloranger in https://github.com/samuelloranger/tether/pull/2\n* chore: upgrade to TypeScript 7.0 by @samuelloranger in https://github.com/samuelloranger/tether/pull/4\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.0.5...v1.0.6",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.6/tether-v1.0.6.ipa",
+          "size": 10371484,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.5",
           "date": "2026-07-07",
           "localizedDescription": "Fix: the **Select Text** (copy) screen no longer scrolls up and down endlessly — it now sits still so you can select and copy.\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.0.4...v1.0.5",
