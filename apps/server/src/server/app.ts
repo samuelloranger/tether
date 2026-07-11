@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
+import { authMiddleware } from './auth';
 import { getLogs, getSession, listSessions, renameSession } from './db';
 import {
   getDefaultShell,
@@ -23,8 +24,14 @@ app.use(
   }),
 );
 
-// Health/root
+// Health/root — liveness only, no data. Left open so `tether status` can probe it.
 app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
+
+// Everything under /api/* requires the shared password. `/` stays open (liveness).
+app.use('/api/*', authMiddleware);
+
+// Lightweight authed reachability + password probe for the client's Test connection.
+app.get('/api/health', (c) => c.json({ ok: true }));
 
 // --- HTTP API Routes ---
 
