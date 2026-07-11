@@ -49,6 +49,16 @@ const migrations = [
     name: 'pruned_watermark',
     up: `ALTER TABLE sessions ADD COLUMN pruned_before INTEGER NOT NULL DEFAULT 0;`,
   },
+  {
+    version: 4,
+    name: 'settings',
+    up: `
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function runMigrations() {
@@ -179,6 +189,29 @@ export function resetRunningSessions() {
 
 export function renameSession(id: string, name: string | null) {
   db.query('UPDATE sessions SET name = $name WHERE id = $id').run({ $id: id, $name: name });
+}
+
+// --- Settings (key/value) ---
+export function getSetting(key: string): string | null {
+  const row = db.query('SELECT value FROM settings WHERE key = $key').get({ $key: key }) as {
+    value: string;
+  } | null;
+  return row ? row.value : null;
+}
+
+export function setSetting(key: string, value: string): void {
+  db.query(`
+    INSERT INTO settings (key, value) VALUES ($key, $value)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run({ $key: key, $value: value });
+}
+
+const AUTH_HASH_KEY = 'auth_password_hash';
+export function getAuthHash(): string | null {
+  return getSetting(AUTH_HASH_KEY);
+}
+export function setAuthHash(hash: string): void {
+  setSetting(AUTH_HASH_KEY, hash);
 }
 
 // Fully remove a session (row + its logs) so it disappears from the list.

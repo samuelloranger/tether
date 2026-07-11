@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,9 @@ import {
   Pressable,
   Animated,
   AccessibilityInfo,
+  Alert,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 export interface DrawerSession {
   id: string;
@@ -142,7 +143,16 @@ export function SessionDrawer({
                   style={styles.kill}
                   hitSlop={HIT}
                   activeOpacity={0.6}
-                  onPress={() => onKill(s.id)}
+                  onPress={() =>
+                    Alert.alert(
+                      'Kill this terminal?',
+                      "The process and its saved output will be deleted. This can't be undone.",
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Kill', style: 'destructive', onPress: () => onKill(s.id) },
+                      ],
+                    )
+                  }
                   accessibilityRole="button"
                   accessibilityLabel={`Kill terminal ${s.id}`}
                 >
@@ -216,7 +226,7 @@ const styles = StyleSheet.create({
     marginVertical: 12,
     paddingVertical: 13,
     borderRadius: 8,
-    backgroundColor: '#4f46e5',
+    backgroundColor: '#3730a3',
   },
   newBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
 });

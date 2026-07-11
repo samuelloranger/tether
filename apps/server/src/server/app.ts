@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
-import { getLogs, getSession, listSessions, renameSession } from './db';
+import { authMiddleware } from './auth';
+import { getAuthHash, getLogs, getSession, listSessions, renameSession, setAuthHash } from './db';
 import {
   getDefaultShell,
   killSession,
@@ -23,8 +24,29 @@ app.use(
   }),
 );
 
-// Health/root
+// Health/root — liveness only, no data. Left open so `tether status` can probe it.
 app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
+
+// Everything under /api/* requires the shared password, EXCEPT the first-run
+// pairing endpoints (/api/status, /api/setup), which the middleware exempts.
+app.use('/api/*', authMiddleware);
+
+// First-run pairing (unauthenticated): does the server need a password yet?
+app.get('/api/status', (c) => c.json({ needsSetup: getAuthHash() === null }));
+
+// First-run pairing (unauthenticated, one-time): set the password iff none exists.
+// TOFU — safe only on a trusted LAN/tunnel; self-locks once a hash is stored.
+app.post('/api/setup', async (c) => {
+  if (getAuthHash()) return c.json({ error: 'already_setup' }, 409);
+  const body = await c.req.json().catch(() => ({}));
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (password.length < 1) return c.json({ error: 'empty' }, 400);
+  setAuthHash(await Bun.password.hash(password, { algorithm: 'argon2id' }));
+  return c.json({ ok: true });
+});
+
+// Lightweight authed reachability + password probe for the client's Test connection.
+app.get('/api/health', (c) => c.json({ ok: true }));
 
 // --- HTTP API Routes ---
 

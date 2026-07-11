@@ -1,6 +1,6 @@
 import { websocket } from 'hono/bun';
 import { app } from './app';
-import { resetRunningSessions, setSessionStatus } from './db';
+import { getAuthHash, resetRunningSessions, setSessionStatus } from './db';
 import { reattachHolders } from './pty';
 
 const PORT = Number(process.env.TETHER_PORT ?? 8085);
@@ -15,6 +15,17 @@ for (const id of await reattachHolders()) {
 }
 
 console.log(`Tether server listening on :${PORT}`);
+
+if (getAuthHash()) {
+  console.log('Auth: password required on all /api routes.');
+} else {
+  console.warn(
+    'Auth: NO PASSWORD SET — /api routes will reject all clients. Run: tether set-password',
+  );
+}
+console.log(
+  "Transport encryption is the tunnel's job (Tailscale / WireGuard / SSH). Bind is 0.0.0.0.",
+);
 
 const _server = Bun.serve({
   port: PORT,
