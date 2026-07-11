@@ -1,9 +1,20 @@
-import { expect, test } from 'bun:test';
-import { verifyPassword } from './auth';
-import { getAuthHash, setAuthHash } from './db';
+import { beforeAll, expect, test } from 'bun:test';
 
-// Run with a fresh TETHER_DB_PATH so no hash pre-exists:
-//   TETHER_DB_PATH=/tmp/tether-test-$$.db bun test src/server/auth.test.ts
+// Self-isolating: point the DB at a fresh temp file BEFORE importing ./db (which
+// resolves its path at import time). Dynamic imports keep db.ts from loading — and
+// touching the live server database — until the env is set. No caller env needed.
+let getAuthHash: () => string | null;
+let setAuthHash: (hash: string) => void;
+let verifyPassword: (provided: string) => Promise<boolean>;
+
+beforeAll(async () => {
+  process.env.TETHER_DB_PATH = `/tmp/tether-authtest-${Date.now()}-${process.pid}.db`;
+  const db = await import('./db');
+  const auth = await import('./auth');
+  getAuthHash = db.getAuthHash;
+  setAuthHash = db.setAuthHash;
+  verifyPassword = auth.verifyPassword;
+});
 
 test('verifyPassword false when no hash set', async () => {
   expect(getAuthHash()).toBeNull();

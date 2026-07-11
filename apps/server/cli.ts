@@ -129,6 +129,10 @@ async function setPassword(): Promise<void> {
     console.error('Password cannot be empty.');
     process.exit(1);
   }
+  // db.ts derives its path from process.cwd(); this CLI runs from anywhere, so
+  // point it at the server's own config dir (honoring an explicit TETHER_DB_PATH
+  // override) — otherwise we'd write a stray db the running server never reads.
+  process.env.TETHER_DB_PATH ||= path.join(SERVER_DIR, 'config', 'tether.db');
   const { setAuthHash } = await import('./src/server/db');
   const hash = await Bun.password.hash(password, { algorithm: 'argon2id' });
   setAuthHash(hash);
