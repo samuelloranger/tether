@@ -38,3 +38,16 @@ export function computeInputDelta(prev: string, next: string): InputDelta {
     resetField: false,
   };
 }
+
+// Adapt computeInputDelta to a controlled TextInput. The caller MUST set both
+// the controlled `value` prop and its previous-value ref to the returned
+// `value` — otherwise React Native reverts the native field to the stale
+// `value` and the next diff runs against the wrong baseline (emitting spurious
+// deletes that corrupt typing/dictation).
+export function applyFieldChange(
+  prevValue: string,
+  next: string,
+): { bytes: string; value: string } {
+  const d = computeInputDelta(prevValue, next);
+  return { bytes: d.bytes, value: d.resetField ? SENT : d.nextPrev };
+}

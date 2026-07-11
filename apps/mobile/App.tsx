@@ -30,7 +30,7 @@ import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal
 import { splitRunByLinks, urlColumns } from './src/links';
 import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
 import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
-import { computeInputDelta, SENT } from './src/input';
+import { applyFieldChange, SENT } from './src/input';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -696,24 +696,22 @@ function AppInner() {
   // arrives here. Diff against the previous value and forward the delta.
   const handleChangeText = (next: string) => {
     if (skipNextChangeRef.current) {
-      // A Ctrl-combo already emitted its byte; absorb the trailing char.
+      // A Ctrl-combo already emitted its byte; discard the trailing char and
+      // re-anchor so the controlled value doesn't drift out of sync.
       skipNextChangeRef.current = false;
-      prevValueRef.current = next;
+      resetField();
       return;
     }
-    const { bytes, nextPrev, resetField: doReset } = computeInputDelta(
-      prevValueRef.current,
-      next,
-    );
+    const { bytes, value } = applyFieldChange(prevValueRef.current, next);
     if (bytes) {
       sendInput(bytes);
       autoScroll.current = true;
     }
-    if (doReset) {
-      resetField();
-    } else {
-      prevValueRef.current = nextPrev;
-    }
+    // Keep the controlled value AND the diff baseline in lockstep — otherwise
+    // React Native reverts the field to the old value and the next diff runs
+    // against a stale prev (corrupting typing/dictation).
+    setInputText(value);
+    prevValueRef.current = value;
   };
 
   // Return key: send carriage return (raw-mode TUIs like Claude Code expect \r).
