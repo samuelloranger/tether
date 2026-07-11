@@ -17,13 +17,14 @@ import {
   useWindowDimensions,
   Modal,
   Linking,
+  AccessibilityInfo,
   type TextStyle,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
 import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal';
@@ -31,6 +32,8 @@ import { splitRunByLinks, urlColumns } from './src/links';
 import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
 import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
 import { applyFieldChange, SENT } from './src/input';
+import { getPassword, setPassword as persistPassword, authHeaders } from './src/secureConfig';
+import { httpBase, wsUrl, validateAddress } from './src/address';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -206,6 +209,18 @@ function AppInner() {
   // Connection states
   const [serverIp, setServerIp] = useState('192.168.50.30');
   const [port, setPort] = useState('8085');
+  const [password, setPassword] = useState('');
+  const passwordRef = useRef('');
+  useEffect(() => {
+    passwordRef.current = password;
+  }, [password]);
+  // First-run pairing: 'unknown' until we probe /api/status; 'create' = server has
+  // no password yet (TOFU set); 'enter' = server already paired.
+  const [setupMode, setSetupMode] = useState<'unknown' | 'create' | 'enter'>('unknown');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [testStatus, setTestStatus] = useState<
+    { kind: 'idle' } | { kind: 'testing' } | { kind: 'ok' } | { kind: 'error'; msg: string }
+  >({ kind: 'idle' });
 
   // UI states
   const [isConfiguring, setIsConfiguring] = useState(true);
@@ -214,7 +229,12 @@ function AppInner() {
   const [ready, setReady] = useState(false);
   const readyRef = useRef(false);
   const lastConnectedRef = useRef({ ip: serverIp, port });
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connecting' | 'connected' | 'disconnected' | 'auth-failed'
+  >('disconnected');
+  // Distinguishes a first-ever connect ("Connecting…") from a dropped-and-retrying
+  // socket ("Reconnecting…") so the banner never overclaims on the very first try.
+  const hasConnectedRef = useRef(false);
   const [screen, setScreen] = useState<RenderRow[]>([]);
   const [inputText, setInputText] = useState(SENT);
   // Mirrors the field's last value so onChangeText can diff against it.
@@ -253,10 +273,28 @@ function AppInner() {
   const scrolledRef = useRef(false);
   const lastContentHeight = useRef(0);
   const [blinkOn, setBlinkOn] = useState(true);
+  const [reduceMotion, setReduceMotion] = useState(false);
   useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((v) => {
+      if (mounted) setReduceMotion(v);
+    });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) =>
+      setReduceMotion(v),
+    );
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
+  useEffect(() => {
+    if (reduceMotion) {
+      setBlinkOn(true); // steady caret, no interval
+      return;
+    }
     const iv = setInterval(() => setBlinkOn((v) => !v), 530);
     return () => clearInterval(iv);
-  }, []);
+  }, [reduceMotion]);
   const renderScheduled = useRef(false);
   const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
   const wheelAccum = useRef(0);
@@ -356,11 +394,29 @@ function AppInner() {
     const id = activeIdRef.current;
     const e = entryFor(id);
     setConnectionStatus('connecting');
-    const wsUrl = `ws://${serverIp}:${port}/api/ws?sessionId=${id}&sinceId=${e.sinceId}&cols=${numCols}&rows=${numRows}`;
+    const url = wsUrl(serverIp, port, {
+      sessionId: id,
+      sinceId: e.sinceId,
+      cols: numCols,
+      rows: numRows,
+    });
 
-    const socket = new WebSocket(wsUrl);
+    // 3-arg RN WebSocket(url, protocols, options) sends `headers` on the upgrade —
+    // keeps the shared password out of the URL and server logs. The DOM WebSocket
+    // type omits the options arg, so cast the constructor to RN's real signature.
+    const RNWebSocket = WebSocket as unknown as {
+      new (
+        url: string,
+        protocols: string[],
+        options: { headers: Record<string, string> },
+      ): WebSocket;
+    };
+    const socket = new RNWebSocket(url, [], { headers: authHeaders(passwordRef.current) });
 
-    socket.onopen = () => setConnectionStatus('connected');
+    socket.onopen = () => {
+      hasConnectedRef.current = true;
+      setConnectionStatus('connected');
+    };
 
     socket.onmessage = (event) => {
       if (ws.current !== socket) return;
@@ -439,9 +495,9 @@ function AppInner() {
   const killActiveOr = async (id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      await fetch(`http://${serverIp}:${port}/api/sessions/kill`, {
+      await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
         body: JSON.stringify({ id }),
       });
     } catch {}
@@ -512,7 +568,15 @@ function AppInner() {
 
   const refreshSessions = async () => {
     try {
-      const res = await fetch(`http://${serverIp}:${port}/api/sessions`);
+      const res = await fetch(`${httpBase(serverIp, port)}/api/sessions`, {
+        headers: authHeaders(passwordRef.current),
+      });
+      // The 4s poll doubles as auth surveillance: a 401 (e.g. server password
+      // changed) flips the UI to a distinct "Wrong password." state.
+      if (res.status === 401) {
+        setConnectionStatus('auth-failed');
+        return;
+      }
       const rows = (await res.json()) as DrawerSession[];
       setDrawerSessions(rows);
     } catch {}
@@ -530,10 +594,11 @@ function AppInner() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const [savedIp, savedPort, savedSession] = await Promise.all([
+        const [savedIp, savedPort, savedSession, savedPw] = await Promise.all([
           AsyncStorage.getItem(KEY_SERVER_IP),
           AsyncStorage.getItem(KEY_PORT),
           AsyncStorage.getItem(KEY_SESSION_ID),
+          getPassword(),
         ]);
 
         if (savedIp) setServerIp(savedIp);
@@ -542,7 +607,14 @@ function AppInner() {
           setActiveId(savedSession);
           activeIdRef.current = savedSession;
         }
-        if (savedIp) {
+        if (savedPw) {
+          setPassword(savedPw);
+          passwordRef.current = savedPw;
+        }
+        // Auto-connect only when BOTH an address AND a password are stored. An
+        // upgrading user with an address but no password stays on setup to enter
+        // the now-required password (migration path).
+        if (savedIp && savedPw) {
           lastConnectedRef.current = { ip: savedIp, port: savedPort || port };
           readyRef.current = true;
           setIsConfiguring(false);
@@ -583,6 +655,84 @@ function AppInner() {
     return () => sub.remove();
   }, []);
 
+  // Probe the server, then either create the first password (TOFU) or validate an
+  // existing one — driving the setup screen to a testable "Reachable ✓" state.
+  const testConnection = async () => {
+    const v = validateAddress(serverIp, port);
+    if (!v.ok) {
+      setTestStatus({ kind: 'error', msg: v.reason });
+      return;
+    }
+    setTestStatus({ kind: 'testing' });
+
+    // 1. Does this server need a first-run password?
+    let needsSetup: boolean;
+    try {
+      const res = await fetch(`${httpBase(serverIp, port)}/api/status`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error('status');
+      needsSetup = Boolean((await res.json()).needsSetup);
+    } catch {
+      setTestStatus({ kind: 'error', msg: 'Unreachable — check the host and port.' });
+      return;
+    }
+    setSetupMode(needsSetup ? 'create' : 'enter');
+
+    if (!password) {
+      setTestStatus({
+        kind: 'error',
+        msg: needsSetup ? 'Choose a password for this server.' : 'Enter the server password.',
+      });
+      return;
+    }
+
+    if (needsSetup) {
+      // 2a. Create the password (one-time TOFU set).
+      if (password !== confirmPassword) {
+        setTestStatus({ kind: 'error', msg: 'Passwords do not match.' });
+        return;
+      }
+      try {
+        const res = await fetch(`${httpBase(serverIp, port)}/api/setup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.status === 409) {
+          setSetupMode('enter');
+          setTestStatus({ kind: 'error', msg: 'Already set up. Enter the existing password.' });
+          return;
+        }
+        if (!res.ok) throw new Error('setup');
+        setTestStatus({ kind: 'ok' });
+      } catch {
+        setTestStatus({ kind: 'error', msg: 'Setup failed — try again.' });
+      }
+      return;
+    }
+
+    // 2b. Validate an existing password against the authed health probe.
+    try {
+      const res = await fetch(`${httpBase(serverIp, port)}/api/health`, {
+        headers: authHeaders(password),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.status === 401) {
+        setTestStatus({ kind: 'error', msg: 'Wrong password.' });
+        return;
+      }
+      if (!res.ok) {
+        setTestStatus({ kind: 'error', msg: `Server error (${res.status}).` });
+        return;
+      }
+      setTestStatus({ kind: 'ok' });
+    } catch {
+      setTestStatus({ kind: 'error', msg: 'Unreachable — check the host and port.' });
+    }
+  };
+
   // 3. Command interactions
   const saveConfig = async () => {
     try {
@@ -591,6 +741,7 @@ function AppInner() {
         [KEY_PORT, port],
         [KEY_SESSION_ID, activeId],
       ]);
+      await persistPassword(password);
       const addressChanged =
         serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port;
       setIsConfiguring(false);
@@ -649,7 +800,7 @@ function AppInner() {
     const text = getFullText();
     if (!text) return;
     await Clipboard.setStringAsync(text);
-    Alert.alert('Copied', 'Terminal contents copied to clipboard.');
+    Alert.alert('Copied', 'Displayed transcript copied to clipboard.');
   };
 
   const handlePaste = async () => {
@@ -734,9 +885,9 @@ function AppInner() {
     const name = renameText.trim();
     setRenameModalOpen(false);
     try {
-      await fetch(`http://${serverIp}:${port}/api/sessions/rename`, {
+      await fetch(`${httpBase(serverIp, port)}/api/sessions/rename`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...authHeaders(passwordRef.current) },
         body: JSON.stringify({ id, name }),
       });
       await refreshSessions();
@@ -747,8 +898,8 @@ function AppInner() {
 
   const hardResetSession = () => {
     Alert.alert(
-      'Hard Reset',
-      'Are you sure you want to terminate and restart the shell process on the server?',
+      'Restart terminal',
+      "This restarts the shell process and clears this terminal's scrollback history on the server. This can't be undone.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -757,9 +908,9 @@ function AppInner() {
           onPress: async () => {
             resetTerminal();
             try {
-              await fetch(`http://${serverIp}:${port}/api/sessions/kill`, {
+              await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
                 body: JSON.stringify({ id: activeId }),
               });
               connect();
@@ -818,7 +969,7 @@ function AppInner() {
               <Text style={styles.configLogoIcon}>{'>_'}</Text>
             </View>
             <Text style={styles.configTitle}>Tether Mobile</Text>
-            <Text style={styles.configSubtitle}>Connect to your persistent agent console</Text>
+            <Text style={styles.configSubtitle}>Connect to a terminal on your server</Text>
           </View>
 
           <View style={styles.formContainer}>
@@ -826,7 +977,11 @@ function AppInner() {
             <TextInput
               style={styles.configInput}
               value={serverIp}
-              onChangeText={setServerIp}
+              onChangeText={(t) => {
+                setServerIp(t);
+                setSetupMode('unknown');
+                setTestStatus({ kind: 'idle' });
+              }}
               placeholder="e.g. 192.168.50.30"
               placeholderTextColor="#64748b"
               autoCapitalize="none"
@@ -837,7 +992,11 @@ function AppInner() {
             <TextInput
               style={styles.configInput}
               value={port}
-              onChangeText={setPort}
+              onChangeText={(t) => {
+                setPort(t);
+                setSetupMode('unknown');
+                setTestStatus({ kind: 'idle' });
+              }}
               placeholder="e.g. 8085"
               placeholderTextColor="#64748b"
               keyboardType="numeric"
@@ -845,9 +1004,75 @@ function AppInner() {
               autoCorrect={false}
             />
 
-            <TouchableOpacity style={styles.connectBtn} onPress={saveConfig}>
-              <Text style={styles.connectBtnText}>Establish Tether Connection</Text>
-            </TouchableOpacity>
+            <Text style={styles.inputLabel}>Password</Text>
+            <TextInput
+              style={styles.configInput}
+              value={password}
+              onChangeText={(t) => {
+                setPassword(t);
+                setTestStatus({ kind: 'idle' });
+              }}
+              placeholder={setupMode === 'create' ? 'Choose a password' : 'Shared server password'}
+              placeholderTextColor="#64748b"
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            {setupMode === 'create' && (
+              <>
+                <TextInput
+                  style={styles.configInput}
+                  value={confirmPassword}
+                  onChangeText={(t) => {
+                    setConfirmPassword(t);
+                    setTestStatus({ kind: 'idle' });
+                  }}
+                  placeholder="Confirm password"
+                  placeholderTextColor="#64748b"
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Text style={styles.configHint}>
+                  This server has no password yet. The one you choose here will be required by every
+                  client.
+                </Text>
+              </>
+            )}
+
+            <Text style={styles.configHint}>
+              The password controls access. For traffic encryption, run tether behind a tunnel
+              (Tailscale, WireGuard, or SSH).
+            </Text>
+
+            {testStatus.kind === 'error' && <Text style={styles.testError}>{testStatus.msg}</Text>}
+            {testStatus.kind === 'ok' && (
+              <View style={styles.testOkRow}>
+                <View style={[styles.badgeDot, styles.dotConnected]} />
+                <Text style={styles.testOk}>Reachable</Text>
+              </View>
+            )}
+
+            {testStatus.kind === 'ok' ? (
+              <TouchableOpacity style={styles.connectBtn} onPress={saveConfig}>
+                <Text style={styles.connectBtnText}>Save &amp; Connect</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.connectBtn}
+                onPress={testConnection}
+                disabled={testStatus.kind === 'testing'}
+              >
+                <Text style={styles.connectBtnText}>
+                  {testStatus.kind === 'testing'
+                    ? 'Testing…'
+                    : setupMode === 'create'
+                      ? 'Create password'
+                      : 'Test connection'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </KeyboardAvoidingView>
       ) : (
@@ -880,10 +1105,15 @@ function AppInner() {
                   <View style={[styles.badgeDot, styles.dotConnected]} />
                   <Text style={styles.badgeTextConnected}>Connected</Text>
                 </View>
+              ) : connectionStatus === 'auth-failed' ? (
+                <View style={[styles.statusBadge, styles.badgeOffline]}>
+                  <View style={[styles.badgeDot, styles.dotOffline]} />
+                  <Text style={styles.badgeTextOffline}>Auth</Text>
+                </View>
               ) : connectionStatus === 'connecting' ? (
                 <View style={[styles.statusBadge, styles.badgeConnecting]}>
                   <ActivityIndicator size={8} color="#fbbf24" style={styles.spinIcon} />
-                  <Text style={styles.badgeTextConnecting}>Syncing...</Text>
+                  <Text style={styles.badgeTextConnecting}>Connecting…</Text>
                 </View>
               ) : (
                 <View style={[styles.statusBadge, styles.badgeOffline]}>
@@ -905,12 +1135,24 @@ function AppInner() {
             </View>
           </View>
 
-          {/* Connection banner */}
+          {/* Connection banner — names the real state; no safety overclaim. */}
           {connectionStatus !== 'connected' && (
             <View style={styles.reconnectBanner}>
               <Text style={styles.reconnectBannerText}>
-                Reconnecting... Process is preserved safely on the host.
+                {connectionStatus === 'auth-failed'
+                  ? 'Wrong password.'
+                  : hasConnectedRef.current
+                    ? 'Reconnecting… (session kept running on the server)'
+                    : 'Connecting…'}
               </Text>
+              <TouchableOpacity
+                onPress={() => setIsConfiguring(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Edit connection settings"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.reconnectBannerEdit}>Edit</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -924,6 +1166,8 @@ function AppInner() {
           >
             <Pressable
               style={{ flex: 1 }}
+              accessibilityRole="button"
+              accessibilityLabel="Terminal. Double-tap to type, long-press to select text."
               onPressIn={() => {
                 scrolledRef.current = false;
               }}
@@ -953,6 +1197,11 @@ function AppInner() {
                 onContentSizeChange={() => {
                   if (autoScroll.current) listRef.current?.scrollToEnd({ animated: false });
                 }}
+                ListEmptyComponent={
+                  connectionStatus === 'connected' ? (
+                    <Text style={styles.terminalEmpty}>Connected. Type a command to begin.</Text>
+                  ) : null
+                }
                 initialNumToRender={40}
                 windowSize={11}
                 removeClippedSubviews
@@ -1008,7 +1257,7 @@ function AppInner() {
                 </View>
                 <TouchableOpacity style={styles.menuRow} onPress={openSearch}>
                   <Feather name="search" size={16} color="#cbd5e1" />
-                  <Text style={styles.menuRowText}>Search output</Text>
+                  <Text style={styles.menuRowText}>Search displayed transcript</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.menuRow}
@@ -1018,7 +1267,7 @@ function AppInner() {
                   }}
                 >
                   <Feather name="terminal" size={16} color="#cbd5e1" />
-                  <Text style={styles.menuRowText}>Snippets</Text>
+                  <Text style={styles.menuRowText}>Saved commands</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.menuRow}
@@ -1080,9 +1329,9 @@ function AppInner() {
           >
             <Pressable style={styles.menuBackdrop} onPress={() => setSnippetsModalOpen(false)}>
               <Pressable style={styles.renamePanel} onPress={() => {}}>
-                <Text style={styles.renameTitle}>Snippets</Text>
+                <Text style={styles.renameTitle}>Saved commands</Text>
                 {snippets.length === 0 && (
-                  <Text style={styles.snippetEmpty}>No snippets yet. Add one below.</Text>
+                  <Text style={styles.snippetEmpty}>No saved commands yet. Add one below.</Text>
                 )}
                 {snippets.map((s, i) => (
                   <View key={`${s}-${i}`} style={styles.snippetRow}>
@@ -1131,15 +1380,15 @@ function AppInner() {
           >
             <View style={[styles.selectionViewContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
               <View style={styles.selectionViewHeader}>
-                <Text style={styles.selectionViewTitle}>Select Text</Text>
+                <Text style={styles.selectionViewTitle}>Select text (displayed transcript)</Text>
                 <View style={styles.selectionViewHeaderBtns}>
                   <TouchableOpacity
                     style={styles.selectionViewHeaderBtn}
                     onPress={handleCopyAll}
                     accessibilityRole="button"
-                    accessibilityLabel="Copy all"
+                    accessibilityLabel="Copy displayed transcript"
                   >
-                    <Text style={styles.selectionViewHeaderBtnText}>Copy All</Text>
+                    <Text style={styles.selectionViewHeaderBtnText}>Copy displayed transcript</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.selectionViewHeaderBtn}
@@ -1259,6 +1508,9 @@ function AppInner() {
             autoComplete="off"
             blurOnSubmit={false}
             keyboardAppearance="dark"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            accessibilityLabel="Terminal input (hidden)"
           />
         </KeyboardAvoidingView>
       )}
@@ -1345,7 +1597,7 @@ const styles = StyleSheet.create({
     width: '48%',
   },
   connectBtn: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: '#3730a3',
     paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
@@ -1356,6 +1608,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  configHint: { color: '#64748b', fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 12 },
+  testError: { color: '#f87171', fontSize: 13, marginBottom: 10 },
+  testOkRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
+  testOk: { color: '#4ade80', fontSize: 13 },
 
   /* Terminal Screen Styles */
   terminalContainer: {
@@ -1466,12 +1722,20 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(245, 158, 11, 0.25)',
     paddingVertical: 6,
     paddingHorizontal: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
   reconnectBannerText: {
     fontSize: 10,
     color: '#fcd34d',
     textAlign: 'center',
+  },
+  reconnectBannerEdit: {
+    fontSize: 11,
+    color: '#22d3ee',
+    fontWeight: '600',
   },
   terminalScroll: {
     flex: 1,
@@ -1480,6 +1744,12 @@ const styles = StyleSheet.create({
   terminalContent: {
     paddingHorizontal: 6,
     paddingVertical: 8,
+  },
+  terminalEmpty: {
+    color: '#64748b',
+    fontFamily: MONO,
+    fontSize: 13,
+    padding: 16,
   },
   termLine: {
     fontFamily: MONO,
@@ -1808,7 +2078,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#4f46e5',
+    backgroundColor: '#3730a3',
     justifyContent: 'center',
     alignItems: 'center',
   },

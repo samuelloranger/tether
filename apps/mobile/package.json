@@ -10,6 +10,7 @@
     "expo-clipboard": "~57.0.0",
     "expo-font": "~57.0.0",
     "expo-haptics": "~57.0.0",
+    "expo-secure-store": "~57.0.0",
     "expo-splash-screen": "~57.0.1",
     "expo-status-bar": "~57.0.0",
     "expo-system-ui": "~57.0.0",

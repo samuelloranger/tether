@@ -106,10 +106,37 @@ Usage: tether <command>
   restart   Stop then start
   status    Show running state + HTTP health
   logs      Follow the server log (tail -f)
+  set-password  Set the shared access password (required for clients)
   help      Show this help
 
 Env: TETHER_PORT (default 8085), TETHER_DB_PATH
 State: ${STATE_DIR}`);
+}
+
+async function setPassword(): Promise<void> {
+  process.stdout.write('New Tether password: ');
+  // Read one line without echo.
+  const { createInterface } = await import('node:readline');
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const orig = (rl as unknown as { output: NodeJS.WriteStream }).output;
+  (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = (s: string) => {
+    if (s.includes('\n') || s.includes('\r')) orig.write(s);
+  };
+  const password: string = await new Promise((resolve) => rl.question('', resolve));
+  rl.close();
+  process.stdout.write('\n');
+  if (!password || password.length < 1) {
+    console.error('Password cannot be empty.');
+    process.exit(1);
+  }
+  // db.ts derives its path from process.cwd(); this CLI runs from anywhere, so
+  // point it at the server's own config dir (honoring an explicit TETHER_DB_PATH
+  // override) — otherwise we'd write a stray db the running server never reads.
+  process.env.TETHER_DB_PATH ||= path.join(SERVER_DIR, 'config', 'tether.db');
+  const { setAuthHash } = await import('./src/server/db');
+  const hash = await Bun.password.hash(password, { algorithm: 'argon2id' });
+  setAuthHash(hash);
+  console.log('Password set. Restart the server if it is running: tether restart');
 }
 
 const cmd = process.argv[2] ?? 'help';
@@ -129,6 +156,9 @@ switch (cmd) {
     break;
   case 'logs':
     logs();
+    break;
+  case 'set-password':
+    await setPassword();
     break;
   default:
     help();
