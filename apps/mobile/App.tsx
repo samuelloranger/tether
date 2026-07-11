@@ -30,6 +30,7 @@ import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal
 import { splitRunByLinks, urlColumns } from './src/links';
 import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
 import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
+import { computeInputDelta, SENT } from './src/input';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -37,10 +38,6 @@ const KEY_PORT = 'tether_port';
 const KEY_SESSION_ID = 'tether_session_id';
 const KEY_FONT = 'tether_font_size';
 const KEY_SNIPPETS = 'tether_snippets';
-
-// Zero-width sentinel kept in the capture field so it's never "empty" — lets iOS
-// fire onChangeText for Backspace even with nothing typed yet.
-const SENT = '​';
 
 function runToStyle(s: CellStyle, caretOn = true): TextStyle {
   const style: TextStyle = {};
@@ -220,6 +217,11 @@ function AppInner() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
   const [screen, setScreen] = useState<RenderRow[]>([]);
   const [inputText, setInputText] = useState(SENT);
+  // Mirrors the field's last value so onChangeText can diff against it.
+  const prevValueRef = useRef(SENT);
+  // Set when handleKeyPress has already emitted a Ctrl-combo byte, so the
+  // following onChangeText absorbs that char without re-sending it.
+  const skipNextChangeRef = useRef(false);
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
   const [ctrlArmed, setCtrlArmed] = useState(false);
@@ -667,21 +669,49 @@ function AppInner() {
   // firing on iOS even before anything is typed.
   const handleKeyPress = (e: { nativeEvent: { key: string } }) => {
     const key = e.nativeEvent.key;
+    // Only Ctrl-combos are handled here now; all printable text and Backspace
+    // are handled by the onChangeText delta (see handleChangeText).
     if (ctrlArmed) {
       setCtrlArmed(false);
       if (/^[a-zA-Z]$/.test(key)) {
         sendInput(String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64));
         autoScroll.current = true;
-        return;
+        // The printed letter still lands in the field and will fire
+        // onChangeText next — swallow it there instead of sending it literally.
+        skipNextChangeRef.current = true;
       }
-      // Non-letter while armed: fall through and handle normally, modifier dropped.
+      // Non-letter while armed: fall through, modifier dropped.
     }
-    if (key === 'Backspace') sendInput('\x7f');
-    else if (key.length === 1) sendInput(key); // printable char (incl. space)
-    autoScroll.current = true;
   };
 
-  const resetField = () => setInputText(SENT);
+  const resetField = () => {
+    setInputText(SENT);
+    prevValueRef.current = SENT;
+  };
+
+  // Every field mutation (typing, dictation, swipe, autocorrect, Backspace)
+  // arrives here. Diff against the previous value and forward the delta.
+  const handleChangeText = (next: string) => {
+    if (skipNextChangeRef.current) {
+      // A Ctrl-combo already emitted its byte; absorb the trailing char.
+      skipNextChangeRef.current = false;
+      prevValueRef.current = next;
+      return;
+    }
+    const { bytes, nextPrev, resetField: doReset } = computeInputDelta(
+      prevValueRef.current,
+      next,
+    );
+    if (bytes) {
+      sendInput(bytes);
+      autoScroll.current = true;
+    }
+    if (doReset) {
+      resetField();
+    } else {
+      prevValueRef.current = nextPrev;
+    }
+  };
 
   // Return key: send carriage return (raw-mode TUIs like Claude Code expect \r).
   const handleSend = () => {
@@ -1212,7 +1242,7 @@ function AppInner() {
             style={styles.hiddenInput}
             value={inputText}
             onKeyPress={handleKeyPress}
-            onChangeText={resetField}
+            onChangeText={handleChangeText}
             onSubmitEditing={handleSend}
             autoCapitalize="none"
             autoCorrect={false}

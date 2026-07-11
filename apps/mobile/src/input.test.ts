@@ -1,47 +1,60 @@
-// Run: bun test  (from apps/mobile)
-import { describe, expect, test } from 'bun:test';
+// Run: bun run src/input.test.ts  (from apps/mobile)
 import { computeInputDelta, SENT } from './input';
 
-describe('computeInputDelta', () => {
-  test('single char typed appends to sentinel', () => {
-    const d = computeInputDelta(SENT, `${SENT}a`);
-    expect(d.bytes).toBe('a');
-    expect(d.nextPrev).toBe(`${SENT}a`);
-    expect(d.resetField).toBe(false);
-  });
+let pass = 0;
+function eq(actual: unknown, expected: unknown, msg: string) {
+  const a = JSON.stringify(actual);
+  const b = JSON.stringify(expected);
+  if (a !== b) throw new Error(`FAIL ${msg}\n  expected ${b}\n  got      ${a}`);
+  pass++;
+}
 
-  test('dictated block inserts whole phrase', () => {
-    const d = computeInputDelta(SENT, `${SENT}hello world`);
-    expect(d.bytes).toBe('hello world');
-    expect(d.nextPrev).toBe(`${SENT}hello world`);
-  });
+// 1. Single char typed appends to sentinel
+{
+  const d = computeInputDelta(SENT, `${SENT}a`);
+  eq(d.bytes, 'a', 'single char bytes');
+  eq(d.nextPrev, `${SENT}a`, 'single char nextPrev');
+  eq(d.resetField, false, 'single char no reset');
+}
 
-  test('backspace mid-word sends one delete', () => {
-    const d = computeInputDelta(`${SENT}abc`, `${SENT}ab`);
-    expect(d.bytes).toBe('\x7f');
-    expect(d.resetField).toBe(false);
-  });
+// 2. Dictated block inserts the whole phrase
+{
+  const d = computeInputDelta(SENT, `${SENT}hello world`);
+  eq(d.bytes, 'hello world', 'dictated block bytes');
+  eq(d.nextPrev, `${SENT}hello world`, 'dictated block nextPrev');
+}
 
-  test('live dictation replacement: delete then insert', () => {
-    // "helo" refined to "hello"
-    const d = computeInputDelta(`${SENT}helo`, `${SENT}hello`);
-    expect(d.bytes).toBe('\x7flo');
-  });
+// 3. Backspace mid-word sends one delete
+{
+  const d = computeInputDelta(`${SENT}abc`, `${SENT}ab`);
+  eq(d.bytes, '\x7f', 'backspace one delete');
+  eq(d.resetField, false, 'backspace no reset');
+}
 
-  test('sentinel eaten (backspace at empty) sends one delete and resets', () => {
-    const d = computeInputDelta(SENT, '');
-    expect(d.bytes).toBe('\x7f');
-    expect(d.nextPrev).toBe(SENT);
-    expect(d.resetField).toBe(true);
-  });
+// 4. Live dictation replacement: delete then insert ("helo" -> "hello")
+{
+  const d = computeInputDelta(`${SENT}helo`, `${SENT}hello`);
+  eq(d.bytes, '\x7flo', 'dictation replacement delete+insert');
+}
 
-  test('no change sends nothing', () => {
-    const d = computeInputDelta(`${SENT}ab`, `${SENT}ab`);
-    expect(d.bytes).toBe('');
-  });
+// 5. Sentinel eaten (backspace at empty) sends one delete and resets
+{
+  const d = computeInputDelta(SENT, '');
+  eq(d.bytes, '\x7f', 'sentinel eaten delete');
+  eq(d.nextPrev, SENT, 'sentinel eaten re-anchors');
+  eq(d.resetField, true, 'sentinel eaten resets field');
+}
 
-  test('multi-char backspace (autocorrect deletes tail)', () => {
-    const d = computeInputDelta(`${SENT}teh`, `${SENT}t`);
-    expect(d.bytes).toBe('\x7f\x7f');
-  });
-});
+// 6. No change sends nothing
+{
+  const d = computeInputDelta(`${SENT}ab`, `${SENT}ab`);
+  eq(d.bytes, '', 'no change sends nothing');
+}
+
+// 7. Multi-char backspace (autocorrect deletes tail)
+{
+  const d = computeInputDelta(`${SENT}teh`, `${SENT}t`);
+  eq(d.bytes, '\x7f\x7f', 'multi-char backspace');
+}
+
+console.log(`\n  ${pass} assertions passed\n`);
