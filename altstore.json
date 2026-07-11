@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.7",
+          "date": "2026-07-11",
+          "localizedDescription": "Redesign fixing the design audit (16/30 → trust/recovery/honesty).\n\n- **Auth**: shared password required on all `/api/*` (HTTP + WebSocket). First install sets the password from the phone (TOFU pairing). No more open shell on the network. Encryption delegated to your tunnel (Tailscale/WireGuard/SSH).\n- **Setup**: testable connection flow with clear failure states + direct edit/recovery.\n- **Honesty**: transcript-scope copy, no safety overclaims, confirmations before Kill/Restart.\n- **A11y/quality**: WCAG-AA action contrast, reduced-motion caret, terminal screen-reader labels, empty state, lighter icon bundle.\n\nUpgrading: set a password on first launch. Run `tether set-password` on the server or pair from the app.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.7/tether-v1.0.7.ipa",
+          "size": 8146041,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.6",
           "date": "2026-07-09",
           "localizedDescription": "## What's Changed\n* feat(mobile): links survive line-break by @samuelloranger in https://github.com/samuelloranger/tether/pull/2\n* chore: upgrade to TypeScript 7.0 by @samuelloranger in https://github.com/samuelloranger/tether/pull/4\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.0.5...v1.0.6",
