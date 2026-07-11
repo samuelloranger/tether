@@ -1,0 +1,4 @@
+[test]
+# Runs before any *.test.ts loads, so server tests never open the developer's
+# live config DB. See test-preload.ts.
+preload = ["./test-preload.ts"]

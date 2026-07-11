@@ -1,20 +1,10 @@
-import { beforeAll, expect, test } from 'bun:test';
+import { expect, test } from 'bun:test';
+import { verifyPassword } from './auth';
+import { getAuthHash, setAuthHash } from './db';
 
-// Self-isolating: point the DB at a fresh temp file BEFORE importing ./db (which
-// resolves its path at import time). Dynamic imports keep db.ts from loading — and
-// touching the live server database — until the env is set. No caller env needed.
-let getAuthHash: () => string | null;
-let setAuthHash: (hash: string) => void;
-let verifyPassword: (provided: string) => Promise<boolean>;
-
-beforeAll(async () => {
-  process.env.TETHER_DB_PATH = `/tmp/tether-authtest-${Date.now()}-${process.pid}.db`;
-  const db = await import('./db');
-  const auth = await import('./auth');
-  getAuthHash = db.getAuthHash;
-  setAuthHash = db.setAuthHash;
-  verifyPassword = auth.verifyPassword;
-});
+// Isolation is guaranteed by test-preload.ts (bunfig.toml), which pins
+// TETHER_DB_PATH to a temp file BEFORE any test file imports ./db — so this
+// suite never touches the developer's live config database.
 
 test('verifyPassword false when no hash set', async () => {
   expect(getAuthHash()).toBeNull();

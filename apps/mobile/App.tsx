@@ -744,6 +744,9 @@ function AppInner() {
       await persistPassword(password);
       const addressChanged =
         serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port;
+      // A different server has never been connected to — reset so its first
+      // attempt shows the honest "Connecting…" (not "Reconnecting… session kept").
+      if (addressChanged) hasConnectedRef.current = false;
       setIsConfiguring(false);
       if (!readyRef.current) {
         readyRef.current = true;
