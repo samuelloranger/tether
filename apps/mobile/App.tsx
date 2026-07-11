@@ -248,6 +248,9 @@ function AppInner() {
   const inputRef = useRef<TextInput | null>(null);
   const reconnectTimeout = useRef<any>(null);
   const autoScroll = useRef(true);
+  // True while the current touch has scrolled the list, so a scroll-release
+  // isn't misread as a tap that focuses the input and pops the keyboard.
+  const scrolledRef = useRef(false);
   const lastContentHeight = useRef(0);
   const [blinkOn, setBlinkOn] = useState(true);
   useEffect(() => {
@@ -923,7 +926,14 @@ function AppInner() {
           >
             <Pressable
               style={{ flex: 1 }}
-              onPress={() => inputRef.current?.focus()}
+              onPressIn={() => {
+                scrolledRef.current = false;
+              }}
+              onPress={() => {
+                // Only a genuine tap focuses the input; a scroll-release must not
+                // pop the keyboard.
+                if (!scrolledRef.current) inputRef.current?.focus();
+              }}
               onLongPress={openSelectionView}
             >
               <FlatList
@@ -936,6 +946,7 @@ function AppInner() {
                 onScroll={onScroll}
                 onScrollBeginDrag={() => {
                   autoScroll.current = false;
+                  scrolledRef.current = true;
                 }}
                 scrollEventThrottle={100}
                 scrollEnabled={!mouseOn}
