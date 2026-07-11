@@ -1,5 +1,5 @@
 // Run: bun run src/input.test.ts  (from apps/mobile)
-import { computeInputDelta, SENT } from './input';
+import { applyFieldChange, computeInputDelta, SENT } from './input';
 
 let pass = 0;
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -55,6 +55,58 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 {
   const d = computeInputDelta(`${SENT}teh`, `${SENT}t`);
   eq(d.bytes, '\x7f\x7f', 'multi-char backspace');
+}
+
+// --- applyFieldChange: models the controlled-value loop ---
+// The hidden TextInput is controlled by `value`. After each onChangeText the
+// caller must set BOTH the controlled value and the previous-value ref to the
+// returned `value`, or React Native reverts the native field to the old value
+// and the next diff is computed against a stale prev (spurious deletes).
+// This helper drives that loop: `field` = what the native field shows before an
+// edit, which equals the last applied `value`.
+function drive(edits: ((field: string) => string)[]): string {
+  let value = SENT;
+  let sent = '';
+  for (const edit of edits) {
+    const next = edit(value); // user mutates the field currently showing `value`
+    const r = applyFieldChange(value, next);
+    sent += r.bytes;
+    value = r.value; // caller syncs controlled value + prev ref
+  }
+  return sent;
+}
+
+// 8. Sequential typing appends without a spurious delete (the PR#5 P1 bug)
+{
+  eq(drive([(f) => `${f}a`, (f) => `${f}b`]), 'ab', 'typing "ab" sends "ab"');
+}
+
+// 9. Dictated phrase then another word both survive
+{
+  eq(
+    drive([(f) => `${f}hello`, (f) => `${f} world`]),
+    'hello world',
+    'dictation accumulates across changes',
+  );
+}
+
+// 10. Backspace after typing deletes exactly one char
+{
+  eq(drive([(f) => `${f}ab`, (f) => f.slice(0, -1)]), 'ab\x7f', 'type "ab" then backspace');
+}
+
+// 11. applyFieldChange keeps value in step with prev (no snap-back to SENT)
+{
+  const r = applyFieldChange(SENT, `${SENT}a`);
+  eq(r.bytes, 'a', 'first char bytes');
+  eq(r.value, `${SENT}a`, 'value advances so the field will not snap back to SENT');
+}
+
+// 12. Sentinel eaten re-anchors the controlled value to SENT
+{
+  const r = applyFieldChange(SENT, '');
+  eq(r.bytes, '\x7f', 'backspace at empty sends one delete');
+  eq(r.value, SENT, 'value re-anchored to sentinel');
 }
 
 console.log(`\n  ${pass} assertions passed\n`);
