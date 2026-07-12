@@ -8,6 +8,9 @@ export default defineConfig({
   sitemap: { hostname: "https://samlo.cloud/tether/" },
   cleanUrls: true,
   appearance: false,
+  // Internal planning docs live under docs/superpowers/ — keep them in the repo
+  // but don't publish them on the site.
+  srcExclude: ["superpowers/**"],
   themeConfig: {
     logo: { src: "/icon.svg", alt: "Tether" },
     nav: [
