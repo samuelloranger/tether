@@ -3,7 +3,7 @@
 // `tether start` from anywhere to launch the backend as a detached background
 // process. State lives in ~/.tether (pid + log). The server always runs with
 // its own directory as cwd, so config/ and the SQLite db stay in apps/server/.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,8 @@ const SERVER_ENTRY = path.join(SERVER_DIR, 'src', 'server', 'index.ts');
 const STATE_DIR = path.join(homedir(), '.tether');
 const PID_FILE = path.join(STATE_DIR, 'server.pid');
 const LOG_FILE = path.join(STATE_DIR, 'server.log');
+const SRC_DIR = path.join(STATE_DIR, 'src'); // git cache clone for `tether update`
+const REPO_URL = process.env.TETHER_REPO ?? 'https://github.com/samuelloranger/tether.git';
 const PORT = process.env.TETHER_PORT ?? '8085';
 
 mkdirSync(STATE_DIR, { recursive: true });
@@ -107,9 +109,10 @@ Usage: tether <command>
   status    Show running state + HTTP health
   logs      Follow the server log (tail -f)
   set-password  Set the shared access password (required for clients)
+  update    Pull the latest server code from GitHub and redeploy (keeps config/)
   help      Show this help
 
-Env: TETHER_PORT (default 8085), TETHER_DB_PATH
+Env: TETHER_PORT (default 8085), TETHER_DB_PATH, TETHER_REPO
 State: ${STATE_DIR}`);
 }
 
@@ -189,6 +192,67 @@ async function setPassword(): Promise<void> {
   console.log('Password set. Restart the server if it is running: tether restart');
 }
 
+// Run a child command inheriting stdio; exit the CLI on failure.
+function run(cmd: string, args: string[], cwd?: string): void {
+  const r = spawnSync(cmd, args, { stdio: 'inherit', cwd });
+  if (r.error) {
+    console.error(`\nCould not run ${cmd}: ${r.error.message}`);
+    process.exit(1);
+  }
+  if (r.status !== 0) {
+    console.error(`\n${cmd} ${args.join(' ')} exited with code ${r.status}`);
+    process.exit(1);
+  }
+}
+
+// Pull the latest server code from GitHub and redeploy into ~/.tether/app,
+// preserving config/ (the SQLite db + password). Restarts the daemon if it was
+// running. Source repo overridable via TETHER_REPO.
+function update(): void {
+  const wasRunning = runningPid() !== null;
+
+  if (existsSync(path.join(SRC_DIR, '.git'))) {
+    console.log('Fetching latest tether source…');
+    run('git', ['-C', SRC_DIR, 'fetch', '--depth', '1', 'origin', 'main']);
+    run('git', ['-C', SRC_DIR, 'reset', '--hard', 'origin/main']);
+  } else {
+    console.log(`Cloning tether source from ${REPO_URL}…`);
+    rmSync(SRC_DIR, { recursive: true, force: true });
+    run('git', ['clone', '--depth', '1', REPO_URL, SRC_DIR]);
+  }
+
+  const serverSrc = `${path.join(SRC_DIR, 'apps', 'server')}/`;
+  if (!existsSync(serverSrc)) {
+    console.error(`\nUpdate failed: ${serverSrc} not found in the repo.`);
+    process.exit(1);
+  }
+
+  console.log('Updating server files (preserving config/)…');
+  // --delete drops files removed upstream; config/ + node_modules are preserved.
+  run('rsync', [
+    '-a',
+    '--delete',
+    '--exclude',
+    'config/',
+    '--exclude',
+    'node_modules/',
+    serverSrc,
+    `${SERVER_DIR}/`,
+  ]);
+
+  console.log('Installing dependencies…');
+  run('bun', ['install'], SERVER_DIR);
+
+  if (wasRunning) {
+    console.log('Restarting server…');
+    stop();
+    start();
+  } else {
+    console.log('Server not running. Start it with: tether start');
+  }
+  console.log('tether updated.');
+}
+
 const cmd = process.argv[2] ?? 'help';
 switch (cmd) {
   case 'start':
@@ -209,6 +273,9 @@ switch (cmd) {
     break;
   case 'set-password':
     await setPassword();
+    break;
+  case 'update':
+    update();
     break;
   default:
     help();
