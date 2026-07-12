@@ -52,12 +52,28 @@ chmod +x "$tmp"
 mv -f "$tmp" "$DEST"
 
 echo "Installed to $DEST"
+
+# Upgrading from the old source-copy installer? Stop its daemon so (a) the new
+# binary can take over on `tether start`, and (b) the DB migration on first run
+# copies a quiesced database, not one a live writer still holds in WAL. Killed by
+# pid here in plain shell — invoking the binary would trigger the migration while
+# the old daemon is still running.
+PID_FILE="${HOME}/.tether/server.pid"
+if [ -f "$PID_FILE" ]; then
+  oldpid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [ -n "${oldpid:-}" ] && kill -0 "$oldpid" 2>/dev/null; then
+    echo "Stopping previous tether daemon (pid $oldpid)…"
+    kill "$oldpid" 2>/dev/null || true
+    rm -f "$PID_FILE"
+  fi
+fi
+
 case ":${PATH}:" in
   *":${BIN_DIR}:"*) ;;
   *) echo "Add to PATH:  export PATH=\"${BIN_DIR}:\$PATH\"" ;;
 esac
 if [ -d "${HOME}/.tether/app" ]; then
-  echo "Note: old ~/.tether/app detected. Your database migrates automatically on first run; you can delete ~/.tether/app afterward."
+  echo "Note: old ~/.tether/app detected. Your database (password + sessions) migrates automatically on first run; delete ~/.tether/app afterward. Live PTY sessions from the old server won't reattach across the upgrade."
 fi
 echo "Next: tether set-password && tether start"
 echo "SECURITY: a password gates access, but traffic is unencrypted — run tether behind a tunnel (Tailscale / WireGuard / SSH)."
