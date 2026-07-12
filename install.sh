@@ -43,8 +43,13 @@ fi
 
 echo "Installing tether ${tag} (${asset})…"
 mkdir -p "$BIN_DIR"
-curl -fsSL "$url" -o "$DEST"
-chmod +x "$DEST"
+# Download to a temp file then move over $DEST. If $DEST is the old installer's
+# symlink (-> ~/.tether/app/cli.ts), `curl -o` would follow it and write into the
+# old tree; `mv -f` replaces the symlink itself with the real binary.
+tmp="$(mktemp "${BIN_DIR}/.tether.XXXXXX")"
+curl -fsSL "$url" -o "$tmp"
+chmod +x "$tmp"
+mv -f "$tmp" "$DEST"
 
 echo "Installed to $DEST"
 case ":${PATH}:" in

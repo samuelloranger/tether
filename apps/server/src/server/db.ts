@@ -13,7 +13,14 @@ mkdirSync(DB_DIR, { recursive: true });
 // one does, carry it over so sessions + the password survive the upgrade.
 if (usingDefault && !existsSync(DB_PATH) && existsSync(OLD_DB_PATH)) {
   console.log(`Migrating database from ${OLD_DB_PATH} to ${DB_PATH}`);
-  copyFileSync(OLD_DB_PATH, DB_PATH);
+  // The old DB runs in WAL mode; recently-committed rows (schema, sessions, the
+  // password) may still live only in the -wal file. Copy the whole set so the
+  // new DB replays the WAL on first open instead of losing that data.
+  for (const suffix of ['', '-wal', '-shm']) {
+    if (existsSync(OLD_DB_PATH + suffix)) {
+      copyFileSync(OLD_DB_PATH + suffix, DB_PATH + suffix);
+    }
+  }
 }
 
 export const db = new Database(DB_PATH, { create: true });

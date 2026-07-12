@@ -4,11 +4,16 @@ import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
+import { CONFIG_DIR } from './paths';
+import { selfArgv } from './runtime';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
 // first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
 // (not an inlined PS1) so the shell logic stays readable.
-const RC_DIR = path.join(process.cwd(), 'config');
+// bashrc + holder sockets live in the DB's config dir (TETHER_DB_PATH override
+// gets its own isolated set; otherwise ~/.tether/config). Independent of cwd so
+// the compiled binary — whose daemon cwd is $HOME — writes to the right place.
+const RC_DIR = process.env.TETHER_DB_PATH ? path.dirname(process.env.TETHER_DB_PATH) : CONFIG_DIR;
 const RC_PATH = path.join(RC_DIR, 'tether.bashrc');
 const BASHRC = [
   '[ -f ~/.bashrc ] && source ~/.bashrc',
@@ -39,11 +44,8 @@ writeFileSync(RC_PATH, BASHRC);
 // Each session's PTY lives in a detached holder process (holder.ts) so shells
 // survive tether server restarts; we speak newline-delimited JSON to it over a
 // unix socket (see holder.ts for the frame shapes). Holders live next to the
-// DB so a TETHER_DB_PATH override (tests) gets its own isolated set.
-const HOLDERS_DIR = process.env.TETHER_DB_PATH
-  ? path.join(path.dirname(process.env.TETHER_DB_PATH), 'holders')
-  : path.join(RC_DIR, 'holders');
-const HOLDER_PATH = path.join(import.meta.dir, 'holder.ts');
+// bashrc in the same config dir.
+const HOLDERS_DIR = path.join(RC_DIR, 'holders');
 mkdirSync(HOLDERS_DIR, { recursive: true });
 
 const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
@@ -245,11 +247,20 @@ async function doStartSession(
     unlinkSync(sockPath); // stale socket from a dead holder
   } catch {}
   const logFd = openSync(path.join(HOLDERS_DIR, `${id}.log`), 'a');
-  const holder = spawn(
-    process.execPath,
-    ['run', HOLDER_PATH, sockPath, String(dims.cols), String(dims.rows), homedir(), ...args],
-    { detached: true, stdio: ['ignore', logFd, logFd], env: scrubAgentEnv(process.env) },
-  );
+  // Re-invoke ourselves with the `holder` subcommand so this works from source
+  // (bun) and from the compiled binary alike (process.execPath is the binary).
+  const [holderCmd, ...holderArgs] = selfArgv('holder', [
+    sockPath,
+    String(dims.cols),
+    String(dims.rows),
+    homedir(),
+    ...args,
+  ]);
+  const holder = spawn(holderCmd, holderArgs, {
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    env: scrubAgentEnv(process.env),
+  });
   holder.unref();
 
   // Wait for the holder's socket to accept us (bun startup + listen).

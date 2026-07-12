@@ -3,19 +3,12 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { LOG_FILE, PID_FILE, STATE_DIR } from './paths';
+import { COMPILED, selfArgv, VERSION } from './runtime';
 import { serve } from './serve';
 
-const VERSION = process.env.TETHER_VERSION ?? 'dev';
-const COMPILED = VERSION !== 'dev';
 const PORT = process.env.TETHER_PORT ?? '8085';
 
 mkdirSync(STATE_DIR, { recursive: true });
-
-// argv needed to re-launch this same program with `serve`. Compiled binary:
-// [binary, 'serve']. Dev (bun run main.ts): [bun, main.ts, 'serve'].
-function selfServeArgv(): string[] {
-  return COMPILED ? [process.execPath, 'serve'] : [process.execPath, import.meta.path, 'serve'];
-}
 
 function alive(pid: number): boolean {
   try {
@@ -45,7 +38,7 @@ function start(): void {
   for (const k of Object.keys(env)) {
     if (k.startsWith('CLAUDE')) delete env[k];
   }
-  const [cmd, ...args] = selfServeArgv();
+  const [cmd, ...args] = selfArgv('serve');
   const child = spawn(cmd, args, {
     cwd: homedir(),
     env,
@@ -206,6 +199,12 @@ switch (cmd) {
   case 'update': {
     const { runUpdate } = await import('./update');
     await runUpdate({ version: VERSION, compiled: COMPILED, start, stop, runningPid });
+    break;
+  }
+  case 'holder': {
+    // Internal: the PTY holder process, spawned by pty.ts via selfArgv('holder').
+    const { runHolder } = await import('./holder');
+    runHolder(process.argv.slice(3));
     break;
   }
   case 'version':
