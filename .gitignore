@@ -39,3 +39,7 @@ apps/server/config/
 
 # CodeGraph local index
 .codegraph/
+
+# VitePress build artifacts
+docs/.vitepress/dist/
+docs/.vitepress/cache/
