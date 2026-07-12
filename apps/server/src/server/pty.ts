@@ -4,7 +4,7 @@ import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
-import { CONFIG_DIR } from './paths';
+import { CONFIG_DIR, OLD_HOLDERS_DIR } from './paths';
 import { selfArgv } from './runtime';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
@@ -99,7 +99,7 @@ function broadcast(
 
 // Connect to a session's holder socket and wire its frames into the existing
 // log + broadcast pipeline. Resolves once attached; rejects if nothing listens.
-function attach(id: string): Promise<SessionInstance> {
+function attach(id: string, sockPath: string = sockPathFor(id)): Promise<SessionInstance> {
   // Per-session streaming decoder: buffers incomplete multi-byte UTF-8 sequences
   // across PTY read chunks so split emoji/wide glyphs don't decode to U+FFFD (�).
   const decoder = new TextDecoder('utf-8');
@@ -139,7 +139,7 @@ function attach(id: string): Promise<SessionInstance> {
   return new Promise((resolve, reject) => {
     let settled = false;
     Bun.connect({
-      unix: sockPathFor(id),
+      unix: sockPath,
       socket: {
         open(sock) {
           settled = true;
@@ -281,27 +281,41 @@ async function doStartSession(
 // that are still live so boot code can mark them running again.
 export async function reattachHolders(): Promise<string[]> {
   const live: string[] = [];
-  let socks: string[] = [];
-  try {
-    socks = readdirSync(HOLDERS_DIR).filter((f) => f.endsWith('.sock'));
-  } catch {
-    return live;
-  }
-  for (const f of socks) {
-    const id = f.slice(0, -'.sock'.length);
+
+  const scan = async (dir: string, cleanupDead: boolean) => {
+    let socks: string[] = [];
     try {
-      await attach(id);
-      live.push(id);
+      socks = readdirSync(dir).filter((f) => f.endsWith('.sock'));
     } catch {
-      // Dead holder leftovers — clean up so they don't shadow future spawns.
-      try {
-        unlinkSync(path.join(HOLDERS_DIR, f));
-      } catch {}
-      try {
-        unlinkSync(path.join(HOLDERS_DIR, `${f}.pid`));
-      } catch {}
+      return;
     }
-  }
+    for (const f of socks) {
+      const id = f.slice(0, -'.sock'.length);
+      if (live.includes(id)) continue; // a holder in the primary dir already won
+      const sockPath = path.join(dir, f);
+      try {
+        await attach(id, sockPath);
+        live.push(id);
+      } catch {
+        // Dead holder leftovers — clean up so they don't shadow future spawns.
+        // Only prune the primary dir; leave the old upgrade dir untouched.
+        if (cleanupDead) {
+          try {
+            unlinkSync(sockPath);
+          } catch {}
+          try {
+            unlinkSync(`${sockPath}.pid`);
+          } catch {}
+        }
+      }
+    }
+  };
+
+  await scan(HOLDERS_DIR, true);
+  // One-time upgrade adoption: reattach live holders from a pre-binary install
+  // (old server cwd) so in-flight sessions survive. Skipped under a
+  // TETHER_DB_PATH override (tests) and self-disables once the old tree is gone.
+  if (!process.env.TETHER_DB_PATH) await scan(OLD_HOLDERS_DIR, false);
   return live;
 }
 

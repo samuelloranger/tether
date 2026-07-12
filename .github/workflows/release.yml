@@ -102,13 +102,15 @@ jobs:
     strategy:
       matrix:
         include:
-          - target: bun-linux-x64-modern
+          # x64 uses -baseline (no AVX2 requirement) so the single x64 asset runs
+          # on older CPUs too; arm64 has no such split.
+          - target: bun-linux-x64-baseline
             asset: tether-linux-x64
           - target: bun-linux-arm64
             asset: tether-linux-arm64
           - target: bun-darwin-arm64
             asset: tether-darwin-arm64
-          - target: bun-darwin-x64
+          - target: bun-darwin-x64-baseline
             asset: tether-darwin-x64
     steps:
       - uses: actions/checkout@v4

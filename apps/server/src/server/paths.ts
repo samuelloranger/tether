@@ -12,3 +12,6 @@ export const CONFIG_DIR = path.join(STATE_DIR, 'config');
 export const DEFAULT_DB_PATH = path.join(CONFIG_DIR, 'tether.db');
 // Pre-binary installs kept the DB inside the ~/.tether/app source copy.
 export const OLD_DB_PATH = path.join(STATE_DIR, 'app', 'config', 'tether.db');
+// ...and the holder sockets alongside it. Scanned once on upgrade so live PTY
+// sessions from the old server reattach.
+export const OLD_HOLDERS_DIR = path.join(STATE_DIR, 'app', 'config', 'holders');
