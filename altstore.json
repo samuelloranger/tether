@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.9",
+          "date": "2026-07-12",
+          "localizedDescription": "Patch: removes the unused Face ID (`NSFaceIDUsageDescription`) permission from the iOS build so AltStore installs without prompting for an undeclared permission. SecureStore keychain storage is unchanged (biometrics were never used).",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.9/tether-v1.0.9.ipa",
+          "size": 8145970,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.8",
           "date": "2026-07-11",
           "localizedDescription": "Patch on v1.0.7.\n\n- Honest connection state when switching servers: a first attempt to a new/unreachable server now shows **Connecting…** instead of a false *Reconnecting… (session kept running)*.\n- Server test isolation: `bun test` suite pins a temp DB via preload, so tests never touch a developer's live server password.",
