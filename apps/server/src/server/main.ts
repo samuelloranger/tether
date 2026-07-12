@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } 
 import { homedir } from 'node:os';
 import { LOG_FILE, PID_FILE, STATE_DIR } from './paths';
 import { COMPILED, selfArgv, VERSION } from './runtime';
-import { serve } from './serve';
 
 const PORT = process.env.TETHER_PORT ?? '8085';
 
@@ -174,9 +173,13 @@ State: ${STATE_DIR}`);
 
 const cmd = process.argv[2] ?? 'serve';
 switch (cmd) {
-  case 'serve':
+  case 'serve': {
+    // Lazy so control commands (stop/status/version/update) don't pull in
+    // serve→db and open/migrate the SQLite DB just to read a pid or print help.
+    const { serve } = await import('./serve');
     await serve();
     break;
+  }
   case 'start':
     start();
     break;
