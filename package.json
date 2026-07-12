@@ -14,7 +14,7 @@
     "lint": "bun --cwd apps/server lint && bun --cwd apps/mobile lint",
     "format": "bun --cwd apps/server format",
     "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
+    "docs:build": "cp install.sh docs/public/install.sh && vitepress build docs",
     "docs:preview": "vitepress preview docs"
   },
   "dependencies": {

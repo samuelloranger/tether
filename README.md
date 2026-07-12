@@ -17,7 +17,7 @@ A persistent remote-shell console: real PTY shells on your server, streamed to y
 ## Install the server
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | sh
+curl -fsSL https://samlo.cloud/tether/install.sh | sh
 tether set-password
 tether start
 ```
