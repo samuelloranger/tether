@@ -30,7 +30,7 @@ tether serve | start | stop | restart | status | logs | set-password | update | 
 
 - **Update later:** `tether update` downloads the newest release binary and restarts.
 - **macOS** binaries are unsigned — the first run may need: `xattr -d com.apple.quarantine ~/.local/bin/tether`.
-- **Data** (sessions + password) lives in `~/.tether/config/tether.db`; override with `TETHER_DB_PATH`. An existing `~/.tether/app` DB migrates automatically on first run.
+- **Data** (sessions + password) lives in `~/.tether/config/tether.db`; override with `TETHER_DB_PATH`.
 - Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`, `TETHER_REPO_SLUG`.
 
 > **Security:** a password gates all access (set it on first install), but **traffic is unencrypted**. Run tether behind a tunnel (Tailscale / WireGuard / SSH) for encryption; keep it LAN-only otherwise.
