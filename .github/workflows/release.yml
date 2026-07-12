@@ -97,6 +97,38 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  server:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: bun-linux-x64-modern
+            asset: tether-linux-x64
+          - target: bun-linux-arm64
+            asset: tether-linux-arm64
+          - target: bun-darwin-arm64
+            asset: tether-darwin-arm64
+          - target: bun-darwin-x64
+            asset: tether-darwin-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install workspace deps
+        run: bun install
+      - name: Compile ${{ matrix.asset }}
+        working-directory: apps/server
+        run: |
+          bun build --compile --minify \
+            --target=${{ matrix.target }} \
+            --define 'process.env.TETHER_VERSION="'"${GITHUB_REF_NAME}"'"' \
+            --outfile "${{ matrix.asset }}" \
+            src/server/main.ts
+      - name: Attach to release
+        working-directory: apps/server
+        run: gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   altstore:
     needs: ios
     runs-on: ubuntu-latest
