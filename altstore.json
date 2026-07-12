@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.0.10",
+          "date": "2026-07-12",
+          "localizedDescription": "## Fixes\n\n- `apps/server/bun.lock` was a stale duplicate of the workspace root lockfile, out of sync with `package.json` (typescript `^7.0.2` vs locked `^5.8.2`). Removed it — `install.sh` extracts `apps/server` standalone, so bun's frozen-lockfile check was tripping on the drift and hard-failing every fresh install.\n- `install.sh` now auto-recovers from lockfile drift: if `bun install --production` fails, it regenerates the lockfile and retries once before giving up.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.0.10/tether-v1.0.10.ipa",
+          "size": 8145734,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.9",
           "date": "2026-07-12",
           "localizedDescription": "Patch: removes the unused Face ID (`NSFaceIDUsageDescription`) permission from the iOS build so AltStore installs without prompting for an undeclared permission. SecureStore keychain storage is unchanged (biometrics were never used).",
