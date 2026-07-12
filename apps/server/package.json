@@ -8,8 +8,8 @@
   },
   "scripts": {
     "dev": "bun run --watch src/server/index.ts",
-    "build": "bun build src/server/index.ts --outdir dist --target bun",
-    "start": "bun run dist/index.js",
+    "build": "bun run build:binary",
+    "start": "./dist/tether serve",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "format": "biome check --write",

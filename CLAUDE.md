@@ -20,8 +20,8 @@ Run from repo root:
 - `bun dev:mobile` — Expo Metro bundler
 - `bun lint` — Biome check (server) + Expo lint (mobile)
 - `bun format` — `biome check --write` (server only)
-- `bun build:server` — bundle server to `apps/server/dist`
-- `bun start:server` — run built server
+- `bun build:server` — compile the standalone server binary to `apps/server/dist/tether`
+- `bun start:server` — run the compiled binary (`dist/tether serve`)
 
 Server typecheck: `bun --cwd apps/server typecheck`.
 
