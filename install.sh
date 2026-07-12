@@ -1,7 +1,7 @@
 #!/bin/sh
 # Tether server installer. Detects OS/arch, downloads the matching binary from
 # the latest GitHub release, installs to ~/.local/bin/tether. No bun/git needed.
-#   curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | sh
+#   curl -fsSL https://samlo.cloud/tether/install.sh | sh
 # Env: TETHER_VERSION=vX.Y.Z pins a version; DRY_RUN=1 prints the plan only.
 set -eu
 
