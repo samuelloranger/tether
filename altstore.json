@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.1.0",
+          "date": "2026-07-12",
+          "localizedDescription": "The server now ships as a **single self-contained binary** — no bun, git, or node_modules on the box.\n\n- **Install:** `curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | sh` — detects OS/arch, drops the binary in `~/.local/bin/tether`.\n- **Update:** `tether update` downloads the latest release binary and restarts (atomic swap). No more git/rsync.\n- One binary is the whole CLI: `serve | start | stop | restart | status | logs | set-password | update | version`.\n- Data moves to `~/.tether/config/tether.db`; an existing `~/.tether/app` install migrates automatically on first run (password + sessions preserved, live sessions reattached).\n- macOS binaries unsigned; x64 built baseline (no AVX2 requirement).",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.1.0/tether-v1.1.0.ipa",
+          "size": 8145966,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.0.10",
           "date": "2026-07-12",
           "localizedDescription": "## Fixes\n\n- `apps/server/bun.lock` was a stale duplicate of the workspace root lockfile, out of sync with `package.json` (typescript `^7.0.2` vs locked `^5.8.2`). Removed it — `install.sh` extracts `apps/server` standalone, so bun's frozen-lockfile check was tripping on the drift and hard-failing every fresh install.\n- `install.sh` now auto-recovers from lockfile drift: if `bun install --production` fails, it regenerates the lockfile and retries once before giving up.",
