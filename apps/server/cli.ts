@@ -113,18 +113,68 @@ Env: TETHER_PORT (default 8085), TETHER_DB_PATH
 State: ${STATE_DIR}`);
 }
 
+// Read a line of hidden input. The old readline `_writeToOutput` mute emitted
+// terminal refresh escapes (\x1b[0J) that wiped the visible prompt in a real
+// terminal — the command looked frozen. This reads stdin directly instead:
+// raw mode + manual char loop on a TTY (prompt stays visible, nothing echoes),
+// plain line read when piped.
+function readHidden(promptText: string): Promise<string> {
+  const stdin = process.stdin;
+  process.stdout.write(promptText);
+
+  if (!stdin.isTTY) {
+    return new Promise((resolve) => {
+      let buf = '';
+      stdin.setEncoding('utf8');
+      stdin.resume();
+      const onData = (d: string) => {
+        buf += d;
+        const nl = buf.indexOf('\n');
+        if (nl >= 0) {
+          stdin.off('data', onData);
+          stdin.pause();
+          resolve(buf.slice(0, nl).replace(/\r$/, ''));
+        }
+      };
+      stdin.on('data', onData);
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    const finish = (fn: () => void) => {
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdin.off('data', onData);
+      process.stdout.write('\n');
+      fn();
+    };
+    const onData = (chunk: string) => {
+      for (const c of chunk) {
+        if (c === '\r' || c === '\n') return finish(() => resolve(buf));
+        if (c === '\x03') return finish(() => reject(new Error('cancelled'))); // Ctrl-C
+        if (c === '\x7f' || c === '\b') {
+          buf = buf.slice(0, -1); // backspace
+        } else if (c >= ' ') {
+          buf += c;
+        }
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
+
 async function setPassword(): Promise<void> {
-  process.stdout.write('New Tether password: ');
-  // Read one line without echo.
-  const { createInterface } = await import('node:readline');
-  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-  const orig = (rl as unknown as { output: NodeJS.WriteStream }).output;
-  (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = (s: string) => {
-    if (s.includes('\n') || s.includes('\r')) orig.write(s);
-  };
-  const password: string = await new Promise((resolve) => rl.question('', resolve));
-  rl.close();
-  process.stdout.write('\n');
+  let password: string;
+  try {
+    password = await readHidden('New Tether password: ');
+  } catch {
+    console.error('\nCancelled.');
+    process.exit(1);
+  }
   if (!password || password.length < 1) {
     console.error('Password cannot be empty.');
     process.exit(1);
