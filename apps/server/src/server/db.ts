@@ -1,17 +1,16 @@
 import { Database } from 'bun:sqlite';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_DB_PATH, OLD_DB_PATH } from './paths';
+import { DB_PATH, OLD_DB_PATH, USING_DEFAULT_DB } from './paths';
+import { COMPILED } from './runtime';
 
-const usingDefault = !process.env.TETHER_DB_PATH;
-const DB_PATH = process.env.TETHER_DB_PATH ?? DEFAULT_DB_PATH;
 const DB_DIR = path.dirname(DB_PATH);
 mkdirSync(DB_DIR, { recursive: true });
 
 // One-time migration: pre-binary installs kept the DB in the ~/.tether/app
-// source copy. If we're on the default path, it doesn't exist yet, and the old
-// one does, carry it over so sessions + the password survive the upgrade.
-if (usingDefault && !existsSync(DB_PATH) && existsSync(OLD_DB_PATH)) {
+// source copy. Only for the installed binary on its default path (never a dev
+// run or a TETHER_DB_PATH override), and only if the new DB doesn't exist yet.
+if (COMPILED && USING_DEFAULT_DB && !existsSync(DB_PATH) && existsSync(OLD_DB_PATH)) {
   console.log(`Migrating database from ${OLD_DB_PATH} to ${DB_PATH}`);
   // The old DB runs in WAL mode; recently-committed rows (schema, sessions, the
   // password) may still live only in the -wal file. Copy the whole set so the

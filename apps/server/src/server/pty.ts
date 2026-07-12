@@ -4,16 +4,15 @@ import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
-import { CONFIG_DIR, OLD_HOLDERS_DIR } from './paths';
-import { selfArgv } from './runtime';
+import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
+import { COMPILED, selfArgv } from './runtime';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
 // first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
 // (not an inlined PS1) so the shell logic stays readable.
-// bashrc + holder sockets live in the DB's config dir (TETHER_DB_PATH override
-// gets its own isolated set; otherwise ~/.tether/config). Independent of cwd so
-// the compiled binary — whose daemon cwd is $HOME — writes to the right place.
-const RC_DIR = process.env.TETHER_DB_PATH ? path.dirname(process.env.TETHER_DB_PATH) : CONFIG_DIR;
+// bashrc + holder sockets live alongside the DB (CONFIG_DIR already resolves
+// env / installed-binary / dev-source to the right place — see paths.ts).
+const RC_DIR = CONFIG_DIR;
 const RC_PATH = path.join(RC_DIR, 'tether.bashrc');
 const BASHRC = [
   '[ -f ~/.bashrc ] && source ~/.bashrc',
@@ -313,9 +312,10 @@ export async function reattachHolders(): Promise<string[]> {
 
   await scan(HOLDERS_DIR, true);
   // One-time upgrade adoption: reattach live holders from a pre-binary install
-  // (old server cwd) so in-flight sessions survive. Skipped under a
-  // TETHER_DB_PATH override (tests) and self-disables once the old tree is gone.
-  if (!process.env.TETHER_DB_PATH) await scan(OLD_HOLDERS_DIR, false);
+  // (old server cwd) so in-flight sessions survive. Only for the installed binary
+  // on its default path — never a dev run or TETHER_DB_PATH override — and it
+  // self-disables once the old tree is gone.
+  if (COMPILED && USING_DEFAULT_DB) await scan(OLD_HOLDERS_DIR, false);
   return live;
 }
 
