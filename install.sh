@@ -69,7 +69,11 @@ fi
 chmod +x "$APP_DIR/cli.ts"
 
 say "installing dependencies"
-(cd "$APP_DIR" && bun install --production)
+if ! (cd "$APP_DIR" && bun install --production); then
+  say "install failed — likely lockfile drift, regenerating and retrying"
+  rm -f "$APP_DIR/bun.lock" "$APP_DIR/bun.lockb"
+  (cd "$APP_DIR" && bun install --production) || die "bun install failed even after lockfile regen"
+fi
 
 # --- 4. CLI on PATH -----------------------------------------------------------
 mkdir -p "$BIN_DIR"
