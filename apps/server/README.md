@@ -1,51 +1,47 @@
-# Tether 📱🔌
+# Tether server 📱🔌
 
-> Persistent terminal agent console designed for mobile browsers and background stability.
+> Persistent remote-shell backend. Real PTY shells on your host, streamed to the Tether mobile app over WebSocket, logged so clients can reconnect and replay.
 
-**Tether** is a self-hosted, lightweight web application built to run long-running terminal agents (like `claude-code`, `antigravity`, or standard interactive bash shells) persistently on your server. It is specifically designed to solve the issue of iOS backgrounding aggressively killing TCP/SSH connections (causing WebSSH and other client apps to drop sessions and interrupt running agents).
+**Tether** runs long-running terminal agents (`claude-code`, builds, interactive bash) persistently on your server. It solves iOS aggressively backgrounding connections (which drops WebSSH-style sessions and interrupts running agents): the shell lives in a detached holder process on the server and keeps running across client disconnects **and** server restarts.
+
+This package is the **server only** — an API/WebSocket backend with no web UI. The client is the Expo React Native app in [`apps/mobile`](../mobile).
 
 ---
 
-## 🛠️ The Architecture
+## 🛠️ Architecture
 
-Instead of connecting directly via SSH, you run **Tether** on your host. You access the terminal console using an installable **Progressive Web App (PWA)** built on Svelte 5.
-
-*   **Native Bun PTY:** Spawns subprocesses natively using Bun's fast built-in terminal spawn wrapper (`Bun.spawn`), avoiding heavy legacy compiled C++ add-ons like `node-pty`.
-*   **Persistent SQLite Log Cache:** All terminal stdout chunks are buffered directly into an SQLite database with incremental row IDs.
-*   **State-Recovery Protocol:** If the iOS device goes to sleep, locks, or suspends the browser tab, the connection drops. Upon focus/wakeup, the Svelte client automatically reconnects, sends the last received log ID, and re-syncs all missed terminal output logs instantly from the SQLite cache. Your background processes are never interrupted.
-*   **Mobile-First Virtual Terminal:** Avoids hard-to-use virtual keyboard terminal inputs by providing a hybrid chat-style prompt input, along with persistent controls for key combinations (`Ctrl+C`, `Tab`, `Ctrl+D`, `Esc`) and command history navigation.
+- **Native Bun PTY:** shells are spawned with `Bun.spawn(..., { terminal })` (requires Bun ≥ 1.3.14) — no `node-pty`.
+- **Detached holder processes:** each session's PTY lives in its own `holder` process (`main.ts holder …`) that owns a unix socket. The Hono server attaches to it, so the shell survives server restarts; on boot the server reattaches to surviving holders.
+- **Persistent SQLite log cache:** every stdout chunk is written to `bun:sqlite` with an incrementing row id (capped per session, pruned periodically).
+- **Reconnect + replay:** clients persist the last log id they saw; on reconnect the server replays everything since that id from SQLite, so no output is missed. A prune watermark tells a client to reset if its cursor predates pruned rows.
+- **Shared-password auth:** all `/api/*` routes (HTTP + the WS upgrade) require `Authorization: Bearer <password>` (argon2 hash in the DB). Set it with `tether set-password` or first-run TOFU pairing (`/api/status` + one-time `/api/setup`).
 
 ---
 
 ## 🚀 Tech Stack
-*   **Runtime:** [Bun](https://bun.sh)
-*   **Backend Web Server:** [Hono](https://hono.dev) + WebSockets
-*   **Database:** Bun Native SQLite (`bun:sqlite`)
-*   **Frontend UI:** [Svelte 5](https://svelte.dev) + TypeScript + Vite
-*   **Icons:** [Lucide Svelte](https://github.com/lucide-dev/lucide)
-*   **Formatting/Linter:** [Biome](https://biomejs.dev)
+- **Runtime:** [Bun](https://bun.sh) (≥ 1.3.14)
+- **Server:** [Hono](https://hono.dev) + WebSockets
+- **Database:** Bun native SQLite (`bun:sqlite`)
+- **Formatting/Linter:** [Biome](https://biomejs.dev)
+
+The single distributable is a `bun build --compile` binary (bin name `tether`) that is both the daemon and the control CLI.
 
 ---
 
 ## 💻 Development
 
-### Setup
-Ensure you have Bun installed, then install dependencies:
+From the repo root: `bun install`, then run the server from source in watch mode (port `8085`):
 ```bash
-bun install
+bun dev:server          # == bun --cwd apps/server dev
 ```
+Dev runs use a repo-local `apps/server/config/tether.db` (isolated from any installed binary's `~/.tether/config`). Override with `TETHER_DB_PATH`.
 
-### Run in Dev Mode
-Run the Hono API server in watch mode (port `8085`):
+Typecheck / lint / format:
 ```bash
-bun run dev
+bun --cwd apps/server typecheck
+bun lint
+bun format
 ```
-
-In a separate terminal, launch the Svelte development server (port `5173`):
-```bash
-cd src/web && bun run dev
-```
-*Note: Vite dev server is pre-configured to proxy `/api` and WebSocket upgrade requests to the Hono backend on port `8085`.*
 
 ---
 
@@ -53,11 +49,17 @@ cd src/web && bun run dev
 
 Compile the server into a single self-contained binary (`dist/tether`):
 ```bash
-bun run build
+bun run build          # == build:binary
 ```
 
 Run the compiled binary:
 ```bash
-bun run start        # ./dist/tether serve
+bun run start          # ./dist/tether serve
 ```
-It listens on port `8085` (or `process.env.TETHER_PORT`). For distribution, CI cross-compiles the four release binaries; end users install via `install.sh` and manage the daemon with `tether start|stop|status|update`.
+It listens on port `8085` (or `process.env.TETHER_PORT`). For distribution, CI cross-compiles the four release binaries (`tether-{linux,darwin}-{x64,arm64}`); end users install via [`install.sh`](../../install.sh) and manage the daemon with `tether start | stop | status | update`.
+
+---
+
+## 🔒 Security
+
+The password gates **access**, not the wire — traffic is unencrypted (`0.0.0.0`, open CORS). Run tether behind a tunnel (Tailscale / WireGuard / SSH) for encryption, or keep it LAN-only. With no password set, every client is rejected.

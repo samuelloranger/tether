@@ -9,7 +9,7 @@ Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY s
 ## Monorepo layout (Bun workspaces)
 
 - `apps/server/` — Bun + Hono backend (`tether`). PTY launcher + SQLite logger + API/WS.
-  - `src/server/` — `index.ts` (Bun.serve entry), `app.ts` (Hono routes + WS gateway), `pty.ts` (process lifecycle), `db.ts` (bun:sqlite + migrations).
+  - `src/server/` — `main.ts` (compiled-binary entry: argv dispatch + control CLI), `serve.ts` (`serve()` — reattach holders + `Bun.serve`), `index.ts` (dev entry → `serve()`), `app.ts` (Hono routes + WS gateway + password auth), `pty.ts` (holder/PTY lifecycle), `db.ts` (bun:sqlite + migrations), `update.ts` (self-update), `paths.ts`/`runtime.ts` (paths + compiled-mode detection).
 - `apps/mobile/` — Expo RN client (`tether-mobile`). `App.tsx` (UI + session management) + `src/terminal.ts` (VT emulator), `src/sessionCache.ts` (LRU tab cache), `src/SessionDrawer.tsx` (tab drawer).
 
 ## Commands
@@ -51,9 +51,9 @@ The **same PTY process survives client disconnects** — that's the whole point 
 - Formatting is Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100. Run `bun format` before committing.
 - `bun:sqlite` uses `$name` named params. Schema changes go through the `migrations` array in `db.ts` (versioned, idempotent) — never edit an applied migration; append a new one.
 - Terminal rendering: the mobile client uses a full VT emulator `apps/mobile/src/terminal.ts` (grid + scrollback, cursor addressing / alt-screen / caret). Icons are Feather from `@expo/vector-icons`.
-- DB and runtime state live in `~/.tether/config/tether.db` for the installed binary (dev/tests use `TETHER_DB_PATH`, which overrides). An existing pre-binary `~/.tether/app/config/tether.db` migrates automatically on first run. Override port with `TETHER_PORT`.
+- DB and runtime state live in `~/.tether/config/tether.db` for the installed binary (dev/tests use `TETHER_DB_PATH`, which overrides). Override port with `TETHER_PORT`.
 - **Mobile only:** before writing Expo code, read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ (per `apps/mobile/AGENTS.md`). Expo 57 / RN 0.86 / React 19.
 
 ## Security note
 
-The server exposes an **unauthenticated** shell over the network (`0.0.0.0`, `cors origin: '*'`). Anyone who can reach the port gets a shell. Treat it as LAN-only / behind a tunnel unless auth is added.
+All `/api/*` routes (HTTP + the WS upgrade) require a shared password — argon2 hash in the DB, set via `tether set-password` or first-run TOFU pairing (`GET /api/status` + one-time `POST /api/setup`). No password ⇒ every client is rejected (401). This closes the "anyone who reaches the port gets a shell" hole. **Transport is still unencrypted** (`0.0.0.0`, `cors origin: '*'`) — the password gates access but does not encrypt traffic, so run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only.
