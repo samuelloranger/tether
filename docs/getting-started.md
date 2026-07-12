@@ -5,7 +5,7 @@ Tether has two halves: a **server** you run on your machine, and the **mobile ap
 ## 1. Install the server
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | sh
+curl -fsSL https://samlo.cloud/tether/install.sh | sh
 ```
 
 This downloads a single self-contained binary for your OS/arch into `~/.local/bin/tether` — no bun, git, or node_modules required. If `tether` isn't found afterward, add `~/.local/bin` to your `PATH` (the installer prints the exact line).

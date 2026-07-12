@@ -43,3 +43,6 @@ apps/server/config/
 # VitePress build artifacts
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+
+# generated: canonical install.sh copied in at docs build
+docs/public/install.sh
