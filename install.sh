@@ -1,91 +1,97 @@
-#!/usr/bin/env bash
-# Tether server installer — no git clone needed.
-#
-#   curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | bash
-#
-# While the repo is private, pass a token (classic PAT or `gh auth token`):
-#   curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" .../install.sh | GITHUB_TOKEN=... bash
-#
-# Env overrides:
-#   TETHER_REF    git ref to install (default: main)
-#   TETHER_HOME   install dir (default: ~/.tether/app)
-#   TETHER_BIN    symlink dir for the CLI (default: ~/.local/bin)
-#   GITHUB_TOKEN  auth for private repo download
-set -euo pipefail
+#!/bin/sh
+# Tether server installer. Detects OS/arch, downloads the matching binary from
+# the latest GitHub release, installs to ~/.local/bin/tether. No bun/git needed.
+#   curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | sh
+# Env: TETHER_VERSION=vX.Y.Z pins a version; DRY_RUN=1 prints the plan only.
+set -eu
 
-REPO="samuelloranger/tether"
-REF="${TETHER_REF:-main}"
-APP_DIR="${TETHER_HOME:-$HOME/.tether/app}"
-BIN_DIR="${TETHER_BIN:-$HOME/.local/bin}"
-MIN_BUN="1.3.14" # Bun.spawn PTY support — older bun silently breaks sessions
+REPO="${TETHER_REPO_SLUG:-samuelloranger/tether}"
+BIN_DIR="${HOME}/.local/bin"
+DEST="${BIN_DIR}/tether"
 
-say() { printf '\033[36m[tether]\033[0m %s\n' "$*"; }
-die() {
-  printf '\033[31m[tether]\033[0m %s\n' "$*" >&2
-  exit 1
-}
-
-# --- 1. Bun ------------------------------------------------------------------
-if ! command -v bun >/dev/null 2>&1; then
-  say "bun not found — installing via bun.sh"
-  curl -fsSL https://bun.sh/install | bash
-  export PATH="$HOME/.bun/bin:$PATH"
-fi
-BUN_V="$(bun --version)"
-if [ "$(printf '%s\n%s\n' "$MIN_BUN" "$BUN_V" | sort -V | head -1)" != "$MIN_BUN" ]; then
-  say "bun $BUN_V too old (need >= $MIN_BUN) — upgrading"
-  bun upgrade || die "bun upgrade failed; install bun >= $MIN_BUN manually"
-fi
-say "bun $(bun --version) ok"
-
-# --- 2. Download the server workspace ---------------------------------------
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-AUTH=()
-[ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
-say "downloading $REPO@$REF"
-curl -fL "${AUTH[@]}" "https://api.github.com/repos/$REPO/tarball/$REF" -o "$TMP/src.tgz" ||
-  die "download failed — private repo? set GITHUB_TOKEN"
-tar -xzf "$TMP/src.tgz" -C "$TMP"
-SRC="$(find "$TMP" -maxdepth 4 -type d -path '*/apps/server' | head -1)"
-[ -n "$SRC" ] || die "tarball layout unexpected: apps/server not found"
-
-# --- 3. Install (preserve config/: DB, holders, bashrc) ----------------------
-if [ -x "$APP_DIR/cli.ts" ]; then
-  say "stopping existing server for upgrade (sessions survive in their holders)"
-  bun "$APP_DIR/cli.ts" stop >/dev/null 2>&1 || true
-fi
-mkdir -p "$APP_DIR"
-if [ -d "$APP_DIR/config" ]; then
-  mv "$APP_DIR/config" "$TMP/config.keep"
-fi
-rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR"
-cp -R "$SRC/." "$APP_DIR/"
-if [ -d "$TMP/config.keep" ]; then
-  rm -rf "$APP_DIR/config"
-  mv "$TMP/config.keep" "$APP_DIR/config"
-fi
-chmod +x "$APP_DIR/cli.ts"
-
-say "installing dependencies"
-if ! (cd "$APP_DIR" && bun install --production); then
-  say "install failed — likely lockfile drift, regenerating and retrying"
-  rm -f "$APP_DIR/bun.lock" "$APP_DIR/bun.lockb"
-  (cd "$APP_DIR" && bun install --production) || die "bun install failed even after lockfile regen"
-fi
-
-# --- 4. CLI on PATH -----------------------------------------------------------
-mkdir -p "$BIN_DIR"
-ln -sf "$APP_DIR/cli.ts" "$BIN_DIR/tether"
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) say "NOTE: add $BIN_DIR to your PATH to use 'tether' directly" ;;
+os="$(uname -s)"
+case "$os" in
+  Linux) os=linux ;;
+  Darwin) os=darwin ;;
+  *) echo "Unsupported OS: $os" >&2; exit 1 ;;
 esac
 
-# --- 5. Start ------------------------------------------------------------------
-say "starting server"
-"$BIN_DIR/tether" start
-"$BIN_DIR/tether" status
-say "done — server data lives in $APP_DIR/config, logs in ~/.tether/server.log"
-say "SECURITY: the server is unauthenticated on 0.0.0.0 — keep it LAN/VPN-only"
+arch="$(uname -m)"
+case "$arch" in
+  x86_64 | amd64) arch=x64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) echo "Unsupported arch: $arch" >&2; exit 1 ;;
+esac
+
+asset="tether-${os}-${arch}"
+
+if [ -n "${TETHER_VERSION:-}" ]; then
+  tag="$TETHER_VERSION"
+else
+  tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+    | grep '"tag_name"' | head -1 | cut -d '"' -f 4)"
+fi
+[ -n "$tag" ] || { echo "Could not resolve latest release tag" >&2; exit 1; }
+
+url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
+
+if [ "${DRY_RUN:-0}" = "1" ]; then
+  echo "would download: $url"
+  echo "would install to: $DEST"
+  exit 0
+fi
+
+echo "Installing tether ${tag} (${asset})…"
+mkdir -p "$BIN_DIR"
+# Download to a temp file then move over $DEST. If $DEST is the old installer's
+# symlink (-> ~/.tether/app/cli.ts), `curl -o` would follow it and write into the
+# old tree; `mv -f` replaces the symlink itself with the real binary.
+tmp="$(mktemp "${BIN_DIR}/.tether.XXXXXX")"
+curl -fsSL "$url" -o "$tmp"
+chmod +x "$tmp"
+mv -f "$tmp" "$DEST"
+
+echo "Installed to $DEST"
+
+# Upgrading from the old source-copy installer? Stop its daemon so (a) the new
+# binary can take over on `tether start`, and (b) the DB migration on first run
+# copies a quiesced database, not one a live writer still holds in WAL. Killed by
+# pid here in plain shell — invoking the binary would trigger the migration while
+# the old daemon is still running.
+PID_FILE="${HOME}/.tether/server.pid"
+if [ -f "$PID_FILE" ]; then
+  oldpid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [ -n "${oldpid:-}" ] && kill -0 "$oldpid" 2>/dev/null; then
+    echo "Stopping previous tether daemon (pid $oldpid)…"
+    kill "$oldpid" 2>/dev/null || true
+    # SIGTERM returns immediately; wait for the process to actually exit so it has
+    # released the SQLite DB before the first-run migration copies it (else the
+    # copy can be torn / lose the password or sessions). Escalate after ~5s.
+    i=0
+    while kill -0 "$oldpid" 2>/dev/null; do
+      i=$((i + 1))
+      if [ "$i" -ge 50 ]; then
+        kill -9 "$oldpid" 2>/dev/null || true
+        break
+      fi
+      sleep 0.1
+    done
+    rm -f "$PID_FILE"
+  fi
+fi
+
+# If ~/.local/bin isn't on PATH, `tether ...` won't resolve in the current shell,
+# so print the next-step commands with the full path (and the export hint) — the
+# advertised first-run flow must work without a PATH edit.
+case ":${PATH}:" in
+  *":${BIN_DIR}:"*) cmd="tether" ;;
+  *)
+    echo "Add to PATH:  export PATH=\"${BIN_DIR}:\$PATH\""
+    cmd="$DEST"
+    ;;
+esac
+if [ -d "${HOME}/.tether/app" ]; then
+  echo "Note: old ~/.tether/app detected. Your database (password + sessions) migrates automatically on first run; delete ~/.tether/app afterward. Live PTY sessions from the old server won't reattach across the upgrade."
+fi
+echo "Next: $cmd set-password && $cmd start"
+echo "SECURITY: a password gates access, but traffic is unencrypted — run tether behind a tunnel (Tailscale / WireGuard / SSH)."

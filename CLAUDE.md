@@ -20,12 +20,12 @@ Run from repo root:
 - `bun dev:mobile` — Expo Metro bundler
 - `bun lint` — Biome check (server) + Expo lint (mobile)
 - `bun format` — `biome check --write` (server only)
-- `bun build:server` — bundle server to `apps/server/dist`
-- `bun start:server` — run built server
+- `bun build:server` — compile the standalone server binary to `apps/server/dist/tether`
+- `bun start:server` — run the compiled binary (`dist/tether serve`)
 
 Server typecheck: `bun --cwd apps/server typecheck`.
 
-**Run the backend as a background daemon:** `apps/server/cli.ts` (bin name `tether`). Install once by symlinking it onto PATH (`ln -sf "$PWD/apps/server/cli.ts" ~/.local/bin/tether`), then from anywhere: `tether start | stop | restart | status | logs`. It spawns `bun run src/server/index.ts` detached (cwd pinned to `apps/server`, so `config/` + db stay there); pid + log live in `~/.tether/`. Honors `TETHER_PORT` / `TETHER_DB_PATH`.
+**Run the backend as a background daemon:** the server ships as a single compiled binary (`bun build --compile` of `apps/server/src/server/main.ts`, bin name `tether`), installed via `install.sh` into `~/.local/bin/tether`. The binary *is* the CLI — argv dispatch: `serve` (default) runs the daemon in foreground; `start | stop | restart | status | logs | set-password | update | version` are control ops. `start` re-execs itself (`serve`) detached; pid + log live in `~/.tether/`. `tether update` downloads the latest release binary and swaps it in. Honors `TETHER_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`. Dev runs from source: `bun dev:server` (or `bun run src/server/index.ts`, which calls the same `serve()`). CI's `release.yml` ships four server binaries (`tether-{linux,darwin}-{x64,arm64}`) alongside the mobile artifacts on each `vX.Y.Z` release.
 Native iOS build: `cd apps/mobile && npx expo run:ios --device` (dev build to a connected device; Expo Go doesn't support SDK 57).
 
 There are **no tests** in this repo. There is no test runner configured.
@@ -51,7 +51,7 @@ The **same PTY process survives client disconnects** — that's the whole point 
 - Formatting is Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100. Run `bun format` before committing.
 - `bun:sqlite` uses `$name` named params. Schema changes go through the `migrations` array in `db.ts` (versioned, idempotent) — never edit an applied migration; append a new one.
 - Terminal rendering: the mobile client uses a full VT emulator `apps/mobile/src/terminal.ts` (grid + scrollback, cursor addressing / alt-screen / caret). Icons are Feather from `@expo/vector-icons`.
-- DB and runtime state live in `apps/server/config/*.db` (gitignored). Override paths with `TETHER_DB_PATH`, port with `TETHER_PORT`.
+- DB and runtime state live in `~/.tether/config/tether.db` for the installed binary (dev/tests use `TETHER_DB_PATH`, which overrides). An existing pre-binary `~/.tether/app/config/tether.db` migrates automatically on first run. Override port with `TETHER_PORT`.
 - **Mobile only:** before writing Expo code, read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ (per `apps/mobile/AGENTS.md`). Expo 57 / RN 0.86 / React 19.
 
 ## Security note
