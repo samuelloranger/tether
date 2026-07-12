@@ -14,21 +14,26 @@
 
 A persistent remote-shell console: real PTY shells on your server, streamed to your phone over WebSocket. Shells keep running when you disconnect — and survive server restarts.
 
-## Install the server (no clone needed)
+## Install the server
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | sh
+tether set-password
+tether start
 ```
 
-The installer checks/installs Bun (**≥ 1.3.14** — required for PTY support), downloads the server to `~/.tether/app`, symlinks the `tether` CLI into `~/.local/bin`, and starts the daemon on port `8085`. Re-running it upgrades in place; your sessions and data (`config/`) are preserved.
+The installer detects your OS/arch and downloads a single self-contained binary (no bun, git, or node_modules needed) from the latest release into `~/.local/bin/tether`. If `tether` isn't found afterward, add `~/.local/bin` to your PATH (the installer prints the exact line, and the commands it prints use the full path meanwhile).
 
 ```bash
-tether start | stop | restart | status | logs
+tether serve | start | stop | restart | status | logs | set-password | update | version
 ```
 
-Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`. Installer overrides: `TETHER_REF`, `TETHER_HOME`, `TETHER_BIN`.
+- **Update later:** `tether update` downloads the newest release binary and restarts.
+- **macOS** binaries are unsigned — the first run may need: `xattr -d com.apple.quarantine ~/.local/bin/tether`.
+- **Data** (sessions + password) lives in `~/.tether/config/tether.db`; override with `TETHER_DB_PATH`. An existing `~/.tether/app` DB migrates automatically on first run.
+- Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`, `TETHER_REPO_SLUG`.
 
-> **Security:** the server exposes an **unauthenticated shell** on `0.0.0.0`. Anyone who can reach the port gets a shell. Keep it LAN-only or behind a VPN/tunnel.
+> **Security:** a password gates all access (set it on first install), but **traffic is unencrypted**. Run tether behind a tunnel (Tailscale / WireGuard / SSH) for encryption; keep it LAN-only otherwise.
 
 ## What you get
 

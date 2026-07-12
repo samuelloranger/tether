@@ -51,14 +51,13 @@ cd src/web && bun run dev
 
 ## 📦 Production Deployment
 
-To compile the Svelte 5 frontend and package the Hono backend into a single distribution:
+Compile the server into a single self-contained binary (`dist/tether`):
 ```bash
 bun run build
 ```
-This builds the client assets to `src/web/dist` and bundles the server into `dist/index.js`.
 
-To start the production server:
+Run the compiled binary:
 ```bash
-bun run start
+bun run start        # ./dist/tether serve
 ```
-The application will run on port `8085` (or `process.env.TETHER_PORT`). You can access it in your browser and save it to your iOS Home Screen as a standalone PWA.
+It listens on port `8085` (or `process.env.TETHER_PORT`). For distribution, CI cross-compiles the four release binaries; end users install via `install.sh` and manage the daemon with `tether start|stop|status|update`.

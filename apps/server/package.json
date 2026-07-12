@@ -4,15 +4,16 @@
   "private": true,
   "type": "module",
   "bin": {
-    "tether": "./cli.ts"
+    "tether": "./src/server/main.ts"
   },
   "scripts": {
     "dev": "bun run --watch src/server/index.ts",
-    "build": "bun build src/server/index.ts --outdir dist --target bun",
-    "start": "bun run dist/index.js",
+    "build": "bun run build:binary",
+    "start": "./dist/tether serve",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
-    "format": "biome check --write"
+    "format": "biome check --write",
+    "build:binary": "bun build --compile --minify --define process.env.TETHER_VERSION=\\\"${TETHER_VERSION:-dev}\\\" --outfile dist/tether src/server/main.ts"
   },
   "dependencies": {
     "hono": "^4.7.4",
