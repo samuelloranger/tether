@@ -22,7 +22,7 @@ tether set-password
 tether start
 ```
 
-The installer detects your OS/arch and downloads a single self-contained binary (no bun, git, or node_modules needed) from the latest release into `~/.local/bin/tether`.
+The installer detects your OS/arch and downloads a single self-contained binary (no bun, git, or node_modules needed) from the latest release into `~/.local/bin/tether`. If `tether` isn't found afterward, add `~/.local/bin` to your PATH (the installer prints the exact line, and the commands it prints use the full path meanwhile).
 
 ```bash
 tether serve | start | stop | restart | status | logs | set-password | update | version

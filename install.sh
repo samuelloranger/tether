@@ -80,12 +80,18 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
+# If ~/.local/bin isn't on PATH, `tether ...` won't resolve in the current shell,
+# so print the next-step commands with the full path (and the export hint) — the
+# advertised first-run flow must work without a PATH edit.
 case ":${PATH}:" in
-  *":${BIN_DIR}:"*) ;;
-  *) echo "Add to PATH:  export PATH=\"${BIN_DIR}:\$PATH\"" ;;
+  *":${BIN_DIR}:"*) cmd="tether" ;;
+  *)
+    echo "Add to PATH:  export PATH=\"${BIN_DIR}:\$PATH\""
+    cmd="$DEST"
+    ;;
 esac
 if [ -d "${HOME}/.tether/app" ]; then
   echo "Note: old ~/.tether/app detected. Your database (password + sessions) migrates automatically on first run; delete ~/.tether/app afterward. Live PTY sessions from the old server won't reattach across the upgrade."
 fi
-echo "Next: tether set-password && tether start"
+echo "Next: $cmd set-password && $cmd start"
 echo "SECURITY: a password gates access, but traffic is unencrypted — run tether behind a tunnel (Tailscale / WireGuard / SSH)."
