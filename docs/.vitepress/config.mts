@@ -22,6 +22,7 @@ export default defineConfig({
         text: "Using Tether",
         items: [
           { text: "Getting started", link: "/getting-started" },
+          { text: "Desktop app", link: "/desktop" },
           { text: "Terminal basics", link: "/terminal/basics" },
           { text: "Sessions & tabs", link: "/terminal/sessions" },
           { text: "Saved commands & search", link: "/terminal/saved-commands" },

@@ -1,6 +1,6 @@
 # Getting started
 
-Tether has two halves: a **server** you run on your machine, and the **mobile app** you install on your phone. Set up the server first.
+Tether has two halves: a **server** you run on your machine, and a **client app** you connect with — on your phone (iOS) or your desktop (Linux, Windows, macOS). Set up the server first.
 
 ## 1. Install the server
 
@@ -22,9 +22,12 @@ tether status            # confirm it's up
 
 You can also set the password later from the phone the first time you connect (see below).
 
-## 3. Install the mobile app
+## 3. Install a client
 
-Install via [AltStore](https://altstore.io): set up AltServer on your Mac/PC, add the Tether source, and install the app. New releases show up in AltStore automatically.
+Pick the app for your device — both connect to the same server the same way.
+
+- **Phone (iOS)** — install via [AltStore](https://altstore.io): set up AltServer on your Mac/PC, add the Tether source, and install the app. New releases show up in AltStore automatically.
+- **Desktop (Linux / Windows / macOS)** — download the installer for your platform from the [latest release](https://github.com/samuelloranger/tether/releases/latest). See [Desktop app](/desktop) for the per-OS files and how it differs from mobile.
 
 ## 4. Connect
 
