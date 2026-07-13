@@ -104,7 +104,15 @@ const TermRow = React.memo(
     return (
       <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
         <Text
-          style={[styles.termLine, { fontSize, lineHeight, width }]}
+          style={[
+            styles.termLine,
+            { fontSize, lineHeight, width },
+            // Web: preserve whitespace. RN-web's numberOfLines=1 sets
+            // white-space:nowrap, which collapses/trims spaces — that hides the
+            // block caret (a trailing space) and breaks column alignment. `pre`
+            // keeps every space on one line; the wrapper's overflow:hidden clips.
+            isDesktop && ({ whiteSpace: 'pre' } as any),
+          ]}
           numberOfLines={1}
           selectable={isDesktop}
         >
@@ -1244,6 +1252,9 @@ function AppInner() {
       data={screen}
       renderItem={renderRow}
       keyExtractor={(_, i) => String(i)}
+      // Rows are a fixed lineHeight, so give the list exact offsets — otherwise
+      // RN-web's VirtualizedList estimates them and scrollToEnd lands a row short.
+      getItemLayout={(_, index) => ({ length: lineHeight, offset: lineHeight * index, index })}
       onScroll={onScroll}
       onScrollBeginDrag={() => {
         autoScroll.current = false;
