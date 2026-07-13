@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.3.0",
+          "date": "2026-07-13",
+          "localizedDescription": "Desktop client hardening.\n\n**Terminal correctness**\n- Application-cursor mode (DECCKM): arrows/Home/End send SS3 vs CSI per the app's mode (fixes vim/less/readline navigation) — desktop keys and mobile key bar\n- AltGr (Ctrl+Alt+char) types the composed glyph — EU/intl layouts can enter @ { } [ ] \\\n- Mouse wheel forwarded to mouse-reporting TUIs (desktop), at the pointer cell, using the app's negotiated encoding (SGR or legacy X10)\n\n**Auto-update**\n- In-app self-update via GitHub Releases, minisign-verified; styled modal with a live download progress bar, then relaunch\n- Launch auto-check + manual 'Check for updates'; gated to updatable installs (AppImage/macOS/Windows — not deb/rpm)\n\n**Desktop polish**\n- Window size/position/maximized persist across launches\n- Right-click terminal menu: Copy / Paste / Select all\n- Polling pauses while hidden; ws send failures surface as a reconnect\n\nDownloads: Linux .deb/.rpm/.AppImage, Windows .msi/.exe, macOS .dmg (arm64 + x64). macOS + updater artifacts are signed by CI using the repo signing secrets.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.3.0/tether-v1.3.0.ipa",
+          "size": 8161304,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.2.1",
           "date": "2026-07-13",
           "localizedDescription": "Desktop client UI/UX tuned for keyboard-and-mouse:\n\n- **Docked session sidebar** replaces the slide-in drawer on desktop\n- **No on-screen key bar** — physical keyboard sends arrows/Tab/Esc/nav/F-keys/Ctrl+Alt combos straight to the shell\n- **Native mouse text selection**; Ctrl/Cmd+C copies selection or sends SIGINT, Ctrl/Cmd+V pastes (bracketed)\n- Terminal grid now fits the pane beside the sidebar (no column overflow)\n\nAlso: fixed the docs site deploy (GitHub Pages) and documented the desktop app.\n\nDownloads: Linux .deb/.rpm/.AppImage, Windows .msi/.exe, macOS .dmg (arm64 + x64).",
