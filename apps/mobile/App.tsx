@@ -34,6 +34,7 @@ import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
 import { applyFieldChange, SENT } from './src/input';
 import { getPassword, setPassword as persistPassword, authHeaders } from './src/secureConfig';
 import { httpBase, wsUrl, validateAddress } from './src/address';
+import { openTerminalSocket, type TerminalSocket } from './src/wsTransport';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -263,7 +264,12 @@ function AppInner() {
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
 
   // References
-  const ws = useRef<WebSocket | null>(null);
+  // Active terminal socket, abstracted over platform (RN WebSocket on mobile,
+  // Tauri Rust bridge on desktop — see wsTransport). `gen` invalidates the
+  // handlers of a superseded connection; `open` gates sends.
+  const sock = useRef<TerminalSocket | null>(null);
+  const gen = useRef(0);
+  const open = useRef(false);
   const listRef = useRef<FlatList<RenderRow> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const reconnectTimeout = useRef<any>(null);
@@ -328,8 +334,7 @@ function AppInner() {
   // lags the real socket state — e.g. mid-switch the new socket is CONNECTING —
   // so guarding on it throws INVALID_STATE_ERR. readyState is the source of truth.
   const wsSend = (obj: unknown) => {
-    const s = ws.current;
-    if (s && s.readyState === WebSocket.OPEN) s.send(JSON.stringify(obj));
+    if (open.current && sock.current) sock.current.send(JSON.stringify(obj));
   };
 
   // When the remote enables mouse reporting (TUIs like Claude Code), translate
@@ -388,6 +393,37 @@ function AppInner() {
     }
   };
 
+  // Parse one server frame into the session's emulator. Shared by both transports.
+  const applyWsMessage = (id: string, data: string) => {
+    try {
+      const msg = JSON.parse(data);
+      const ent = cache.get(id);
+      if (!ent) return;
+      if (msg.type === 'output') {
+        // Dedup: the server replays logs with ids > sinceId on (re)connect.
+        if (msg.id) {
+          if (msg.id <= ent.lastAppliedId) return;
+          ent.lastAppliedId = msg.id;
+          ent.sinceId = msg.id;
+        }
+        ent.term.write(msg.chunk);
+        if (id === activeIdRef.current) scheduleRender();
+      } else if (msg.type === 'exit') {
+        ent.term.write(`\r\n\x1b[31m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
+        if (id === activeIdRef.current) scheduleRender();
+      } else if (msg.type === 'reset') {
+        // Server pruned past our sinceId — replay would have a hole. Wipe and
+        // let the full replay that follows rebuild the screen from scratch.
+        ent.term.reset();
+        ent.sinceId = 0;
+        ent.lastAppliedId = 0;
+        if (id === activeIdRef.current) scheduleRender();
+      }
+    } catch (err) {
+      console.error('ws message error:', err);
+    }
+  };
+
   const connect = () => {
     disconnect();
     lastConnectedRef.current = { ip: serverIp, port };
@@ -401,64 +437,30 @@ function AppInner() {
       rows: numRows,
     });
 
-    // 3-arg RN WebSocket(url, protocols, options) sends `headers` on the upgrade —
-    // keeps the shared password out of the URL and server logs. The DOM WebSocket
-    // type omits the options arg, so cast the constructor to RN's real signature.
-    const RNWebSocket = WebSocket as unknown as {
-      new (
-        url: string,
-        protocols: string[],
-        options: { headers: Record<string, string> },
-      ): WebSocket;
-    };
-    const socket = new RNWebSocket(url, [], { headers: authHeaders(passwordRef.current) });
+    // Each connect bumps the generation; a superseded socket's late callbacks are
+    // ignored (replaces the old `ws.current !== socket` staleness check).
+    const myGen = ++gen.current;
+    const fresh = () => myGen === gen.current;
 
-    socket.onopen = () => {
-      hasConnectedRef.current = true;
-      setConnectionStatus('connected');
-    };
-
-    socket.onmessage = (event) => {
-      if (ws.current !== socket) return;
-      try {
-        const msg = JSON.parse(event.data);
-        const ent = cache.get(id);
-        if (!ent) return;
-        if (msg.type === 'output') {
-          // Dedup: the server replays logs with ids > sinceId on (re)connect.
-          if (msg.id) {
-            if (msg.id <= ent.lastAppliedId) return;
-            ent.lastAppliedId = msg.id;
-            ent.sinceId = msg.id;
-          }
-          ent.term.write(msg.chunk);
-          if (id === activeIdRef.current) scheduleRender();
-        } else if (msg.type === 'exit') {
-          ent.term.write(`\r\n\x1b[31m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
-          if (id === activeIdRef.current) scheduleRender();
-        } else if (msg.type === 'reset') {
-          // Server pruned past our sinceId — replay would have a hole. Wipe and
-          // let the full replay that follows rebuild the screen from scratch.
-          ent.term.reset();
-          ent.sinceId = 0;
-          ent.lastAppliedId = 0;
-          if (id === activeIdRef.current) scheduleRender();
+    sock.current = openTerminalSocket(url, passwordRef.current, {
+      onOpen: () => {
+        if (!fresh()) return;
+        hasConnectedRef.current = true;
+        open.current = true;
+        setConnectionStatus('connected');
+      },
+      onMessage: (data) => {
+        if (fresh()) applyWsMessage(id, data);
+      },
+      onClose: () => {
+        if (!fresh()) return;
+        open.current = false;
+        setConnectionStatus('disconnected');
+        if (readyRef.current && activeIdRef.current === id) {
+          reconnectTimeout.current = setTimeout(connect, 3000);
         }
-      } catch (err) {
-        console.error('ws message error:', err);
-      }
-    };
-
-    socket.onclose = () => {
-      if (ws.current !== socket) return; // stale socket — a newer connection owns state
-      setConnectionStatus('disconnected');
-      ws.current = null;
-      if (readyRef.current && activeIdRef.current === id) {
-        reconnectTimeout.current = setTimeout(connect, 3000);
-      }
-    };
-    socket.onerror = (e2) => console.log('ws error:', e2);
-    ws.current = socket;
+      },
+    });
   };
 
   const disconnect = () => {
@@ -466,8 +468,10 @@ function AppInner() {
       clearTimeout(reconnectTimeout.current);
       reconnectTimeout.current = null;
     }
-    const s = ws.current;
-    ws.current = null;
+    gen.current++; // invalidate any in-flight handlers
+    open.current = false;
+    const s = sock.current;
+    sock.current = null;
     if (s) s.close();
     setConnectionStatus('disconnected');
   };
@@ -475,7 +479,7 @@ function AppInner() {
   // Switch to a different session
   const switchTo = (id: string) => {
     setDrawerOpen(false);
-    if (id === activeIdRef.current && ws.current) return;
+    if (id === activeIdRef.current && sock.current) return;
     disconnect();
     activeIdRef.current = id;
     setActiveId(id);
