@@ -44,6 +44,7 @@ import { TermRow } from './src/TermRow';
 import { ArrowCluster } from './src/Dpad';
 import { ConnectionBanner } from './src/ConnectionBanner';
 import { UtilityBar } from './src/UtilityBar';
+import { OverflowMenu } from './src/OverflowMenu';
 import { mouseSeq } from './src/mouseSeq';
 
 
@@ -1394,78 +1395,26 @@ function AppInner() {
           )}
 
           {/* Overflow menu (header ⋯) */}
-          <Modal
+          <OverflowMenu
             visible={menuOpen}
-            animationType="fade"
-            transparent
-            onRequestClose={() => setMenuOpen(false)}
-          >
-            <Pressable style={styles.overflowMenuBackdrop} onPress={() => setMenuOpen(false)}>
-              <Pressable style={[styles.menuPanel, { marginTop: insets.top + 52 }]} onPress={() => {}}>
-                <TouchableOpacity style={styles.menuRow} onPress={openRename}>
-                  <Feather name="edit-2" size={16} color="#cbd5e1" />
-                  <Text style={styles.menuRowText}>Rename terminal</Text>
-                </TouchableOpacity>
-                <View style={styles.menuRow}>
-                  <Feather name="type" size={16} color="#cbd5e1" />
-                  <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
-                    Font size
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.fontStepBtn}
-                    onPress={() => changeFontSize(-1)}
-                    accessibilityLabel="Decrease font size"
-                  >
-                    <Text style={styles.fontStepText}>−</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.fontSizeValue}>{fontSize}</Text>
-                  <TouchableOpacity
-                    style={styles.fontStepBtn}
-                    onPress={() => changeFontSize(1)}
-                    accessibilityLabel="Increase font size"
-                  >
-                    <Text style={styles.fontStepText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity style={styles.menuRow} onPress={openSearch}>
-                  <Feather name="search" size={16} color="#cbd5e1" />
-                  <Text style={styles.menuRowText}>Search displayed transcript</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  onPress={() => {
-                    setMenuOpen(false);
-                    setSnippetsModalOpen(true);
-                  }}
-                >
-                  <Feather name="terminal" size={16} color="#cbd5e1" />
-                  <Text style={styles.menuRowText}>Saved commands</Text>
-                </TouchableOpacity>
-                {isDesktop && (
-                  <TouchableOpacity
-                    style={styles.menuRow}
-                    onPress={() => {
-                      setMenuOpen(false);
-                      void checkForUpdatesManual();
-                    }}
-                  >
-                    <Feather name="download" size={16} color="#cbd5e1" />
-                    <Text style={styles.menuRowText}>Check for updates</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  onPress={() => {
-                    setMenuOpen(false);
-                    hardResetSession();
-                  }}
-                >
-                  <Feather name="refresh-cw" size={16} color="#f87171" />
-                  <Text style={[styles.menuRowText, { color: '#f87171' }]}>Restart terminal</Text>
-                </TouchableOpacity>
-              </Pressable>
-            </Pressable>
-          </Modal>
+            onClose={() => setMenuOpen(false)}
+            onRename={openRename}
+            fontSize={fontSize}
+            onFontDelta={changeFontSize}
+            onSearch={openSearch}
+            onSnippets={() => {
+              setMenuOpen(false);
+              setSnippetsModalOpen(true);
+            }}
+            onCheckUpdates={() => {
+              setMenuOpen(false);
+              void checkForUpdatesManual();
+            }}
+            onRestart={() => {
+              setMenuOpen(false);
+              hardResetSession();
+            }}
+          />
 
           {/* Rename Modal */}
           <Modal
