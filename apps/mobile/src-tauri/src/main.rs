@@ -35,6 +35,7 @@ impl Bridge {
 #[tauri::command]
 async fn ws_connect(
     app: AppHandle,
+    conn_id: String,
     url: String,
     password: String,
 ) -> Result<(), String> {
@@ -56,19 +57,22 @@ async fn ws_connect(
     let (tx, mut rx) = mpsc::unbounded_channel::<Outgoing>();
     *app.state::<Bridge>().0.lock().unwrap() = Some(tx);
 
-    // Reader: forward server frames to the webview.
+    // Reader: forward server frames to the webview. Events are scoped by conn_id
+    // so a superseded connection's late frames/close can't hit a newer socket.
     let app_read = app.clone();
+    let msg_evt = format!("ws-message-{conn_id}");
+    let close_evt = format!("ws-closed-{conn_id}");
     tauri::async_runtime::spawn(async move {
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(Message::Text(t)) => {
-                    let _ = app_read.emit("ws-message", t);
+                    let _ = app_read.emit(&msg_evt, t);
                 }
                 Ok(Message::Close(_)) | Err(_) => break,
                 _ => {}
             }
         }
-        let _ = app_read.emit("ws-closed", ());
+        let _ = app_read.emit(&close_evt, ());
     });
 
     // Writer: drain the channel into the socket.
