@@ -42,6 +42,7 @@ import { styles } from './src/styles';
 import { isDesktop, isMacDesktop } from './src/platform';
 import { TermRow } from './src/TermRow';
 import { ArrowCluster } from './src/Dpad';
+import { ConnectionBanner } from './src/ConnectionBanner';
 import { mouseSeq } from './src/mouseSeq';
 
 
@@ -1331,25 +1332,11 @@ function AppInner() {
           )}
 
           {/* Connection banner — names the real state; no safety overclaim. */}
-          {connectionStatus !== 'connected' && (
-            <View style={styles.reconnectBanner}>
-              <Text style={styles.reconnectBannerText}>
-                {connectionStatus === 'auth-failed'
-                  ? 'Wrong password.'
-                  : hasConnectedRef.current
-                    ? 'Reconnecting… (session kept running on the server)'
-                    : 'Connecting…'}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setIsConfiguring(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Edit connection settings"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Text style={styles.reconnectBannerEdit}>Edit</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          <ConnectionBanner
+            status={connectionStatus}
+            hasConnected={hasConnectedRef.current}
+            onEdit={() => setIsConfiguring(true)}
+          />
 
           {/* Terminal grid — vertical FlatList inside a horizontal ScrollView so
               wide (e.g. 80-col) output stays legible and scrolls sideways.
