@@ -38,6 +38,11 @@
           "faceIDPermission": false
         }
       ]
-    ]
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png"
+    }
   }
 }
