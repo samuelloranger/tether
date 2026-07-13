@@ -37,6 +37,8 @@ import { openTerminalSocket, type TerminalSocket } from './src/wsTransport';
 import { keyToBytes, COPY, PASTE } from './src/desktopKeys';
 import { notify, confirmAction } from './src/dialog';
 import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './src/desktopUpdate';
+import TitleBar from './src/TitleBar';
+import { injectDragRegionStyles } from './src/dragRegion';
 import { mouseSeq } from './src/mouseSeq';
 
 // The web bundle only ever runs inside the Tauri desktop shell (plain browsers
@@ -959,6 +961,11 @@ function AppInner() {
     resetField();
   };
 
+  // Desktop: install the window drag-region CSS once (custom title bar).
+  useEffect(() => {
+    if (isDesktop) injectDragRegionStyles();
+  }, []);
+
   // Desktop: capture the physical keyboard globally and forward keystrokes to
   // the PTY (replacing the mobile utility bar). Skipped while a text field is
   // focused (config form, rename/snippet/search modals) so those still type
@@ -1218,6 +1225,16 @@ function AppInner() {
 
   if (!fontsLoaded) return null;
 
+  // Map the connection state to the TitleBar's status union ('disconnected' → 'offline').
+  const titleBarStatus: 'connected' | 'connecting' | 'auth-failed' | 'offline' =
+    connectionStatus === 'connected'
+      ? 'connected'
+      : connectionStatus === 'connecting'
+        ? 'connecting'
+        : connectionStatus === 'auth-failed'
+          ? 'auth-failed'
+          : 'offline';
+
   return (
     <SafeAreaView style={styles.appContainer}>
       {isConfiguring ? (
@@ -1359,7 +1376,20 @@ function AppInner() {
           )}
 
           <View style={styles.terminalMain}>
-          {/* Header Panel */}
+          {/* Desktop: custom window title bar (replaces the OS titlebar). */}
+          {isDesktop && (
+            <TitleBar
+              isMac={isMacDesktop}
+              title={activeName}
+              subtitle={`${serverIp}:${port}`}
+              status={titleBarStatus}
+              onNew={newTerminal}
+              onSettings={() => setIsConfiguring(true)}
+              onMenu={() => setMenuOpen(true)}
+            />
+          )}
+          {/* Mobile header panel */}
+          {!isDesktop && (
           <View style={styles.header}>
             {!isDesktop && (
               <TouchableOpacity
@@ -1414,6 +1444,7 @@ function AppInner() {
               </TouchableOpacity>
             </View>
           </View>
+          )}
 
           {/* Connection banner — names the real state; no safety overclaim. */}
           {connectionStatus !== 'connected' && (
