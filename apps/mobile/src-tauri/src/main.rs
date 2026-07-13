@@ -132,12 +132,25 @@ fn is_updatable() -> bool {
 // stylesheets/fonts under webkit2gtk (blank/unstyled UI). Revisit if we ever
 // render remote or untrusted HTML.
 fn main() {
+    // The AppImage's linuxdeploy AppRun force-exports GDK_BACKEND=x11 (an old
+    // workaround for a WebKit-on-Wayland crash, resolved by the newer bundled
+    // WebKit). Under XWayland, GTK doesn't draw its client-side titlebar, so the
+    // window controls (close/min/max) render invisibly (tauri#13142). In a
+    // Wayland session, prefer the Wayland backend so the titlebar appears.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        std::env::set_var("GDK_BACKEND", "wayland");
+    }
+
     tauri::Builder::default()
         // Persist window size/position/maximized state across launches.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         // Self-update: check GitHub releases, verify the signature, relaunch.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Native OS dialogs (message/confirm) — replaces WebKitGTK's "JavaScript"
+        // titled window.alert/confirm.
+        .plugin(tauri_plugin_dialog::init())
         // Open the release page in the system browser for package-managed
         // (deb/rpm) installs that can't self-update.
         .plugin(tauri_plugin_opener::init())
