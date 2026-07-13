@@ -480,35 +480,6 @@ export const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     marginHorizontal: 2,
   },
-  arrowCluster: {
-    flexDirection: 'row',
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    overflow: 'hidden',
-  },
-  arrowSeg: {
-    width: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowMid: {
-    width: 34,
-  },
-  arrowMidHalf: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowVDivider: {
-    width: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  arrowHDivider: {
-    height: 1,
-    marginHorizontal: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
   resizeSpacer: {
     width: 12,
   },
