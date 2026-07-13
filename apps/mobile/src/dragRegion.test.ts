@@ -11,7 +11,10 @@ describe('dragRegion', () => {
     expect(DRAG_REGION_CSS).toContain('-webkit-app-region: no-drag');
   });
   it('prop bundles carry the expected data attributes', () => {
-    expect(DRAG_PROPS.dataSet.tauriDragRegion).toBe('');
+    // "deep" (not bare "") so clicks anywhere in the bar's subtree drag the
+    // window — bare means "only direct clicks on the bar element", which never
+    // fires because child Views cover it. See Tauri window/scripts/drag.js.
+    expect(DRAG_PROPS.dataSet.tauriDragRegion).toBe('deep');
     expect(NO_DRAG_PROPS.dataSet.tauriNoDrag).toBe('');
   });
 });
