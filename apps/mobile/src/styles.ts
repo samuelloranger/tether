@@ -10,74 +10,7 @@ export const styles = StyleSheet.create({
   },
 
   /* Config Screen Styles */
-  configContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    backgroundColor: '#070a13',
-  },
   // Caps the login form width so it doesn't stretch across a wide desktop window.
-  configInner: {
-    width: '100%',
-    maxWidth: 400,
-  },
-  configLogoContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  configIconBox: {
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(99, 102, 241, 0.2)',
-    marginBottom: 16,
-  },
-  configLogoIcon: {
-    fontSize: 32,
-    fontFamily: MONO,
-    fontWeight: 'bold',
-    color: '#818cf8',
-  },
-  configTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  configSubtitle: {
-    fontSize: 12,
-    color: '#94a3b8',
-    textAlign: 'center',
-  },
-  formContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    padding: 20,
-  },
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    color: '#94a3b8',
-    marginBottom: 6,
-    letterSpacing: 0.5,
-  },
-  configInput: {
-    backgroundColor: '#030712',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 8,
-    color: '#e2e8f0',
-    fontSize: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginBottom: 16,
-    fontFamily: MONO,
-  },
   rowInputs: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -85,22 +18,6 @@ export const styles = StyleSheet.create({
   halfInput: {
     width: '48%',
   },
-  connectBtn: {
-    backgroundColor: '#3730a3',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  connectBtnText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  configHint: { color: '#64748b', fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 12 },
-  testError: { color: '#f87171', fontSize: 13, marginBottom: 10 },
-  testOkRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
-  testOk: { color: '#4ade80', fontSize: 13 },
 
   /* Terminal Screen Styles */
   terminalContainer: {
