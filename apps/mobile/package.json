@@ -33,6 +33,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "tsc --noEmit",
+    "test": "bun test",
     "build:web": "expo export --platform web",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
