@@ -18,11 +18,14 @@ import {
 export interface TitleBarProps {
   isMac: boolean;
   title: string;
-  subtitle: string;
-  status: 'connected' | 'connecting' | 'auth-failed' | 'offline';
-  onNew: () => void;
-  onSettings: () => void;
-  onMenu: () => void;
+  // Session-specific chrome — omitted on the config screen, which renders the bar
+  // only for the drag region + window controls (so a frameless window still has
+  // close/min/max and is movable before any session exists).
+  subtitle?: string;
+  status?: 'connected' | 'connecting' | 'auth-failed' | 'offline';
+  onNew?: () => void;
+  onSettings?: () => void;
+  onMenu?: () => void;
 }
 
 const HIT = { top: 8, bottom: 8, left: 6, right: 6 };
@@ -82,49 +85,57 @@ export default function TitleBar({
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        <Text style={styles.subtitle} numberOfLines={1}>
-          {subtitle}
-        </Text>
+        {subtitle ? (
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.actions}>
-        <StatusBadge status={status} />
+        {status ? <StatusBadge status={status} /> : null}
 
-        <TouchableOpacity
-          {...NO_DRAG_PROPS}
-          style={styles.btn}
-          activeOpacity={0.6}
-          hitSlop={HIT}
-          onPress={onNew}
-          accessibilityRole="button"
-          accessibilityLabel="New terminal"
-        >
-          <Feather name="plus" size={19} color="#cbd5e1" />
-        </TouchableOpacity>
+        {onNew ? (
+          <TouchableOpacity
+            {...NO_DRAG_PROPS}
+            style={styles.btn}
+            activeOpacity={0.6}
+            hitSlop={HIT}
+            onPress={onNew}
+            accessibilityRole="button"
+            accessibilityLabel="New terminal"
+          >
+            <Feather name="plus" size={19} color="#cbd5e1" />
+          </TouchableOpacity>
+        ) : null}
 
-        <TouchableOpacity
-          {...NO_DRAG_PROPS}
-          style={styles.btn}
-          activeOpacity={0.6}
-          hitSlop={HIT}
-          onPress={onSettings}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-        >
-          <Feather name="settings" size={18} color="#cbd5e1" />
-        </TouchableOpacity>
+        {onSettings ? (
+          <TouchableOpacity
+            {...NO_DRAG_PROPS}
+            style={styles.btn}
+            activeOpacity={0.6}
+            hitSlop={HIT}
+            onPress={onSettings}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
+            <Feather name="settings" size={18} color="#cbd5e1" />
+          </TouchableOpacity>
+        ) : null}
 
-        <TouchableOpacity
-          {...NO_DRAG_PROPS}
-          style={styles.btn}
-          activeOpacity={0.6}
-          hitSlop={HIT}
-          onPress={onMenu}
-          accessibilityRole="button"
-          accessibilityLabel="Terminal menu"
-        >
-          <Feather name="more-vertical" size={19} color="#cbd5e1" />
-        </TouchableOpacity>
+        {onMenu ? (
+          <TouchableOpacity
+            {...NO_DRAG_PROPS}
+            style={styles.btn}
+            activeOpacity={0.6}
+            hitSlop={HIT}
+            onPress={onMenu}
+            accessibilityRole="button"
+            accessibilityLabel="Terminal menu"
+          >
+            <Feather name="more-vertical" size={19} color="#cbd5e1" />
+          </TouchableOpacity>
+        ) : null}
 
         {showControls && (
           <View style={styles.winControls}>
