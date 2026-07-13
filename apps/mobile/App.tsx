@@ -1235,6 +1235,38 @@ function AppInner() {
           ? 'auth-failed'
           : 'offline';
 
+  // The scrollable terminal grid, shared by the desktop and mobile surfaces.
+  const terminalGrid = (
+    <FlatList
+      ref={listRef}
+      style={{ flex: 1 }}
+      contentContainerStyle={styles.terminalContent}
+      data={screen}
+      renderItem={renderRow}
+      keyExtractor={(_, i) => String(i)}
+      onScroll={onScroll}
+      onScrollBeginDrag={() => {
+        autoScroll.current = false;
+        scrolledRef.current = true;
+      }}
+      scrollEventThrottle={100}
+      scrollEnabled={!mouseOn}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="none"
+      onContentSizeChange={() => {
+        if (autoScroll.current) listRef.current?.scrollToEnd({ animated: false });
+      }}
+      ListEmptyComponent={
+        connectionStatus === 'connected' ? (
+          <Text style={styles.terminalEmpty}>Connected. Type a command to begin.</Text>
+        ) : null
+      }
+      initialNumToRender={40}
+      windowSize={11}
+      removeClippedSubviews
+    />
+  );
+
   return (
     <SafeAreaView style={styles.appContainer}>
       {isConfiguring ? (
@@ -1243,6 +1275,7 @@ function AppInner() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.configContainer}
         >
+          <View style={styles.configInner}>
           <View style={styles.configLogoContainer}>
             <View style={styles.configIconBox}>
               <Text style={styles.configLogoIcon}>{'>_'}</Text>
@@ -1352,6 +1385,7 @@ function AppInner() {
                 </Text>
               </TouchableOpacity>
             )}
+          </View>
           </View>
         </KeyboardAvoidingView>
       ) : (
@@ -1475,56 +1509,36 @@ function AppInner() {
             onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
             {...panResponder.panHandlers}
           >
-            <Pressable
-              nativeID="tether-terminal"
-              style={{ flex: 1 }}
-              // On desktop the terminal must NOT be a role="button": react-native-web
-              // would then hijack Enter/Space to "activate" it, so those keys never
-              // reach the PTY key-forwarder (only letters do). Click-to-focus still
-              // works via onPress. Mobile keeps the button role for its tap/a11y hint.
-              accessibilityRole={isDesktop ? undefined : 'button'}
-              accessibilityLabel={
-                isDesktop ? undefined : 'Terminal. Double-tap to type, long-press to select text.'
-              }
-              onPressIn={() => {
-                scrolledRef.current = false;
-              }}
-              onPress={() => {
-                // Only a genuine tap focuses the input; a scroll-release must not
-                // pop the keyboard.
-                if (!scrolledRef.current) inputRef.current?.focus();
-              }}
-              onLongPress={openSelectionView}
-            >
-              <FlatList
-                ref={listRef}
+            {isDesktop ? (
+              // Desktop: a plain, non-focusable surface. It must NOT be a Pressable:
+              // react-native-web's Pressable is focusable (tabIndex 0) and consumes a
+              // focused Enter as an "activate" gesture (PressResponder isValidKeyPress
+              // returns true for Enter regardless of role), so Enter never reaches the
+              // PTY. Keyboard is captured globally via the window keydown listener;
+              // text selection is native (selectable) and actions use the right-click
+              // menu — so no press handlers are needed here.
+              <View nativeID="tether-terminal" style={{ flex: 1 }}>
+                {terminalGrid}
+              </View>
+            ) : (
+              <Pressable
+                nativeID="tether-terminal"
                 style={{ flex: 1 }}
-                contentContainerStyle={styles.terminalContent}
-                data={screen}
-                renderItem={renderRow}
-                keyExtractor={(_, i) => String(i)}
-                onScroll={onScroll}
-                onScrollBeginDrag={() => {
-                  autoScroll.current = false;
-                  scrolledRef.current = true;
+                accessibilityRole="button"
+                accessibilityLabel="Terminal. Double-tap to type, long-press to select text."
+                onPressIn={() => {
+                  scrolledRef.current = false;
                 }}
-                scrollEventThrottle={100}
-                scrollEnabled={!mouseOn}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="none"
-                onContentSizeChange={() => {
-                  if (autoScroll.current) listRef.current?.scrollToEnd({ animated: false });
+                onPress={() => {
+                  // Only a genuine tap focuses the input; a scroll-release must not
+                  // pop the keyboard.
+                  if (!scrolledRef.current) inputRef.current?.focus();
                 }}
-                ListEmptyComponent={
-                  connectionStatus === 'connected' ? (
-                    <Text style={styles.terminalEmpty}>Connected. Type a command to begin.</Text>
-                  ) : null
-                }
-                initialNumToRender={40}
-                windowSize={11}
-                removeClippedSubviews
-              />
-            </Pressable>
+                onLongPress={openSelectionView}
+              >
+                {terminalGrid}
+              </Pressable>
+            )}
           </View>
 
           {/* Session Drawer (overlay) — mobile only; desktop uses the docked sidebar. */}
@@ -1959,8 +1973,14 @@ const styles = StyleSheet.create({
   configContainer: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 24,
     backgroundColor: '#070a13',
+  },
+  // Caps the login form width so it doesn't stretch across a wide desktop window.
+  configInner: {
+    width: '100%',
+    maxWidth: 400,
   },
   configLogoContainer: {
     alignItems: 'center',
