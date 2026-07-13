@@ -1,8 +1,14 @@
 name: Deploy documentation to GitHub Pages
 
+# Deploy on pushes to main that touch the docs (release runs deploy from a tag
+# ref, which the github-pages environment rejects — it only allows main).
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "install.sh"
+      - ".github/workflows/docs-pages.yml"
   workflow_dispatch:
 
 permissions:
