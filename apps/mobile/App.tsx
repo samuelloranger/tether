@@ -1189,6 +1189,9 @@ function AppInner() {
     <SafeAreaView style={styles.appContainer}>
       {isConfiguring ? (
         /* Configuration Screen */
+        <>
+        {/* Desktop: frameless window still needs drag + close/min/max here too. */}
+        {isDesktop && <TitleBar isMac={isMacDesktop} title="Tether" />}
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.configContainer}
@@ -1306,6 +1309,7 @@ function AppInner() {
           </View>
           </View>
         </KeyboardAvoidingView>
+        </>
       ) : (
         /* Terminal Client Screen */
         <KeyboardAvoidingView
