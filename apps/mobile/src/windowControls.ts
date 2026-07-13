@@ -33,3 +33,13 @@ export async function onMaximizeChange(cb: (maximized: boolean) => void): Promis
     cb(await w.isMaximized());
   });
 }
+
+// Fire cb with the current fullscreen state now and on every resize (entering/
+// leaving native fullscreen resizes the window). Returns an unlisten function.
+export async function onFullscreenChange(cb: (fullscreen: boolean) => void): Promise<() => void> {
+  const w = await win();
+  cb(await w.isFullscreen());
+  return w.onResized(async () => {
+    cb(await w.isFullscreen());
+  });
+}
