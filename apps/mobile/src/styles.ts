@@ -24,6 +24,10 @@ export const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#05070e',
   },
+  // The area below the full-width title bar; a row (sidebar + terminal) on desktop.
+  terminalBody: {
+    flex: 1,
+  },
   // Desktop: sidebar + terminal side by side.
   terminalRow: {
     flexDirection: 'row',

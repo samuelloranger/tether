@@ -13,6 +13,7 @@ import {
   toggleMaximizeWindow,
   closeWindow,
   onMaximizeChange,
+  onFullscreenChange,
 } from './windowControls';
 
 export interface TitleBarProps {
@@ -65,8 +66,9 @@ export default function TitleBar({
   onSettings,
   onMenu,
 }: TitleBarProps) {
-  const { showControls, leftInset } = titlebarChrome(isMac);
   const [maximized, setMaximized] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const { showControls, leftInset } = titlebarChrome(isMac, fullscreen);
 
   useEffect(() => {
     if (!showControls) return;
@@ -76,6 +78,17 @@ export default function TitleBar({
     });
     return () => unlisten?.();
   }, [showControls]);
+
+  // macOS: the native traffic lights hide in fullscreen, so collapse the inset.
+  // (This runs even though showControls is false on macOS.)
+  useEffect(() => {
+    if (!isMac) return;
+    let unlisten: (() => void) | undefined;
+    onFullscreenChange(setFullscreen).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [isMac]);
 
   return (
     <View style={styles.bar} {...DRAG_PROPS}>

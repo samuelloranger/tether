@@ -71,8 +71,23 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
         /* Terminal Client Screen */
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[styles.terminalContainer, isDesktop && styles.terminalRow]}
+          style={styles.terminalContainer}
         >
+          {/* Desktop: full-width custom title bar spanning above the sidebar + terminal,
+              so macOS traffic lights sit over the bar (not the sidebar) and the whole
+              top edge is a drag region. */}
+          {isDesktop && (
+            <TitleBar
+              isMac={isMacDesktop}
+              title={activeName}
+              subtitle={`${serverIp}:${port}`}
+              status={titleBarStatus}
+              onNew={newTerminal}
+              onSettings={() => setIsConfiguring(true)}
+              onMenu={() => setMenuOpen(true)}
+            />
+          )}
+          <View style={[styles.terminalBody, isDesktop && styles.terminalRow]}>
           {/* Desktop: permanent sidebar of terminals in place of the overlay drawer. */}
           {isDesktop && (
             <SessionDrawer
@@ -89,18 +104,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           )}
 
           <View style={styles.terminalMain}>
-          {/* Desktop: custom window title bar (replaces the OS titlebar). */}
-          {isDesktop && (
-            <TitleBar
-              isMac={isMacDesktop}
-              title={activeName}
-              subtitle={`${serverIp}:${port}`}
-              status={titleBarStatus}
-              onNew={newTerminal}
-              onSettings={() => setIsConfiguring(true)}
-              onMenu={() => setMenuOpen(true)}
-            />
-          )}
           {/* Mobile header panel */}
           {!isDesktop && (
           <View style={styles.header}>
@@ -311,6 +314,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               accessibilityLabel="Terminal input (hidden)"
             />
           )}
+          </View>
           </View>
 
           {/* Desktop right-click menu */}
