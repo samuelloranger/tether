@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.3.1",
+          "date": "2026-07-13",
+          "localizedDescription": "- **Linux .deb/.rpm** installs now show an 'update available → Download' notice (opens the release page) instead of silently skipping the update check. AppImage/Windows/macOS keep the in-place self-update.\n- README: platforms badge, Desktop app section, full version history.\n- Docs: desktop 'Updating' section + a Changelog page.\n\nDownloads: Linux .deb/.rpm/.AppImage, Windows .msi/.exe, macOS .dmg (arm64 + x64) — signed; updater feed included.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.3.1/tether-v1.3.1.ipa",
+          "size": 8162076,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.3.0",
           "date": "2026-07-13",
           "localizedDescription": "Desktop client hardening.\n\n**Terminal correctness**\n- Application-cursor mode (DECCKM): arrows/Home/End send SS3 vs CSI per the app's mode (fixes vim/less/readline navigation) — desktop keys and mobile key bar\n- AltGr (Ctrl+Alt+char) types the composed glyph — EU/intl layouts can enter @ { } [ ] \\\n- Mouse wheel forwarded to mouse-reporting TUIs (desktop), at the pointer cell, using the app's negotiated encoding (SGR or legacy X10)\n\n**Auto-update**\n- In-app self-update via GitHub Releases, minisign-verified; styled modal with a live download progress bar, then relaunch\n- Launch auto-check + manual 'Check for updates'; gated to updatable installs (AppImage/macOS/Windows — not deb/rpm)\n\n**Desktop polish**\n- Window size/position/maximized persist across launches\n- Right-click terminal menu: Copy / Paste / Select all\n- Polling pauses while hidden; ws send failures surface as a reconnect\n\nDownloads: Linux .deb/.rpm/.AppImage, Windows .msi/.exe, macOS .dmg (arm64 + x64). macOS + updater artifacts are signed by CI using the repo signing secrets.",
