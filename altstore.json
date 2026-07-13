@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.3.3",
+          "date": "2026-07-13",
+          "localizedDescription": "Desktop stability fixes: restored terminal Enter/Space input, native dialogs, Linux Wayland titlebar handling with X11 fallback, and updated desktop icons.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.3.3/tether-v1.3.3.ipa",
+          "size": 8163395,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.3.2",
           "date": "2026-07-13",
           "localizedDescription": "## Fixes\n\n- **Linux AppImage** — fixed a blank/gray window on some GPU + compositor setups (notably hybrid Intel + NVIDIA on Wayland). The AppImage bundles its own WebKitGTK; the previously bundled build (2.44, from the Ubuntu 24.04 build runner) couldn't create an EGL display and never painted. It now builds on Ubuntu 26.04 and bundles WebKitGTK 2.52, which renders correctly. The `.deb`/`.rpm` packages were never affected (they use the system WebKit).\n\nNo client changes from v1.3.1 — this is a build/packaging fix so the AppImage renders. Existing AppImage installs will be offered this via in-app auto-update.",
