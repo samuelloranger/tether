@@ -36,7 +36,7 @@ import { getPassword, setPassword as persistPassword, authHeaders } from './src/
 import { httpBase, wsUrl, validateAddress } from './src/address';
 import { openTerminalSocket, type TerminalSocket } from './src/wsTransport';
 import { keyToBytes, COPY, PASTE } from './src/desktopKeys';
-import { fetchUpdate, installUpdate, type PendingUpdate } from './src/desktopUpdate';
+import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './src/desktopUpdate';
 import { mouseSeq } from './src/mouseSeq';
 
 // The web bundle only ever runs inside the Tauri desktop shell (plain browsers
@@ -262,7 +262,11 @@ function AppInner() {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   // Desktop self-update modal: version info when an update is pending, live
   // download progress while installing.
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{
+    version: string;
+    current: string;
+    canSelfInstall: boolean;
+  } | null>(null);
   const pendingUpdate = useRef<PendingUpdate | null>(null);
   const [updateProgress, setUpdateProgress] = useState<{ done: number; total: number } | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -1051,7 +1055,7 @@ function AppInner() {
       .then((u) => {
         if (u) {
           pendingUpdate.current = u;
-          setUpdateInfo({ version: u.version, current: u.current });
+          setUpdateInfo({ version: u.version, current: u.current, canSelfInstall: u.canSelfInstall });
         }
       })
       .catch(() => {});
@@ -1071,7 +1075,7 @@ function AppInner() {
       const u = await fetchUpdate();
       if (u) {
         pendingUpdate.current = u;
-        setUpdateInfo({ version: u.version, current: u.current });
+        setUpdateInfo({ version: u.version, current: u.current, canSelfInstall: u.canSelfInstall });
       } else {
         Alert.alert('Up to date', "You're running the latest version of Tether.");
       }
@@ -1091,6 +1095,14 @@ function AppInner() {
       disposePending();
       Alert.alert('Update failed', 'The update could not be downloaded or installed.');
     });
+  };
+
+  // Package-managed installs (.deb/.rpm) can't self-install: open the releases
+  // page so the user downloads the new package and reinstalls.
+  const downloadUpdate = () => {
+    void openReleasesPage();
+    disposePending();
+    setUpdateInfo(null);
   };
 
   const dismissUpdate = () => {
@@ -1856,6 +1868,11 @@ function AppInner() {
                   </View>
                   <Text style={styles.updateVersion}>Tether {updateInfo.version}</Text>
                   <Text style={styles.updateSub}>You have {updateInfo.current}</Text>
+                  {!updateInfo.canSelfInstall && (
+                    <Text style={styles.updateNote}>
+                      This install updates through your package manager — download the new package.
+                    </Text>
+                  )}
 
                   {updating ? (
                     <View style={styles.updateProgressWrap}>
@@ -1869,12 +1886,21 @@ function AppInner() {
                       <TouchableOpacity style={styles.updateBtn} onPress={dismissUpdate}>
                         <Text style={styles.updateBtnText}>Later</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.updateBtn, styles.updateBtnPrimary]}
-                        onPress={startUpdate}
-                      >
-                        <Text style={[styles.updateBtnText, styles.updateBtnTextPrimary]}>Update</Text>
-                      </TouchableOpacity>
+                      {updateInfo.canSelfInstall ? (
+                        <TouchableOpacity
+                          style={[styles.updateBtn, styles.updateBtnPrimary]}
+                          onPress={startUpdate}
+                        >
+                          <Text style={[styles.updateBtnText, styles.updateBtnTextPrimary]}>Update</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={[styles.updateBtn, styles.updateBtnPrimary]}
+                          onPress={downloadUpdate}
+                        >
+                          <Text style={[styles.updateBtnText, styles.updateBtnTextPrimary]}>Download</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 </View>
@@ -2474,6 +2500,7 @@ const styles = StyleSheet.create({
   updateTitle: { color: '#e2e8f0', fontSize: 15, fontWeight: '700' },
   updateVersion: { color: '#f8fafc', fontSize: 18, fontWeight: '700' },
   updateSub: { color: '#64748b', fontSize: 12, marginTop: 2 },
+  updateNote: { color: '#94a3b8', fontSize: 12, marginTop: 12, lineHeight: 17 },
   updateProgressWrap: { marginTop: 18 },
   updateTrack: {
     height: 8,

@@ -28,6 +28,7 @@ export default defineConfig({
           { text: "Saved commands & search", link: "/terminal/saved-commands" },
           { text: "Security & networking", link: "/security" },
           { text: "Updating & data", link: "/updating" },
+          { text: "Changelog", link: "/changelog" },
         ],
       },
       {

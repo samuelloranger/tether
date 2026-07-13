@@ -9,7 +9,7 @@
   <a href="https://github.com/samuelloranger/tether/releases"><img src="https://img.shields.io/github/v/release/samuelloranger/tether" alt="Latest release" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/ci.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/release.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/release.yml/badge.svg" alt="Release builds" /></a>
-  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android-blue" alt="Platforms: iOS and Android" />
+  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20Linux%20%7C%20Windows%20%7C%20macOS-blue" alt="Platforms: iOS, Android, Linux, Windows, macOS" />
 </p>
 
 A persistent remote-shell console: real PTY shells on your server, streamed to your phone over WebSocket. Shells keep running when you disconnect — and survive server restarts.
@@ -40,6 +40,7 @@ tether serve | start | stop | restart | status | logs | set-password | update | 
 - **Persistent sessions** — each shell runs in a detached holder process. Client disconnects, server restarts, even `tether restart` upgrades: the shell (and whatever runs in it) keeps going.
 - **Replay** — every byte is logged to SQLite; reconnecting clients catch up from where they left off, with no output lost while the server was down.
 - **Mobile client** — multi-session tabs, full VT emulator (TUIs, box drawing, CJK/emoji), key repeat, search, snippets.
+- **Desktop client** — the same terminal as a native Linux/Windows/macOS app (docked sidebar, physical keyboard, mouse selection, self-update).
 
 ## Mobile app (iOS)
 
@@ -63,6 +64,21 @@ Point the app at your server's IP and port on first launch.
 Grab `tether-vX.Y.Z.apk` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and install it (allow installs from your browser when prompted).
 
 For automatic updates, add this repo to [Obtainium](https://github.com/ImranR98/Obtainium): **Add App →** `https://github.com/samuelloranger/tether` — it tracks releases and updates the APK for you.
+
+## Desktop app (Linux / Windows / macOS)
+
+A native [Tauri](https://tauri.app) client — the same terminal, tuned for keyboard and mouse (docked session sidebar, physical keyboard, mouse selection, right-click menu). Download for your platform from the [latest release](https://github.com/samuelloranger/tether/releases/latest):
+
+| Platform | File |
+| --- | --- |
+| Debian / Ubuntu / Mint | `Tether_*_amd64.deb` |
+| Fedora / RHEL | `Tether-*.x86_64.rpm` |
+| Any Linux (incl. Arch) | `Tether_*_amd64.AppImage` |
+| Windows | `Tether_*_x64-setup.exe` or `.msi` |
+| macOS (Apple Silicon) | `Tether_*_aarch64.dmg` |
+| macOS (Intel) | `Tether_*_x64.dmg` |
+
+The app checks for updates on launch: the **AppImage, Windows, and macOS** builds self-update in place; **`.deb`/`.rpm`** installs are pointed to the new package to install via your package manager. See [the docs](https://samlo.cloud/tether/desktop) for details.
 
 ## Building the app from source
 
@@ -94,6 +110,22 @@ cd apps/mobile && bun run src/terminal.test.ts
 ```
 
 See `CLAUDE.md` for architecture notes (data flow, holder processes, conventions).
+
+## Version history
+
+Newest first. Full notes on each [release](https://github.com/samuelloranger/tether/releases).
+
+| Version | Highlights |
+| --- | --- |
+| [v1.3.0](https://github.com/samuelloranger/tether/releases/tag/v1.3.0) | Desktop hardening: in-app auto-update (signed, with progress), window-state persistence, right-click menu; terminal input correctness (DECCKM app-cursor keys, AltGr, mouse-wheel forwarding). |
+| [v1.2.1](https://github.com/samuelloranger/tether/releases/tag/v1.2.1) | Desktop UI tuned for keyboard + mouse: docked session sidebar, physical keyboard, native text selection, no on-screen key bar. |
+| [v1.2.0](https://github.com/samuelloranger/tether/releases/tag/v1.2.0) | Desktop client (Tauri) for Linux, Windows, and macOS. |
+| [v1.1.0](https://github.com/samuelloranger/tether/releases/tag/v1.1.0) | Server ships as a single self-contained compiled binary; `tether update` self-update. |
+| [v1.0.10](https://github.com/samuelloranger/tether/releases/tag/v1.0.10) | Fix `install.sh` lockfile drift. |
+| [v1.0.9](https://github.com/samuelloranger/tether/releases/tag/v1.0.9) | Drop unused Face ID permission (fixes AltStore install). |
+| [v1.0.8](https://github.com/samuelloranger/tether/releases/tag/v1.0.8) | Codex review follow-up fixes. |
+| [v1.0.7](https://github.com/samuelloranger/tether/releases/tag/v1.0.7) | Trust, recovery & honesty: shared-password auth + TOFU pairing, verifiable connection setup, honest status copy. |
+| [v1.0.0 – v1.0.6](https://github.com/samuelloranger/tether/releases) | Initial releases: persistent PTY sessions, SQLite replay, mobile VT emulator, multi-terminal tabs, wrapped links, diff-based input. |
 
 ## License
 
