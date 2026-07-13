@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.2.0",
+          "date": "2026-07-13",
+          "localizedDescription": "Adds a **desktop client** built from the same app via Expo Web + Tauri. The WebSocket runs on the Rust side so the shared-password header works (browsers can't set it).\n\n**Desktop downloads** (this release, built by CI):\n- **Linux:** `.deb` (Ubuntu/Mint), `.rpm` (Fedora), `.AppImage` (Arch + any distro)\n- **Windows:** `.msi` / `.exe`\n- **macOS:** `.dmg` (Apple Silicon + Intel; unsigned)\n\nPlus the usual server binaries + mobile IPA/APK. Server unchanged.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.2.0/tether-v1.2.0.ipa",
+          "size": 8153657,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.1.0",
           "date": "2026-07-12",
           "localizedDescription": "The server now ships as a **single self-contained binary** — no bun, git, or node_modules on the box.\n\n- **Install:** `curl -fsSL https://raw.githubusercontent.com/samuelloranger/tether/main/install.sh | sh` — detects OS/arch, drops the binary in `~/.local/bin/tether`.\n- **Update:** `tether update` downloads the latest release binary and restarts (atomic swap). No more git/rsync.\n- One binary is the whole CLI: `serve | start | stop | restart | status | logs | set-password | update | version`.\n- Data moves to `~/.tether/config/tether.db`; an existing `~/.tether/app` install migrates automatically on first run (password + sessions preserved, live sessions reattached).\n- macOS binaries unsigned; x64 built baseline (no AVX2 requirement).",
