@@ -45,6 +45,7 @@ import { ArrowCluster } from './src/Dpad';
 import { ConnectionBanner } from './src/ConnectionBanner';
 import { UtilityBar } from './src/UtilityBar';
 import { OverflowMenu } from './src/OverflowMenu';
+import { RenameModal, SnippetsModal } from './src/SessionModals';
 import { mouseSeq } from './src/mouseSeq';
 
 
@@ -1417,90 +1418,26 @@ function AppInner() {
           />
 
           {/* Rename Modal */}
-          <Modal
+          <RenameModal
             visible={renameModalOpen}
-            animationType="fade"
-            transparent
-            onRequestClose={() => setRenameModalOpen(false)}
-          >
-            <Pressable style={styles.menuBackdrop} onPress={() => setRenameModalOpen(false)}>
-              <Pressable style={styles.renamePanel} onPress={() => {}}>
-                <Text style={styles.renameTitle}>Rename terminal</Text>
-                <TextInput
-                  style={styles.renameInput}
-                  value={renameText}
-                  onChangeText={setRenameText}
-                  placeholder={activeId}
-                  placeholderTextColor="#64748b"
-                  autoFocus
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onSubmitEditing={submitRename}
-                  keyboardAppearance="dark"
-                />
-                <View style={styles.renameBtns}>
-                  <TouchableOpacity
-                    style={styles.renameBtn}
-                    onPress={() => setRenameModalOpen(false)}
-                  >
-                    <Text style={styles.renameBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.renameBtn} onPress={submitRename}>
-                    <Text style={[styles.renameBtnText, { color: '#22d3ee' }]}>Save</Text>
-                  </TouchableOpacity>
-                </View>
-              </Pressable>
-            </Pressable>
-          </Modal>
+            onClose={() => setRenameModalOpen(false)}
+            value={renameText}
+            onChangeText={setRenameText}
+            placeholder={activeId}
+            onSubmit={submitRename}
+          />
 
           {/* Snippets Modal */}
-          <Modal
+          <SnippetsModal
             visible={snippetsModalOpen}
-            animationType="fade"
-            transparent
-            onRequestClose={() => setSnippetsModalOpen(false)}
-          >
-            <Pressable style={styles.menuBackdrop} onPress={() => setSnippetsModalOpen(false)}>
-              <Pressable style={styles.renamePanel} onPress={() => {}}>
-                <Text style={styles.renameTitle}>Saved commands</Text>
-                {snippets.length === 0 && (
-                  <Text style={styles.snippetEmpty}>No saved commands yet. Add one below.</Text>
-                )}
-                {snippets.map((s, i) => (
-                  <View key={`${s}-${i}`} style={styles.snippetRow}>
-                    <TouchableOpacity style={styles.snippetSend} onPress={() => sendSnippet(s)}>
-                      <Text style={styles.snippetText} numberOfLines={1}>
-                        {s}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.snippetDelete}
-                      onPress={() => removeSnippet(i)}
-                      accessibilityLabel={`Delete snippet ${s}`}
-                    >
-                      <Feather name="x" size={16} color="#94a3b8" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                <View style={styles.snippetAddRow}>
-                  <TextInput
-                    style={[styles.renameInput, { flex: 1 }]}
-                    value={snippetDraft}
-                    onChangeText={setSnippetDraft}
-                    placeholder="New snippet (e.g. git status)"
-                    placeholderTextColor="#64748b"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    onSubmitEditing={addSnippet}
-                    keyboardAppearance="dark"
-                  />
-                  <TouchableOpacity style={styles.snippetAddBtn} onPress={addSnippet}>
-                    <Feather name="plus" size={18} color="#22d3ee" />
-                  </TouchableOpacity>
-                </View>
-              </Pressable>
-            </Pressable>
-          </Modal>
+            onClose={() => setSnippetsModalOpen(false)}
+            snippets={snippets}
+            onSend={sendSnippet}
+            onRemove={removeSnippet}
+            draft={snippetDraft}
+            onDraftChange={setSnippetDraft}
+            onAdd={addSnippet}
+          />
 
           {/* Fullscreen selectable-text view (long-press the terminal to open) */}
           <Modal
