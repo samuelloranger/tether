@@ -12,7 +12,6 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Platform,
-  Alert,
   ActivityIndicator,
   useWindowDimensions,
   Modal,
@@ -36,6 +35,7 @@ import { getPassword, setPassword as persistPassword, authHeaders } from './src/
 import { httpBase, wsUrl, validateAddress } from './src/address';
 import { openTerminalSocket, type TerminalSocket } from './src/wsTransport';
 import { keyToBytes, COPY, PASTE } from './src/desktopKeys';
+import { notify, confirmAction } from './src/dialog';
 import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './src/desktopUpdate';
 import { mouseSeq } from './src/mouseSeq';
 
@@ -811,7 +811,7 @@ function AppInner() {
         connect();
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to save configuration');
+      void notify('Error', 'Failed to save configuration', 'error');
     }
   };
 
@@ -864,7 +864,7 @@ function AppInner() {
     const text = getFullText();
     if (!text) return;
     await Clipboard.setStringAsync(text);
-    Alert.alert('Copied', 'Displayed transcript copied to clipboard.');
+    void notify('Copied', 'Displayed transcript copied to clipboard.');
   };
 
   // Desktop context-menu actions.
@@ -891,7 +891,7 @@ function AppInner() {
     try {
       text = await Clipboard.getStringAsync();
     } catch {
-      Alert.alert('Paste failed', 'Could not read the clipboard.');
+      void notify('Paste failed', 'Could not read the clipboard.', 'error');
       return;
     }
     if (!text) return;
@@ -1077,10 +1077,10 @@ function AppInner() {
         pendingUpdate.current = u;
         setUpdateInfo({ version: u.version, current: u.current, canSelfInstall: u.canSelfInstall });
       } else {
-        Alert.alert('Up to date', "You're running the latest version of Tether.");
+        void notify('Up to date', "You're running the latest version of Tether.");
       }
     } catch {
-      Alert.alert('Update check failed', 'Could not reach the update server.');
+      void notify('Update check failed', 'Could not reach the update server.', 'error');
     }
   };
 
@@ -1093,7 +1093,7 @@ function AppInner() {
       setUpdating(false);
       setUpdateInfo(null);
       disposePending();
-      Alert.alert('Update failed', 'The update could not be downloaded or installed.');
+      void notify('Update failed', 'The update could not be downloaded or installed.', 'error');
     });
   };
 
@@ -1157,35 +1157,28 @@ function AppInner() {
       });
       await refreshSessions();
     } catch (err) {
-      Alert.alert('Rename failed', String(err));
+      void notify('Rename failed', String(err), 'error');
     }
   };
 
-  const hardResetSession = () => {
-    Alert.alert(
+  const hardResetSession = async () => {
+    const ok = await confirmAction(
       'Restart terminal',
       "This restarts the shell process and clears this terminal's scrollback history on the server. This can't be undone.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Restart',
-          style: 'destructive',
-          onPress: async () => {
-            resetTerminal();
-            try {
-              await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
-                body: JSON.stringify({ id: activeId }),
-              });
-              connect();
-            } catch (e) {
-              Alert.alert('Error', 'Failed to kill session on the server');
-            }
-          },
-        },
-      ]
+      { confirmLabel: 'Restart', destructive: true }
     );
+    if (!ok) return;
+    resetTerminal();
+    try {
+      await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
+        body: JSON.stringify({ id: activeId }),
+      });
+      connect();
+    } catch (e) {
+      void notify('Error', 'Failed to kill session on the server', 'error');
+    }
   };
 
   const onScroll = (e: any) => {
@@ -1450,8 +1443,14 @@ function AppInner() {
             <Pressable
               nativeID="tether-terminal"
               style={{ flex: 1 }}
-              accessibilityRole="button"
-              accessibilityLabel="Terminal. Double-tap to type, long-press to select text."
+              // On desktop the terminal must NOT be a role="button": react-native-web
+              // would then hijack Enter/Space to "activate" it, so those keys never
+              // reach the PTY key-forwarder (only letters do). Click-to-focus still
+              // works via onPress. Mobile keeps the button role for its tap/a11y hint.
+              accessibilityRole={isDesktop ? undefined : 'button'}
+              accessibilityLabel={
+                isDesktop ? undefined : 'Terminal. Double-tap to type, long-press to select text.'
+              }
               onPressIn={() => {
                 scrolledRef.current = false;
               }}

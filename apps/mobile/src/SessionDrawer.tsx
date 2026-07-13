@@ -8,10 +8,9 @@ import {
   Pressable,
   Animated,
   AccessibilityInfo,
-  Alert,
-  Platform,
 } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { confirmAction } from './dialog';
 
 export interface DrawerSession {
   id: string;
@@ -37,19 +36,17 @@ interface SessionDrawerProps {
 export const PANEL_W = 264;
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
-// Kill needs a confirm. RN-web's Alert.alert can't render multiple buttons, so
-// on web fall back to window.confirm; native keeps the styled Alert.
+// Kill needs a confirm. confirmAction shows a native OS dialog on desktop (the
+// Tauri plugin — not window.confirm, which WebKitGTK titles "JavaScript") and
+// the styled multi-button Alert on mobile.
 function confirmKill(id: string, onKill: (id: string) => void) {
-  const title = 'Kill this terminal?';
-  const body = "The process and its saved output will be deleted. This can't be undone.";
-  if (Platform.OS === 'web') {
-    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${body}`)) onKill(id);
-    return;
-  }
-  Alert.alert(title, body, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: 'Kill', style: 'destructive', onPress: () => onKill(id) },
-  ]);
+  void confirmAction(
+    'Kill this terminal?',
+    "The process and its saved output will be deleted. This can't be undone.",
+    { confirmLabel: 'Kill', destructive: true }
+  ).then((ok) => {
+    if (ok) onKill(id);
+  });
 }
 
 function isRecentlyActive(ts: string | null): boolean {
