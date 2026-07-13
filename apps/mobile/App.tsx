@@ -44,6 +44,10 @@ import { mouseSeq } from './src/mouseSeq';
 // use it to swap the mobile chrome (utility bar, overlay drawer, tap-to-type)
 // for desktop conventions (physical keyboard, docked sidebar, mouse selection).
 const isDesktop = Platform.OS === 'web';
+// macOS uses Cmd (not Ctrl) as the clipboard modifier, so Ctrl+C stays SIGINT.
+// Detected from the webview UA since this only ever runs on the desktop build.
+const isMacDesktop =
+  isDesktop && typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent);
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -991,7 +995,7 @@ function AppInner() {
         }
       }
       const appCursor = cache.get(activeIdRef.current)?.term.applicationCursor ?? false;
-      const bytes = keyToBytes(e, appCursor);
+      const bytes = keyToBytes(e, appCursor, isMacDesktop);
       if (bytes == null) return;
       if (bytes === COPY) return; // let the browser copy the selection
       e.preventDefault();
