@@ -46,6 +46,9 @@ import { ConnectionBanner } from './src/ConnectionBanner';
 import { UtilityBar } from './src/UtilityBar';
 import { OverflowMenu } from './src/OverflowMenu';
 import { RenameModal, SnippetsModal } from './src/SessionModals';
+import { SelectionView } from './src/SelectionView';
+import { ContextMenu } from './src/ContextMenu';
+import { UpdateModal } from './src/UpdateModal';
 import { mouseSeq } from './src/mouseSeq';
 
 
@@ -1440,61 +1443,18 @@ function AppInner() {
           />
 
           {/* Fullscreen selectable-text view (long-press the terminal to open) */}
-          <Modal
+          <SelectionView
             visible={selectionViewOpen}
-            animationType="slide"
-            onRequestClose={() => {
+            onClose={() => {
               setSelectionViewOpen(false);
               setSearchQuery('');
             }}
-          >
-            <View style={[styles.selectionViewContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-              <View style={styles.selectionViewHeader}>
-                <Text style={styles.selectionViewTitle}>Select text (displayed transcript)</Text>
-                <View style={styles.selectionViewHeaderBtns}>
-                  <TouchableOpacity
-                    style={styles.selectionViewHeaderBtn}
-                    onPress={handleCopyAll}
-                    accessibilityRole="button"
-                    accessibilityLabel="Copy displayed transcript"
-                  >
-                    <Text style={styles.selectionViewHeaderBtnText}>Copy displayed transcript</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.selectionViewHeaderBtn}
-                    onPress={() => {
-                      setSelectionViewOpen(false);
-                      setSearchQuery('');
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel="Close"
-                  >
-                    <Feather name="x" size={20} color="#cbd5e1" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <TextInput
-                ref={searchInputRef}
-                style={styles.searchInput}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Filter lines…"
-                placeholderTextColor="#64748b"
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardAppearance="dark"
-              />
-              {selectionViewOpen && (
-                <TextInput
-                  style={styles.selectionViewText}
-                  value={searchText}
-                  editable={false}
-                  multiline
-                  scrollEnabled
-                />
-              )}
-            </View>
-          </Modal>
+            onCopy={handleCopyAll}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchInputRef={searchInputRef}
+            text={searchText}
+          />
 
           {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
           {!isDesktop && (
@@ -1531,96 +1491,28 @@ function AppInner() {
           )}
           </View>
 
-          {/* Desktop right-click menu. Rendered in a Modal so it portals to the
-              viewport root — client coordinates then map 1:1 (no sidebar offset). */}
-          {isDesktop && ctxMenu && (
-            <Modal visible transparent animationType="none" onRequestClose={() => setCtxMenu(null)}>
-            <Pressable style={styles.ctxBackdrop} onPress={() => setCtxMenu(null)}>
-              <View style={[styles.ctxMenu, { left: ctxMenu.x, top: ctxMenu.y }]}>
-                <TouchableOpacity
-                  style={styles.ctxRow}
-                  onPress={() => {
-                    void copySelection();
-                    setCtxMenu(null);
-                  }}
-                >
-                  <Feather name="copy" size={15} color="#cbd5e1" />
-                  <Text style={styles.ctxText}>Copy</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.ctxRow}
-                  onPress={() => {
-                    void handlePaste();
-                    setCtxMenu(null);
-                  }}
-                >
-                  <Feather name="clipboard" size={15} color="#cbd5e1" />
-                  <Text style={styles.ctxText}>Paste</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.ctxRow}
-                  onPress={() => {
-                    selectAllTerminal();
-                    setCtxMenu(null);
-                  }}
-                >
-                  <Feather name="maximize" size={15} color="#cbd5e1" />
-                  <Text style={styles.ctxText}>Select all</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-            </Modal>
+          {/* Desktop right-click menu */}
+          {isDesktop && (
+            <ContextMenu
+              menu={ctxMenu}
+              onClose={() => setCtxMenu(null)}
+              onCopy={() => void copySelection()}
+              onPaste={() => void handlePaste()}
+              onSelectAll={selectAllTerminal}
+            />
           )}
 
-          {/* Desktop self-update modal (styled + progress). */}
-          {isDesktop && updateInfo && (
-            <Modal visible transparent animationType="fade" onRequestClose={dismissUpdate}>
-              <View style={styles.updateBackdrop}>
-                <View style={styles.updateCard}>
-                  <View style={styles.updateHeaderRow}>
-                    <Feather name="download" size={16} color="#818cf8" />
-                    <Text style={styles.updateTitle}>Update available</Text>
-                  </View>
-                  <Text style={styles.updateVersion}>Tether {updateInfo.version}</Text>
-                  <Text style={styles.updateSub}>You have {updateInfo.current}</Text>
-                  {!updateInfo.canSelfInstall && (
-                    <Text style={styles.updateNote}>
-                      This install updates through your package manager — download the new package.
-                    </Text>
-                  )}
-
-                  {updating ? (
-                    <View style={styles.updateProgressWrap}>
-                      <View style={styles.updateTrack}>
-                        <View style={[styles.updateFill, { width: `${upPct}%` }]} />
-                      </View>
-                      <Text style={styles.updateProgressText}>{upLabel}</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.updateBtns}>
-                      <TouchableOpacity style={styles.updateBtn} onPress={dismissUpdate}>
-                        <Text style={styles.updateBtnText}>Later</Text>
-                      </TouchableOpacity>
-                      {updateInfo.canSelfInstall ? (
-                        <TouchableOpacity
-                          style={[styles.updateBtn, styles.updateBtnPrimary]}
-                          onPress={startUpdate}
-                        >
-                          <Text style={[styles.updateBtnText, styles.updateBtnTextPrimary]}>Update</Text>
-                        </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity
-                          style={[styles.updateBtn, styles.updateBtnPrimary]}
-                          onPress={downloadUpdate}
-                        >
-                          <Text style={[styles.updateBtnText, styles.updateBtnTextPrimary]}>Download</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  )}
-                </View>
-              </View>
-            </Modal>
+          {/* Desktop self-update modal */}
+          {isDesktop && (
+            <UpdateModal
+              info={updateInfo}
+              updating={updating}
+              pct={upPct}
+              label={upLabel}
+              onDismiss={dismissUpdate}
+              onUpdate={startUpdate}
+              onDownload={downloadUpdate}
+            />
           )}
         </KeyboardAvoidingView>
       )}
