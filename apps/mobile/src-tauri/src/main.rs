@@ -110,10 +110,41 @@ fn ws_close(state: State<'_, Bridge>) {
     }
 }
 
+// Whether this install can self-update. The Tauri updater can replace the
+// macOS/Windows bundles and the Linux AppImage, but NOT a package-managed
+// (.deb/.rpm) install — those must update via apt/dnf. On Linux we treat only an
+// AppImage run (APPIMAGE env set) as updatable so we don't offer a doomed update.
+#[tauri::command]
+fn is_updatable() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var("APPIMAGE").is_ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+// NOTE: the webview CSP is left null (see tauri.conf.json). This shell loads
+// only the local bundled frontend — no remote page loads — so its XSS surface is
+// minimal, and a strict CSP breaks react-native-web's runtime-injected
+// stylesheets/fonts under webkit2gtk (blank/unstyled UI). Revisit if we ever
+// render remote or untrusted HTML.
 fn main() {
     tauri::Builder::default()
+        // Persist window size/position/maximized state across launches.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Self-update: check GitHub releases, verify the signature, relaunch.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(Bridge::default())
-        .invoke_handler(tauri::generate_handler![ws_connect, ws_send, ws_close])
+        .invoke_handler(tauri::generate_handler![
+            ws_connect,
+            ws_send,
+            ws_close,
+            is_updatable
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");
 }

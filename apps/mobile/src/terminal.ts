@@ -141,6 +141,10 @@ export class TerminalEmulator {
   // UI forward swipes as scroll-wheel events so TUIs scroll their own history.
   mouseOn = false;
 
+  // True when the app negotiated SGR mouse encoding (?1006h). Off ⇒ the UI must
+  // send legacy X10 mouse reports, which is what those apps parse.
+  mouseSgr = false;
+
   // Cursor visibility (DECTCEM ?25). Shown for shells; TUIs hide it (?25l) and
   // draw their own, so the caret only renders when the app wants it visible.
   cursorVisible = true;
@@ -182,6 +186,7 @@ export class TerminalEmulator {
     this.scrollBot = this.rows - 1;
     this.pen = {};
     this.mouseOn = false;
+    this.mouseSgr = false;
     this.cursorVisible = true;
     this.bracketedPaste = false;
     this.applicationCursor = false;
@@ -513,6 +518,8 @@ export class TerminalEmulator {
         this.mouseOn = on; // mouse reporting enabled/disabled
       } else if (m === 25) {
         this.cursorVisible = on; // DECTCEM
+      } else if (m === 1006) {
+        this.mouseSgr = on; // SGR extended mouse encoding
       } else if (m === 2004) {
         this.bracketedPaste = on;
       } else if (m === 1) {

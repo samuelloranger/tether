@@ -52,9 +52,26 @@ jobs:
 
       # Builds the web frontend (beforeBuildCommand) then the native bundle, and
       # uploads the artifacts to the release that triggered the run.
+      #
+      # Signing is opt-in via repo secrets (safe in a public repo — Actions
+      # secrets are encrypted and never exposed to fork PRs). When a secret is
+      # absent the step still builds, just unsigned:
+      #   - TAURI_SIGNING_PRIVATE_KEY(+ _PASSWORD): signs update artifacts and
+      #     emits latest.json — REQUIRED for the in-app auto-updater to work.
+      #   - APPLE_* : Developer ID signing + notarization (clears macOS Gatekeeper).
+      #   - Windows signing needs a separate approach (Azure Trusted Signing or a
+      #     pfx + certificateThumbprint in tauri.conf); left unsigned for now.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/mobile
           args: ${{ matrix.args }}
