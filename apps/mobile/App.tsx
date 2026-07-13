@@ -41,6 +41,7 @@ import { injectDragRegionStyles } from './src/dragRegion';
 import { styles } from './src/styles';
 import { isDesktop, isMacDesktop } from './src/platform';
 import { TermRow } from './src/TermRow';
+import { ArrowCluster } from './src/Dpad';
 import { mouseSeq } from './src/mouseSeq';
 
 
@@ -51,79 +52,6 @@ const KEY_SESSION_ID = 'tether_session_id';
 const KEY_FONT = 'tether_font_size';
 const KEY_SNIPPETS = 'tether_snippets';
 
-
-// Directional pad, styled after the arrow clusters in Blink/Termius: one
-// capsule with three segments (left | up-over-down | right) instead of four
-// separate buttons — reads as a single control and halves the width four
-// loose buttons would cost in an already-tight toolbar.
-// Press-and-hold repeat for navigation keys: fire once on press, then repeat
-// after 350ms at 60ms — mirrors hardware key-repeat.
-function RepeatBtn({
-  onFire,
-  style,
-  label,
-  children,
-}: {
-  onFire: () => void;
-  style: object;
-  label: string;
-  children: React.ReactNode;
-}) {
-  const delay = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const iv = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stop = () => {
-    if (delay.current) clearTimeout(delay.current);
-    if (iv.current) clearInterval(iv.current);
-    delay.current = null;
-    iv.current = null;
-  };
-  useEffect(() => stop, []);
-  return (
-    <TouchableOpacity
-      style={style}
-      activeOpacity={0.6}
-      onPressIn={() => {
-        onFire();
-        delay.current = setTimeout(() => {
-          iv.current = setInterval(onFire, 60);
-        }, 350);
-      }}
-      onPressOut={stop}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-    >
-      {children}
-    </TouchableOpacity>
-  );
-}
-
-const ArrowCluster = React.memo(function ArrowCluster({
-  onArrow,
-}: {
-  onArrow: (dir: 'A' | 'B' | 'C' | 'D') => void;
-}) {
-  return (
-    <View style={styles.arrowCluster}>
-      <RepeatBtn style={styles.arrowSeg} label="Arrow left" onFire={() => onArrow('D')}>
-        <Feather name="chevron-left" size={18} color="#cbd5e1" />
-      </RepeatBtn>
-      <View style={styles.arrowVDivider} />
-      <View style={styles.arrowMid}>
-        <RepeatBtn style={styles.arrowMidHalf} label="Arrow up" onFire={() => onArrow('A')}>
-          <Feather name="chevron-up" size={15} color="#cbd5e1" />
-        </RepeatBtn>
-        <View style={styles.arrowHDivider} />
-        <RepeatBtn style={styles.arrowMidHalf} label="Arrow down" onFire={() => onArrow('B')}>
-          <Feather name="chevron-down" size={15} color="#cbd5e1" />
-        </RepeatBtn>
-      </View>
-      <View style={styles.arrowVDivider} />
-      <RepeatBtn style={styles.arrowSeg} label="Arrow right" onFire={() => onArrow('C')}>
-        <Feather name="chevron-right" size={18} color="#cbd5e1" />
-      </RepeatBtn>
-    </View>
-  );
-});
 
 export default function App() {
   return (
