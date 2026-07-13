@@ -30,11 +30,18 @@ import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './src/terminal';
 import { splitRunByLinks, urlColumns } from './src/links';
 import { SessionCache, nextTermId, type SessionEntry } from './src/sessionCache';
-import { SessionDrawer, type DrawerSession } from './src/SessionDrawer';
+import { SessionDrawer, PANEL_W, type DrawerSession } from './src/SessionDrawer';
 import { applyFieldChange, SENT } from './src/input';
 import { getPassword, setPassword as persistPassword, authHeaders } from './src/secureConfig';
 import { httpBase, wsUrl, validateAddress } from './src/address';
 import { openTerminalSocket, type TerminalSocket } from './src/wsTransport';
+import { keyToBytes, COPY, PASTE } from './src/desktopKeys';
+
+// The web bundle only ever runs inside the Tauri desktop shell (plain browsers
+// can't authenticate the WS). So Platform.OS === 'web' means "desktop", and we
+// use it to swap the mobile chrome (utility bar, overlay drawer, tap-to-type)
+// for desktop conventions (physical keyboard, docked sidebar, mouse selection).
+const isDesktop = Platform.OS === 'web';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -88,7 +95,11 @@ const TermRow = React.memo(
     let col = 0;
     return (
       <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
-        <Text style={[styles.termLine, { fontSize, lineHeight, width }]} numberOfLines={1}>
+        <Text
+          style={[styles.termLine, { fontSize, lineHeight, width }]}
+          numberOfLines={1}
+          selectable={isDesktop}
+        >
           {row.runs.map((run, i) => {
             const st = runToStyle(run.style, blinkOn);
             const segs = splitRunByLinks(run.text, col, urlAt);
@@ -314,7 +325,11 @@ function AppInner() {
   const CHAR_RATIO = 0.6;
   const [fontSize, setFontSize] = useState(11);
   const lineHeight = Math.round(fontSize * 1.3);
-  const gridWidth = winWidth - 12;
+  // Desktop docks a fixed-width sidebar, so the terminal pane is narrower than
+  // the window — fit the grid (and the PTY resize) to the pane, not the window,
+  // or the rightmost columns overflow off-screen.
+  const paneWidth = isDesktop ? Math.max(120, winWidth - PANEL_W) : winWidth;
+  const gridWidth = paneWidth - 12;
   const numCols = Math.max(20, Math.floor(gridWidth / (fontSize * CHAR_RATIO)));
   const numRows = termHeight ? Math.max(6, Math.floor((termHeight - 12) / lineHeight)) : 24;
 
@@ -879,6 +894,58 @@ function AppInner() {
     resetField();
   };
 
+  // Desktop: capture the physical keyboard globally and forward keystrokes to
+  // the PTY (replacing the mobile utility bar). Skipped while a text field is
+  // focused (config form, rename/snippet/search modals) so those still type
+  // normally. Ctrl/Cmd+C copies an active selection or sends SIGINT; Ctrl/Cmd+V
+  // pastes from the clipboard.
+  useEffect(() => {
+    if (!isDesktop || isConfiguring) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as (HTMLElement & { isContentEditable?: boolean }) | null;
+      // Don't hijack the keyboard while a real UI control is focused: text fields
+      // must type normally, and Enter/Space must activate a focused button
+      // (New terminal, Settings, the overflow menu, Kill) instead of leaking into
+      // the shell. The terminal surface itself is exempt so click-to-focus then
+      // type still works. Nothing focused (body) → forward, the common case.
+      if (el && el !== document.body) {
+        const onTerminal = el.id === 'tether-terminal' || !!el.closest?.('#tether-terminal');
+        if (!onTerminal) {
+          const tag = el.tagName;
+          const role = el.getAttribute?.('role');
+          if (
+            tag === 'INPUT' ||
+            tag === 'TEXTAREA' ||
+            tag === 'SELECT' ||
+            tag === 'BUTTON' ||
+            tag === 'A' ||
+            el.isContentEditable ||
+            role === 'button' ||
+            role === 'link' ||
+            role === 'menuitem' ||
+            el.getAttribute?.('tabindex') != null
+          ) {
+            return;
+          }
+        }
+      }
+      const bytes = keyToBytes(e);
+      if (bytes == null) return;
+      if (bytes === COPY) return; // let the browser copy the selection
+      e.preventDefault();
+      if (bytes === PASTE) {
+        void handlePaste();
+        return;
+      }
+      sendInput(bytes);
+      autoScroll.current = true;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // sendInput/handlePaste delegate to refs, so a stable listener is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConfiguring]);
+
   const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
 
   const openRename = () => {
@@ -975,7 +1042,7 @@ function AppInner() {
             <View style={styles.configIconBox}>
               <Text style={styles.configLogoIcon}>{'>_'}</Text>
             </View>
-            <Text style={styles.configTitle}>Tether Mobile</Text>
+            <Text style={styles.configTitle}>{isDesktop ? 'Tether Desktop' : 'Tether Mobile'}</Text>
             <Text style={styles.configSubtitle}>Connect to a terminal on your server</Text>
           </View>
 
@@ -1086,20 +1153,38 @@ function AppInner() {
         /* Terminal Client Screen */
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.terminalContainer}
+          style={[styles.terminalContainer, isDesktop && styles.terminalRow]}
         >
+          {/* Desktop: permanent sidebar of terminals in place of the overlay drawer. */}
+          {isDesktop && (
+            <SessionDrawer
+              docked
+              visible
+              sessions={drawerSessions}
+              activeId={activeId}
+              onSelect={switchTo}
+              onNew={newTerminal}
+              onKill={killActiveOr}
+              onClose={() => {}}
+              onSettings={() => setIsConfiguring(true)}
+            />
+          )}
+
+          <View style={styles.terminalMain}>
           {/* Header Panel */}
           <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.headerBtn}
-              activeOpacity={0.6}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              onPress={() => { Keyboard.dismiss(); refreshSessions(); setDrawerOpen(true); }}
-              accessibilityRole="button"
-              accessibilityLabel="Open terminal list"
-            >
-              <Feather name="menu" size={20} color="#cbd5e1" />
-            </TouchableOpacity>
+            {!isDesktop && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                activeOpacity={0.6}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                onPress={() => { Keyboard.dismiss(); refreshSessions(); setDrawerOpen(true); }}
+                accessibilityRole="button"
+                accessibilityLabel="Open terminal list"
+              >
+                <Feather name="menu" size={20} color="#cbd5e1" />
+              </TouchableOpacity>
+            )}
 
             <View style={styles.headerInfo}>
               <Text style={styles.headerTitle}>{activeName}</Text>
@@ -1172,6 +1257,7 @@ function AppInner() {
             {...panResponder.panHandlers}
           >
             <Pressable
+              nativeID="tether-terminal"
               style={{ flex: 1 }}
               accessibilityRole="button"
               accessibilityLabel="Terminal. Double-tap to type, long-press to select text."
@@ -1216,17 +1302,19 @@ function AppInner() {
             </Pressable>
           </View>
 
-          {/* Session Drawer (overlay) */}
-          <SessionDrawer
-            visible={drawerOpen}
-            sessions={drawerSessions}
-            activeId={activeId}
-            onSelect={switchTo}
-            onNew={newTerminal}
-            onKill={killActiveOr}
-            onClose={() => setDrawerOpen(false)}
-            onSettings={() => { setDrawerOpen(false); setIsConfiguring(true); }}
-          />
+          {/* Session Drawer (overlay) — mobile only; desktop uses the docked sidebar. */}
+          {!isDesktop && (
+            <SessionDrawer
+              visible={drawerOpen}
+              sessions={drawerSessions}
+              activeId={activeId}
+              onSelect={switchTo}
+              onNew={newTerminal}
+              onKill={killActiveOr}
+              onClose={() => setDrawerOpen(false)}
+              onSettings={() => { setDrawerOpen(false); setIsConfiguring(true); }}
+            />
+          )}
 
           {/* Overflow menu (header ⋯) */}
           <Modal
@@ -1433,7 +1521,8 @@ function AppInner() {
             </View>
           </Modal>
 
-          {/* Mobile Terminal Shortcuts Utility Bar */}
+          {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
+          {!isDesktop && (
           <View style={styles.utilityBar}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.utilityScroll}>
               <TouchableOpacity
@@ -1498,27 +1587,31 @@ function AppInner() {
               </TouchableOpacity>
             </ScrollView>
           </View>
+          )}
 
-          {/* Hidden keyboard-capture field: tapping the terminal focuses it, so
-              typing goes straight into the terminal (the shell echoes it back).
-              No visible input box. */}
-          <TextInput
-            ref={inputRef}
-            style={styles.hiddenInput}
-            value={inputText}
-            onKeyPress={handleKeyPress}
-            onChangeText={handleChangeText}
-            onSubmitEditing={handleSend}
-            autoCapitalize="none"
-            autoCorrect={false}
-            spellCheck={false}
-            autoComplete="off"
-            blurOnSubmit={false}
-            keyboardAppearance="dark"
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            accessibilityLabel="Terminal input (hidden)"
-          />
+          {/* Hidden keyboard-capture field (mobile): tapping the terminal focuses
+              it, so typing goes straight into the terminal (the shell echoes it
+              back). Desktop reads the physical keyboard globally instead. */}
+          {!isDesktop && (
+            <TextInput
+              ref={inputRef}
+              style={styles.hiddenInput}
+              value={inputText}
+              onKeyPress={handleKeyPress}
+              onChangeText={handleChangeText}
+              onSubmitEditing={handleSend}
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              autoComplete="off"
+              blurOnSubmit={false}
+              keyboardAppearance="dark"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              accessibilityLabel="Terminal input (hidden)"
+            />
+          )}
+          </View>
         </KeyboardAvoidingView>
       )}
     </SafeAreaView>
@@ -1624,6 +1717,15 @@ const styles = StyleSheet.create({
   terminalContainer: {
     flex: 1,
     backgroundColor: '#05070e',
+  },
+  // Desktop: sidebar + terminal side by side.
+  terminalRow: {
+    flexDirection: 'row',
+  },
+  // The terminal column (right of the docked sidebar on desktop; the whole
+  // screen on mobile).
+  terminalMain: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
@@ -1747,6 +1849,9 @@ const styles = StyleSheet.create({
   terminalScroll: {
     flex: 1,
     backgroundColor: '#05070e',
+    // Desktop: allow native mouse selection of terminal text (RN-web maps these
+    // through; no-ops on native).
+    ...(isDesktop ? ({ userSelect: 'text', cursor: 'text' } as object) : null),
   },
   terminalContent: {
     paddingHorizontal: 6,

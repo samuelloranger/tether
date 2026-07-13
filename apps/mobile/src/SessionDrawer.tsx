@@ -9,6 +9,7 @@ import {
   Animated,
   AccessibilityInfo,
   Alert,
+  Platform,
 } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 
@@ -28,10 +29,28 @@ interface SessionDrawerProps {
   onKill: (id: string) => void;
   onClose: () => void;
   onSettings: () => void;
+  // Desktop: render as a permanent inline sidebar (no scrim, no slide, always
+  // mounted) instead of a slide-in overlay.
+  docked?: boolean;
 }
 
-const PANEL_W = 264;
+export const PANEL_W = 264;
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
+
+// Kill needs a confirm. RN-web's Alert.alert can't render multiple buttons, so
+// on web fall back to window.confirm; native keeps the styled Alert.
+function confirmKill(id: string, onKill: (id: string) => void) {
+  const title = 'Kill this terminal?';
+  const body = "The process and its saved output will be deleted. This can't be undone.";
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${body}`)) onKill(id);
+    return;
+  }
+  Alert.alert(title, body, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Kill', style: 'destructive', onPress: () => onKill(id) },
+  ]);
+}
 
 function isRecentlyActive(ts: string | null): boolean {
   if (!ts) return false;
@@ -49,6 +68,7 @@ export function SessionDrawer({
   onKill,
   onClose,
   onSettings,
+  docked = false,
 }: SessionDrawerProps) {
   const [mounted, setMounted] = useState(visible);
   const reduceMotion = useRef(false);
@@ -91,21 +111,9 @@ export function SessionDrawer({
     }
   }, [visible]);
 
-  if (!mounted) return null;
-
-  return (
-    <View style={styles.overlay}>
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
-        <Pressable
-          style={styles.scrim}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close terminal list"
-        />
-      </Animated.View>
-
-      <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
-        <View style={styles.header}>
+  const panelBody = (
+    <>
+      <View style={styles.header}>
           <Feather name="terminal" size={14} color="#818cf8" />
           <Text style={styles.title}>Terminals</Text>
           <TouchableOpacity
@@ -143,16 +151,7 @@ export function SessionDrawer({
                   style={styles.kill}
                   hitSlop={HIT}
                   activeOpacity={0.6}
-                  onPress={() =>
-                    Alert.alert(
-                      'Kill this terminal?',
-                      "The process and its saved output will be deleted. This can't be undone.",
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Kill', style: 'destructive', onPress: () => onKill(s.id) },
-                      ],
-                    )
-                  }
+                  onPress={() => confirmKill(s.id, onKill)}
                   accessibilityRole="button"
                   accessibilityLabel={`Kill terminal ${s.id}`}
                 >
@@ -173,6 +172,30 @@ export function SessionDrawer({
           <Feather name="plus" size={16} color="#fff" />
           <Text style={styles.newBtnText}>New terminal</Text>
         </TouchableOpacity>
+    </>
+  );
+
+  // Desktop: a fixed inline column, always present.
+  if (docked) {
+    return <View style={[styles.panel, styles.panelDocked]}>{panelBody}</View>;
+  }
+
+  if (!mounted) return null;
+
+  // Mobile: slide-in overlay with a tap-to-dismiss scrim.
+  return (
+    <View style={styles.overlay}>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
+        <Pressable
+          style={styles.scrim}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close terminal list"
+        />
+      </Animated.View>
+
+      <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
+        {panelBody}
       </Animated.View>
     </View>
   );
@@ -193,6 +216,9 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
   },
+  // Docked (desktop): inline column, no absolute positioning, tighter top pad
+  // (no mobile status bar to clear).
+  panelDocked: { position: 'relative', paddingTop: 12, alignSelf: 'stretch' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   settingsBtn: { marginLeft: 'auto', padding: 4 },
   title: {

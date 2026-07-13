@@ -3,5 +3,5 @@
   "compilerOptions": {
     "strict": true
   },
-  "exclude": ["src-tauri", "dist"]
+  "exclude": ["src-tauri", "dist", "**/*.test.ts"]
 }

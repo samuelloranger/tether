@@ -1,6 +1,6 @@
 {
   "name": "tether-mobile",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/fira-code": "^0.4.1",
@@ -33,6 +33,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "tsc --noEmit",
+    "test": "bun test",
     "build:web": "expo export --platform web",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
