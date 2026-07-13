@@ -99,7 +99,20 @@ jobs:
           args: ${{ matrix.args }}
           tagName: ${{ github.event_name == 'release' && github.ref_name || '' }}
           releaseId: ${{ github.event_name == 'release' && github.event.release.id || '' }}
-          uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
+
+      # tauri-action has no built-in workflow-artifact upload; on manual runs,
+      # upload the built bundles so they can be downloaded and tested. The
+      # bundle dir is target/release/bundle (no --target) or
+      # target/<triple>/release/bundle (macOS builds pass --target).
+      - name: Upload desktop bundles (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-${{ strategy.job-index }}
+          path: |
+            apps/mobile/src-tauri/target/release/bundle/**
+            apps/mobile/src-tauri/target/*/release/bundle/**
+          if-no-files-found: error
 
   ios:
     if: github.event_name == 'release' || inputs.scope == 'all'
