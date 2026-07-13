@@ -43,6 +43,7 @@ import { isDesktop, isMacDesktop } from './src/platform';
 import { TermRow } from './src/TermRow';
 import { ArrowCluster } from './src/Dpad';
 import { ConnectionBanner } from './src/ConnectionBanner';
+import { UtilityBar } from './src/UtilityBar';
 import { mouseSeq } from './src/mouseSeq';
 
 
@@ -1611,70 +1612,13 @@ function AppInner() {
 
           {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
           {!isDesktop && (
-          <View style={styles.utilityBar}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.utilityScroll}>
-              <TouchableOpacity
-                style={[styles.utilityBtn, ctrlArmed && styles.utilityBtnActive]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setCtrlArmed((v) => !v);
-                }}
-              >
-                <Text style={[styles.utilityBtnText, ctrlArmed && styles.utilityBtnTextActive]}>
-                  Ctrl
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.utilityBtn}
-                onPress={() => sendInput('\t')}
-                onLongPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  sendInput('\x1b[Z');
-                }}
-              >
-                <Text style={styles.utilityBtnText}>Tab</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b')}>
-                <Text style={styles.utilityBtnText}>Esc</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[3~')}>
-                <Text style={styles.utilityBtnText}>Del</Text>
-              </TouchableOpacity>
-
-              <View style={styles.utilityGroupDivider} />
-
-              <ArrowCluster
-                onArrow={(dir) => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  sendInput(cursorSeq(dir));
-                }}
-              />
-
-              <View style={styles.utilityGroupDivider} />
-
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput(cursorSeq('H'))}>
-                <Text style={styles.utilityBtnText}>Home</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput(cursorSeq('F'))}>
-                <Text style={styles.utilityBtnText}>End</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[5~')}>
-                <Text style={styles.utilityBtnText}>PgUp</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[6~')}>
-                <Text style={styles.utilityBtnText}>PgDn</Text>
-              </TouchableOpacity>
-
-              <View style={styles.utilityGroupDivider} />
-
-              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={handlePaste} accessibilityRole="button" accessibilityLabel="Paste">
-                <Feather name="clipboard" size={17} color="#cbd5e1" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityIconBtn} activeOpacity={0.6} onPress={() => Keyboard.dismiss()} accessibilityRole="button" accessibilityLabel="Hide keyboard">
-                <Feather name="chevron-down" size={18} color="#cbd5e1" />
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
+            <UtilityBar
+              ctrlArmed={ctrlArmed}
+              setCtrlArmed={setCtrlArmed}
+              sendInput={sendInput}
+              cursorSeq={cursorSeq}
+              onPaste={handlePaste}
+            />
           )}
 
           {/* Hidden keyboard-capture field (mobile): tapping the terminal focuses

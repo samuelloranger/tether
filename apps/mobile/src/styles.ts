@@ -231,44 +231,6 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     padding: 16,
   },
-  utilityBar: {
-    backgroundColor: '#0b0f19',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
-    paddingVertical: 8,
-  },
-  utilityScroll: {
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    gap: 6,
-  },
-  utilityBtn: {
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  utilityBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    fontFamily: MONO,
-    color: '#cbd5e1',
-  },
-  utilityBtnActive: {
-    backgroundColor: '#22d3ee',
-  },
-  utilityBtnTextActive: {
-    color: '#0b0f19',
-  },
-  utilityIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   fontStepBtn: {
     width: 30,
     height: 30,
@@ -452,12 +414,6 @@ export const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: MONO,
     color: '#cbd5e1',
-  },
-  utilityGroupDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    marginHorizontal: 2,
   },
   resizeSpacer: {
     width: 12,
