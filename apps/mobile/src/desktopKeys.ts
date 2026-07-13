@@ -55,7 +55,7 @@ export interface KeyLike {
   shiftKey: boolean;
 }
 
-export function keyToBytes(e: KeyLike, appCursor = false): string | null {
+export function keyToBytes(e: KeyLike, appCursor = false, isMac = false): string | null {
   const { key } = e;
 
   // Pure modifier presses produce nothing.
@@ -68,18 +68,24 @@ export function keyToBytes(e: KeyLike, appCursor = false): string | null {
   // the Ctrl-combo handling below, which would otherwise swallow it.
   if (e.ctrlKey && e.altKey && key.length === 1) return key;
 
-  const mod = e.ctrlKey || e.metaKey;
+  // Clipboard modifier: Cmd on macOS, Ctrl elsewhere. On macOS, Ctrl must stay a
+  // pure control modifier (Ctrl+C = SIGINT, Ctrl+V = 0x16), so it must NOT map to
+  // copy/paste — only Cmd does. On Windows/Linux there's no Cmd, so Ctrl serves
+  // double duty via the copy-vs-SIGINT heuristic below.
+  const clip = isMac ? e.metaKey : e.ctrlKey || e.metaKey;
 
-  // Clipboard: copy only when there's a selection, otherwise Ctrl+C is SIGINT.
-  if (mod && (key === 'c' || key === 'C')) {
+  // Copy only when there's a selection.
+  if (clip && (key === 'c' || key === 'C')) {
     const sel = typeof window !== 'undefined' ? window.getSelection()?.toString() : '';
     if (sel) return COPY;
-    return '\x03'; // Ctrl+C → SIGINT
+    // Windows/Linux: Ctrl+C with no selection is SIGINT. macOS: Cmd+C with no
+    // selection is a no-op (Ctrl+C is the SIGINT path, handled as a control byte).
+    return isMac ? null : '\x03';
   }
-  if (mod && (key === 'v' || key === 'V')) return PASTE;
+  if (clip && (key === 'v' || key === 'V')) return PASTE;
 
-  // Ctrl+letter → control byte (Ctrl+A = 0x01 … Ctrl+Z = 0x1a). Cmd is left for
-  // the OS on macOS (Cmd+C/V handled above); only Ctrl maps to control codes.
+  // Ctrl+letter → control byte (Ctrl+A = 0x01 … Ctrl+Z = 0x1a). On macOS this is
+  // also how Ctrl+C→SIGINT and Ctrl+V→0x16 (verbatim) happen; Cmd is above.
   if (e.ctrlKey && !e.altKey && /^[a-zA-Z]$/.test(key)) {
     return String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64);
   }
