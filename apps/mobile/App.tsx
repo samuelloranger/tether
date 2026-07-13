@@ -1264,8 +1264,12 @@ function AppInner() {
       scrollEnabled={!mouseOn}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="none"
-      onContentSizeChange={() => {
-        if (autoScroll.current) listRef.current?.scrollToEnd({ animated: false });
+      onContentSizeChange={(_w, h) => {
+        // Scroll to the height reported by THIS event, not scrollToEnd (which reads
+        // the list's internal content length — that lags a row behind a just-
+        // appended row, landing the view short). Offset past max is clamped to the
+        // true bottom.
+        if (autoScroll.current) listRef.current?.scrollToOffset({ offset: h, animated: false });
       }}
       ListEmptyComponent={
         connectionStatus === 'connected' ? (
