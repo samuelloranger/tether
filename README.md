@@ -111,22 +111,6 @@ cd apps/mobile && bun run src/terminal.test.ts
 
 See `CLAUDE.md` for architecture notes (data flow, holder processes, conventions).
 
-## Version history
-
-Newest first. Full notes on each [release](https://github.com/samuelloranger/tether/releases).
-
-| Version | Highlights |
-| --- | --- |
-| [v1.3.0](https://github.com/samuelloranger/tether/releases/tag/v1.3.0) | Desktop hardening: in-app auto-update (signed, with progress), window-state persistence, right-click menu; terminal input correctness (DECCKM app-cursor keys, AltGr, mouse-wheel forwarding). |
-| [v1.2.1](https://github.com/samuelloranger/tether/releases/tag/v1.2.1) | Desktop UI tuned for keyboard + mouse: docked session sidebar, physical keyboard, native text selection, no on-screen key bar. |
-| [v1.2.0](https://github.com/samuelloranger/tether/releases/tag/v1.2.0) | Desktop client (Tauri) for Linux, Windows, and macOS. |
-| [v1.1.0](https://github.com/samuelloranger/tether/releases/tag/v1.1.0) | Server ships as a single self-contained compiled binary; `tether update` self-update. |
-| [v1.0.10](https://github.com/samuelloranger/tether/releases/tag/v1.0.10) | Fix `install.sh` lockfile drift. |
-| [v1.0.9](https://github.com/samuelloranger/tether/releases/tag/v1.0.9) | Drop unused Face ID permission (fixes AltStore install). |
-| [v1.0.8](https://github.com/samuelloranger/tether/releases/tag/v1.0.8) | Codex review follow-up fixes. |
-| [v1.0.7](https://github.com/samuelloranger/tether/releases/tag/v1.0.7) | Trust, recovery & honesty: shared-password auth + TOFU pairing, verifiable connection setup, honest status copy. |
-| [v1.0.0 – v1.0.6](https://github.com/samuelloranger/tether/releases) | Initial releases: persistent PTY sessions, SQLite replay, mobile VT emulator, multi-terminal tabs, wrapped links, diff-based input. |
-
 ## License
 
 [GPL-3.0](./LICENSE)
