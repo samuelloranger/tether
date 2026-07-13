@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.2.1",
+          "date": "2026-07-13",
+          "localizedDescription": "Desktop client UI/UX tuned for keyboard-and-mouse:\n\n- **Docked session sidebar** replaces the slide-in drawer on desktop\n- **No on-screen key bar** — physical keyboard sends arrows/Tab/Esc/nav/F-keys/Ctrl+Alt combos straight to the shell\n- **Native mouse text selection**; Ctrl/Cmd+C copies selection or sends SIGINT, Ctrl/Cmd+V pastes (bracketed)\n- Terminal grid now fits the pane beside the sidebar (no column overflow)\n\nAlso: fixed the docs site deploy (GitHub Pages) and documented the desktop app.\n\nDownloads: Linux .deb/.rpm/.AppImage, Windows .msi/.exe, macOS .dmg (arm64 + x64).",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.2.1/tether-v1.2.1.ipa",
+          "size": 8156789,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.2.0",
           "date": "2026-07-13",
           "localizedDescription": "Adds a **desktop client** built from the same app via Expo Web + Tauri. The WebSocket runs on the Rust side so the shared-password header works (browsers can't set it).\n\n**Desktop downloads** (this release, built by CI):\n- **Linux:** `.deb` (Ubuntu/Mint), `.rpm` (Fedora), `.AppImage` (Arch + any distro)\n- **Windows:** `.msi` / `.exe`\n- **macOS:** `.dmg` (Apple Silicon + Intel; unsigned)\n\nPlus the usual server binaries + mobile IPA/APK. Server unchanged.",
