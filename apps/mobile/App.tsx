@@ -783,6 +783,12 @@ function AppInner() {
     wsSend({ type: 'input', text });
   };
 
+  // Cursor keys (arrows/Home/End) encode as SS3 (ESC O x) when the active app has
+  // DECCKM on, else CSI (ESC [ x). Used by the mobile key bar and shared with the
+  // desktop keyboard mapper so both honour application-cursor mode.
+  const cursorSeq = (final: string) =>
+    `\x1b${cache.get(activeIdRef.current)?.term.applicationCursor ? 'O' : '['}${final}`;
+
   // Full plain-text transcript (visible screen + scrollback) for the
   // selectable view and the Copy All fallback.
   const getFullText = () =>
@@ -929,7 +935,8 @@ function AppInner() {
           }
         }
       }
-      const bytes = keyToBytes(e);
+      const appCursor = cache.get(activeIdRef.current)?.term.applicationCursor ?? false;
+      const bytes = keyToBytes(e, appCursor);
       if (bytes == null) return;
       if (bytes === COPY) return; // let the browser copy the selection
       e.preventDefault();
@@ -943,6 +950,38 @@ function AppInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // sendInput/handlePaste delegate to refs, so a stable listener is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConfiguring]);
+
+  // Desktop: when the remote app enables mouse reporting (Claude Code, vim,
+  // less…), the FlatList is frozen (scrollEnabled=false), so forward the wheel
+  // as SGR mouse-wheel events and the app scrolls its own history. Outside mouse
+  // mode we don't intercept, so the list scrolls natively.
+  useEffect(() => {
+    if (!isDesktop || isConfiguring) return;
+    let accum = 0;
+    const onWheel = (e: WheelEvent) => {
+      const el = document.getElementById('tether-terminal');
+      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
+      const term = cache.get(activeIdRef.current)?.term;
+      if (!term?.mouseOn) return; // let the list scroll natively
+      e.preventDefault();
+      const STEP = 40;
+      accum += e.deltaY;
+      const col = Math.max(1, Math.floor((term.cols ?? 80) / 2));
+      const row = Math.max(1, Math.floor((term.rows ?? 24) / 2));
+      const send = (btn: number) => wsSend({ type: 'input', text: `\x1b[<${btn};${col};${row}M` });
+      while (accum >= STEP) {
+        send(65); // wheel down → forward/newer
+        accum -= STEP;
+      }
+      while (accum <= -STEP) {
+        send(64); // wheel up → back/older
+        accum += STEP;
+      }
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfiguring]);
 
@@ -1558,16 +1597,16 @@ function AppInner() {
               <ArrowCluster
                 onArrow={(dir) => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  sendInput(`\x1b[${dir}`);
+                  sendInput(cursorSeq(dir));
                 }}
               />
 
               <View style={styles.utilityGroupDivider} />
 
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[H')}>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput(cursorSeq('H'))}>
                 <Text style={styles.utilityBtnText}>Home</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[F')}>
+              <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput(cursorSeq('F'))}>
                 <Text style={styles.utilityBtnText}>End</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.utilityBtn} onPress={() => sendInput('\x1b[5~')}>
