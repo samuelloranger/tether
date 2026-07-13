@@ -5,8 +5,6 @@
   "identifier": "cloud.samlo.tether",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:8081",
-    "beforeDevCommand": "bun run web",
     "beforeBuildCommand": "bun run build:web"
   },
   "app": {
