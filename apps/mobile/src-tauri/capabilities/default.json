@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Core permissions for the Tether desktop window (events for the WS bridge).",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "updater:default", "process:default"]
 }

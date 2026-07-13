@@ -36,6 +36,8 @@ import { getPassword, setPassword as persistPassword, authHeaders } from './src/
 import { httpBase, wsUrl, validateAddress } from './src/address';
 import { openTerminalSocket, type TerminalSocket } from './src/wsTransport';
 import { keyToBytes, COPY, PASTE } from './src/desktopKeys';
+import { fetchUpdate, installUpdate, type PendingUpdate } from './src/desktopUpdate';
+import { mouseSeq } from './src/mouseSeq';
 
 // The web bundle only ever runs inside the Tauri desktop shell (plain browsers
 // can't authenticate the WS). So Platform.OS === 'web' means "desktop", and we
@@ -256,6 +258,14 @@ function AppInner() {
   const skipNextChangeRef = useRef(false);
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
+  // Desktop right-click menu anchor (null when closed).
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  // Desktop self-update modal: version info when an update is pending, live
+  // download progress while installing.
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null);
+  const pendingUpdate = useRef<PendingUpdate | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<{ done: number; total: number } | null>(null);
+  const [updating, setUpdating] = useState(false);
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const [selectionViewOpen, setSelectionViewOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -373,7 +383,7 @@ function AppInner() {
         const wheel = (btn: number) => {
           const col = Math.max(1, Math.floor((e?.term.cols ?? 80) / 2));
           const row = Math.max(1, Math.floor((e?.term.rows ?? 24) / 2));
-          wsSend({ type: 'input', text: `\x1b[<${btn};${col};${row}M` });
+          wsSend({ type: 'input', text: mouseSeq(btn, col, row, e?.term.mouseSgr ?? false) });
         };
         while (wheelAccum.current >= STEP) { wheel(64); wheelAccum.current -= STEP; } // drag down → older
         while (wheelAccum.current <= -STEP) { wheel(65); wheelAccum.current += STEP; } // drag up → newer
@@ -604,9 +614,31 @@ function AppInner() {
   // Poll the session list every 4s while foregrounded.
   useEffect(() => {
     if (isConfiguring) return;
-    refreshSessions();
-    const iv = setInterval(refreshSessions, 4000);
-    return () => clearInterval(iv);
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (iv) return;
+      refreshSessions();
+      iv = setInterval(refreshSessions, 4000);
+    };
+    const stop = () => {
+      if (iv) {
+        clearInterval(iv);
+        iv = null;
+      }
+    };
+    start();
+    // Desktop: pause polling while the window is hidden/minimized and resume with
+    // an immediate refresh on return, so we don't hammer the server in the tray
+    // and the list is never stale when the window comes back.
+    let onVis: (() => void) | undefined;
+    if (isDesktop && typeof document !== 'undefined') {
+      onVis = () => (document.hidden ? stop() : start());
+      document.addEventListener('visibilitychange', onVis);
+    }
+    return () => {
+      stop();
+      if (onVis) document.removeEventListener('visibilitychange', onVis);
+    };
   }, [isConfiguring, serverIp, port]);
 
   // 1. Load saved config on mount
@@ -831,6 +863,25 @@ function AppInner() {
     Alert.alert('Copied', 'Displayed transcript copied to clipboard.');
   };
 
+  // Desktop context-menu actions.
+  const copySelection = async () => {
+    const sel = typeof window !== 'undefined' ? window.getSelection()?.toString() : '';
+    // Fall back to the whole displayed transcript when nothing is selected.
+    const text = sel || getFullText();
+    if (text) await Clipboard.setStringAsync(text);
+  };
+
+  const selectAllTerminal = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const el = document.getElementById('tether-terminal');
+    const sel = window.getSelection();
+    if (!el || !sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
+
   const handlePaste = async () => {
     let text = '';
     try {
@@ -968,9 +1019,16 @@ function AppInner() {
       e.preventDefault();
       const STEP = 40;
       accum += e.deltaY;
-      const col = Math.max(1, Math.floor((term.cols ?? 80) / 2));
-      const row = Math.max(1, Math.floor((term.rows ?? 24) / 2));
-      const send = (btn: number) => wsSend({ type: 'input', text: `\x1b[<${btn};${col};${row}M` });
+      // Report the cell under the pointer (not the grid centre) so split-pane
+      // TUIs (tmux, vim) route the scroll to the right pane. Derive the cell
+      // from the element's rendered size — accurate regardless of font metrics.
+      const cols = term.cols || 80;
+      const rows = term.rows || 24;
+      const rect = el.getBoundingClientRect();
+      const col = Math.min(cols, Math.max(1, Math.floor((e.clientX - rect.left) / (rect.width / cols)) + 1));
+      const row = Math.min(rows, Math.max(1, Math.floor((e.clientY - rect.top) / (rect.height / rows)) + 1));
+      const send = (btn: number) =>
+        wsSend({ type: 'input', text: mouseSeq(btn, col, row, term.mouseSgr) });
       while (accum >= STEP) {
         send(65); // wheel down → forward/newer
         accum -= STEP;
@@ -985,7 +1043,89 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfiguring]);
 
+  // Desktop: check for a newer signed build once on launch. If one exists, open
+  // the update modal; stay silent on "up to date" or an unreachable feed.
+  useEffect(() => {
+    if (!isDesktop) return;
+    fetchUpdate()
+      .then((u) => {
+        if (u) {
+          pendingUpdate.current = u;
+          setUpdateInfo({ version: u.version, current: u.current });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Free the native Update resource behind a pending update (Rust resource-table
+  // entries aren't GC'd, so an un-closed check leaks until exit).
+  const disposePending = () => {
+    pendingUpdate.current?.update.close().catch(() => {});
+    pendingUpdate.current = null;
+  };
+
+  // Manual "Check for updates" (overflow menu): surface every outcome.
+  const checkForUpdatesManual = async () => {
+    try {
+      disposePending(); // release any earlier pending update before replacing it
+      const u = await fetchUpdate();
+      if (u) {
+        pendingUpdate.current = u;
+        setUpdateInfo({ version: u.version, current: u.current });
+      } else {
+        Alert.alert('Up to date', "You're running the latest version of Tether.");
+      }
+    } catch {
+      Alert.alert('Update check failed', 'Could not reach the update server.');
+    }
+  };
+
+  const startUpdate = () => {
+    const pending = pendingUpdate.current;
+    if (!pending) return;
+    setUpdating(true);
+    setUpdateProgress({ done: 0, total: 0 });
+    installUpdate(pending, (done, total) => setUpdateProgress({ done, total })).catch(() => {
+      setUpdating(false);
+      setUpdateInfo(null);
+      disposePending();
+      Alert.alert('Update failed', 'The update could not be downloaded or installed.');
+    });
+  };
+
+  const dismissUpdate = () => {
+    if (updating) return; // don't let it close mid-install
+    disposePending();
+    setUpdateInfo(null);
+    setUpdateProgress(null);
+  };
+
+  // Desktop: right-click the terminal for a Copy / Paste / Select All menu.
+  useEffect(() => {
+    if (!isDesktop || isConfiguring) return;
+    const onCtx = (e: MouseEvent) => {
+      const el = document.getElementById('tether-terminal');
+      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY });
+    };
+    document.addEventListener('contextmenu', onCtx);
+    return () => document.removeEventListener('contextmenu', onCtx);
+  }, [isConfiguring]);
+
   const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
+
+  // Update-modal progress display.
+  const upPct =
+    updateProgress && updateProgress.total > 0
+      ? Math.min(100, Math.round((updateProgress.done / updateProgress.total) * 100))
+      : 0;
+  const upLabel =
+    !updateProgress || updateProgress.total === 0
+      ? 'Preparing…'
+      : upPct >= 100
+        ? 'Restarting…'
+        : `${upPct}%  ${(updateProgress.done / 1e6).toFixed(1)}/${(updateProgress.total / 1e6).toFixed(1)} MB`;
 
   const openRename = () => {
     setRenameText(drawerSessions.find((s) => s.id === activeId)?.name || '');
@@ -1403,6 +1543,18 @@ function AppInner() {
                   <Feather name="terminal" size={16} color="#cbd5e1" />
                   <Text style={styles.menuRowText}>Saved commands</Text>
                 </TouchableOpacity>
+                {isDesktop && (
+                  <TouchableOpacity
+                    style={styles.menuRow}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      void checkForUpdatesManual();
+                    }}
+                  >
+                    <Feather name="download" size={16} color="#cbd5e1" />
+                    <Text style={styles.menuRowText}>Check for updates</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={styles.menuRow}
                   onPress={() => {
@@ -1651,6 +1803,84 @@ function AppInner() {
             />
           )}
           </View>
+
+          {/* Desktop right-click menu. Rendered in a Modal so it portals to the
+              viewport root — client coordinates then map 1:1 (no sidebar offset). */}
+          {isDesktop && ctxMenu && (
+            <Modal visible transparent animationType="none" onRequestClose={() => setCtxMenu(null)}>
+            <Pressable style={styles.ctxBackdrop} onPress={() => setCtxMenu(null)}>
+              <View style={[styles.ctxMenu, { left: ctxMenu.x, top: ctxMenu.y }]}>
+                <TouchableOpacity
+                  style={styles.ctxRow}
+                  onPress={() => {
+                    void copySelection();
+                    setCtxMenu(null);
+                  }}
+                >
+                  <Feather name="copy" size={15} color="#cbd5e1" />
+                  <Text style={styles.ctxText}>Copy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.ctxRow}
+                  onPress={() => {
+                    void handlePaste();
+                    setCtxMenu(null);
+                  }}
+                >
+                  <Feather name="clipboard" size={15} color="#cbd5e1" />
+                  <Text style={styles.ctxText}>Paste</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.ctxRow}
+                  onPress={() => {
+                    selectAllTerminal();
+                    setCtxMenu(null);
+                  }}
+                >
+                  <Feather name="maximize" size={15} color="#cbd5e1" />
+                  <Text style={styles.ctxText}>Select all</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+            </Modal>
+          )}
+
+          {/* Desktop self-update modal (styled + progress). */}
+          {isDesktop && updateInfo && (
+            <Modal visible transparent animationType="fade" onRequestClose={dismissUpdate}>
+              <View style={styles.updateBackdrop}>
+                <View style={styles.updateCard}>
+                  <View style={styles.updateHeaderRow}>
+                    <Feather name="download" size={16} color="#818cf8" />
+                    <Text style={styles.updateTitle}>Update available</Text>
+                  </View>
+                  <Text style={styles.updateVersion}>Tether {updateInfo.version}</Text>
+                  <Text style={styles.updateSub}>You have {updateInfo.current}</Text>
+
+                  {updating ? (
+                    <View style={styles.updateProgressWrap}>
+                      <View style={styles.updateTrack}>
+                        <View style={[styles.updateFill, { width: `${upPct}%` }]} />
+                      </View>
+                      <Text style={styles.updateProgressText}>{upLabel}</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.updateBtns}>
+                      <TouchableOpacity style={styles.updateBtn} onPress={dismissUpdate}>
+                        <Text style={styles.updateBtnText}>Later</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.updateBtn, styles.updateBtnPrimary]}
+                        onPress={startUpdate}
+                      >
+                        <Text style={[styles.updateBtnText, styles.updateBtnTextPrimary]}>Update</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </Modal>
+          )}
         </KeyboardAvoidingView>
       )}
     </SafeAreaView>
@@ -2211,6 +2441,53 @@ const styles = StyleSheet.create({
     height: 1,
     opacity: 0,
   },
+  // Desktop right-click menu.
+  ctxBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 200 },
+  ctxMenu: {
+    position: 'absolute',
+    minWidth: 168,
+    backgroundColor: '#0b0f19',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 8,
+    paddingVertical: 4,
+  },
+  ctxRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  ctxText: { color: '#cbd5e1', fontSize: 13 },
+  // Desktop self-update modal.
+  updateBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  updateCard: {
+    width: 360,
+    maxWidth: '90%',
+    backgroundColor: '#0b0f19',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    padding: 20,
+  },
+  updateHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  updateTitle: { color: '#e2e8f0', fontSize: 15, fontWeight: '700' },
+  updateVersion: { color: '#f8fafc', fontSize: 18, fontWeight: '700' },
+  updateSub: { color: '#64748b', fontSize: 12, marginTop: 2 },
+  updateProgressWrap: { marginTop: 18 },
+  updateTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  updateFill: { height: 8, borderRadius: 4, backgroundColor: '#818cf8' },
+  updateProgressText: { color: '#94a3b8', fontSize: 12, marginTop: 8, textAlign: 'center' },
+  updateBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 20 },
+  updateBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 8 },
+  updateBtnPrimary: { backgroundColor: '#3730a3' },
+  updateBtnText: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
+  updateBtnTextPrimary: { color: '#fff' },
   inputPrompt: {
     color: '#34d399',
     fontFamily: MONO,
