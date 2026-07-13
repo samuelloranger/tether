@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.4.0",
+          "date": "2026-07-13",
+          "localizedDescription": "## Desktop\n- **New:** custom frameless title bar — native-feeling window controls (minimize / maximize / close), full-width drag region, and double-click-to-maximize. macOS keeps its native traffic lights; Windows/Linux get custom controls.\n- **Fixed:** terminal **Enter** now sends commands; block **caret** renders and blinks; output **auto-scrolls** to the bottom; no focus glow on the terminal; login form width-capped.\n- **Fixed:** macOS uses **Cmd** (not Ctrl) as the clipboard modifier, so Ctrl+C stays SIGINT.\n- Config/first-run screen has window controls too (frameless windows).\n\n## Internal\n- Decomposed the mobile app's monolithic `App.tsx` (2,617 → 42 lines) into focused components + a `useTetherApp` hook.\n- Consolidated the desktop builds into the release workflow (with a build-only manual dispatch).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.4.0/tether-v1.4.0.ipa",
+          "size": 8196223,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.3.3",
           "date": "2026-07-13",
           "localizedDescription": "Desktop stability fixes: restored terminal Enter/Space input, native dialogs, Linux Wayland titlebar handling with X11 fallback, and updated desktop icons.",
