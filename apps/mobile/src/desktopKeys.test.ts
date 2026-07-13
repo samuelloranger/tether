@@ -124,6 +124,29 @@ describe('keyToBytes — clipboard', () => {
     expect(keyToBytes(k('v', { ctrlKey: true }))).toBe(PASTE);
     expect(keyToBytes(k('v', { metaKey: true }))).toBe(PASTE);
   });
+
+  // macOS: Cmd is the clipboard modifier; Ctrl stays a pure control modifier.
+  describe('macOS (isMac = true)', () => {
+    it('Ctrl+C is always SIGINT, even with a selection (Cmd handles copy)', () => {
+      withSelection('some selected text', () => {
+        expect(keyToBytes(k('c', { ctrlKey: true }), false, true)).toBe('\x03');
+      });
+    });
+    it('Cmd+C with a selection returns COPY', () => {
+      withSelection('some selected text', () => {
+        expect(keyToBytes(k('c', { metaKey: true }), false, true)).toBe(COPY);
+      });
+    });
+    it('Cmd+C with no selection is a no-op (not SIGINT)', () => {
+      withSelection('', () => {
+        expect(keyToBytes(k('c', { metaKey: true }), false, true)).toBeNull();
+      });
+    });
+    it('Ctrl+V sends 0x16 (verbatim insert), Cmd+V pastes', () => {
+      expect(keyToBytes(k('v', { ctrlKey: true }), false, true)).toBe('\x16');
+      expect(keyToBytes(k('v', { metaKey: true }), false, true)).toBe(PASTE);
+    });
+  });
 });
 
 describe('keyToBytes — Alt (Meta) prefixing', () => {
