@@ -214,27 +214,6 @@ export const styles = StyleSheet.create({
   spinIcon: {
     marginRight: 4,
   },
-  reconnectBanner: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(245, 158, 11, 0.25)',
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  reconnectBannerText: {
-    fontSize: 10,
-    color: '#fcd34d',
-    textAlign: 'center',
-  },
-  reconnectBannerEdit: {
-    fontSize: 11,
-    color: '#22d3ee',
-    fontWeight: '600',
-  },
   terminalScroll: {
     flex: 1,
     backgroundColor: '#05070e',
