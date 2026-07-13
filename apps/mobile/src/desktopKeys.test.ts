@@ -54,19 +54,31 @@ describe('keyToBytes — named keys', () => {
     expect(keyToBytes(k('Tab'))).toBe('\t');
     expect(keyToBytes(k('Tab', { shiftKey: true }))).toBe('\x1b[Z');
   });
-  it('maps arrows', () => {
+  it('maps arrows as CSI in normal cursor mode', () => {
     expect(keyToBytes(k('ArrowUp'))).toBe('\x1b[A');
     expect(keyToBytes(k('ArrowDown'))).toBe('\x1b[B');
     expect(keyToBytes(k('ArrowRight'))).toBe('\x1b[C');
     expect(keyToBytes(k('ArrowLeft'))).toBe('\x1b[D');
   });
-  it('maps navigation + editing keys', () => {
+  it('maps arrows as SS3 in application-cursor mode (DECCKM)', () => {
+    expect(keyToBytes(k('ArrowUp'), true)).toBe('\x1bOA');
+    expect(keyToBytes(k('ArrowDown'), true)).toBe('\x1bOB');
+    expect(keyToBytes(k('ArrowRight'), true)).toBe('\x1bOC');
+    expect(keyToBytes(k('ArrowLeft'), true)).toBe('\x1bOD');
+  });
+  it('maps Home/End per cursor mode', () => {
     expect(keyToBytes(k('Home'))).toBe('\x1b[H');
     expect(keyToBytes(k('End'))).toBe('\x1b[F');
+    expect(keyToBytes(k('Home'), true)).toBe('\x1bOH');
+    expect(keyToBytes(k('End'), true)).toBe('\x1bOF');
+  });
+  it('maps navigation + editing keys (cursor-mode independent)', () => {
     expect(keyToBytes(k('PageUp'))).toBe('\x1b[5~');
     expect(keyToBytes(k('PageDown'))).toBe('\x1b[6~');
     expect(keyToBytes(k('Delete'))).toBe('\x1b[3~');
     expect(keyToBytes(k('Insert'))).toBe('\x1b[2~');
+    // PageUp/Delete stay CSI even in app-cursor mode.
+    expect(keyToBytes(k('PageUp'), true)).toBe('\x1b[5~');
   });
   it('maps function keys', () => {
     expect(keyToBytes(k('F1'))).toBe('\x1bOP');
@@ -118,6 +130,20 @@ describe('keyToBytes — Alt (Meta) prefixing', () => {
   it('Alt+letter sends ESC-prefixed for word motion', () => {
     expect(keyToBytes(k('b', { altKey: true }))).toBe('\x1bb');
     expect(keyToBytes(k('f', { altKey: true }))).toBe('\x1bf');
+  });
+});
+
+describe('keyToBytes — AltGr (Ctrl+Alt) composed characters', () => {
+  it('sends the composed printable char verbatim (EU layouts)', () => {
+    // AltGr is reported as ctrlKey+altKey with key = the composed glyph.
+    expect(keyToBytes(k('@', { ctrlKey: true, altKey: true }))).toBe('@');
+    expect(keyToBytes(k('{', { ctrlKey: true, altKey: true }))).toBe('{');
+    expect(keyToBytes(k('\\', { ctrlKey: true, altKey: true }))).toBe('\\');
+  });
+  it('AltGr wins over Ctrl-combo handling', () => {
+    // 'e' via AltGr (€ on some layouts arrives as a longer key, but a 1-char
+    // key like 'e' must not become Ctrl-E control byte).
+    expect(keyToBytes(k('e', { ctrlKey: true, altKey: true }))).toBe('e');
   });
 });
 

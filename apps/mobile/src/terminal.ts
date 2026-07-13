@@ -145,6 +145,11 @@ export class TerminalEmulator {
   // draw their own, so the caret only renders when the app wants it visible.
   cursorVisible = true;
 
+  // Application-cursor-keys mode (DECCKM ?1). When on, arrow/Home/End keys must
+  // be sent as SS3 (ESC O x) instead of CSI (ESC [ x) — vim, less, readline apps
+  // enable it and misread CSI arrows otherwise. Read by the UI when encoding keys.
+  applicationCursor = false;
+
   // Set by the app via ?2004h/l (bracketed paste). Read by the UI to decide
   // whether to wrap pasted text in \x1b[200~...\x1b[201~ before sending.
   bracketedPaste = false;
@@ -179,6 +184,7 @@ export class TerminalEmulator {
     this.mouseOn = false;
     this.cursorVisible = true;
     this.bracketedPaste = false;
+    this.applicationCursor = false;
     this.prevRows = [];
     this.state = 'ground';
     this.params = '';
@@ -509,8 +515,10 @@ export class TerminalEmulator {
         this.cursorVisible = on; // DECTCEM
       } else if (m === 2004) {
         this.bracketedPaste = on;
+      } else if (m === 1) {
+        this.applicationCursor = on; // DECCKM — app cursor keys (SS3 vs CSI)
       }
-      // 2026 (sync), 1 (app cursor) — ignored.
+      // 2026 (sync) — ignored.
     }
   }
 

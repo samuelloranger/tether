@@ -11,16 +11,21 @@
 export const COPY = '__TETHER_COPY__';
 export const PASTE = '__TETHER_PASTE__';
 
-const ARROWS: Record<string, string> = {
-  ArrowUp: '\x1b[A',
-  ArrowDown: '\x1b[B',
-  ArrowRight: '\x1b[C',
-  ArrowLeft: '\x1b[D',
+// Cursor keys (arrows, Home, End) switch between CSI (ESC [ x) and SS3 (ESC O x)
+// depending on the app's DECCKM mode. `final` is the last byte (A/B/C/D/H/F).
+function cursorKey(final: string, appCursor: boolean): string {
+  return `\x1b${appCursor ? 'O' : '['}${final}`;
+}
+
+const ARROW_FINAL: Record<string, string> = {
+  ArrowUp: 'A',
+  ArrowDown: 'B',
+  ArrowRight: 'C',
+  ArrowLeft: 'D',
 };
 
+// Navigation keys that don't depend on DECCKM.
 const NAV: Record<string, string> = {
-  Home: '\x1b[H',
-  End: '\x1b[F',
   PageUp: '\x1b[5~',
   PageDown: '\x1b[6~',
   Insert: '\x1b[2~',
@@ -50,13 +55,18 @@ export interface KeyLike {
   shiftKey: boolean;
 }
 
-export function keyToBytes(e: KeyLike): string | null {
+export function keyToBytes(e: KeyLike, appCursor = false): string | null {
   const { key } = e;
 
   // Pure modifier presses produce nothing.
   if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') {
     return null;
   }
+
+  // AltGr (reported as Ctrl+Alt on Windows/Linux) composes a printable char —
+  // e.g. `@ { } [ ] \` on many EU layouts. Send it verbatim; it must win over
+  // the Ctrl-combo handling below, which would otherwise swallow it.
+  if (e.ctrlKey && e.altKey && key.length === 1) return key;
 
   const mod = e.ctrlKey || e.metaKey;
 
@@ -86,7 +96,9 @@ export function keyToBytes(e: KeyLike): string | null {
   if (key === 'Tab') return e.shiftKey ? '\x1b[Z' : '\t';
   if (key === 'Escape') return '\x1b';
 
-  if (ARROWS[key]) return ARROWS[key];
+  if (ARROW_FINAL[key]) return cursorKey(ARROW_FINAL[key], appCursor);
+  if (key === 'Home') return cursorKey('H', appCursor);
+  if (key === 'End') return cursorKey('F', appCursor);
   if (NAV[key]) return NAV[key];
   if (FKEYS[key]) return FKEYS[key];
 
