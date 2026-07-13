@@ -49,6 +49,7 @@ import { RenameModal, SnippetsModal } from './src/SessionModals';
 import { SelectionView } from './src/SelectionView';
 import { ContextMenu } from './src/ContextMenu';
 import { UpdateModal } from './src/UpdateModal';
+import { ConfigScreen } from './src/ConfigScreen';
 import { mouseSeq } from './src/mouseSeq';
 
 
@@ -1123,128 +1124,22 @@ function AppInner() {
   return (
     <SafeAreaView style={styles.appContainer}>
       {isConfiguring ? (
-        /* Configuration Screen */
-        <>
-        {/* Desktop: frameless window still needs drag + close/min/max here too. */}
-        {isDesktop && <TitleBar isMac={isMacDesktop} title="Tether" />}
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.configContainer}
-        >
-          <View style={styles.configInner}>
-          <View style={styles.configLogoContainer}>
-            <View style={styles.configIconBox}>
-              <Text style={styles.configLogoIcon}>{'>_'}</Text>
-            </View>
-            <Text style={styles.configTitle}>{isDesktop ? 'Tether Desktop' : 'Tether Mobile'}</Text>
-            <Text style={styles.configSubtitle}>Connect to a terminal on your server</Text>
-          </View>
-
-          <View style={styles.formContainer}>
-            <Text style={styles.inputLabel}>Server IP / Host</Text>
-            <TextInput
-              style={styles.configInput}
-              value={serverIp}
-              onChangeText={(t) => {
-                setServerIp(t);
-                setSetupMode('unknown');
-                setTestStatus({ kind: 'idle' });
-              }}
-              placeholder="e.g. 192.168.50.30"
-              placeholderTextColor="#64748b"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Text style={styles.inputLabel}>Port</Text>
-            <TextInput
-              style={styles.configInput}
-              value={port}
-              onChangeText={(t) => {
-                setPort(t);
-                setSetupMode('unknown');
-                setTestStatus({ kind: 'idle' });
-              }}
-              placeholder="e.g. 8085"
-              placeholderTextColor="#64748b"
-              keyboardType="numeric"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Text style={styles.inputLabel}>Password</Text>
-            <TextInput
-              style={styles.configInput}
-              value={password}
-              onChangeText={(t) => {
-                setPassword(t);
-                setTestStatus({ kind: 'idle' });
-              }}
-              placeholder={setupMode === 'create' ? 'Choose a password' : 'Shared server password'}
-              placeholderTextColor="#64748b"
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            {setupMode === 'create' && (
-              <>
-                <TextInput
-                  style={styles.configInput}
-                  value={confirmPassword}
-                  onChangeText={(t) => {
-                    setConfirmPassword(t);
-                    setTestStatus({ kind: 'idle' });
-                  }}
-                  placeholder="Confirm password"
-                  placeholderTextColor="#64748b"
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <Text style={styles.configHint}>
-                  This server has no password yet. The one you choose here will be required by every
-                  client.
-                </Text>
-              </>
-            )}
-
-            <Text style={styles.configHint}>
-              The password controls access. For traffic encryption, run tether behind a tunnel
-              (Tailscale, WireGuard, or SSH).
-            </Text>
-
-            {testStatus.kind === 'error' && <Text style={styles.testError}>{testStatus.msg}</Text>}
-            {testStatus.kind === 'ok' && (
-              <View style={styles.testOkRow}>
-                <View style={[styles.badgeDot, styles.dotConnected]} />
-                <Text style={styles.testOk}>Reachable</Text>
-              </View>
-            )}
-
-            {testStatus.kind === 'ok' ? (
-              <TouchableOpacity style={styles.connectBtn} onPress={saveConfig}>
-                <Text style={styles.connectBtnText}>Save &amp; Connect</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.connectBtn}
-                onPress={testConnection}
-                disabled={testStatus.kind === 'testing'}
-              >
-                <Text style={styles.connectBtnText}>
-                  {testStatus.kind === 'testing'
-                    ? 'Testing…'
-                    : setupMode === 'create'
-                      ? 'Create password'
-                      : 'Test connection'}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          </View>
-        </KeyboardAvoidingView>
-        </>
+        <ConfigScreen
+          serverIp={serverIp}
+          setServerIp={setServerIp}
+          port={port}
+          setPort={setPort}
+          password={password}
+          setPassword={setPassword}
+          confirmPassword={confirmPassword}
+          setConfirmPassword={setConfirmPassword}
+          setupMode={setupMode}
+          setSetupMode={setSetupMode}
+          testStatus={testStatus}
+          setTestStatus={setTestStatus}
+          onSave={saveConfig}
+          onTest={testConnection}
+        />
       ) : (
         /* Terminal Client Screen */
         <KeyboardAvoidingView
