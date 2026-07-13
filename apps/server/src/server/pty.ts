@@ -61,11 +61,20 @@ export function scrubAgentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return out;
 }
 
+type Subscriber = (data: {
+  type: 'output' | 'exit';
+  chunk?: string;
+  exitCode?: number;
+  id?: number;
+}) => void;
+
 interface SessionInstance {
   sock: Socket;
-  subscribers: Set<
-    (data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number; id?: number }) => void
-  >;
+  subscribers: Set<Subscriber>;
+  // Each attached client's requested dims. A PTY has one size, so a shared session
+  // is fit to the SMALLEST attached client (tmux model): content fits everyone and
+  // a larger client just gets blank margin. Recomputed on attach/resize/detach.
+  clientDims: Map<Subscriber, { cols: number; rows: number }>;
 }
 
 const instances = new Map<string, SessionInstance>();
@@ -142,7 +151,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       socket: {
         open(sock) {
           settled = true;
-          const instance: SessionInstance = { sock, subscribers: new Set() };
+          const instance: SessionInstance = { sock, subscribers: new Set(), clientDims: new Map() };
           instances.set(id, instance);
           resolve(instance);
         },
@@ -323,25 +332,40 @@ export function writeToSession(id: string, text: string) {
   return sendFrame(id, { t: 'i', d: Buffer.from(text, 'utf8').toString('base64') });
 }
 
-export function resizeSession(id: string, cols: number, rows: number) {
+// Fit the PTY to the smallest attached client so a shared session renders
+// consistently for everyone (no client's line-wrapping fights another's). No-op
+// when no clients are attached (keeps the last size for reconnect replay).
+function recomputeSize(id: string) {
+  const inst = instances.get(id);
+  if (!inst || inst.clientDims.size === 0) return;
+  let cols = Number.POSITIVE_INFINITY;
+  let rows = Number.POSITIVE_INFINITY;
+  for (const d of inst.clientDims.values()) {
+    cols = Math.min(cols, d.cols);
+    rows = Math.min(rows, d.rows);
+  }
   const dims = clampDims(cols, rows);
-  return sendFrame(id, { t: 'r', c: dims.cols, r: dims.rows });
+  sendFrame(id, { t: 'r', c: dims.cols, r: dims.rows });
 }
 
-export function subscribeToSession(
-  id: string,
-  callback: (data: {
-    type: 'output' | 'exit';
-    chunk?: string;
-    exitCode?: number;
-    id?: number;
-  }) => void,
-) {
+// Record this client's requested size and re-fit the PTY to the smallest client.
+export function resizeSession(id: string, client: Subscriber, cols: number, rows: number) {
+  const inst = instances.get(id);
+  if (!inst) return;
+  inst.clientDims.set(client, clampDims(cols, rows));
+  recomputeSize(id);
+}
+
+export function subscribeToSession(id: string, callback: Subscriber, cols: number, rows: number) {
   const instance = instances.get(id);
   if (instance) {
     instance.subscribers.add(callback);
+    instance.clientDims.set(callback, clampDims(cols, rows));
+    recomputeSize(id);
     return () => {
       instance.subscribers.delete(callback);
+      instance.clientDims.delete(callback);
+      recomputeSize(id); // a client left → the PTY may grow back to the next-smallest
     };
   }
   return () => {};
