@@ -23,6 +23,17 @@ The macOS and Windows builds aren't code-signed yet, so the OS may warn on first
 
 Same as mobile: on the setup screen enter your server's **host/IP**, **port** (default `8085`), and **password**, then **Test connection** and **Save & connect**. The password is stored locally by the app. See [Getting started](/getting-started#_4-connect) for what each test result means, and [Security & networking](/security) — the password gates access but does not encrypt traffic, so run Tether behind a tunnel.
 
+## Updating
+
+The app checks for a newer release on launch (and on demand via the **⋯** menu → **Check for updates**). What happens next depends on how you installed it:
+
+- **AppImage, Windows, macOS** — self-update in place. You get a dialog with the new version and a live download progress bar; the app installs the signed update and restarts. Updates are verified against a bundled signing key, so a tampered download is rejected.
+- **`.deb` / `.rpm`** — these are owned by your package manager, so the app can't replace them itself. It tells you an update is available and links to the release to download the new package (`sudo apt install ./Tether_*.deb` / `sudo dnf install ./Tether-*.rpm`).
+
+::: tip
+For hands-off updates on Linux, use the **AppImage** — it's the build that self-updates.
+:::
+
 ## How it differs from mobile
 
 The desktop app is the same terminal, retuned for a keyboard-and-mouse machine:
