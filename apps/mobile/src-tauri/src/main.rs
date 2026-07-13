@@ -136,10 +136,11 @@ fn main() {
     // workaround for a WebKit-on-Wayland crash, resolved by the newer bundled
     // WebKit). Under XWayland, GTK doesn't draw its client-side titlebar, so the
     // window controls (close/min/max) render invisibly (tauri#13142). In a
-    // Wayland session, prefer the Wayland backend so the titlebar appears.
+    // Wayland session, prefer Wayland so the titlebar appears, but retain X11
+    // as a fallback when the Wayland socket/backend is unavailable.
     #[cfg(target_os = "linux")]
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        std::env::set_var("GDK_BACKEND", "wayland");
+        std::env::set_var("GDK_BACKEND", "wayland,x11");
     }
 
     tauri::Builder::default()
