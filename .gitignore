@@ -46,3 +46,4 @@ docs/.vitepress/cache/
 
 # generated: canonical install.sh copied in at docs build
 docs/public/install.sh
+apps/mobile/dist/
