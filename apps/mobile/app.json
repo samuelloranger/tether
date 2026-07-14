@@ -41,7 +41,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Tether uses your photo library to upload files to the connected server."
+          "photosPermission": "Tether uses your photo library to upload files to the connected server.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ],
