@@ -460,4 +460,19 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(t.cursorStyle, 'block', 'Ps=2 -> steady block');
 }
 
+// 48. OSC 133 marks prompt-start rows for jump navigation
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}]133;A${E}\\$ ls\r\n`); // row 0: prompt + echoed command (same row, no newline in between)
+  t.write('file.txt\r\n');            // row 1: command output
+  t.write(`${E}]133;A${E}\\$ `);      // row 2: next prompt
+  const rows = t.getSnapshot();
+  eq(rows[0].promptStart, true, 'row 0 is a prompt row');
+  eq(rows[1].promptStart, false, 'row 1 is not a prompt row');
+  eq(rows[2].promptStart, true, 'row 2 is a prompt row');
+  eq(t.jumpToPrompt(2, -1), 0, 'jump backward from row 2 finds row 0');
+  eq(t.jumpToPrompt(0, 1), 2, 'jump forward from row 0 finds row 2');
+  eq(t.jumpToPrompt(0, -1), null, 'jump backward from the first prompt finds nothing');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
