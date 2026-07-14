@@ -445,4 +445,19 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(t.cwd, '/home/sam/My Project', 'OSC 7 parses path, strips host, decodes %20');
 }
 
+// 47. DECSCUSR sets cursor shape/blink
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.cursorStyle, 'block', 'default cursor shape is block');
+  eq(t.cursorBlink, true, 'default cursor blinks');
+  t.write(`${E}[5 q`);
+  eq(t.cursorStyle, 'bar', 'Ps=5 -> blinking bar');
+  eq(t.cursorBlink, true, 'Ps=5 -> blink on');
+  t.write(`${E}[4 q`);
+  eq(t.cursorStyle, 'underline', 'Ps=4 -> steady underline');
+  eq(t.cursorBlink, false, 'Ps=4 -> blink off (even Ps = steady)');
+  t.write(`${E}[2 q`);
+  eq(t.cursorStyle, 'block', 'Ps=2 -> steady block');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

@@ -149,6 +149,11 @@ export class TerminalEmulator {
   // draw their own, so the caret only renders when the app wants it visible.
   cursorVisible = true;
 
+  // DECSCUSR (CSI Ps SP q) cursor shape + blink. Read by TermRow to render the
+  // caret; defaults match a real terminal's power-on default (blinking block).
+  cursorStyle: 'block' | 'bar' | 'underline' = 'block';
+  cursorBlink = true;
+
   // Application-cursor-keys mode (DECCKM ?1). When on, arrow/Home/End keys must
   // be sent as SS3 (ESC O x) instead of CSI (ESC [ x) — vim, less, readline apps
   // enable it and misread CSI arrows otherwise. Read by the UI when encoding keys.
@@ -202,6 +207,8 @@ export class TerminalEmulator {
     this.mouseOn = false;
     this.mouseSgr = false;
     this.cursorVisible = true;
+    this.cursorStyle = 'block';
+    this.cursorBlink = true;
     this.bracketedPaste = false;
     this.applicationCursor = false;
     this.bellCount = 0;
@@ -417,9 +424,18 @@ export class TerminalEmulator {
   }
 
   private dispatchCsi(final: string) {
-    // Sequences with intermediate bytes (CSI Ps SP q cursor style, CSI Ps SP A
-    // scroll-right, CSI ! p soft reset, ...) share final bytes with plain ANSI
-    // actions but mean something else entirely. None are implemented — ignore
+    // DECSCUSR: CSI Ps SP q — cursor shape/blink. Handled before the generic
+    // intermediate-byte bail-out below (this is the one intermediate-byte
+    // sequence we do implement).
+    if (this.intermediate === ' ' && final === 'q') {
+      const n = this.nums(0)[0] ?? 0;
+      this.cursorStyle = n <= 2 ? 'block' : n <= 4 ? 'underline' : 'bar';
+      this.cursorBlink = n === 0 || n % 2 === 1;
+      return;
+    }
+    // Sequences with intermediate bytes (CSI Ps SP A scroll-right, CSI ! p
+    // soft reset, ...) share final bytes with plain ANSI actions but mean
+    // something else entirely. None of the rest are implemented — ignore
     // them wholesale rather than misdispatch (SP A would run as cursor-up).
     if (this.intermediate) return;
     // Private parameter prefix byte (0x3c-0x3f): '?' DEC modes, and '<' '=' '>'
