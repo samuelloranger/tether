@@ -75,7 +75,13 @@ const KEY_MONO_FONT = 'tether_mono_font';
 
 
 export function useTetherApp() {
-  const [fontsLoaded] = useFonts({ FiraCode_400Regular, JetBrainsMono_400Regular });
+  // Proceed once fonts settle OR fail — never gate the whole app on a font fetch.
+  // In the Tauri desktop build the webview serves assets over the `tauri://`
+  // custom scheme, where FontFace.load() rejects; without the `|| fontError`
+  // fallback the app rendered `null` forever (blank white window). On failure RN
+  // Web falls back to a system monospace, which beats a white screen.
+  const [fontsReady, fontError] = useFonts({ FiraCode_400Regular, JetBrainsMono_400Regular });
+  const fontsLoaded = fontsReady || !!fontError;
   const insets = useSafeAreaInsets();
 
   // Connection states
