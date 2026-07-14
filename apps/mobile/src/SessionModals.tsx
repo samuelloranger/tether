@@ -1,6 +1,7 @@
 import { Modal, Pressable, View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { MONO } from './styles';
+import { THEME_IDS } from './themes';
 
 // Rename the active terminal.
 export function RenameModal({
@@ -109,6 +110,42 @@ export function SnippetsModal({
               <Feather name="plus" size={18} color="#22d3ee" />
             </TouchableOpacity>
           </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// Theme picker (+ desktop font picker — added in Task 12).
+export function AppearanceModal({
+  visible,
+  onClose,
+  themeId,
+  onThemeChange,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  themeId: string;
+  onThemeChange: (id: string) => void;
+}) {
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <Pressable style={styles.menuBackdrop} onPress={onClose}>
+        <Pressable style={styles.renamePanel} onPress={() => {}}>
+          <Text style={styles.renameTitle}>Appearance</Text>
+          {THEME_IDS.map((id) => (
+            <TouchableOpacity
+              key={id}
+              style={[
+                styles.renameBtn,
+                { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
+              ]}
+              onPress={() => onThemeChange(id)}
+            >
+              <Text style={styles.renameBtnText}>{id}</Text>
+              {id === themeId && <Feather name="check" size={16} color="#22d3ee" />}
+            </TouchableOpacity>
+          ))}
         </Pressable>
       </Pressable>
     </Modal>

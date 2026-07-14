@@ -1,5 +1,5 @@
 // Run: bun test  (from apps/mobile)  — or: bun run src/terminal.test.ts
-import { TerminalEmulator } from './terminal';
+import { TerminalEmulator, setTheme } from './terminal';
 import { computeLinkSpans, splitRunByLinks, urlColumns } from './links';
 
 const E = '\x1b';
@@ -494,6 +494,22 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   const links = t.getSnapshot()[0].links;
   eq(links.length, 1, 'regex still finds a plain URL');
   eq(links[0].url, 'https://example.com/path', 'regex-detected URL is correct');
+}
+
+// 51. setTheme swaps the ANSI palette + default fg/bg used by new writes
+{
+  const t = new TerminalEmulator(80, 24);
+  setTheme({ base16: Array(16).fill('#111111'), fg: '#eeeeee', bg: '#000000' });
+  t.write(`${E}[31mred${E}[0m`);
+  eq(t.getSnapshot()[0].runs[0].style.fg, '#111111', 'SGR 31 resolves through the new base16');
+  setTheme({
+    base16: [
+      '#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
+      '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
+    ],
+    fg: '#cbd5e1',
+    bg: '#05070e',
+  }); // restore defaults so later tests in this same process see the original palette
 }
 
 console.log(`\n  ${pass} assertions passed\n`);
