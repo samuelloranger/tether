@@ -28,7 +28,7 @@ import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './terminal';
 import { splitRunByLinks, urlColumns } from './links';
 import { SessionCache, nextTermId, type SessionEntry } from './sessionCache';
-import { SessionDrawer, PANEL_W, type DrawerSession } from './SessionDrawer';
+import type { DrawerSession } from './SessionDrawer';
 import { applyFieldChange, SENT } from './input';
 import { getPassword, setPassword as persistPassword, authHeaders } from './secureConfig';
 import { httpBase, wsUrl, validateAddress } from './address';
@@ -51,6 +51,13 @@ import { ContextMenu } from './ContextMenu';
 import { UpdateModal } from './UpdateModal';
 import { ConfigScreen } from './ConfigScreen';
 import { mouseSeq } from './mouseSeq';
+import {
+  DEFAULT_DESKTOP_NAVIGATION_MODE,
+  DESKTOP_NAVIGATION_STORAGE_KEY,
+  parseDesktopNavigationMode,
+  reservedNavigationWidth,
+  type DesktopNavigationMode,
+} from './desktopNavigation';
 
 
 // Constants for async storage keys
@@ -133,6 +140,9 @@ export function useTetherApp() {
   const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
+  const [desktopNavigationMode, setDesktopNavigationMode] = useState<DesktopNavigationMode>(
+    DEFAULT_DESKTOP_NAVIGATION_MODE,
+  );
 
   // References
   // Active terminal socket, abstracted over platform (RN WebSocket on mobile,
@@ -188,7 +198,9 @@ export function useTetherApp() {
   // Desktop docks a fixed-width sidebar, so the terminal pane is narrower than
   // the window — fit the grid (and the PTY resize) to the pane, not the window,
   // or the rightmost columns overflow off-screen.
-  const paneWidth = isDesktop ? Math.max(120, winWidth - PANEL_W) : winWidth;
+  const paneWidth = isDesktop
+    ? Math.max(120, winWidth - reservedNavigationWidth(desktopNavigationMode))
+    : winWidth;
   const gridWidth = paneWidth - 12;
   const numCols = Math.max(20, Math.floor(gridWidth / (fontSize * CHAR_RATIO)));
   const numRows = termHeight ? Math.max(6, Math.floor((termHeight - 12) / lineHeight)) : 24;
@@ -407,6 +419,20 @@ export function useTetherApp() {
       AsyncStorage.setItem(KEY_FONT, String(next));
       return next;
     });
+  };
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    AsyncStorage.getItem(DESKTOP_NAVIGATION_STORAGE_KEY)
+      .then((value) => setDesktopNavigationMode(parseDesktopNavigationMode(value)))
+      .catch(() => {});
+  }, []);
+
+  const selectDesktopNavigationMode = (mode: DesktopNavigationMode) => {
+    setDesktopNavigationMode(mode);
+    if (isDesktop) {
+      AsyncStorage.setItem(DESKTOP_NAVIGATION_STORAGE_KEY, mode).catch(() => {});
+    }
   };
 
   // Load persisted snippets once on mount.
@@ -1114,6 +1140,6 @@ export function useTetherApp() {
 
 
   return {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, handleCopyAll, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, handleCopyAll, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus,
   };
 }
