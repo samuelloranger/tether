@@ -34,7 +34,8 @@ const BASHRC = [
   '  printf "%s" "$out"',
   '}',
   '_tether_branch() { local b; b=$(git branch --show-current 2>/dev/null); [ -n "$b" ] && printf " (%s)" "$b"; }',
-  "PS1='\\[\\e[36m\\]$(_tether_pwd)\\[\\e[0m\\]\\[\\e[33m\\]$(_tether_branch)\\[\\e[0m\\] \\[\\e[32m\\]❯\\[\\e[0m\\] '",
+  '_tether_osc7() { printf "\\e]7;file://%s%s\\a" "$(hostname)" "$PWD"; }',
+  "PS1='\\[$(_tether_osc7)\\]\\[\\e[36m\\]$(_tether_pwd)\\[\\e[0m\\]\\[\\e[33m\\]$(_tether_branch)\\[\\e[0m\\] \\[\\e[32m\\]❯\\[\\e[0m\\] '",
   '',
 ].join('\n');
 mkdirSync(RC_DIR, { recursive: true });

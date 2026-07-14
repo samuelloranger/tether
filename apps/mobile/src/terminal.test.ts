@@ -437,4 +437,12 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(t.title, 'another', 'OSC 0 sets title (BEL terminator)');
 }
 
+// 46. OSC 7 sets cwd from a file:// URI, stripping host + decoding percent-escapes
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.cwd, '', 'cwd starts empty');
+  t.write(`${E}]7;file://myhost/home/sam/My%20Project${E}\\`);
+  eq(t.cwd, '/home/sam/My Project', 'OSC 7 parses path, strips host, decodes %20');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
