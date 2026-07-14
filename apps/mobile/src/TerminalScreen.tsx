@@ -112,7 +112,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           {isDesktop && (
             <TitleBar
               isMac={isMacDesktop}
-              title={activeName}
+              title={entryFor(activeId).term.title || activeName}
               subtitle={`${serverIp}:${port}`}
               status={titleBarStatus}
               onNew={newTerminal}

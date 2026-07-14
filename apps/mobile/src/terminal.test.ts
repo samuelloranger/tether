@@ -427,4 +427,14 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(t.bellCount, 3, 'bell increments once per BEL byte');
 }
 
+// 45. OSC 0/2 sets the window title
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.title, '', 'title starts empty');
+  t.write(`${E}]2;my-session${E}\\`);
+  eq(t.title, 'my-session', 'OSC 2 sets title (ST terminator)');
+  t.write(`${E}]0;another\x07`);
+  eq(t.title, 'another', 'OSC 0 sets title (BEL terminator)');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
