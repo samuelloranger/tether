@@ -7,6 +7,7 @@ import {
   getDefaultShell,
   killSession,
   resizeSession,
+  type Subscriber,
   startSession,
   subscribeToSession,
   writeToSession,
@@ -105,10 +106,40 @@ app.get(
     const rows = Number(c.req.query('rows') || 24);
 
     let unsubscribe = () => {};
+    // The subscribe-to-session call is deferred (see the setTimeout below), so a
+    // client that disconnects before it runs must stop it from ever registering
+    // — otherwise its dims/subscriber entry leaks forever, since onClose only
+    // fires once and unsubscribe is still the no-op at that point.
+    let closed = false;
+    // Stable per-connection output handler. Defined synchronously in onOpen so it
+    // also serves as this client's key for per-client PTY sizing (onMessage/resize).
+    let onData: Subscriber = () => {};
 
     return {
       onOpen(_event, ws) {
         console.log(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
+
+        onData = (data) => {
+          // ponytail: no queueing for slow clients — if the socket's send
+          // buffer blows past 4MB, close it; reconnect replays via sinceId.
+          const raw = ws.raw as { getBufferedAmount?: () => number } | undefined;
+          if (raw?.getBufferedAmount && raw.getBufferedAmount() > 4_000_000) {
+            try {
+              ws.close();
+            } catch {}
+            return;
+          }
+          try {
+            if (data.type === 'output') {
+              ws.send(JSON.stringify({ type: 'output', chunk: data.chunk, id: data.id }));
+            } else if (data.type === 'exit') {
+              ws.send(JSON.stringify({ type: 'exit', exitCode: data.exitCode }));
+            }
+          } catch (wsErr) {
+            // Swallow quietly to avoid PTY reader loop crashes
+            console.warn('WebSocket send error during PTY broadcast:', wsErr);
+          }
+        };
 
         // Yield execution to let Hono/Bun complete the protocol upgrade before writing
         setTimeout(async () => {
@@ -117,7 +148,6 @@ app.get(
             // Everything after this await runs synchronously, so no PTY frame can
             // slip in between the replay read and the subscribe below.
             await startSession(sessionId, getDefaultShell(), cols, rows);
-            resizeSession(sessionId, cols, rows);
 
             // 1b. If the client's sinceId predates pruned rows, the replay has a
             // hole — tell the client to wipe its emulator before the replay.
@@ -144,39 +174,13 @@ app.get(
               }
             }
 
-            // 3. Subscribe client to real-time process output
-            unsubscribe = subscribeToSession(sessionId, (data) => {
-              // ponytail: no queueing for slow clients — if the socket's send
-              // buffer blows past 4MB, close it; reconnect replays via sinceId.
-              const raw = ws.raw as { getBufferedAmount?: () => number } | undefined;
-              if (raw?.getBufferedAmount && raw.getBufferedAmount() > 4_000_000) {
-                try {
-                  ws.close();
-                } catch {}
-                return;
-              }
-              try {
-                if (data.type === 'output') {
-                  ws.send(
-                    JSON.stringify({
-                      type: 'output',
-                      chunk: data.chunk,
-                      id: data.id,
-                    }),
-                  );
-                } else if (data.type === 'exit') {
-                  ws.send(
-                    JSON.stringify({
-                      type: 'exit',
-                      exitCode: data.exitCode,
-                    }),
-                  );
-                }
-              } catch (wsErr) {
-                // Swallow quietly to avoid PTY reader loop crashes
-                console.warn('WebSocket send error during PTY broadcast:', wsErr);
-              }
-            });
+            // 3. Subscribe client to real-time process output (registers this
+            // client's dims and fits the shared PTY to the smallest client).
+            // Skip if the client already disconnected during the awaits above —
+            // onClose already ran (unsubscribe was still the no-op), so a late
+            // subscribe here would never get cleaned up.
+            if (closed) return;
+            unsubscribe = subscribeToSession(sessionId, onData, cols, rows);
           } catch (err) {
             console.error('Error inside settled WebSocket init:', err);
           }
@@ -189,7 +193,7 @@ app.get(
           if (msg.type === 'input') {
             writeToSession(sessionId, msg.text);
           } else if (msg.type === 'resize') {
-            resizeSession(sessionId, Number(msg.cols), Number(msg.rows));
+            resizeSession(sessionId, onData, Number(msg.cols), Number(msg.rows));
           }
         } catch (e) {
           console.error('Failed to handle incoming WebSocket message:', e);
@@ -198,6 +202,7 @@ app.get(
 
       onClose() {
         console.log(`WebSocket closed for session "${sessionId}"`);
+        closed = true;
         unsubscribe();
       },
     };
