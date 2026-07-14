@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.5.0",
+          "date": "2026-07-14",
+          "localizedDescription": "## Desktop\n\n- **New:** configurable session navigation — choose between a persistent left sidebar, a left-edge hover-to-reveal sidebar, or top session tabs. Pick your mode from the title-bar overflow menu's new **Navigation** section; the choice is saved and restored across restarts.\n- Mobile navigation is unchanged.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.5.0/tether-v1.5.0.ipa",
+          "size": 8200703,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.4.1",
           "date": "2026-07-14",
           "localizedDescription": "Fix `tether update` hanging on the download step for larger release assets.\n\n`Bun.write(tmp, response)` streaming a Response body directly could hang indefinitely on Bun 1.3.14 once the asset grew past ~90MB. The download now buffers via `arrayBuffer()` before writing to disk.",
