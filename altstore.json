@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.6.0",
+          "date": "2026-07-14",
+          "localizedDescription": "## What's Changed\n* feat: add native terminal features by @samuelloranger in https://github.com/samuelloranger/tether/pull/18\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.5.1...v1.6.0",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.6.0/tether-v1.6.0.ipa",
+          "size": 8379903,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.5.1",
           "date": "2026-07-14",
           "localizedDescription": "## Server\n\n- **Fixed:** two clients attached to the same shared terminal session no longer fight over the PTY size — the shared PTY now fits to the smallest attached client (the tmux model), instead of whichever client resized last winning for everyone.\n- **Fixed:** a client that disconnected during the WebSocket's startup window could leak a stale size registration that permanently pinned a shared session's PTY too small, with no recovery short of restarting the session holder.",
