@@ -28,7 +28,7 @@ import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { TerminalEmulator, type RenderRow, type CellStyle } from './terminal';
 import { splitRunByLinks, urlColumns } from './links';
 import { SessionCache, nextTermId, type SessionEntry } from './sessionCache';
-import { SessionDrawer, PANEL_W, type DrawerSession } from './SessionDrawer';
+import { SessionDrawer, type DrawerSession } from './SessionDrawer';
 import { applyFieldChange, SENT } from './input';
 import { getPassword, setPassword as persistPassword, authHeaders } from './secureConfig';
 import { httpBase, wsUrl, validateAddress } from './address';
@@ -208,7 +208,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             )}
           </View>
 
-          {/* Session Drawer (overlay) — mobile only; desktop uses the docked sidebar. */}
+          {/* Session Drawer (overlay) — mobile only; desktop uses DesktopSessionNavigator. */}
           {!isDesktop && (
             <SessionDrawer
               visible={drawerOpen}

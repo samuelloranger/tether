@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import Feather from '@expo/vector-icons/Feather';
 import { confirmAction } from './dialog';
 import type { DrawerSession } from './SessionDrawer';
-import { sessionDotColor, type DesktopNavigationMode } from './desktopNavigation';
+import { PANEL_W, sessionDotColor, type DesktopNavigationMode } from './desktopNavigation';
 
 export interface DesktopSessionNavigatorProps {
   mode: DesktopNavigationMode;
@@ -157,7 +157,7 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
 }
 
 const styles = StyleSheet.create({
-  sidebar: { width: 264, flexShrink: 0 },
+  sidebar: { width: PANEL_W, flexShrink: 0 },
   panel: { flex: 1, backgroundColor: '#0b0f19', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.08)' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)' },
   headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 7 },
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
   newButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   hoverRegion: { position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 2 },
   hoverTarget: { width: 12, flex: 1 },
-  hoverPanel: { position: 'absolute', top: 0, bottom: 0, left: 0, width: 264, shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 },
+  hoverPanel: { position: 'absolute', top: 0, bottom: 0, left: 0, width: PANEL_W, shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 },
   tabs: { flexGrow: 0, backgroundColor: '#0b0f19', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
   tabsContent: { paddingHorizontal: 8 },
   tab: { flexDirection: 'row', alignItems: 'center', maxWidth: 220, borderBottomWidth: 2, borderBottomColor: 'transparent' },
