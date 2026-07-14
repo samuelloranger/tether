@@ -3,7 +3,6 @@ import { View, Text, Linking, StyleSheet, type TextStyle } from 'react-native';
 import type { RenderRow, CellStyle } from './terminal';
 import { splitRunByLinks, urlColumns } from './links';
 import { isDesktop } from './platform';
-import { MONO } from './styles';
 
 function runToStyle(
   s: CellStyle,
@@ -48,6 +47,7 @@ export const TermRow = React.memo(
     width,
     blinkOn,
     cursorStyle,
+    fontFamily,
   }: {
     row: RenderRow;
     fontSize: number;
@@ -55,6 +55,7 @@ export const TermRow = React.memo(
     width: number;
     blinkOn: boolean;
     cursorStyle: 'block' | 'bar' | 'underline';
+    fontFamily: string;
   }) {
     // Column → full URL, from spans the emulator resolved across soft-wrapped
     // rows. A wrapped link's fragments each carry the WHOLE url, so tapping any
@@ -67,7 +68,7 @@ export const TermRow = React.memo(
         <Text
           style={[
             styles.termLine,
-            { fontSize, lineHeight, width },
+            { fontFamily, fontSize, lineHeight, width },
             // Web: preserve whitespace. RN-web's numberOfLines=1 sets
             // white-space:nowrap, which collapses/trims spaces — that hides the
             // block caret (a trailing space) and breaks column alignment. `pre`
@@ -106,6 +107,7 @@ export const TermRow = React.memo(
     prev.fontSize === next.fontSize &&
     prev.lineHeight === next.lineHeight &&
     prev.width === next.width &&
+    prev.fontFamily === next.fontFamily &&
     prev.cursorStyle === next.cursorStyle &&
     // Blink only invalidates the row that actually contains the caret.
     (prev.blinkOn === next.blinkOn || !rowHasCaret(next.row)),
@@ -113,7 +115,6 @@ export const TermRow = React.memo(
 
 const styles = StyleSheet.create({
   termLine: {
-    fontFamily: MONO,
     color: '#cbd5e1',
   },
   link: {

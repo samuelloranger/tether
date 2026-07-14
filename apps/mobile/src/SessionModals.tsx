@@ -2,6 +2,9 @@ import { Modal, Pressable, View, Text, TextInput, TouchableOpacity, StyleSheet }
 import Feather from '@expo/vector-icons/Feather';
 import { MONO } from './styles';
 import { THEME_IDS } from './themes';
+import { isDesktop } from './platform';
+
+const FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
 
 // Rename the active terminal.
 export function RenameModal({
@@ -122,11 +125,15 @@ export function AppearanceModal({
   onClose,
   themeId,
   onThemeChange,
+  fontFamily,
+  onFontChange,
 }: {
   visible: boolean;
   onClose: () => void;
   themeId: string;
   onThemeChange: (id: string) => void;
+  fontFamily: string;
+  onFontChange: (fontFamily: string) => void;
 }) {
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
@@ -146,6 +153,24 @@ export function AppearanceModal({
               {id === themeId && <Feather name="check" size={16} color="#22d3ee" />}
             </TouchableOpacity>
           ))}
+          {isDesktop && (
+            <>
+              <Text style={[styles.renameTitle, { marginTop: 12 }]}>Font</Text>
+              {FONTS.map((font) => (
+                <TouchableOpacity
+                  key={font}
+                  style={[
+                    styles.renameBtn,
+                    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
+                  ]}
+                  onPress={() => onFontChange(font)}
+                >
+                  <Text style={[styles.renameBtnText, { fontFamily: font }]}>{font.split('_')[0]}</Text>
+                  {font === fontFamily && <Feather name="check" size={16} color="#22d3ee" />}
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
