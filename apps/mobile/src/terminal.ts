@@ -158,6 +158,11 @@ export class TerminalEmulator {
   // whether to wrap pasted text in \x1b[200~...\x1b[201~ before sending.
   bracketedPaste = false;
 
+  // Monotonically increasing counter, incremented once per BEL (0x07) byte. A
+  // counter (not a boolean) so the UI can detect a second bell even if it
+  // hasn't re-rendered since the first.
+  bellCount = 0;
+
   // Wired by the UI to the live input channel. The emulator calls this for
   // sequences that expect a reply (DSR cursor report, DA identify) — without
   // it, apps that query the terminal and wait on the answer (readline, some
@@ -190,6 +195,7 @@ export class TerminalEmulator {
     this.cursorVisible = true;
     this.bracketedPaste = false;
     this.applicationCursor = false;
+    this.bellCount = 0;
     this.prevRows = [];
     this.state = 'ground';
     this.params = '';
@@ -298,7 +304,7 @@ export class TerminalEmulator {
     } else if (code === 0x09) {
       this.cx = Math.min(this.cols - 1, (Math.floor(this.cx / 8) + 1) * 8);
     } else if (code === 0x07) {
-      // bell, ignore
+      this.bellCount++;
     } else if (code === 0x0e) {
       this.shiftOut = true; // SO
     } else if (code === 0x0f) {
