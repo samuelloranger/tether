@@ -1087,9 +1087,10 @@ export function useTetherApp() {
         lineHeight={lineHeight}
         width={gridWidth}
         blinkOn={blinkOn}
+        cursorStyle={entryFor(activeId).term.cursorStyle}
       />
     ),
-    [fontSize, lineHeight, gridWidth, blinkOn],
+    [fontSize, lineHeight, gridWidth, blinkOn, activeId, entryFor],
   );
 
   // Map the connection state to the TitleBar's status union ('disconnected' → 'offline').
