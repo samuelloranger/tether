@@ -163,6 +163,10 @@ export class TerminalEmulator {
   // hasn't re-rendered since the first.
   bellCount = 0;
 
+  // Set by OSC 0 ("icon name + title") or OSC 2 ("title"). Empty until the
+  // remote shell/app sends one.
+  title = '';
+
   // Wired by the UI to the live input channel. The emulator calls this for
   // sequences that expect a reply (DSR cursor report, DA identify) — without
   // it, apps that query the terminal and wait on the answer (readline, some
@@ -172,6 +176,7 @@ export class TerminalEmulator {
   private state: ParserState = 'ground';
   private params = '';
   private intermediate = '';
+  private oscBuf = '';
 
   constructor(cols = 80, rows = 24) {
     this.cols = cols;
@@ -196,6 +201,8 @@ export class TerminalEmulator {
     this.bracketedPaste = false;
     this.applicationCursor = false;
     this.bellCount = 0;
+    this.title = '';
+    this.oscBuf = '';
     this.prevRows = [];
     this.state = 'ground';
     this.params = '';
@@ -270,11 +277,25 @@ export class TerminalEmulator {
           this.csi(ch, code);
           break;
         case 'osc':
-          if (code === 0x07) this.state = 'ground';
-          else if (code === 0x1b) this.state = 'oscEsc';
+          if (code === 0x07) {
+            this.dispatchOsc(this.oscBuf);
+            this.oscBuf = '';
+            this.state = 'ground';
+          } else if (code === 0x1b) {
+            this.state = 'oscEsc';
+          } else {
+            this.oscBuf += ch;
+          }
           break;
         case 'oscEsc':
-          this.state = 'ground'; // drop ST terminator
+          // ESC \ (ST) properly terminates; any other byte here means a
+          // malformed OSC (seen in the wild from a corrupted Warp
+          // shell-integration string, same failure mode as the DCS parser
+          // below) — dispatch what we buffered anyway rather than drop a
+          // whole title/cwd/hyperlink update.
+          this.dispatchOsc(this.oscBuf);
+          this.oscBuf = '';
+          this.state = 'ground';
           break;
         case 'dcs':
           if (code === 0x07) this.state = 'ground';
@@ -323,6 +344,7 @@ export class TerminalEmulator {
         this.intermediate = '';
         return;
       case ']':
+        this.oscBuf = '';
         this.state = 'osc';
         return;
       case 'P':
@@ -552,6 +574,17 @@ export class TerminalEmulator {
       this.cx = this.savedCx;
       this.cy = this.savedCy;
       this.inAlt = false;
+    }
+  }
+
+  // --- OSC (title, cwd, hyperlinks, shell-integration) ---
+  // buf is the content between "ESC ]" and the terminator, format "Ps;Pt...".
+  private dispatchOsc(buf: string) {
+    const sep = buf.indexOf(';');
+    const ps = sep === -1 ? buf : buf.slice(0, sep);
+    const pt = sep === -1 ? '' : buf.slice(sep + 1);
+    if (ps === '0' || ps === '2') {
+      this.title = pt;
     }
   }
 
