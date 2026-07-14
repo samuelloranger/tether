@@ -951,6 +951,16 @@ export function useTetherApp() {
     // intermediate keydowns here would leak partial composition bytes to the
     // PTY. keydown is suppressed while composing; the final composed text is
     // sent once, from compositionend.
+    //
+    // Composition needs an actual focused, editable DOM element to attach to —
+    // the terminal surface itself is a plain non-focusable View (see the
+    // isDesktop branch in TerminalScreen.tsx), so these window-level listeners
+    // alone would never fire for the real "click terminal, type" path. A
+    // hidden TextInput (ref: inputRef) is rendered inside #tether-terminal on
+    // desktop specifically as that composition target, focused on click
+    // (TerminalScreen.tsx). Composition events bubble to window regardless of
+    // which element they originate on, so listening here still works once that
+    // target exists and has focus.
     let composing = false;
 
     const focused = () =>
@@ -971,6 +981,11 @@ export function useTetherApp() {
         sendInput(ent?.term.bracketedPaste ? `\x1b[200~${e.data}\x1b[201~` : e.data);
         autoScroll.current = true;
       }
+      // The composed text landed in the hidden desktop composition-target
+      // input's own DOM value (composition was never preventDefault()'d so the
+      // browser could compose into it) — clear it so the next composition
+      // starts clean instead of accumulating.
+      inputRef.current?.clear();
     };
 
     const onKey = (e: KeyboardEvent) => {

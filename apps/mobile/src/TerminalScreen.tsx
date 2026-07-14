@@ -110,6 +110,22 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     };
   }, [uploadFile]);
 
+  // Desktop: clicking the terminal focuses the hidden IME composition-target
+  // input (see the isDesktop TextInput above) — needed so the browser has an
+  // actual editable element to attach dead-key/CJK composition sessions to.
+  // A plain mousedown listener (not a Pressable) so this stays consistent with
+  // the terminal surface remaining a non-focusable View — Pressable would make
+  // Enter "activate" it instead of reaching the PTY (see the isDesktop render
+  // branch's comment on this exact failure mode).
+  useEffect(() => {
+    if (!isDesktop) return;
+    const el = document.getElementById('tether-terminal');
+    if (!el) return;
+    const onMouseDown = () => inputRef.current?.focus();
+    el.addEventListener('mousedown', onMouseDown);
+    return () => el.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
   return (
         /* Terminal Client Screen */
         <KeyboardAvoidingView
@@ -405,6 +421,29 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
               accessibilityLabel="Terminal input (hidden)"
+            />
+          )}
+
+          {/* Hidden IME/dead-key composition target (desktop): the terminal
+              surface is a plain non-focusable View, so it can't receive an OS
+              composition session on its own — this gives the browser an actual
+              editable element to compose into (é/ñ/ö dead-keys, CJK IME candidate
+              windows). Regular typing is unaffected: it's still forwarded by the
+              global keydown listener in useTetherApp.tsx, which preventDefault()s
+              every key it handles, so this field never receives non-composing
+              keystrokes. Rendered inside #tether-terminal so the keydown/
+              composition focus-guard (desktopFocusGuard.ts) already treats it as
+              part of the terminal. Focused on click via the effect below. */}
+          {isDesktop && (
+            <TextInput
+              ref={inputRef}
+              style={styles.hiddenInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              accessibilityLabel="Terminal IME composition target (hidden)"
             />
           )}
           </View>
