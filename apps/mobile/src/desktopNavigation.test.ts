@@ -3,6 +3,7 @@ import {
   DEFAULT_DESKTOP_NAVIGATION_MODE,
   parseDesktopNavigationMode,
   reservedNavigationWidth,
+  sessionDotColor,
 } from './desktopNavigation';
 
 describe('desktop navigation mode', () => {
@@ -18,5 +19,11 @@ describe('desktop navigation mode', () => {
     expect(reservedNavigationWidth('sidebar')).toBe(264);
     expect(reservedNavigationWidth('hover')).toBe(0);
     expect(reservedNavigationWidth('tabs')).toBe(0);
+  });
+
+  it('prioritizes stopped state and marks only the active running session as live', () => {
+    expect(sessionDotColor({ status: 'stopped', last_output_at: null }, true)).toBe('#64748b');
+    expect(sessionDotColor({ status: 'running', last_output_at: null }, true)).toBe('#22c55e');
+    expect(sessionDotColor({ status: 'running', last_output_at: null }, false)).toBe('#334155');
   });
 });
