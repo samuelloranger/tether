@@ -86,6 +86,30 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     prevBellCount.current = activeBellCount;
   }, [activeBellCount]);
 
+  // Desktop: drag a file from the OS onto the terminal to upload it into the
+  // session's cwd. Plain DOM events (the desktop build is a Tauri webview
+  // running react-native-web) — no native Tauri fs plugin/permission needed.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const el = document.getElementById('tether-terminal');
+    if (!el) return;
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      const files = e.dataTransfer?.files;
+      if (!files || !files.length) return;
+      for (const file of Array.from(files)) {
+        await uploadFile(file, file.name);
+      }
+    };
+    el.addEventListener('dragover', onDragOver);
+    el.addEventListener('drop', onDrop);
+    return () => {
+      el.removeEventListener('dragover', onDragOver);
+      el.removeEventListener('drop', onDrop);
+    };
+  }, [uploadFile]);
+
   return (
         /* Terminal Client Screen */
         <KeyboardAvoidingView
