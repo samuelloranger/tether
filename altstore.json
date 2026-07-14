@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.6.2",
+          "date": "2026-07-14",
+          "localizedDescription": "## What's Changed\n* fix(desktop): Alt/Option+Left/Right word-motion by @samuelloranger in https://github.com/samuelloranger/tether/pull/20\n* feat: TERM/COLORTERM env + IME/dead-key composition support by @samuelloranger in https://github.com/samuelloranger/tether/pull/21\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.1...v1.6.2",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.6.2/tether-v1.6.2.ipa",
+          "size": 8381242,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.6.1",
           "date": "2026-07-14",
           "localizedDescription": "## What's Changed\n* fix: macOS desktop white screen + browser-safe release assets by @samuelloranger in https://github.com/samuelloranger/tether/pull/19\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.0...v1.6.1",
