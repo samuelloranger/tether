@@ -102,6 +102,14 @@ export function keyToBytes(e: KeyLike, appCursor = false, isMac = false): string
   if (key === 'Tab') return e.shiftKey ? '\x1b[Z' : '\t';
   if (key === 'Escape') return '\x1b';
 
+  // Alt+Left/Right → readline word-motion (Meta-b/Meta-f), matching the
+  // convention terminal emulators use (Terminal.app/iTerm2 send this exact
+  // sequence for Option+Left/Right) so it works with bash/readline's default
+  // bindings with no user config needed. Up/Down have no word-motion analog,
+  // so they fall through to plain cursor motion below.
+  if (e.altKey && key === 'ArrowLeft') return '\x1bb';
+  if (e.altKey && key === 'ArrowRight') return '\x1bf';
+
   if (ARROW_FINAL[key]) return cursorKey(ARROW_FINAL[key], appCursor);
   if (key === 'Home') return cursorKey('H', appCursor);
   if (key === 'End') return cursorKey('F', appCursor);
