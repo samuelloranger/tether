@@ -23,8 +23,6 @@ case "$arch" in
   *) echo "Unsupported arch: $arch" >&2; exit 1 ;;
 esac
 
-asset="tether-${os}-${arch}"
-
 if [ -n "${TETHER_VERSION:-}" ]; then
   tag="$TETHER_VERSION"
 else
@@ -32,6 +30,11 @@ else
     | grep '"tag_name"' | head -1 | cut -d '"' -f 4)"
 fi
 [ -n "$tag" ] || { echo "Could not resolve latest release tag" >&2; exit 1; }
+
+# macOS ships a .tar.gz (raw Mach-O download gets quarantined + loses its exec
+# bit); Linux ships the raw binary. Asset name embeds the tag.
+base="tether-${os}-${arch}-${tag}"
+if [ "$os" = darwin ]; then asset="${base}.tar.gz"; else asset="$base"; fi
 
 url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
 
@@ -43,13 +46,20 @@ fi
 
 echo "Installing tether ${tag} (${asset})…"
 mkdir -p "$BIN_DIR"
-# Download to a temp file then move over $DEST. If $DEST is the old installer's
-# symlink (-> ~/.tether/app/cli.ts), `curl -o` would follow it and write into the
-# old tree; `mv -f` replaces the symlink itself with the real binary.
-tmp="$(mktemp "${BIN_DIR}/.tether.XXXXXX")"
-curl -fsSL "$url" -o "$tmp"
-chmod +x "$tmp"
-mv -f "$tmp" "$DEST"
+# Download into a temp dir, produce $tmpd/tether (extract on macOS, rename on
+# Linux), then move it over $DEST. If $DEST is the old installer's symlink
+# (-> ~/.tether/app/cli.ts), `mv -f` replaces the symlink itself with the real
+# binary. The temp dir keeps the staged binary from colliding with $DEST.
+tmpd="$(mktemp -d "${BIN_DIR}/.tether.XXXXXX")"
+trap 'rm -rf "$tmpd"' EXIT
+if [ "$os" = darwin ]; then
+  curl -fsSL "$url" -o "$tmpd/tether.tar.gz"
+  tar -xzf "$tmpd/tether.tar.gz" -C "$tmpd" tether
+else
+  curl -fsSL "$url" -o "$tmpd/tether"
+fi
+chmod +x "$tmpd/tether"
+mv -f "$tmpd/tether" "$DEST"
 
 echo "Installed to $DEST"
 
