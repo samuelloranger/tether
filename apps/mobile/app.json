@@ -43,7 +43,8 @@
         {
           "photosPermission": "Tether uses your photo library to upload files to the connected server."
         }
-      ]
+      ],
+      "expo-drag-drop-content-view"
     ],
     "web": {
       "bundler": "metro",
