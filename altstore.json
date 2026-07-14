@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.5.1",
+          "date": "2026-07-14",
+          "localizedDescription": "## Server\n\n- **Fixed:** two clients attached to the same shared terminal session no longer fight over the PTY size — the shared PTY now fits to the smallest attached client (the tmux model), instead of whichever client resized last winning for everyone.\n- **Fixed:** a client that disconnected during the WebSocket's startup window could leak a stale size registration that permanently pinned a shared session's PTY too small, with no recovery short of restarting the session holder.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.5.1/tether-v1.5.1.ipa",
+          "size": 8200469,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.5.0",
           "date": "2026-07-14",
           "localizedDescription": "## Desktop\n\n- **New:** configurable session navigation — choose between a persistent left sidebar, a left-edge hover-to-reveal sidebar, or top session tabs. Pick your mode from the title-bar overflow menu's new **Navigation** section; the choice is saved and restored across restarts.\n- Mobile navigation is unchanged.",
