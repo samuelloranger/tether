@@ -11,12 +11,14 @@ export function UtilityBar({
   sendInput,
   cursorSeq,
   onPaste,
+  onImagePick,
 }: {
   ctrlArmed: boolean;
   setCtrlArmed: (updater: (prev: boolean) => boolean) => void;
   sendInput: (s: string) => void;
   cursorSeq: (final: string) => string;
   onPaste: () => void;
+  onImagePick: () => void;
 }) {
   return (
     <View style={styles.utilityBar}>
@@ -86,6 +88,15 @@ export function UtilityBar({
           accessibilityLabel="Paste"
         >
           <Feather name="clipboard" size={17} color="#cbd5e1" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.utilityIconBtn}
+          activeOpacity={0.6}
+          onPress={onImagePick}
+          accessibilityRole="button"
+          accessibilityLabel="Upload image"
+        >
+          <Feather name="image" size={17} color="#cbd5e1" />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.utilityIconBtn}

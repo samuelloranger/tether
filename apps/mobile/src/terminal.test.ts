@@ -1,5 +1,5 @@
 // Run: bun test  (from apps/mobile)  — or: bun run src/terminal.test.ts
-import { TerminalEmulator } from './terminal';
+import { TerminalEmulator, setTheme } from './terminal';
 import { computeLinkSpans, splitRunByLinks, urlColumns } from './links';
 
 const E = '\x1b';
@@ -415,6 +415,109 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   // column 2 should surface the whole url as one tagged segment.
   const urlAt = urlColumns(computeLinkSpans([`ab${url}`], [false])[0]);
   eq(splitRunByLinks(url, 2, urlAt), [{ text: url, url }], 'offset run maps to the url');
+}
+
+// 44. Bell increments a counter instead of being dropped
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.bellCount, 0, 'bell starts at 0');
+  t.write('\x07');
+  eq(t.bellCount, 1, 'bell increments on BEL');
+  t.write('a\x07b\x07');
+  eq(t.bellCount, 3, 'bell increments once per BEL byte');
+}
+
+// 45. OSC 0/2 sets the window title
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.title, '', 'title starts empty');
+  t.write(`${E}]2;my-session${E}\\`);
+  eq(t.title, 'my-session', 'OSC 2 sets title (ST terminator)');
+  t.write(`${E}]0;another\x07`);
+  eq(t.title, 'another', 'OSC 0 sets title (BEL terminator)');
+}
+
+// 46. OSC 7 sets cwd from a file:// URI, stripping host + decoding percent-escapes
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.cwd, '', 'cwd starts empty');
+  t.write(`${E}]7;file://myhost/home/sam/My%20Project${E}\\`);
+  eq(t.cwd, '/home/sam/My Project', 'OSC 7 parses path, strips host, decodes %20');
+}
+
+// 46a. A malformed OSC 7 escape keeps the parser live and preserves the raw path.
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}]7;file://myhost/home/sam/foo%bar${E}\\after`);
+  eq(t.cwd, '/home/sam/foo%bar', 'malformed OSC 7 path is kept raw');
+  eq(line(t, 0), 'after', 'parser resumes after malformed OSC 7');
+}
+
+// 47. DECSCUSR sets cursor shape/blink
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.cursorStyle, 'block', 'default cursor shape is block');
+  eq(t.cursorBlink, true, 'default cursor blinks');
+  t.write(`${E}[5 q`);
+  eq(t.cursorStyle, 'bar', 'Ps=5 -> blinking bar');
+  eq(t.cursorBlink, true, 'Ps=5 -> blink on');
+  t.write(`${E}[4 q`);
+  eq(t.cursorStyle, 'underline', 'Ps=4 -> steady underline');
+  eq(t.cursorBlink, false, 'Ps=4 -> blink off (even Ps = steady)');
+  t.write(`${E}[2 q`);
+  eq(t.cursorStyle, 'block', 'Ps=2 -> steady block');
+}
+
+// 48. OSC 133 marks prompt-start rows for jump navigation
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}]133;A${E}\\$ ls\r\n`); // row 0: prompt + echoed command (same row, no newline in between)
+  t.write('file.txt\r\n');            // row 1: command output
+  t.write(`${E}]133;A${E}\\$ `);      // row 2: next prompt
+  const rows = t.getSnapshot();
+  eq(rows[0].promptStart, true, 'row 0 is a prompt row');
+  eq(rows[1].promptStart, false, 'row 1 is not a prompt row');
+  eq(rows[2].promptStart, true, 'row 2 is a prompt row');
+  eq(t.jumpToPrompt(2, -1), 0, 'jump backward from row 2 finds row 0');
+  eq(t.jumpToPrompt(0, 1), 2, 'jump forward from row 0 finds row 2');
+  eq(t.jumpToPrompt(0, -1), null, 'jump backward from the first prompt finds nothing');
+}
+
+// 49. OSC 8 hyperlinks: explicit spans win over regex reconstruction
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`click ${E}]8;;https://example.com${E}\\here${E}]8;;${E}\\ done`);
+  const links = t.getSnapshot()[0].links;
+  eq(links.length, 1, 'exactly one link span on the row');
+  eq(links[0].url, 'https://example.com', 'link carries the OSC 8 URI');
+  // "click " (0-5) is not part of the link; "here" (6-9) is (starts after "click ").
+  eq(links[0].start, 6, 'link starts at "here"');
+  eq(links[0].end, 10, 'link ends after "here"');
+}
+
+// 50. Plain (non-OSC-8) URLs still fall back to regex detection
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write('see https://example.com/path for details');
+  const links = t.getSnapshot()[0].links;
+  eq(links.length, 1, 'regex still finds a plain URL');
+  eq(links[0].url, 'https://example.com/path', 'regex-detected URL is correct');
+}
+
+// 51. setTheme swaps the ANSI palette + default fg/bg used by new writes
+{
+  const t = new TerminalEmulator(80, 24);
+  setTheme({ base16: Array(16).fill('#111111'), fg: '#eeeeee', bg: '#000000' });
+  t.write(`${E}[31mred${E}[0m`);
+  eq(t.getSnapshot()[0].runs[0].style.fg, '#111111', 'SGR 31 resolves through the new base16');
+  setTheme({
+    base16: [
+      '#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
+      '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
+    ],
+    fg: '#cbd5e1',
+    bg: '#05070e',
+  }); // restore defaults so later tests in this same process see the original palette
 }
 
 console.log(`\n  ${pass} assertions passed\n`);

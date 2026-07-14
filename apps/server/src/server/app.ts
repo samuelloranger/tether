@@ -12,6 +12,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { resolveUploadPath } from './upload';
 
 const app = new Hono();
 
@@ -94,6 +95,29 @@ app.get('/api/sessions/:id/logs', (c) => {
 
   const logs = getLogs(sessionId, sinceId);
   return c.json(logs);
+});
+
+// Receive an uploaded file (mobile image-picker, iOS/iPadOS drag-drop, desktop
+// drag-drop all funnel through here) and write it into the session's live cwd.
+app.post('/api/sessions/:id/upload', async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ ok: false, error: 'invalid form data' }, 400);
+  const file = form.get('file');
+  const cwd = form.get('cwd');
+  const filenameOverride = form.get('filename');
+  if (!(file instanceof File) || typeof cwd !== 'string' || !cwd) {
+    return c.json({ ok: false, error: 'missing file or cwd' }, 400);
+  }
+  const filename =
+    typeof filenameOverride === 'string' && filenameOverride ? filenameOverride : file.name;
+  let dest: string;
+  try {
+    dest = resolveUploadPath(cwd, filename);
+  } catch (err) {
+    return c.json({ ok: false, error: String(err) }, 400);
+  }
+  await Bun.write(dest, file);
+  return c.json({ ok: true, path: dest });
 });
 
 // --- WebSocket Real-Time Terminal Gateway ---
