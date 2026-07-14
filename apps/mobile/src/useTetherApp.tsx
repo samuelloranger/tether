@@ -27,6 +27,7 @@ import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
 import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
 import { TerminalEmulator, setTheme, type RenderRow, type CellStyle } from './terminal';
+import { shellQuote } from './shell';
 import { THEMES } from './themes';
 import { splitRunByLinks, urlColumns } from './links';
 import { SessionCache, nextTermId, type SessionEntry } from './sessionCache';
@@ -837,7 +838,7 @@ export function useTetherApp() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'upload failed');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      sendInput(data.path);
+      sendInput(shellQuote(data.path));
     } catch {
       void notify('Upload failed', 'Could not upload the file to the server.', 'error');
     }

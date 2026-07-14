@@ -445,6 +445,14 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(t.cwd, '/home/sam/My Project', 'OSC 7 parses path, strips host, decodes %20');
 }
 
+// 46a. A malformed OSC 7 escape keeps the parser live and preserves the raw path.
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}]7;file://myhost/home/sam/foo%bar${E}\\after`);
+  eq(t.cwd, '/home/sam/foo%bar', 'malformed OSC 7 path is kept raw');
+  eq(line(t, 0), 'after', 'parser resumes after malformed OSC 7');
+}
+
 // 47. DECSCUSR sets cursor shape/blink
 {
   const t = new TerminalEmulator(80, 24);
