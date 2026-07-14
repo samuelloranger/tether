@@ -12,6 +12,8 @@ export function OverflowMenu({
   fontSize,
   onFontDelta,
   onSearch,
+  onJumpPromptUp,
+  onJumpPromptDown,
   onSnippets,
   onCheckUpdates,
   onRestart,
@@ -24,6 +26,8 @@ export function OverflowMenu({
   fontSize: number;
   onFontDelta: (delta: number) => void;
   onSearch: () => void;
+  onJumpPromptUp: () => void;
+  onJumpPromptDown: () => void;
   onSnippets: () => void;
   onCheckUpdates: () => void;
   onRestart: () => void;
@@ -63,6 +67,14 @@ export function OverflowMenu({
           <TouchableOpacity style={styles.menuRow} onPress={onSearch}>
             <Feather name="search" size={16} color="#cbd5e1" />
             <Text style={styles.menuRowText}>Search displayed transcript</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuRow} onPress={onJumpPromptUp}>
+            <Feather name="chevron-up" size={16} color="#cbd5e1" />
+            <Text style={styles.menuRowText}>Jump to previous command</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuRow} onPress={onJumpPromptDown}>
+            <Feather name="chevron-down" size={16} color="#cbd5e1" />
+            <Text style={styles.menuRowText}>Jump to next command</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.menuRow} onPress={onSnippets}>
             <Feather name="terminal" size={16} color="#cbd5e1" />

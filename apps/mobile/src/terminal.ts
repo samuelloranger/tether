@@ -39,6 +39,8 @@ export interface RenderRow {
   wrapped: boolean;
   // Link spans (column ranges → full URL) resolved across any soft-wrapped rows.
   links: LinkSpan[];
+  // True when OSC 133;A (shell-integration prompt-start) marked this row.
+  promptStart: boolean;
 }
 
 const DEFAULT_FG = '#cbd5e1';
@@ -123,6 +125,10 @@ export class TerminalEmulator {
   // through splice/shift/scrollUp with no parallel bookkeeping; a fresh
   // blankLine (clear/scroll) is naturally absent, so its flag reads false.
   private wrappedLines = new WeakSet<Cell[]>();
+  // Rows marked by OSC 133;A (shell-integration prompt-start), same
+  // keyed-on-the-line-array pattern as wrappedLines above.
+  private promptRows = new WeakSet<Cell[]>();
+  private lastExitCode: number | null = null;
 
   private cx = 0;
   private cy = 0;
@@ -214,6 +220,8 @@ export class TerminalEmulator {
     this.bellCount = 0;
     this.title = '';
     this.cwd = '';
+    this.promptRows = new WeakSet();
+    this.lastExitCode = null;
     this.oscBuf = '';
     this.prevRows = [];
     this.state = 'ground';
@@ -609,6 +617,13 @@ export class TerminalEmulator {
     } else if (ps === '7') {
       const m = /^file:\/\/[^/]*(\/.*)$/.exec(pt);
       if (m) this.cwd = decodeURIComponent(m[1]);
+    } else if (ps === '133') {
+      if (pt.startsWith('A')) {
+        this.promptRows.add(this.screen[this.cy]);
+      } else if (pt.startsWith('D')) {
+        const codeStr = pt.split(';')[1];
+        this.lastExitCode = codeStr !== undefined ? parseInt(codeStr, 10) : null;
+      }
     }
   }
 
@@ -793,6 +808,7 @@ export class TerminalEmulator {
     const caretCol = Math.min(this.cx, this.cols - 1); // cx can sit at cols (pending wrap)
     const rowRuns = lines.map((l, i) => this.mergeRuns(l, i === caretRow ? caretCol : -1));
     const wrapped = lines.map((l) => this.wrappedLines.has(l));
+    const promptFlags = lines.map((l) => this.promptRows.has(l));
     // Resolve URLs over logical lines (joining soft-wrapped rows) so a link
     // split across the width is tappable — as a whole — on every fragment.
     const texts = rowRuns.map((runs) => runs.map((r) => r.text).join(''));
@@ -803,13 +819,25 @@ export class TerminalEmulator {
       out[i] =
         prev &&
         prev.wrapped === wrapped[i] &&
+        prev.promptStart === promptFlags[i] &&
         runsEqual(prev.runs, rowRuns[i]) &&
         linksEqual(prev.links, links[i])
           ? prev
-          : { runs: rowRuns[i], wrapped: wrapped[i], links: links[i] };
+          : { runs: rowRuns[i], wrapped: wrapped[i], links: links[i], promptStart: promptFlags[i] };
     }
     this.prevRows = out;
     return out;
+  }
+
+  // Returns the row index (in getSnapshot()'s combined scrollback+screen
+  // coordinate space) of the next prompt-start row searching from `fromRow` in
+  // direction `dir` (1 = forward, -1 = backward), or null if there is none.
+  jumpToPrompt(fromRow: number, dir: 1 | -1): number | null {
+    const lines = [...this.scrollback, ...this.screen];
+    for (let i = fromRow + dir; i >= 0 && i < lines.length; i += dir) {
+      if (this.promptRows.has(lines[i])) return i;
+    }
+    return null;
   }
 
   private mergeRuns(line: Cell[], caretCol = -1): RenderRun[] {
