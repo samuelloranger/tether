@@ -59,9 +59,12 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
     process.exit(1);
   }
   // Write next to the current binary so the final rename is same-filesystem/atomic.
+  // Buffer the whole body first: Bun.write(path, Response) hangs on large streamed
+  // bodies (repro'd on 1.3.14 with a ~90MB asset) — arrayBuffer() sidesteps it.
   const target = process.execPath;
   const tmp = path.join(path.dirname(target), '.tether.new');
-  await Bun.write(tmp, dl);
+  const bytes = await dl.arrayBuffer();
+  await Bun.write(tmp, bytes);
   chmodSync(tmp, 0o755);
 
   // Sanity-check the downloaded binary before swapping it in.
