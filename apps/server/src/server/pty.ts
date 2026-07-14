@@ -61,7 +61,7 @@ export function scrubAgentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return out;
 }
 
-type Subscriber = (data: {
+export type Subscriber = (data: {
   type: 'output' | 'exit';
   chunk?: string;
   exitCode?: number;

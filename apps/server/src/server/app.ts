@@ -7,6 +7,7 @@ import {
   getDefaultShell,
   killSession,
   resizeSession,
+  type Subscriber,
   startSession,
   subscribeToSession,
   writeToSession,
@@ -105,14 +106,14 @@ app.get(
     const rows = Number(c.req.query('rows') || 24);
 
     let unsubscribe = () => {};
+    // The subscribe-to-session call is deferred (see the setTimeout below), so a
+    // client that disconnects before it runs must stop it from ever registering
+    // — otherwise its dims/subscriber entry leaks forever, since onClose only
+    // fires once and unsubscribe is still the no-op at that point.
+    let closed = false;
     // Stable per-connection output handler. Defined synchronously in onOpen so it
     // also serves as this client's key for per-client PTY sizing (onMessage/resize).
-    let onData: (data: {
-      type: 'output' | 'exit';
-      chunk?: string;
-      exitCode?: number;
-      id?: number;
-    }) => void = () => {};
+    let onData: Subscriber = () => {};
 
     return {
       onOpen(_event, ws) {
@@ -175,6 +176,10 @@ app.get(
 
             // 3. Subscribe client to real-time process output (registers this
             // client's dims and fits the shared PTY to the smallest client).
+            // Skip if the client already disconnected during the awaits above —
+            // onClose already ran (unsubscribe was still the no-op), so a late
+            // subscribe here would never get cleaned up.
+            if (closed) return;
             unsubscribe = subscribeToSession(sessionId, onData, cols, rows);
           } catch (err) {
             console.error('Error inside settled WebSocket init:', err);
@@ -197,6 +202,7 @@ app.get(
 
       onClose() {
         console.log(`WebSocket closed for session "${sessionId}"`);
+        closed = true;
         unsubscribe();
       },
     };
