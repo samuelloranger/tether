@@ -62,6 +62,15 @@ export function scrubAgentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return out;
 }
 
+// The client-side emulator (terminal.ts) already renders 256-color and 24-bit
+// truecolor SGR codes, but remote programs (vim, tmux, htop, less…) only emit
+// them if TERM/COLORTERM advertise that support. Override rather than defer to
+// whatever the tether server process happened to inherit (could be unset, or
+// "dumb" in some launch contexts) — Tether shells always get the full palette.
+export function withTermEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+}
+
 export type Subscriber = (data: {
   type: 'output' | 'exit';
   chunk?: string;
@@ -268,7 +277,7 @@ async function doStartSession(
   const holder = spawn(holderCmd, holderArgs, {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: scrubAgentEnv(process.env),
+    env: withTermEnv(scrubAgentEnv(process.env)),
   });
   holder.unref();
 
