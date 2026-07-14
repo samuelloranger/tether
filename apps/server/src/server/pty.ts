@@ -41,6 +41,30 @@ const BASHRC = [
 mkdirSync(RC_DIR, { recursive: true });
 writeFileSync(RC_PATH, BASHRC);
 
+// zsh has no --rcfile-equivalent flag for interactive mode; the standard,
+// safe (zsh-only, unlike XDG_CONFIG_HOME) redirect is the ZDOTDIR env var,
+// which zsh reads $ZDOTDIR/.zshrc from instead of ~/.zshrc. Only the invisible
+// OSC 7 hook is added — no prompt replacement, since zsh users already have
+// their own (bare `~/.zshrc`, not `$ZDOTDIR`-relative, so a customized
+// ZDOTDIR of the user's own is intentionally not chased here — same
+// simplification the bash rcfile already makes for ~/.bashrc).
+const ZSH_RC_DIR = path.join(RC_DIR, 'zsh');
+const ZSHRC = [
+  '[ -f ~/.zshrc ] && source ~/.zshrc',
+  '_tether_osc7() { printf "\\e]7;file://%s%s\\a" "$(hostname)" "$PWD"; }',
+  'precmd_functions+=(_tether_osc7)',
+  '',
+].join('\n');
+mkdirSync(ZSH_RC_DIR, { recursive: true });
+writeFileSync(path.join(ZSH_RC_DIR, '.zshrc'), ZSHRC);
+
+// fish has no rcfile-redirect env var without risking collateral effects on
+// other XDG-aware tools in the session (XDG_CONFIG_HOME would redirect ALL of
+// them, not just fish) — --init-command runs before fish's own config.fish,
+// with no environment side effects at all.
+const FISH_INIT =
+  'function _tether_osc7 --on-event fish_prompt; printf "\\e]7;file://%s%s\\a" (hostname) (pwd); end';
+
 // Each session's PTY lives in a detached holder process (holder.ts) so shells
 // survive tether server restarts; we speak newline-delimited JSON to it over a
 // unix socket (see holder.ts for the frame shapes). Holders live next to the
@@ -240,6 +264,24 @@ export async function startSession(
   return promise;
 }
 
+export interface ShellInvocation {
+  args: string[];
+  env?: Record<string, string>;
+}
+
+// Picks the spawn args (and any env override) that wire up shell integration
+// (currently just OSC 7 cwd tracking) for the given command, per-shell since
+// each needs a different injection mechanism — bash's --rcfile, zsh's ZDOTDIR
+// redirect, fish's --init-command. Anything else runs as-is (matches the
+// pre-existing fallback: no shell integration attempted).
+export function shellInvocation(command: string): ShellInvocation {
+  const shell = path.basename(command);
+  if (shell === 'bash') return { args: ['bash', '--rcfile', RC_PATH, '-i'] };
+  if (shell === 'zsh') return { args: ['zsh', '-i'], env: { ZDOTDIR: ZSH_RC_DIR } };
+  if (shell === 'fish') return { args: ['fish', '--init-command', FISH_INIT, '-i'] };
+  return { args: [command, '-i'] };
+}
+
 async function doStartSession(
   id: string,
   command: string,
@@ -255,11 +297,9 @@ async function doStartSession(
   } catch {}
 
   // No live holder: spawn one, detached so it outlives this server process.
-  // For bash, load our rcfile for the fish-like prompt (still sources the user's
-  // ~/.bashrc). Any other command runs as-is (e.g. the user's $SHELL, so fish
-  // abbreviations etc. load from their own config).
-  const isBash = path.basename(command) === 'bash';
-  const args = isBash ? ['bash', '--rcfile', RC_PATH, '-i'] : [command, '-i'];
+  // shellInvocation wires up OSC 7 cwd tracking per-shell (bash/zsh/fish);
+  // anything else runs as-is with no shell integration.
+  const { args, env: shellEnv } = shellInvocation(command);
   const sockPath = sockPathFor(id);
   try {
     unlinkSync(sockPath); // stale socket from a dead holder
@@ -277,7 +317,7 @@ async function doStartSession(
   const holder = spawn(holderCmd, holderArgs, {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: withTermEnv(scrubAgentEnv(process.env)),
+    env: { ...withTermEnv(scrubAgentEnv(process.env)), ...shellEnv },
   });
   holder.unref();
 
