@@ -113,7 +113,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             <TitleBar
               isMac={isMacDesktop}
               title={entryFor(activeId).term.title || activeName}
-              subtitle={`${serverIp}:${port}`}
+              subtitle={entryFor(activeId).term.cwd || `${serverIp}:${port}`}
               status={titleBarStatus}
               onNew={newTerminal}
               onSettings={() => setIsConfiguring(true)}

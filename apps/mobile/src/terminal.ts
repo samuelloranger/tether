@@ -167,6 +167,10 @@ export class TerminalEmulator {
   // remote shell/app sends one.
   title = '';
 
+  // Set by OSC 7 (shell-integration cwd report, "file://host/path"). Empty
+  // until the remote shell's prompt hook has fired at least once.
+  cwd = '';
+
   // Wired by the UI to the live input channel. The emulator calls this for
   // sequences that expect a reply (DSR cursor report, DA identify) — without
   // it, apps that query the terminal and wait on the answer (readline, some
@@ -202,6 +206,7 @@ export class TerminalEmulator {
     this.applicationCursor = false;
     this.bellCount = 0;
     this.title = '';
+    this.cwd = '';
     this.oscBuf = '';
     this.prevRows = [];
     this.state = 'ground';
@@ -585,6 +590,9 @@ export class TerminalEmulator {
     const pt = sep === -1 ? '' : buf.slice(sep + 1);
     if (ps === '0' || ps === '2') {
       this.title = pt;
+    } else if (ps === '7') {
+      const m = /^file:\/\/[^/]*(\/.*)$/.exec(pt);
+      if (m) this.cwd = decodeURIComponent(m[1]);
     }
   }
 
