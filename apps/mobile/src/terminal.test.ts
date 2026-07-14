@@ -417,4 +417,14 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(splitRunByLinks(url, 2, urlAt), [{ text: url, url }], 'offset run maps to the url');
 }
 
+// 44. Bell increments a counter instead of being dropped
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.bellCount, 0, 'bell starts at 0');
+  t.write('\x07');
+  eq(t.bellCount, 1, 'bell increments on BEL');
+  t.write('a\x07b\x07');
+  eq(t.bellCount, 3, 'bell increments once per BEL byte');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
