@@ -25,6 +25,7 @@ export interface CellStyle {
 
 interface Cell extends CellStyle {
   ch: string;
+  url?: string;
 }
 
 export interface RenderRun {
@@ -624,6 +625,11 @@ export class TerminalEmulator {
         const codeStr = pt.split(';')[1];
         this.lastExitCode = codeStr !== undefined ? parseInt(codeStr, 10) : null;
       }
+    } else if (ps === '8') {
+      // "params;URI" — params (e.g. id=xxx) is ignored; empty URI closes the link.
+      const uriSep = pt.indexOf(';');
+      const uri = uriSep === -1 ? '' : pt.slice(uriSep + 1);
+      (this.pen as Cell).url = uri || undefined;
     }
   }
 
@@ -812,7 +818,11 @@ export class TerminalEmulator {
     // Resolve URLs over logical lines (joining soft-wrapped rows) so a link
     // split across the width is tappable — as a whole — on every fragment.
     const texts = rowRuns.map((runs) => runs.map((r) => r.text).join(''));
-    const links = computeLinkSpans(texts, wrapped);
+    const regexLinks = computeLinkSpans(texts, wrapped);
+    const links = lines.map((line, i) => {
+      const explicit = explicitLinkSpans(line);
+      return explicit.length ? explicit : regexLinks[i];
+    });
     const out: RenderRow[] = new Array(lines.length);
     for (let i = 0; i < lines.length; i++) {
       const prev = this.prevRows[i];
@@ -913,4 +923,23 @@ function linksEqual(a: LinkSpan[], b: LinkSpan[]): boolean {
     if (a[i].start !== b[i].start || a[i].end !== b[i].end || a[i].url !== b[i].url) return false;
   }
   return true;
+}
+
+// Contiguous same-URL cell runs on one row, as LinkSpans — explicit OSC-8
+// links take priority over regex URL detection for any row that has them.
+function explicitLinkSpans(line: Cell[]): LinkSpan[] {
+  const out: LinkSpan[] = [];
+  let i = 0;
+  while (i < line.length) {
+    const url = line[i].url;
+    if (!url) {
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    while (j < line.length && line[j].url === url) j++;
+    out.push({ start: i, end: j, url });
+    i = j;
+  }
+  return out;
 }

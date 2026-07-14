@@ -475,4 +475,25 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(t.jumpToPrompt(0, -1), null, 'jump backward from the first prompt finds nothing');
 }
 
+// 49. OSC 8 hyperlinks: explicit spans win over regex reconstruction
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`click ${E}]8;;https://example.com${E}\\here${E}]8;;${E}\\ done`);
+  const links = t.getSnapshot()[0].links;
+  eq(links.length, 1, 'exactly one link span on the row');
+  eq(links[0].url, 'https://example.com', 'link carries the OSC 8 URI');
+  // "click " (0-5) is not part of the link; "here" (6-9) is (starts after "click ").
+  eq(links[0].start, 6, 'link starts at "here"');
+  eq(links[0].end, 10, 'link ends after "here"');
+}
+
+// 50. Plain (non-OSC-8) URLs still fall back to regex detection
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write('see https://example.com/path for details');
+  const links = t.getSnapshot()[0].links;
+  eq(links.length, 1, 'regex still finds a plain URL');
+  eq(links[0].url, 'https://example.com/path', 'regex-detected URL is correct');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
