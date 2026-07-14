@@ -37,6 +37,12 @@
         {
           "faceIDPermission": false
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Tether uses your photo library to upload files to the connected server."
+        }
       ]
     ],
     "web": {

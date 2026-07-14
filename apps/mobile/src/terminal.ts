@@ -25,6 +25,7 @@ export interface CellStyle {
 
 interface Cell extends CellStyle {
   ch: string;
+  url?: string;
 }
 
 export interface RenderRun {
@@ -39,15 +40,20 @@ export interface RenderRow {
   wrapped: boolean;
   // Link spans (column ranges → full URL) resolved across any soft-wrapped rows.
   links: LinkSpan[];
+  // True when OSC 133;A (shell-integration prompt-start) marked this row.
+  promptStart: boolean;
 }
 
-const DEFAULT_FG = '#cbd5e1';
-const DEFAULT_BG = '#05070e';
+let DEFAULT_FG = '#cbd5e1';
+let DEFAULT_BG = '#05070e';
 const MAX_SCROLLBACK = 1000;
 
 // Standard 16-color terminal palette (VS Code integrated-terminal values),
 // extended to xterm-256. Using conventional colors so themed TUIs look correct.
-const BASE_16 = [
+// Mutable: setTheme() below replaces BASE_16/PALETTE/DEFAULT_FG/DEFAULT_BG at
+// runtime so an active session re-colors on its next repaint without needing a
+// fresh TerminalEmulator instance.
+let BASE_16 = [
   '#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
   '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
 ];
@@ -66,7 +72,22 @@ function buildPalette(): string[] {
   }
   return pal; // length 256
 }
-const PALETTE = buildPalette();
+let PALETTE = buildPalette();
+
+export interface Theme {
+  base16: string[]; // exactly 16 hex colors, same order as the old BASE_16
+  fg: string;
+  bg: string;
+}
+
+// Applies a theme — rebuilds the 256-color PALETTE from the theme's 16 base
+// colors and swaps the default fg/bg used by cells with no explicit SGR color.
+export function setTheme(theme: Theme) {
+  BASE_16 = theme.base16;
+  PALETTE = buildPalette();
+  DEFAULT_FG = theme.fg;
+  DEFAULT_BG = theme.bg;
+}
 
 function blankCell(): Cell {
   return { ch: ' ' };
@@ -123,6 +144,10 @@ export class TerminalEmulator {
   // through splice/shift/scrollUp with no parallel bookkeeping; a fresh
   // blankLine (clear/scroll) is naturally absent, so its flag reads false.
   private wrappedLines = new WeakSet<Cell[]>();
+  // Rows marked by OSC 133;A (shell-integration prompt-start), same
+  // keyed-on-the-line-array pattern as wrappedLines above.
+  private promptRows = new WeakSet<Cell[]>();
+  private lastExitCode: number | null = null;
 
   private cx = 0;
   private cy = 0;
@@ -149,6 +174,11 @@ export class TerminalEmulator {
   // draw their own, so the caret only renders when the app wants it visible.
   cursorVisible = true;
 
+  // DECSCUSR (CSI Ps SP q) cursor shape + blink. Read by TermRow to render the
+  // caret; defaults match a real terminal's power-on default (blinking block).
+  cursorStyle: 'block' | 'bar' | 'underline' = 'block';
+  cursorBlink = true;
+
   // Application-cursor-keys mode (DECCKM ?1). When on, arrow/Home/End keys must
   // be sent as SS3 (ESC O x) instead of CSI (ESC [ x) — vim, less, readline apps
   // enable it and misread CSI arrows otherwise. Read by the UI when encoding keys.
@@ -157,6 +187,19 @@ export class TerminalEmulator {
   // Set by the app via ?2004h/l (bracketed paste). Read by the UI to decide
   // whether to wrap pasted text in \x1b[200~...\x1b[201~ before sending.
   bracketedPaste = false;
+
+  // Monotonically increasing counter, incremented once per BEL (0x07) byte. A
+  // counter (not a boolean) so the UI can detect a second bell even if it
+  // hasn't re-rendered since the first.
+  bellCount = 0;
+
+  // Set by OSC 0 ("icon name + title") or OSC 2 ("title"). Empty until the
+  // remote shell/app sends one.
+  title = '';
+
+  // Set by OSC 7 (shell-integration cwd report, "file://host/path"). Empty
+  // until the remote shell's prompt hook has fired at least once.
+  cwd = '';
 
   // Wired by the UI to the live input channel. The emulator calls this for
   // sequences that expect a reply (DSR cursor report, DA identify) — without
@@ -167,6 +210,7 @@ export class TerminalEmulator {
   private state: ParserState = 'ground';
   private params = '';
   private intermediate = '';
+  private oscBuf = '';
 
   constructor(cols = 80, rows = 24) {
     this.cols = cols;
@@ -188,8 +232,16 @@ export class TerminalEmulator {
     this.mouseOn = false;
     this.mouseSgr = false;
     this.cursorVisible = true;
+    this.cursorStyle = 'block';
+    this.cursorBlink = true;
     this.bracketedPaste = false;
     this.applicationCursor = false;
+    this.bellCount = 0;
+    this.title = '';
+    this.cwd = '';
+    this.promptRows = new WeakSet();
+    this.lastExitCode = null;
+    this.oscBuf = '';
     this.prevRows = [];
     this.state = 'ground';
     this.params = '';
@@ -264,11 +316,25 @@ export class TerminalEmulator {
           this.csi(ch, code);
           break;
         case 'osc':
-          if (code === 0x07) this.state = 'ground';
-          else if (code === 0x1b) this.state = 'oscEsc';
+          if (code === 0x07) {
+            this.dispatchOsc(this.oscBuf);
+            this.oscBuf = '';
+            this.state = 'ground';
+          } else if (code === 0x1b) {
+            this.state = 'oscEsc';
+          } else {
+            this.oscBuf += ch;
+          }
           break;
         case 'oscEsc':
-          this.state = 'ground'; // drop ST terminator
+          // ESC \ (ST) properly terminates; any other byte here means a
+          // malformed OSC (seen in the wild from a corrupted Warp
+          // shell-integration string, same failure mode as the DCS parser
+          // below) — dispatch what we buffered anyway rather than drop a
+          // whole title/cwd/hyperlink update.
+          this.dispatchOsc(this.oscBuf);
+          this.oscBuf = '';
+          this.state = 'ground';
           break;
         case 'dcs':
           if (code === 0x07) this.state = 'ground';
@@ -298,7 +364,7 @@ export class TerminalEmulator {
     } else if (code === 0x09) {
       this.cx = Math.min(this.cols - 1, (Math.floor(this.cx / 8) + 1) * 8);
     } else if (code === 0x07) {
-      // bell, ignore
+      this.bellCount++;
     } else if (code === 0x0e) {
       this.shiftOut = true; // SO
     } else if (code === 0x0f) {
@@ -317,6 +383,7 @@ export class TerminalEmulator {
         this.intermediate = '';
         return;
       case ']':
+        this.oscBuf = '';
         this.state = 'osc';
         return;
       case 'P':
@@ -384,9 +451,18 @@ export class TerminalEmulator {
   }
 
   private dispatchCsi(final: string) {
-    // Sequences with intermediate bytes (CSI Ps SP q cursor style, CSI Ps SP A
-    // scroll-right, CSI ! p soft reset, ...) share final bytes with plain ANSI
-    // actions but mean something else entirely. None are implemented — ignore
+    // DECSCUSR: CSI Ps SP q — cursor shape/blink. Handled before the generic
+    // intermediate-byte bail-out below (this is the one intermediate-byte
+    // sequence we do implement).
+    if (this.intermediate === ' ' && final === 'q') {
+      const n = this.nums(0)[0] ?? 0;
+      this.cursorStyle = n <= 2 ? 'block' : n <= 4 ? 'underline' : 'bar';
+      this.cursorBlink = n === 0 || n % 2 === 1;
+      return;
+    }
+    // Sequences with intermediate bytes (CSI Ps SP A scroll-right, CSI ! p
+    // soft reset, ...) share final bytes with plain ANSI actions but mean
+    // something else entirely. None of the rest are implemented — ignore
     // them wholesale rather than misdispatch (SP A would run as cursor-up).
     if (this.intermediate) return;
     // Private parameter prefix byte (0x3c-0x3f): '?' DEC modes, and '<' '=' '>'
@@ -546,6 +622,38 @@ export class TerminalEmulator {
       this.cx = this.savedCx;
       this.cy = this.savedCy;
       this.inAlt = false;
+    }
+  }
+
+  // --- OSC (title, cwd, hyperlinks, shell-integration) ---
+  // buf is the content between "ESC ]" and the terminator, format "Ps;Pt...".
+  private dispatchOsc(buf: string) {
+    const sep = buf.indexOf(';');
+    const ps = sep === -1 ? buf : buf.slice(0, sep);
+    const pt = sep === -1 ? '' : buf.slice(sep + 1);
+    if (ps === '0' || ps === '2') {
+      this.title = pt;
+    } else if (ps === '7') {
+      const m = /^file:\/\/[^/]*(\/.*)$/.exec(pt);
+      if (m) {
+        try {
+          this.cwd = decodeURIComponent(m[1]);
+        } catch {
+          this.cwd = m[1];
+        }
+      }
+    } else if (ps === '133') {
+      if (pt.startsWith('A')) {
+        this.promptRows.add(this.screen[this.cy]);
+      } else if (pt.startsWith('D')) {
+        const codeStr = pt.split(';')[1];
+        this.lastExitCode = codeStr !== undefined ? parseInt(codeStr, 10) : null;
+      }
+    } else if (ps === '8') {
+      // "params;URI" — params (e.g. id=xxx) is ignored; empty URI closes the link.
+      const uriSep = pt.indexOf(';');
+      const uri = uriSep === -1 ? '' : pt.slice(uriSep + 1);
+      (this.pen as Cell).url = uri || undefined;
     }
   }
 
@@ -730,23 +838,40 @@ export class TerminalEmulator {
     const caretCol = Math.min(this.cx, this.cols - 1); // cx can sit at cols (pending wrap)
     const rowRuns = lines.map((l, i) => this.mergeRuns(l, i === caretRow ? caretCol : -1));
     const wrapped = lines.map((l) => this.wrappedLines.has(l));
+    const promptFlags = lines.map((l) => this.promptRows.has(l));
     // Resolve URLs over logical lines (joining soft-wrapped rows) so a link
     // split across the width is tappable — as a whole — on every fragment.
     const texts = rowRuns.map((runs) => runs.map((r) => r.text).join(''));
-    const links = computeLinkSpans(texts, wrapped);
+    const regexLinks = computeLinkSpans(texts, wrapped);
+    const links = lines.map((line, i) => {
+      const explicit = explicitLinkSpans(line);
+      return explicit.length ? explicit : regexLinks[i];
+    });
     const out: RenderRow[] = new Array(lines.length);
     for (let i = 0; i < lines.length; i++) {
       const prev = this.prevRows[i];
       out[i] =
         prev &&
         prev.wrapped === wrapped[i] &&
+        prev.promptStart === promptFlags[i] &&
         runsEqual(prev.runs, rowRuns[i]) &&
         linksEqual(prev.links, links[i])
           ? prev
-          : { runs: rowRuns[i], wrapped: wrapped[i], links: links[i] };
+          : { runs: rowRuns[i], wrapped: wrapped[i], links: links[i], promptStart: promptFlags[i] };
     }
     this.prevRows = out;
     return out;
+  }
+
+  // Returns the row index (in getSnapshot()'s combined scrollback+screen
+  // coordinate space) of the next prompt-start row searching from `fromRow` in
+  // direction `dir` (1 = forward, -1 = backward), or null if there is none.
+  jumpToPrompt(fromRow: number, dir: 1 | -1): number | null {
+    const lines = [...this.scrollback, ...this.screen];
+    for (let i = fromRow + dir; i >= 0 && i < lines.length; i += dir) {
+      if (this.promptRows.has(lines[i])) return i;
+    }
+    return null;
   }
 
   private mergeRuns(line: Cell[], caretCol = -1): RenderRun[] {
@@ -822,4 +947,23 @@ function linksEqual(a: LinkSpan[], b: LinkSpan[]): boolean {
     if (a[i].start !== b[i].start || a[i].end !== b[i].end || a[i].url !== b[i].url) return false;
   }
   return true;
+}
+
+// Contiguous same-URL cell runs on one row, as LinkSpans — explicit OSC-8
+// links take priority over regex URL detection for any row that has them.
+function explicitLinkSpans(line: Cell[]): LinkSpan[] {
+  const out: LinkSpan[] = [];
+  let i = 0;
+  while (i < line.length) {
+    const url = line[i].url;
+    if (!url) {
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    while (j < line.length && line[j].url === url) j++;
+    out.push({ start: i, end: j, url });
+    i = j;
+  }
+  return out;
 }

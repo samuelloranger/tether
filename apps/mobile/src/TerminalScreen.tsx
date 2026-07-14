@@ -37,6 +37,7 @@ import { keyToBytes, COPY, PASTE } from './desktopKeys';
 import { notify, confirmAction } from './dialog';
 import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
 import TitleBar from './TitleBar';
+import { DragDropContentView } from 'expo-drag-drop-content-view';
 import { injectDragRegionStyles } from './dragRegion';
 import { styles } from './styles';
 import { isDesktop, isMacDesktop } from './platform';
@@ -45,7 +46,7 @@ import { ArrowCluster } from './Dpad';
 import { ConnectionBanner } from './ConnectionBanner';
 import { UtilityBar } from './UtilityBar';
 import { OverflowMenu } from './OverflowMenu';
-import { RenameModal, SnippetsModal } from './SessionModals';
+import { RenameModal, SnippetsModal, AppearanceModal } from './SessionModals';
 import { SelectionView } from './SelectionView';
 import { ContextMenu } from './ContextMenu';
 import { UpdateModal } from './UpdateModal';
@@ -66,22 +67,78 @@ import { useTetherApp } from './useTetherApp';
 
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
   const {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, handleCopyAll, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, handleCopyAll, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, themeId, changeTheme, fontFamily, changeFontFamily,
   } = app;
+
+  // Bell (BEL): brief red flash + haptic tick whenever the active session's
+  // bellCount advances, so a background/completed job is noticeable without
+  // watching the screen.
+  const prevBellCount = useRef(0);
+  const [bellFlash, setBellFlash] = useState(false);
+  useEffect(() => {
+    if (activeBellCount > prevBellCount.current) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setBellFlash(true);
+      const t = setTimeout(() => setBellFlash(false), 150);
+      prevBellCount.current = activeBellCount;
+      return () => clearTimeout(t);
+    }
+    prevBellCount.current = activeBellCount;
+  }, [activeBellCount]);
+
+  // Desktop: drag a file from the OS onto the terminal to upload it into the
+  // session's cwd. Plain DOM events (the desktop build is a Tauri webview
+  // running react-native-web) — no native Tauri fs plugin/permission needed.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const el = document.getElementById('tether-terminal');
+    if (!el) return;
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      const files = e.dataTransfer?.files;
+      if (!files || !files.length) return;
+      for (const file of Array.from(files)) {
+        await uploadFile(file, file.name);
+      }
+    };
+    el.addEventListener('dragover', onDragOver);
+    el.addEventListener('drop', onDrop);
+    return () => {
+      el.removeEventListener('dragover', onDragOver);
+      el.removeEventListener('drop', onDrop);
+    };
+  }, [uploadFile]);
+
   return (
         /* Terminal Client Screen */
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.terminalContainer}
         >
+          {bellFlash && (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: '#ef4444',
+                opacity: 0.12,
+                zIndex: 999,
+              }}
+            />
+          )}
           {/* Desktop: full-width custom title bar spanning above the sidebar + terminal,
               so macOS traffic lights sit over the bar (not the sidebar) and the whole
               top edge is a drag region. */}
           {isDesktop && (
             <TitleBar
               isMac={isMacDesktop}
-              title={activeName}
-              subtitle={`${serverIp}:${port}`}
+              title={entryFor(activeId).term.title || activeName}
+              subtitle={entryFor(activeId).term.cwd || `${serverIp}:${port}`}
               status={titleBarStatus}
               onNew={newTerminal}
               onSettings={() => setIsConfiguring(true)}
@@ -203,7 +260,25 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 }}
                 onLongPress={openSelectionView}
               >
-                {terminalGrid}
+                {Platform.OS === 'ios' ? (
+                  <DragDropContentView
+                    style={{ flex: 1 }}
+                    onDrop={(event) => {
+                      for (const asset of event.assets) {
+                        if (!asset.uri) continue;
+                        fetch(asset.uri)
+                          .then((r) => r.blob())
+                          .then((blob) =>
+                            uploadFile(blob, asset.fileName || `drop-${Date.now()}`),
+                          );
+                      }
+                    }}
+                  >
+                    {terminalGrid}
+                  </DragDropContentView>
+                ) : (
+                  terminalGrid
+                )}
               </Pressable>
             )}
           </View>
@@ -230,9 +305,15 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             fontSize={fontSize}
             onFontDelta={changeFontSize}
             onSearch={openSearch}
+            onJumpPromptUp={() => jumpPrompt(-1)}
+            onJumpPromptDown={() => jumpPrompt(1)}
             onSnippets={() => {
               setMenuOpen(false);
               setSnippetsModalOpen(true);
+            }}
+            onAppearance={() => {
+              setMenuOpen(false);
+              setAppearanceModalOpen(true);
             }}
             onCheckUpdates={() => {
               setMenuOpen(false);
@@ -268,6 +349,16 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             onAdd={addSnippet}
           />
 
+          {/* Appearance Modal (theme + desktop font picker) */}
+          <AppearanceModal
+            visible={appearanceModalOpen}
+            onClose={() => setAppearanceModalOpen(false)}
+            themeId={themeId}
+            onThemeChange={changeTheme}
+            fontFamily={fontFamily}
+            onFontChange={changeFontFamily}
+          />
+
           {/* Fullscreen selectable-text view (long-press the terminal to open) */}
           <SelectionView
             visible={selectionViewOpen}
@@ -290,6 +381,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               sendInput={sendInput}
               cursorSeq={cursorSeq}
               onPaste={handlePaste}
+              onImagePick={pickAndUploadImage}
             />
           )}
 

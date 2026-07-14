@@ -3,9 +3,12 @@ import { View, Text, Linking, StyleSheet, type TextStyle } from 'react-native';
 import type { RenderRow, CellStyle } from './terminal';
 import { splitRunByLinks, urlColumns } from './links';
 import { isDesktop } from './platform';
-import { MONO } from './styles';
 
-function runToStyle(s: CellStyle, caretOn = true): TextStyle {
+function runToStyle(
+  s: CellStyle,
+  caretOn: boolean,
+  cursorStyle: 'block' | 'bar' | 'underline',
+): TextStyle {
   const style: TextStyle = {};
   if (s.fg) style.color = s.fg;
   if (s.bg) style.backgroundColor = s.bg;
@@ -16,9 +19,17 @@ function runToStyle(s: CellStyle, caretOn = true): TextStyle {
   else if (s.underline) style.textDecorationLine = 'underline';
   else if (s.strike) style.textDecorationLine = 'line-through';
   if (s.caret && caretOn) {
-    // Block caret: accent background, dark glyph for contrast.
-    style.backgroundColor = '#818cf8';
-    style.color = '#0b0f19';
+    if (cursorStyle === 'bar') {
+      style.borderLeftWidth = 2;
+      style.borderLeftColor = '#818cf8';
+    } else if (cursorStyle === 'underline') {
+      style.textDecorationLine = 'underline';
+      style.textDecorationColor = '#818cf8';
+    } else {
+      // Block caret: accent background, dark glyph for contrast.
+      style.backgroundColor = '#818cf8';
+      style.color = '#0b0f19';
+    }
   }
   return style;
 }
@@ -35,12 +46,16 @@ export const TermRow = React.memo(
     lineHeight,
     width,
     blinkOn,
+    cursorStyle,
+    fontFamily,
   }: {
     row: RenderRow;
     fontSize: number;
     lineHeight: number;
     width: number;
     blinkOn: boolean;
+    cursorStyle: 'block' | 'bar' | 'underline';
+    fontFamily: string;
   }) {
     // Column → full URL, from spans the emulator resolved across soft-wrapped
     // rows. A wrapped link's fragments each carry the WHOLE url, so tapping any
@@ -53,7 +68,7 @@ export const TermRow = React.memo(
         <Text
           style={[
             styles.termLine,
-            { fontSize, lineHeight, width },
+            { fontFamily, fontSize, lineHeight, width },
             // Web: preserve whitespace. RN-web's numberOfLines=1 sets
             // white-space:nowrap, which collapses/trims spaces — that hides the
             // block caret (a trailing space) and breaks column alignment. `pre`
@@ -64,7 +79,7 @@ export const TermRow = React.memo(
           selectable={isDesktop}
         >
           {row.runs.map((run, i) => {
-            const st = runToStyle(run.style, blinkOn);
+            const st = runToStyle(run.style, blinkOn, cursorStyle);
             const segs = splitRunByLinks(run.text, col, urlAt);
             col += run.text.length;
             return segs.map((seg, j) =>
@@ -92,13 +107,14 @@ export const TermRow = React.memo(
     prev.fontSize === next.fontSize &&
     prev.lineHeight === next.lineHeight &&
     prev.width === next.width &&
+    prev.fontFamily === next.fontFamily &&
+    prev.cursorStyle === next.cursorStyle &&
     // Blink only invalidates the row that actually contains the caret.
     (prev.blinkOn === next.blinkOn || !rowHasCaret(next.row)),
 );
 
 const styles = StyleSheet.create({
   termLine: {
-    fontFamily: MONO,
     color: '#cbd5e1',
   },
   link: {
