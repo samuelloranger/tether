@@ -635,7 +635,13 @@ export class TerminalEmulator {
       this.title = pt;
     } else if (ps === '7') {
       const m = /^file:\/\/[^/]*(\/.*)$/.exec(pt);
-      if (m) this.cwd = decodeURIComponent(m[1]);
+      if (m) {
+        try {
+          this.cwd = decodeURIComponent(m[1]);
+        } catch {
+          this.cwd = m[1];
+        }
+      }
     } else if (ps === '133') {
       if (pt.startsWith('A')) {
         this.promptRows.add(this.screen[this.cy]);
