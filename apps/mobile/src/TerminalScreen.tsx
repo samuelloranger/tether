@@ -37,6 +37,7 @@ import { keyToBytes, COPY, PASTE } from './desktopKeys';
 import { notify, confirmAction } from './dialog';
 import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
 import TitleBar from './TitleBar';
+import { DragDropContentView } from 'expo-drag-drop-content-view';
 import { injectDragRegionStyles } from './dragRegion';
 import { styles } from './styles';
 import { isDesktop, isMacDesktop } from './platform';
@@ -235,7 +236,25 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 }}
                 onLongPress={openSelectionView}
               >
-                {terminalGrid}
+                {Platform.OS === 'ios' ? (
+                  <DragDropContentView
+                    style={{ flex: 1 }}
+                    onDrop={(event) => {
+                      for (const asset of event.assets) {
+                        if (!asset.uri) continue;
+                        fetch(asset.uri)
+                          .then((r) => r.blob())
+                          .then((blob) =>
+                            uploadFile(blob, asset.fileName || `drop-${Date.now()}`),
+                          );
+                      }
+                    }}
+                  >
+                    {terminalGrid}
+                  </DragDropContentView>
+                ) : (
+                  terminalGrid
+                )}
               </Pressable>
             )}
           </View>
