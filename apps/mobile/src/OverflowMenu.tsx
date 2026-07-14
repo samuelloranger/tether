@@ -2,6 +2,7 @@ import { Modal, Pressable, View, Text, TouchableOpacity, StyleSheet } from 'reac
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Feather from '@expo/vector-icons/Feather';
 import { isDesktop } from './platform';
+import { desktopNavigationLabel, type DesktopNavigationMode } from './desktopNavigation';
 
 // Header ⋯ overflow menu. Actions are passed in; the parent closes the menu.
 export function OverflowMenu({
@@ -14,6 +15,8 @@ export function OverflowMenu({
   onSnippets,
   onCheckUpdates,
   onRestart,
+  desktopNavigationMode,
+  onDesktopNavigationMode,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -24,6 +27,8 @@ export function OverflowMenu({
   onSnippets: () => void;
   onCheckUpdates: () => void;
   onRestart: () => void;
+  desktopNavigationMode?: DesktopNavigationMode;
+  onDesktopNavigationMode?: (mode: DesktopNavigationMode) => void;
 }) {
   const insets = useSafeAreaInsets();
   return (
@@ -63,6 +68,33 @@ export function OverflowMenu({
             <Feather name="terminal" size={16} color="#cbd5e1" />
             <Text style={styles.menuRowText}>Saved commands</Text>
           </TouchableOpacity>
+          {isDesktop && desktopNavigationMode && onDesktopNavigationMode && (
+            <View style={styles.navigationSection}>
+              <Text style={styles.navigationLabel}>Navigation</Text>
+              <View style={styles.navigationButtons}>
+                {(['sidebar', 'hover', 'tabs'] as const).map((mode) => {
+                  const active = desktopNavigationMode === mode;
+                  return (
+                    <TouchableOpacity
+                      key={mode}
+                      style={[styles.navigationButton, active && styles.navigationButtonActive]}
+                      onPress={() => {
+                        onDesktopNavigationMode(mode);
+                        onClose();
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`Navigation: ${desktopNavigationLabel(mode)}`}
+                    >
+                      <Text style={[styles.navigationButtonText, active && styles.navigationButtonTextActive]}>
+                        {desktopNavigationLabel(mode)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
           {isDesktop && (
             <TouchableOpacity style={styles.menuRow} onPress={onCheckUpdates}>
               <Feather name="download" size={16} color="#cbd5e1" />
@@ -127,5 +159,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#e2e8f0',
+  },
+  navigationSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  navigationLabel: {
+    marginBottom: 7,
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  navigationButtons: {
+    flexDirection: 'row',
+    gap: 5,
+  },
+  navigationButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingVertical: 7,
+  },
+  navigationButtonActive: {
+    backgroundColor: 'rgba(99, 102, 241, 0.32)',
+  },
+  navigationButtonText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  navigationButtonTextActive: {
+    color: '#e0e7ff',
   },
 });

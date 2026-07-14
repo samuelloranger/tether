@@ -13,6 +13,10 @@ export function reservedNavigationWidth(mode: DesktopNavigationMode): number {
   return mode === 'sidebar' ? 264 : 0;
 }
 
+export function desktopNavigationLabel(mode: DesktopNavigationMode): string {
+  return mode === 'hover' ? 'On hover' : mode === 'sidebar' ? 'Sidebar' : 'Tabs';
+}
+
 export function sessionDotColor(
   session: { status: 'running' | 'stopped'; last_output_at: string | null },
   active: boolean,

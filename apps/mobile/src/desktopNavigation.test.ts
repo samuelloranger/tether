@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   DEFAULT_DESKTOP_NAVIGATION_MODE,
+  desktopNavigationLabel,
   parseDesktopNavigationMode,
   reservedNavigationWidth,
   sessionDotColor,
@@ -25,5 +26,11 @@ describe('desktop navigation mode', () => {
     expect(sessionDotColor({ status: 'stopped', last_output_at: null }, true)).toBe('#64748b');
     expect(sessionDotColor({ status: 'running', last_output_at: null }, true)).toBe('#22c55e');
     expect(sessionDotColor({ status: 'running', last_output_at: null }, false)).toBe('#334155');
+  });
+
+  it('uses the menu labels agreed for each navigation mode', () => {
+    expect(desktopNavigationLabel('sidebar')).toBe('Sidebar');
+    expect(desktopNavigationLabel('hover')).toBe('On hover');
+    expect(desktopNavigationLabel('tabs')).toBe('Tabs');
   });
 });
