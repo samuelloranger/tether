@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.6.3",
+          "date": "2026-07-14",
+          "localizedDescription": "## What's Changed\n* fix(mobile): drop unused camera/microphone permission requests by @samuelloranger in https://github.com/samuelloranger/tether/pull/22\n* feat(server): extend OSC 7 cwd tracking to zsh and fish by @samuelloranger in https://github.com/samuelloranger/tether/pull/23\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.2...v1.6.3",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.6.3/tether-v1.6.3.ipa",
+          "size": 8381186,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.6.2",
           "date": "2026-07-14",
           "localizedDescription": "## What's Changed\n* fix(desktop): Alt/Option+Left/Right word-motion by @samuelloranger in https://github.com/samuelloranger/tether/pull/20\n* feat: TERM/COLORTERM env + IME/dead-key composition support by @samuelloranger in https://github.com/samuelloranger/tether/pull/21\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.1...v1.6.2",
