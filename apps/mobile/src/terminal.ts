@@ -44,13 +44,16 @@ export interface RenderRow {
   promptStart: boolean;
 }
 
-const DEFAULT_FG = '#cbd5e1';
-const DEFAULT_BG = '#05070e';
+let DEFAULT_FG = '#cbd5e1';
+let DEFAULT_BG = '#05070e';
 const MAX_SCROLLBACK = 1000;
 
 // Standard 16-color terminal palette (VS Code integrated-terminal values),
 // extended to xterm-256. Using conventional colors so themed TUIs look correct.
-const BASE_16 = [
+// Mutable: setTheme() below replaces BASE_16/PALETTE/DEFAULT_FG/DEFAULT_BG at
+// runtime so an active session re-colors on its next repaint without needing a
+// fresh TerminalEmulator instance.
+let BASE_16 = [
   '#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
   '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
 ];
@@ -69,7 +72,22 @@ function buildPalette(): string[] {
   }
   return pal; // length 256
 }
-const PALETTE = buildPalette();
+let PALETTE = buildPalette();
+
+export interface Theme {
+  base16: string[]; // exactly 16 hex colors, same order as the old BASE_16
+  fg: string;
+  bg: string;
+}
+
+// Applies a theme — rebuilds the 256-color PALETTE from the theme's 16 base
+// colors and swaps the default fg/bg used by cells with no explicit SGR color.
+export function setTheme(theme: Theme) {
+  BASE_16 = theme.base16;
+  PALETTE = buildPalette();
+  DEFAULT_FG = theme.fg;
+  DEFAULT_BG = theme.bg;
+}
 
 function blankCell(): Cell {
   return { ch: ' ' };

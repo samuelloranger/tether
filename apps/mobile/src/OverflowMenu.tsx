@@ -15,6 +15,7 @@ export function OverflowMenu({
   onJumpPromptUp,
   onJumpPromptDown,
   onSnippets,
+  onAppearance,
   onCheckUpdates,
   onRestart,
   desktopNavigationMode,
@@ -29,6 +30,7 @@ export function OverflowMenu({
   onJumpPromptUp: () => void;
   onJumpPromptDown: () => void;
   onSnippets: () => void;
+  onAppearance: () => void;
   onCheckUpdates: () => void;
   onRestart: () => void;
   desktopNavigationMode?: DesktopNavigationMode;
@@ -79,6 +81,10 @@ export function OverflowMenu({
           <TouchableOpacity style={styles.menuRow} onPress={onSnippets}>
             <Feather name="terminal" size={16} color="#cbd5e1" />
             <Text style={styles.menuRowText}>Saved commands</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuRow} onPress={onAppearance}>
+            <Feather name="droplet" size={16} color="#cbd5e1" />
+            <Text style={styles.menuRowText}>Appearance</Text>
           </TouchableOpacity>
           {isDesktop && desktopNavigationMode && onDesktopNavigationMode && (
             <View style={styles.navigationSection}>
