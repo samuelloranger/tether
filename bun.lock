@@ -13,7 +13,7 @@
     },
     "apps/mobile": {
       "name": "tether-mobile",
-      "version": "1.6.1",
+      "version": "1.6.2",
       "dependencies": {
         "@expo-google-fonts/fira-code": "^0.4.1",
         "@expo-google-fonts/jetbrains-mono": "^0.4.1",
