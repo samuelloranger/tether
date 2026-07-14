@@ -243,18 +243,35 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install workspace deps
         run: bun install
+      # The asset name embeds the tag. macOS ships a .tar.gz wrapping a stable
+      # inner `tether`: a raw Mach-O can't survive a browser download — GitHub
+      # release assets drop the exec bit and the browser stamps
+      # com.apple.quarantine, so the adhoc-signed binary won't run. CLI
+      # `tar xzf` restores the exec bit and does NOT propagate quarantine.
+      # (Double-clicking the archive in Finder still quarantines; only Developer
+      # ID notarization clears that.) Linux ships the raw binary (chmod +x is
+      # enough there). install.sh and `tether update` mirror this branch.
       - name: Compile ${{ matrix.asset }}
         working-directory: apps/server
         run: |
           bun build --compile --minify \
             --target=${{ matrix.target }} \
             --define 'process.env.TETHER_VERSION="'"${GITHUB_REF_NAME}"'"' \
-            --outfile "${{ matrix.asset }}" \
+            --outfile tether \
             src/server/main.ts
+          case "${{ matrix.asset }}" in
+            *darwin*)
+              out="${{ matrix.asset }}-${GITHUB_REF_NAME}.tar.gz"
+              tar czf "$out" tether ;;
+            *)
+              out="${{ matrix.asset }}-${GITHUB_REF_NAME}"
+              mv tether "$out" ;;
+          esac
+          echo "ASSET=$out" >> "$GITHUB_ENV"
       - name: Attach to release
         if: github.event_name == 'release'
         working-directory: apps/server
-        run: gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}" --clobber
+        run: gh release upload "$GITHUB_REF_NAME" "$ASSET" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -263,7 +280,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}-${{ github.sha }}
-          path: apps/server/${{ matrix.asset }}
+          path: apps/server/${{ env.ASSET }}
 
   altstore:
     if: github.event_name == 'release'
