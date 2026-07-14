@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { confirmAction } from './dialog';
+import { isRecentlyActive, PANEL_W } from './desktopNavigation';
 
 export interface DrawerSession {
   id: string;
@@ -33,7 +34,6 @@ interface SessionDrawerProps {
   docked?: boolean;
 }
 
-export const PANEL_W = 264;
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 // Kill needs a confirm. confirmAction shows a native OS dialog on desktop (the
@@ -47,13 +47,6 @@ function confirmKill(id: string, onKill: (id: string) => void) {
   ).then((ok) => {
     if (ok) onKill(id);
   });
-}
-
-function isRecentlyActive(ts: string | null): boolean {
-  if (!ts) return false;
-  // SQLite CURRENT_TIMESTAMP is UTC "YYYY-MM-DD HH:MM:SS"; treat as UTC.
-  const t = Date.parse(ts.replace(' ', 'T') + 'Z');
-  return !Number.isNaN(t) && Date.now() - t < 10_000;
 }
 
 export function SessionDrawer({
