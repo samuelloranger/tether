@@ -154,6 +154,22 @@ describe('keyToBytes — Alt (Meta) prefixing', () => {
     expect(keyToBytes(k('b', { altKey: true }))).toBe('\x1bb');
     expect(keyToBytes(k('f', { altKey: true }))).toBe('\x1bf');
   });
+  it('Alt+ArrowLeft/Right send readline word-motion (ESC b / ESC f), not plain cursor motion', () => {
+    expect(keyToBytes(k('ArrowLeft', { altKey: true }))).toBe('\x1bb');
+    expect(keyToBytes(k('ArrowRight', { altKey: true }))).toBe('\x1bf');
+  });
+  it('Alt+ArrowLeft/Right word-motion is independent of DECCKM (app-cursor mode)', () => {
+    expect(keyToBytes(k('ArrowLeft', { altKey: true }), true)).toBe('\x1bb');
+    expect(keyToBytes(k('ArrowRight', { altKey: true }), true)).toBe('\x1bf');
+  });
+  it('Alt+ArrowUp/Down still send plain cursor motion (no word-motion analog)', () => {
+    expect(keyToBytes(k('ArrowUp', { altKey: true }))).toBe('\x1b[A');
+    expect(keyToBytes(k('ArrowDown', { altKey: true }))).toBe('\x1b[B');
+  });
+  it('macOS Option+Left/Right (reported as altKey, isMac=true) sends the same word-motion', () => {
+    expect(keyToBytes(k('ArrowLeft', { altKey: true }), false, true)).toBe('\x1bb');
+    expect(keyToBytes(k('ArrowRight', { altKey: true }), false, true)).toBe('\x1bf');
+  });
 });
 
 describe('keyToBytes — AltGr (Ctrl+Alt) composed characters', () => {
