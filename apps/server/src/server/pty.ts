@@ -55,8 +55,14 @@ const ZSHRC = [
   'precmd_functions+=(_tether_osc7)',
   '',
 ].join('\n');
+// ZDOTDIR redirects ALL of zsh's startup files, not just .zshrc — .zshenv is
+// read even for non-interactive shells and is the canonical place users put
+// PATH/SDK-manager/Nix env setup (zsh does not fall back to ~/.zshenv once
+// ZDOTDIR is set, so without this that setup would silently vanish).
+const ZSHENV = '[ -f ~/.zshenv ] && source ~/.zshenv\n';
 mkdirSync(ZSH_RC_DIR, { recursive: true });
 writeFileSync(path.join(ZSH_RC_DIR, '.zshrc'), ZSHRC);
+writeFileSync(path.join(ZSH_RC_DIR, '.zshenv'), ZSHENV);
 
 // fish has no rcfile-redirect env var without risking collateral effects on
 // other XDG-aware tools in the session (XDG_CONFIG_HOME would redirect ALL of
@@ -275,10 +281,14 @@ export interface ShellInvocation {
 // redirect, fish's --init-command. Anything else runs as-is (matches the
 // pre-existing fallback: no shell integration attempted).
 export function shellInvocation(command: string): ShellInvocation {
+  // Dispatch matches on basename, but argv[0] keeps the original (possibly
+  // absolute, e.g. /opt/homebrew/bin/fish) command — the daemon's own PATH may
+  // not include the shell's install directory even when the resolved login
+  // shell (getDefaultShell(), read from /etc/passwd) does exist at that path.
   const shell = path.basename(command);
-  if (shell === 'bash') return { args: ['bash', '--rcfile', RC_PATH, '-i'] };
-  if (shell === 'zsh') return { args: ['zsh', '-i'], env: { ZDOTDIR: ZSH_RC_DIR } };
-  if (shell === 'fish') return { args: ['fish', '--init-command', FISH_INIT, '-i'] };
+  if (shell === 'bash') return { args: [command, '--rcfile', RC_PATH, '-i'] };
+  if (shell === 'zsh') return { args: [command, '-i'], env: { ZDOTDIR: ZSH_RC_DIR } };
+  if (shell === 'fish') return { args: [command, '--init-command', FISH_INIT, '-i'] };
   return { args: [command, '-i'] };
 }
 
