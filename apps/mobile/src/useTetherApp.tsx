@@ -37,6 +37,7 @@ import { getPassword, setPassword as persistPassword, authHeaders } from './secu
 import { httpBase, wsUrl, validateAddress } from './address';
 import { openTerminalSocket, type TerminalSocket } from './wsTransport';
 import { keyToBytes, COPY, PASTE } from './desktopKeys';
+import { shouldForwardToTerminal } from './desktopFocusGuard';
 import { notify, confirmAction } from './dialog';
 import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
 import TitleBar from './TitleBar';
@@ -944,34 +945,38 @@ export function useTetherApp() {
   // pastes from the clipboard.
   useEffect(() => {
     if (!isDesktop || isConfiguring) return;
-    const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement as (HTMLElement & { isContentEditable?: boolean }) | null;
-      // Don't hijack the keyboard while a real UI control is focused: text fields
-      // must type normally, and Enter/Space must activate a focused button
-      // (New terminal, Settings, the overflow menu, Kill) instead of leaking into
-      // the shell. The terminal surface itself is exempt so click-to-focus then
-      // type still works. Nothing focused (body) → forward, the common case.
-      if (el && el !== document.body) {
-        const onTerminal = el.id === 'tether-terminal' || !!el.closest?.('#tether-terminal');
-        if (!onTerminal) {
-          const tag = el.tagName;
-          const role = el.getAttribute?.('role');
-          if (
-            tag === 'INPUT' ||
-            tag === 'TEXTAREA' ||
-            tag === 'SELECT' ||
-            tag === 'BUTTON' ||
-            tag === 'A' ||
-            el.isContentEditable ||
-            role === 'button' ||
-            role === 'link' ||
-            role === 'menuitem' ||
-            el.getAttribute?.('tabindex') != null
-          ) {
-            return;
-          }
-        }
+    // True while an IME/dead-key composition is in progress (accented Latin
+    // chars like é/ñ/ö on many layouts, or CJK candidate windows). Composition
+    // is driven by compositionstart/end, not keydown — forwarding the raw
+    // intermediate keydowns here would leak partial composition bytes to the
+    // PTY. keydown is suppressed while composing; the final composed text is
+    // sent once, from compositionend.
+    let composing = false;
+
+    const focused = () =>
+      shouldForwardToTerminal(
+        document.activeElement as (HTMLElement & { isContentEditable?: boolean }) | null,
+        document.activeElement === document.body,
+      );
+
+    const onCompositionStart = () => {
+      if (focused()) composing = true;
+    };
+    const onCompositionEnd = (e: CompositionEvent) => {
+      if (!composing) return;
+      composing = false;
+      if (!focused()) return;
+      if (e.data) {
+        const ent = cache.get(activeIdRef.current);
+        sendInput(ent?.term.bracketedPaste ? `\x1b[200~${e.data}\x1b[201~` : e.data);
+        autoScroll.current = true;
       }
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      // keyCode 229 is the legacy composing signal (older Safari/Firefox).
+      if (composing || e.isComposing || e.keyCode === 229) return;
+      if (!focused()) return;
       const appCursor = cache.get(activeIdRef.current)?.term.applicationCursor ?? false;
       const bytes = keyToBytes(e, appCursor, isMacDesktop);
       if (bytes == null) return;
@@ -985,7 +990,13 @@ export function useTetherApp() {
       autoScroll.current = true;
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('compositionstart', onCompositionStart);
+    window.addEventListener('compositionend', onCompositionEnd);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('compositionstart', onCompositionStart);
+      window.removeEventListener('compositionend', onCompositionEnd);
+    };
     // sendInput/handlePaste delegate to refs, so a stable listener is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfiguring]);
