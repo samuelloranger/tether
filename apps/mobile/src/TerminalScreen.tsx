@@ -144,7 +144,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 left: 0,
                 right: 0,
                 bottom: 0,
-                backgroundColor: '#ef4444',
+                backgroundColor: theme.colors.danger,
                 opacity: 0.12,
                 zIndex: 999,
               }}
@@ -191,7 +191,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 accessibilityRole="button"
                 accessibilityLabel="Open terminal list"
               >
-                <Feather name="menu" size={20} color="#cbd5e1" />
+                <Feather name="menu" size={20} color={theme.colors.text} />
               </TouchableOpacity>
             )}
 
@@ -213,7 +213,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 </View>
               ) : connectionStatus === 'connecting' ? (
                 <View style={[styles.statusBadge, styles.badgeConnecting]}>
-                  <ActivityIndicator size={8} color="#fbbf24" style={styles.spinIcon} />
+                  <ActivityIndicator size={8} color={theme.colors.warning} style={styles.spinIcon} />
                   <Text style={styles.badgeTextConnecting}>Connecting…</Text>
                 </View>
               ) : (
@@ -231,7 +231,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 accessibilityRole="button"
                 accessibilityLabel="Terminal menu"
               >
-                <Feather name="more-vertical" size={19} color="#cbd5e1" />
+                <Feather name="more-vertical" size={19} color={theme.colors.text} />
               </TouchableOpacity>
             </View>
           </View>
@@ -418,7 +418,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               spellCheck={false}
               autoComplete="off"
               blurOnSubmit={false}
-              keyboardAppearance="dark"
+              keyboardAppearance={theme.keyboardAppearance}
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
               accessibilityLabel="Terminal input (hidden)"
