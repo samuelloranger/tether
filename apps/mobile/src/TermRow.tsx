@@ -4,6 +4,7 @@ import type { RenderRow, CellStyle } from './terminal';
 import { splitRunByLinks, urlColumns } from './links';
 import { isDesktop } from './platform';
 import { useAppTheme } from './AppThemeProvider';
+import { openExternalUrl } from './desktopUpdate';
 
 function runToStyle(
   s: CellStyle,
@@ -91,7 +92,7 @@ export const TermRow = React.memo(
                 <Text
                   key={`${i}-${j}`}
                   style={[st, styles.link]}
-                  onPress={() => Linking.openURL(seg.url!)}
+                  onPress={() => (isDesktop ? openExternalUrl(seg.url!) : Linking.openURL(seg.url!))}
                 >
                   {seg.text}
                 </Text>
