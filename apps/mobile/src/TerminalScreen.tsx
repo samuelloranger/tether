@@ -387,6 +387,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             searchInputRef={searchInputRef}
             text={searchText}
             insets={insets}
+            fontFamily={fontFamily}
+            fontSize={fontSize}
+            lineHeight={lineHeight}
           />
 
           {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
