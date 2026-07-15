@@ -6,6 +6,7 @@ import type { DrawerSession } from './SessionDrawer';
 import { PANEL_W, sessionActivity, type DesktopNavigationMode } from './desktopNavigation';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import type { Presentation } from './presentations';
 
 export interface DesktopSessionNavigatorProps {
   mode: DesktopNavigationMode;
@@ -14,6 +15,10 @@ export interface DesktopSessionNavigatorProps {
   onSelect: (id: string) => void;
   onNew: () => void;
   onKill: (id: string) => void;
+  previews: Presentation[];
+  activePreviewId: string | null;
+  onSelectPreview: (id: string) => void;
+  onClosePreview: (id: string) => void;
   onSettings: () => void;
 }
 
@@ -29,7 +34,7 @@ function confirmKill(id: string, onKill: (id: string) => void) {
   });
 }
 
-function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings }: Omit<DesktopSessionNavigatorProps, 'mode'>) {
+function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, previews, activePreviewId, onSelectPreview, onClosePreview, onSettings }: Omit<DesktopSessionNavigatorProps, 'mode'>) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
   return (
@@ -37,7 +42,7 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
       <View style={styles.header}>
         <View style={styles.headerTitle}>
           <Feather name="terminal" size={14} color={theme.colors.accent} />
-          <Text style={styles.title}>Terminals</Text>
+          <Text style={styles.title}>Workspace</Text>
         </View>
         <TouchableOpacity
           style={styles.settings}
@@ -53,7 +58,7 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
 
       <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
         {sessions.map((session) => {
-          const active = session.id === activeId;
+          const active = activePreviewId === null && session.id === activeId;
           const label = session.name || session.id;
           return (
             <View key={session.id} style={[styles.row, active && styles.rowActive]}>
@@ -84,6 +89,36 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
             </View>
           );
         })}
+        {previews.map((preview) => {
+          const active = preview.id === activePreviewId;
+          return (
+            <View key={`preview-${preview.id}`} style={[styles.row, active && styles.rowActive]}>
+              <TouchableOpacity
+                style={styles.rowMain}
+                activeOpacity={0.6}
+                onPress={() => onSelectPreview(preview.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Preview ${preview.title}`}
+              >
+                <Feather name="layout" size={14} color={theme.colors.accent} />
+                <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
+                  {preview.title}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.kill}
+                hitSlop={HIT}
+                activeOpacity={0.6}
+                onPress={() => onClosePreview(preview.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Close preview ${preview.title}`}
+              >
+                <Feather name="x" size={16} color={theme.colors.danger} />
+              </TouchableOpacity>
+            </View>
+          );
+        })}
       </ScrollView>
 
       <TouchableOpacity
@@ -100,11 +135,11 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
   );
 }
 
-export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, onNew, onKill, onSettings }: DesktopSessionNavigatorProps) {
+export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, onNew, onKill, previews, activePreviewId, onSelectPreview, onClosePreview, onSettings }: DesktopSessionNavigatorProps) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
   const [hoverOpen, setHoverOpen] = useState(false);
-  const panelProps = { sessions, activeId, onSelect, onNew, onKill, onSettings };
+  const panelProps = { sessions, activeId, onSelect, onNew, onKill, previews, activePreviewId, onSelectPreview, onClosePreview, onSettings };
   // react-native-web forwards these DOM hover handlers, but Expo's View type omits them.
   const hoverHandlers = {
     onMouseEnter: () => setHoverOpen(true),
@@ -130,7 +165,7 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
   return (
     <ScrollView horizontal style={styles.tabs} contentContainerStyle={styles.tabsContent} showsHorizontalScrollIndicator={false}>
       {sessions.map((session) => {
-        const active = session.id === activeId;
+        const active = activePreviewId === null && session.id === activeId;
         const label = session.name || session.id;
         return (
           <View key={session.id} style={[styles.tab, active && styles.tabActive]}>
@@ -152,6 +187,34 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
               onPress={() => confirmKill(session.id, onKill)}
               accessibilityRole="button"
               accessibilityLabel={`Kill terminal ${label}`}
+            >
+              <Feather name="x" size={14} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+      {previews.map((preview) => {
+        const active = preview.id === activePreviewId;
+        return (
+          <View key={`preview-${preview.id}`} style={[styles.tab, active && styles.tabActive]}>
+            <TouchableOpacity
+              style={styles.tabMain}
+              activeOpacity={0.6}
+              onPress={() => onSelectPreview(preview.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`Preview ${preview.title}`}
+            >
+              <Feather name="layout" size={13} color={theme.colors.accent} />
+              <Text style={styles.tabText} numberOfLines={1}>{preview.title}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.tabKill}
+              hitSlop={HIT}
+              activeOpacity={0.6}
+              onPress={() => onClosePreview(preview.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Close preview ${preview.title}`}
             >
               <Feather name="x" size={14} color={theme.colors.textMuted} />
             </TouchableOpacity>

@@ -54,6 +54,8 @@ import { UpdateModal } from './UpdateModal';
 import { ConfigScreen } from './ConfigScreen';
 import { mouseSeq } from './mouseSeq';
 import { DesktopSessionNavigator } from './DesktopSessionNavigator';
+import { PresentationView } from './PresentationView';
+import { previewUrl } from './presentations';
 
 
 // Constants for async storage keys
@@ -70,7 +72,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   } = app;
 
   // Bell (BEL): brief red flash + haptic tick whenever the active session's
@@ -156,12 +158,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           {isDesktop && (
             <TitleBar
               isMac={isMacDesktop}
-              title={entryFor(activeId).term.title || activeName}
-              subtitle={entryFor(activeId).term.cwd || `${serverIp}:${port}`}
+              title={activePresentation?.title || entryFor(activeId).term.title || activeName}
+              subtitle={activePresentation?.project || entryFor(activeId).term.cwd || `${serverIp}:${port}`}
               status={titleBarStatus}
               onNew={newTerminal}
               onSettings={() => setIsConfiguring(true)}
-              onMenu={() => setMenuOpen(true)}
+              onMenu={() => { if (!activePresentation) setMenuOpen(true); }}
             />
           )}
           <View style={[styles.terminalBody, isDesktop && desktopNavigationMode === 'sidebar' && styles.terminalRow]}>
@@ -171,9 +173,13 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               mode={desktopNavigationMode}
               sessions={drawerSessions}
               activeId={activeId}
-              onSelect={switchTo}
+              onSelect={selectTerminal}
               onNew={newTerminal}
               onKill={killActiveOr}
+              previews={presentations}
+              activePreviewId={activePresentationId}
+              onSelectPreview={selectPresentation}
+              onClosePreview={closePresentation}
               onSettings={() => setIsConfiguring(true)}
             />
           )}
@@ -187,7 +193,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     style={styles.headerBtn}
                     activeOpacity={0.6}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    onPress={() => { Keyboard.dismiss(); refreshSessions(); setDrawerOpen(true); }}
+                    onPress={() => { Keyboard.dismiss(); refreshSessions(); refreshPresentations(); setDrawerOpen(true); }}
                     accessibilityRole="button"
                     accessibilityLabel="Open terminal list"
                   >
@@ -195,7 +201,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   </TouchableOpacity>
 
                   <View style={styles.headerInfo}>
-                    <Text style={styles.headerTitle}>{activeName}</Text>
+                    <Text style={styles.headerTitle}>{activePresentation?.title || activeName}</Text>
                     <Text style={styles.headerSubtitle}>{serverIp}:{port}</Text>
                   </View>
 
@@ -222,21 +228,29 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                       </View>
                     )}
 
-                    <TouchableOpacity
-                      style={styles.headerBtn}
-                      activeOpacity={0.6}
-                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                      onPress={() => setMenuOpen(true)}
-                      accessibilityRole="button"
-                      accessibilityLabel="Terminal menu"
-                    >
-                      <Feather name="more-vertical" size={19} color={theme.colors.text} />
-                    </TouchableOpacity>
+                    {!activePresentation && (
+                      <TouchableOpacity
+                        style={styles.headerBtn}
+                        activeOpacity={0.6}
+                        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                        onPress={() => setMenuOpen(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Terminal menu"
+                      >
+                        <Feather name="more-vertical" size={19} color={theme.colors.text} />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
               </SafeAreaView>
             )}
 
+          {activePresentation ? (
+            <PresentationView
+              preview={activePresentation}
+              url={previewUrl(serverIp, port, activePresentation.url)}
+            />
+          ) : <>
           {/* Connection banner — names the real state; no safety overclaim. */}
           <ConnectionBanner
             status={connectionStatus}
@@ -298,6 +312,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               </Pressable>
             )}
           </View>
+          </>}
 
           {/* Session Drawer (overlay) — mobile only; desktop uses DesktopSessionNavigator. */}
           {!isDesktop && (
@@ -305,16 +320,20 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               visible={drawerOpen}
               sessions={drawerSessions}
               activeId={activeId}
-              onSelect={switchTo}
+              onSelect={selectTerminal}
               onNew={newTerminal}
               onKill={killActiveOr}
+              previews={presentations}
+              activePreviewId={activePresentationId}
+              onSelectPreview={(id) => { selectPresentation(id); setDrawerOpen(false); }}
+              onClosePreview={closePresentation}
               onClose={() => setDrawerOpen(false)}
               onSettings={() => { setDrawerOpen(false); setIsConfiguring(true); }}
             />
           )}
 
           {/* Overflow menu (header ⋯) */}
-          <OverflowMenu
+          {!activePresentation && <OverflowMenu
             visible={menuOpen}
             onClose={() => setMenuOpen(false)}
             onRename={openRename}
@@ -341,7 +360,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             }}
             desktopNavigationMode={desktopNavigationMode}
             onDesktopNavigationMode={selectDesktopNavigationMode}
-          />
+          />}
 
           {/* Rename Modal */}
           <RenameModal
@@ -374,7 +393,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           />
 
           {/* Fullscreen selectable-text view (long-press the terminal to open) */}
-          <SelectionView
+          {!activePresentation && <SelectionView
             visible={selectionViewOpen}
             onClose={() => {
               setSelectionViewOpen(false);
@@ -388,10 +407,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             fontFamily={fontFamily}
             fontSize={fontSize}
             lineHeight={lineHeight}
-          />
+          />}
 
           {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
-          {!isDesktop && (
+          {!isDesktop && !activePresentation && (
             <UtilityBar
               ctrlArmed={ctrlArmed}
               setCtrlArmed={setCtrlArmed}
@@ -405,7 +424,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           {/* Hidden keyboard-capture field (mobile): tapping the terminal focuses
               it, so typing goes straight into the terminal (the shell echoes it
               back). Desktop reads the physical keyboard globally instead. */}
-          {!isDesktop && (
+          {!isDesktop && !activePresentation && (
             <TextInput
               ref={inputRef}
               style={styles.hiddenInput}
@@ -435,7 +454,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               keystrokes. Rendered inside #tether-terminal so the keydown/
               composition focus-guard (desktopFocusGuard.ts) already treats it as
               part of the terminal. Focused on click via the effect below. */}
-          {isDesktop && (
+          {isDesktop && !activePresentation && (
             <TextInput
               ref={inputRef}
               style={styles.hiddenInput}
