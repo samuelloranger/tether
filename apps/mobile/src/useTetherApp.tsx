@@ -812,49 +812,93 @@ export function useTetherApp() {
     sel.addRange(range);
   };
 
-  // Uploads bytes to the active session's live cwd (server writes
-  // `${cwd}/${filename}`, collision-suffixed), then types the resulting path
-  // into the terminal — shared by the image picker, iOS/iPadOS native
-  // drag-drop, and desktop drag-drop.
-  const uploadFile = async (blob: Blob, filename: string) => {
-    const e = entryFor(activeIdRef.current);
-    const cwd = e.term.cwd;
-    if (!cwd) {
-      void notify(
-        'Upload failed',
-        'No known working directory yet — wait for the next prompt.',
-        'error',
-      );
-      return;
-    }
-    const form = new FormData();
-    form.append('file', blob, filename);
-    form.append('cwd', cwd);
+  // Uploads bytes into a per-session upload dir under ~/.tether/uploads on
+  // the server (collision-suffixed, keeps uploads out of whatever project
+  // the user happens to be working in), then types the resulting path into
+  // the terminal — shared by the image picker, iOS/iPadOS native drag-drop,
+  // and desktop drag-drop.
+  //
+  // Native callers (picker, iOS/iPadOS drag-drop) must pass a {uri, name,
+  // type} descriptor, not a Blob, and it's uploaded via expo-file-system's
+  // File.upload() rather than fetch()+FormData. Both of RN's own file-upload
+  // primitives are broken for local asset/content URIs under this app's setup:
+  // fetch(uri).then(r => r.blob()) throws under Hermes ("Creating blobs from
+  // 'ArrayBuffer' ... are not supported"), and FormData.append(key, {uri,
+  // name, type}) — RN's own documented pattern for this — throws natively
+  // ("Unsupported FormDataPart implementation"), a known New Architecture
+  // regression. expo-file-system's native upload sidesteps both. The desktop
+  // web drag-drop path already has a real browser Blob/File from the DOM drop
+  // event (no local URI involved), so it keeps using fetch()+FormData.
+  const uploadFile = async (
+    file: Blob | { uri: string; name: string; type?: string },
+    filename: string,
+  ) => {
+    const url = `${httpBase(serverIp, port)}/api/sessions/${activeIdRef.current}/upload`;
     try {
-      const res = await fetch(
-        `${httpBase(serverIp, port)}/api/sessions/${activeIdRef.current}/upload`,
-        { method: 'POST', headers: authHeaders(passwordRef.current), body: form },
-      );
-      const data = await res.json();
+      let data: { ok: boolean; path?: string; error?: string };
+      if (file instanceof Blob) {
+        const form = new FormData();
+        form.append('file', file, filename);
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: authHeaders(passwordRef.current),
+          body: form,
+        });
+        data = await res.json();
+      } else {
+        const { File, Paths, UploadType } = await import('expo-file-system');
+        const source = new File(file.uri);
+        // Unique per call regardless of the (possibly colliding, possibly
+        // shared-across-a-multi-drop) display filename, so concurrent
+        // uploads never race on the same staged cache file.
+        const staged = new File(Paths.cache, `${Date.now()}-${Math.random().toString(36).slice(2)}-${filename}`);
+        try {
+          await source.copy(staged, { overwrite: true });
+          const result = await staged.upload(url, {
+            uploadType: UploadType.MULTIPART,
+            fieldName: 'file',
+            mimeType: file.type,
+            // The multipart part's own filename is the unique staged name
+            // above (needed to dedupe concurrent uploads) — override it back
+            // to the real display name the server should save under.
+            parameters: { filename },
+            headers: authHeaders(passwordRef.current),
+          });
+          data = JSON.parse(result.body);
+        } finally {
+          try {
+            staged.delete();
+          } catch {}
+        }
+      }
       if (!data.ok) throw new Error(data.error || 'upload failed');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      sendInput(shellQuote(data.path));
-    } catch {
-      void notify('Upload failed', 'Could not upload the file to the server.', 'error');
+      sendInput(shellQuote(data.path!));
+    } catch (err) {
+      void notify('Upload failed', `Could not upload the file to the server: ${String(err)}`, 'error');
     }
   };
 
   const pickAndUploadImage = async () => {
-    const ImagePicker = await import('expo-image-picker');
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 1 });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    const res = await fetch(asset.uri);
-    const blob = await res.blob();
-    const filename = asset.fileName || `image-${Date.now()}.jpg`;
-    await uploadFile(blob, filename);
+    try {
+      const ImagePicker = await import('expo-image-picker');
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        void notify(
+          'Permission needed',
+          'Allow photo library access in Settings to attach images.',
+          'error',
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({ quality: 1 });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      const filename = asset.fileName || `image-${Date.now()}.jpg`;
+      await uploadFile({ uri: asset.uri, name: filename, type: asset.mimeType }, filename);
+    } catch (err) {
+      void notify('Upload failed', `Could not read the selected image: ${String(err)}`, 'error');
+    }
   };
 
   const handlePaste = async () => {

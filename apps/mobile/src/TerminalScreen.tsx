@@ -282,11 +282,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     onDrop={(event) => {
                       for (const asset of event.assets) {
                         if (!asset.uri) continue;
-                        fetch(asset.uri)
-                          .then((r) => r.blob())
-                          .then((blob) =>
-                            uploadFile(blob, asset.fileName || `drop-${Date.now()}`),
-                          );
+                        const filename = asset.fileName || `drop-${Date.now()}`;
+                        uploadFile({ uri: asset.uri, name: filename, type: asset.type }, filename);
                       }
                     }}
                   >
