@@ -5,6 +5,7 @@ import {
   parseDarkFlavor,
   parseThemePreference,
   resolveFlavor,
+  selectThemePreference,
 } from './appTheme';
 
 describe('app theme preference', () => {
@@ -34,5 +35,20 @@ describe('app theme preference', () => {
     expect(APP_THEMES.mocha.colors.background).toBe('#1e1e2e');
     expect(APP_THEMES.frappe.terminal.base16).toHaveLength(16);
     expect(APP_THEMES.macchiato.terminal.fg).toBe('#cad3f5');
+  });
+
+  it('remembers only explicit dark flavors for System mode', () => {
+    expect(selectThemePreference('system', 'mocha', 'frappe')).toEqual({
+      preference: 'frappe',
+      systemDarkFlavor: 'frappe',
+    });
+    expect(selectThemePreference('frappe', 'frappe', 'latte')).toEqual({
+      preference: 'latte',
+      systemDarkFlavor: 'frappe',
+    });
+    expect(selectThemePreference('macchiato', 'macchiato', 'system')).toEqual({
+      preference: 'system',
+      systemDarkFlavor: 'macchiato',
+    });
   });
 });
