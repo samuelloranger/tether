@@ -15,6 +15,7 @@ import { confirmAction } from './dialog';
 import { isRecentlyActive, PANEL_W } from './desktopNavigation';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import type { Presentation } from './presentations';
 
 export interface DrawerSession {
   id: string;
@@ -30,6 +31,10 @@ interface SessionDrawerProps {
   onSelect: (id: string) => void;
   onNew: () => void;
   onKill: (id: string) => void;
+  previews: Presentation[];
+  activePreviewId: string | null;
+  onSelectPreview: (id: string) => void;
+  onClosePreview: (id: string) => void;
   onClose: () => void;
   onSettings: () => void;
   // Desktop: render as a permanent inline sidebar (no scrim, no slide, always
@@ -59,6 +64,10 @@ export function SessionDrawer({
   onSelect,
   onNew,
   onKill,
+  previews,
+  activePreviewId,
+  onSelectPreview,
+  onClosePreview,
   onClose,
   onSettings,
   docked = false,
@@ -110,7 +119,7 @@ export function SessionDrawer({
     <>
       <View style={styles.header}>
           <Feather name="terminal" size={14} color={theme.colors.accent} />
-          <Text style={styles.title}>Terminals</Text>
+          <Text style={styles.title}>Workspace</Text>
           <TouchableOpacity
             style={styles.settingsBtn}
             hitSlop={HIT}
@@ -125,7 +134,7 @@ export function SessionDrawer({
 
         <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
           {sessions.map((s) => {
-            const active = s.id === activeId;
+            const active = activePreviewId === null && s.id === activeId;
             const live = active || isRecentlyActive(s.last_output_at);
             const dotColor = s.status === 'stopped' ? theme.colors.textFaint : live ? theme.colors.success : theme.colors.border;
             return (
@@ -149,6 +158,34 @@ export function SessionDrawer({
                   onPress={() => confirmKill(s.id, onKill)}
                   accessibilityRole="button"
                   accessibilityLabel={`Kill terminal ${s.id}`}
+                >
+                  <Feather name="x" size={16} color={theme.colors.danger} />
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+          {previews.map((preview) => {
+            const active = preview.id === activePreviewId;
+            return (
+              <View key={`preview-${preview.id}`} style={[styles.row, active && styles.rowActive]}>
+                <TouchableOpacity
+                  style={styles.rowMain}
+                  activeOpacity={0.6}
+                  onPress={() => onSelectPreview(preview.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Preview ${preview.title}`}
+                >
+                  <Feather name="layout" size={14} color={theme.colors.accent} style={styles.previewIcon} />
+                  <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>{preview.title}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.kill}
+                  hitSlop={HIT}
+                  activeOpacity={0.6}
+                  onPress={() => onClosePreview(preview.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Close preview ${preview.title}`}
                 >
                   <Feather name="x" size={16} color={theme.colors.danger} />
                 </TouchableOpacity>
@@ -237,6 +274,7 @@ const createStyles = (c: AppColors) => StyleSheet.create({
   rowActive: { backgroundColor: c.selected },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 11 },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
+  previewIcon: { marginRight: 10 },
   name: { color: c.text, fontFamily: 'Courier', fontSize: 13 },
   nameActive: { color: c.accent, fontWeight: '700' },
   stopped: { color: c.textFaint, fontSize: 10, marginLeft: 8 },

@@ -25,7 +25,7 @@ tether start
 The installer detects your OS/arch and downloads a single self-contained binary (no bun, git, or node_modules needed) from the latest release into `~/.local/bin/tether`. If `tether` isn't found afterward, add `~/.local/bin` to your PATH (the installer prints the exact line, and the commands it prints use the full path meanwhile).
 
 ```bash
-tether serve | start | stop | restart | status | logs | set-password | update | version
+tether serve | start | stop | restart | status | logs | present | set-password | update | version
 ```
 
 - **Update later:** `tether update` downloads the newest release binary and restarts.
@@ -41,6 +41,7 @@ tether serve | start | stop | restart | status | logs | set-password | update | 
 - **Replay** — every byte is logged to SQLite; reconnecting clients catch up from where they left off, with no output lost while the server was down.
 - **Mobile client** — multi-session tabs, full VT emulator (TUIs, box drawing, CJK/emoji), key repeat, search, snippets.
 - **Desktop client** — the same terminal as a native Linux/Windows/macOS app (docked sidebar, physical keyboard, mouse selection, self-update).
+- **Agent previews** — Codex CLI or Claude Code can run `tether present ./preview/index.html --project <name>` to open a watched HTML/CSS/JS preview on desktop or iOS. Install the optional agent skills with `tether present agent-install`; clear previews with `tether present reset [project-name]`.
 
 ## Mobile app (iOS)
 

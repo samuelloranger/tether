@@ -13,10 +13,11 @@ Downloads the latest release binary for your platform, verifies it, atomically s
 One binary is the whole CLI:
 
 ```
-tether serve | start | stop | restart | status | logs | set-password | update | version
+tether serve | start | stop | restart | status | logs | present | set-password | update | version
 ```
 
 - `serve` (or no argument) runs the daemon in the foreground; `start` runs it detached.
+- `present` opens or clears display-only HTML previews for coding agents. Run `tether present agent-install [codex|claude]` to install the optional global agent skills.
 - pid + log live in `~/.tether/`.
 
 ## Data & environment
