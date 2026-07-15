@@ -28,10 +28,10 @@ export function desktopNavigationLabel(mode: DesktopNavigationMode): string {
   return mode === 'hover' ? 'On hover' : mode === 'sidebar' ? 'Sidebar' : 'Tabs';
 }
 
-export function sessionDotColor(
+export function sessionActivity(
   session: { status: 'running' | 'stopped'; last_output_at: string | null },
   active: boolean,
-): string {
-  if (session.status === 'stopped') return '#64748b';
-  return active || isRecentlyActive(session.last_output_at) ? '#22c55e' : '#334155';
+): 'stopped' | 'live' | 'idle' {
+  if (session.status === 'stopped') return 'stopped';
+  return active || isRecentlyActive(session.last_output_at) ? 'live' : 'idle';
 }

@@ -3,11 +3,14 @@ import { View, Text, Linking, StyleSheet, type TextStyle } from 'react-native';
 import type { RenderRow, CellStyle } from './terminal';
 import { splitRunByLinks, urlColumns } from './links';
 import { isDesktop } from './platform';
+import { useAppTheme } from './AppThemeProvider';
 
 function runToStyle(
   s: CellStyle,
   caretOn: boolean,
   cursorStyle: 'block' | 'bar' | 'underline',
+  accent: string,
+  accentText: string,
 ): TextStyle {
   const style: TextStyle = {};
   if (s.fg) style.color = s.fg;
@@ -21,14 +24,14 @@ function runToStyle(
   if (s.caret && caretOn) {
     if (cursorStyle === 'bar') {
       style.borderLeftWidth = 2;
-      style.borderLeftColor = '#818cf8';
+      style.borderLeftColor = accent;
     } else if (cursorStyle === 'underline') {
       style.textDecorationLine = 'underline';
-      style.textDecorationColor = '#818cf8';
+      style.textDecorationColor = accent;
     } else {
       // Block caret: accent background, dark glyph for contrast.
-      style.backgroundColor = '#818cf8';
-      style.color = '#0b0f19';
+      style.backgroundColor = accent;
+      style.color = accentText;
     }
   }
   return style;
@@ -57,6 +60,7 @@ export const TermRow = React.memo(
     cursorStyle: 'block' | 'bar' | 'underline';
     fontFamily: string;
   }) {
+    const { theme } = useAppTheme();
     // Column → full URL, from spans the emulator resolved across soft-wrapped
     // rows. A wrapped link's fragments each carry the WHOLE url, so tapping any
     // fragment (on either row) opens the complete link.
@@ -67,7 +71,7 @@ export const TermRow = React.memo(
       <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
         <Text
           style={[
-            styles.termLine,
+            [styles.termLine, { color: theme.terminal.fg }],
             { fontFamily, fontSize, lineHeight, width },
             // Web: preserve whitespace. RN-web's numberOfLines=1 sets
             // white-space:nowrap, which collapses/trims spaces — that hides the
@@ -79,7 +83,7 @@ export const TermRow = React.memo(
           selectable={isDesktop}
         >
           {row.runs.map((run, i) => {
-            const st = runToStyle(run.style, blinkOn, cursorStyle);
+            const st = runToStyle(run.style, blinkOn, cursorStyle, theme.colors.accent, theme.colors.accentText);
             const segs = splitRunByLinks(run.text, col, urlAt);
             col += run.text.length;
             return segs.map((seg, j) =>
@@ -114,9 +118,7 @@ export const TermRow = React.memo(
 );
 
 const styles = StyleSheet.create({
-  termLine: {
-    color: '#cbd5e1',
-  },
+  termLine: {},
   link: {
     textDecorationLine: 'underline',
   },

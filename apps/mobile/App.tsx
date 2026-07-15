@@ -1,22 +1,27 @@
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { styles } from './src/styles';
+import { createStyles } from './src/styles';
 import { useTetherApp } from './src/useTetherApp';
 import { ConfigScreen } from './src/ConfigScreen';
 import { TerminalScreen } from './src/TerminalScreen';
+import { AppThemeProvider, useAppTheme } from './src/AppThemeProvider';
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <AppInner />
+      <AppThemeProvider>
+        <AppInner />
+      </AppThemeProvider>
     </SafeAreaProvider>
   );
 }
 
 function AppInner() {
   const app = useTetherApp();
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   if (!app.fontsLoaded) return null;
   return (
-    <SafeAreaView style={styles.appContainer}>
+    <SafeAreaView style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
       {app.isConfiguring ? (
         <ConfigScreen
           serverIp={app.serverIp}

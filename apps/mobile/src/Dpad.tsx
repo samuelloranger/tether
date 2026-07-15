@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 
 // Press-and-hold repeat for navigation keys: fire once on press, then repeat
 // after 350ms at 60ms — mirrors hardware key-repeat.
@@ -52,35 +54,37 @@ export const ArrowCluster = React.memo(function ArrowCluster({
 }: {
   onArrow: (dir: 'A' | 'B' | 'C' | 'D') => void;
 }) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   return (
     <View style={styles.arrowCluster}>
       <RepeatBtn style={styles.arrowSeg} label="Arrow left" onFire={() => onArrow('D')}>
-        <Feather name="chevron-left" size={18} color="#cbd5e1" />
+        <Feather name="chevron-left" size={18} color={theme.colors.text} />
       </RepeatBtn>
       <View style={styles.arrowVDivider} />
       <View style={styles.arrowMid}>
         <RepeatBtn style={styles.arrowMidHalf} label="Arrow up" onFire={() => onArrow('A')}>
-          <Feather name="chevron-up" size={15} color="#cbd5e1" />
+          <Feather name="chevron-up" size={15} color={theme.colors.text} />
         </RepeatBtn>
         <View style={styles.arrowHDivider} />
         <RepeatBtn style={styles.arrowMidHalf} label="Arrow down" onFire={() => onArrow('B')}>
-          <Feather name="chevron-down" size={15} color="#cbd5e1" />
+          <Feather name="chevron-down" size={15} color={theme.colors.text} />
         </RepeatBtn>
       </View>
       <View style={styles.arrowVDivider} />
       <RepeatBtn style={styles.arrowSeg} label="Arrow right" onFire={() => onArrow('C')}>
-        <Feather name="chevron-right" size={18} color="#cbd5e1" />
+        <Feather name="chevron-right" size={18} color={theme.colors.text} />
       </RepeatBtn>
     </View>
   );
 });
 
-const styles = StyleSheet.create({
+const createStyles = (c: AppColors) => StyleSheet.create({
   arrowCluster: {
     flexDirection: 'row',
     height: 40,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: c.surfaceRaised,
     overflow: 'hidden',
   },
   arrowSeg: {
@@ -98,11 +102,11 @@ const styles = StyleSheet.create({
   },
   arrowVDivider: {
     width: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: c.border,
   },
   arrowHDivider: {
     height: 1,
     marginHorizontal: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: c.border,
   },
 });
