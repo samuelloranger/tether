@@ -28,6 +28,25 @@ test('registers an HTML preview without exposing its filesystem root', () => {
   }
 });
 
+test('associates a preview with the session that created it, and allows none', () => {
+  const root = tempDir('tether-preview-');
+  try {
+    const entry = path.join(root, 'index.html');
+    writeFileSync(entry, 'ok');
+    const registry = new PresentationRegistry(10);
+
+    const withSession = registry.create({ entry, sessionId: 'term-2' });
+    expect(withSession.sessionId).toBe('term-2');
+
+    const withoutSession = registry.create({ entry });
+    expect(withoutSession.sessionId).toBeUndefined();
+
+    registry.dispose();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('rejects traversal and symlinks that escape a preview root', () => {
   const root = tempDir('tether-preview-');
   const outside = tempDir('tether-outside-');

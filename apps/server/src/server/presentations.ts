@@ -18,6 +18,7 @@ export interface Presentation {
   project: string;
   revision: number;
   url: string;
+  sessionId?: string;
 }
 
 export function createControlToken(file: string): string {
@@ -62,7 +63,12 @@ export class PresentationRegistry {
 
   constructor(private readonly debounceMs = 150) {}
 
-  create(input: { entry: string; project?: string; title?: string }): Presentation {
+  create(input: {
+    entry: string;
+    project?: string;
+    title?: string;
+    sessionId?: string;
+  }): Presentation {
     const entry = realpathSync(input.entry);
     if (path.extname(entry).toLowerCase() !== '.html')
       throw new Error('preview entry must be an HTML file');
@@ -75,6 +81,7 @@ export class PresentationRegistry {
       project: input.project || path.basename(root),
       revision: 0,
       url: `/preview/${token}/${path.basename(entry)}`,
+      sessionId: input.sessionId,
       root,
       token,
       watcher: undefined as unknown as FSWatcher,
@@ -130,6 +137,7 @@ export class PresentationRegistry {
       project: preview.project,
       revision: preview.revision,
       url: preview.url,
+      sessionId: preview.sessionId,
     };
   }
 }
