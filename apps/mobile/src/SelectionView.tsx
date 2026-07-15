@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 
 // Fullscreen selectable-text view (long-press the terminal to open): filter the
 // displayed transcript and select/copy it via the OS's native text selection.
@@ -33,6 +35,8 @@ export function SelectionView({
   fontSize: number;
   lineHeight: number;
 }) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   const scrollRef = useRef<ScrollView>(null);
   const transcriptRef = useRef<TextInput>(null);
   // Real rendered height of the transcript at its actual on-device width/font,
@@ -58,7 +62,7 @@ export function SelectionView({
             accessibilityRole="button"
             accessibilityLabel="Close"
           >
-            <Feather name="x" size={20} color="#cbd5e1" />
+            <Feather name="x" size={20} color={theme.colors.text} />
           </TouchableOpacity>
         </View>
         <TextInput
@@ -67,10 +71,10 @@ export function SelectionView({
           value={searchQuery}
           onChangeText={onSearchChange}
           placeholder="Filter lines…"
-          placeholderTextColor="#64748b"
+          placeholderTextColor={theme.colors.textFaint}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardAppearance="dark"
+          keyboardAppearance={theme.keyboardAppearance}
         />
         {visible && measuredHeight === null && (
           // Invisible measurement pass: lays the real transcript text out at
@@ -117,10 +121,11 @@ export function SelectionView({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(c: AppColors) {
+  return StyleSheet.create({
   selectionViewContainer: {
     flex: 1,
-    backgroundColor: '#070a13',
+    backgroundColor: c.background,
   },
   selectionViewHeader: {
     flexDirection: 'row',
@@ -129,14 +134,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomColor: c.border,
   },
   selectionViewTitle: {
     flexShrink: 1,
     marginRight: 12,
     fontSize: 16,
     fontWeight: '700',
-    color: '#e2e8f0',
+    color: c.text,
   },
   selectionViewHeaderBtn: {
     paddingHorizontal: 4,
@@ -145,11 +150,11 @@ const styles = StyleSheet.create({
   searchInput: {
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: c.input,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    color: '#e2e8f0',
+    color: c.text,
     fontSize: 14,
   },
   selectionViewScroll: {
@@ -159,7 +164,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   selectionViewText: {
-    color: '#cbd5e1',
+    color: c.text,
   },
   // Same horizontal padding as selectionViewScrollContent, so the invisible
   // measurement pass wraps lines identically to the real scroll content.
@@ -170,4 +175,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     opacity: 0,
   },
-});
+  });
+}
