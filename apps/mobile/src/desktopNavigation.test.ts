@@ -4,7 +4,7 @@ import {
   desktopNavigationLabel,
   parseDesktopNavigationMode,
   reservedNavigationWidth,
-  sessionDotColor,
+  sessionActivity,
 } from './desktopNavigation';
 
 describe('desktop navigation mode', () => {
@@ -23,9 +23,9 @@ describe('desktop navigation mode', () => {
   });
 
   it('prioritizes stopped state and marks only the active running session as live', () => {
-    expect(sessionDotColor({ status: 'stopped', last_output_at: null }, true)).toBe('#64748b');
-    expect(sessionDotColor({ status: 'running', last_output_at: null }, true)).toBe('#22c55e');
-    expect(sessionDotColor({ status: 'running', last_output_at: null }, false)).toBe('#334155');
+    expect(sessionActivity({ status: 'stopped', last_output_at: null }, true)).toBe('stopped');
+    expect(sessionActivity({ status: 'running', last_output_at: null }, true)).toBe('live');
+    expect(sessionActivity({ status: 'running', last_output_at: null }, false)).toBe('idle');
   });
 
   it('uses the menu labels agreed for each navigation mode', () => {

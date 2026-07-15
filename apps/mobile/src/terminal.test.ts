@@ -1,5 +1,6 @@
 // Run: bun test  (from apps/mobile)  — or: bun run src/terminal.test.ts
 import { TerminalEmulator, setTheme } from './terminal';
+import { APP_THEMES } from './appTheme';
 import { computeLinkSpans, splitRunByLinks, urlColumns } from './links';
 
 const E = '\x1b';
@@ -25,6 +26,8 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   if (a !== b) throw new Error(`FAIL ${msg}\n  expected ${b}\n  got      ${a}`);
   pass++;
 }
+
+setTheme(APP_THEMES.mocha.terminal);
 
 // 1. Plain text
 {
@@ -75,7 +78,7 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   t.write(`x${E}[`);
   t.write('31mR');
   const runs = t.getSnapshot()[0].runs;
-  eq(runs.find((r) => r.text === 'R')?.style.fg, '#cd3131', 'split SGR sequence');
+  eq(runs.find((r) => r.text === 'R')?.style.fg, '#f38ba8', 'split SGR sequence');
 }
 
 // 7. Newline scroll pushes to scrollback, screen keeps last N rows
@@ -510,14 +513,33 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   setTheme({ base16: Array(16).fill('#111111'), fg: '#eeeeee', bg: '#000000' });
   t.write(`${E}[31mred${E}[0m`);
   eq(t.getSnapshot()[0].runs[0].style.fg, '#111111', 'SGR 31 resolves through the new base16');
-  setTheme({
-    base16: [
-      '#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
-      '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
-    ],
-    fg: '#cbd5e1',
-    bg: '#05070e',
-  }); // restore defaults so later tests in this same process see the original palette
+  setTheme(APP_THEMES.latte.terminal);
+  const latte = new TerminalEmulator(80, 24);
+  latte.write(`plain ${E}[31mred`);
+  const runs = latte.getSnapshot()[0].runs;
+  eq(runs[0].style.fg, '#4c4f69', 'Latte terminal foreground is semantic');
+  eq(runs[1].style.fg, '#d20f39', 'Latte ANSI red is semantic');
+  setTheme(APP_THEMES.mocha.terminal);
+}
+
+// 52. Existing ANSI cells repaint through the new palette after a theme switch.
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}[31mred`);
+  setTheme(APP_THEMES.latte.terminal);
+  eq(t.getSnapshot()[0].runs[0].style.fg, '#d20f39', 'existing ANSI red recolors for Latte');
+  setTheme(APP_THEMES.mocha.terminal);
+}
+
+// 53. Inverse ANSI cells keep their resolved palette color after a theme switch.
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}[31;7minverse`);
+  setTheme(APP_THEMES.latte.terminal);
+  const style = t.getSnapshot()[0].runs[0].style;
+  eq(style.fg, '#eff1f5', 'inverse foreground uses Latte terminal background');
+  eq(style.bg, '#d20f39', 'inverse background uses Latte ANSI red');
+  setTheme(APP_THEMES.mocha.terminal);
 }
 
 console.log(`\n  ${pass} assertions passed\n`);

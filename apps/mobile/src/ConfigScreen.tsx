@@ -1,7 +1,9 @@
 import { KeyboardAvoidingView, View, Text, TextInput, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import TitleBar from './TitleBar';
 import { isDesktop, isMacDesktop } from './platform';
-import { styles as shared, MONO } from './styles';
+import { createStyles, MONO } from './styles';
+import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 
 export type SetupMode = 'unknown' | 'create' | 'enter';
 export type TestStatus =
@@ -44,6 +46,9 @@ export function ConfigScreen({
   onSave: () => void;
   onTest: () => void;
 }) {
+  const { theme } = useAppTheme();
+  const shared = createStyles(theme.colors);
+  const styles = createConfigStyles(theme.colors);
   return (
     <>
       {/* Desktop: frameless window still needs drag + close/min/max here too. */}
@@ -72,7 +77,7 @@ export function ConfigScreen({
                 setTestStatus({ kind: 'idle' });
               }}
               placeholder="e.g. 192.168.50.30"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={theme.colors.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -87,7 +92,7 @@ export function ConfigScreen({
                 setTestStatus({ kind: 'idle' });
               }}
               placeholder="e.g. 8085"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={theme.colors.textFaint}
               keyboardType="numeric"
               autoCapitalize="none"
               autoCorrect={false}
@@ -102,7 +107,7 @@ export function ConfigScreen({
                 setTestStatus({ kind: 'idle' });
               }}
               placeholder={setupMode === 'create' ? 'Choose a password' : 'Shared server password'}
-              placeholderTextColor="#64748b"
+              placeholderTextColor={theme.colors.textFaint}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -118,7 +123,7 @@ export function ConfigScreen({
                     setTestStatus({ kind: 'idle' });
                   }}
                   placeholder="Confirm password"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={theme.colors.textFaint}
                   secureTextEntry
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -169,13 +174,13 @@ export function ConfigScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const createConfigStyles = (c: AppColors) => StyleSheet.create({
   configContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
-    backgroundColor: '#070a13',
+    backgroundColor: c.background,
   },
   // Caps the login form width so it doesn't stretch across a wide desktop window.
   configInner: {
@@ -189,49 +194,49 @@ const styles = StyleSheet.create({
   configIconBox: {
     padding: 16,
     borderRadius: 16,
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: 'rgba(99, 102, 241, 0.2)',
+    borderColor: c.accent,
     marginBottom: 16,
   },
   configLogoIcon: {
     fontSize: 32,
     fontFamily: MONO,
     fontWeight: 'bold',
-    color: '#818cf8',
+    color: c.accent,
   },
   configTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: c.text,
     marginBottom: 8,
   },
   configSubtitle: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: c.textMuted,
     textAlign: 'center',
   },
   formContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: c.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: c.border,
     padding: 20,
   },
   inputLabel: {
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
-    color: '#94a3b8',
+    color: c.textMuted,
     marginBottom: 6,
     letterSpacing: 0.5,
   },
   configInput: {
-    backgroundColor: '#030712',
+    backgroundColor: c.input,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: c.border,
     borderRadius: 8,
-    color: '#e2e8f0',
+    color: c.text,
     fontSize: 14,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -239,19 +244,19 @@ const styles = StyleSheet.create({
     fontFamily: MONO,
   },
   connectBtn: {
-    backgroundColor: '#3730a3',
+    backgroundColor: c.accent,
     paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
     marginTop: 10,
   },
   connectBtnText: {
-    color: '#ffffff',
+    color: c.accentText,
     fontSize: 14,
     fontWeight: '600',
   },
-  configHint: { color: '#64748b', fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 12 },
-  testError: { color: '#f87171', fontSize: 13, marginBottom: 10 },
+  configHint: { color: c.textFaint, fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 12 },
+  testError: { color: c.danger, fontSize: 13, marginBottom: 10 },
   testOkRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
-  testOk: { color: '#4ade80', fontSize: 13 },
+  testOk: { color: c.success, fontSize: 13 },
 });

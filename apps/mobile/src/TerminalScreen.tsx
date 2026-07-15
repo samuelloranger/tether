@@ -39,7 +39,8 @@ import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from
 import TitleBar from './TitleBar';
 import { DragDropContentView } from 'expo-drag-drop-content-view';
 import { injectDragRegionStyles } from './dragRegion';
-import { styles } from './styles';
+import { createStyles } from './styles';
+import { useAppTheme } from './AppThemeProvider';
 import { isDesktop, isMacDesktop } from './platform';
 import { TermRow } from './TermRow';
 import { ArrowCluster } from './Dpad';
@@ -66,8 +67,10 @@ const KEY_SNIPPETS = 'tether_snippets';
 import { useTetherApp } from './useTetherApp';
 
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, themeId, changeTheme, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   } = app;
 
   // Bell (BEL): brief red flash + haptic tick whenever the active session's
@@ -141,7 +144,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 left: 0,
                 right: 0,
                 bottom: 0,
-                backgroundColor: '#ef4444',
+                backgroundColor: theme.colors.danger,
                 opacity: 0.12,
                 zIndex: 999,
               }}
@@ -188,7 +191,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 accessibilityRole="button"
                 accessibilityLabel="Open terminal list"
               >
-                <Feather name="menu" size={20} color="#cbd5e1" />
+                <Feather name="menu" size={20} color={theme.colors.text} />
               </TouchableOpacity>
             )}
 
@@ -210,7 +213,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 </View>
               ) : connectionStatus === 'connecting' ? (
                 <View style={[styles.statusBadge, styles.badgeConnecting]}>
-                  <ActivityIndicator size={8} color="#fbbf24" style={styles.spinIcon} />
+                  <ActivityIndicator size={8} color={theme.colors.warning} style={styles.spinIcon} />
                   <Text style={styles.badgeTextConnecting}>Connecting…</Text>
                 </View>
               ) : (
@@ -228,7 +231,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 accessibilityRole="button"
                 accessibilityLabel="Terminal menu"
               >
-                <Feather name="more-vertical" size={19} color="#cbd5e1" />
+                <Feather name="more-vertical" size={19} color={theme.colors.text} />
               </TouchableOpacity>
             </View>
           </View>
@@ -366,8 +369,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           <AppearanceModal
             visible={appearanceModalOpen}
             onClose={() => setAppearanceModalOpen(false)}
-            themeId={themeId}
-            onThemeChange={changeTheme}
             fontFamily={fontFamily}
             onFontChange={changeFontFamily}
           />
@@ -417,7 +418,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               spellCheck={false}
               autoComplete="off"
               blurOnSubmit={false}
-              keyboardAppearance="dark"
+              keyboardAppearance={theme.keyboardAppearance}
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
               accessibilityLabel="Terminal input (hidden)"
