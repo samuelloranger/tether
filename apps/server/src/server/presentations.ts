@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import {
   closeSync,
   type FSWatcher,
+  mkdirSync,
   openSync,
   readFileSync,
   realpathSync,
@@ -19,6 +20,7 @@ export interface Presentation {
 }
 
 export function createControlToken(file: string): string {
+  mkdirSync(path.dirname(file), { recursive: true });
   try {
     const fd = openSync(file, 'wx', 0o600);
     const token = randomBytes(24).toString('hex');
