@@ -62,7 +62,7 @@ import {
   reservedNavigationWidth,
   type DesktopNavigationMode,
 } from './desktopNavigation';
-import type { Presentation } from './presentations';
+import { pickAutoSelectPreview, type Presentation } from './presentations';
 
 
 // Constants for async storage keys
@@ -552,7 +552,7 @@ export function useTetherApp() {
         setPresentations(rows);
         return;
       }
-      const newPreview = rows.find((preview) => !seenPresentationIds.current.has(preview.id));
+      const newPreview = pickAutoSelectPreview(rows, seenPresentationIds.current, activeIdRef.current);
       seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
       setPresentations(rows);
       if (newPreview) setActivePresentationId(newPreview.id);
