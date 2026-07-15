@@ -27,6 +27,7 @@ export function SelectionView({
   insets: { top: number; bottom: number };
 }) {
   const scrollRef = useRef<ScrollView>(null);
+  const transcriptRef = useRef<TextInput>(null);
   useEffect(() => {
     if (visible) scrollRef.current?.scrollToEnd({ animated: false });
   }, [visible]);
@@ -61,9 +62,22 @@ export function SelectionView({
         />
         {visible && (
           <ScrollView ref={scrollRef} style={styles.selectionViewScroll} contentContainerStyle={styles.selectionViewScrollContent}>
-            <Text style={styles.selectionViewText} selectable>
-              {text}
-            </Text>
+            <TextInput
+              ref={transcriptRef}
+              style={styles.selectionViewText}
+              value={text}
+              // editable (not editable={false}) is what makes iOS/Android's real
+              // word/phrase drag-handle selection work at all — a non-editable
+              // TextInput only supports a whole-block "Copy" long-press, same as
+              // Text's selectable prop. Suppress the keyboard and snap back any
+              // stray edit so it still behaves as read-only.
+              editable
+              showSoftInputOnFocus={false}
+              caretHidden
+              onChangeText={() => transcriptRef.current?.setNativeProps({ text })}
+              multiline
+              scrollEnabled={false}
+            />
           </ScrollView>
         )}
       </View>
