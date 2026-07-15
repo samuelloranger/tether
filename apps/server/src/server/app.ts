@@ -1,8 +1,11 @@
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { authMiddleware } from './auth';
 import { getAuthHash, getLogs, getSession, listSessions, renameSession, setAuthHash } from './db';
+import { UPLOADS_DIR } from './paths';
 import {
   getDefaultShell,
   killSession,
@@ -98,21 +101,25 @@ app.get('/api/sessions/:id/logs', (c) => {
 });
 
 // Receive an uploaded file (mobile image-picker, iOS/iPadOS drag-drop, desktop
-// drag-drop all funnel through here) and write it into the session's live cwd.
+// drag-drop all funnel through here) and write it into a per-session upload
+// dir under ~/.tether/uploads, not the session's live cwd — keeps uploads out
+// of whatever project the user happens to be working in.
 app.post('/api/sessions/:id/upload', async (c) => {
+  const sessionId = c.req.param('id');
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ ok: false, error: 'invalid form data' }, 400);
   const file = form.get('file');
-  const cwd = form.get('cwd');
   const filenameOverride = form.get('filename');
-  if (!(file instanceof File) || typeof cwd !== 'string' || !cwd) {
-    return c.json({ ok: false, error: 'missing file or cwd' }, 400);
+  if (!(file instanceof File)) {
+    return c.json({ ok: false, error: 'missing file' }, 400);
   }
   const filename =
     typeof filenameOverride === 'string' && filenameOverride ? filenameOverride : file.name;
+  const dir = path.join(UPLOADS_DIR, sessionId);
   let dest: string;
   try {
-    dest = resolveUploadPath(cwd, filename);
+    mkdirSync(dir, { recursive: true });
+    dest = resolveUploadPath(dir, filename);
   } catch (err) {
     return c.json({ ok: false, error: String(err) }, 400);
   }

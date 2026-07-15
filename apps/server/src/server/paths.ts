@@ -6,6 +6,7 @@ import { COMPILED } from './runtime';
 export const STATE_DIR = path.join(homedir(), '.tether');
 export const PID_FILE = path.join(STATE_DIR, 'server.pid');
 export const LOG_FILE = path.join(STATE_DIR, 'server.log');
+export const UPLOADS_DIR = path.join(STATE_DIR, 'uploads');
 
 // Where the SQLite DB lives, and thus the config dir (bashrc + holder sockets):
 //   - TETHER_DB_PATH set  → exactly that (tests, custom deploys)

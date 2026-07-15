@@ -812,10 +812,11 @@ export function useTetherApp() {
     sel.addRange(range);
   };
 
-  // Uploads bytes to the active session's live cwd (server writes
-  // `${cwd}/${filename}`, collision-suffixed), then types the resulting path
-  // into the terminal — shared by the image picker, iOS/iPadOS native
-  // drag-drop, and desktop drag-drop.
+  // Uploads bytes into a per-session upload dir under ~/.tether/uploads on
+  // the server (collision-suffixed, keeps uploads out of whatever project
+  // the user happens to be working in), then types the resulting path into
+  // the terminal — shared by the image picker, iOS/iPadOS native drag-drop,
+  // and desktop drag-drop.
   //
   // Native callers (picker, iOS/iPadOS drag-drop) must pass a {uri, name,
   // type} descriptor, not a Blob, and it's uploaded via expo-file-system's
@@ -832,23 +833,12 @@ export function useTetherApp() {
     file: Blob | { uri: string; name: string; type?: string },
     filename: string,
   ) => {
-    const e = entryFor(activeIdRef.current);
-    const cwd = e.term.cwd;
-    if (!cwd) {
-      void notify(
-        'Upload failed',
-        'No known working directory yet — wait for the next prompt.',
-        'error',
-      );
-      return;
-    }
     const url = `${httpBase(serverIp, port)}/api/sessions/${activeIdRef.current}/upload`;
     try {
       let data: { ok: boolean; path?: string; error?: string };
       if (file instanceof Blob) {
         const form = new FormData();
         form.append('file', file, filename);
-        form.append('cwd', cwd);
         const res = await fetch(url, {
           method: 'POST',
           headers: authHeaders(passwordRef.current),
@@ -858,17 +848,28 @@ export function useTetherApp() {
       } else {
         const { File, Paths, UploadType } = await import('expo-file-system');
         const source = new File(file.uri);
-        const staged = new File(Paths.cache, filename);
-        await source.copy(staged, { overwrite: true });
-        const result = await staged.upload(url, {
-          uploadType: UploadType.MULTIPART,
-          fieldName: 'file',
-          mimeType: file.type,
-          parameters: { cwd },
-          headers: authHeaders(passwordRef.current),
-        });
-        staged.delete();
-        data = JSON.parse(result.body);
+        // Unique per call regardless of the (possibly colliding, possibly
+        // shared-across-a-multi-drop) display filename, so concurrent
+        // uploads never race on the same staged cache file.
+        const staged = new File(Paths.cache, `${Date.now()}-${Math.random().toString(36).slice(2)}-${filename}`);
+        try {
+          await source.copy(staged, { overwrite: true });
+          const result = await staged.upload(url, {
+            uploadType: UploadType.MULTIPART,
+            fieldName: 'file',
+            mimeType: file.type,
+            // The multipart part's own filename is the unique staged name
+            // above (needed to dedupe concurrent uploads) — override it back
+            // to the real display name the server should save under.
+            parameters: { filename },
+            headers: authHeaders(passwordRef.current),
+          });
+          data = JSON.parse(result.body);
+        } finally {
+          try {
+            staged.delete();
+          } catch {}
+        }
       }
       if (!data.ok) throw new Error(data.error || 'upload failed');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
