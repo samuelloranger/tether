@@ -41,7 +41,7 @@ import { notify, confirmAction } from './dialog';
 import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
 import TitleBar from './TitleBar';
 import { injectDragRegionStyles } from './dragRegion';
-import { styles } from './styles';
+import { createStyles } from './styles';
 import { isDesktop, isMacDesktop } from './platform';
 import { TermRow } from './TermRow';
 import { ArrowCluster } from './Dpad';
@@ -84,6 +84,7 @@ export function useTetherApp() {
   const fontsLoaded = fontsReady || !!fontError;
   const insets = useSafeAreaInsets();
   const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
 
   // Connection states
   const [serverIp, setServerIp] = useState('192.168.50.30');
