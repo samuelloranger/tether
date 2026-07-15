@@ -10,6 +10,7 @@ import {
   AccessibilityInfo,
 } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { confirmAction } from './dialog';
 import { isRecentlyActive, PANEL_W } from './desktopNavigation';
 import { useAppTheme } from './AppThemeProvider';
@@ -189,7 +190,9 @@ export function SessionDrawer({
       </Animated.View>
 
       <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
-        {panelBody}
+        <SafeAreaView edges={['top']} style={styles.panelContent}>
+          {panelBody}
+        </SafeAreaView>
       </Animated.View>
     </View>
   );
@@ -203,13 +206,13 @@ const createStyles = (c: AppColors) => StyleSheet.create({
     backgroundColor: c.surface,
     borderRightWidth: 1,
     borderRightColor: c.border,
-    paddingTop: 56,
     paddingHorizontal: 12,
     position: 'absolute',
     left: 0,
     top: 0,
     bottom: 0,
   },
+  panelContent: { flex: 1, paddingTop: 56 },
   // Docked (desktop): inline column, no absolute positioning, tighter top pad
   // (no mobile status bar to clear).
   panelDocked: { position: 'relative', paddingTop: 12, alignSelf: 'stretch' },
