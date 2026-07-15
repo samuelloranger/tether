@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.6.5",
+          "date": "2026-07-15",
+          "localizedDescription": "## What's Changed\n* fix(mobile): make copy-screen text actually selectable by @samuelloranger in https://github.com/samuelloranger/tether/pull/25\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.4...v1.6.5",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.6.5/tether-v1.6.5.ipa",
+          "size": 8381220,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.6.4",
           "date": "2026-07-15",
           "localizedDescription": "## What's Changed\n* fix(mobile): fix copy-screen dismiss/scroll, drop copy-all button by @samuelloranger in https://github.com/samuelloranger/tether/pull/24\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.3...v1.6.4",
