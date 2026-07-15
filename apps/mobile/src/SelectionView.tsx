@@ -1,54 +1,52 @@
-import type { RefObject } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect, useRef, type RefObject } from 'react';
+import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { MONO } from './styles';
 
-// Fullscreen selectable-text view (long-press the terminal to open): filter +
-// copy the displayed transcript. The text is read-only and natively selectable.
+// Fullscreen selectable-text view (long-press the terminal to open): filter the
+// displayed transcript and select/copy it via the OS's native text selection.
 export function SelectionView({
   visible,
   onClose,
-  onCopy,
   searchQuery,
   onSearchChange,
   searchInputRef,
   text,
+  insets,
 }: {
   visible: boolean;
   onClose: () => void;
-  onCopy: () => void;
   searchQuery: string;
   onSearchChange: (t: string) => void;
   searchInputRef: RefObject<TextInput | null>;
   text: string;
+  // Computed outside the Modal and passed in: useSafeAreaInsets() called from
+  // inside a <Modal> resolves against the wrong native view hierarchy on iOS
+  // (a documented react-native-safe-area-context limitation), pinning the
+  // header under the status bar/notch.
+  insets: { top: number; bottom: number };
 }) {
-  const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (visible) scrollRef.current?.scrollToEnd({ animated: false });
+  }, [visible]);
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View
         style={[styles.selectionViewContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
       >
         <View style={styles.selectionViewHeader}>
-          <Text style={styles.selectionViewTitle}>Select text (displayed transcript)</Text>
-          <View style={styles.selectionViewHeaderBtns}>
-            <TouchableOpacity
-              style={styles.selectionViewHeaderBtn}
-              onPress={onCopy}
-              accessibilityRole="button"
-              accessibilityLabel="Copy displayed transcript"
-            >
-              <Text style={styles.selectionViewHeaderBtnText}>Copy displayed transcript</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.selectionViewHeaderBtn}
-              onPress={onClose}
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-            >
-              <Feather name="x" size={20} color="#cbd5e1" />
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.selectionViewTitle} numberOfLines={1} ellipsizeMode="tail">
+            Select text (displayed transcript)
+          </Text>
+          <TouchableOpacity
+            style={styles.selectionViewHeaderBtn}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
+            <Feather name="x" size={20} color="#cbd5e1" />
+          </TouchableOpacity>
         </View>
         <TextInput
           ref={searchInputRef}
@@ -62,7 +60,11 @@ export function SelectionView({
           keyboardAppearance="dark"
         />
         {visible && (
-          <TextInput style={styles.selectionViewText} value={text} editable={false} multiline scrollEnabled />
+          <ScrollView ref={scrollRef} style={styles.selectionViewScroll} contentContainerStyle={styles.selectionViewScrollContent}>
+            <Text style={styles.selectionViewText} selectable>
+              {text}
+            </Text>
+          </ScrollView>
         )}
       </View>
     </Modal>
@@ -84,23 +86,15 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   selectionViewTitle: {
+    flexShrink: 1,
+    marginRight: 12,
     fontSize: 16,
     fontWeight: '700',
     color: '#e2e8f0',
   },
-  selectionViewHeaderBtns: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
   selectionViewHeaderBtn: {
     paddingHorizontal: 4,
     paddingVertical: 4,
-  },
-  selectionViewHeaderBtnText: {
-    color: '#22d3ee',
-    fontWeight: '600',
-    fontSize: 14,
   },
   searchInput: {
     marginHorizontal: 16,
@@ -112,9 +106,13 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontSize: 14,
   },
-  selectionViewText: {
+  selectionViewScroll: {
     flex: 1,
+  },
+  selectionViewScrollContent: {
     padding: 16,
+  },
+  selectionViewText: {
     fontFamily: MONO,
     fontSize: 13,
     lineHeight: 18,
