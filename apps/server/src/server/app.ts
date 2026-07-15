@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
@@ -5,7 +6,8 @@ import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { authMiddleware } from './auth';
 import { getAuthHash, getLogs, getSession, listSessions, renameSession, setAuthHash } from './db';
-import { UPLOADS_DIR } from './paths';
+import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
+import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
 import {
   getDefaultShell,
   killSession,
@@ -18,6 +20,38 @@ import {
 import { resolveUploadPath } from './upload';
 
 const app = new Hono();
+const presentations = new PresentationRegistry();
+export const presentationControlToken = createControlToken(PRESENT_CONTROL_TOKEN_FILE);
+
+function hasControlToken(value: string | undefined): boolean {
+  return (
+    !!value &&
+    value.length === presentationControlToken.length &&
+    timingSafeEqual(Buffer.from(value), Buffer.from(presentationControlToken))
+  );
+}
+
+const PREVIEW_MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css',
+  '.gif': 'image/gif',
+  '.html': 'text/html',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript',
+  '.json': 'application/json',
+  '.mjs': 'text/javascript',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+function previewMime(file: string): string {
+  return PREVIEW_MIME_TYPES[path.extname(file)] || 'application/octet-stream';
+}
 
 // API/WebSocket-only server (mobile client). CORS open for LAN access.
 app.use(
@@ -32,9 +66,57 @@ app.use(
 // Health/root — liveness only, no data. Left open so `tether status` can probe it.
 app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
 
+app.post('/control/presentations', async (c) => {
+  if (!hasControlToken(c.req.header('X-Tether-Present-Control')))
+    return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  if (typeof body.entry !== 'string') return c.json({ error: 'missing entry' }, 400);
+  try {
+    return c.json(
+      presentations.create({
+        entry: body.entry,
+        project: typeof body.project === 'string' ? body.project : undefined,
+        title: typeof body.title === 'string' ? body.title : undefined,
+        sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
+      }),
+    );
+  } catch (error) {
+    return c.json({ error: String(error) }, 400);
+  }
+});
+
+app.post('/control/presentations/reset', async (c) => {
+  if (!hasControlToken(c.req.header('X-Tether-Present-Control')))
+    return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  return c.json({
+    cleared: presentations.reset(typeof body.project === 'string' ? body.project : undefined),
+  });
+});
+
+app.get('/preview/:token/*', (c) => {
+  const preview = presentations.findByToken(c.req.param('token'));
+  if (!preview) return c.notFound();
+  try {
+    const prefix = `/preview/${preview.token}/`;
+    const file = resolvePresentationFile(
+      preview.root,
+      decodeURIComponent(new URL(c.req.url).pathname.slice(prefix.length)),
+    );
+    return new Response(Bun.file(file), {
+      headers: { 'Content-Type': previewMime(file), 'Cache-Control': 'no-store' },
+    });
+  } catch {
+    return c.notFound();
+  }
+});
+
 // Everything under /api/* requires the shared password, EXCEPT the first-run
 // pairing endpoints (/api/status, /api/setup), which the middleware exempts.
 app.use('/api/*', authMiddleware);
+
+app.get('/api/presentations', (c) => c.json(presentations.list()));
+app.delete('/api/presentations/:id', (c) => c.json({ ok: presentations.close(c.req.param('id')) }));
 
 // First-run pairing (unauthenticated): does the server need a password yet?
 app.get('/api/status', (c) => c.json({ needsSetup: getAuthHash() === null }));

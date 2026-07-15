@@ -62,6 +62,7 @@ import {
   reservedNavigationWidth,
   type DesktopNavigationMode,
 } from './desktopNavigation';
+import { pickAutoSelectPreview, type Presentation } from './presentations';
 
 
 // Constants for async storage keys
@@ -154,6 +155,10 @@ export function useTetherApp() {
   const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
+  const [presentations, setPresentations] = useState<Presentation[]>([]);
+  const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
+  const seenPresentationIds = useRef(new Set<string>());
+  const presentationsPrimed = useRef(false);
   const [desktopNavigationMode, setDesktopNavigationMode] = useState<DesktopNavigationMode>(
     DEFAULT_DESKTOP_NAVIGATION_MODE,
   );
@@ -401,6 +406,7 @@ export function useTetherApp() {
 
   const newTerminal = () => {
     const existing = drawerSessions.map((s) => s.id);
+    setActivePresentationId(null);
     switchTo(nextTermId(existing.length ? existing : cache.ids()));
   };
 
@@ -416,7 +422,10 @@ export function useTetherApp() {
     cache.delete(id);
     const remaining = drawerSessions.filter((s) => s.id !== id).map((s) => s.id);
     await refreshSessions();
-    if (id === activeIdRef.current) switchTo(remaining[0] ?? 'term-1');
+    if (id === activeIdRef.current) {
+      setActivePresentationId(null);
+      switchTo(remaining[0] ?? 'term-1');
+    }
   };
 
   // Keep activeIdRef synced when activeId changes (belt-and-suspenders)
@@ -523,14 +532,69 @@ export function useTetherApp() {
     } catch {}
   };
 
-  // Poll the session list every 4s while foregrounded.
+  const refreshPresentations = async () => {
+    try {
+      const res = await fetch(`${httpBase(serverIp, port)}/api/presentations`, {
+        headers: authHeaders(passwordRef.current),
+      });
+      if (res.status === 401) {
+        setConnectionStatus('auth-failed');
+        return;
+      }
+      if (!res.ok) return;
+      const rows = (await res.json()) as Presentation[];
+      // The first successful poll after mount/reconnect just primes the seen
+      // set from whatever's already on the server — it must not treat every
+      // pre-existing preview as newly-created and hijack the active view.
+      if (!presentationsPrimed.current) {
+        presentationsPrimed.current = true;
+        seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
+        setPresentations(rows);
+        return;
+      }
+      const newPreview = pickAutoSelectPreview(rows, seenPresentationIds.current, activeIdRef.current);
+      seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
+      setPresentations(rows);
+      if (newPreview) setActivePresentationId(newPreview.id);
+      else {
+        setActivePresentationId((current) =>
+          current && !rows.some((preview) => preview.id === current) ? null : current,
+        );
+      }
+    } catch {}
+  };
+
+  const selectTerminal = (id: string) => {
+    setActivePresentationId(null);
+    switchTo(id);
+  };
+
+  const selectPresentation = (id: string) => setActivePresentationId(id);
+
+  const closePresentation = async (id: string) => {
+    try {
+      const res = await fetch(`${httpBase(serverIp, port)}/api/presentations/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(passwordRef.current),
+      });
+      if (!res.ok) return;
+      if (activePresentationId === id) setActivePresentationId(null);
+      await refreshPresentations();
+    } catch {}
+  };
+
+  // Poll the session list and presentation metadata every 4s while foregrounded.
   useEffect(() => {
     if (isConfiguring) return;
     let iv: ReturnType<typeof setInterval> | null = null;
     const start = () => {
       if (iv) return;
       refreshSessions();
-      iv = setInterval(refreshSessions, 4000);
+      refreshPresentations();
+      iv = setInterval(() => {
+        refreshSessions();
+        refreshPresentations();
+      }, 4000);
     };
     const stop = () => {
       if (iv) {
@@ -968,7 +1032,7 @@ export function useTetherApp() {
   // normally. Ctrl/Cmd+C copies an active selection or sends SIGINT; Ctrl/Cmd+V
   // pastes from the clipboard.
   useEffect(() => {
-    if (!isDesktop || isConfiguring) return;
+    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
     // True while an IME/dead-key composition is in progress (accented Latin
     // chars like é/ñ/ö on many layouts, or CJK candidate windows). Composition
     // is driven by compositionstart/end, not keydown — forwarding the raw
@@ -1038,14 +1102,14 @@ export function useTetherApp() {
     };
     // sendInput/handlePaste delegate to refs, so a stable listener is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring]);
+  }, [isConfiguring, activePresentationId, presentations]);
 
   // Desktop: when the remote app enables mouse reporting (Claude Code, vim,
   // less…), the FlatList is frozen (scrollEnabled=false), so forward the wheel
   // as SGR mouse-wheel events and the app scrolls its own history. Outside mouse
   // mode we don't intercept, so the list scrolls natively.
   useEffect(() => {
-    if (!isDesktop || isConfiguring) return;
+    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
     let accum = 0;
     const onWheel = (e: WheelEvent) => {
       const el = document.getElementById('tether-terminal');
@@ -1077,7 +1141,7 @@ export function useTetherApp() {
     window.addEventListener('wheel', onWheel, { passive: false });
     return () => window.removeEventListener('wheel', onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring]);
+  }, [isConfiguring, activePresentationId, presentations]);
 
   // Desktop: check for a newer signed build once on launch. If one exists, open
   // the update modal; stay silent on "up to date" or an unreachable feed.
@@ -1146,7 +1210,7 @@ export function useTetherApp() {
 
   // Desktop: right-click the terminal for a Copy / Paste / Select All menu.
   useEffect(() => {
-    if (!isDesktop || isConfiguring) return;
+    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
     const onCtx = (e: MouseEvent) => {
       const el = document.getElementById('tether-terminal');
       if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
@@ -1155,9 +1219,10 @@ export function useTetherApp() {
     };
     document.addEventListener('contextmenu', onCtx);
     return () => document.removeEventListener('contextmenu', onCtx);
-  }, [isConfiguring]);
+  }, [isConfiguring, activePresentationId, presentations]);
 
   const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
+  const activePresentation = presentations.find((preview) => preview.id === activePresentationId) || null;
   // Read live off the mutable emulator field — re-derives every render since
   // entryFor/activeId are already render-time values, no extra state needed.
   const activeBellCount = entryFor(activeId).term.bellCount;
@@ -1300,6 +1365,6 @@ export function useTetherApp() {
 
 
   return {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   };
 }

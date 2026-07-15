@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { LOG_FILE, PID_FILE, STATE_DIR } from './paths';
+import { LOG_FILE, PID_FILE, PRESENT_CONTROL_TOKEN_FILE, STATE_DIR } from './paths';
 import { COMPILED, selfArgv, VERSION } from './runtime';
 
 const PORT = process.env.TETHER_PORT ?? '8085';
@@ -162,6 +162,7 @@ Usage: tether <command>
   restart          Stop then start
   status           Show running state + HTTP health
   logs             Follow the server log (tail -f)
+  present          Open/reset an agent HTML preview or install an agent skill
   set-password     Set the shared access password (required for clients)
   update           Download the latest release binary and restart
   version          Print the version
@@ -196,6 +197,19 @@ switch (cmd) {
   case 'logs':
     logs();
     break;
+  case 'present': {
+    const { parsePresentArgs, runPresent } = await import('./presentCli');
+    try {
+      await runPresent(parsePresentArgs(process.argv.slice(3)), {
+        port: PORT,
+        tokenFile: PRESENT_CONTROL_TOKEN_FILE,
+      });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    }
+    break;
+  }
   case 'set-password':
     await setPassword();
     break;

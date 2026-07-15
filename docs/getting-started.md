@@ -42,3 +42,28 @@ The password controls *access*, not encryption. For encrypted transport, run Tet
 :::
 
 Once connected, see [Terminal basics](/terminal/basics).
+
+## Show an agent preview
+
+Codex CLI and Claude Code can show a generated HTML/CSS/JavaScript preview directly in Tether — on desktop and iOS. Install the optional skill once for the CLI you use:
+
+```sh
+tether present agent-install          # every detected CLI
+tether present agent-install codex    # Codex CLI only
+tether present agent-install claude   # Claude Code only
+```
+
+An agent can then create a preview directory and open its entry file:
+
+```sh
+tether present ./preview/index.html --project creneau --title "New feature"
+```
+
+The preview appears beside terminals in the workspace navigator. Tether watches its directory and reloads it automatically after changes. Preview URLs are capability-scoped and can only serve files below that preview directory; previews are ephemeral and are cleared when Tether restarts.
+
+Clear generated previews when the work is accepted or abandoned:
+
+```sh
+tether present reset             # every preview
+tether present reset creneau     # one project
+```
