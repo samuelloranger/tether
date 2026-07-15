@@ -1,4 +1,5 @@
 import { computeLinkSpans, type LinkSpan } from './links';
+import { APP_THEMES } from './appTheme';
 
 // A compact VT100/xterm terminal emulator: consumes the raw PTY byte stream and
 // maintains a screen grid + scrollback so cursor-addressed output (prompts,
@@ -44,19 +45,15 @@ export interface RenderRow {
   promptStart: boolean;
 }
 
-let DEFAULT_FG = '#cbd5e1';
-let DEFAULT_BG = '#05070e';
+let DEFAULT_FG = APP_THEMES.mocha.terminal.fg;
+let DEFAULT_BG = APP_THEMES.mocha.terminal.bg;
 const MAX_SCROLLBACK = 1000;
 
-// Standard 16-color terminal palette (VS Code integrated-terminal values),
-// extended to xterm-256. Using conventional colors so themed TUIs look correct.
-// Mutable: setTheme() below replaces BASE_16/PALETTE/DEFAULT_FG/DEFAULT_BG at
+// The default Catppuccin Mocha ANSI palette, extended to xterm-256. Mutable:
+// setTheme() below replaces BASE_16/PALETTE/DEFAULT_FG/DEFAULT_BG at
 // runtime so an active session re-colors on its next repaint without needing a
 // fresh TerminalEmulator instance.
-let BASE_16 = [
-  '#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
-  '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
-];
+let BASE_16 = [...APP_THEMES.mocha.terminal.base16];
 
 function buildPalette(): string[] {
   const pal = [...BASE_16];
@@ -75,7 +72,7 @@ function buildPalette(): string[] {
 let PALETTE = buildPalette();
 
 export interface Theme {
-  base16: string[]; // exactly 16 hex colors, same order as the old BASE_16
+  base16: string[]; // exactly 16 ANSI colors
   fg: string;
   bg: string;
 }
