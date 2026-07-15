@@ -25,7 +25,7 @@ export function parseDarkFlavor(value: string | null): DarkFlavor {
 
 export function resolveFlavor(
   preference: ThemePreference,
-  scheme: 'light' | 'dark' | null | undefined,
+  scheme: 'light' | 'dark' | 'unspecified' | null | undefined,
   systemDarkFlavor: DarkFlavor = DEFAULT_SYSTEM_DARK_FLAVOR,
 ): ResolvedFlavor {
   return preference === 'system' ? (scheme === 'light' ? 'latte' : systemDarkFlavor) : preference;
