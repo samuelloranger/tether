@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "tether",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#05070e",
     "ios": {
       "supportsTablet": true,
