@@ -21,7 +21,7 @@
           "date": "2026-07-15",
           "localizedDescription": "## What's Changed\n* fix(mobile): fix image upload from picker and native drag-drop by @samuelloranger in https://github.com/samuelloranger/tether/pull/26\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.5...v1.6.6",
           "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.6.6/tether-v1.6.6.ipa",
-          "size": 8401941,
+          "size": 8442136,
           "minOSVersion": "15.1"
         },
         {
