@@ -3,7 +3,9 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import Feather from '@expo/vector-icons/Feather';
 import { confirmAction } from './dialog';
 import type { DrawerSession } from './SessionDrawer';
-import { PANEL_W, sessionDotColor, type DesktopNavigationMode } from './desktopNavigation';
+import { PANEL_W, sessionActivity, type DesktopNavigationMode } from './desktopNavigation';
+import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 
 export interface DesktopSessionNavigatorProps {
   mode: DesktopNavigationMode;
@@ -28,11 +30,13 @@ function confirmKill(id: string, onKill: (id: string) => void) {
 }
 
 function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings }: Omit<DesktopSessionNavigatorProps, 'mode'>) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   return (
     <View style={styles.panel}>
       <View style={styles.header}>
         <View style={styles.headerTitle}>
-          <Feather name="terminal" size={14} color="#818cf8" />
+          <Feather name="terminal" size={14} color={theme.colors.accent} />
           <Text style={styles.title}>Terminals</Text>
         </View>
         <TouchableOpacity
@@ -43,7 +47,7 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
           accessibilityRole="button"
           accessibilityLabel="Settings"
         >
-          <Feather name="settings" size={15} color="#94a3b8" />
+          <Feather name="settings" size={15} color={theme.colors.textMuted} />
         </TouchableOpacity>
       </View>
 
@@ -61,7 +65,7 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={`Terminal ${label}`}
               >
-                <View style={[styles.dot, { backgroundColor: sessionDotColor(session, active) }]} />
+                <View style={[styles.dot, { backgroundColor: sessionActivity(session, active) === 'live' ? theme.colors.success : sessionActivity(session, active) === 'stopped' ? theme.colors.textFaint : theme.colors.border }]} />
                 <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
                   {label}
                 </Text>
@@ -75,7 +79,7 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
                 accessibilityRole="button"
                 accessibilityLabel={`Kill terminal ${label}`}
               >
-                <Feather name="x" size={16} color="#f87171" />
+                <Feather name="x" size={16} color={theme.colors.danger} />
               </TouchableOpacity>
             </View>
           );
@@ -89,7 +93,7 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
         accessibilityRole="button"
         accessibilityLabel="New terminal"
       >
-        <Feather name="plus" size={16} color="#fff" />
+        <Feather name="plus" size={16} color={theme.colors.accentText} />
         <Text style={styles.newButtonText}>New terminal</Text>
       </TouchableOpacity>
     </View>
@@ -97,6 +101,8 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, onSettings 
 }
 
 export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, onNew, onKill, onSettings }: DesktopSessionNavigatorProps) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   const [hoverOpen, setHoverOpen] = useState(false);
   const panelProps = { sessions, activeId, onSelect, onNew, onKill, onSettings };
   // react-native-web forwards these DOM hover handlers, but Expo's View type omits them.
@@ -136,7 +142,7 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
               accessibilityState={{ selected: active }}
               accessibilityLabel={`Terminal ${label}`}
             >
-              <View style={[styles.dot, { backgroundColor: sessionDotColor(session, active) }]} />
+              <View style={[styles.dot, { backgroundColor: sessionActivity(session, active) === 'live' ? theme.colors.success : sessionActivity(session, active) === 'stopped' ? theme.colors.textFaint : theme.colors.border }]} />
               <Text style={styles.tabText} numberOfLines={1}>{label}</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -147,7 +153,7 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
               accessibilityRole="button"
               accessibilityLabel={`Kill terminal ${label}`}
             >
-              <Feather name="x" size={14} color="#94a3b8" />
+              <Feather name="x" size={14} color={theme.colors.textMuted} />
             </TouchableOpacity>
           </View>
         );
@@ -156,32 +162,32 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: AppColors) => StyleSheet.create({
   sidebar: { width: PANEL_W, flexShrink: 0 },
-  panel: { flex: 1, backgroundColor: '#0b0f19', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.08)' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)' },
+  panel: { flex: 1, backgroundColor: c.surface, borderRightWidth: 1, borderRightColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.border },
   headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  title: { color: '#cbd5e1', fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase' },
+  title: { color: c.text, fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase' },
   settings: { padding: 3 },
   list: { flex: 1, paddingVertical: 6 },
   row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 6, borderRadius: 6 },
-  rowActive: { backgroundColor: 'rgba(99,102,241,0.16)' },
+  rowActive: { backgroundColor: c.selected },
   rowMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingLeft: 9 },
   dot: { width: 7, height: 7, borderRadius: 999 },
-  name: { flex: 1, minWidth: 0, color: '#94a3b8', fontSize: 13 },
-  nameActive: { color: '#e2e8f0', fontWeight: '600' },
-  stopped: { color: '#64748b', fontSize: 10, marginRight: 4 },
+  name: { flex: 1, minWidth: 0, color: c.textMuted, fontSize: 13 },
+  nameActive: { color: c.text, fontWeight: '600' },
+  stopped: { color: c.textFaint, fontSize: 10, marginRight: 4 },
   kill: { padding: 7 },
-  newButton: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, margin: 12, paddingVertical: 10, borderRadius: 7, backgroundColor: '#4f46e5' },
-  newButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  newButton: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, margin: 12, paddingVertical: 10, borderRadius: 7, backgroundColor: c.accent },
+  newButtonText: { color: c.accentText, fontSize: 13, fontWeight: '700' },
   hoverRegion: { position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 2 },
   hoverTarget: { width: 12, flex: 1 },
-  hoverPanel: { position: 'absolute', top: 0, bottom: 0, left: 0, width: PANEL_W, shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 },
-  tabs: { flexGrow: 0, backgroundColor: '#0b0f19', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  hoverPanel: { position: 'absolute', top: 0, bottom: 0, left: 0, width: PANEL_W, shadowColor: c.overlay, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 },
+  tabs: { flexGrow: 0, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border },
   tabsContent: { paddingHorizontal: 8 },
   tab: { flexDirection: 'row', alignItems: 'center', maxWidth: 220, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: '#818cf8', backgroundColor: 'rgba(99,102,241,0.1)' },
+  tabActive: { borderBottomColor: c.accent, backgroundColor: c.selected },
   tabMain: { flexDirection: 'row', alignItems: 'center', gap: 7, minWidth: 0, paddingLeft: 12, paddingVertical: 10 },
-  tabText: { color: '#cbd5e1', fontSize: 12, fontWeight: '600', maxWidth: 150 },
+  tabText: { color: c.text, fontSize: 12, fontWeight: '600', maxWidth: 150 },
   tabKill: { padding: 8 },
 });

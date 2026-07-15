@@ -12,6 +12,8 @@ import {
 import Feather from '@expo/vector-icons/Feather';
 import { confirmAction } from './dialog';
 import { isRecentlyActive, PANEL_W } from './desktopNavigation';
+import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 
 export interface DrawerSession {
   id: string;
@@ -60,6 +62,8 @@ export function SessionDrawer({
   onSettings,
   docked = false,
 }: SessionDrawerProps) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   const [mounted, setMounted] = useState(visible);
   const reduceMotion = useRef(false);
   const tx = useRef(new Animated.Value(visible ? 0 : -PANEL_W)).current;
@@ -104,7 +108,7 @@ export function SessionDrawer({
   const panelBody = (
     <>
       <View style={styles.header}>
-          <Feather name="terminal" size={14} color="#818cf8" />
+          <Feather name="terminal" size={14} color={theme.colors.accent} />
           <Text style={styles.title}>Terminals</Text>
           <TouchableOpacity
             style={styles.settingsBtn}
@@ -114,7 +118,7 @@ export function SessionDrawer({
             accessibilityRole="button"
             accessibilityLabel="Settings"
           >
-            <Feather name="settings" size={15} color="#94a3b8" />
+            <Feather name="settings" size={15} color={theme.colors.textMuted} />
           </TouchableOpacity>
         </View>
 
@@ -122,7 +126,7 @@ export function SessionDrawer({
           {sessions.map((s) => {
             const active = s.id === activeId;
             const live = active || isRecentlyActive(s.last_output_at);
-            const dotColor = s.status === 'stopped' ? '#64748b' : live ? '#22c55e' : '#334155';
+            const dotColor = s.status === 'stopped' ? theme.colors.textFaint : live ? theme.colors.success : theme.colors.border;
             return (
               <View key={s.id} style={[styles.row, active && styles.rowActive]}>
                 <TouchableOpacity
@@ -145,7 +149,7 @@ export function SessionDrawer({
                   accessibilityRole="button"
                   accessibilityLabel={`Kill terminal ${s.id}`}
                 >
-                  <Feather name="x" size={16} color="#f87171" />
+                  <Feather name="x" size={16} color={theme.colors.danger} />
                 </TouchableOpacity>
               </View>
             );
@@ -159,7 +163,7 @@ export function SessionDrawer({
           accessibilityRole="button"
           accessibilityLabel="New terminal"
         >
-          <Feather name="plus" size={16} color="#fff" />
+          <Feather name="plus" size={16} color={theme.colors.accentText} />
           <Text style={styles.newBtnText}>New terminal</Text>
         </TouchableOpacity>
     </>
@@ -191,14 +195,14 @@ export function SessionDrawer({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: AppColors) => StyleSheet.create({
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-  scrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  scrim: { flex: 1, backgroundColor: c.overlay },
   panel: {
     width: PANEL_W,
-    backgroundColor: '#0b0f19',
+    backgroundColor: c.surface,
     borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.1)',
+    borderRightColor: c.border,
     paddingTop: 56,
     paddingHorizontal: 12,
     position: 'absolute',
@@ -212,7 +216,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   settingsBtn: { marginLeft: 'auto', padding: 4 },
   title: {
-    color: '#94a3b8',
+    color: c.textMuted,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -225,14 +229,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 4,
     minHeight: 44,
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    backgroundColor: c.surfaceRaised,
   },
-  rowActive: { backgroundColor: 'rgba(99,102,241,0.15)' },
+  rowActive: { backgroundColor: c.selected },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 11 },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
-  name: { color: '#cbd5e1', fontFamily: 'Courier', fontSize: 13 },
-  nameActive: { color: '#818cf8', fontWeight: '700' },
-  stopped: { color: '#64748b', fontSize: 10, marginLeft: 8 },
+  name: { color: c.text, fontFamily: 'Courier', fontSize: 13 },
+  nameActive: { color: c.accent, fontWeight: '700' },
+  stopped: { color: c.textFaint, fontSize: 10, marginLeft: 8 },
   kill: { paddingHorizontal: 12, paddingVertical: 11, alignItems: 'center', justifyContent: 'center' },
   newBtn: {
     flexDirection: 'row',
@@ -242,7 +246,7 @@ const styles = StyleSheet.create({
     marginVertical: 12,
     paddingVertical: 13,
     borderRadius: 8,
-    backgroundColor: '#3730a3',
+    backgroundColor: c.accent,
   },
-  newBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  newBtnText: { color: c.accentText, fontWeight: '600', fontSize: 13 },
 });

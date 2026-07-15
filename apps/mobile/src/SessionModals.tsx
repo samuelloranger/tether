@@ -4,6 +4,14 @@ import { MONO } from './styles';
 import { THEME_OPTIONS } from './appTheme';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+
+const THEME_LABELS = {
+  system: 'System',
+  latte: 'Latte',
+  frappe: 'Frappé',
+  macchiato: 'Macchiato',
+  mocha: 'Mocha',
+} as const;
 import { isDesktop } from './platform';
 
 const FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
@@ -153,7 +161,7 @@ export function AppearanceModal({
               ]}
               onPress={() => setPreference(id)}
             >
-              <Text style={styles.renameBtnText}>{id[0].toUpperCase() + id.slice(1)}</Text>
+              <Text style={styles.renameBtnText}>{THEME_LABELS[id]}</Text>
               {id === preference && <Feather name="check" size={16} color={theme.colors.info} />}
             </TouchableOpacity>
           ))}

@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { titlebarChrome } from './titlebarChrome';
+import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 import { DRAG_PROPS, NO_DRAG_PROPS } from './dragRegion';
 import {
   minimizeWindow,
@@ -31,7 +33,8 @@ export interface TitleBarProps {
 
 const HIT = { top: 8, bottom: 8, left: 6, right: 6 };
 
-function StatusBadge({ status }: { status: TitleBarProps['status'] }) {
+function StatusBadge({ status, colors }: { status: TitleBarProps['status']; colors: AppColors }) {
+  const styles = createStyles(colors);
   if (status === 'connected') {
     return (
       <View style={[styles.badge, styles.badgeOk]}>
@@ -43,7 +46,7 @@ function StatusBadge({ status }: { status: TitleBarProps['status'] }) {
   if (status === 'connecting') {
     return (
       <View style={[styles.badge, styles.badgeWarn]}>
-        <ActivityIndicator size={8} color="#fbbf24" style={{ marginRight: 5 }} />
+        <ActivityIndicator size={8} color={colors.warning} style={{ marginRight: 5 }} />
         <Text style={styles.badgeTextWarn}>Connecting…</Text>
       </View>
     );
@@ -66,6 +69,8 @@ export default function TitleBar({
   onSettings,
   onMenu,
 }: TitleBarProps) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   const [maximized, setMaximized] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const { showControls, leftInset } = titlebarChrome(isMac, fullscreen);
@@ -106,7 +111,7 @@ export default function TitleBar({
       </View>
 
       <View style={styles.actions}>
-        {status ? <StatusBadge status={status} /> : null}
+        {status ? <StatusBadge status={status} colors={theme.colors} /> : null}
 
         {onNew ? (
           <TouchableOpacity
@@ -118,7 +123,7 @@ export default function TitleBar({
             accessibilityRole="button"
             accessibilityLabel="New terminal"
           >
-            <Feather name="plus" size={19} color="#cbd5e1" />
+            <Feather name="plus" size={19} color={theme.colors.text} />
           </TouchableOpacity>
         ) : null}
 
@@ -132,7 +137,7 @@ export default function TitleBar({
             accessibilityRole="button"
             accessibilityLabel="Settings"
           >
-            <Feather name="settings" size={18} color="#cbd5e1" />
+            <Feather name="settings" size={18} color={theme.colors.text} />
           </TouchableOpacity>
         ) : null}
 
@@ -146,7 +151,7 @@ export default function TitleBar({
             accessibilityRole="button"
             accessibilityLabel="Terminal menu"
           >
-            <Feather name="more-vertical" size={19} color="#cbd5e1" />
+            <Feather name="more-vertical" size={19} color={theme.colors.text} />
           </TouchableOpacity>
         ) : null}
 
@@ -160,7 +165,7 @@ export default function TitleBar({
               accessibilityRole="button"
               accessibilityLabel="Minimize"
             >
-              <Feather name="minus" size={18} color="#cbd5e1" />
+              <Feather name="minus" size={18} color={theme.colors.text} />
             </TouchableOpacity>
             <TouchableOpacity
               {...NO_DRAG_PROPS}
@@ -170,7 +175,7 @@ export default function TitleBar({
               accessibilityRole="button"
               accessibilityLabel={maximized ? 'Restore' : 'Maximize'}
             >
-              <Feather name={maximized ? 'copy' : 'square'} size={15} color="#cbd5e1" />
+              <Feather name={maximized ? 'copy' : 'square'} size={15} color={theme.colors.text} />
             </TouchableOpacity>
             <TouchableOpacity
               {...NO_DRAG_PROPS}
@@ -180,7 +185,7 @@ export default function TitleBar({
               accessibilityRole="button"
               accessibilityLabel="Close"
             >
-              <Feather name="x" size={18} color="#cbd5e1" />
+              <Feather name="x" size={18} color={theme.colors.text} />
             </TouchableOpacity>
           </View>
         )}
@@ -189,19 +194,19 @@ export default function TitleBar({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: AppColors) => StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
     height: 40,
     paddingLeft: 12,
-    backgroundColor: '#0b0f19',
+    backgroundColor: c.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: c.border,
   },
   info: { flex: 1, minWidth: 0 },
-  title: { color: '#e2e8f0', fontSize: 13, fontWeight: '600' },
-  subtitle: { color: '#64748b', fontSize: 11 },
+  title: { color: c.text, fontSize: 13, fontWeight: '600' },
+  subtitle: { color: c.textFaint, fontSize: 11 },
   actions: { flexDirection: 'row', alignItems: 'center' },
   btn: { paddingHorizontal: 8, paddingVertical: 6 },
   badge: {
@@ -212,15 +217,15 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     marginRight: 4,
   },
-  badgeOk: { backgroundColor: 'rgba(34,197,94,0.12)' },
-  badgeWarn: { backgroundColor: 'rgba(251,191,36,0.12)' },
-  badgeOff: { backgroundColor: 'rgba(148,163,184,0.12)' },
+  badgeOk: { backgroundColor: c.surfaceRaised },
+  badgeWarn: { backgroundColor: c.surfaceRaised },
+  badgeOff: { backgroundColor: c.surfaceRaised },
   dot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
-  dotOk: { backgroundColor: '#22c55e' },
-  dotOff: { backgroundColor: '#94a3b8' },
-  badgeTextOk: { color: '#22c55e', fontSize: 11, fontWeight: '600' },
-  badgeTextWarn: { color: '#fbbf24', fontSize: 11, fontWeight: '600' },
-  badgeTextOff: { color: '#94a3b8', fontSize: 11, fontWeight: '600' },
+  dotOk: { backgroundColor: c.success },
+  dotOff: { backgroundColor: c.textMuted },
+  badgeTextOk: { color: c.success, fontSize: 11, fontWeight: '600' },
+  badgeTextWarn: { color: c.warning, fontSize: 11, fontWeight: '600' },
+  badgeTextOff: { color: c.textMuted, fontSize: 11, fontWeight: '600' },
   winControls: { flexDirection: 'row', alignItems: 'center', marginLeft: 6 },
   winBtn: {
     width: 40,
