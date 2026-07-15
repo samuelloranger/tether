@@ -31,6 +31,19 @@ export function resolveFlavor(
   return preference === 'system' ? (scheme === 'light' ? 'latte' : systemDarkFlavor) : preference;
 }
 
+export function selectThemePreference(
+  _preference: ThemePreference,
+  systemDarkFlavor: DarkFlavor,
+  next: ThemePreference,
+) {
+  return {
+    preference: next,
+    systemDarkFlavor: next === 'frappe' || next === 'macchiato' || next === 'mocha'
+      ? next
+      : systemDarkFlavor,
+  };
+}
+
 export interface AppColors {
   background: string;
   surface: string;
