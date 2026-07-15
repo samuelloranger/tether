@@ -433,16 +433,6 @@ export function useTetherApp() {
     activeIdRef.current = activeId;
   }, [activeId]);
 
-  // Load persisted font size once on mount.
-  useEffect(() => {
-    AsyncStorage.getItem(KEY_FONT)
-      .then((v) => {
-        const n = Number(v);
-        if (Number.isFinite(n) && n >= 8 && n <= 24) setFontSize(n);
-      })
-      .catch(() => {});
-  }, []);
-
   const changeFontSize = (delta: number) => {
     setFontSize((prev) => {
       const next = Math.min(24, Math.max(8, prev + delta));
@@ -621,11 +611,12 @@ export function useTetherApp() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const [savedIp, savedPort, savedSession, savedPw] = await Promise.all([
+        const [savedIp, savedPort, savedSession, savedPw, savedFont] = await Promise.all([
           AsyncStorage.getItem(KEY_SERVER_IP),
           AsyncStorage.getItem(KEY_PORT),
           AsyncStorage.getItem(KEY_SESSION_ID),
           getPassword(),
+          AsyncStorage.getItem(KEY_FONT).catch(() => null),
         ]);
 
         if (savedIp) setServerIp(savedIp);
@@ -638,6 +629,8 @@ export function useTetherApp() {
           setPassword(savedPw);
           passwordRef.current = savedPw;
         }
+        const fontSize = Number(savedFont);
+        if (Number.isFinite(fontSize) && fontSize >= 8 && fontSize <= 24) setFontSize(fontSize);
         // Auto-connect only when BOTH an address AND a password are stored. An
         // upgrading user with an address but no password stays on setup to enter
         // the now-required password (migration path).
