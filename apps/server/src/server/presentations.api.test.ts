@@ -48,3 +48,33 @@ test('opens a scoped preview through local control and serves its assets by capa
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('associates a preview with the sessionId it was opened with', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'tether-preview-session-'));
+  try {
+    const entry = path.join(root, 'index.html');
+    writeFileSync(entry, 'ok');
+
+    const opened = await app.request('/control/presentations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tether-Present-Control': presentationControlToken,
+      },
+      body: JSON.stringify({ entry, project: 'sessioned', sessionId: 'term-3' }),
+    });
+    const preview = (await opened.json()) as { sessionId?: string };
+    expect(preview.sessionId).toBe('term-3');
+
+    await app.request('/control/presentations/reset', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tether-Present-Control': presentationControlToken,
+      },
+      body: JSON.stringify({ project: 'sessioned' }),
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

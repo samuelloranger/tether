@@ -77,6 +77,7 @@ app.post('/control/presentations', async (c) => {
         entry: body.entry,
         project: typeof body.project === 'string' ? body.project : undefined,
         title: typeof body.title === 'string' ? body.title : undefined,
+        sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
       }),
     );
   } catch (error) {
