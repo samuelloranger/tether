@@ -34,6 +34,7 @@ describe('app theme preference', () => {
     expect(APP_THEMES.mocha.keyboardAppearance).toBe('dark');
     expect(APP_THEMES.latte.colors.background).toBe('#eff1f5');
     expect(APP_THEMES.mocha.colors.background).toBe('#1e1e2e');
+    expect(APP_THEMES.mocha.colors.overlay).toBe('#11111b99');
     expect(APP_THEMES.frappe.terminal.base16).toHaveLength(16);
     expect(APP_THEMES.macchiato.terminal.fg).toBe('#cad3f5');
   });

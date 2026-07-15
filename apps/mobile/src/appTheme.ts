@@ -90,7 +90,7 @@ function createTheme(flavor: ResolvedFlavor): AppTheme {
       textMuted: p.subtext0,
       textFaint: p.overlay0,
       border: p.surface1,
-      overlay: '#0000008c',
+      overlay: `${p.crust}99`,
       selected: p.surface1,
       accent: p.mauve,
       accentText: p.base,
