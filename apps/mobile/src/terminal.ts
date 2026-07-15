@@ -288,6 +288,12 @@ export class TerminalEmulator {
   }
 
   private fitLine(line: Cell[], cols: number): Cell[] {
+    // Return the SAME array when it already fits: resize() maps this over
+    // every on-screen row on ANY resize (e.g. rows-only changes from the
+    // keyboard showing/hiding), and wrappedLines/promptRows are WeakSets
+    // keyed on row identity — a needless copy here silently orphans those
+    // flags, breaking wrapped-link reconstruction and jump-to-prompt nav.
+    if (line.length === cols) return line;
     const out = line.slice(0, cols);
     while (out.length < cols) out.push(blankCell());
     return out;
