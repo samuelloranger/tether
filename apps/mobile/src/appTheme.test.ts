@@ -23,6 +23,7 @@ describe('app theme preference', () => {
     expect(resolveFlavor('system', 'light')).toBe('latte');
     expect(resolveFlavor('system', 'dark', 'frappe')).toBe('frappe');
     expect(resolveFlavor('system', null, 'macchiato')).toBe('macchiato');
+    expect(resolveFlavor('system', 'unspecified', 'frappe')).toBe('frappe');
     expect(resolveFlavor('frappe', 'light', 'mocha')).toBe('frappe');
     expect(parseDarkFlavor('latte')).toBe(DEFAULT_SYSTEM_DARK_FLAVOR);
     expect(parseDarkFlavor('mocha')).toBe('mocha');

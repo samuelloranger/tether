@@ -1,7 +1,8 @@
 import { Modal, Pressable, View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { MONO } from './styles';
-import { THEME_IDS } from './themes';
+import { THEME_OPTIONS } from './appTheme';
+import { useAppTheme } from './AppThemeProvider';
 import { isDesktop } from './platform';
 
 const FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
@@ -123,34 +124,31 @@ export function SnippetsModal({
 export function AppearanceModal({
   visible,
   onClose,
-  themeId,
-  onThemeChange,
   fontFamily,
   onFontChange,
 }: {
   visible: boolean;
   onClose: () => void;
-  themeId: string;
-  onThemeChange: (id: string) => void;
   fontFamily: string;
   onFontChange: (fontFamily: string) => void;
 }) {
+  const { preference, setPreference } = useAppTheme();
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.menuBackdrop} onPress={onClose}>
         <Pressable style={styles.renamePanel} onPress={() => {}}>
           <Text style={styles.renameTitle}>Appearance</Text>
-          {THEME_IDS.map((id) => (
+          {THEME_OPTIONS.map((id) => (
             <TouchableOpacity
               key={id}
               style={[
                 styles.renameBtn,
                 { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
               ]}
-              onPress={() => onThemeChange(id)}
+              onPress={() => setPreference(id)}
             >
-              <Text style={styles.renameBtnText}>{id}</Text>
-              {id === themeId && <Feather name="check" size={16} color="#22d3ee" />}
+              <Text style={styles.renameBtnText}>{id[0].toUpperCase() + id.slice(1)}</Text>
+              {id === preference && <Feather name="check" size={16} color="#22d3ee" />}
             </TouchableOpacity>
           ))}
           {isDesktop && (
