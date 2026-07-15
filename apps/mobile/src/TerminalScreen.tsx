@@ -18,7 +18,7 @@ import {
   AccessibilityInfo,
   type TextStyle,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -179,63 +179,63 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           )}
 
           <View style={styles.terminalMain}>
-          {/* Mobile header panel */}
-          {!isDesktop && (
-          <View style={styles.header}>
+            {/* Mobile header panel */}
             {!isDesktop && (
-              <TouchableOpacity
-                style={styles.headerBtn}
-                activeOpacity={0.6}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => { Keyboard.dismiss(); refreshSessions(); setDrawerOpen(true); }}
-                accessibilityRole="button"
-                accessibilityLabel="Open terminal list"
-              >
-                <Feather name="menu" size={20} color={theme.colors.text} />
-              </TouchableOpacity>
+              <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.surface }}>
+                <View style={styles.header}>
+                  <TouchableOpacity
+                    style={styles.headerBtn}
+                    activeOpacity={0.6}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    onPress={() => { Keyboard.dismiss(); refreshSessions(); setDrawerOpen(true); }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open terminal list"
+                  >
+                    <Feather name="menu" size={20} color={theme.colors.text} />
+                  </TouchableOpacity>
+
+                  <View style={styles.headerInfo}>
+                    <Text style={styles.headerTitle}>{activeName}</Text>
+                    <Text style={styles.headerSubtitle}>{serverIp}:{port}</Text>
+                  </View>
+
+                  <View style={styles.headerControls}>
+                    {connectionStatus === 'connected' ? (
+                      <View style={[styles.statusBadge, styles.badgeConnected]}>
+                        <View style={[styles.badgeDot, styles.dotConnected]} />
+                        <Text style={styles.badgeTextConnected}>Connected</Text>
+                      </View>
+                    ) : connectionStatus === 'auth-failed' ? (
+                      <View style={[styles.statusBadge, styles.badgeOffline]}>
+                        <View style={[styles.badgeDot, styles.dotOffline]} />
+                        <Text style={styles.badgeTextOffline}>Auth</Text>
+                      </View>
+                    ) : connectionStatus === 'connecting' ? (
+                      <View style={[styles.statusBadge, styles.badgeConnecting]}>
+                        <ActivityIndicator size={8} color={theme.colors.warning} style={styles.spinIcon} />
+                        <Text style={styles.badgeTextConnecting}>Connecting…</Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.statusBadge, styles.badgeOffline]}>
+                        <View style={[styles.badgeDot, styles.dotOffline]} />
+                        <Text style={styles.badgeTextOffline}>Offline</Text>
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.headerBtn}
+                      activeOpacity={0.6}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      onPress={() => setMenuOpen(true)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Terminal menu"
+                    >
+                      <Feather name="more-vertical" size={19} color={theme.colors.text} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </SafeAreaView>
             )}
-
-            <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>{activeName}</Text>
-              <Text style={styles.headerSubtitle}>{serverIp}:{port}</Text>
-            </View>
-
-            <View style={styles.headerControls}>
-              {connectionStatus === 'connected' ? (
-                <View style={[styles.statusBadge, styles.badgeConnected]}>
-                  <View style={[styles.badgeDot, styles.dotConnected]} />
-                  <Text style={styles.badgeTextConnected}>Connected</Text>
-                </View>
-              ) : connectionStatus === 'auth-failed' ? (
-                <View style={[styles.statusBadge, styles.badgeOffline]}>
-                  <View style={[styles.badgeDot, styles.dotOffline]} />
-                  <Text style={styles.badgeTextOffline}>Auth</Text>
-                </View>
-              ) : connectionStatus === 'connecting' ? (
-                <View style={[styles.statusBadge, styles.badgeConnecting]}>
-                  <ActivityIndicator size={8} color={theme.colors.warning} style={styles.spinIcon} />
-                  <Text style={styles.badgeTextConnecting}>Connecting…</Text>
-                </View>
-              ) : (
-                <View style={[styles.statusBadge, styles.badgeOffline]}>
-                  <View style={[styles.badgeDot, styles.dotOffline]} />
-                  <Text style={styles.badgeTextOffline}>Offline</Text>
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={styles.headerBtn}
-                activeOpacity={0.6}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                onPress={() => setMenuOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Terminal menu"
-              >
-                <Feather name="more-vertical" size={19} color={theme.colors.text} />
-              </TouchableOpacity>
-            </View>
-          </View>
-          )}
 
           {/* Connection banner — names the real state; no safety overclaim. */}
           <ConnectionBanner
