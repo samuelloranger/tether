@@ -39,7 +39,8 @@ import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from
 import TitleBar from './TitleBar';
 import { DragDropContentView } from 'expo-drag-drop-content-view';
 import { injectDragRegionStyles } from './dragRegion';
-import { styles } from './styles';
+import { createStyles } from './styles';
+import { useAppTheme } from './AppThemeProvider';
 import { isDesktop, isMacDesktop } from './platform';
 import { TermRow } from './TermRow';
 import { ArrowCluster } from './Dpad';
@@ -66,6 +67,8 @@ const KEY_SNIPPETS = 'tether_snippets';
 import { useTetherApp } from './useTetherApp';
 
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const {
     fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   } = app;

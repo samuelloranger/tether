@@ -52,4 +52,5 @@ describe('app theme preference', () => {
       systemDarkFlavor: 'macchiato',
     });
   });
+
 });

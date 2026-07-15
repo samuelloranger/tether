@@ -1,7 +1,8 @@
 import { KeyboardAvoidingView, View, Text, TextInput, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import TitleBar from './TitleBar';
 import { isDesktop, isMacDesktop } from './platform';
-import { styles as shared, MONO } from './styles';
+import { createStyles, MONO } from './styles';
+import { useAppTheme } from './AppThemeProvider';
 
 export type SetupMode = 'unknown' | 'create' | 'enter';
 export type TestStatus =
@@ -44,6 +45,8 @@ export function ConfigScreen({
   onSave: () => void;
   onTest: () => void;
 }) {
+  const { theme } = useAppTheme();
+  const shared = createStyles(theme.colors);
   return (
     <>
       {/* Desktop: frameless window still needs drag + close/min/max here too. */}
