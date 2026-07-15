@@ -522,4 +522,24 @@ setTheme(APP_THEMES.mocha.terminal);
   setTheme(APP_THEMES.mocha.terminal);
 }
 
+// 52. Existing ANSI cells repaint through the new palette after a theme switch.
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}[31mred`);
+  setTheme(APP_THEMES.latte.terminal);
+  eq(t.getSnapshot()[0].runs[0].style.fg, '#d20f39', 'existing ANSI red recolors for Latte');
+  setTheme(APP_THEMES.mocha.terminal);
+}
+
+// 53. Inverse ANSI cells keep their resolved palette color after a theme switch.
+{
+  const t = new TerminalEmulator(80, 24);
+  t.write(`${E}[31;7minverse`);
+  setTheme(APP_THEMES.latte.terminal);
+  const style = t.getSnapshot()[0].runs[0].style;
+  eq(style.fg, '#eff1f5', 'inverse foreground uses Latte terminal background');
+  eq(style.bg, '#d20f39', 'inverse background uses Latte ANSI red');
+  setTheme(APP_THEMES.mocha.terminal);
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
