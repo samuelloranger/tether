@@ -52,7 +52,7 @@
       "name": "tether",
       "version": "1.0.5",
       "bin": {
-        "tether": "./cli.ts",
+        "tether": "./src/server/main.ts",
       },
       "dependencies": {
         "hono": "^4.7.4",
@@ -64,6 +64,9 @@
         "typescript": "^7.0.2",
       },
     },
+  },
+  "patchedDependencies": {
+    "expo-modules-jsi@57.0.3": "patches/expo-modules-jsi@57.0.3.patch",
   },
   "packages": {
     "@algolia/abtesting": ["@algolia/abtesting@1.21.2", "", { "dependencies": { "@algolia/client-common": "5.55.2", "@algolia/requester-browser-xhr": "5.55.2", "@algolia/requester-fetch": "5.55.2", "@algolia/requester-node-http": "5.55.2" } }, "sha512-uXj0rgk30EpsKvOpuS+R+1XFDrnm56hED1Lz56e8uBkZdKCxw99LS2U8eXBqAHYU8kpkbsnV1GC8velBG070Hg=="],
