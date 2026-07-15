@@ -26,6 +26,13 @@ type DownloadEvent =
   | { event: 'Progress'; data: { chunkLength: number } }
   | { event: 'Finished' };
 
+// Tauri's webview cannot reliably hand URLs to the Windows shell through
+// React Native's browser-oriented Linking API.
+export async function openExternalUrl(url: string): Promise<void> {
+  const { openUrl } = await import('@tauri-apps/plugin-opener');
+  await openUrl(url);
+}
+
 // Check for a newer signed build. Returns null when already current; throws on a
 // network/feed error (the caller decides whether to surface it). `canSelfInstall`
 // distinguishes installs that can update in place (macOS/Windows/AppImage) from
@@ -47,8 +54,7 @@ export async function fetchUpdate(): Promise<PendingUpdate | null> {
 // Open the releases page in the system browser (for package-managed installs
 // that download the new .deb/.rpm and reinstall via their package manager).
 export async function openReleasesPage(): Promise<void> {
-  const { openUrl } = await import('@tauri-apps/plugin-opener');
-  await openUrl(RELEASES_PAGE);
+  await openExternalUrl(RELEASES_PAGE);
 }
 
 // Download + install a pending update, reporting byte progress, then relaunch.
