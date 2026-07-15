@@ -20,9 +20,9 @@ function AppInner() {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
   if (!app.fontsLoaded) return null;
-  return (
-    <SafeAreaView style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
-      {app.isConfiguring ? (
+  if (app.isConfiguring) {
+    return (
+      <SafeAreaView style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
         <ConfigScreen
           serverIp={app.serverIp}
           setServerIp={app.setServerIp}
@@ -39,9 +39,15 @@ function AppInner() {
           onSave={app.saveConfig}
           onTest={app.testConnection}
         />
-      ) : (
-        <TerminalScreen app={app} />
-      )}
+      </SafeAreaView>
+    );
+  }
+  return (
+    <SafeAreaView
+      edges={['bottom', 'left', 'right']}
+      style={[styles.appContainer, { backgroundColor: theme.colors.background }]}
+    >
+      <TerminalScreen app={app} />
     </SafeAreaView>
   );
 }
