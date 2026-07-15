@@ -2,11 +2,10 @@
   "expo": {
     "name": "Tether",
     "slug": "tether-mobile",
-    "version": "1.6.6",
+    "version": "1.7.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "tether",
-    "userInterfaceStyle": "dark",
     "backgroundColor": "#05070e",
     "ios": {
       "supportsTablet": true,
