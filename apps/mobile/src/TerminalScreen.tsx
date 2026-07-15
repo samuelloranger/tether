@@ -54,8 +54,9 @@ import { UpdateModal } from './UpdateModal';
 import { ConfigScreen } from './ConfigScreen';
 import { mouseSeq } from './mouseSeq';
 import { DesktopSessionNavigator } from './DesktopSessionNavigator';
+import { PresentationBanner } from './PresentationBanner';
 import { PresentationView } from './PresentationView';
-import { previewUrl } from './presentations';
+import { findSessionPreview, previewUrl } from './presentations';
 
 
 // Constants for async storage keys
@@ -148,6 +149,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
       setSelectionViewOpen(false);
     }
   }, [activePresentation, setMenuOpen, setSelectionViewOpen]);
+
+  const sessionPreview = findSessionPreview(presentations, activeId);
+  const backTarget = activePresentation?.sessionId ?? activeId;
+  const backLabel = drawerSessions.find((s) => s.id === backTarget)?.name || backTarget;
 
   return (
         /* Terminal Client Screen */
@@ -264,11 +269,27 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             )}
 
           {activePresentation ? (
-            <PresentationView
-              preview={activePresentation}
-              url={previewUrl(serverIp, port, activePresentation.url)}
-            />
+            <>
+              {!isDesktop && (
+                <PresentationBanner
+                  label={`Back to ${backLabel}`}
+                  icon="terminal"
+                  onPress={() => selectTerminal(backTarget)}
+                />
+              )}
+              <PresentationView
+                preview={activePresentation}
+                url={previewUrl(serverIp, port, activePresentation.url)}
+              />
+            </>
           ) : <>
+          {!isDesktop && sessionPreview && (
+            <PresentationBanner
+              label={`Preview ready: ${sessionPreview.title}`}
+              icon="layout"
+              onPress={() => selectPresentation(sessionPreview.id)}
+            />
+          )}
           {/* Connection banner — names the real state; no safety overclaim. */}
           <ConnectionBanner
             status={connectionStatus}
