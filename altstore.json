@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.6.4",
+          "date": "2026-07-15",
+          "localizedDescription": "## What's Changed\n* fix(mobile): fix copy-screen dismiss/scroll, drop copy-all button by @samuelloranger in https://github.com/samuelloranger/tether/pull/24\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.3...v1.6.4",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.6.4/tether-v1.6.4.ipa",
+          "size": 8380896,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.6.3",
           "date": "2026-07-14",
           "localizedDescription": "## What's Changed\n* fix(mobile): drop unused camera/microphone permission requests by @samuelloranger in https://github.com/samuelloranger/tether/pull/22\n* feat(server): extend OSC 7 cwd tracking to zsh and fish by @samuelloranger in https://github.com/samuelloranger/tether/pull/23\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.2...v1.6.3",
