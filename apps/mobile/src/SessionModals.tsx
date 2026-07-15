@@ -3,6 +3,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { MONO } from './styles';
 import { THEME_OPTIONS } from './appTheme';
 import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 import { isDesktop } from './platform';
 
 const FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
@@ -23,6 +24,8 @@ export function RenameModal({
   placeholder: string;
   onSubmit: () => void;
 }) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.menuBackdrop} onPress={onClose}>
@@ -33,19 +36,19 @@ export function RenameModal({
             value={value}
             onChangeText={onChangeText}
             placeholder={placeholder}
-            placeholderTextColor="#64748b"
+            placeholderTextColor={theme.colors.textFaint}
             autoFocus
             autoCapitalize="none"
             autoCorrect={false}
             onSubmitEditing={onSubmit}
-            keyboardAppearance="dark"
+            keyboardAppearance={theme.keyboardAppearance}
           />
           <View style={styles.renameBtns}>
             <TouchableOpacity style={styles.renameBtn} onPress={onClose}>
               <Text style={styles.renameBtnText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.renameBtn} onPress={onSubmit}>
-              <Text style={[styles.renameBtnText, { color: '#22d3ee' }]}>Save</Text>
+              <Text style={[styles.renameBtnText, { color: theme.colors.info }]}>Save</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -74,6 +77,8 @@ export function SnippetsModal({
   onDraftChange: (t: string) => void;
   onAdd: () => void;
 }) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.menuBackdrop} onPress={onClose}>
@@ -94,7 +99,7 @@ export function SnippetsModal({
                 onPress={() => onRemove(i)}
                 accessibilityLabel={`Delete snippet ${s}`}
               >
-                <Feather name="x" size={16} color="#94a3b8" />
+                <Feather name="x" size={16} color={theme.colors.textMuted} />
               </TouchableOpacity>
             </View>
           ))}
@@ -104,14 +109,14 @@ export function SnippetsModal({
               value={draft}
               onChangeText={onDraftChange}
               placeholder="New snippet (e.g. git status)"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={theme.colors.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
               onSubmitEditing={onAdd}
-              keyboardAppearance="dark"
+              keyboardAppearance={theme.keyboardAppearance}
             />
             <TouchableOpacity style={styles.snippetAddBtn} onPress={onAdd}>
-              <Feather name="plus" size={18} color="#22d3ee" />
+              <Feather name="plus" size={18} color={theme.colors.info} />
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -132,7 +137,8 @@ export function AppearanceModal({
   fontFamily: string;
   onFontChange: (fontFamily: string) => void;
 }) {
-  const { preference, setPreference } = useAppTheme();
+  const { preference, setPreference, theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.menuBackdrop} onPress={onClose}>
@@ -148,7 +154,7 @@ export function AppearanceModal({
               onPress={() => setPreference(id)}
             >
               <Text style={styles.renameBtnText}>{id[0].toUpperCase() + id.slice(1)}</Text>
-              {id === preference && <Feather name="check" size={16} color="#22d3ee" />}
+              {id === preference && <Feather name="check" size={16} color={theme.colors.info} />}
             </TouchableOpacity>
           ))}
           {isDesktop && (
@@ -164,7 +170,7 @@ export function AppearanceModal({
                   onPress={() => onFontChange(font)}
                 >
                   <Text style={[styles.renameBtnText, { fontFamily: font }]}>{font.split('_')[0]}</Text>
-                  {font === fontFamily && <Feather name="check" size={16} color="#22d3ee" />}
+                  {font === fontFamily && <Feather name="check" size={16} color={theme.colors.info} />}
                 </TouchableOpacity>
               ))}
             </>
@@ -175,10 +181,11 @@ export function AppearanceModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(c: AppColors) {
+  return StyleSheet.create({
   menuBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: c.overlay,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
@@ -186,24 +193,24 @@ const styles = StyleSheet.create({
   renamePanel: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#0b0f19',
+    backgroundColor: c.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: c.border,
     padding: 20,
     gap: 14,
   },
   renameTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#e2e8f0',
+    color: c.text,
   },
   renameInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: c.input,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#e2e8f0',
+    color: c.text,
     fontSize: 15,
   },
   renameBtns: {
@@ -218,10 +225,10 @@ const styles = StyleSheet.create({
   renameBtnText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#94a3b8',
+    color: c.textMuted,
   },
   snippetEmpty: {
-    color: '#64748b',
+    color: c.textFaint,
     fontSize: 13,
   },
   snippetRow: {
@@ -231,13 +238,13 @@ const styles = StyleSheet.create({
   },
   snippetSend: {
     flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: c.input,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   snippetText: {
-    color: '#e2e8f0',
+    color: c.text,
     fontSize: 14,
     fontFamily: MONO,
   },
@@ -253,8 +260,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: c.input,
     justifyContent: 'center',
     alignItems: 'center',
   },
-});
+  });
+}
