@@ -24,7 +24,12 @@ export interface CellStyle {
   caret?: boolean;
 }
 
-interface Cell extends CellStyle {
+interface PaletteStyle {
+  fgIndex?: number;
+  bgIndex?: number;
+}
+
+interface Cell extends CellStyle, PaletteStyle {
   ch: string;
   url?: string;
 }
@@ -157,7 +162,7 @@ export class TerminalEmulator {
   private scrollTop = 0;
   private scrollBot = 0;
 
-  private pen: CellStyle = {};
+  private pen: CellStyle & PaletteStyle = {};
 
   // True when the app has enabled mouse reporting (?1000/1002/1003h). Lets the
   // UI forward swipes as scroll-wheel events so TUIs scroll their own history.
@@ -798,23 +803,32 @@ export class TerminalEmulator {
       else if (c === 24) this.pen.underline = false;
       else if (c === 27) this.pen.inverse = false;
       else if (c === 29) this.pen.strike = false;
-      else if (c >= 30 && c <= 37) this.pen.fg = PALETTE[c - 30];
-      else if (c === 39) this.pen.fg = undefined;
-      else if (c >= 40 && c <= 47) this.pen.bg = PALETTE[c - 40];
-      else if (c === 49) this.pen.bg = undefined;
-      else if (c >= 90 && c <= 97) this.pen.fg = PALETTE[c - 90 + 8];
-      else if (c >= 100 && c <= 107) this.pen.bg = PALETTE[c - 100 + 8];
+      else if (c >= 30 && c <= 37) this.pen.fgIndex = c - 30;
+      else if (c === 39) {
+        this.pen.fg = undefined;
+        this.pen.fgIndex = undefined;
+      }
+      else if (c >= 40 && c <= 47) this.pen.bgIndex = c - 40;
+      else if (c === 49) {
+        this.pen.bg = undefined;
+        this.pen.bgIndex = undefined;
+      }
+      else if (c >= 90 && c <= 97) this.pen.fgIndex = c - 90 + 8;
+      else if (c >= 100 && c <= 107) this.pen.bgIndex = c - 100 + 8;
       else if (c === 38 || c === 48) {
         const target = c === 38 ? 'fg' : 'bg';
         if (codes[i + 1] === 5) {
           // 38;5;n  (256-color)
-          this.pen[target] = PALETTE[codes[i + 2]] ?? undefined;
+          const index = codes[i + 2];
+          this.pen[target] = PALETTE[index] ?? undefined;
+          this.pen[target === 'fg' ? 'fgIndex' : 'bgIndex'] = PALETTE[index] ? index : undefined;
           i += 2;
         } else if (codes[i + 1] === 2) {
           // 38;2;r;g;b  (24-bit truecolor)
           const r = codes[i + 2], g = codes[i + 3], b = codes[i + 4];
           const hex = (v: number) => (v || 0).toString(16).padStart(2, '0');
           this.pen[target] = `#${hex(r)}${hex(g)}${hex(b)}`;
+          this.pen[target === 'fg' ? 'fgIndex' : 'bgIndex'] = undefined;
           i += 4;
         }
       }
@@ -875,7 +889,7 @@ export class TerminalEmulator {
     // Trim trailing blanks so empty tails don't paint background — but never trim
     // past the caret, so the cursor still renders at end of line.
     let end = line.length;
-    while (end > 0 && line[end - 1].ch === ' ' && !line[end - 1].bg && !line[end - 1].inverse) {
+    while (end > 0 && line[end - 1].ch === ' ' && !line[end - 1].bg && line[end - 1].bgIndex === undefined && !line[end - 1].inverse) {
       end--;
     }
     if (caretCol >= 0) end = Math.max(end, caretCol + 1);
@@ -898,11 +912,11 @@ export class TerminalEmulator {
   }
 
   private cellStyle(cell: Cell): CellStyle {
-    let fg = cell.fg ?? DEFAULT_FG;
-    let bg = cell.bg;
+    let fg = cell.fgIndex === undefined ? cell.fg ?? DEFAULT_FG : PALETTE[cell.fgIndex];
+    let bg = cell.bgIndex === undefined ? cell.bg : PALETTE[cell.bgIndex];
     if (cell.inverse) {
       const nfg = bg ?? DEFAULT_BG;
-      const nbg = cell.fg ?? DEFAULT_FG;
+      const nbg = fg;
       fg = nfg;
       bg = nbg;
     }
