@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.7.1",
+          "date": "2026-07-15",
+          "localizedDescription": "## What's Changed\n* fix(mobile): honor system appearance and header inset by @samuelloranger in https://github.com/samuelloranger/tether/pull/28\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.7.0...v1.7.1",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.7.1/tether-v1.7.1.ipa",
+          "size": 8446947,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.7.0",
           "date": "2026-07-15",
           "localizedDescription": "## What's Changed\n* feat: add Catppuccin app themes by @samuelloranger in https://github.com/samuelloranger/tether/pull/27\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.6.6...v1.7.0",
