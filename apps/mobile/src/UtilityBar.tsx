@@ -3,6 +3,8 @@ import Feather from '@expo/vector-icons/Feather';
 import * as Haptics from 'expo-haptics';
 import { ArrowCluster } from './Dpad';
 import { MONO } from './styles';
+import { useAppTheme } from './AppThemeProvider';
+import type { AppColors } from './appTheme';
 
 // Mobile terminal-shortcuts utility bar — desktop uses the real keyboard.
 export function UtilityBar({
@@ -20,6 +22,8 @@ export function UtilityBar({
   onPaste: () => void;
   onImagePick: () => void;
 }) {
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
   return (
     <View style={styles.utilityBar}>
       <ScrollView
@@ -87,7 +91,7 @@ export function UtilityBar({
           accessibilityRole="button"
           accessibilityLabel="Paste"
         >
-          <Feather name="clipboard" size={17} color="#cbd5e1" />
+          <Feather name="clipboard" size={17} color={theme.colors.text} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.utilityIconBtn}
@@ -96,7 +100,7 @@ export function UtilityBar({
           accessibilityRole="button"
           accessibilityLabel="Upload image"
         >
-          <Feather name="image" size={17} color="#cbd5e1" />
+          <Feather name="image" size={17} color={theme.colors.text} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.utilityIconBtn}
@@ -105,18 +109,18 @@ export function UtilityBar({
           accessibilityRole="button"
           accessibilityLabel="Hide keyboard"
         >
-          <Feather name="chevron-down" size={18} color="#cbd5e1" />
+          <Feather name="chevron-down" size={18} color={theme.colors.text} />
         </TouchableOpacity>
       </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: AppColors) => StyleSheet.create({
   utilityBar: {
-    backgroundColor: '#0b0f19',
+    backgroundColor: c.surface,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    borderTopColor: c.border,
     paddingVertical: 8,
   },
   utilityScroll: {
@@ -129,32 +133,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: c.surfaceRaised,
   },
   utilityBtnText: {
     fontSize: 13,
     fontWeight: '700',
     fontFamily: MONO,
-    color: '#cbd5e1',
+    color: c.text,
   },
   utilityBtnActive: {
-    backgroundColor: '#22d3ee',
+    backgroundColor: c.accent,
   },
   utilityBtnTextActive: {
-    color: '#0b0f19',
+    color: c.accentText,
   },
   utilityIconBtn: {
     width: 40,
     height: 40,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: c.surfaceRaised,
     justifyContent: 'center',
     alignItems: 'center',
   },
   utilityGroupDivider: {
     width: 1,
     height: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: c.border,
     marginHorizontal: 2,
   },
 });
