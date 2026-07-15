@@ -1,7 +1,6 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
-import { MONO } from './styles';
 
 // Fullscreen selectable-text view (long-press the terminal to open): filter the
 // displayed transcript and select/copy it via the OS's native text selection.
@@ -13,6 +12,9 @@ export function SelectionView({
   searchInputRef,
   text,
   insets,
+  fontFamily,
+  fontSize,
+  lineHeight,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -25,10 +27,21 @@ export function SelectionView({
   // (a documented react-native-safe-area-context limitation), pinning the
   // header under the status bar/notch.
   insets: { top: number; bottom: number };
+  // The terminal's own configured font — matches what's on screen and keeps
+  // the height measurement below accurate for the font actually rendered.
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
 }) {
   const scrollRef = useRef<ScrollView>(null);
+  const transcriptRef = useRef<TextInput>(null);
+  // Real rendered height of the transcript at its actual on-device width/font,
+  // learned from an invisible measurement pass below — not guessed math — so
+  // the ScrollView can open with the exact scroll offset already applied
+  // (no post-mount jump, no flash of line 1).
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
   useEffect(() => {
-    if (visible) scrollRef.current?.scrollToEnd({ animated: false });
+    if (!visible) setMeasuredHeight(null);
   }, [visible]);
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -59,11 +72,44 @@ export function SelectionView({
           autoCorrect={false}
           keyboardAppearance="dark"
         />
-        {visible && (
-          <ScrollView ref={scrollRef} style={styles.selectionViewScroll} contentContainerStyle={styles.selectionViewScrollContent}>
-            <Text style={styles.selectionViewText} selectable>
-              {text}
-            </Text>
+        {visible && measuredHeight === null && (
+          // Invisible measurement pass: lays the real transcript text out at
+          // the real on-device width/font (identical style to the visible
+          // copy below) purely to learn its rendered height via onLayout —
+          // no line-count/font-size arithmetic, so it's correct regardless of
+          // font size, device width, or line wrapping.
+          <Text
+            style={[styles.selectionViewText, { fontFamily, fontSize, lineHeight }, styles.selectionViewMeasure]}
+            onLayout={(e) => setMeasuredHeight(e.nativeEvent.layout.height)}
+          >
+            {text}
+          </Text>
+        )}
+        {visible && measuredHeight !== null && (
+          <ScrollView
+            ref={scrollRef}
+            style={styles.selectionViewScroll}
+            contentContainerStyle={styles.selectionViewScrollContent}
+            // Opens already scrolled to the last line — no post-mount jump,
+            // no flash of line 1.
+            contentOffset={{ x: 0, y: measuredHeight }}
+          >
+            <TextInput
+              ref={transcriptRef}
+              style={[styles.selectionViewText, { fontFamily, fontSize, lineHeight }]}
+              value={text}
+              // editable (not editable={false}) is what makes iOS/Android's real
+              // word/phrase drag-handle selection work at all — a non-editable
+              // TextInput only supports a whole-block "Copy" long-press, same as
+              // Text's selectable prop. Suppress the keyboard and snap back any
+              // stray edit so it still behaves as read-only.
+              editable
+              showSoftInputOnFocus={false}
+              caretHidden
+              onChangeText={() => transcriptRef.current?.setNativeProps({ text })}
+              multiline
+              scrollEnabled={false}
+            />
           </ScrollView>
         )}
       </View>
@@ -113,9 +159,15 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   selectionViewText: {
-    fontFamily: MONO,
-    fontSize: 13,
-    lineHeight: 18,
     color: '#cbd5e1',
+  },
+  // Same horizontal padding as selectionViewScrollContent, so the invisible
+  // measurement pass wraps lines identically to the real scroll content.
+  selectionViewMeasure: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    opacity: 0,
   },
 });
