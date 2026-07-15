@@ -63,7 +63,12 @@ export async function runPresent(args: PresentArgs, deps: PresentDeps): Promise<
   const body =
     args.kind === 'reset'
       ? { project: args.project }
-      : { entry: path.resolve(args.entry), project: args.project, title: args.title };
+      : {
+          entry: path.resolve(args.entry),
+          project: args.project,
+          title: args.title,
+          sessionId: process.env.TETHER_SESSION_ID,
+        };
   const res = await (deps.fetch ?? fetch)(`http://127.0.0.1:${deps.port}${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Tether-Present-Control': token },

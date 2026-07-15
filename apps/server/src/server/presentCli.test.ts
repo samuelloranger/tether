@@ -62,3 +62,49 @@ test('sends the local control token without using the mobile password', async ()
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('includes the session id from TETHER_SESSION_ID when present, omits it when absent', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'tether-control-'));
+  const originalSessionId = process.env.TETHER_SESSION_ID;
+  try {
+    const tokenFile = path.join(root, 'token');
+    await Bun.write(tokenFile, 'local-token');
+
+    process.env.TETHER_SESSION_ID = 'term-4';
+    let withSession: Request | undefined;
+    await runPresent(
+      { kind: 'open', entry: 'index.html' },
+      {
+        port: '8085',
+        tokenFile,
+        fetch: async (input, init) => {
+          withSession = new Request(input, init);
+          return new Response('{}');
+        },
+      },
+    );
+    expect(await withSession?.json()).toEqual({
+      entry: path.resolve('index.html'),
+      sessionId: 'term-4',
+    });
+
+    delete process.env.TETHER_SESSION_ID;
+    let withoutSession: Request | undefined;
+    await runPresent(
+      { kind: 'open', entry: 'index.html' },
+      {
+        port: '8085',
+        tokenFile,
+        fetch: async (input, init) => {
+          withoutSession = new Request(input, init);
+          return new Response('{}');
+        },
+      },
+    );
+    expect(await withoutSession?.json()).toEqual({ entry: path.resolve('index.html') });
+  } finally {
+    if (originalSessionId === undefined) delete process.env.TETHER_SESSION_ID;
+    else process.env.TETHER_SESSION_ID = originalSessionId;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
