@@ -31,3 +31,7 @@ jobs:
       - name: Mobile tests
         run: bun run src/terminal.test.ts
         working-directory: apps/mobile
+
+      - name: Expo dependency compatibility
+        run: npx expo install --check
+        working-directory: apps/mobile
