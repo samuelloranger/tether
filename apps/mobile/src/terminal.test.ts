@@ -542,4 +542,18 @@ setTheme(APP_THEMES.mocha.terminal);
   setTheme(APP_THEMES.mocha.terminal);
 }
 
+// 54. A resize (e.g. keyboard show/hide) must not orphan a wrapped row's
+// wrapped-link tracking — regression for the "links survive line-break" fix.
+{
+  const t = new TerminalEmulator(20, 10);
+  const url = 'http://example.com/some/very/long/path/that/wraps';
+  t.write(url);
+  t.resize(20, 6); // keyboard shows: rows shrink
+  t.resize(20, 10); // keyboard hides: rows grow back
+  const snap = t.getSnapshot();
+  eq(snap[0].wrapped, true, 'row 0 still marked soft-wrapped after a resize round trip');
+  eq(snap[0].links[0]?.url, url, 'row 0 still resolves the full URL after a resize round trip');
+  eq(snap[1].links[0]?.url, url, 'row 1 still resolves the full URL after a resize round trip');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
