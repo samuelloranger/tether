@@ -101,6 +101,17 @@ export function withTermEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
 }
 
+// Every process running inside a session's shell — the agent, and anything it
+// shells out to (e.g. `tether present`) — inherits this via normal fork/exec.
+// It's how the server later links a preview back to the session that made it.
+export function sessionEnv(
+  id: string,
+  env: NodeJS.ProcessEnv,
+  shellEnv: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv {
+  return { ...withTermEnv(scrubAgentEnv(env)), ...shellEnv, TETHER_SESSION_ID: id };
+}
+
 export type Subscriber = (data: {
   type: 'output' | 'exit';
   chunk?: string;
@@ -327,7 +338,7 @@ async function doStartSession(
   const holder = spawn(holderCmd, holderArgs, {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: { ...withTermEnv(scrubAgentEnv(process.env)), ...shellEnv },
+    env: sessionEnv(id, process.env, shellEnv),
   });
   holder.unref();
 
