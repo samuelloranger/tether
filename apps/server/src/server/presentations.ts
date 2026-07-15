@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  statSync,
   watch,
   writeSync,
 } from 'node:fs';
@@ -49,6 +50,9 @@ export function resolvePresentationFile(root: string, requested: string): string
   const candidate = realpathSync(attempted);
   if (candidate !== canonicalRoot && !candidate.startsWith(`${canonicalRoot}${path.sep}`)) {
     throw new Error('preview path escapes its root');
+  }
+  if (statSync(candidate).isDirectory()) {
+    throw new Error('preview path is a directory');
   }
   return candidate;
 }

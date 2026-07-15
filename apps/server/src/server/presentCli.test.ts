@@ -53,7 +53,11 @@ test('sends the local control token without using the mobile password', async ()
     );
     expect(request?.url).toBe('http://127.0.0.1:8085/control/presentations');
     expect(request?.headers.get('X-Tether-Present-Control')).toBe('local-token');
-    expect(await request?.json()).toEqual({ entry: 'index.html', project: 'creneau', title: 'UI' });
+    expect(await request?.json()).toEqual({
+      entry: path.resolve('index.html'),
+      project: 'creneau',
+      title: 'UI',
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

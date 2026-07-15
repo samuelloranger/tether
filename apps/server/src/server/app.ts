@@ -31,20 +31,26 @@ function hasControlToken(value: string | undefined): boolean {
   );
 }
 
+const PREVIEW_MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css',
+  '.gif': 'image/gif',
+  '.html': 'text/html',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript',
+  '.json': 'application/json',
+  '.mjs': 'text/javascript',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
 function previewMime(file: string): string {
-  return (
-    (
-      {
-        '.css': 'text/css',
-        '.html': 'text/html',
-        '.js': 'text/javascript',
-        '.json': 'application/json',
-        '.png': 'image/png',
-        '.svg': 'image/svg+xml',
-        '.woff2': 'font/woff2',
-      } as Record<string, string>
-    )[path.extname(file)] || 'application/octet-stream'
-  );
+  return PREVIEW_MIME_TYPES[path.extname(file)] || 'application/octet-stream';
 }
 
 // API/WebSocket-only server (mobile client). CORS open for LAN access.

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
@@ -45,6 +45,19 @@ test('rejects traversal and symlinks that escape a preview root', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('rejects a bare directory request instead of serving the root', () => {
+  const root = tempDir('tether-preview-');
+  try {
+    writeFileSync(path.join(root, 'index.html'), 'ok');
+    mkdirSync(path.join(root, 'assets'));
+
+    expect(() => resolvePresentationFile(root, '')).toThrow('preview path is a directory');
+    expect(() => resolvePresentationFile(root, 'assets')).toThrow('preview path is a directory');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

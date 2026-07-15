@@ -113,7 +113,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
       el.removeEventListener('dragover', onDragOver);
       el.removeEventListener('drop', onDrop);
     };
-  }, [uploadFile]);
+    // Re-run when a presentation opens/closes: the #tether-terminal node
+    // unmounts/remounts across that transition (see the render branch below),
+    // so a stale node reference would silently stop receiving drops.
+  }, [uploadFile, activePresentation]);
 
   // Desktop: clicking the terminal focuses the hidden IME composition-target
   // input (see the isDesktop TextInput above) — needed so the browser has an
@@ -129,7 +132,22 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     const onMouseDown = () => inputRef.current?.focus();
     el.addEventListener('mousedown', onMouseDown);
     return () => el.removeEventListener('mousedown', onMouseDown);
-  }, []);
+    // Re-run when a presentation opens/closes: the #tether-terminal node
+    // unmounts/remounts across that transition (see the render branch below),
+    // so an empty deps array would keep this bound to a detached node forever.
+  }, [activePresentation]);
+
+  // OverflowMenu/SelectionView force-unmount below when a presentation is
+  // active (bypassing their own onClose), which can happen while either is
+  // open — e.g. a new preview auto-selected in the background. Reset their
+  // open state here so they don't pop back visible once the preview closes
+  // and they remount.
+  useEffect(() => {
+    if (activePresentation) {
+      setMenuOpen(false);
+      setSelectionViewOpen(false);
+    }
+  }, [activePresentation, setMenuOpen, setSelectionViewOpen]);
 
   return (
         /* Terminal Client Screen */

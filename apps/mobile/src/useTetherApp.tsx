@@ -158,6 +158,7 @@ export function useTetherApp() {
   const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
   const seenPresentationIds = useRef(new Set<string>());
+  const presentationsPrimed = useRef(false);
   const [desktopNavigationMode, setDesktopNavigationMode] = useState<DesktopNavigationMode>(
     DEFAULT_DESKTOP_NAVIGATION_MODE,
   );
@@ -405,6 +406,7 @@ export function useTetherApp() {
 
   const newTerminal = () => {
     const existing = drawerSessions.map((s) => s.id);
+    setActivePresentationId(null);
     switchTo(nextTermId(existing.length ? existing : cache.ids()));
   };
 
@@ -420,7 +422,10 @@ export function useTetherApp() {
     cache.delete(id);
     const remaining = drawerSessions.filter((s) => s.id !== id).map((s) => s.id);
     await refreshSessions();
-    if (id === activeIdRef.current) switchTo(remaining[0] ?? 'term-1');
+    if (id === activeIdRef.current) {
+      setActivePresentationId(null);
+      switchTo(remaining[0] ?? 'term-1');
+    }
   };
 
   // Keep activeIdRef synced when activeId changes (belt-and-suspenders)
@@ -538,6 +543,15 @@ export function useTetherApp() {
       }
       if (!res.ok) return;
       const rows = (await res.json()) as Presentation[];
+      // The first successful poll after mount/reconnect just primes the seen
+      // set from whatever's already on the server — it must not treat every
+      // pre-existing preview as newly-created and hijack the active view.
+      if (!presentationsPrimed.current) {
+        presentationsPrimed.current = true;
+        seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
+        setPresentations(rows);
+        return;
+      }
       const newPreview = rows.find((preview) => !seenPresentationIds.current.has(preview.id));
       seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
       setPresentations(rows);
@@ -559,16 +573,17 @@ export function useTetherApp() {
 
   const closePresentation = async (id: string) => {
     try {
-      await fetch(`${httpBase(serverIp, port)}/api/presentations/${id}`, {
+      const res = await fetch(`${httpBase(serverIp, port)}/api/presentations/${id}`, {
         method: 'DELETE',
         headers: authHeaders(passwordRef.current),
       });
+      if (!res.ok) return;
       if (activePresentationId === id) setActivePresentationId(null);
       await refreshPresentations();
     } catch {}
   };
 
-  // Poll the session list every 4s while foregrounded.
+  // Poll the session list and presentation metadata every 4s while foregrounded.
   useEffect(() => {
     if (isConfiguring) return;
     let iv: ReturnType<typeof setInterval> | null = null;
@@ -579,7 +594,7 @@ export function useTetherApp() {
       iv = setInterval(() => {
         refreshSessions();
         refreshPresentations();
-      }, 1000);
+      }, 4000);
     };
     const stop = () => {
       if (iv) {
@@ -1017,7 +1032,7 @@ export function useTetherApp() {
   // normally. Ctrl/Cmd+C copies an active selection or sends SIGINT; Ctrl/Cmd+V
   // pastes from the clipboard.
   useEffect(() => {
-    if (!isDesktop || isConfiguring || activePresentationId) return;
+    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
     // True while an IME/dead-key composition is in progress (accented Latin
     // chars like é/ñ/ö on many layouts, or CJK candidate windows). Composition
     // is driven by compositionstart/end, not keydown — forwarding the raw
@@ -1087,14 +1102,14 @@ export function useTetherApp() {
     };
     // sendInput/handlePaste delegate to refs, so a stable listener is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring, activePresentationId]);
+  }, [isConfiguring, activePresentationId, presentations]);
 
   // Desktop: when the remote app enables mouse reporting (Claude Code, vim,
   // less…), the FlatList is frozen (scrollEnabled=false), so forward the wheel
   // as SGR mouse-wheel events and the app scrolls its own history. Outside mouse
   // mode we don't intercept, so the list scrolls natively.
   useEffect(() => {
-    if (!isDesktop || isConfiguring || activePresentationId) return;
+    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
     let accum = 0;
     const onWheel = (e: WheelEvent) => {
       const el = document.getElementById('tether-terminal');
@@ -1126,7 +1141,7 @@ export function useTetherApp() {
     window.addEventListener('wheel', onWheel, { passive: false });
     return () => window.removeEventListener('wheel', onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring, activePresentationId]);
+  }, [isConfiguring, activePresentationId, presentations]);
 
   // Desktop: check for a newer signed build once on launch. If one exists, open
   // the update modal; stay silent on "up to date" or an unreachable feed.
@@ -1195,7 +1210,7 @@ export function useTetherApp() {
 
   // Desktop: right-click the terminal for a Copy / Paste / Select All menu.
   useEffect(() => {
-    if (!isDesktop || isConfiguring || activePresentationId) return;
+    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
     const onCtx = (e: MouseEvent) => {
       const el = document.getElementById('tether-terminal');
       if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
@@ -1204,7 +1219,7 @@ export function useTetherApp() {
     };
     document.addEventListener('contextmenu', onCtx);
     return () => document.removeEventListener('contextmenu', onCtx);
-  }, [isConfiguring, activePresentationId]);
+  }, [isConfiguring, activePresentationId, presentations]);
 
   const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
   const activePresentation = presentations.find((preview) => preview.id === activePresentationId) || null;

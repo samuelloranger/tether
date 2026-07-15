@@ -57,10 +57,13 @@ export async function runPresent(args: PresentArgs, deps: PresentDeps): Promise<
   const token = readFileSync(deps.tokenFile, 'utf8').trim();
   const endpoint =
     args.kind === 'reset' ? '/control/presentations/reset' : '/control/presentations';
+  // Resolve here, against this short-lived CLI process's own cwd — the entry
+  // arg is relative to the invoking shell, not the long-running daemon's cwd,
+  // which is wherever the daemon happened to be started from.
   const body =
     args.kind === 'reset'
       ? { project: args.project }
-      : { entry: args.entry, project: args.project, title: args.title };
+      : { entry: path.resolve(args.entry), project: args.project, title: args.title };
   const res = await (deps.fetch ?? fetch)(`http://127.0.0.1:${deps.port}${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Tether-Present-Control': token },
