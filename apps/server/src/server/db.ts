@@ -72,6 +72,13 @@ const migrations = [
       );
     `,
   },
+  {
+    version: 5,
+    name: 'terminal_logs_session_id_index',
+    // Composite index lets replay (WHERE session_id = ? AND id > ?, ORDER BY id)
+    // resolve as an index range scan instead of filter-then-sort.
+    up: `CREATE INDEX IF NOT EXISTS idx_terminal_logs_session_id ON terminal_logs(session_id, id);`,
+  },
 ];
 
 export function runMigrations() {

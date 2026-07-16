@@ -292,7 +292,7 @@ export function useTetherApp() {
         mouseOnRef.current = e.term.mouseOn;
         setMouseOn(e.term.mouseOn);
       }
-    }, 33); // ~30fps: enough for a terminal, halves render load vs 60fps
+    }, isDesktop ? 16 : 33); // 60fps on desktop (no battery cost); 30fps on mobile halves render load
   };
 
   const resetTerminal = () => {
