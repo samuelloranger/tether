@@ -5,6 +5,7 @@ import { splitRunByLinks, urlColumns } from './links';
 import { isDesktop } from './platform';
 import { useAppTheme } from './AppThemeProvider';
 import { openExternalUrl } from './desktopUpdate';
+import { notify } from './dialog';
 
 function runToStyle(
   s: CellStyle,
@@ -92,7 +93,21 @@ export const TermRow = React.memo(
                 <Text
                   key={`${i}-${j}`}
                   style={[st, styles.link]}
-                  onPress={() => (isDesktop ? openExternalUrl(seg.url!) : Linking.openURL(seg.url!))}
+                  onPress={(e) => {
+                    if (isDesktop) {
+                      // Ctrl/Cmd+click opens the link — a plain click is free for
+                      // cursor positioning/selection instead (matches iTerm2/VS
+                      // Code convention). Any failure (no default browser
+                      // configured, etc.) surfaces instead of silently no-oping.
+                      const mods = e.nativeEvent as unknown as { ctrlKey?: boolean; metaKey?: boolean };
+                      if (!mods.ctrlKey && !mods.metaKey) return;
+                      openExternalUrl(seg.url!).catch((err) =>
+                        void notify('Could not open link', String(err), 'error'),
+                      );
+                    } else {
+                      Linking.openURL(seg.url!);
+                    }
+                  }}
                 >
                   {seg.text}
                 </Text>
