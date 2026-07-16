@@ -578,4 +578,42 @@ setTheme(APP_THEMES.mocha.terminal);
   eq(replies.length, 1, 'OSC 10 set-form (non-"?") produces no reply');
 }
 
+// 57. OSC 52 write: base64 payload is decoded and handed to onClipboardWrite.
+{
+  const t = new TerminalEmulator(80, 24);
+  const written: string[] = [];
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;aGVsbG8gd29ybGQ=${E}\\`); // base64("hello world")
+  eq(written, ['hello world'], 'OSC 52 write decodes base64 to onClipboardWrite');
+}
+
+// 58. OSC 52 write: non-ASCII text round-trips correctly (UTF-8 safe base64).
+{
+  const t = new TerminalEmulator(80, 24);
+  const written: string[] = [];
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;44GT44KT44Gr44Gh44Gv${E}\\`); // base64("こんにちは")
+  eq(written, ['こんにちは'], 'OSC 52 write decodes multi-byte UTF-8 base64 correctly');
+}
+
+// 59. OSC 52 query: onClipboardRead result is base64-encoded and sent via onReply.
+{
+  const t = new TerminalEmulator(80, 24);
+  const replies: string[] = [];
+  t.onReply = (data) => replies.push(data);
+  t.onClipboardRead = () => Promise.resolve('hello world');
+  t.write(`${E}]52;c;?${E}\\`);
+  await Promise.resolve(); // let the onClipboardRead().then(...) microtask run
+  eq(replies, [`${E}]52;c;aGVsbG8gd29ybGQ=${E}\\`], 'OSC 52 query replies with base64-encoded clipboard text');
+}
+
+// 60. OSC 52 write: malformed base64 fails silently — no throw, no onClipboardWrite call.
+{
+  const t = new TerminalEmulator(80, 24);
+  const written: string[] = [];
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;not-valid-base64!!!${E}\\`);
+  eq(written, [], 'malformed OSC 52 base64 does not call onClipboardWrite');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
