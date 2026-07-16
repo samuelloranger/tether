@@ -165,6 +165,18 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
   let lineBuf = '';
   let exited = false;
 
+  // Frames from one socket `data()` read are batched into a single log row +
+  // broadcast instead of one round-trip each — under bursty output (`cat` a big
+  // file, `npm install`) a single read often carries many holder frames.
+  let pendingOutput: string[] = [];
+  const flushOutput = () => {
+    if (pendingOutput.length === 0) return;
+    const text = pendingOutput.join('');
+    pendingOutput = [];
+    const logId = addTerminalLog(id, text);
+    broadcast(id, { type: 'output', chunk: text, id: logId });
+  };
+
   const handleLine = (line: string) => {
     let msg: { t: string; d?: string; code?: number };
     try {
@@ -174,18 +186,14 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     }
     if (msg.t === 'o' && msg.d) {
       const text = decoder.decode(Buffer.from(msg.d, 'base64'), { stream: true });
-      if (!text) return;
-      const logId = addTerminalLog(id, text);
-      broadcast(id, { type: 'output', chunk: text, id: logId });
+      if (text) pendingOutput.push(text);
     } else if (msg.t === 'x') {
       exited = true;
       // Flush any buffered partial multi-byte sequence the streaming decoder is
       // still holding (PTY died mid-emoji) so the tail isn't silently dropped.
       const tail = decoder.decode();
-      if (tail) {
-        const logId = addTerminalLog(id, tail);
-        broadcast(id, { type: 'output', chunk: tail, id: logId });
-      }
+      if (tail) pendingOutput.push(tail);
+      flushOutput();
       console.log(`PTY process for session "${id}" exited with code ${msg.code}`);
       const sess = getSession(id);
       upsertSession(id, sess?.command ?? 'bash', 'stopped');
@@ -215,6 +223,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
             nl = lineBuf.indexOf('\n');
             if (line) handleLine(line);
           }
+          flushOutput();
         },
         close() {
           // Holder gone without an exit frame = it crashed or was killed hard.
