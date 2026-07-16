@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.9.0",
+          "date": "2026-07-16",
+          "localizedDescription": "## Terminal\n- OSC 52 clipboard write (base64-decoded, written to the device clipboard) — vim/tmux \"yank to system clipboard\" now reaches the phone/desktop\n- OSC 10/11 fg/bg color query reply — TUIs like fzf, lazygit, nvim, and btop that query terminal colors to pick light/dark no longer get silence\n\n## Desktop\n- Native OS notification when a terminal bell rings or a command finishes, while the Tether window is unfocused\n- Server password moved from plaintext localStorage to the OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service), with a localStorage fallback if the keychain is unavailable",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.9.0/tether-v1.9.0.ipa",
+          "size": 8537361,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.8.5",
           "date": "2026-07-16",
           "localizedDescription": "## Perf\n- 60fps terminal render on desktop (30fps kept on mobile for battery)\n- Batch same-read PTY output frames into a single log write + broadcast (big win under bursty output like `cat`/`npm install`)\n- Composite index on terminal_logs speeds up reconnect replay",
