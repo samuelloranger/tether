@@ -219,6 +219,11 @@ export class TerminalEmulator {
   // hasn't re-rendered since the first.
   bellCount = 0;
 
+  // Monotonically increasing counter, incremented once per OSC 133;A (shell
+  // prompt start). A new prompt means the previous command finished — used
+  // by the desktop app to notify when a long-running command completes.
+  promptReturnCount = 0;
+
   // Set by OSC 0 ("icon name + title") or OSC 2 ("title"). Empty until the
   // remote shell/app sends one.
   title = '';
@@ -270,6 +275,7 @@ export class TerminalEmulator {
     this.bracketedPaste = false;
     this.applicationCursor = false;
     this.bellCount = 0;
+    this.promptReturnCount = 0;
     this.title = '';
     this.cwd = '';
     this.promptRows = new WeakSet();
@@ -684,6 +690,7 @@ export class TerminalEmulator {
     } else if (ps === '133') {
       if (pt.startsWith('A')) {
         this.promptRows.add(this.screen[this.cy]);
+        this.promptReturnCount++;
       } else if (pt.startsWith('D')) {
         const codeStr = pt.split(';')[1];
         this.lastExitCode = codeStr !== undefined ? parseInt(codeStr, 10) : null;
