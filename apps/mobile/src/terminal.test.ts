@@ -628,4 +628,14 @@ setTheme(APP_THEMES.mocha.terminal);
   eq(written, [], 'malformed OSC 52 base64 does not call onClipboardWrite');
 }
 
+// 62. promptReturnCount increments once per OSC 133;A (new shell prompt = previous command finished).
+{
+  const t = new TerminalEmulator(80, 24);
+  eq(t.promptReturnCount, 0, 'promptReturnCount starts at 0');
+  t.write(`${E}]133;A${E}\\`);
+  eq(t.promptReturnCount, 1, 'promptReturnCount increments on OSC 133;A');
+  t.write(`ls${E}]133;D;0${E}\\${E}]133;A${E}\\`);
+  eq(t.promptReturnCount, 2, 'promptReturnCount increments once per new prompt, not per OSC 133 sequence');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

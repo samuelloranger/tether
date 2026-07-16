@@ -63,6 +63,7 @@ import {
   type DesktopNavigationMode,
 } from './desktopNavigation';
 import { pickAutoSelectPreview, type Presentation } from './presentations';
+import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
 
 
 // Constants for async storage keys
@@ -609,6 +610,13 @@ export function useTetherApp() {
       if (onVis) document.removeEventListener('visibilitychange', onVis);
     };
   }, [isConfiguring, serverIp, port]);
+
+  // Desktop: get notification permission out of the way at startup (eager,
+  // not lazy on first trigger — product decision), independent of connection
+  // state.
+  useEffect(() => {
+    if (isDesktop) void ensureNotificationPermission();
+  }, []);
 
   // 1. Load saved config on mount
   useEffect(() => {
@@ -1222,6 +1230,43 @@ export function useTetherApp() {
   // Read live off the mutable emulator field — re-derives every render since
   // entryFor/activeId are already render-time values, no extra state needed.
   const activeBellCount = entryFor(activeId).term.bellCount;
+  // Read live off the mutable emulator field, same pattern as activeBellCount
+  // above.
+  const activePromptReturnCount = entryFor(activeId).term.promptReturnCount;
+
+  // Desktop: native notification when a bell rings or a command finishes (new
+  // shell prompt appears) while the window isn't focused. windowFocusedRef
+  // tracks real OS focus — distinct from the visibilitychange listener
+  // earlier in this file, which only catches minimize/hide, not "visible but
+  // alt-tabbed away".
+  const windowFocusedRef = useRef(true);
+  useEffect(() => {
+    if (!isDesktop || typeof window === 'undefined') return;
+    const onFocus = () => {
+      windowFocusedRef.current = true;
+    };
+    const onBlur = () => {
+      windowFocusedRef.current = false;
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+  const prevBellCountForNotifyRef = useRef(0);
+  const prevPromptReturnCountRef = useRef(0);
+  useEffect(() => {
+    if (!isDesktop) return;
+    const bellFired = activeBellCount > prevBellCountForNotifyRef.current;
+    const promptReturned = activePromptReturnCount > prevPromptReturnCountRef.current;
+    prevBellCountForNotifyRef.current = activeBellCount;
+    prevPromptReturnCountRef.current = activePromptReturnCount;
+    if ((bellFired || promptReturned) && !windowFocusedRef.current) {
+      void sendNativeNotification('Tether', bellFired ? 'Terminal bell' : 'Command finished');
+    }
+  }, [activeBellCount, activePromptReturnCount]);
 
   // Update-modal progress display.
   const upPct =
