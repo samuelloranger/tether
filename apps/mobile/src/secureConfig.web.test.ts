@@ -38,46 +38,52 @@ beforeEach(() => {
   tauriActive = true;
 });
 
-test('getPassword calls the Rust keychain command when running under Tauri', async () => {
+test('getPassword calls the Rust keychain command when there is no pending fallback', async () => {
   invoke.mockImplementation(() => Promise.resolve('hunter2'));
   const pw = await getPassword();
   expect(invoke).toHaveBeenCalledWith('secure_get_password');
   expect(pw).toBe('hunter2');
 });
 
-test('getPassword falls back to the fallback key when the keychain call throws', async () => {
+test('getPassword returns null when the keychain throws and there is no pending fallback', async () => {
   invoke.mockImplementation(() => Promise.reject(new Error('no secret service')));
-  localStorageStub.setItem(FALLBACK_KEY, 'fallback-pw');
   const pw = await getPassword();
-  expect(pw).toBe('fallback-pw');
-});
-
-test('getPassword returns a fallback value when the keychain is reachable but empty', async () => {
-  // Simulates: password was saved during a keychain outage (setPassword's
-  // catch path), and the keychain has since recovered but has no entry.
-  invoke.mockImplementation(() => Promise.resolve(null));
-  localStorageStub.setItem(FALLBACK_KEY, 'saved-during-outage');
-  const pw = await getPassword();
-  expect(pw).toBe('saved-during-outage');
-});
-
-test('getPassword clears a stale fallback value once the keychain has a real value', async () => {
-  invoke.mockImplementation(() => Promise.resolve('hunter2'));
-  localStorageStub.setItem(FALLBACK_KEY, 'stale-fallback');
-  const pw = await getPassword();
-  expect(pw).toBe('hunter2');
-  expect(localStorageStub.getItem(FALLBACK_KEY)).toBeNull();
+  expect(pw).toBeNull();
 });
 
 test('getPassword under Tauri never returns a leftover legacy plaintext password, even if the keychain is empty', async () => {
   // Regression for codex P1: an existing desktop user upgrading has an old
-  // plaintext password sitting under the legacy key. The keychain is empty
-  // (nothing saved there yet) and there is no fallback-key entry either —
-  // this must NOT silently resurrect the legacy value; the user re-enters it.
+  // plaintext password sitting under the legacy key, no fallback entry, and
+  // an empty keychain. This must NOT silently resurrect the legacy value —
+  // the user re-enters it once, per the no-migration product decision.
   invoke.mockImplementation(() => Promise.resolve(null));
   localStorageStub.setItem(LEGACY_KEY, 'old-plaintext-from-before-upgrade');
   const pw = await getPassword();
   expect(pw).toBeNull();
+});
+
+test('getPassword flushes a pending fallback into the keychain once it is reachable again, and the newer value wins', async () => {
+  // Regression for codex P2 (2nd round): the keychain already holds an OLDER
+  // password. A newer one was saved to the fallback key during an outage.
+  // Once the keychain is reachable again, the newer fallback value must win
+  // and get synced — not the stale keychain value.
+  invoke.mockImplementation((cmd: string) =>
+    cmd === 'secure_get_password' ? Promise.resolve('old-keychain-pw') : Promise.resolve(undefined),
+  );
+  localStorageStub.setItem(FALLBACK_KEY, 'newer-pw-saved-during-outage');
+  const pw = await getPassword();
+  expect(invoke).toHaveBeenCalledWith('secure_set_password', { password: 'newer-pw-saved-during-outage' });
+  expect(pw).toBe('newer-pw-saved-during-outage');
+  expect(localStorageStub.getItem(FALLBACK_KEY)).toBeNull();
+});
+
+test('getPassword keeps using a pending fallback value while the keychain is still unavailable', async () => {
+  invoke.mockImplementation(() => Promise.reject(new Error('still locked')));
+  localStorageStub.setItem(FALLBACK_KEY, 'pending-pw');
+  const pw = await getPassword();
+  expect(pw).toBe('pending-pw');
+  // Not yet synced — must stay put so the next read/attempt can retry.
+  expect(localStorageStub.getItem(FALLBACK_KEY)).toBe('pending-pw');
 });
 
 test('setPassword writes to the keychain and clears both the fallback and legacy keys', async () => {

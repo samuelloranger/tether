@@ -30,22 +30,29 @@ function ls(): Storage | null {
 
 export async function getPassword(): Promise<string | null> {
   if (isTauri()) {
+    // A fallback value exists ONLY because a previous setPassword's keychain
+    // write failed — it is therefore always more recent than whatever's
+    // already in the keychain (which wasn't updated during that outage).
+    // Try to flush it now, on every read, so a recovered keychain gets synced
+    // instead of a stale keychain value silently winning and the newer
+    // fallback password being discarded.
+    const pending = ls()?.getItem(KEY_PASSWORD_FALLBACK) ?? null;
+    if (pending !== null) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('secure_set_password', { password: pending });
+        ls()?.removeItem(KEY_PASSWORD_FALLBACK);
+        ls()?.removeItem(KEY_PASSWORD);
+      } catch {
+        // Keychain still unavailable — keep using the pending value below.
+      }
+      return pending;
+    }
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const pw = await invoke<string | null>('secure_get_password');
-      if (pw !== null) {
-        // Keychain has it — drop any stale outage-fallback copy.
-        ls()?.removeItem(KEY_PASSWORD_FALLBACK);
-        return pw;
-      }
-      // Keychain reachable but empty — a value saved locally during a prior
-      // outage (setPassword's catch below) is still valid; don't force the
-      // user to re-enter it just because the keychain is back. Never falls
-      // back to the legacy KEY_PASSWORD here — see its doc comment above.
-      return ls()?.getItem(KEY_PASSWORD_FALLBACK) ?? null;
+      return await invoke<string | null>('secure_get_password');
     } catch {
-      // Keychain unavailable this call.
-      return ls()?.getItem(KEY_PASSWORD_FALLBACK) ?? null;
+      return null;
     }
   }
   return ls()?.getItem(KEY_PASSWORD) ?? null;
