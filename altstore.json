@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.9.1",
+          "date": "2026-07-16",
+          "localizedDescription": "## Desktop\n- Fixed Ctrl/Cmd+click not opening terminal links at all — a missing Tauri capability (`opener:allow-default-urls`) was silently denying every open-link call\n- Error/confirm dialogs now render in-app instead of as native OS dialogs — fixes GNOME showing them as a duplicate \"Tether\" window in the taskbar/Alt-Tab",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.9.1/tether-v1.9.1.ipa",
+          "size": 8538868,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.9.0",
           "date": "2026-07-16",
           "localizedDescription": "## Terminal\n- OSC 52 clipboard write (base64-decoded, written to the device clipboard) — vim/tmux \"yank to system clipboard\" now reaches the phone/desktop\n- OSC 10/11 fg/bg color query reply — TUIs like fzf, lazygit, nvim, and btop that query terminal colors to pick light/dark no longer get silence\n\n## Desktop\n- Native OS notification when a terminal bell rings or a command finishes, while the Tether window is unfocused\n- Server password moved from plaintext localStorage to the OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service), with a localStorage fallback if the keychain is unavailable",
