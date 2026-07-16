@@ -39,6 +39,7 @@ import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from
 import TitleBar from './TitleBar';
 import { DragDropContentView } from 'expo-drag-drop-content-view';
 import { injectDragRegionStyles } from './dragRegion';
+import { injectTerminalScrollbarStyles } from './terminalScrollbar';
 import { createStyles } from './styles';
 import { useAppTheme } from './AppThemeProvider';
 import { isDesktop, isMacDesktop } from './platform';
@@ -72,6 +73,9 @@ import { useTetherApp } from './useTetherApp';
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  useEffect(() => {
+    if (isDesktop) injectTerminalScrollbarStyles();
+  }, []);
   const {
     fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   } = app;
@@ -313,7 +317,15 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               // PTY. Keyboard is captured globally via the window keydown listener;
               // text selection is native (selectable) and actions use the right-click
               // menu — so no press handlers are needed here.
-              <View nativeID="tether-terminal" style={{ flex: 1 }}>
+              <View
+                nativeID="tether-terminal"
+                style={{
+                  flex: 1,
+                  '--tether-scrollbar-track': theme.terminal.bg,
+                  '--tether-scrollbar-thumb': theme.colors.border,
+                  '--tether-scrollbar-thumb-hover': theme.colors.selected,
+                } as any}
+              >
                 {terminalGrid}
               </View>
             ) : (
