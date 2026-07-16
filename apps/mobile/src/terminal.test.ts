@@ -556,4 +556,26 @@ setTheme(APP_THEMES.mocha.terminal);
   eq(snap[1].links[0]?.url, url, 'row 1 still resolves the full URL after a resize round trip');
 }
 
+// 55. OSC 10 query replies with the current theme foreground as an xterm rgb: color.
+{
+  const t = new TerminalEmulator(80, 24);
+  const replies: string[] = [];
+  t.onReply = (data) => replies.push(data);
+  t.write(`${E}]10;?${E}\\`);
+  eq(replies.length, 1, 'OSC 10 query produced exactly one reply');
+  eq(replies[0], `${E}]10;rgb:cdcd/d6d6/f4f4${E}\\`, 'OSC 10 reply carries Mocha fg as rgb:');
+}
+
+// 56. OSC 11 query replies with the current theme background; non-query OSC 10/11 is a no-op.
+{
+  const t = new TerminalEmulator(80, 24);
+  const replies: string[] = [];
+  t.onReply = (data) => replies.push(data);
+  t.write(`${E}]11;?${E}\\`);
+  eq(replies.length, 1, 'OSC 11 query produced exactly one reply');
+  eq(replies[0], `${E}]11;rgb:1e1e/1e1e/2e2e${E}\\`, 'OSC 11 reply carries Mocha bg as rgb:');
+  t.write(`${E}]10;rgb:ffff/ffff/ffff${E}\\`); // "set" form — must NOT trigger a reply
+  eq(replies.length, 1, 'OSC 10 set-form (non-"?") produces no reply');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

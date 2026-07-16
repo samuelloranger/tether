@@ -74,6 +74,17 @@ function buildPalette(): string[] {
   }
   return pal; // length 256
 }
+
+// xterm OSC 10/11 reply color format: each "#rrggbb" hex byte doubled, e.g.
+// "#1e1e2e" -> "rgb:1e1e/1e1e/2e2e".
+function hexToOscColor(hex: string): string {
+  const h = hex.replace('#', '');
+  const r = h.slice(0, 2);
+  const g = h.slice(2, 4);
+  const b = h.slice(4, 6);
+  return `rgb:${r}${r}/${g}${g}/${b}${b}`;
+}
+
 let PALETTE = buildPalette();
 
 export interface Theme {
@@ -662,6 +673,13 @@ export class TerminalEmulator {
       const uriSep = pt.indexOf(';');
       const uri = uriSep === -1 ? '' : pt.slice(uriSep + 1);
       (this.pen as Cell).url = uri || undefined;
+    } else if (ps === '10' || ps === '11') {
+      // Query-only (xterm's "set fg/bg" direction is intentionally unsupported —
+      // our themes are fixed, a remote app should not override them).
+      if (pt === '?') {
+        const color = ps === '10' ? DEFAULT_FG : DEFAULT_BG;
+        this.onReply?.(`\x1b]${ps};${hexToOscColor(color)}\x1b\\`);
+      }
     }
   }
 
