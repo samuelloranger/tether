@@ -52,6 +52,7 @@ import { RenameModal, SnippetsModal, AppearanceModal } from './SessionModals';
 import { SelectionView } from './SelectionView';
 import { ContextMenu } from './ContextMenu';
 import { UpdateModal } from './UpdateModal';
+import { AlertModal } from './AlertModal';
 import { ConfigScreen } from './ConfigScreen';
 import { mouseSeq } from './mouseSeq';
 import { DesktopSessionNavigator } from './DesktopSessionNavigator';
@@ -543,6 +544,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onDownload={downloadUpdate}
             />
           )}
+          {isDesktop && <AlertModal />}
         </KeyboardAvoidingView>
   );
 }
