@@ -176,6 +176,7 @@ fn main() {
     tauri::Builder::default()
         // Persist window size/position/maximized state across launches.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
         // Self-update: check GitHub releases, verify the signature, relaunch.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
