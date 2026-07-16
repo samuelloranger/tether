@@ -556,4 +556,76 @@ setTheme(APP_THEMES.mocha.terminal);
   eq(snap[1].links[0]?.url, url, 'row 1 still resolves the full URL after a resize round trip');
 }
 
+// 55. OSC 10 query replies with the current theme foreground as an xterm rgb: color.
+{
+  const t = new TerminalEmulator(80, 24);
+  const replies: string[] = [];
+  t.onReply = (data) => replies.push(data);
+  t.write(`${E}]10;?${E}\\`);
+  eq(replies.length, 1, 'OSC 10 query produced exactly one reply');
+  eq(replies[0], `${E}]10;rgb:cdcd/d6d6/f4f4${E}\\`, 'OSC 10 reply carries Mocha fg as rgb:');
+}
+
+// 56. OSC 11 query replies with the current theme background; non-query OSC 10/11 is a no-op.
+{
+  const t = new TerminalEmulator(80, 24);
+  const replies: string[] = [];
+  t.onReply = (data) => replies.push(data);
+  t.write(`${E}]11;?${E}\\`);
+  eq(replies.length, 1, 'OSC 11 query produced exactly one reply');
+  eq(replies[0], `${E}]11;rgb:1e1e/1e1e/2e2e${E}\\`, 'OSC 11 reply carries Mocha bg as rgb:');
+  t.write(`${E}]10;rgb:ffff/ffff/ffff${E}\\`); // "set" form — must NOT trigger a reply
+  eq(replies.length, 1, 'OSC 10 set-form (non-"?") produces no reply');
+}
+
+// 57. OSC 52 write: base64 payload is decoded and handed to onClipboardWrite.
+{
+  const t = new TerminalEmulator(80, 24);
+  const written: string[] = [];
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;aGVsbG8gd29ybGQ=${E}\\`); // base64("hello world")
+  eq(written, ['hello world'], 'OSC 52 write decodes base64 to onClipboardWrite');
+}
+
+// 58. OSC 52 write: non-ASCII text round-trips correctly (UTF-8 safe base64).
+{
+  const t = new TerminalEmulator(80, 24);
+  const written: string[] = [];
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;44GT44KT44Gr44Gh44Gv${E}\\`); // base64("こんにちは")
+  eq(written, ['こんにちは'], 'OSC 52 write decodes multi-byte UTF-8 base64 correctly');
+}
+
+// 59. OSC 52 query ("?") is intentionally unsupported — no onReply, no read of
+// the device clipboard. Supporting it would let any process in the shell
+// silently exfiltrate the clipboard with no user consent.
+{
+  const t = new TerminalEmulator(80, 24);
+  const replies: string[] = [];
+  const written: string[] = [];
+  t.onReply = (data) => replies.push(data);
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;?${E}\\`);
+  eq(replies, [], 'OSC 52 query produces no reply');
+  eq(written, [], 'OSC 52 query does not call onClipboardWrite');
+}
+
+// 60. OSC 52 write: empty payload is the valid "clear the clipboard" form.
+{
+  const t = new TerminalEmulator(80, 24);
+  const written: string[] = [];
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;${E}\\`);
+  eq(written, [''], "OSC 52 empty payload clears the clipboard via onClipboardWrite('')");
+}
+
+// 61. OSC 52 write: malformed base64 fails silently — no throw, no onClipboardWrite call.
+{
+  const t = new TerminalEmulator(80, 24);
+  const written: string[] = [];
+  t.onClipboardWrite = (text) => written.push(text);
+  t.write(`${E}]52;c;not-valid-base64!!!${E}\\`);
+  eq(written, [], 'malformed OSC 52 base64 does not call onClipboardWrite');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
