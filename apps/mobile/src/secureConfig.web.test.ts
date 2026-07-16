@@ -49,6 +49,23 @@ test('getPassword falls back to localStorage when the keychain call throws', asy
   expect(pw).toBe('fallback-pw');
 });
 
+test('getPassword returns a localStorage fallback value when the keychain is reachable but empty', async () => {
+  // Simulates: password was saved during a keychain outage (setPassword's
+  // fallback path), and the keychain has since recovered but has no entry.
+  invoke.mockImplementation(() => Promise.resolve(null));
+  localStorageStub.setItem('tether_password', 'saved-during-outage');
+  const pw = await getPassword();
+  expect(pw).toBe('saved-during-outage');
+});
+
+test('getPassword clears a stale localStorage fallback once the keychain has a real value', async () => {
+  invoke.mockImplementation(() => Promise.resolve('hunter2'));
+  localStorageStub.setItem('tether_password', 'stale-fallback');
+  const pw = await getPassword();
+  expect(pw).toBe('hunter2');
+  expect(localStorageStub.getItem('tether_password')).toBeNull();
+});
+
 test('setPassword writes to the keychain and clears any stale localStorage entry', async () => {
   localStorageStub.setItem('tether_password', 'old-plaintext');
   await setPassword('new-pw');
@@ -65,6 +82,12 @@ test('setPassword falls back to localStorage when the keychain call throws', asy
 test('clearPassword calls the Rust command when running under Tauri', async () => {
   await clearPassword();
   expect(invoke).toHaveBeenCalledWith('secure_clear_password');
+});
+
+test('clearPassword also clears a stale localStorage fallback so it cannot resurrect later', async () => {
+  localStorageStub.setItem('tether_password', 'stale-fallback');
+  await clearPassword();
+  expect(localStorageStub.getItem('tether_password')).toBeNull();
 });
 
 test('non-Tauri (plain browser dev preview) always uses localStorage directly', async () => {

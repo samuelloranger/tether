@@ -21,7 +21,16 @@ export async function getPassword(): Promise<string | null> {
   if (isTauri()) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<string | null>('secure_get_password');
+      const pw = await invoke<string | null>('secure_get_password');
+      if (pw !== null) {
+        // Keychain has it — drop any stale fallback copy from an earlier outage.
+        ls()?.removeItem(KEY_PASSWORD);
+        return pw;
+      }
+      // Keychain reachable but empty — a value saved locally during a prior
+      // outage (setPassword's fallback path) is still valid; don't force the
+      // user to re-enter it just because the keychain is back.
+      return ls()?.getItem(KEY_PASSWORD) ?? null;
     } catch {
       // Keychain unavailable — fall through to localStorage below.
     }
@@ -51,6 +60,9 @@ export async function clearPassword(): Promise<void> {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('secure_clear_password');
+      // Also drop any stale fallback copy, or a later keychain outage could
+      // resurrect a password this call just cleared.
+      ls()?.removeItem(KEY_PASSWORD);
       return;
     } catch {
       // Keychain unavailable — fall through to localStorage below.
