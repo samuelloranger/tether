@@ -85,17 +85,10 @@ function hexToOscColor(hex: string): string {
   return `rgb:${r}${r}/${g}${g}/${b}${b}`;
 }
 
-// btoa/atob are Latin1-only; round-tripping arbitrary clipboard text (which
-// may contain multi-byte UTF-8) needs the encodeURIComponent/decodeURIComponent
-// trick below rather than TextEncoder/TextDecoder, whose Hermes support is less
-// consistently available across RN versions than atob/btoa/encodeURIComponent.
-function utf8ToBase64(text: string): string {
-  const latin1 = encodeURIComponent(text).replace(/%([0-9A-F]{2})/g, (_, hex) =>
-    String.fromCharCode(parseInt(hex, 16)),
-  );
-  return btoa(latin1);
-}
-
+// btoa/atob are Latin1-only; decoding arbitrary clipboard text (which may
+// contain multi-byte UTF-8) needs the decodeURIComponent trick below rather
+// than TextDecoder, whose Hermes support is less consistently available
+// across RN versions than atob/decodeURIComponent.
 function base64ToUtf8(b64: string): string {
   const latin1 = atob(b64);
   const percentEncoded = latin1
@@ -240,11 +233,12 @@ export class TerminalEmulator {
   // prompts) stall until their internal timeout.
   onReply: ((data: string) => void) | null = null;
 
-  // Wired by the UI to the device clipboard (OSC 52). Write: decoded OSC 52
-  // payload text. Read: returns a Promise resolving to the current clipboard
-  // text, used to answer an OSC 52 query via onReply.
+  // Wired by the UI to the device clipboard (OSC 52 write: decoded payload
+  // text). The query/read direction (OSC 52;c;?) is intentionally NOT
+  // implemented — it would let any process running in the shell silently
+  // read the device clipboard with no user consent, which is why real
+  // terminals (xterm, kitty) disable OSC 52 read by default.
   onClipboardWrite: ((text: string) => void) | null = null;
-  onClipboardRead: (() => Promise<string>) | null = null;
 
   private state: ParserState = 'ground';
   private params = '';
@@ -707,21 +701,19 @@ export class TerminalEmulator {
         this.onReply?.(`\x1b]${ps};${hexToOscColor(color)}\x1b\\`);
       }
     } else if (ps === '52') {
-      // pt is "<buffer-letters>;<base64-or-?>" — buffer letter (c/p/s/0-7) is
-      // ignored, mobile has no separate primary-selection concept.
+      // pt is "<buffer-letters>;<base64-or-empty>" — buffer letter (c/p/s/0-7)
+      // is ignored, mobile has no separate primary-selection concept. Query
+      // (Pt === '?') is intentionally NOT implemented — see onClipboardWrite's
+      // doc comment above for why.
       const dataSep = pt.indexOf(';');
-      const payload = dataSep === -1 ? '' : pt.slice(dataSep + 1);
-      if (payload === '?') {
-        this.onClipboardRead
-          ?.()
-          .then((text) => this.onReply?.(`\x1b]52;c;${utf8ToBase64(text)}\x1b\\`))
-          .catch(() => {});
-      } else if (payload) {
-        try {
-          this.onClipboardWrite?.(base64ToUtf8(payload));
-        } catch {
-          // Malformed base64 — drop silently, same as other malformed OSC payloads.
-        }
+      if (dataSep === -1) return;
+      const payload = pt.slice(dataSep + 1);
+      if (payload === '?') return;
+      try {
+        // Empty payload is the valid "clear the clipboard" form.
+        this.onClipboardWrite?.(base64ToUtf8(payload));
+      } catch {
+        // Malformed base64 — drop silently, same as other malformed OSC payloads.
       }
     }
   }
