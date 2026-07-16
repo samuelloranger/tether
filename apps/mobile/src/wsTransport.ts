@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { isTauri } from './platform';
 
 // Terminal WebSocket transport, abstracted over platform so App.tsx doesn't care
 // how the socket is opened:
@@ -20,10 +21,6 @@ export interface TransportHandlers {
   onClose: () => void;
 }
 
-// Tauri injects __TAURI_INTERNALS__ into the webview global.
-export function isTauri(): boolean {
-  return typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
-}
 
 let connSeq = 0;
 
