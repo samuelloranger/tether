@@ -240,6 +240,10 @@ export function useTetherApp() {
       term.onReply = (text) => {
         if (id === activeIdRef.current) wsSend({ type: 'input', text });
       };
+      term.onClipboardWrite = (text) => {
+        void Clipboard.setStringAsync(text).catch(() => {});
+      };
+      term.onClipboardRead = () => Clipboard.getStringAsync();
       return { term, sinceId: 0, lastAppliedId: 0 };
     });
 
