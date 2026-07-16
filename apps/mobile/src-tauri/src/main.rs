@@ -126,6 +126,36 @@ fn is_updatable() -> bool {
     }
 }
 
+// Desktop password storage backed by the OS keychain (macOS Keychain, Windows
+// Credential Manager, Linux Secret Service via the `keyring` crate). Falls back
+// to localStorage on the TypeScript side (secureConfig.web.ts) if any of these
+// fail — e.g. no Secret Service daemon running on a minimal Linux desktop.
+fn secure_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("tether-desktop", "server-password").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secure_get_password() -> Result<Option<String>, String> {
+    match secure_entry()?.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn secure_set_password(password: String) -> Result<(), String> {
+    secure_entry()?.set_password(&password).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secure_clear_password() -> Result<(), String> {
+    match secure_entry()?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 // NOTE: the webview CSP is left null (see tauri.conf.json). This shell loads
 // only the local bundled frontend — no remote page loads — so its XSS surface is
 // minimal, and a strict CSP breaks react-native-web's runtime-injected
@@ -160,7 +190,10 @@ fn main() {
             ws_connect,
             ws_send,
             ws_close,
-            is_updatable
+            is_updatable,
+            secure_get_password,
+            secure_set_password,
+            secure_clear_password
         ])
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");

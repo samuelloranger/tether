@@ -15,6 +15,7 @@ tauri-plugin-process = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-opener = "2"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 tokio = { version = "1", features = ["sync"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"

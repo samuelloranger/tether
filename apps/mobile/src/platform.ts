@@ -10,3 +10,10 @@ export const isDesktop = Platform.OS === 'web';
 // Detected from the webview UA since this only ever runs on the desktop build.
 export const isMacDesktop =
   isDesktop && typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent);
+
+// Tauri injects __TAURI_INTERNALS__ into the webview global. True only inside
+// the packaged desktop app — false for the plain-browser `bun run web` dev
+// preview, which has no Rust backend to invoke.
+export function isTauri(): boolean {
+  return typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+}
