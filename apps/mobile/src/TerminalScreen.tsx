@@ -61,6 +61,7 @@ import { PresentationView } from './PresentationView';
 import { findSessionPreview, previewUrl } from './presentations';
 import { FileViewer } from './FileViewer';
 import { DiffView } from './DiffView';
+import { ChangeBanner } from './ChangeBanner';
 
 
 // Constants for async storage keys
@@ -80,7 +81,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     if (isDesktop) injectTerminalScrollbarStyles();
   }, []);
   const {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, closeFile, diffSummary, diffSelectedPath, diffText, diffTruncated, diffLoading, openDiff, closeDiff, selectDiffFile, deselectDiffFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, closeFile, diffOpen, changeSummary, diffSelectedPath, diffText, diffTruncated, diffLoading, openDiff, closeDiff, selectDiffFile, deselectDiffFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   } = app;
 
   // Bell (BEL): brief red flash + haptic tick whenever the active session's
@@ -124,7 +125,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     // Re-run when a presentation opens/closes: the #tether-terminal node
     // unmounts/remounts across that transition (see the render branch below),
     // so a stale node reference would silently stop receiving drops.
-  }, [uploadFile, activePresentation, fileView, diffSummary]);
+  }, [uploadFile, activePresentation, fileView, diffOpen]);
 
   // Desktop: clicking the terminal focuses the hidden IME composition-target
   // input (see the isDesktop TextInput above) — needed so the browser has an
@@ -143,7 +144,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     // Re-run when a presentation opens/closes: the #tether-terminal node
     // unmounts/remounts across that transition (see the render branch below),
     // so an empty deps array would keep this bound to a detached node forever.
-  }, [activePresentation, fileView, diffSummary]);
+  }, [activePresentation, fileView, diffOpen]);
 
   // OverflowMenu/SelectionView force-unmount below when a takeover is
   // active (bypassing their own onClose), which can happen while either is
@@ -151,16 +152,16 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   // open state here so they don't pop back visible once the preview closes
   // and they remount.
   useEffect(() => {
-    if (activePresentation || fileView || diffSummary) {
+    if (activePresentation || fileView || diffOpen) {
       setMenuOpen(false);
       setSelectionViewOpen(false);
     }
-  }, [activePresentation, fileView, diffSummary, setMenuOpen, setSelectionViewOpen]);
+  }, [activePresentation, fileView, diffOpen, setMenuOpen, setSelectionViewOpen]);
 
   const sessionPreview = findSessionPreview(presentations, activeId);
   const backTarget = activePresentation?.sessionId ?? activeId;
   const backLabel = drawerSessions.find((s) => s.id === backTarget)?.name || backTarget;
-  const terminalVisible = !fileView && !diffSummary && !activePresentation;
+  const terminalVisible = !fileView && !diffOpen && !activePresentation;
 
   return (
         /* Terminal Client Screen */
@@ -283,9 +284,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           )}
           {fileView ? (
             <FileViewer file={fileView} onBack={closeFile} />
-          ) : diffSummary ? (
+          ) : diffOpen ? (
             <DiffView
-              summary={diffSummary}
+              summary={changeSummary}
               selectedPath={diffSelectedPath}
               diffText={diffText}
               diffTruncated={diffTruncated}
@@ -309,6 +310,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               />
             </>
           ) : <>
+          <ChangeBanner summary={changeSummary} onPress={openDiff} />
           {!isDesktop && sessionPreview && (
             <PresentationBanner
               label={`Preview ready: ${sessionPreview.title}`}

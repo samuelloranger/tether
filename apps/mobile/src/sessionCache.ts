@@ -1,9 +1,11 @@
 import type { TerminalEmulator } from './terminal';
+import type { DiffSummary } from './diffModel';
 
 export interface SessionEntry {
   term: TerminalEmulator;
   sinceId: number;
   lastAppliedId: number;
+  diffSummary: DiffSummary;
 }
 
 // LRU cache of terminal emulators. Only the active session has a live WS; cached
