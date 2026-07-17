@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.9.2",
+          "date": "2026-07-17",
+          "localizedDescription": "## Multi-tab live sync\n\n- Keep each cached terminal tab connected in the background, so switching returns to an up-to-date terminal immediately.\n- Limit live connections to the existing three-tab LRU cache and close the exact evicted or killed tab connection.\n- Support concurrent authenticated desktop sockets through the Tauri bridge.\n- Prevent a background terminal from changing the clipboard through OSC 52.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.9.2/tether-v1.9.2.ipa",
+          "size": 8539499,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.9.1",
           "date": "2026-07-16",
           "localizedDescription": "## Desktop\n- Fixed Ctrl/Cmd+click not opening terminal links at all — a missing Tauri capability (`opener:allow-default-urls`) was silently denying every open-link call\n- Error/confirm dialogs now render in-app instead of as native OS dialogs — fixes GNOME showing them as a duplicate \"Tether\" window in the taskbar/Alt-Tab",
