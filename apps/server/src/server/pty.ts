@@ -12,6 +12,7 @@ import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
+import { clearLiveCwd, recordChunk } from './liveCwd';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { COMPILED, selfArgv } from './runtime';
 
@@ -181,6 +182,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     if (pendingOutput.length === 0) return;
     const text = pendingOutput.join('');
     pendingOutput = [];
+    recordChunk(id, text);
     const logId = addTerminalLog(id, text);
     broadcast(id, { type: 'output', chunk: text, id: logId });
   };
@@ -208,6 +210,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       broadcast(id, { type: 'exit', exitCode: msg.code });
       instances.get(id)?.subscribers.clear();
       instances.delete(id);
+      clearLiveCwd(id);
     }
   };
 
@@ -237,6 +240,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
           // Holder gone without an exit frame = it crashed or was killed hard.
           // Drop the instance so the next startSession spawns a fresh holder.
           if (!exited && instances.get(id)?.sock && instances.delete(id)) {
+            clearLiveCwd(id);
             console.log(`Holder link for session "${id}" closed unexpectedly`);
           }
         },
@@ -463,6 +467,7 @@ export function killSession(id: string) {
   const instance = instances.get(id);
   const hadInstance = sendFrame(id, { t: 'k' });
   if (instance) instances.delete(id);
+  clearLiveCwd(id);
   // Fallback for holders we aren't attached to (or that ignore the frame).
   if (!hadInstance) {
     try {

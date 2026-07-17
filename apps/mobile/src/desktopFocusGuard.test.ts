@@ -17,6 +17,9 @@ describe('shouldForwardToTerminal', () => {
     expect(shouldForwardToTerminal(null, false)).toBe(true);
     expect(shouldForwardToTerminal(el(), true)).toBe(true);
   });
+  it('does not forward while a takeover view hides the terminal', () => {
+    expect(shouldForwardToTerminal(null, true, false)).toBe(false);
+  });
   it('forwards when the terminal surface itself (or a descendant) is focused', () => {
     expect(shouldForwardToTerminal(el({ id: 'tether-terminal' }), false)).toBe(true);
     expect(
