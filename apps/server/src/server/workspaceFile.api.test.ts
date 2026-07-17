@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { app } from './app';
-import { setAuthHash, upsertSession } from './db';
+import { getAuthHash, setAuthHash, upsertSession } from './db';
 
 const PASSWORD = 'test-password';
 const AUTH = { Authorization: `Bearer ${PASSWORD}` };
@@ -13,6 +13,7 @@ async function ensureAuth() {
 }
 
 test('GET /api/sessions/:id/file serves workspace text for an authenticated rooted session', async () => {
+  const previousAuthHash = getAuthHash();
   await ensureAuth();
   const root = mkdtempSync(path.join(tmpdir(), 'tether-file-api-'));
   try {
@@ -49,5 +50,6 @@ test('GET /api/sessions/:id/file serves workspace text for an authenticated root
     expect(body.error).toBeDefined();
   } finally {
     rmSync(root, { recursive: true, force: true });
+    setAuthHash(previousAuthHash);
   }
 });
