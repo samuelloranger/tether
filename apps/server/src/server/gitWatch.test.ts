@@ -45,7 +45,33 @@ test('debounces native worktree events and suppresses an identical summary', asy
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
     await Bun.sleep(250);
     expect(seen).toHaveLength(2);
+
+    execSync('git add main.ts && git commit -q -m update', { cwd: root });
+    await waitFor(() => seen.length === 3);
+    expect(seen[2]).toEqual({ files: [] });
     watch.dispose();
+  });
+});
+
+test('retargets to a new repository and stops publishing the old root', async () => {
+  await withRepo(async (first) => {
+    await withRepo(async (second) => {
+      const seen: DiffSummary[] = [];
+      const watch = new GitWatch((summary) => seen.push(summary), 150);
+      watch.setRoot(first);
+      watch.setRoot(second);
+
+      writeFileSync(path.join(first, 'main.ts'), 'export const answer = 43;\n');
+      await Bun.sleep(250);
+      expect(seen).toEqual([{ files: [] }, { files: [] }]);
+
+      writeFileSync(path.join(second, 'main.ts'), 'export const answer = 43;\n');
+      await waitFor(() => seen.length === 3);
+      expect(seen[2]).toEqual({
+        files: [{ path: 'main.ts', insertions: 1, deletions: 1 }],
+      });
+      watch.dispose();
+    });
   });
 });
 
