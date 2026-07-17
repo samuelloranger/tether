@@ -237,7 +237,11 @@ const AUTH_HASH_KEY = 'auth_password_hash';
 export function getAuthHash(): string | null {
   return getSetting(AUTH_HASH_KEY);
 }
-export function setAuthHash(hash: string): void {
+export function setAuthHash(hash: string | null): void {
+  if (hash === null) {
+    db.query('DELETE FROM settings WHERE key = $key').run({ $key: AUTH_HASH_KEY });
+    return;
+  }
   setSetting(AUTH_HASH_KEY, hash);
 }
 
