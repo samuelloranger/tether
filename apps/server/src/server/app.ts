@@ -172,13 +172,13 @@ app.get('/api/sessions/:id/diff/summary', (c) => {
   }
 });
 
-app.get('/api/sessions/:id/diff', (c) => {
+app.get('/api/sessions/:id/diff', async (c) => {
   const session = getSession(c.req.param('id'));
   if (!session) return c.json({ error: 'session not found' }, 404);
   const cwd = getLiveCwd(c.req.param('id'));
   if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
   try {
-    return c.json(readDiff(resolveGitRoot(cwd), c.req.query('path')));
+    return c.json(await readDiff(resolveGitRoot(cwd), c.req.query('path')));
   } catch (error) {
     if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
     throw error;

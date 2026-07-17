@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { totalChanges } from './diffModel';
+import { displayDiff, totalChanges } from './diffModel';
 
 test('totalChanges sums insertions and deletions across files', () => {
   expect(totalChanges({ files: [] })).toBe(0);
@@ -11,4 +11,8 @@ test('totalChanges sums insertions and deletions across files', () => {
       ],
     }),
   ).toBe(6);
+});
+
+test('displayDiff warns when the server truncates a diff', () => {
+  expect(displayDiff('line 1\n', true)).toBe('line 1\n\n[Diff truncated at 1 MiB]');
 });

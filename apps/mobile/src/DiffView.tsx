@@ -1,11 +1,12 @@
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
-import type { DiffSummary } from './diffModel';
+import { displayDiff, type DiffSummary } from './diffModel';
 
 export function DiffView({
   summary,
   selectedPath,
   diffText,
+  diffTruncated,
   diffLoading,
   onSelectFile,
   onDeselectFile,
@@ -14,6 +15,7 @@ export function DiffView({
   summary: DiffSummary;
   selectedPath: string | null;
   diffText: string | null;
+  diffTruncated: boolean;
   diffLoading: boolean;
   onSelectFile: (path: string) => void;
   onDeselectFile: () => void;
@@ -44,7 +46,7 @@ export function DiffView({
           <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
             <ScrollView horizontal contentContainerStyle={styles.horizontal}>
               <Text selectable style={[styles.code, { color: theme.terminal.fg }]}>
-                {diffText ?? ''}
+                {displayDiff(diffText ?? '', diffTruncated)}
               </Text>
             </ScrollView>
           </ScrollView>

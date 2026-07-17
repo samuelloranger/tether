@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const MAX_DIFF_BYTES = 1_048_576;
@@ -34,6 +34,28 @@ function runGit(root: string, args: string[]): string {
   return result.stdout;
 }
 
+function runGitDiff(root: string, args: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['-C', root, ...args]);
+    const chunks: Buffer[] = [];
+    let length = 0;
+    child.stdout.on('data', (chunk: Buffer) => {
+      const remaining = MAX_DIFF_BYTES + 1 - length;
+      if (remaining > 0) {
+        const kept = chunk.subarray(0, remaining);
+        chunks.push(kept);
+        length += kept.length;
+      }
+    });
+    child.stderr.resume();
+    child.on('error', () => reject(new GitDiffError(404, 'not a git repository')));
+    child.on('close', (status) => {
+      if (status !== 0) reject(new GitDiffError(404, 'not a git repository'));
+      else resolve(Buffer.concat(chunks));
+    });
+  });
+}
+
 export function readDiffSummary(root: string): { files: DiffFileStat[] } {
   const out = runGit(root, ['diff', 'HEAD', '--numstat']);
   const files = out
@@ -50,14 +72,15 @@ export function readDiffSummary(root: string): { files: DiffFileStat[] } {
   return { files };
 }
 
-export function readDiff(
+export async function readDiff(
   root: string,
   requestedPath?: string,
-): { diff: string; truncated: boolean } {
+): Promise<{ diff: string; truncated: boolean }> {
   validatePath(requestedPath);
   const args = ['diff', 'HEAD'];
   if (requestedPath) args.push('--', requestedPath);
-  const out = runGit(root, args);
-  if (out.length > MAX_DIFF_BYTES) return { diff: out.slice(0, MAX_DIFF_BYTES), truncated: true };
-  return { diff: out, truncated: false };
+  const out = await runGitDiff(root, args);
+  if (out.length > MAX_DIFF_BYTES)
+    return { diff: out.subarray(0, MAX_DIFF_BYTES).toString('utf8'), truncated: true };
+  return { diff: out.toString('utf8'), truncated: false };
 }
