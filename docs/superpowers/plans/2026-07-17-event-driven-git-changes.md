@@ -104,7 +104,7 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 2: Run the new test and verify it fails**
 
-  Run: `bun --cwd apps/server test src/server/gitWatch.test.ts`
+  Run (from `apps/server`): `bun test src/server/gitWatch.test.ts`
 
   Expected: FAIL because `./gitWatch` does not exist.
 
@@ -137,7 +137,7 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 5: Run focused server tests and commit**
 
-  Run: `bun --cwd apps/server test src/server/gitDiff.test.ts src/server/gitWatch.test.ts`
+  Run (from `apps/server`): `bun test src/server/gitDiff.test.ts src/server/gitWatch.test.ts`
 
   Expected: PASS with the existing Git diff tests plus watcher debounce/disposal coverage.
 
@@ -171,7 +171,7 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 2: Run the focused test and verify it fails**
 
-  Run: `bun --cwd apps/server test src/server/pty.liveCwd.test.ts`
+  Run (from `apps/server`): `bun test src/server/pty.liveCwd.test.ts`
 
   Expected: FAIL because `Subscriber` does not accept a `diff` frame.
 
@@ -199,7 +199,7 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 5: Run server regression tests and commit**
 
-  Run: `bun --cwd apps/server test src/server/pty.liveCwd.test.ts src/server/gitDiff.api.test.ts src/server/pty.shell.test.ts`
+  Run (from `apps/server`): `bun test src/server/pty.liveCwd.test.ts src/server/gitDiff.api.test.ts src/server/pty.shell.test.ts`
 
   Expected: PASS; each subscriber gets the same initial/change summary, while existing output, exit, and OSC 7 behavior remains green.
 
@@ -402,7 +402,7 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 1: Run the full automated suite**
 
-  Run: `bun --cwd apps/server test`
+  Run (from `apps/server`): `bun test`
 
   Run: `bun --cwd apps/mobile test`
 
