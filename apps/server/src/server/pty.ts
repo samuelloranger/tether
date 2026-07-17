@@ -240,6 +240,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
           // Holder gone without an exit frame = it crashed or was killed hard.
           // Drop the instance so the next startSession spawns a fresh holder.
           if (!exited && instances.get(id)?.sock && instances.delete(id)) {
+            clearLiveCwd(id);
             console.log(`Holder link for session "${id}" closed unexpectedly`);
           }
         },
@@ -466,6 +467,7 @@ export function killSession(id: string) {
   const instance = instances.get(id);
   const hadInstance = sendFrame(id, { t: 'k' });
   if (instance) instances.delete(id);
+  clearLiveCwd(id);
   // Fallback for holders we aren't attached to (or that ignore the frame).
   if (!hadInstance) {
     try {
