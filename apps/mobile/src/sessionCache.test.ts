@@ -45,4 +45,23 @@ const mk = (tag: string): (() => SessionEntry) => () =>
   ok(nextTermId(['default', 'term-2']) === 'term-3', 'ignores non-term ids');
 }
 
+// onEvict fires with the victim id when the LRU pushes it out
+{
+  const evicted: string[] = [];
+  const c = new SessionCache(2, (id) => evicted.push(id));
+  c.touch('a', mk('a'));
+  c.touch('b', mk('b'));
+  c.touch('c', mk('c')); // evicts 'a' (least recent)
+  ok(evicted.length === 1 && evicted[0] === 'a', 'onEvict fires once with victim id');
+}
+
+// onEvict does NOT fire for a plain touch of a still-resident entry
+{
+  const evicted: string[] = [];
+  const c = new SessionCache(3, (id) => evicted.push(id));
+  c.touch('x', mk('x'));
+  c.touch('x', mk('x2')); // re-touch, already present, no eviction
+  ok(evicted.length === 0, 'onEvict does not fire when nothing is evicted');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
