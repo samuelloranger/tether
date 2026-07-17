@@ -1,11 +1,9 @@
 import React from 'react';
-import { View, Text, Linking, StyleSheet, type TextStyle } from 'react-native';
+import { View, Text, StyleSheet, type TextStyle } from 'react-native';
 import type { RenderRow, CellStyle } from './terminal';
-import { splitRunByLinks, urlColumns } from './links';
+import { splitRunByLinks, urlColumns, type LinkTarget } from './links';
 import { isDesktop } from './platform';
 import { useAppTheme } from './AppThemeProvider';
-import { openExternalUrl } from './desktopUpdate';
-import { notify } from './dialog';
 
 function runToStyle(
   s: CellStyle,
@@ -53,6 +51,7 @@ export const TermRow = React.memo(
     blinkOn,
     cursorStyle,
     fontFamily,
+    onOpenLink,
   }: {
     row: RenderRow;
     fontSize: number;
@@ -61,6 +60,7 @@ export const TermRow = React.memo(
     blinkOn: boolean;
     cursorStyle: 'block' | 'bar' | 'underline';
     fontFamily: string;
+    onOpenLink: (target: LinkTarget) => void;
   }) {
     const { theme } = useAppTheme();
     // Column → full URL, from spans the emulator resolved across soft-wrapped
@@ -89,24 +89,16 @@ export const TermRow = React.memo(
             const segs = splitRunByLinks(run.text, col, urlAt);
             col += run.text.length;
             return segs.map((seg, j) =>
-              seg.url ? (
+              seg.target ? (
                 <Text
                   key={`${i}-${j}`}
                   style={[st, styles.link]}
                   onPress={(e) => {
                     if (isDesktop) {
-                      // Ctrl/Cmd+click opens the link — a plain click is free for
-                      // cursor positioning/selection instead (matches iTerm2/VS
-                      // Code convention). Any failure (no default browser
-                      // configured, etc.) surfaces instead of silently no-oping.
                       const mods = e.nativeEvent as unknown as { ctrlKey?: boolean; metaKey?: boolean };
                       if (!mods.ctrlKey && !mods.metaKey) return;
-                      openExternalUrl(seg.url!).catch((err) =>
-                        void notify('Could not open link', String(err), 'error'),
-                      );
-                    } else {
-                      Linking.openURL(seg.url!);
                     }
+                    onOpenLink(seg.target!);
                   }}
                 >
                   {seg.text}
@@ -129,6 +121,7 @@ export const TermRow = React.memo(
     prev.width === next.width &&
     prev.fontFamily === next.fontFamily &&
     prev.cursorStyle === next.cursorStyle &&
+    prev.onOpenLink === next.onOpenLink &&
     // Blink only invalidates the row that actually contains the caret.
     (prev.blinkOn === next.blinkOn || !rowHasCaret(next.row)),
 );

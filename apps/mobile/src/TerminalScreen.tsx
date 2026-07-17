@@ -59,6 +59,7 @@ import { DesktopSessionNavigator } from './DesktopSessionNavigator';
 import { PresentationBanner } from './PresentationBanner';
 import { PresentationView } from './PresentationView';
 import { findSessionPreview, previewUrl } from './presentations';
+import { FileViewer } from './FileViewer';
 
 
 // Constants for async storage keys
@@ -78,7 +79,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     if (isDesktop) injectTerminalScrollbarStyles();
   }, []);
   const {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, closeFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   } = app;
 
   // Bell (BEL): brief red flash + haptic tick whenever the active session's
@@ -122,7 +123,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     // Re-run when a presentation opens/closes: the #tether-terminal node
     // unmounts/remounts across that transition (see the render branch below),
     // so a stale node reference would silently stop receiving drops.
-  }, [uploadFile, activePresentation]);
+  }, [uploadFile, activePresentation, fileView]);
 
   // Desktop: clicking the terminal focuses the hidden IME composition-target
   // input (see the isDesktop TextInput above) — needed so the browser has an
@@ -141,23 +142,24 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     // Re-run when a presentation opens/closes: the #tether-terminal node
     // unmounts/remounts across that transition (see the render branch below),
     // so an empty deps array would keep this bound to a detached node forever.
-  }, [activePresentation]);
+  }, [activePresentation, fileView]);
 
-  // OverflowMenu/SelectionView force-unmount below when a presentation is
+  // OverflowMenu/SelectionView force-unmount below when a takeover is
   // active (bypassing their own onClose), which can happen while either is
   // open — e.g. a new preview auto-selected in the background. Reset their
   // open state here so they don't pop back visible once the preview closes
   // and they remount.
   useEffect(() => {
-    if (activePresentation) {
+    if (activePresentation || fileView) {
       setMenuOpen(false);
       setSelectionViewOpen(false);
     }
-  }, [activePresentation, setMenuOpen, setSelectionViewOpen]);
+  }, [activePresentation, fileView, setMenuOpen, setSelectionViewOpen]);
 
   const sessionPreview = findSessionPreview(presentations, activeId);
   const backTarget = activePresentation?.sessionId ?? activeId;
   const backLabel = drawerSessions.find((s) => s.id === backTarget)?.name || backTarget;
+  const terminalVisible = !fileView && !activePresentation;
 
   return (
         /* Terminal Client Screen */
@@ -191,7 +193,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               status={titleBarStatus}
               onNew={newTerminal}
               onSettings={() => setIsConfiguring(true)}
-              onMenu={() => { if (!activePresentation) setMenuOpen(true); }}
+              onMenu={() => { if (terminalVisible) setMenuOpen(true); }}
             />
           )}
           <View style={[styles.terminalBody, isDesktop && desktopNavigationMode === 'sidebar' && styles.terminalRow]}>
@@ -256,7 +258,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                       </View>
                     )}
 
-                    {!activePresentation && (
+                    {terminalVisible && (
                       <TouchableOpacity
                         style={styles.headerBtn}
                         activeOpacity={0.6}
@@ -273,7 +275,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               </SafeAreaView>
             )}
 
-          {activePresentation ? (
+          {fileLoading && (
+            <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+              <ActivityIndicator color={theme.colors.accent} />
+            </View>
+          )}
+          {fileView ? <FileViewer file={fileView} onBack={closeFile} /> : activePresentation ? (
             <>
               {!isDesktop && (
                 <PresentationBanner
@@ -385,7 +392,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           )}
 
           {/* Overflow menu (header ⋯) */}
-          {!activePresentation && <OverflowMenu
+          {terminalVisible && <OverflowMenu
             visible={menuOpen}
             onClose={() => setMenuOpen(false)}
             onRename={openRename}
@@ -445,7 +452,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           />
 
           {/* Fullscreen selectable-text view (long-press the terminal to open) */}
-          {!activePresentation && <SelectionView
+          {terminalVisible && <SelectionView
             visible={selectionViewOpen}
             onClose={() => {
               setSelectionViewOpen(false);
@@ -462,7 +469,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           />}
 
           {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
-          {!isDesktop && !activePresentation && (
+          {!isDesktop && terminalVisible && (
             <UtilityBar
               ctrlArmed={ctrlArmed}
               setCtrlArmed={setCtrlArmed}
@@ -476,7 +483,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           {/* Hidden keyboard-capture field (mobile): tapping the terminal focuses
               it, so typing goes straight into the terminal (the shell echoes it
               back). Desktop reads the physical keyboard globally instead. */}
-          {!isDesktop && !activePresentation && (
+          {!isDesktop && terminalVisible && (
             <TextInput
               ref={inputRef}
               style={styles.hiddenInput}
@@ -506,7 +513,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               keystrokes. Rendered inside #tether-terminal so the keydown/
               composition focus-guard (desktopFocusGuard.ts) already treats it as
               part of the terminal. Focused on click via the effect below. */}
-          {isDesktop && !activePresentation && (
+          {isDesktop && terminalVisible && (
             <TextInput
               ref={inputRef}
               style={styles.hiddenInput}

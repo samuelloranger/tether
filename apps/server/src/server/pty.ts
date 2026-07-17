@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
@@ -319,7 +327,7 @@ async function doStartSession(
   rows: number,
 ): Promise<SessionInstance> {
   const dims = clampDims(cols, rows);
-  upsertSession(id, command, 'running');
+  upsertSession(id, command, 'running', realpathSync(process.cwd()));
 
   // A holder may already be running from before a server restart — reattach.
   try {
