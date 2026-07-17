@@ -1,6 +1,7 @@
 // Prevent a console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use futures_util::{SinkExt, StreamExt};
@@ -10,25 +11,29 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
-// The desktop client's WebSocket lives on the Rust side so it can send the
-// `Authorization` header (a browser WebSocket can't). The webview talks to it via
-// `invoke` (ws_connect/ws_send/ws_close) and receives frames as `ws-message` /
-// `ws-closed` events. One active connection at a time — mirrors the mobile app,
-// where only the active tab holds a live socket.
+// The desktop client's WebSockets live on the Rust side so they can send the
+// `Authorization` header (a browser WebSocket can't). The webview talks to them
+// via `invoke` (ws_connect/ws_send/ws_close, all keyed by `conn_id`) and receives
+// frames as `ws-message-<conn_id>` / `ws-closed-<conn_id>` events. Multiple
+// connections can be live at once — one per tab the mobile/desktop app keeps
+// synced in the background.
 enum Outgoing {
     Text(String),
     Close,
 }
 
 #[derive(Default)]
-struct Bridge(Mutex<Option<mpsc::UnboundedSender<Outgoing>>>);
+struct Bridge(Mutex<HashMap<String, mpsc::UnboundedSender<Outgoing>>>);
 
 impl Bridge {
-    fn take(&self) -> Option<mpsc::UnboundedSender<Outgoing>> {
-        self.0.lock().unwrap().take()
+    fn get(&self, conn_id: &str) -> Option<mpsc::UnboundedSender<Outgoing>> {
+        self.0.lock().unwrap().get(conn_id).cloned()
     }
-    fn get(&self) -> Option<mpsc::UnboundedSender<Outgoing>> {
-        self.0.lock().unwrap().clone()
+    fn insert(&self, conn_id: String, tx: mpsc::UnboundedSender<Outgoing>) {
+        self.0.lock().unwrap().insert(conn_id, tx);
+    }
+    fn remove(&self, conn_id: &str) -> Option<mpsc::UnboundedSender<Outgoing>> {
+        self.0.lock().unwrap().remove(conn_id)
     }
 }
 
@@ -39,11 +44,6 @@ async fn ws_connect(
     url: String,
     password: String,
 ) -> Result<(), String> {
-    // Close any existing connection first.
-    if let Some(old) = app.state::<Bridge>().take() {
-        let _ = old.send(Outgoing::Close);
-    }
-
     let mut req = url.into_client_request().map_err(|e| e.to_string())?;
     req.headers_mut().insert(
         "Authorization",
@@ -55,13 +55,16 @@ async fn ws_connect(
     let (ws, _resp) = connect_async(req).await.map_err(|e| e.to_string())?;
     let (mut write, mut read) = ws.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Outgoing>();
-    *app.state::<Bridge>().0.lock().unwrap() = Some(tx);
+    app.state::<Bridge>().insert(conn_id.clone(), tx);
 
     // Reader: forward server frames to the webview. Events are scoped by conn_id
     // so a superseded connection's late frames/close can't hit a newer socket.
+    // Also drops this conn_id's entry from the Bridge map once the socket ends,
+    // so a naturally-closed (server-side) connection doesn't linger.
     let app_read = app.clone();
     let msg_evt = format!("ws-message-{conn_id}");
     let close_evt = format!("ws-closed-{conn_id}");
+    let close_conn_id = conn_id.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(msg) = read.next().await {
             match msg {
@@ -72,6 +75,7 @@ async fn ws_connect(
                 _ => {}
             }
         }
+        app_read.state::<Bridge>().remove(&close_conn_id);
         let _ = app_read.emit(&close_evt, ());
     });
 
@@ -96,16 +100,16 @@ async fn ws_connect(
 }
 
 #[tauri::command]
-fn ws_send(state: State<'_, Bridge>, text: String) -> Result<(), String> {
-    match state.get() {
+fn ws_send(state: State<'_, Bridge>, conn_id: String, text: String) -> Result<(), String> {
+    match state.get(&conn_id) {
         Some(tx) => tx.send(Outgoing::Text(text)).map_err(|e| e.to_string()),
         None => Err("not connected".into()),
     }
 }
 
 #[tauri::command]
-fn ws_close(state: State<'_, Bridge>) {
-    if let Some(tx) = state.take() {
+fn ws_close(state: State<'_, Bridge>, conn_id: String) {
+    if let Some(tx) = state.remove(&conn_id) {
         let _ = tx.send(Outgoing::Close);
     }
 }

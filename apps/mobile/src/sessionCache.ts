@@ -12,7 +12,10 @@ export interface SessionEntry {
 export class SessionCache {
   private map = new Map<string, SessionEntry>();
   private order: string[] = []; // most-recent first
-  constructor(private cap = 3) {}
+  constructor(
+    private cap = 3,
+    private onEvict?: (id: string, entry: SessionEntry) => void,
+  ) {}
 
   get(id: string): SessionEntry | undefined {
     return this.map.get(id);
@@ -31,7 +34,9 @@ export class SessionCache {
     this.order = [id, ...this.order.filter((x) => x !== id)];
     while (this.order.length > this.cap) {
       const victim = this.order.pop()!;
+      const victimEntry = this.map.get(victim);
       this.map.delete(victim);
+      if (victimEntry) this.onEvict?.(victim, victimEntry);
     }
     return e;
   }
