@@ -82,7 +82,7 @@ export function CodeHighlight(props: {
 
 **Produces:** `GitWatch.setRoot(root)` and `GitWatch.dispose()` for PTY lifecycle ownership.
 
-- [ ] **Step 1: Write the failing watcher tests**
+- [x] **Step 1: Write the failing watcher tests**
 
   Create `gitWatch.test.ts` with a temporary initialized repository. Assert that one saved edit emits `{ files: [{ path: 'main.ts', insertions: 1, deletions: 1 }] }`, that several filesystem events in a 150 ms burst emit once, that a second event with identical `--numstat` emits nothing, and that `dispose()` prevents later callbacks.
 
@@ -102,13 +102,13 @@ export function CodeHighlight(props: {
   });
   ```
 
-- [ ] **Step 2: Run the new test and verify it fails**
+- [x] **Step 2: Run the new test and verify it fails**
 
   Run (from `apps/server`): `bun test src/server/gitWatch.test.ts`
 
   Expected: FAIL because `./gitWatch` does not exist.
 
-- [ ] **Step 3: Add strict Git location helpers and shared summary types**
+- [x] **Step 3: Add strict Git location helpers and shared summary types**
 
   In `gitRoot.ts`, add `findGitRoot(cwd): string | null` and `resolveGitDir(root): string`, using `git -C <cwd> rev-parse --show-toplevel` and `git -C <root> rev-parse --absolute-git-dir`. Keep the existing fallback resolver for file routes unchanged. Move the following exact type from `gitDiff.ts` into its exported public shape:
 
@@ -122,7 +122,7 @@ export function CodeHighlight(props: {
 
   Make `readDiffSummary` return `DiffSummary`.
 
-- [ ] **Step 4: Implement the minimal watcher**
+- [x] **Step 4: Implement the minimal watcher**
 
   Implement `GitWatch` with two `watch()` handles, one for `{ recursive: true }` on the root and one for the absolute Git directory. `setRoot` must close old handles, set `lastSummary` to `null`, publish `EMPTY_DIFF_SUMMARY` for `null`, and immediately calculate/publish a valid root's summary. Both watcher callbacks call one `schedule()` method that clears/restarts a 150 ms timer. The timer reads Git, compares `JSON.stringify(summary.files)` to the last result, and calls `onChange` only on change. Catch `GitDiffError` and publish `EMPTY_DIFF_SUMMARY`; never throw from an OS watch callback.
 
@@ -135,7 +135,7 @@ export function CodeHighlight(props: {
   };
   ```
 
-- [ ] **Step 5: Run focused server tests and commit**
+- [x] **Step 5: Run focused server tests and commit**
 
   Run (from `apps/server`): `bun test src/server/gitDiff.test.ts src/server/gitWatch.test.ts`
 
@@ -158,7 +158,7 @@ export function CodeHighlight(props: {
 
 **Produces:** authenticated terminal WebSocket `{"type":"diff","summary":...}` frames, including one initial frame after subscription.
 
-- [ ] **Step 1: Write failing session-frame tests**
+- [x] **Step 1: Write failing session-frame tests**
 
   Extend `pty.liveCwd.test.ts` with a fake subscriber and a temporary Git root. Feed OSC 7 output through the existing PTY chunk path, change `main.ts`, and wait for a `diff` frame. Add an assertion that a second subscriber receives the current summary as soon as it subscribes.
 
@@ -169,17 +169,17 @@ export function CodeHighlight(props: {
   });
   ```
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
   Run (from `apps/server`): `bun test src/server/pty.liveCwd.test.ts`
 
   Expected: FAIL because `Subscriber` does not accept a `diff` frame.
 
-- [ ] **Step 3: Extend PTY instance lifecycle**
+- [x] **Step 3: Extend PTY instance lifecycle**
 
   Replace the current inline subscriber payload with a `SessionFrame` union. Add `diffSummary: DiffSummary` and `gitWatch: GitWatch` to `SessionInstance`. Construct the watcher with `summary => { instance.diffSummary = summary; broadcast(id, { type: 'diff', summary }); }`. After `recordChunk(id, text)`, resolve `findGitRoot(getLiveCwd(id) ?? '')` and call `instance.gitWatch.setRoot(root)` only when the root differs from the watcher's current root. Dispose the watcher before deleting an instance in normal exit, unexpected holder close, and `killSession`.
 
-- [ ] **Step 4: Send the initial state and forward it in Hono**
+- [x] **Step 4: Send the initial state and forward it in Hono**
 
   In `subscribeToSession`, immediately invoke the callback after registering it:
 
@@ -197,7 +197,7 @@ export function CodeHighlight(props: {
 
   Retain `GET /api/sessions/:id/diff/summary` for compatibility, but remove all client use of it in Task 3.
 
-- [ ] **Step 5: Run server regression tests and commit**
+- [x] **Step 5: Run server regression tests and commit**
 
   Run (from `apps/server`): `bun test src/server/pty.liveCwd.test.ts src/server/gitDiff.api.test.ts src/server/pty.shell.test.ts`
 
@@ -224,7 +224,7 @@ export function CodeHighlight(props: {
 
 **Produces:** a current `changeSummary` for each cached session, a banner action, and an opened diff view that never fetches a summary.
 
-- [ ] **Step 1: Write failing pure-model and banner tests**
+- [x] **Step 1: Write failing pure-model and banner tests**
 
   Add `changeLabel(summary)` to `diffModel.test.ts` and test its exact copy. Test the new banner's model-facing props by rendering a nonempty summary and asserting `+3 -2`; test that an empty summary produces no banner.
 
@@ -233,13 +233,13 @@ export function CodeHighlight(props: {
   expect(changeLabel({ files: [] })).toBeNull();
   ```
 
-- [ ] **Step 2: Run mobile tests and verify they fail**
+- [x] **Step 2: Run mobile tests and verify they fail**
 
   Run: `bun --cwd apps/mobile test src/diffModel.test.ts src/changeBanner.test.ts`
 
   Expected: FAIL because `changeLabel` and `ChangeBanner` do not exist.
 
-- [ ] **Step 3: Make the summary session-scoped**
+- [x] **Step 3: Make the summary session-scoped**
 
   Add `diffSummary: DiffSummary` to `SessionEntry` and initialize it to `{ files: [] }` in `entryFor`. In `applyWsMessage`, before terminal-output handling, accept the new frame and store the complete summary in that entry:
 
@@ -253,11 +253,11 @@ export function CodeHighlight(props: {
 
   Derive `changeSummary` from `entryFor(activeId).diffSummary`; keep the existing fetch only for individual diff text. Replace `diffSummary: DiffSummary | null` as the takeover flag with `diffOpen: boolean`, so a zero-change session can still show the `No changes` view and the banner state cannot accidentally hide the terminal.
 
-- [ ] **Step 4: Render the minimal banner and remove summary polling**
+- [x] **Step 4: Render the minimal banner and remove summary polling**
 
   Implement `ChangeBanner` as one `TouchableOpacity` with `accessibilityRole="button"`, accessibility label `View changes, +N -M`, and Catppuccin success/danger text. Render it next to the existing session-preview affordance only when `changeLabel(changeSummary)` is non-null. Make `openDiff` set `diffOpen` and clear selected diff text; it must not call `/diff/summary`. Keep `selectDiffFile`'s on-demand `/diff?path=` fetch unchanged.
 
-- [ ] **Step 5: Run focused tests, typecheck, and commit**
+- [x] **Step 5: Run focused tests, typecheck, and commit**
 
   Run: `bun --cwd apps/mobile test src/diffModel.test.ts src/changeBanner.test.ts src/sessionCache.test.ts`
 
@@ -282,7 +282,7 @@ export function CodeHighlight(props: {
 
 **Produces:** a selectable native renderer for the built-in Prism grammars and a plain-text fallback.
 
-- [ ] **Step 1: Capture the baseline export sizes**
+- [x] **Step 1: Capture the baseline export sizes**
 
   Run the current production exports before changing dependencies:
 
@@ -295,7 +295,7 @@ export function CodeHighlight(props: {
 
   Save both byte counts in the task handoff note; do not modify source during this step.
 
-- [ ] **Step 2: Write failing language-selection tests**
+- [x] **Step 2: Write failing language-selection tests**
 
   Test the exact path mapping and fallback contract:
 
@@ -306,19 +306,19 @@ export function CodeHighlight(props: {
   expect(languageForPath('assets/blob.bin')).toBeNull();
   ```
 
-- [ ] **Step 3: Run the test and verify it fails**
+- [x] **Step 3: Run the test and verify it fails**
 
   Run: `bun --cwd apps/mobile test src/codeHighlight.test.ts`
 
   Expected: FAIL because `./codeHighlight` does not exist.
 
-- [ ] **Step 4: Add and implement the pinned renderer**
+- [x] **Step 4: Add and implement the pinned renderer**
 
   Run: `bun --cwd apps/mobile add prism-react-renderer@2.4.1`
 
   Implement `languageForPath` for `.ts`, `.tsx`, `.js`, `.jsx`, `.json`, `.sh`, `.bash`, `.zsh`, `.html`, `.css`, `.md`, `.yaml`, `.yml`, and `.py`. `CodeHighlight` uses `Highlight` and the library's bundled grammars to produce nested selectable native `Text` spans. Build its Prism theme from the active Catppuccin colors; use the existing terminal foreground for unclassified tokens. For a null language, return one `<Text selectable>` with the original code unchanged.
 
-- [ ] **Step 5: Measure after adding the dependency and verify**
+- [x] **Step 5: Measure after adding the dependency and verify**
 
   Run:
 
@@ -350,7 +350,7 @@ export function CodeHighlight(props: {
 
 **Produces:** syntax-colored regular files that wrap and still jump to the requested source line, plus wrapped unified diffs with semantic colors.
 
-- [ ] **Step 1: Write failing renderer-input tests**
+- [x] **Step 1: Write failing renderer-input tests**
 
   Add pure helpers to `codeHighlight.tsx` and `fileView.ts` if required. Test that file rendering forwards the full path and original text, maps one original source line to one measured renderer row, and records the requested line as zero-based index `file.line - 1`. Test unified diff line kinds exactly:
 
@@ -364,19 +364,19 @@ export function CodeHighlight(props: {
 
   Also assert that `+` and `-` prefixes are retained in rendered text rather than stripped from selectable content.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
   Run: `bun --cwd apps/mobile test src/fileViewer.test.ts src/codeHighlight.test.ts`
 
   Expected: FAIL because `diffLineKinds` does not exist.
 
-- [ ] **Step 3: Replace each single text block with the shared renderer**
+- [x] **Step 3: Replace each single text block with the shared renderer**
 
   In `FileViewer`, remove the horizontal `ScrollView`. Render one selectable, wrapping `Text` row per original source line through `CodeHighlight`; pass `onLineLayout` to record each row's actual Y. Keep `pendingTargetLine = Math.max(0, (file.line ?? 1) - 1)` in a ref. When that row reports layout, call `scrollRef.current?.scrollTo({ y, animated: false })` and clear the pending target. Reset the pending target when `file.path`, `file.content`, or `file.line` changes. This intentionally renders every source line inside the existing 1 MiB cap; add a `// ponytail:` comment naming that ceiling and the upgrade path to a virtualized measured list if profiling shows jank.
 
   In `DiffView`, remove its nested horizontal `ScrollView` and pass `displayDiff(diffText ?? '', diffTruncated)` plus `selectedPath ?? ''` to `CodeHighlight`. Mark `diff --git`, `index`, `---`, `+++`, and `@@` lines as `meta`; preserve addition/deletion/context background or foreground treatment on the containing line and apply Prism token colors only to its source content. Every diff row must wrap within the viewport.
 
-- [ ] **Step 4: Run focused UI-model tests and typecheck**
+- [x] **Step 4: Run focused UI-model tests and typecheck**
 
   Run: `bun --cwd apps/mobile test src/fileViewer.test.ts src/diffModel.test.ts src/codeHighlight.test.ts`
 
@@ -384,7 +384,7 @@ export function CodeHighlight(props: {
 
   Expected: all tests pass and TypeScript is clean; regular source and diffs wrap with no horizontal scrolling, a terminal link scrolls to its measured source row, and unsupported text remains selectable and unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   ```bash
   git add apps/mobile/src/FileViewer.tsx apps/mobile/src/DiffView.tsx apps/mobile/src/fileViewer.test.ts apps/mobile/src/diffModel.test.ts apps/mobile/src/codeHighlight.tsx apps/mobile/src/codeHighlight.test.ts
@@ -400,7 +400,7 @@ export function CodeHighlight(props: {
 
 **Produces:** verified behavior and a recorded bundle-size decision.
 
-- [ ] **Step 1: Run the full automated suite**
+- [x] **Step 1: Run the full automated suite**
 
   Run (from `apps/server`): `bun test`
 
@@ -416,11 +416,11 @@ export function CodeHighlight(props: {
 
   Start one server, connect two Tether clients to the same terminal session, `cd` to a temporary Git repository, and save a tracked file. Confirm both clients show the same `+N -M` banner within one watcher debounce, no polling request occurs, tapping either banner lists the changed file, and the diff shows green/red line treatment plus syntax colors. Open a long line through a terminal file link and confirm the regular file viewer wraps it at the viewport edge, scrolls to the measured requested source line, and keeps text selectable; confirm long diff lines also wrap with no horizontal scroll.
 
-- [ ] **Step 3: Verify lifecycle changes**
+- [x] **Step 3: Verify lifecycle changes**
 
   In the same session, commit the change, confirm both banners disappear, `cd` to a second repository, edit there, confirm both banners switch to the new root, then kill the session and confirm no further watcher callback is logged after another file save.
 
-- [ ] **Step 4: Record measurement and commit verification state**
+- [x] **Step 4: Record measurement and commit verification state**
 
   Append the exact before/after web and iOS export byte counts, the deltas, and manual-test result to this plan. Then commit only the completed plan metadata:
 
@@ -428,3 +428,10 @@ export function CodeHighlight(props: {
   git add docs/superpowers/plans/2026-07-17-event-driven-git-changes.md
   git commit -m "docs: verify event-driven git changes"
   ```
+
+### Verification results
+
+- Export sizes: web 1,167,311 → 1,255,824 bytes (+88,513, 7.58%); iOS 2,266,880 → 2,469,737 bytes (+202,857, 8.95%).
+- Final automated run: server 44/44 tests, mobile 89/89 tests, root lint/typecheck, and `git diff --check` all pass. Independent re-review verdict: ready to merge.
+- Automated lifecycle coverage confirms two subscribers receive the same initial/change summary, commits clear the summary, repository retargeting stops the old watcher and follows the new root, and disposal prevents later callbacks.
+- Production web and iOS exports completed successfully. The actual two-GUI-client interaction and touch-selection smoke test remains unchecked above; the implementation path is covered by server integration/model tests and a production web preview was opened successfully.
