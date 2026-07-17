@@ -1,17 +1,35 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { lineOffset, type FileView } from './fileView';
-
-const lineHeight = 20;
+import { CodeHighlight } from './CodeHighlight';
 
 export function FileViewer({ file, onBack }: { file: FileView; onBack: () => void }) {
   const { theme } = useAppTheme();
   const scrollRef = useRef<ScrollView>(null);
+  const rowOffsets = useRef(new Map<number, number>());
+  const pendingTargetLine = useRef(0);
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ y: lineOffset(file.content, file.line) * lineHeight, animated: false });
-  }, [file.content, file.line]);
+  useLayoutEffect(() => {
+    rowOffsets.current.clear();
+  }, [file.path, file.content]);
+
+  useLayoutEffect(() => {
+    const target = lineOffset(file.content, file.line);
+    pendingTargetLine.current = target;
+    const y = rowOffsets.current.get(target);
+    if (y !== undefined) {
+      scrollRef.current?.scrollTo({ y, animated: false });
+      pendingTargetLine.current = -1;
+    }
+  }, [file.path, file.content, file.line]);
+
+  const onLineLayout = (index: number, y: number) => {
+    rowOffsets.current.set(index, y);
+    if (pendingTargetLine.current !== index) return;
+    scrollRef.current?.scrollTo({ y, animated: false });
+    pendingTargetLine.current = -1;
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
@@ -22,9 +40,8 @@ export function FileViewer({ file, onBack }: { file: FileView; onBack: () => voi
         <Text numberOfLines={1} style={[styles.path, { color: theme.colors.text }]}>{file.path}</Text>
       </View>
       <ScrollView ref={scrollRef} style={styles.vertical} contentContainerStyle={styles.content}>
-        <ScrollView horizontal contentContainerStyle={styles.horizontal}>
-          <Text selectable style={[styles.code, { color: theme.terminal.fg }]}>{file.content}</Text>
-        </ScrollView>
+        {/* ponytail: the server caps files at 1 MiB; use a virtualized measured list only if profiling shows row rendering jank. */}
+        <CodeHighlight path={file.path} code={file.content} onLineLayout={onLineLayout} />
       </ScrollView>
     </View>
   );
@@ -36,7 +53,5 @@ const styles = StyleSheet.create({
   back: { paddingHorizontal: 16, paddingVertical: 12 },
   path: { flex: 1, fontFamily: 'monospace', marginRight: 16 },
   vertical: { flex: 1 },
-  content: { padding: 16 },
-  horizontal: { minWidth: '100%' },
-  code: { fontFamily: 'monospace', fontSize: 14, lineHeight },
+  content: { padding: 16, alignItems: 'stretch' },
 });

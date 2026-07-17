@@ -18,6 +18,12 @@ export interface DiffFileStat {
   deletions: number;
 }
 
+export interface DiffSummary {
+  files: DiffFileStat[];
+}
+
+export const EMPTY_DIFF_SUMMARY: DiffSummary = { files: [] };
+
 function validatePath(requestedPath: string | undefined) {
   if (requestedPath === undefined) return;
   if (path.isAbsolute(requestedPath) || requestedPath.split(/[\\/]/).includes('..')) {
@@ -56,7 +62,7 @@ function runGitDiff(root: string, args: string[]): Promise<Buffer> {
   });
 }
 
-export function readDiffSummary(root: string): { files: DiffFileStat[] } {
+export function readDiffSummary(root: string): DiffSummary {
   const out = runGit(root, ['diff', 'HEAD', '--numstat']);
   const files = out
     .split('\n')

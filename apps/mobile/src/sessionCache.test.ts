@@ -7,7 +7,7 @@ function ok(c: boolean, m: string) {
   pass++;
 }
 const mk = (tag: string): (() => SessionEntry) => () =>
-  ({ term: { tag } as any, sinceId: 0, lastAppliedId: 0 } as any);
+  ({ term: { tag } as any, sinceId: 0, lastAppliedId: 0, diffSummary: { files: [] } } as any);
 
 // touch creates and is retrievable
 {

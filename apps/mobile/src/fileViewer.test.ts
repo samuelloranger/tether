@@ -8,3 +8,9 @@ test('lineOffset clamps one-based source locations', () => {
   expect(lineOffset(content, 99)).toBe(3);
   expect(lineOffset(content, undefined)).toBe(0);
 });
+
+test('lineOffset maps a requested source row without changing the original text', () => {
+  const content = 'const first = 1;\nconst second = 2;';
+  expect(lineOffset(content, 2)).toBe(1);
+  expect(content).toBe('const first = 1;\nconst second = 2;');
+});
