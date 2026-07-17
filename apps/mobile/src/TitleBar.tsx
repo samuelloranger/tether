@@ -32,6 +32,7 @@ export interface TitleBarProps {
 }
 
 const HIT = { top: 8, bottom: 8, left: 6, right: 6 };
+const COMPACT_TEXT = { includeFontPadding: false } as const;
 
 function StatusBadge({ status, colors }: { status: TitleBarProps['status']; colors: AppColors }) {
   const styles = createStyles(colors);
@@ -205,8 +206,8 @@ const createStyles = (c: AppColors) => StyleSheet.create({
     borderBottomColor: c.border,
   },
   info: { flex: 1, minWidth: 0 },
-  title: { color: c.text, fontSize: 13, fontWeight: '600' },
-  subtitle: { color: c.textFaint, fontSize: 11 },
+  title: { color: c.text, fontSize: 13, lineHeight: 15, fontWeight: '600', ...COMPACT_TEXT },
+  subtitle: { color: c.textFaint, fontSize: 11, lineHeight: 13, ...COMPACT_TEXT },
   actions: { flexDirection: 'row', alignItems: 'center' },
   btn: { paddingHorizontal: 8, paddingVertical: 6 },
   badge: {
@@ -223,9 +224,9 @@ const createStyles = (c: AppColors) => StyleSheet.create({
   dot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
   dotOk: { backgroundColor: c.success },
   dotOff: { backgroundColor: c.textMuted },
-  badgeTextOk: { color: c.success, fontSize: 11, fontWeight: '600' },
-  badgeTextWarn: { color: c.warning, fontSize: 11, fontWeight: '600' },
-  badgeTextOff: { color: c.textMuted, fontSize: 11, fontWeight: '600' },
+  badgeTextOk: { color: c.success, fontSize: 11, lineHeight: 13, fontWeight: '600', ...COMPACT_TEXT },
+  badgeTextWarn: { color: c.warning, fontSize: 11, lineHeight: 13, fontWeight: '600', ...COMPACT_TEXT },
+  badgeTextOff: { color: c.textMuted, fontSize: 11, lineHeight: 13, fontWeight: '600', ...COMPACT_TEXT },
   winControls: { flexDirection: 'row', alignItems: 'center', marginLeft: 6 },
   winBtn: {
     width: 40,

@@ -23,6 +23,7 @@ export interface DesktopSessionNavigatorProps {
 }
 
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
+const COMPACT_TEXT = { includeFontPadding: false } as const;
 
 function confirmKill(id: string, onKill: (id: string) => void) {
   void confirmAction(
@@ -230,16 +231,16 @@ const createStyles = (c: AppColors) => StyleSheet.create({
   panel: { flex: 1, backgroundColor: c.surface, borderRightWidth: 1, borderRightColor: c.border },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.border },
   headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  title: { color: c.text, fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase' },
+  title: { color: c.text, fontSize: 11, lineHeight: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', ...COMPACT_TEXT },
   settings: { padding: 3 },
   list: { flex: 1, paddingVertical: 6 },
   row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 6, borderRadius: 6 },
   rowActive: { backgroundColor: c.selected },
   rowMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingLeft: 9 },
   dot: { width: 7, height: 7, borderRadius: 999 },
-  name: { flex: 1, minWidth: 0, color: c.textMuted, fontSize: 13 },
+  name: { flex: 1, minWidth: 0, color: c.textMuted, fontSize: 13, lineHeight: 16, ...COMPACT_TEXT },
   nameActive: { color: c.text, fontWeight: '600' },
-  stopped: { color: c.textFaint, fontSize: 10, marginRight: 4 },
+  stopped: { color: c.textFaint, fontSize: 10, lineHeight: 12, marginRight: 4, ...COMPACT_TEXT },
   kill: { padding: 7 },
   newButton: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, margin: 12, paddingVertical: 10, borderRadius: 7, backgroundColor: c.accent },
   newButtonText: { color: c.accentText, fontSize: 13, fontWeight: '700' },
@@ -251,6 +252,6 @@ const createStyles = (c: AppColors) => StyleSheet.create({
   tab: { flexDirection: 'row', alignItems: 'center', maxWidth: 220, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: c.accent, backgroundColor: c.selected },
   tabMain: { flexDirection: 'row', alignItems: 'center', gap: 7, minWidth: 0, paddingLeft: 12, paddingVertical: 10 },
-  tabText: { color: c.text, fontSize: 12, fontWeight: '600', maxWidth: 150 },
+  tabText: { color: c.text, fontSize: 12, lineHeight: 15, fontWeight: '600', maxWidth: 150, ...COMPACT_TEXT },
   tabKill: { padding: 8 },
 });
