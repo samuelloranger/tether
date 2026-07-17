@@ -184,10 +184,9 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     if (pendingOutput.length === 0) return;
     const text = pendingOutput.join('');
     pendingOutput = [];
-    const previousCwd = getLiveCwd(id);
-    recordChunk(id, text);
+    const cwdReported = recordChunk(id, text);
     const cwd = getLiveCwd(id);
-    if (cwd !== previousCwd) instances.get(id)?.gitWatch.setRoot(cwd ? findGitRoot(cwd) : null);
+    if (cwdReported) instances.get(id)?.gitWatch.setRoot(cwd ? findGitRoot(cwd) : null);
     const logId = addTerminalLog(id, text);
     broadcast(id, { type: 'output', chunk: text, id: logId });
   };

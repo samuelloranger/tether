@@ -61,3 +61,37 @@ test('pushes git summaries to every subscriber and primes later subscribers', as
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('starts watching when a repository is initialized without changing cwd', async () => {
+  const id = 'git-init-in-place';
+  const root = mkdtempSync(path.join(tmpdir(), 'tether-pty-git-init-'));
+  const frames: Parameters<Subscriber>[0][] = [];
+  let unsubscribe = () => {};
+  try {
+    await startSession(id, 'bash');
+    unsubscribe = subscribeToSession(id, (frame) => frames.push(frame), 80, 24);
+    writeToSession(id, `cd -- ${JSON.stringify(root)}\n`);
+    await waitFor(() => getLiveCwd(id) === root);
+    frames.length = 0;
+
+    writeToSession(
+      id,
+      'git init -q && git config user.email test@example.com && git config user.name test && printf "one\\n" > main.txt && git add main.txt && git commit -q -m initial\n',
+    );
+    await waitFor(() => frames.some((frame) => frame.type === 'diff'));
+    frames.length = 0;
+
+    writeFileSync(path.join(root, 'main.txt'), 'two\n');
+    await waitFor(() =>
+      frames.some((frame) => frame.type === 'diff' && frame.summary.files.length === 1),
+    );
+    expect(frames).toContainEqual({
+      type: 'diff',
+      summary: { files: [{ path: 'main.txt', insertions: 1, deletions: 1 }] },
+    });
+  } finally {
+    unsubscribe();
+    killSession(id);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
