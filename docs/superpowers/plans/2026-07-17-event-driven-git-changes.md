@@ -15,7 +15,7 @@
 - Watch both the worktree and its resolved Git directory; debounce by exactly 150 ms and suppress an unchanged summary.
 - Every subscriber to the same terminal session receives the same initial and changed summary.
 - Use `prism-react-renderer@2.4.1` only; unsupported paths remain selectable plain text.
-- Preserve existing 1 MiB diff cap, horizontal scrolling, text selection, and Catppuccin theme behavior.
+- Preserve the 1 MiB response cap, text selection, and Catppuccin theme behavior. Regular files wrap at the viewport edge and measure the requested source line before scrolling; diffs retain horizontal scrolling.
 - Measure and record the production web-export and iOS-export size deltas before shipping the syntax dependency.
 
 ---
@@ -65,6 +65,7 @@ export function CodeHighlight(props: {
   code: string;
   path: string;
   lineKinds?: Array<'context' | 'add' | 'remove' | 'meta'>;
+  onLineLayout?: (sourceLine: number, y: number) => void;
 }): React.ReactNode;
 ```
 
@@ -347,11 +348,11 @@ export function CodeHighlight(props: {
 
 **Consumes:** `CodeHighlight`, `languageForPath`, existing `FileView.path`, selected diff path, and `displayDiff`.
 
-**Produces:** syntax-colored regular files and unified diffs while preserving selection, scrolling, line boundaries, and diff semantic colors.
+**Produces:** syntax-colored regular files that wrap and still jump to the requested source line, plus horizontally scrollable unified diffs with semantic colors.
 
 - [ ] **Step 1: Write failing renderer-input tests**
 
-  Add pure helpers to `codeHighlight.tsx` if required and test that file rendering forwards the full path and original text, while a unified diff splits line kinds exactly:
+  Add pure helpers to `codeHighlight.tsx` and `fileView.ts` if required. Test that file rendering forwards the full path and original text, maps one original source line to one measured renderer row, and records the requested line as zero-based index `file.line - 1`. Test unified diff line kinds exactly:
 
   ```ts
   expect(diffLineKinds('+const answer = 43;\n-old\n@@ -1 +1 @@')).toEqual([
@@ -371,7 +372,9 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 3: Replace each single text block with the shared renderer**
 
-  In `FileViewer`, replace `{file.content}` with `<CodeHighlight code={file.content} path={file.path} />` inside the same nested vertical/horizontal scroll views. In `DiffView`, pass `displayDiff(diffText ?? '', diffTruncated)` and `selectedPath ?? ''`. Mark `diff --git`, `index`, `---`, `+++`, and `@@` lines as `meta`; preserve addition/deletion/context background or foreground treatment on the containing line and apply Prism token colors only to its source content.
+  In `FileViewer`, remove the horizontal `ScrollView`. Render one selectable, wrapping `Text` row per original source line through `CodeHighlight`; pass `onLineLayout` to record each row's actual Y. Keep `pendingTargetLine = Math.max(0, (file.line ?? 1) - 1)` in a ref. When that row reports layout, call `scrollRef.current?.scrollTo({ y, animated: false })` and clear the pending target. Reset the pending target when `file.path`, `file.content`, or `file.line` changes. This intentionally renders every source line inside the existing 1 MiB cap; add a `// ponytail:` comment naming that ceiling and the upgrade path to a virtualized measured list if profiling shows jank.
+
+  In `DiffView`, retain its nested horizontal `ScrollView` and pass `displayDiff(diffText ?? '', diffTruncated)` plus `selectedPath ?? ''` to `CodeHighlight`. Mark `diff --git`, `index`, `---`, `+++`, and `@@` lines as `meta`; preserve addition/deletion/context background or foreground treatment on the containing line and apply Prism token colors only to its source content.
 
 - [ ] **Step 4: Run focused UI-model tests and typecheck**
 
@@ -379,7 +382,7 @@ export function CodeHighlight(props: {
 
   Run: `bun --cwd apps/mobile lint`
 
-  Expected: all tests pass and TypeScript is clean; source text remains selectable and unchanged for an unsupported extension.
+  Expected: all tests pass and TypeScript is clean; regular source wraps, a terminal link scrolls to its measured source row, diffs remain horizontally scrollable, and unsupported text remains selectable and unchanged.
 
 - [ ] **Step 5: Commit**
 
@@ -411,7 +414,7 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 2: Perform the multi-client manual test**
 
-  Start one server, connect two Tether clients to the same terminal session, `cd` to a temporary Git repository, and save a tracked file. Confirm both clients show the same `+N -M` banner within one watcher debounce, no polling request occurs, tapping either banner lists the changed file, and the diff shows green/red line treatment plus syntax colors. Open that file through a terminal file link and confirm matching syntax colors, horizontal scroll, and text selection.
+  Start one server, connect two Tether clients to the same terminal session, `cd` to a temporary Git repository, and save a tracked file. Confirm both clients show the same `+N -M` banner within one watcher debounce, no polling request occurs, tapping either banner lists the changed file, and the diff shows green/red line treatment plus syntax colors. Open a long line through a terminal file link and confirm the regular file viewer wraps it at the viewport edge, scrolls to the measured requested source line, and keeps text selectable; confirm the diff remains horizontally scrollable.
 
 - [ ] **Step 3: Verify lifecycle changes**
 
