@@ -15,7 +15,7 @@
 - Watch both the worktree and its resolved Git directory; debounce by exactly 150 ms and suppress an unchanged summary.
 - Every subscriber to the same terminal session receives the same initial and changed summary.
 - Use `prism-react-renderer@2.4.1` only; unsupported paths remain selectable plain text.
-- Preserve the 1 MiB response cap, text selection, and Catppuccin theme behavior. Regular files wrap at the viewport edge and measure the requested source line before scrolling; diffs retain horizontal scrolling.
+- Preserve the 1 MiB response cap, text selection, and Catppuccin theme behavior. Both regular files and diffs wrap at the viewport edge with no horizontal scrolling; regular files measure the requested source line before scrolling.
 - Measure and record the production web-export and iOS-export size deltas before shipping the syntax dependency.
 
 ---
@@ -348,7 +348,7 @@ export function CodeHighlight(props: {
 
 **Consumes:** `CodeHighlight`, `languageForPath`, existing `FileView.path`, selected diff path, and `displayDiff`.
 
-**Produces:** syntax-colored regular files that wrap and still jump to the requested source line, plus horizontally scrollable unified diffs with semantic colors.
+**Produces:** syntax-colored regular files that wrap and still jump to the requested source line, plus wrapped unified diffs with semantic colors.
 
 - [ ] **Step 1: Write failing renderer-input tests**
 
@@ -374,7 +374,7 @@ export function CodeHighlight(props: {
 
   In `FileViewer`, remove the horizontal `ScrollView`. Render one selectable, wrapping `Text` row per original source line through `CodeHighlight`; pass `onLineLayout` to record each row's actual Y. Keep `pendingTargetLine = Math.max(0, (file.line ?? 1) - 1)` in a ref. When that row reports layout, call `scrollRef.current?.scrollTo({ y, animated: false })` and clear the pending target. Reset the pending target when `file.path`, `file.content`, or `file.line` changes. This intentionally renders every source line inside the existing 1 MiB cap; add a `// ponytail:` comment naming that ceiling and the upgrade path to a virtualized measured list if profiling shows jank.
 
-  In `DiffView`, retain its nested horizontal `ScrollView` and pass `displayDiff(diffText ?? '', diffTruncated)` plus `selectedPath ?? ''` to `CodeHighlight`. Mark `diff --git`, `index`, `---`, `+++`, and `@@` lines as `meta`; preserve addition/deletion/context background or foreground treatment on the containing line and apply Prism token colors only to its source content.
+  In `DiffView`, remove its nested horizontal `ScrollView` and pass `displayDiff(diffText ?? '', diffTruncated)` plus `selectedPath ?? ''` to `CodeHighlight`. Mark `diff --git`, `index`, `---`, `+++`, and `@@` lines as `meta`; preserve addition/deletion/context background or foreground treatment on the containing line and apply Prism token colors only to its source content. Every diff row must wrap within the viewport.
 
 - [ ] **Step 4: Run focused UI-model tests and typecheck**
 
@@ -382,7 +382,7 @@ export function CodeHighlight(props: {
 
   Run: `bun --cwd apps/mobile lint`
 
-  Expected: all tests pass and TypeScript is clean; regular source wraps, a terminal link scrolls to its measured source row, diffs remain horizontally scrollable, and unsupported text remains selectable and unchanged.
+  Expected: all tests pass and TypeScript is clean; regular source and diffs wrap with no horizontal scrolling, a terminal link scrolls to its measured source row, and unsupported text remains selectable and unchanged.
 
 - [ ] **Step 5: Commit**
 
@@ -414,7 +414,7 @@ export function CodeHighlight(props: {
 
 - [ ] **Step 2: Perform the multi-client manual test**
 
-  Start one server, connect two Tether clients to the same terminal session, `cd` to a temporary Git repository, and save a tracked file. Confirm both clients show the same `+N -M` banner within one watcher debounce, no polling request occurs, tapping either banner lists the changed file, and the diff shows green/red line treatment plus syntax colors. Open a long line through a terminal file link and confirm the regular file viewer wraps it at the viewport edge, scrolls to the measured requested source line, and keeps text selectable; confirm the diff remains horizontally scrollable.
+  Start one server, connect two Tether clients to the same terminal session, `cd` to a temporary Git repository, and save a tracked file. Confirm both clients show the same `+N -M` banner within one watcher debounce, no polling request occurs, tapping either banner lists the changed file, and the diff shows green/red line treatment plus syntax colors. Open a long line through a terminal file link and confirm the regular file viewer wraps it at the viewport edge, scrolls to the measured requested source line, and keeps text selectable; confirm long diff lines also wrap with no horizontal scroll.
 
 - [ ] **Step 3: Verify lifecycle changes**
 
