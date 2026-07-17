@@ -79,6 +79,11 @@ const migrations = [
     // resolve as an index range scan instead of filter-then-sort.
     up: `CREATE INDEX IF NOT EXISTS idx_terminal_logs_session_id ON terminal_logs(session_id, id);`,
   },
+  {
+    version: 6,
+    name: 'session_workspace_root',
+    up: `ALTER TABLE sessions ADD COLUMN workspace_root TEXT;`,
+  },
 ];
 
 export function runMigrations() {
@@ -144,6 +149,7 @@ export interface Session {
   created_at: string;
   name: string | null;
   pruned_before: number;
+  workspace_root: string | null;
 }
 
 export interface TerminalLog {
@@ -161,12 +167,13 @@ export function upsertSession(
   id: string,
   command: string,
   status: 'running' | 'stopped' = 'running',
+  workspaceRoot?: string,
 ) {
   db.query(`
-    INSERT INTO sessions (id, command, status)
-    VALUES ($id, $command, $status)
+    INSERT INTO sessions (id, command, status, workspace_root)
+    VALUES ($id, $command, $status, $workspaceRoot)
     ON CONFLICT(id) DO UPDATE SET command = excluded.command, status = excluded.status
-  `).run({ $id: id, $command: command, $status: status });
+  `).run({ $id: id, $command: command, $status: status, $workspaceRoot: workspaceRoot ?? null });
 }
 
 export function addTerminalLog(sessionId: string, chunk: string): number {
