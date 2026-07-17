@@ -3,6 +3,8 @@ import { useAppTheme } from './AppThemeProvider';
 import { diffLineKind, displayDiff, type DiffSummary } from './diffModel';
 import { CodeHighlight } from './CodeHighlight';
 
+const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
+
 export function DiffView({
   summary,
   selectedPath,
@@ -32,7 +34,7 @@ export function DiffView({
           onPress={selectedPath ? onDeselectFile : onBack}
           style={styles.back}
         >
-          <Text style={{ color: theme.colors.accent }}>Back</Text>
+          <Text style={[styles.backText, { color: theme.colors.accent }]}>Back</Text>
         </TouchableOpacity>
         <Text numberOfLines={1} style={[styles.path, { color: theme.colors.text }]}>
           {selectedPath ?? 'Changes'}
@@ -85,7 +87,8 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, minHeight: 48 },
   back: { paddingHorizontal: 16, paddingVertical: 12 },
-  path: { flex: 1, fontFamily: 'monospace', marginRight: 16 },
+  backText: { ...TEXT_METRICS },
+  path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   vertical: { flex: 1 },
   content: { padding: 16, alignItems: 'stretch' },

@@ -4,6 +4,8 @@ import { useAppTheme } from './AppThemeProvider';
 import { lineOffset, type FileView } from './fileView';
 import { CodeHighlight } from './CodeHighlight';
 
+const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
+
 export function FileViewer({ file, onBack }: { file: FileView; onBack: () => void }) {
   const { theme } = useAppTheme();
   const scrollRef = useRef<ScrollView>(null);
@@ -35,7 +37,7 @@ export function FileViewer({ file, onBack }: { file: FileView; onBack: () => voi
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back to terminal" onPress={onBack} style={styles.back}>
-          <Text style={{ color: theme.colors.accent }}>Back</Text>
+          <Text style={[styles.backText, { color: theme.colors.accent }]}>Back</Text>
         </TouchableOpacity>
         <Text numberOfLines={1} style={[styles.path, { color: theme.colors.text }]}>{file.path}</Text>
       </View>
@@ -51,7 +53,8 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, minHeight: 48 },
   back: { paddingHorizontal: 16, paddingVertical: 12 },
-  path: { flex: 1, fontFamily: 'monospace', marginRight: 16 },
+  backText: { ...TEXT_METRICS },
+  path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
   vertical: { flex: 1 },
   content: { padding: 16, alignItems: 'stretch' },
 });
