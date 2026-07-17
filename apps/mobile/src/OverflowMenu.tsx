@@ -11,6 +11,7 @@ export function OverflowMenu({
   visible,
   onClose,
   onRename,
+  onViewChanges,
   fontSize,
   onFontDelta,
   onSearch,
@@ -26,6 +27,7 @@ export function OverflowMenu({
   visible: boolean;
   onClose: () => void;
   onRename: () => void;
+  onViewChanges: () => void;
   fontSize: number;
   onFontDelta: (delta: number) => void;
   onSearch: () => void;
@@ -48,6 +50,10 @@ export function OverflowMenu({
           <TouchableOpacity style={styles.menuRow} onPress={onRename}>
             <Feather name="edit-2" size={16} color={theme.colors.text} />
             <Text style={styles.menuRowText}>Rename terminal</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuRow} onPress={onViewChanges}>
+            <Feather name="git-branch" size={16} color={theme.colors.text} />
+            <Text style={styles.menuRowText}>View changes</Text>
           </TouchableOpacity>
           <View style={styles.menuRow}>
             <Feather name="type" size={16} color={theme.colors.text} />

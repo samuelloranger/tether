@@ -1,3 +1,4 @@
+// biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 7 is delimited by ESC/BEL control bytes by definition.
 const OSC7_RE = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 const FILE_URI_RE = /^file:\/\/[^/]*(\/.*)$/;
 
@@ -25,6 +26,7 @@ export function updateLiveCwd(state: LiveCwdState, chunk: string): LiveCwdState 
   let consumed = 0;
   OSC7_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop.
   while ((m = OSC7_RE.exec(joined))) {
     const fileMatch = FILE_URI_RE.exec(m[1]);
     if (fileMatch) {
@@ -40,6 +42,7 @@ export function updateLiveCwd(state: LiveCwdState, chunk: string): LiveCwdState 
   const oscStart = tail.lastIndexOf('\x1b]');
   if (oscStart === -1) return { cwd, residual: '' };
   const rest = tail.slice(oscStart);
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: same ESC/BEL terminators as OSC7_RE above.
   const residual = /\x07|\x1b\\/.test(rest) ? '' : rest.slice(-MAX_RESIDUAL);
   return { cwd, residual };
 }

@@ -29,6 +29,7 @@ import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400R
 import { TerminalEmulator, setTheme, type RenderRow, type CellStyle } from './terminal';
 import { shellQuote } from './shell';
 import type { LinkTarget } from './links';
+import type { DiffSummary } from './diffModel';
 import { SessionCache, nextTermId, type SessionEntry } from './sessionCache';
 import type { DrawerSession } from './SessionDrawer';
 import { applyFieldChange, SENT } from './input';
@@ -162,6 +163,10 @@ export function useTetherApp() {
   const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const [diffSummary, setDiffSummary] = useState<DiffSummary | null>(null);
+  const [diffSelectedPath, setDiffSelectedPath] = useState<string | null>(null);
+  const [diffText, setDiffText] = useState<string | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
   const seenPresentationIds = useRef(new Set<string>());
   const presentationsPrimed = useRef(false);
   const [desktopNavigationMode, setDesktopNavigationMode] = useState<DesktopNavigationMode>(
@@ -433,6 +438,7 @@ export function useTetherApp() {
   const switchTo = (id: string) => {
     setDrawerOpen(false);
     setFileView(null);
+    closeDiff();
     if (id === activeIdRef.current) return;
     activeIdRef.current = id;
     setActiveId(id);
@@ -607,6 +613,7 @@ export function useTetherApp() {
 
   const selectPresentation = (id: string) => {
     setFileView(null);
+    closeDiff();
     setActivePresentationId(id);
   };
 
@@ -1293,13 +1300,10 @@ export function useTetherApp() {
     setFileLoading(true);
     try {
       const sessionId = activeIdRef.current;
-      const cwd = entryFor(sessionId).term.cwd;
       const query = new URLSearchParams({ path: target.path });
-      if (cwd) query.set('cwd', cwd);
-      const res = await fetch(
-        `${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`,
-        { headers: authHeaders(passwordRef.current) },
-      );
+      const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`, {
+        headers: authHeaders(passwordRef.current),
+      });
       const body = (await res.json().catch(() => ({}))) as { path?: string; content?: string; error?: string };
       if (!res.ok || typeof body.path !== 'string' || typeof body.content !== 'string') {
         throw new Error(body.error || `Request failed (${res.status})`);
@@ -1311,6 +1315,58 @@ export function useTetherApp() {
       void notify('Could not open file', String(error), 'error');
     } finally {
       setFileLoading(false);
+    }
+  }, [serverIp, port]);
+  const closeDiff = useCallback(() => {
+    setDiffSummary(null);
+    setDiffSelectedPath(null);
+    setDiffText(null);
+  }, []);
+  const deselectDiffFile = useCallback(() => {
+    setDiffSelectedPath(null);
+    setDiffText(null);
+  }, []);
+  const selectDiffFile = useCallback(
+    async (filePath: string) => {
+      setDiffSelectedPath(filePath);
+      setDiffText(null);
+      setDiffLoading(true);
+      try {
+        const sessionId = activeIdRef.current;
+        const query = new URLSearchParams({ path: filePath });
+        const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff?${query}`, {
+          headers: authHeaders(passwordRef.current),
+        });
+        const body = (await res.json().catch(() => ({}))) as { diff?: string; error?: string };
+        if (!res.ok || typeof body.diff !== 'string') {
+          throw new Error(body.error || `Request failed (${res.status})`);
+        }
+        setDiffText(body.diff);
+      } catch (error) {
+        void notify('Could not load diff', String(error), 'error');
+      } finally {
+        setDiffLoading(false);
+      }
+    },
+    [serverIp, port],
+  );
+  const openDiff = useCallback(async () => {
+    setDiffSummary({ files: [] });
+    setDiffSelectedPath(null);
+    setDiffText(null);
+    try {
+      const sessionId = activeIdRef.current;
+      const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff/summary`, {
+        headers: authHeaders(passwordRef.current),
+      });
+      const body = (await res.json().catch(() => ({}))) as { files?: DiffSummary['files']; error?: string };
+      if (!res.ok || !Array.isArray(body.files)) {
+        throw new Error(body.error || `Request failed (${res.status})`);
+      }
+      if (activeIdRef.current === sessionId) setDiffSummary({ files: body.files });
+    } catch (error) {
+      void notify('Could not load changes', String(error), 'error');
+      setDiffSummary(null);
     }
   }, [serverIp, port]);
   // Read live off the mutable emulator field — re-derives every render since
@@ -1493,6 +1549,6 @@ export function useTetherApp() {
 
 
   return {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, openFile, closeFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, openFile, closeFile, diffSummary, diffSelectedPath, diffText, diffLoading, openDiff, closeDiff, selectDiffFile, deselectDiffFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   };
 }
