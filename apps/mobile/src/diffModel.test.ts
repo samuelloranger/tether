@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import { displayDiff, totalChanges } from './diffModel';
+import { changeLabel, displayDiff, totalChanges } from './diffModel';
+
+test('changeLabel formats nonempty totals and hides an empty summary', () => {
+  expect(changeLabel({ files: [{ path: 'a.ts', insertions: 3, deletions: 2 }] })).toBe('+3 -2');
+  expect(changeLabel({ files: [] })).toBeNull();
+});
 
 test('totalChanges sums insertions and deletions across files', () => {
   expect(totalChanges({ files: [] })).toBe(0);
