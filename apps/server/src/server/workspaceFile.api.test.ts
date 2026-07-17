@@ -29,16 +29,26 @@ test('GET /api/sessions/:id/file serves workspace text once the shell has report
     upsertSession('file-rooted', 'bash', 'running');
     recordChunk('file-rooted', osc7(path.join(root, 'src')));
 
-    const ok = await app.request(`/api/sessions/file-rooted/file?path=${encodeURIComponent('main.ts')}`, {
-      headers: AUTH,
-    });
+    const ok = await app.request(
+      `/api/sessions/file-rooted/file?path=${encodeURIComponent('main.ts')}`,
+      {
+        headers: AUTH,
+      },
+    );
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ path: 'src/main.ts', content: 'export const answer = 42;\n' });
+    expect(await ok.json()).toEqual({
+      path: 'src/main.ts',
+      content: 'export const answer = 42;\n',
+    });
 
     upsertSession('file-pending', 'bash', 'running');
-    const pending = await app.request('/api/sessions/file-pending/file?path=main.ts', { headers: AUTH });
+    const pending = await app.request('/api/sessions/file-pending/file?path=main.ts', {
+      headers: AUTH,
+    });
     expect(pending.status).toBe(409);
-    expect(await pending.json()).toEqual({ error: 'waiting for shell to report its working directory' });
+    expect(await pending.json()).toEqual({
+      error: 'waiting for shell to report its working directory',
+    });
 
     const bad = await app.request(
       `/api/sessions/file-rooted/file?path=${encodeURIComponent('../secret.txt')}`,

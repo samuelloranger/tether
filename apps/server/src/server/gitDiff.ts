@@ -50,7 +50,10 @@ export function readDiffSummary(root: string): { files: DiffFileStat[] } {
   return { files };
 }
 
-export function readDiff(root: string, requestedPath?: string): { diff: string; truncated: boolean } {
+export function readDiff(
+  root: string,
+  requestedPath?: string,
+): { diff: string; truncated: boolean } {
   validatePath(requestedPath);
   const args = ['diff', 'HEAD'];
   if (requestedPath) args.push('--', requestedPath);
