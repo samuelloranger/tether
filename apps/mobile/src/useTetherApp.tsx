@@ -1118,6 +1118,7 @@ export function useTetherApp() {
       shouldForwardToTerminal(
         document.activeElement as (HTMLElement & { isContentEditable?: boolean }) | null,
         document.activeElement === document.body,
+        !fileView && !diffSummary,
       );
 
     const onCompositionStart = () => {
@@ -1165,7 +1166,7 @@ export function useTetherApp() {
     };
     // sendInput/handlePaste delegate to refs, so a stable listener is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring, activePresentationId, presentations]);
+  }, [isConfiguring, activePresentationId, presentations, fileView, diffSummary]);
 
   // Desktop: when the remote app enables mouse reporting (Claude Code, vim,
   // less…), the FlatList is frozen (scrollEnabled=false), so forward the wheel
