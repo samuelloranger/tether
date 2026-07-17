@@ -288,7 +288,7 @@ git commit -m "feat(mobile): detect workspace file links in terminal output"
 ### Task 4: Build the native read-only viewer
 
 **Files:**
-- Create: `apps/mobile/src/fileViewer.ts`
+- Create: `apps/mobile/src/fileView.ts`
 - Create: `apps/mobile/src/fileViewer.test.ts`
 - Create: `apps/mobile/src/FileViewer.tsx`
 
@@ -303,7 +303,7 @@ Create `fileViewer.test.ts`:
 
 ```ts
 import { expect, test } from 'bun:test';
-import { lineOffset } from './fileViewer';
+import { lineOffset } from './fileView';
 
 test('lineOffset clamps one-based source locations', () => {
   const content = 'one\ntwo\nthree\n';
@@ -322,7 +322,7 @@ Expected: FAIL because `./fileViewer` does not exist.
 
 - [ ] **Step 3: Implement the viewer and minimal source-location helper**
 
-Create `fileViewer.ts`:
+Create `fileView.ts`:
 
 ```ts
 export interface FileView { path: string; content: string; line?: number; column?: number; }
@@ -348,7 +348,7 @@ Run: `cd apps/mobile && bun test src/fileViewer.test.ts && npx tsc --noEmit`
 Expected: helper test and mobile typecheck pass.
 
 ```bash
-git add apps/mobile/src/fileViewer.ts apps/mobile/src/fileViewer.test.ts apps/mobile/src/FileViewer.tsx
+git add apps/mobile/src/fileView.ts apps/mobile/src/fileViewer.test.ts apps/mobile/src/FileViewer.tsx
 git commit -m "feat(mobile): add read-only terminal file viewer"
 ```
 
