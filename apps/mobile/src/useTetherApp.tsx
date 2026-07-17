@@ -151,7 +151,8 @@ export function useTetherApp() {
   const [snippetDraft, setSnippetDraft] = useState('');
 
   // Multi-session state
-  const cache = useRef(new SessionCache(3)).current;
+  const disconnectRef = useRef<(id: string) => void>(() => {});
+  const cache = useRef(new SessionCache(3, (id) => disconnectRef.current(id))).current;
   const [activeId, setActiveId] = useState('term-1');
   const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -171,15 +172,28 @@ export function useTetherApp() {
   }, [theme, cache]);
 
   // References
-  // Active terminal socket, abstracted over platform (RN WebSocket on mobile,
-  // Tauri Rust bridge on desktop — see wsTransport). `gen` invalidates the
-  // handlers of a superseded connection; `open` gates sends.
-  const sock = useRef<TerminalSocket | null>(null);
-  const gen = useRef(0);
-  const open = useRef(false);
+  // Per-session terminal sockets, abstracted over platform (RN WebSocket on
+  // mobile, Tauri Rust bridge on desktop — see wsTransport). Each cached
+  // session (cap 3, LRU) keeps its own entry so background tabs can stay live;
+  // `gen` invalidates the handlers of a superseded connection for that id,
+  // `open` gates sends to that id's socket.
+  type ConnState = {
+    sock: TerminalSocket | null;
+    gen: number;
+    open: boolean;
+    reconnectTimeout: any;
+  };
+  const connections = useRef(new Map<string, ConnState>()).current;
+  const connState = (id: string): ConnState => {
+    let s = connections.get(id);
+    if (!s) {
+      s = { sock: null, gen: 0, open: false, reconnectTimeout: null };
+      connections.set(id, s);
+    }
+    return s;
+  };
   const listRef = useRef<FlatList<RenderRow> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
-  const reconnectTimeout = useRef<any>(null);
   const autoScroll = useRef(true);
   // True while the current touch has scrolled the list, so a scroll-release
   // isn't misread as a tap that focuses the input and pops the keyboard.
@@ -236,13 +250,16 @@ export function useTetherApp() {
   const entryFor = (id: string): SessionEntry =>
     cache.touch(id, () => {
       const term = new TerminalEmulator(numCols || 80, numRows || 24);
-      // Only the active session holds a live socket, so replies from a
-      // backgrounded session's emulator have nowhere to go — drop them.
+      // Backgrounded sessions do hold a live socket now, but only the active
+      // tab is allowed to send input — route everyone else's replies nowhere.
       term.onReply = (text) => {
         if (id === activeIdRef.current) wsSend({ type: 'input', text });
       };
       term.onClipboardWrite = (text) => {
-        void Clipboard.setStringAsync(text).catch(() => {});
+        // Guard like onReply: now that background tabs stay live, an OSC 52
+        // sequence arriving in a backgrounded tab must not silently overwrite
+        // the device clipboard while the user is looking at a different tab.
+        if (id === activeIdRef.current) void Clipboard.setStringAsync(text).catch(() => {});
       };
       return { term, sinceId: 0, lastAppliedId: 0 };
     });
@@ -251,7 +268,8 @@ export function useTetherApp() {
   // lags the real socket state — e.g. mid-switch the new socket is CONNECTING —
   // so guarding on it throws INVALID_STATE_ERR. readyState is the source of truth.
   const wsSend = (obj: unknown) => {
-    if (open.current && sock.current) sock.current.send(JSON.stringify(obj));
+    const st = connections.get(activeIdRef.current);
+    if (st?.open && st.sock) st.sock.send(JSON.stringify(obj));
   };
 
   // When the remote enables mouse reporting (TUIs like Claude Code), translate
@@ -341,12 +359,17 @@ export function useTetherApp() {
     }
   };
 
-  const connect = () => {
-    disconnect();
+  // Each cached session (cap 3, LRU) keeps its own live socket instead of the
+  // app owning one global connection torn down on every tab switch. Only the
+  // active tab's connectionStatus surfaces in the titlebar; background tabs
+  // reconnect on their own (gated on still being cache-resident, not on being
+  // active) so they keep receiving output while backgrounded.
+  const connect = (id: string) => {
+    disconnect(id); // clean slate: tear down any stale entry for this id first
     lastConnectedRef.current = { ip: serverIp, port };
-    const id = activeIdRef.current;
     const e = entryFor(id);
-    setConnectionStatus('connecting');
+    const st = connState(id);
+    if (id === activeIdRef.current) setConnectionStatus('connecting');
     const url = wsUrl(serverIp, port, {
       sessionId: id,
       sinceId: e.sinceId,
@@ -354,50 +377,59 @@ export function useTetherApp() {
       rows: numRows,
     });
 
-    // Each connect bumps the generation; a superseded socket's late callbacks are
-    // ignored (replaces the old `ws.current !== socket` staleness check).
-    const myGen = ++gen.current;
-    const fresh = () => myGen === gen.current;
+    // Each connect bumps this id's generation; a superseded socket's late
+    // callbacks are ignored (replaces the old `ws.current !== socket` check).
+    const myGen = ++st.gen;
+    const fresh = () => myGen === st.gen;
 
-    sock.current = openTerminalSocket(url, passwordRef.current, {
+    st.sock = openTerminalSocket(url, passwordRef.current, {
       onOpen: () => {
         if (!fresh()) return;
-        hasConnectedRef.current = true;
-        open.current = true;
-        setConnectionStatus('connected');
+        st.open = true;
+        if (id === activeIdRef.current) {
+          hasConnectedRef.current = true;
+          setConnectionStatus('connected');
+        }
       },
       onMessage: (data) => {
         if (fresh()) applyWsMessage(id, data);
       },
       onClose: () => {
         if (!fresh()) return;
-        open.current = false;
-        setConnectionStatus('disconnected');
-        if (readyRef.current && activeIdRef.current === id) {
-          reconnectTimeout.current = setTimeout(connect, 3000);
+        st.open = false;
+        if (id === activeIdRef.current) setConnectionStatus('disconnected');
+        if (readyRef.current && cache.has(id)) {
+          st.reconnectTimeout = setTimeout(() => connect(id), 3000);
         }
       },
     });
   };
 
-  const disconnect = () => {
-    if (reconnectTimeout.current) {
-      clearTimeout(reconnectTimeout.current);
-      reconnectTimeout.current = null;
+  const disconnect = (id: string) => {
+    const st = connections.get(id);
+    if (!st) return;
+    if (st.reconnectTimeout) {
+      clearTimeout(st.reconnectTimeout);
+      st.reconnectTimeout = null;
     }
-    gen.current++; // invalidate any in-flight handlers
-    open.current = false;
-    const s = sock.current;
-    sock.current = null;
-    if (s) s.close();
-    setConnectionStatus('disconnected');
+    st.gen++; // invalidate any in-flight handlers
+    st.open = false;
+    st.sock?.close();
+    connections.delete(id);
+    if (id === activeIdRef.current) setConnectionStatus('disconnected');
   };
 
-  // Switch to a different session
+  const disconnectAll = () => {
+    for (const id of Array.from(connections.keys())) disconnect(id);
+  };
+
+  disconnectRef.current = disconnect;
+
+  // Switch to a different session. Does NOT disconnect the tab being left —
+  // it keeps streaming in the background as long as it's cache-resident.
   const switchTo = (id: string) => {
     setDrawerOpen(false);
-    if (id === activeIdRef.current && sock.current) return;
-    disconnect();
+    if (id === activeIdRef.current) return;
     activeIdRef.current = id;
     setActiveId(id);
     AsyncStorage.setItem(KEY_SESSION_ID, id);
@@ -405,7 +437,12 @@ export function useTetherApp() {
     setScreen(e.term.getSnapshot()); // instant paint of last-known screen
     autoScroll.current = true;
     lastContentHeight.current = 0;
-    connect();
+    const st = connections.get(id);
+    if (st?.open) {
+      setConnectionStatus('connected'); // already live — no reconnect flicker
+    } else {
+      connect(id);
+    }
   };
 
   const newTerminal = () => {
@@ -424,6 +461,7 @@ export function useTetherApp() {
       });
     } catch {}
     cache.delete(id);
+    disconnect(id);
     const remaining = drawerSessions.filter((s) => s.id !== id).map((s) => s.id);
     await refreshSessions();
     if (id === activeIdRef.current) {
@@ -657,7 +695,7 @@ export function useTetherApp() {
     }
 
     loadConfig();
-    return () => disconnect();
+    return () => disconnectAll();
   }, []);
 
   // Size the emulator (and the remote PTY) to the on-screen grid so the shell
@@ -668,14 +706,16 @@ export function useTetherApp() {
     scheduleRender();
   }, [numCols, numRows, connectionStatus, activeId]);
 
-  // 2. Manage WebSocket connection — reconnects on session switch. Opening
-  // Settings does NOT tear this down; only an address/port change (saveConfig)
-  // or an actual session switch touches the socket.
+  // 2. Open the initial connection once the app becomes ready. Tab switches no
+  // longer touch this effect — switchTo() connects the newly-active tab itself
+  // if it isn't already live, and leaves every other resident tab's socket
+  // alone. Only unmount or an address/port change (saveConfig) tears sockets
+  // down wholesale.
   useEffect(() => {
     if (!ready) return;
-    connect();
-    return () => disconnect();
-  }, [ready, activeId]);
+    connect(activeIdRef.current);
+    return () => disconnectAll();
+  }, [ready]);
 
   // Stick to the bottom when the keyboard opens (view shrinks, no new content).
   useEffect(() => {
@@ -783,8 +823,13 @@ export function useTetherApp() {
         readyRef.current = true;
         setReady(true);
       } else if (addressChanged) {
+        // The server address changed — every resident tab's socket points at
+        // the old host. Drop them all; only the active tab reconnects
+        // immediately, the rest reconnect lazily on next visit (switchTo's
+        // connect-if-not-open fallback).
+        disconnectAll();
         resetTerminal();
-        connect();
+        connect(activeIdRef.current);
       }
     } catch (e) {
       void notify('Error', 'Failed to save configuration', 'error');
@@ -1316,7 +1361,7 @@ export function useTetherApp() {
         headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
         body: JSON.stringify({ id: activeId }),
       });
-      connect();
+      connect(activeIdRef.current);
     } catch (e) {
       void notify('Error', 'Failed to kill session on the server', 'error');
     }
@@ -1406,6 +1451,6 @@ export function useTetherApp() {
 
 
   return {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   };
 }
