@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { lineOffset, type FileView } from './fileView';
@@ -10,11 +10,11 @@ export function FileViewer({ file, onBack }: { file: FileView; onBack: () => voi
   const rowOffsets = useRef(new Map<number, number>());
   const pendingTargetLine = useRef(0);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     rowOffsets.current.clear();
   }, [file.path, file.content]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const target = lineOffset(file.content, file.line);
     pendingTargetLine.current = target;
     const y = rowOffsets.current.get(target);
