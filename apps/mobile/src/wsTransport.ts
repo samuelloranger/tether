@@ -73,14 +73,14 @@ async function openTauriSocket(
       // A send after the Rust side has dropped the socket rejects; treat that as
       // a close so the app can reflect the state and reconnect, instead of
       // silently losing the keystroke.
-      invoke('ws_send', { text: t }).catch(() => {
+      invoke('ws_send', { connId, text: t }).catch(() => {
         cleanup();
         h.onClose();
       });
     },
     close: () => {
       cleanup();
-      void invoke('ws_close');
+      void invoke('ws_close', { connId });
     },
   };
 }
