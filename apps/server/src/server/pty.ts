@@ -12,6 +12,7 @@ import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
+import { clearLiveCwd, recordChunk } from './liveCwd';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { COMPILED, selfArgv } from './runtime';
 
@@ -181,6 +182,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     if (pendingOutput.length === 0) return;
     const text = pendingOutput.join('');
     pendingOutput = [];
+    recordChunk(id, text);
     const logId = addTerminalLog(id, text);
     broadcast(id, { type: 'output', chunk: text, id: logId });
   };
@@ -208,6 +210,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       broadcast(id, { type: 'exit', exitCode: msg.code });
       instances.get(id)?.subscribers.clear();
       instances.delete(id);
+      clearLiveCwd(id);
     }
   };
 
