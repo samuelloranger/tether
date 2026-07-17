@@ -15,7 +15,7 @@ export function totalChanges(summary: DiffSummary): number {
 }
 
 export function changeLabel(summary: DiffSummary): string | null {
-  if (totalChanges(summary) === 0) return null;
+  if (summary.files.length === 0) return null;
   const insertions = summary.files.reduce((sum, file) => sum + file.insertions, 0);
   const deletions = summary.files.reduce((sum, file) => sum + file.deletions, 0);
   return `+${insertions} -${deletions}`;

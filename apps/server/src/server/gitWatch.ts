@@ -22,10 +22,8 @@ export class GitWatch {
 
     if (root) {
       try {
-        this.handles.push(
-          watch(root, { recursive: true }, this.schedule),
-          watch(resolveGitDir(root), { recursive: true }, this.schedule),
-        );
+        this.addHandle(watch(root, { recursive: true }, this.schedule));
+        this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
       } catch {
         this.closeHandles();
       }
@@ -65,5 +63,16 @@ export class GitWatch {
   private closeHandles() {
     for (const handle of this.handles) handle.close();
     this.handles = [];
+  }
+
+  private addHandle(handle: FSWatcher) {
+    this.handles.push(handle);
+    handle.on('error', () => {
+      if (this.disposed) return;
+      this.closeHandles();
+      this.root = null;
+      this.lastSummary = null;
+      this.refresh();
+    });
   }
 }

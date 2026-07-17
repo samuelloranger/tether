@@ -1,5 +1,5 @@
 import { Text, type TextStyle } from 'react-native';
-import { Highlight, type PrismTheme } from 'prism-react-renderer';
+import { Highlight, Prism, type PrismTheme } from 'prism-react-renderer';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { languageForPath } from './codeLanguage';
@@ -28,7 +28,7 @@ export function CodeHighlight({
   };
   const sourceLines = code.split('\n');
 
-  if (!language) {
+  if (!language || !Prism.languages[language]) {
     return sourceLines.map((line, index) => (
       <Text
         key={index}

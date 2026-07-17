@@ -3,6 +3,9 @@ import { changeLabel, diffLineKinds, displayDiff, totalChanges } from './diffMod
 
 test('changeLabel formats nonempty totals and hides an empty summary', () => {
   expect(changeLabel({ files: [{ path: 'a.ts', insertions: 3, deletions: 2 }] })).toBe('+3 -2');
+  expect(changeLabel({ files: [{ path: 'binary.png', insertions: 0, deletions: 0 }] })).toBe(
+    '+0 -0',
+  );
   expect(changeLabel({ files: [] })).toBeNull();
 });
 
