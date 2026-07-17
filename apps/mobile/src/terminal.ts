@@ -1,4 +1,4 @@
-import { computeLinkSpans, type LinkSpan } from './links';
+import { computeLinkSpans, type LinkSpan, type LinkTarget } from './links';
 import { APP_THEMES } from './appTheme';
 
 // A compact VT100/xterm terminal emulator: consumes the raw PTY byte stream and
@@ -1021,9 +1021,16 @@ function runsEqual(a: RenderRun[], b: RenderRun[]): boolean {
 function linksEqual(a: LinkSpan[], b: LinkSpan[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i].start !== b[i].start || a[i].end !== b[i].end || a[i].url !== b[i].url) return false;
+    if (a[i].start !== b[i].start || a[i].end !== b[i].end || !targetsEqual(a[i].target, b[i].target)) return false;
   }
   return true;
+}
+
+function targetsEqual(a: LinkTarget, b: LinkTarget): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'external' && b.kind === 'external') return a.url === b.url;
+  if (a.kind === 'file' && b.kind === 'file') return a.path === b.path && a.line === b.line && a.column === b.column;
+  return false;
 }
 
 // Contiguous same-URL cell runs on one row, as LinkSpans — explicit OSC-8
@@ -1039,7 +1046,7 @@ function explicitLinkSpans(line: Cell[]): LinkSpan[] {
     }
     let j = i + 1;
     while (j < line.length && line[j].url === url) j++;
-    out.push({ start: i, end: j, url });
+    out.push({ start: i, end: j, target: { kind: 'external', url } });
     i = j;
   }
   return out;

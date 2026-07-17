@@ -18,6 +18,7 @@ import {
   writeToSession,
 } from './pty';
 import { resolveUploadPath } from './upload';
+import { readWorkspaceFile, WorkspaceFileError } from './workspaceFile';
 
 const app = new Hono();
 const presentations = new PresentationRegistry();
@@ -140,6 +141,21 @@ app.get('/api/health', (c) => c.json({ ok: true }));
 // List all sessions (active or stopped) from DB
 app.get('/api/sessions', (c) => {
   return c.json(listSessions());
+});
+
+app.get('/api/sessions/:id/file', (c) => {
+  const session = getSession(c.req.param('id'));
+  if (!session) return c.json({ error: 'session not found' }, 404);
+  if (!session.workspace_root)
+    return c.json({ error: 'restart terminal to enable file viewing' }, 409);
+  try {
+    return c.json(
+      readWorkspaceFile(session.workspace_root, c.req.query('path') ?? '', c.req.query('cwd')),
+    );
+  } catch (error) {
+    if (error instanceof WorkspaceFileError) return c.json({ error: error.message }, error.status);
+    throw error;
+  }
 });
 
 // Start or get a session

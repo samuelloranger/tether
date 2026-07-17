@@ -77,4 +77,19 @@ function ok(cond: boolean, msg: string) {
   ok(row!.status === 'stopped', 'orphan reset marks running sessions stopped');
 }
 
+{
+  upsertSession('term-root', 'bash', 'running', '/tmp/tether-workspace');
+  ok(
+    getSession('term-root')!.workspace_root === '/tmp/tether-workspace',
+    'new session stores workspace root',
+  );
+  upsertSession('term-root', 'zsh', 'stopped', '/tmp/other-workspace');
+  const session = getSession('term-root')!;
+  ok(session.workspace_root === '/tmp/tether-workspace', 'workspace root is immutable');
+  ok(
+    session.command === 'zsh' && session.status === 'stopped',
+    'other session fields still update',
+  );
+}
+
 console.log(`\n  ${pass} assertions passed\n`);
