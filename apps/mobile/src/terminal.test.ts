@@ -369,15 +369,15 @@ setTheme(APP_THEMES.mocha.terminal);
   const url = 'https://example.com/abcdefghij';
   const rows = [url.slice(0, 20), url.slice(20)]; // as the 20-col grid would split it
   const spans = computeLinkSpans(rows, [true, false]);
-  eq(spans[0], [{ start: 0, end: 20, url }], 'first fragment carries the full URL');
-  eq(spans[1], [{ start: 0, end: 10, url }], 'second fragment carries the full URL');
+  eq(spans[0], [{ start: 0, end: 20, target: { kind: 'external', url } }], 'first fragment carries the full URL');
+  eq(spans[1], [{ start: 0, end: 10, target: { kind: 'external', url } }], 'second fragment carries the full URL');
 }
 
 // 39. Hard-newline'd lines are not joined into one link
 {
   const spans = computeLinkSpans(['http://a.com', 'http://b.com'], [false, false]);
-  eq(spans[0], [{ start: 0, end: 12, url: 'http://a.com' }], 'line A its own link');
-  eq(spans[1], [{ start: 0, end: 12, url: 'http://b.com' }], 'line B its own link');
+  eq(spans[0], [{ start: 0, end: 12, target: { kind: 'external', url: 'http://a.com' } }], 'line A its own link');
+  eq(spans[1], [{ start: 0, end: 12, target: { kind: 'external', url: 'http://b.com' } }], 'line B its own link');
 }
 
 // 40. A URL wrapping across three rows resolves whole on every fragment
@@ -385,9 +385,9 @@ setTheme(APP_THEMES.mocha.terminal);
   const url = 'https://example.com/' + 'x'.repeat(25); // 45 chars
   const rows = [url.slice(0, 20), url.slice(20, 40), url.slice(40)];
   const spans = computeLinkSpans(rows, [true, true, false]);
-  eq(spans[0][0].url, url, 'row 0 fragment -> full URL');
-  eq(spans[1][0].url, url, 'row 1 fragment -> full URL');
-  eq(spans[2][0].url, url, 'row 2 fragment -> full URL');
+  eq(spans[0][0].target, { kind: 'external', url }, 'row 0 fragment -> full URL');
+  eq(spans[1][0].target, { kind: 'external', url }, 'row 1 fragment -> full URL');
+  eq(spans[2][0].target, { kind: 'external', url }, 'row 2 fragment -> full URL');
 }
 
 // 41. End-to-end: emulator autowrap + computeLinkSpans give one full URL
@@ -398,26 +398,26 @@ setTheme(APP_THEMES.mocha.terminal);
   const snap = t.getSnapshot();
   const texts = snap.map((r) => r.runs.map((x) => x.text).join(''));
   const spans = computeLinkSpans(texts, snap.map((r) => r.wrapped));
-  eq(spans[0][0]?.url, url, 'row 0 resolves the full wrapped URL');
-  eq(spans[1][0]?.url, url, 'row 1 resolves the full wrapped URL');
+  eq(spans[0][0]?.target, { kind: 'external', url }, 'row 0 resolves the full wrapped URL');
+  eq(spans[1][0]?.target, { kind: 'external', url }, 'row 1 resolves the full wrapped URL');
 }
 
-// 42. splitRunByLinks isolates the link portion of a run, tagging it with the url
+// 42. splitRunByLinks isolates the link portion of a run, tagging it with the target
 {
   const url = 'http://x.io';
   const spans = computeLinkSpans([`see ${url} now`], [false]);
   const urlAt = urlColumns(spans[0]);
   const segs = splitRunByLinks(`see ${url} now`, 0, urlAt);
-  eq(segs, [{ text: 'see ' }, { text: url, url }, { text: ' now' }], 'link split out with url');
+  eq(segs, [{ text: 'see ' }, { text: url, target: { kind: 'external', url } }, { text: ' now' }], 'link split out with target');
 }
 
 // 43. splitRunByLinks respects a run's column offset within the row
 {
   const url = 'http://x.io';
   // Row text is 'ab' + url; the link occupies columns 2..12. A run starting at
-  // column 2 should surface the whole url as one tagged segment.
+  // column 2 should surface the whole URL as one tagged segment.
   const urlAt = urlColumns(computeLinkSpans([`ab${url}`], [false])[0]);
-  eq(splitRunByLinks(url, 2, urlAt), [{ text: url, url }], 'offset run maps to the url');
+  eq(splitRunByLinks(url, 2, urlAt), [{ text: url, target: { kind: 'external', url } }], 'offset run maps to the target');
 }
 
 // 44. Bell increments a counter instead of being dropped
@@ -492,7 +492,7 @@ setTheme(APP_THEMES.mocha.terminal);
   t.write(`click ${E}]8;;https://example.com${E}\\here${E}]8;;${E}\\ done`);
   const links = t.getSnapshot()[0].links;
   eq(links.length, 1, 'exactly one link span on the row');
-  eq(links[0].url, 'https://example.com', 'link carries the OSC 8 URI');
+  eq(links[0].target, { kind: 'external', url: 'https://example.com' }, 'link carries the OSC 8 URI');
   // "click " (0-5) is not part of the link; "here" (6-9) is (starts after "click ").
   eq(links[0].start, 6, 'link starts at "here"');
   eq(links[0].end, 10, 'link ends after "here"');
@@ -504,7 +504,7 @@ setTheme(APP_THEMES.mocha.terminal);
   t.write('see https://example.com/path for details');
   const links = t.getSnapshot()[0].links;
   eq(links.length, 1, 'regex still finds a plain URL');
-  eq(links[0].url, 'https://example.com/path', 'regex-detected URL is correct');
+  eq(links[0].target, { kind: 'external', url: 'https://example.com/path' }, 'regex-detected URL is correct');
 }
 
 // 51. setTheme swaps the ANSI palette + default fg/bg used by new writes
@@ -552,8 +552,8 @@ setTheme(APP_THEMES.mocha.terminal);
   t.resize(20, 10); // keyboard hides: rows grow back
   const snap = t.getSnapshot();
   eq(snap[0].wrapped, true, 'row 0 still marked soft-wrapped after a resize round trip');
-  eq(snap[0].links[0]?.url, url, 'row 0 still resolves the full URL after a resize round trip');
-  eq(snap[1].links[0]?.url, url, 'row 1 still resolves the full URL after a resize round trip');
+  eq(snap[0].links[0]?.target, { kind: 'external', url }, 'row 0 still resolves the full URL after a resize round trip');
+  eq(snap[1].links[0]?.target, { kind: 'external', url }, 'row 1 still resolves the full URL after a resize round trip');
 }
 
 // 55. OSC 10 query replies with the current theme foreground as an xterm rgb: color.

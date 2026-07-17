@@ -9,11 +9,24 @@
 // opens the whole link.
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
+const FILE_RE = /(?:^|\s)((?:[\w.-]+\/)+[\w.-]+\.[\w-]+(?::[1-9]\d*(?::[1-9]\d*)?)?)(?=$|\s|[)\],;.])/g;
+
+export type LinkTarget =
+  | { kind: 'external'; url: string }
+  | { kind: 'file'; path: string; line?: number; column?: number };
 
 export interface LinkSpan {
   start: number; // inclusive column offset into the row's text
   end: number; // exclusive
-  url: string; // full reconstructed URL
+  target: LinkTarget;
+}
+
+export function parseFileTarget(token: string): Extract<LinkTarget, { kind: 'file' }> | null {
+  const clean = token.replace(/[)\],;.]+$/, '');
+  const match = /^(.*?)(?::([1-9]\d*)(?::([1-9]\d*))?)?$/.exec(clean);
+  if (!match || !match[1].includes('/') || !/\/[\w.-]+\.[\w-]+$/.test(match[1])) return null;
+  if (match[1].startsWith('/') || match[1].split('/').includes('..')) return null;
+  return { kind: 'file', path: match[1], ...(match[2] ? { line: Number(match[2]) } : {}), ...(match[3] ? { column: Number(match[3]) } : {}) };
 }
 
 // `texts[i]` is row i's plain text; `wrapped[i]` is true when row i soft-wraps
@@ -41,13 +54,28 @@ export function computeLinkSpans(texts: string[], wrapped: boolean[]): LinkSpan[
     while ((m = URL_RE.exec(joined))) {
       const s = m.index;
       const e = s + m[0].length;
-      const url = m[0];
+      const target: LinkTarget = { kind: 'external', url: m[0] };
       for (let k = i; k <= j; k++) {
         const rowStart = offs[k - i];
         const rowEnd = rowStart + texts[k].length;
         const a = Math.max(s, rowStart);
         const b = Math.min(e, rowEnd);
-        if (a < b) out[k].push({ start: a - rowStart, end: b - rowStart, url });
+        if (a < b) out[k].push({ start: a - rowStart, end: b - rowStart, target });
+      }
+    }
+    FILE_RE.lastIndex = 0;
+    while ((m = FILE_RE.exec(joined))) {
+      const raw = m[1];
+      const target = parseFileTarget(raw);
+      if (!target) continue;
+      const s = m.index + m[0].indexOf(raw);
+      const e = s + raw.length;
+      for (let k = i; k <= j; k++) {
+        const rowStart = offs[k - i];
+        const rowEnd = rowStart + texts[k].length;
+        const a = Math.max(s, rowStart);
+        const b = Math.min(e, rowEnd);
+        if (a < b) out[k].push({ start: a - rowStart, end: b - rowStart, target });
       }
     }
 
@@ -58,32 +86,34 @@ export function computeLinkSpans(texts: string[], wrapped: boolean[]): LinkSpan[
 
 export interface RunSegment {
   text: string;
-  url?: string; // set when this segment is (part of) a link
+  target?: LinkTarget;
 }
 
-// Splits one render run's text into maximal segments that share a single URL (or
-// none), given `urlAt` — a column→url lookup for the whole row — and the run's
+// Splits one render run's text into maximal segments that share a single target
+// (or none), given `urlAt` — a column→target lookup for the whole row — and the run's
 // starting column `base`. Lets the renderer wrap only the link portion of a run
 // in a tappable element while leaving surrounding text plain.
 export function splitRunByLinks(
   text: string,
   base: number,
-  urlAt: (string | undefined)[],
+  urlAt: (LinkTarget | undefined)[],
 ): RunSegment[] {
   const segs: RunSegment[] = [];
   for (let p = 0; p < text.length; ) {
-    const url = urlAt[base + p];
+    const target = urlAt[base + p];
     let q = p + 1;
-    while (q < text.length && urlAt[base + q] === url) q++;
-    segs.push({ text: text.slice(p, q), url });
+    while (q < text.length && urlAt[base + q] === target) q++;
+    segs.push({ text: text.slice(p, q), target });
     p = q;
   }
   return segs;
 }
 
-// Expands per-row link spans into a column→url lookup for O(1) queries per cell.
-export function urlColumns(links: LinkSpan[]): (string | undefined)[] {
-  const urlAt: (string | undefined)[] = [];
-  for (const s of links) for (let c = s.start; c < s.end; c++) urlAt[c] = s.url;
+// Expands per-row link spans into a column→target lookup for O(1) queries per cell.
+export function urlColumns(links: LinkSpan[]): (LinkTarget | undefined)[] {
+  const urlAt: (LinkTarget | undefined)[] = [];
+  for (const s of links) {
+    for (let c = s.start; c < s.end; c++) urlAt[c] = s.target;
+  }
   return urlAt;
 }
