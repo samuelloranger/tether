@@ -166,6 +166,7 @@ export function useTetherApp() {
   const [diffSummary, setDiffSummary] = useState<DiffSummary | null>(null);
   const [diffSelectedPath, setDiffSelectedPath] = useState<string | null>(null);
   const [diffText, setDiffText] = useState<string | null>(null);
+  const [diffTruncated, setDiffTruncated] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
   const seenPresentationIds = useRef(new Set<string>());
   const presentationsPrimed = useRef(false);
@@ -1322,15 +1323,18 @@ export function useTetherApp() {
     setDiffSummary(null);
     setDiffSelectedPath(null);
     setDiffText(null);
+    setDiffTruncated(false);
   }, []);
   const deselectDiffFile = useCallback(() => {
     setDiffSelectedPath(null);
     setDiffText(null);
+    setDiffTruncated(false);
   }, []);
   const selectDiffFile = useCallback(
     async (filePath: string) => {
       setDiffSelectedPath(filePath);
       setDiffText(null);
+      setDiffTruncated(false);
       setDiffLoading(true);
       try {
         const sessionId = activeIdRef.current;
@@ -1338,11 +1342,12 @@ export function useTetherApp() {
         const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff?${query}`, {
           headers: authHeaders(passwordRef.current),
         });
-        const body = (await res.json().catch(() => ({}))) as { diff?: string; error?: string };
+        const body = (await res.json().catch(() => ({}))) as { diff?: string; truncated?: boolean; error?: string };
         if (!res.ok || typeof body.diff !== 'string') {
           throw new Error(body.error || `Request failed (${res.status})`);
         }
         setDiffText(body.diff);
+        setDiffTruncated(body.truncated === true);
       } catch (error) {
         void notify('Could not load diff', String(error), 'error');
       } finally {
@@ -1355,6 +1360,7 @@ export function useTetherApp() {
     setDiffSummary({ files: [] });
     setDiffSelectedPath(null);
     setDiffText(null);
+    setDiffTruncated(false);
     try {
       const sessionId = activeIdRef.current;
       const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff/summary`, {
@@ -1550,6 +1556,6 @@ export function useTetherApp() {
 
 
   return {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, openFile, closeFile, diffSummary, diffSelectedPath, diffText, diffLoading, openDiff, closeDiff, selectDiffFile, deselectDiffFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, openFile, closeFile, diffSummary, diffSelectedPath, diffText, diffTruncated, diffLoading, openDiff, closeDiff, selectDiffFile, deselectDiffFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   };
 }

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { GitDiffError, readDiff, readDiffSummary } from './gitDiff';
 
-function withRepo(fn: (root: string) => void) {
+async function withRepo(fn: (root: string) => void | Promise<void>) {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-gitdiff-'));
   try {
     execSync('git init -q', { cwd: root });
@@ -13,7 +13,7 @@ function withRepo(fn: (root: string) => void) {
     execSync('git config user.name test', { cwd: root });
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 42;\n');
     execSync('git add main.ts && git commit -q -m initial', { cwd: root });
-    fn(root);
+    await fn(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -27,10 +27,10 @@ test('summarizes an unstaged change against HEAD', () => {
   });
 });
 
-test('returns the unified diff for a single file', () => {
-  withRepo((root) => {
+test('returns the unified diff for a single file', async () => {
+  await withRepo(async (root) => {
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
-    const { diff, truncated } = readDiff(root, 'main.ts');
+    const { diff, truncated } = await readDiff(root, 'main.ts');
     expect(truncated).toBe(false);
     expect(diff).toContain('-export const answer = 42;');
     expect(diff).toContain('+export const answer = 43;');
@@ -43,10 +43,10 @@ test('rejects a traversal path', () => {
   });
 });
 
-test('truncates a diff larger than 1 MiB and reports truncated: true', () => {
-  withRepo((root) => {
-    writeFileSync(path.join(root, 'main.ts'), 'x'.repeat(1_048_577));
-    const { diff, truncated } = readDiff(root);
+test('truncates a diff larger than 1 MiB and reports truncated: true', async () => {
+  await withRepo(async (root) => {
+    writeFileSync(path.join(root, 'main.ts'), 'x'.repeat(2_000_000));
+    const { diff, truncated } = await readDiff(root);
     expect(truncated).toBe(true);
     expect(diff.length).toBe(1_048_576);
   });
