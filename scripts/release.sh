@@ -134,3 +134,44 @@ else
   cargo check --manifest-path apps/mobile/src-tauri/Cargo.toml > /dev/null 2>&1
   echo "Updated apps/mobile/src-tauri/Cargo.lock"
 fi
+
+# Validation
+echo "Running validation checks (lint & format)..."
+if [ "$DRY_RUN" = true ]; then
+  echo "[dry-run] Would run: bun lint && bun format"
+else
+  bun lint
+  bun format
+fi
+
+# Git Ops
+BRANCH=$(git branch --show-current)
+echo "Preparing Git commit on branch '$BRANCH'..."
+
+if [ "$DRY_RUN" = true ]; then
+  echo "[dry-run] Would run: git add ... && git commit -m 'release: v$TARGET_VERSION'"
+  echo "[dry-run] Would run: git push origin $BRANCH"
+  echo "[dry-run] Would run: gh release create v$TARGET_VERSION --generate-notes"
+else
+  # Stage the modified files
+  git add package.json \
+          apps/server/package.json \
+          apps/mobile/package.json \
+          apps/mobile/app.json \
+          apps/mobile/src-tauri/tauri.conf.json \
+          apps/mobile/src-tauri/Cargo.toml \
+          apps/mobile/src-tauri/Cargo.lock
+
+  git commit -m "release: v$TARGET_VERSION"
+  echo "Pushing changes to origin/$BRANCH..."
+  git push origin "$BRANCH"
+
+  echo "Creating GitHub Release..."
+  if ! gh release create "v$TARGET_VERSION" --generate-notes; then
+    echo "Warning: Release creation failed. Check your gh CLI authorization or permissions." >&2
+  else
+    echo "Successfully created release v$TARGET_VERSION"
+  fi
+fi
+
+echo "Release process completed successfully!"
