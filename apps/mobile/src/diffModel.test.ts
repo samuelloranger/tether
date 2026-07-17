@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { changeLabel, displayDiff, totalChanges } from './diffModel';
+import { changeLabel, diffLineKinds, displayDiff, totalChanges } from './diffModel';
 
 test('changeLabel formats nonempty totals and hides an empty summary', () => {
   expect(changeLabel({ files: [{ path: 'a.ts', insertions: 3, deletions: 2 }] })).toBe('+3 -2');
@@ -20,4 +20,10 @@ test('totalChanges sums insertions and deletions across files', () => {
 
 test('displayDiff warns when the server truncates a diff', () => {
   expect(displayDiff('line 1\n', true)).toBe('line 1\n\n[Diff truncated at 1 MiB]');
+});
+
+test('diffLineKinds preserves prefixes while classifying unified diff rows', () => {
+  const diff = '+const answer = 43;\n-old\n@@ -1 +1 @@';
+  expect(diffLineKinds(diff)).toEqual(['add', 'remove', 'meta']);
+  expect(diff.split('\n').slice(0, 2)).toEqual(['+const answer = 43;', '-old']);
 });

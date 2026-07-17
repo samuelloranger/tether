@@ -22,6 +22,7 @@ export function CodeHighlight({
     fontFamily: 'monospace',
     fontSize: 14,
     lineHeight: 20,
+    minHeight: 20,
     flexShrink: 1,
     width: '100%',
   };
@@ -35,7 +36,7 @@ export function CodeHighlight({
         style={[baseStyle, lineStyle?.(line, index)]}
         onLayout={(event) => onLineLayout?.(index, event.nativeEvent.layout.y)}
       >
-        {line || ' '}
+        {line}
       </Text>
     ));
   }
@@ -55,7 +56,7 @@ export function CodeHighlight({
                 const props = getTokenProps({ token });
                 return (
                   <Text key={tokenIndex} style={props.style as TextStyle}>
-                    {props.children || ' '}
+                    {props.children}
                   </Text>
                 );
               })}

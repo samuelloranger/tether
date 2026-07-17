@@ -1,6 +1,7 @@
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
-import { displayDiff, type DiffSummary } from './diffModel';
+import { diffLineKind, displayDiff, type DiffSummary } from './diffModel';
+import { CodeHighlight } from './CodeHighlight';
 
 export function DiffView({
   summary,
@@ -44,11 +45,17 @@ export function DiffView({
           </View>
         ) : (
           <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
-            <ScrollView horizontal contentContainerStyle={styles.horizontal}>
-              <Text selectable style={[styles.code, { color: theme.terminal.fg }]}>
-                {displayDiff(diffText ?? '', diffTruncated)}
-              </Text>
-            </ScrollView>
+            <CodeHighlight
+              path={selectedPath}
+              code={displayDiff(diffText ?? '', diffTruncated)}
+              lineStyle={(line) => {
+                const kind = diffLineKind(line);
+                if (kind === 'add') return { backgroundColor: `${theme.colors.success}18` };
+                if (kind === 'remove') return { backgroundColor: `${theme.colors.danger}18` };
+                if (kind === 'meta') return { backgroundColor: theme.colors.surfaceRaised, opacity: 0.8 };
+                return undefined;
+              }}
+            />
           </ScrollView>
         )
       ) : summary.files.length === 0 ? (
@@ -81,9 +88,7 @@ const styles = StyleSheet.create({
   path: { flex: 1, fontFamily: 'monospace', marginRight: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   vertical: { flex: 1 },
-  content: { padding: 16 },
-  horizontal: { minWidth: '100%' },
-  code: { fontFamily: 'monospace', fontSize: 14, lineHeight: 20 },
+  content: { padding: 16, alignItems: 'stretch' },
   fileRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10 },
   filePath: { fontFamily: 'monospace', flex: 1, marginRight: 12 },
   fileStat: { fontFamily: 'monospace' },
