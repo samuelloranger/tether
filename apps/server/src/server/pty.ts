@@ -12,7 +12,10 @@ import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
-import { clearLiveCwd, recordChunk } from './liveCwd';
+import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
+import { findGitRoot } from './gitRoot';
+import { GitWatch } from './gitWatch';
+import { clearLiveCwd, getLiveCwd, recordChunk } from './liveCwd';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { COMPILED, selfArgv } from './runtime';
 
@@ -121,16 +124,18 @@ export function sessionEnv(
   return { ...withTermEnv(scrubAgentEnv(env)), ...shellEnv, TETHER_SESSION_ID: id };
 }
 
-export type Subscriber = (data: {
-  type: 'output' | 'exit';
-  chunk?: string;
-  exitCode?: number;
-  id?: number;
-}) => void;
+export type SessionFrame =
+  | { type: 'output'; chunk: string; id: number }
+  | { type: 'exit'; exitCode?: number }
+  | { type: 'diff'; summary: DiffSummary };
+
+export type Subscriber = (data: SessionFrame) => void;
 
 interface SessionInstance {
   sock: Socket;
   subscribers: Set<Subscriber>;
+  diffSummary: DiffSummary;
+  gitWatch: GitWatch;
   // Each attached client's requested dims. A PTY has one size, so a shared session
   // is fit to the SMALLEST attached client (tmux model): content fits everyone and
   // a larger client just gets blank margin. Recomputed on attach/resize/detach.
@@ -150,10 +155,7 @@ export function clampDims(cols: unknown, rows: unknown): { cols: number; rows: n
   };
 }
 
-function broadcast(
-  id: string,
-  data: { type: 'output' | 'exit'; chunk?: string; exitCode?: number; id?: number },
-) {
+function broadcast(id: string, data: SessionFrame) {
   const inst = instances.get(id);
   if (!inst) return;
   for (const sub of inst.subscribers) {
@@ -182,7 +184,10 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     if (pendingOutput.length === 0) return;
     const text = pendingOutput.join('');
     pendingOutput = [];
+    const previousCwd = getLiveCwd(id);
     recordChunk(id, text);
+    const cwd = getLiveCwd(id);
+    if (cwd !== previousCwd) instances.get(id)?.gitWatch.setRoot(cwd ? findGitRoot(cwd) : null);
     const logId = addTerminalLog(id, text);
     broadcast(id, { type: 'output', chunk: text, id: logId });
   };
@@ -208,6 +213,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       const sess = getSession(id);
       upsertSession(id, sess?.command ?? 'bash', 'stopped');
       broadcast(id, { type: 'exit', exitCode: msg.code });
+      instances.get(id)?.gitWatch.dispose();
       instances.get(id)?.subscribers.clear();
       instances.delete(id);
       clearLiveCwd(id);
@@ -221,7 +227,19 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       socket: {
         open(sock) {
           settled = true;
-          const instance: SessionInstance = { sock, subscribers: new Set(), clientDims: new Map() };
+          const gitWatch = new GitWatch((summary) => {
+            const active = instances.get(id);
+            if (!active) return;
+            active.diffSummary = summary;
+            broadcast(id, { type: 'diff', summary });
+          });
+          const instance: SessionInstance = {
+            sock,
+            subscribers: new Set(),
+            diffSummary: EMPTY_DIFF_SUMMARY,
+            gitWatch,
+            clientDims: new Map(),
+          };
           instances.set(id, instance);
           resolve(instance);
         },
@@ -239,7 +257,9 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
         close() {
           // Holder gone without an exit frame = it crashed or was killed hard.
           // Drop the instance so the next startSession spawns a fresh holder.
-          if (!exited && instances.get(id)?.sock && instances.delete(id)) {
+          const instance = instances.get(id);
+          if (!exited && instance?.sock && instances.delete(id)) {
+            instance.gitWatch.dispose();
             clearLiveCwd(id);
             console.log(`Holder link for session "${id}" closed unexpectedly`);
           }
@@ -454,6 +474,7 @@ export function subscribeToSession(id: string, callback: Subscriber, cols: numbe
     instance.subscribers.add(callback);
     instance.clientDims.set(callback, clampDims(cols, rows));
     recomputeSize(id);
+    callback({ type: 'diff', summary: instance.diffSummary });
     return () => {
       instance.subscribers.delete(callback);
       instance.clientDims.delete(callback);
@@ -466,7 +487,10 @@ export function subscribeToSession(id: string, callback: Subscriber, cols: numbe
 export function killSession(id: string) {
   const instance = instances.get(id);
   const hadInstance = sendFrame(id, { t: 'k' });
-  if (instance) instances.delete(id);
+  if (instance) {
+    instance.gitWatch.dispose();
+    instances.delete(id);
+  }
   clearLiveCwd(id);
   // Fallback for holders we aren't attached to (or that ignore the frame).
   if (!hadInstance) {

@@ -290,6 +290,8 @@ app.get(
               ws.send(JSON.stringify({ type: 'output', chunk: data.chunk, id: data.id }));
             } else if (data.type === 'exit') {
               ws.send(JSON.stringify({ type: 'exit', exitCode: data.exitCode }));
+            } else if (data.type === 'diff') {
+              ws.send(JSON.stringify({ type: 'diff', summary: data.summary }));
             }
           } catch (wsErr) {
             // Swallow quietly to avoid PTY reader loop crashes
