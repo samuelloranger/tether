@@ -6,6 +6,9 @@ import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { authMiddleware } from './auth';
 import { getAuthHash, getLogs, getSession, listSessions, renameSession, setAuthHash } from './db';
+import { GitDiffError, readDiff, readDiffSummary } from './gitDiff';
+import { resolveGitRoot } from './gitRoot';
+import { getLiveCwd } from './liveCwd';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
 import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
 import {
@@ -146,14 +149,38 @@ app.get('/api/sessions', (c) => {
 app.get('/api/sessions/:id/file', (c) => {
   const session = getSession(c.req.param('id'));
   if (!session) return c.json({ error: 'session not found' }, 404);
-  if (!session.workspace_root)
-    return c.json({ error: 'restart terminal to enable file viewing' }, 409);
+  const cwd = getLiveCwd(c.req.param('id'));
+  if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
   try {
-    return c.json(
-      readWorkspaceFile(session.workspace_root, c.req.query('path') ?? '', c.req.query('cwd')),
-    );
+    return c.json(readWorkspaceFile(resolveGitRoot(cwd), c.req.query('path') ?? '', cwd));
   } catch (error) {
     if (error instanceof WorkspaceFileError) return c.json({ error: error.message }, error.status);
+    throw error;
+  }
+});
+
+app.get('/api/sessions/:id/diff/summary', (c) => {
+  const session = getSession(c.req.param('id'));
+  if (!session) return c.json({ error: 'session not found' }, 404);
+  const cwd = getLiveCwd(c.req.param('id'));
+  if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
+  try {
+    return c.json(readDiffSummary(resolveGitRoot(cwd)));
+  } catch (error) {
+    if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
+    throw error;
+  }
+});
+
+app.get('/api/sessions/:id/diff', async (c) => {
+  const session = getSession(c.req.param('id'));
+  if (!session) return c.json({ error: 'session not found' }, 404);
+  const cwd = getLiveCwd(c.req.param('id'));
+  if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
+  try {
+    return c.json(await readDiff(resolveGitRoot(cwd), c.req.query('path')));
+  } catch (error) {
+    if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
     throw error;
   }
 });

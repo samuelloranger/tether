@@ -39,7 +39,9 @@ export function readWorkspaceFile(root: string, requestedPath: string, cwd?: str
     throw new WorkspaceFileError(404, 'file not found');
   }
   if (!inside(canonicalRoot, file)) throw new WorkspaceFileError(400, 'file escapes workspace');
-  if (statSync(file).isDirectory()) throw new WorkspaceFileError(415, 'path is a directory');
+  const stat = statSync(file);
+  if (stat.isDirectory()) throw new WorkspaceFileError(415, 'path is a directory');
+  if (stat.size > MAX_TEXT_BYTES) throw new WorkspaceFileError(413, 'file is too large');
   const bytes = readFileSync(file);
   if (bytes.byteLength > MAX_TEXT_BYTES) throw new WorkspaceFileError(413, 'file is too large');
   if (bytes.includes(0)) throw new WorkspaceFileError(415, 'file is binary');
