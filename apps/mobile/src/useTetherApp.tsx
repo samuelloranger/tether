@@ -28,7 +28,7 @@ import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
 import { TerminalEmulator, setTheme, type RenderRow, type CellStyle } from './terminal';
 import { shellQuote } from './shell';
-import { splitRunByLinks, urlColumns } from './links';
+import type { LinkTarget } from './links';
 import { SessionCache, nextTermId, type SessionEntry } from './sessionCache';
 import type { DrawerSession } from './SessionDrawer';
 import { applyFieldChange, SENT } from './input';
@@ -38,7 +38,7 @@ import { openTerminalSocket, type TerminalSocket } from './wsTransport';
 import { keyToBytes, COPY, PASTE } from './desktopKeys';
 import { shouldForwardToTerminal } from './desktopFocusGuard';
 import { notify, confirmAction } from './dialog';
-import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
+import { fetchUpdate, installUpdate, openExternalUrl, openReleasesPage, type PendingUpdate } from './desktopUpdate';
 import TitleBar from './TitleBar';
 import { injectDragRegionStyles } from './dragRegion';
 import { createStyles } from './styles';
@@ -64,6 +64,7 @@ import {
 } from './desktopNavigation';
 import { pickAutoSelectPreview, type Presentation } from './presentations';
 import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
+import type { FileView } from './fileView';
 
 
 // Constants for async storage keys
@@ -158,6 +159,8 @@ export function useTetherApp() {
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
   const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
+  const [fileView, setFileView] = useState<FileView | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
   const seenPresentationIds = useRef(new Set<string>());
   const presentationsPrimed = useRef(false);
   const [desktopNavigationMode, setDesktopNavigationMode] = useState<DesktopNavigationMode>(
@@ -396,6 +399,7 @@ export function useTetherApp() {
   // Switch to a different session
   const switchTo = (id: string) => {
     setDrawerOpen(false);
+    setFileView(null);
     if (id === activeIdRef.current && sock.current) return;
     disconnect();
     activeIdRef.current = id;
@@ -563,7 +567,10 @@ export function useTetherApp() {
     switchTo(id);
   };
 
-  const selectPresentation = (id: string) => setActivePresentationId(id);
+  const selectPresentation = (id: string) => {
+    setFileView(null);
+    setActivePresentationId(id);
+  };
 
   const closePresentation = async (id: string) => {
     try {
@@ -1227,6 +1234,40 @@ export function useTetherApp() {
 
   const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
   const activePresentation = presentations.find((preview) => preview.id === activePresentationId) || null;
+  const closeFile = useCallback(() => setFileView(null), []);
+  const openFile = useCallback(async (target: LinkTarget) => {
+    if (target.kind === 'external') {
+      try {
+        if (isDesktop) await openExternalUrl(target.url);
+        else await Linking.openURL(target.url);
+      } catch (error) {
+        void notify('Could not open link', String(error), 'error');
+      }
+      return;
+    }
+    setFileLoading(true);
+    try {
+      const sessionId = activeIdRef.current;
+      const cwd = entryFor(sessionId).term.cwd;
+      const query = new URLSearchParams({ path: target.path });
+      if (cwd) query.set('cwd', cwd);
+      const res = await fetch(
+        `${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`,
+        { headers: authHeaders(passwordRef.current) },
+      );
+      const body = (await res.json().catch(() => ({}))) as { path?: string; content?: string; error?: string };
+      if (!res.ok || typeof body.path !== 'string' || typeof body.content !== 'string') {
+        throw new Error(body.error || `Request failed (${res.status})`);
+      }
+      if (activeIdRef.current === sessionId) {
+        setFileView({ path: body.path, content: body.content, line: target.line, column: target.column });
+      }
+    } catch (error) {
+      void notify('Could not open file', String(error), 'error');
+    } finally {
+      setFileLoading(false);
+    }
+  }, [serverIp, port]);
   // Read live off the mutable emulator field — re-derives every render since
   // entryFor/activeId are already render-time values, no extra state needed.
   const activeBellCount = entryFor(activeId).term.bellCount;
@@ -1350,9 +1391,10 @@ export function useTetherApp() {
         blinkOn={blinkOn}
         cursorStyle={entryFor(activeId).term.cursorStyle}
         fontFamily={fontFamily}
+        onOpenLink={openFile}
       />
     ),
-    [fontSize, lineHeight, gridWidth, blinkOn, activeId, entryFor, fontFamily],
+    [fontSize, lineHeight, gridWidth, blinkOn, activeId, entryFor, fontFamily, openFile],
   );
 
   // Map the connection state to the TitleBar's status union ('disconnected' → 'offline').
@@ -1406,6 +1448,6 @@ export function useTetherApp() {
 
 
   return {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, openFile, closeFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, sock, gen, open, listRef, inputRef, reconnectTimeout, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
   };
 }
