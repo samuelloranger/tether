@@ -87,3 +87,18 @@ test('dispose prevents later watcher callbacks', async () => {
     expect(seen).toEqual([{ files: [] }]);
   });
 });
+
+test('degrades to empty and closes a partial watcher for a non-repository root', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'tether-gitwatch-notgit-'));
+  try {
+    const seen: DiffSummary[] = [];
+    const watch = new GitWatch((summary) => seen.push(summary), 50);
+    watch.setRoot(root);
+    writeFileSync(path.join(root, 'plain.txt'), 'changed\n');
+    await Bun.sleep(100);
+    expect(seen).toEqual([{ files: [] }]);
+    watch.dispose();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

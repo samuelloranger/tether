@@ -26,6 +26,8 @@ export class GitWatch {
         this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
       } catch {
         this.closeHandles();
+        this.root = null;
+        this.lastSummary = null;
       }
     }
     this.refresh();
