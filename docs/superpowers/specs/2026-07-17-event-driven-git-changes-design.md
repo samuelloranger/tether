@@ -37,7 +37,7 @@ Create one native code renderer shared by `FileViewer` and the per-file portion 
 - `prism-react-renderer` tokenizes the source and returns token spans rendered as nested native `Text` nodes. The shared Catppuccin theme supplies colors for comments, strings, keywords, functions, numbers, punctuation, and plain text.
 - Register only the common grammars used in this project/workflow: TypeScript/JavaScript, JSON, shell, HTML, CSS, Markdown, YAML, and Python. Unknown extensions use the current monospace plain-text renderer.
 - A diff uses its selected file's path for language choice. File headers and hunk metadata stay muted. Context, addition, and deletion lines keep their normal/context, green, and red treatment respectively; syntax colors apply inside the source portion of those lines.
-- The regular file viewer wraps source at the viewport edge. It renders original source lines separately and measures the requested line's rendered Y offset before scrolling, so terminal links still land on their exact source line despite variable wrapped heights. Diffs retain horizontal scrolling because side-to-side comparison is more useful there.
+- Both the regular file viewer and Git diffs wrap source at the viewport edge; neither view has horizontal scrolling. The file viewer renders original source lines separately and measures the requested line's rendered Y offset before scrolling, so terminal links still land on their exact source line despite variable wrapped heights.
 - Content remains selectable and capped by the existing 1 MiB server response limit.
 
 ## Dependency and bundle-size gate
