@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.10.3",
+          "date": "2026-07-17",
+          "localizedDescription": "**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.10.2...v1.10.3",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.10.3/tether-v1.10.3.ipa",
+          "size": 8633843,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.10.2",
           "date": "2026-07-17",
           "localizedDescription": "## Fixes\n\n- Align the title, server URL, and connection-status pill in desktop chrome.\n- Align session activity dots with labels in sidebar and tab navigation.\n- Align Back controls with Changes and file-path headers in the diff and file viewers.\n- Add regression coverage for compact chrome text metrics across desktop and mobile platforms.\n\n## Validation\n\n- 90 mobile tests (243 expectations)\n- TypeScript check\n- Expo web export\n- Tauri Cargo check",
