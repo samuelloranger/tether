@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { INITIAL_LIVE_CWD_STATE, updateLiveCwd, recordChunk, getLiveCwd, clearLiveCwd } from './liveCwd';
+import {
+  clearLiveCwd,
+  getLiveCwd,
+  INITIAL_LIVE_CWD_STATE,
+  recordChunk,
+  updateLiveCwd,
+} from './liveCwd';
 
 test('parses a complete OSC 7 cwd report', () => {
   const chunk = '\x1b]7;file://myhost/home/sam/project\x07';

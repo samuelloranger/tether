@@ -1,5 +1,5 @@
-import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 
 // Resolves the nearest git repository root containing `cwd`, or `cwd` itself
 // if it isn't inside a git working tree. Recomputed on every call — a

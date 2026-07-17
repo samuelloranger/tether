@@ -35,11 +35,16 @@ test('diff routes summarize and return an in-progress change', async () => {
 
     const summary = await app.request('/api/sessions/diff-session/diff/summary', { headers: AUTH });
     expect(summary.status).toBe(200);
-    expect(await summary.json()).toEqual({ files: [{ path: 'main.ts', insertions: 1, deletions: 1 }] });
-
-    const diff = await app.request(`/api/sessions/diff-session/diff?path=${encodeURIComponent('main.ts')}`, {
-      headers: AUTH,
+    expect(await summary.json()).toEqual({
+      files: [{ path: 'main.ts', insertions: 1, deletions: 1 }],
     });
+
+    const diff = await app.request(
+      `/api/sessions/diff-session/diff?path=${encodeURIComponent('main.ts')}`,
+      {
+        headers: AUTH,
+      },
+    );
     expect(diff.status).toBe(200);
     const body = (await diff.json()) as { diff: string; truncated: boolean };
     expect(body.truncated).toBe(false);
