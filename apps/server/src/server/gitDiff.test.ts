@@ -52,6 +52,41 @@ test('truncates a diff larger than 1 MiB and reports truncated: true', async () 
   });
 });
 
+test('summarizes an untracked file as an addition', () => {
+  withRepo((root) => {
+    writeFileSync(path.join(root, 'fresh.ts'), 'export const x = 1;\nexport const y = 2;\n');
+    const summary = readDiffSummary(root);
+    expect(summary.files).toEqual([{ path: 'fresh.ts', insertions: 2, deletions: 0 }]);
+  });
+});
+
+test('summarizes a rename with a clean path, not "old => new"', () => {
+  withRepo((root) => {
+    execSync('git mv main.ts renamed.ts', { cwd: root });
+    const summary = readDiffSummary(root);
+    expect(summary.files).toEqual([{ path: 'renamed.ts', insertions: 0, deletions: 0 }]);
+  });
+});
+
+test('returns the full diff for an untracked file', async () => {
+  await withRepo(async (root) => {
+    writeFileSync(path.join(root, 'fresh.ts'), 'export const x = 1;\n');
+    const { diff, truncated } = await readDiff(root, 'fresh.ts');
+    expect(truncated).toBe(false);
+    expect(diff).toContain('+export const x = 1;');
+  });
+});
+
+test('returns a proper rename diff (not empty) for a renamed file', async () => {
+  await withRepo(async (root) => {
+    execSync('git mv main.ts renamed.ts', { cwd: root });
+    writeFileSync(path.join(root, 'renamed.ts'), 'export const answer = 42;\nextra line\n');
+    const { diff } = await readDiff(root, 'renamed.ts');
+    expect(diff).toContain('rename from main.ts');
+    expect(diff).toContain('rename to renamed.ts');
+  });
+});
+
 test('reports an error for a non-repo root', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'tether-notgit-'));
   try {

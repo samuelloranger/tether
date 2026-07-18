@@ -15,7 +15,7 @@ import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
 import { findGitRoot } from './gitRoot';
 import { GitWatch } from './gitWatch';
-import { clearLiveCwd, getLiveCwd, recordChunk } from './liveCwd';
+import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { COMPILED, selfArgv } from './runtime';
 
@@ -90,7 +90,7 @@ const FISH_INIT =
 const HOLDERS_DIR = path.join(RC_DIR, 'holders');
 mkdirSync(HOLDERS_DIR, { recursive: true });
 
-const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
+export const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
 
 // If the daemon was (re)started from inside a Claude Code Bash tool, its env
 // carries CLAUDE_CODE_CHILD_SESSION etc. Shells inheriting those make any
@@ -201,6 +201,12 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     if (msg.t === 'o' && msg.d) {
       const text = decoder.decode(Buffer.from(msg.d, 'base64'), { stream: true });
       if (text) pendingOutput.push(text);
+    } else if (msg.t === 'c' && msg.d) {
+      // A holder-reported cwd (spawn time, or a fresh kernel read on every new
+      // client attach) — arms git watching without waiting on an OSC 7 prompt
+      // redraw, which may be a long time coming (or never, mid-TUI).
+      reportCwd(id, msg.d);
+      instances.get(id)?.gitWatch.setRoot(findGitRoot(msg.d));
     } else if (msg.t === 'x') {
       exited = true;
       // Flush any buffered partial multi-byte sequence the streaming decoder is

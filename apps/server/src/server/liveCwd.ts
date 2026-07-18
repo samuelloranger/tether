@@ -59,6 +59,14 @@ export function recordChunk(sessionId: string, chunk: string): boolean {
   return next.reported;
 }
 
+// Sets the live cwd directly from a known-good value (e.g. a kernel-level
+// /proc read at holder attach time — see procCwd.ts) instead of waiting for
+// the shell to draw a new OSC 7-carrying prompt, which may not happen for a
+// long time (or ever, if the foreground job is a long-running TUI).
+export function reportCwd(sessionId: string, cwd: string): void {
+  stateBySession.set(sessionId, { cwd, residual: '', reported: true });
+}
+
 export function getLiveCwd(sessionId: string): string | null {
   return stateBySession.get(sessionId)?.cwd ?? null;
 }

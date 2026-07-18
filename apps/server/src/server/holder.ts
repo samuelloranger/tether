@@ -4,13 +4,14 @@
 // JSON frames; base64 payloads keep the byte stream binary-safe.
 //
 //   server -> holder: {t:'i', d}(input b64) {t:'r', c, r}(resize) {t:'k'}(kill)
-//   holder -> server: {t:'o', d}(output b64) {t:'x', code}(pty exit)
+//   holder -> server: {t:'o', d}(output b64) {t:'x', code}(pty exit) {t:'c', d}(cwd)
 //
 // Invoked in-process via the `holder` subcommand (main.ts), so it works whether
 // running from source (bun) or the compiled binary. argv is the tail after the
 // subcommand: <socketPath> <cols> <rows> <cwd> <cmd> [args...]
 
 import { unlinkSync, writeFileSync } from 'node:fs';
+import { getProcessCwd } from './procCwd';
 
 export function runHolder(argv: string[]): void {
   const [socketPath, colsArg, rowsArg, cwd, ...cmdArgs] = argv;
@@ -52,6 +53,12 @@ export function runHolder(argv: string[]): void {
     },
   });
 
+  // Report the shell's cwd right away too — a client attaching before the
+  // shell ever draws a prompt (a brand new session, or a server reconnecting
+  // to a holder that survived a restart) would otherwise have no way to know
+  // it until the next OSC 7 escape comes through.
+  sendFrame(`${JSON.stringify({ t: 'c', d: cwd })}\n`, 0);
+
   try {
     unlinkSync(socketPath); // stale socket from a crashed predecessor
   } catch {}
@@ -75,6 +82,11 @@ export function runHolder(argv: string[]): void {
         // One server at a time: a reconnecting tether server replaces the old link.
         if (client) client.end();
         client = sock;
+        // Fresh read (not just whatever was true at spawn time) so a
+        // reattaching server learns about every `cd` that happened while it
+        // was gone, not just the shell's starting directory.
+        const currentCwd = getProcessCwd(proc.pid);
+        if (currentCwd) sock.write(`${JSON.stringify({ t: 'c', d: currentCwd })}\n`);
         for (const frame of buffered) sock.write(frame);
         buffered = [];
         bufferedBytes = 0;
