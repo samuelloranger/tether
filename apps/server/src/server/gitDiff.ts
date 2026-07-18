@@ -31,16 +31,18 @@ function validatePath(requestedPath: string | undefined) {
   }
 }
 
-function runGit(root: string, args: string[]): string {
+function runGit(root: string, args: string[], okStatuses: number[] = [0]): string {
   const result = spawnSync('git', ['-C', root, ...args], {
     encoding: 'utf8',
     maxBuffer: MAX_DIFF_BYTES + 65_536,
   });
-  if (result.status !== 0) throw new GitDiffError(404, 'not a git repository');
+  if (result.status === null || !okStatuses.includes(result.status)) {
+    throw new GitDiffError(404, 'not a git repository');
+  }
   return result.stdout;
 }
 
-function runGitDiff(root: string, args: string[]): Promise<Buffer> {
+function runGitDiff(root: string, args: string[], okStatuses: number[] = [0]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', ['-C', root, ...args]);
     const chunks: Buffer[] = [];
@@ -56,26 +58,85 @@ function runGitDiff(root: string, args: string[]): Promise<Buffer> {
     child.stderr.resume();
     child.on('error', () => reject(new GitDiffError(404, 'not a git repository')));
     child.on('close', (status) => {
-      if (status !== 0) reject(new GitDiffError(404, 'not a git repository'));
-      else resolve(Buffer.concat(chunks));
+      if (status === null || !okStatuses.includes(status)) {
+        reject(new GitDiffError(404, 'not a git repository'));
+      } else resolve(Buffer.concat(chunks));
     });
   });
 }
 
+// `git diff --no-index` exits 1 (not 0) when the two sides differ — that's
+// the expected case every time we use it (comparing /dev/null against a real
+// untracked file), so 1 is accepted alongside 0 wherever it's invoked.
+const NO_INDEX_OK_STATUSES = [0, 1];
+
+// Parses `--numstat -z` output (tracked-diff or --no-index). NUL-delimited so
+// renames are unambiguous: a rename record is an empty inline path followed by
+// two more NUL-terminated fields (old path, new path) instead of `old => new`
+// baked into one string — see git-diff-tree(1) `-z` docs.
+function parseNumstatZ(
+  out: string,
+): Array<{ insertions: number; deletions: number; path: string; oldPath?: string }> {
+  const tokens = out.split('\0');
+  if (tokens.length && tokens[tokens.length - 1] === '') tokens.pop();
+  const records: Array<{ insertions: number; deletions: number; path: string; oldPath?: string }> =
+    [];
+  for (let i = 0; i < tokens.length; i++) {
+    const [insertions, deletions, inlinePath] = tokens[i].split('\t');
+    const stat = {
+      insertions: insertions === '-' ? 0 : Number(insertions),
+      deletions: deletions === '-' ? 0 : Number(deletions),
+    };
+    if (inlinePath) {
+      records.push({ ...stat, path: inlinePath });
+    } else {
+      const oldPath = tokens[++i];
+      const newPath = tokens[++i];
+      records.push({ ...stat, path: newPath, oldPath });
+    }
+  }
+  return records;
+}
+
+function listUntrackedFiles(root: string): string[] {
+  const out = runGit(root, ['ls-files', '--others', '--exclude-standard', '-z']);
+  return out.split('\0').filter(Boolean);
+}
+
+function isTracked(root: string, requestedPath: string): boolean {
+  const result = spawnSync(
+    'git',
+    ['-C', root, 'ls-files', '--error-unmatch', '--', requestedPath],
+    {
+      encoding: 'utf8',
+    },
+  );
+  return result.status === 0;
+}
+
+function untrackedNumstat(root: string, requestedPath: string): DiffFileStat {
+  const out = runGit(
+    root,
+    ['diff', '--no-index', '--numstat', '-z', '--', '/dev/null', requestedPath],
+    NO_INDEX_OK_STATUSES,
+  );
+  const [record] = parseNumstatZ(out);
+  return {
+    path: requestedPath,
+    insertions: record?.insertions ?? 0,
+    deletions: record?.deletions ?? 0,
+  };
+}
+
 export function readDiffSummary(root: string): DiffSummary {
-  const out = runGit(root, ['diff', 'HEAD', '--numstat']);
-  const files = out
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [insertions, deletions, filePath] = line.split('\t');
-      return {
-        path: filePath,
-        insertions: insertions === '-' ? 0 : Number(insertions),
-        deletions: deletions === '-' ? 0 : Number(deletions),
-      };
-    });
-  return { files };
+  const out = runGit(root, ['diff', 'HEAD', '--numstat', '-z']);
+  const tracked = parseNumstatZ(out).map(({ insertions, deletions, path }) => ({
+    path,
+    insertions,
+    deletions,
+  }));
+  const untracked = listUntrackedFiles(root).map((p) => untrackedNumstat(root, p));
+  return { files: [...tracked, ...untracked] };
 }
 
 export async function readDiff(
@@ -83,9 +144,36 @@ export async function readDiff(
   requestedPath?: string,
 ): Promise<{ diff: string; truncated: boolean }> {
   validatePath(requestedPath);
-  const args = ['diff', 'HEAD'];
-  if (requestedPath) args.push('--', requestedPath);
-  const out = await runGitDiff(root, args);
+
+  if (!requestedPath) {
+    const tracked = await runGitDiff(root, ['diff', 'HEAD']);
+    const untrackedChunks = await Promise.all(
+      listUntrackedFiles(root).map((p) =>
+        runGitDiff(root, ['diff', '--no-index', '--', '/dev/null', p], NO_INDEX_OK_STATUSES),
+      ),
+    );
+    const out = Buffer.concat([tracked, ...untrackedChunks]);
+    if (out.length > MAX_DIFF_BYTES)
+      return { diff: out.subarray(0, MAX_DIFF_BYTES).toString('utf8'), truncated: true };
+    return { diff: out.toString('utf8'), truncated: false };
+  }
+
+  let out: Buffer;
+  if (isTracked(root, requestedPath)) {
+    const renameRecord = parseNumstatZ(runGit(root, ['diff', 'HEAD', '--numstat', '-z'])).find(
+      (r) => r.path === requestedPath && r.oldPath,
+    );
+    const pathArgs = renameRecord?.oldPath
+      ? ['--', renameRecord.oldPath, requestedPath]
+      : ['--', requestedPath];
+    out = await runGitDiff(root, ['diff', 'HEAD', ...pathArgs]);
+  } else {
+    out = await runGitDiff(
+      root,
+      ['diff', '--no-index', '--', '/dev/null', requestedPath],
+      NO_INDEX_OK_STATUSES,
+    );
+  }
   if (out.length > MAX_DIFF_BYTES)
     return { diff: out.subarray(0, MAX_DIFF_BYTES).toString('utf8'), truncated: true };
   return { diff: out.toString('utf8'), truncated: false };

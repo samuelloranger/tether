@@ -48,7 +48,6 @@ export function DiffView({
         ) : (
           <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
             <CodeHighlight
-              path={selectedPath}
               code={displayDiff(diffText ?? '', diffTruncated)}
               lineStyle={(line) => {
                 const kind = diffLineKind(line);

@@ -4,8 +4,16 @@ import {
   getLiveCwd,
   INITIAL_LIVE_CWD_STATE,
   recordChunk,
+  reportCwd,
   updateLiveCwd,
 } from './liveCwd';
+
+test('reportCwd sets the live cwd directly, without needing an OSC 7 report', () => {
+  const id = 'report-cwd-direct';
+  reportCwd(id, '/home/sam/project');
+  expect(getLiveCwd(id)).toBe('/home/sam/project');
+  clearLiveCwd(id);
+});
 
 test('parses a complete OSC 7 cwd report', () => {
   const chunk = '\x1b]7;file://myhost/home/sam/project\x07';

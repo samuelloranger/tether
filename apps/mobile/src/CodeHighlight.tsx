@@ -10,13 +10,17 @@ export function CodeHighlight({
   lineStyle,
   onLineLayout,
 }: {
-  path: string;
+  // Omit for content that isn't source in a single language — a unified diff
+  // mixes hunk headers/+-/- markers with the target file's syntax, and running
+  // it through that file's grammar corrupts tokenization (e.g. "diff --git a/x
+  // b/x" parses "--" as an operator, merging tokens across the line break).
+  path?: string;
   code: string;
   lineStyle?: (line: string, index: number) => TextStyle | undefined;
   onLineLayout?: (index: number, y: number) => void;
 }) {
   const { theme } = useAppTheme();
-  const language = languageForPath(path);
+  const language = path ? languageForPath(path) : null;
   const baseStyle: TextStyle = {
     color: theme.terminal.fg,
     fontFamily: 'monospace',

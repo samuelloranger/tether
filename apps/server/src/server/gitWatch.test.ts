@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import * as nodeFs from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { DiffSummary } from './gitDiff';
@@ -85,6 +86,66 @@ test('dispose prevents later watcher callbacks', async () => {
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
     await Bun.sleep(250);
     expect(seen).toEqual([{ files: [] }]);
+  });
+});
+
+test('captures changes that already existed before setRoot was first called', async () => {
+  await withRepo(async (root) => {
+    // Simulates reconnecting to (or opening) a session whose shell already
+    // had a dirty working tree before the client ever attached.
+    writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
+    writeFileSync(path.join(root, 'fresh.ts'), 'export const x = 1;\n');
+
+    const seen: DiffSummary[] = [];
+    const watch = new GitWatch((summary) => seen.push(summary), 50);
+    watch.setRoot(root);
+    expect(seen).toEqual([
+      {
+        files: [
+          { path: 'main.ts', insertions: 1, deletions: 1 },
+          { path: 'fresh.ts', insertions: 1, deletions: 0 },
+        ],
+      },
+    ]);
+    watch.dispose();
+  });
+});
+
+test('does not open a watch inside a gitignored directory (e.g. node_modules)', async () => {
+  await withRepo(async (root) => {
+    writeFileSync(path.join(root, '.gitignore'), 'ignored_dir/\n');
+    execSync('git add .gitignore && git commit -q -m gitignore', { cwd: root });
+    mkdirSync(path.join(root, 'ignored_dir', 'nested'), { recursive: true });
+    writeFileSync(path.join(root, 'ignored_dir', 'nested', 'file.txt'), 'one\n');
+
+    const watchSpy = spyOn(nodeFs, 'watch');
+    const watch = new GitWatch(() => {}, 50);
+    watch.setRoot(root);
+    await Bun.sleep(50);
+    watch.dispose();
+
+    const watchedPaths = watchSpy.mock.calls.map((call) => call[0]);
+    expect(watchedPaths.some((p) => String(p).includes('ignored_dir'))).toBe(false);
+    expect(watchedPaths.some((p) => String(p) === root)).toBe(true);
+    watchSpy.mockRestore();
+  });
+});
+
+test('logs instead of throwing when a watch cannot be created', async () => {
+  await withRepo(async (root) => {
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    const watchSpy = spyOn(nodeFs, 'watch').mockImplementation(() => {
+      throw new Error('ENOSPC: System limit for number of file watchers reached');
+    });
+    try {
+      const watch = new GitWatch(() => {}, 50);
+      expect(() => watch.setRoot(root)).not.toThrow();
+      expect(warnSpy).toHaveBeenCalled();
+      watch.dispose();
+    } finally {
+      watchSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
   });
 });
 
