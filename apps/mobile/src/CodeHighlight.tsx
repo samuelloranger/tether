@@ -72,19 +72,34 @@ export function CodeHighlight({
   );
 }
 
+const TOKEN_STYLE_GROUPS: Array<{ types: string[]; colorKey: keyof AppColors }> = [
+  { types: ['comment', 'prolog', 'doctype', 'cdata'], colorKey: 'textMuted' },
+  { types: ['punctuation'], colorKey: 'text' },
+  { types: ['property', 'tag', 'constant', 'symbol', 'deleted'], colorKey: 'danger' },
+  { types: ['boolean', 'number'], colorKey: 'warning' },
+  { types: ['selector', 'attr-name', 'string', 'char', 'builtin', 'inserted'], colorKey: 'success' },
+  { types: ['operator', 'entity', 'url'], colorKey: 'info' },
+  { types: ['atrule', 'attr-value', 'keyword'], colorKey: 'accent' },
+  { types: ['function', 'class-name'], colorKey: 'info' },
+  { types: ['regex', 'important', 'variable'], colorKey: 'warning' },
+];
+
+// Shared with DiffLines, which tokenizes diff content line-by-line (rather
+// than through this component's whole-blob <Highlight>) so it can skip diff
+// markup lines without corrupting tokenization.
+export function colorForTokenTypes(types: string[], colors: AppColors): string | undefined {
+  for (const group of TOKEN_STYLE_GROUPS) {
+    if (types.some((type) => group.types.includes(type))) return colors[group.colorKey];
+  }
+  return undefined;
+}
+
 function prismTheme(c: AppColors, foreground: string): PrismTheme {
   return {
     plain: { color: foreground },
-    styles: [
-      { types: ['comment', 'prolog', 'doctype', 'cdata'], style: { color: c.textMuted } },
-      { types: ['punctuation'], style: { color: c.text } },
-      { types: ['property', 'tag', 'constant', 'symbol', 'deleted'], style: { color: c.danger } },
-      { types: ['boolean', 'number'], style: { color: c.warning } },
-      { types: ['selector', 'attr-name', 'string', 'char', 'builtin', 'inserted'], style: { color: c.success } },
-      { types: ['operator', 'entity', 'url'], style: { color: c.info } },
-      { types: ['atrule', 'attr-value', 'keyword'], style: { color: c.accent } },
-      { types: ['function', 'class-name'], style: { color: c.info } },
-      { types: ['regex', 'important', 'variable'], style: { color: c.warning } },
-    ],
+    styles: TOKEN_STYLE_GROUPS.map((group) => ({
+      types: group.types,
+      style: { color: c[group.colorKey] },
+    })),
   };
 }

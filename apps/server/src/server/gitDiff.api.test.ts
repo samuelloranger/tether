@@ -36,7 +36,7 @@ test('diff routes summarize and return an in-progress change', async () => {
     const summary = await app.request('/api/sessions/diff-session/diff/summary', { headers: AUTH });
     expect(summary.status).toBe(200);
     expect(await summary.json()).toEqual({
-      files: [{ path: 'main.ts', insertions: 1, deletions: 1 }],
+      files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false }],
     });
 
     const diff = await app.request(

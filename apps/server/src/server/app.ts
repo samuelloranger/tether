@@ -6,7 +6,7 @@ import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { authMiddleware } from './auth';
 import { getAuthHash, getLogs, getSession, listSessions, renameSession, setAuthHash } from './db';
-import { GitDiffError, readDiff, readDiffSummary } from './gitDiff';
+import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from './gitDiff';
 import { resolveGitRoot } from './gitRoot';
 import { getLiveCwd } from './liveCwd';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
@@ -179,6 +179,31 @@ app.get('/api/sessions/:id/diff', async (c) => {
   if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
   try {
     return c.json(await readDiff(resolveGitRoot(cwd), c.req.query('path')));
+  } catch (error) {
+    if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
+    throw error;
+  }
+});
+
+// Raw bytes for one side of a binary (typically image) file diff — 'old' is
+// the committed blob, 'new' is the working tree copy. Either side can be
+// legitimately absent (added/deleted file), reported as 404.
+app.get('/api/sessions/:id/diff/file', (c) => {
+  const session = getSession(c.req.param('id'));
+  if (!session) return c.json({ error: 'session not found' }, 404);
+  const cwd = getLiveCwd(c.req.param('id'));
+  if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
+  const requestedPath = c.req.query('path');
+  const side = c.req.query('side');
+  if (!requestedPath || (side !== 'old' && side !== 'new')) {
+    return c.json({ error: 'invalid path or side' }, 400);
+  }
+  try {
+    const bytes = readDiffBlob(resolveGitRoot(cwd), side, requestedPath);
+    if (!bytes) return c.json({ error: 'not found' }, 404);
+    return new Response(new Uint8Array(bytes), {
+      headers: { 'Content-Type': previewMime(requestedPath), 'Cache-Control': 'no-store' },
+    });
   } catch (error) {
     if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
     throw error;
