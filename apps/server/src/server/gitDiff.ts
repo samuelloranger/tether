@@ -1,7 +1,23 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 const MAX_DIFF_BYTES = 1_048_576;
+
+const IMAGE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.svg',
+  '.bmp',
+  '.ico',
+]);
+
+export function isImagePath(requestedPath: string): boolean {
+  return IMAGE_EXTENSIONS.has(path.extname(requestedPath).toLowerCase());
+}
 
 export class GitDiffError extends Error {
   constructor(
@@ -16,6 +32,7 @@ export interface DiffFileStat {
   path: string;
   insertions: number;
   deletions: number;
+  binary: boolean;
 }
 
 export interface DiffSummary {
@@ -74,18 +91,29 @@ const NO_INDEX_OK_STATUSES = [0, 1];
 // renames are unambiguous: a rename record is an empty inline path followed by
 // two more NUL-terminated fields (old path, new path) instead of `old => new`
 // baked into one string — see git-diff-tree(1) `-z` docs.
-function parseNumstatZ(
-  out: string,
-): Array<{ insertions: number; deletions: number; path: string; oldPath?: string }> {
+function parseNumstatZ(out: string): Array<{
+  insertions: number;
+  deletions: number;
+  binary: boolean;
+  path: string;
+  oldPath?: string;
+}> {
   const tokens = out.split('\0');
   if (tokens.length && tokens[tokens.length - 1] === '') tokens.pop();
-  const records: Array<{ insertions: number; deletions: number; path: string; oldPath?: string }> =
-    [];
+  const records: Array<{
+    insertions: number;
+    deletions: number;
+    binary: boolean;
+    path: string;
+    oldPath?: string;
+  }> = [];
   for (let i = 0; i < tokens.length; i++) {
     const [insertions, deletions, inlinePath] = tokens[i].split('\t');
+    // git reports "-\t-\tpath" (instead of numeric counts) for binary files.
     const stat = {
       insertions: insertions === '-' ? 0 : Number(insertions),
       deletions: deletions === '-' ? 0 : Number(deletions),
+      binary: insertions === '-' && deletions === '-',
     };
     if (inlinePath) {
       records.push({ ...stat, path: inlinePath });
@@ -125,15 +153,17 @@ function untrackedNumstat(root: string, requestedPath: string): DiffFileStat {
     path: requestedPath,
     insertions: record?.insertions ?? 0,
     deletions: record?.deletions ?? 0,
+    binary: record?.binary ?? false,
   };
 }
 
 export function readDiffSummary(root: string): DiffSummary {
   const out = runGit(root, ['diff', 'HEAD', '--numstat', '-z']);
-  const tracked = parseNumstatZ(out).map(({ insertions, deletions, path }) => ({
+  const tracked = parseNumstatZ(out).map(({ insertions, deletions, binary, path }) => ({
     path,
     insertions,
     deletions,
+    binary,
   }));
   const untracked = listUntrackedFiles(root).map((p) => untrackedNumstat(root, p));
   return { files: [...tracked, ...untracked] };
@@ -177,4 +207,36 @@ export async function readDiff(
   if (out.length > MAX_DIFF_BYTES)
     return { diff: out.subarray(0, MAX_DIFF_BYTES).toString('utf8'), truncated: true };
   return { diff: out.toString('utf8'), truncated: false };
+}
+
+// Raw bytes for one side of a (possibly binary) file, for image-diff previews.
+// 'old' reads the committed blob via `git show`; 'new' reads the working tree
+// directly. Either side legitimately doesn't exist (added or deleted file) —
+// that's not an error, just null, so the caller can render a one-sided view.
+export function readDiffBlob(
+  root: string,
+  side: 'old' | 'new',
+  requestedPath: string,
+): Buffer | null {
+  validatePath(requestedPath);
+  if (side === 'new') {
+    const canonicalRoot = realpathSync(root);
+    let file: string;
+    try {
+      file = realpathSync(path.resolve(canonicalRoot, requestedPath));
+    } catch {
+      return null;
+    }
+    if (file !== canonicalRoot && !file.startsWith(`${canonicalRoot}${path.sep}`)) return null;
+    try {
+      return readFileSync(file);
+    } catch {
+      return null;
+    }
+  }
+  const result = spawnSync('git', ['-C', root, 'show', `HEAD:${requestedPath}`], {
+    maxBuffer: MAX_DIFF_BYTES + 65_536,
+  });
+  if (result.status !== 0) return null;
+  return result.stdout;
 }

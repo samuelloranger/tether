@@ -51,3 +51,6 @@ apps/mobile/dist/
 # Tauri
 apps/mobile/src-tauri/target/
 apps/mobile/src-tauri/gen/
+
+# Superpowers skill session state
+.superpowers/

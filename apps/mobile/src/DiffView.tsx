@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Feather from '@expo/vector-icons/Feather';
 import { useAppTheme } from './AppThemeProvider';
-import { diffLineKind, displayDiff, type DiffSummary } from './diffModel';
-import { CodeHighlight } from './CodeHighlight';
+import { displayDiff, groupFilesByDirectory, isImagePath, type DiffSummary } from './diffModel';
+import { DiffLines } from './DiffLines';
+import { ImageDiff } from './ImageDiff';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 
@@ -11,6 +14,7 @@ export function DiffView({
   diffText,
   diffTruncated,
   diffLoading,
+  diffImage,
   onSelectFile,
   onDeselectFile,
   onBack,
@@ -20,11 +24,25 @@ export function DiffView({
   diffText: string | null;
   diffTruncated: boolean;
   diffLoading: boolean;
+  diffImage: { old: string | null; new: string | null } | null;
   onSelectFile: (path: string) => void;
   onDeselectFile: () => void;
   onBack: () => void;
 }) {
   const { theme } = useAppTheme();
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
+  const selectedFile = summary.files.find((file) => file.path === selectedPath) ?? null;
+  const isImage = selectedFile ? selectedFile.binary && isImagePath(selectedFile.path) : false;
+
+  const toggleDir = (dir: string) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dir)) next.delete(dir);
+      else next.add(dir);
+      return next;
+    });
+  };
+
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
@@ -45,18 +63,15 @@ export function DiffView({
           <View style={styles.center}>
             <ActivityIndicator color={theme.colors.accent} />
           </View>
+        ) : isImage ? (
+          <ImageDiff
+            oldUri={diffImage?.old ?? null}
+            newUri={diffImage?.new ?? null}
+            loading={false}
+          />
         ) : (
           <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
-            <CodeHighlight
-              code={displayDiff(diffText ?? '', diffTruncated)}
-              lineStyle={(line) => {
-                const kind = diffLineKind(line);
-                if (kind === 'add') return { backgroundColor: `${theme.colors.success}18` };
-                if (kind === 'remove') return { backgroundColor: `${theme.colors.danger}18` };
-                if (kind === 'meta') return { backgroundColor: theme.colors.surfaceRaised, opacity: 0.8 };
-                return undefined;
-              }}
-            />
+            <DiffLines diffText={displayDiff(diffText ?? '', diffTruncated)} path={selectedPath} />
           </ScrollView>
         )
       ) : summary.files.length === 0 ? (
@@ -65,17 +80,49 @@ export function DiffView({
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
-          {summary.files.map((file) => (
-            <TouchableOpacity key={file.path} style={styles.fileRow} onPress={() => onSelectFile(file.path)}>
-              <Text numberOfLines={1} style={[styles.filePath, { color: theme.colors.text }]}>
-                {file.path}
-              </Text>
-              <Text style={styles.fileStat}>
-                <Text style={{ color: theme.colors.success }}>+{file.insertions}</Text>{' '}
-                <Text style={{ color: theme.colors.danger }}>-{file.deletions}</Text>
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {groupFilesByDirectory(summary.files).map((group) => {
+            const collapsed = collapsedDirs.has(group.dir);
+            return (
+              <View key={group.dir || '.'}>
+                {group.dir !== '' && (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={styles.dirRow}
+                    onPress={() => toggleDir(group.dir)}
+                  >
+                    <Feather
+                      name={collapsed ? 'chevron-right' : 'chevron-down'}
+                      size={14}
+                      color={theme.colors.textMuted}
+                    />
+                    <Text numberOfLines={1} style={[styles.dirLabel, { color: theme.colors.textMuted }]}>
+                      {group.dir}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {!collapsed &&
+                  group.files.map((file) => (
+                    <TouchableOpacity
+                      key={file.path}
+                      style={styles.fileRow}
+                      onPress={() => onSelectFile(file.path)}
+                    >
+                      <Text numberOfLines={1} style={[styles.filePath, { color: theme.colors.text }]}>
+                        {file.path.slice(group.dir ? group.dir.length + 1 : 0)}
+                      </Text>
+                      {file.binary ? (
+                        <Text style={[styles.fileStat, { color: theme.colors.textMuted }]}>binary</Text>
+                      ) : (
+                        <Text style={styles.fileStat}>
+                          <Text style={{ color: theme.colors.success }}>+{file.insertions}</Text>{' '}
+                          <Text style={{ color: theme.colors.danger }}>-{file.deletions}</Text>
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+              </View>
+            );
+          })}
         </ScrollView>
       )}
     </View>
@@ -91,7 +138,9 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   vertical: { flex: 1 },
   content: { padding: 16, alignItems: 'stretch' },
-  fileRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10 },
+  dirRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, marginTop: 4 },
+  dirLabel: { fontFamily: 'monospace', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  fileRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, paddingLeft: 8 },
   filePath: { fontFamily: 'monospace', flex: 1, marginRight: 12 },
   fileStat: { fontFamily: 'monospace' },
 });
