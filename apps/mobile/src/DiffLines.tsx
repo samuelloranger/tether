@@ -6,6 +6,7 @@ import { languageForPath } from './codeLanguage';
 import { parseDiffLines } from './diffModel';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
+const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$/;
 
 // Renders a unified diff with an old/new line-number gutter and per-line
 // syntax highlighting. Tokenizes each content line independently (rather
@@ -16,7 +17,13 @@ export function DiffLines({ diffText, path }: { diffText: string; path: string }
   const { theme } = useAppTheme();
   const language = languageForPath(path);
   const grammar = language ? Prism.languages[language] : undefined;
-  const lines = parseDiffLines(diffText);
+  // Drop the pure-boilerplate git plumbing lines (diff --git/index/---/+++)
+  // — the file path is already the screen's header. Hunk headers (@@ ... @@)
+  // carry real information (lines were skipped here) so they stay, rendered
+  // as a divider instead of raw diff syntax.
+  const lines = parseDiffLines(diffText).filter(
+    (line) => line.kind !== 'meta' || HUNK_HEADER.test(line.text),
+  );
   const maxLineNumber = lines.reduce(
     (max, line) => Math.max(max, line.oldLine ?? 0, line.newLine ?? 0),
     1,
@@ -26,18 +33,17 @@ export function DiffLines({ diffText, path }: { diffText: string; path: string }
   return (
     <View style={styles.root}>
       {lines.map((line, index) => {
-        if (line.kind === 'meta') {
+        const hunkContext = line.kind === 'meta' ? line.text.match(HUNK_HEADER)?.[1] : undefined;
+        if (hunkContext !== undefined) {
           return (
-            <Text
-              key={index}
-              style={[
-                styles.metaLine,
-                TEXT_METRICS,
-                { color: theme.colors.textMuted, backgroundColor: theme.colors.surfaceRaised },
-              ]}
-            >
-              {line.text}
-            </Text>
+            <View key={index} style={[styles.hunkRow, { borderTopColor: theme.colors.border }]}>
+              <Text style={[styles.hunkLabel, { color: theme.colors.textFaint }]}>⋯</Text>
+              {hunkContext ? (
+                <Text numberOfLines={1} style={[styles.hunkContext, { color: theme.colors.textFaint }]}>
+                  {hunkContext}
+                </Text>
+              ) : null}
+            </View>
           );
         }
         const rowBg =
@@ -89,7 +95,16 @@ export function DiffLines({ diffText, path }: { diffText: string; path: string }
 
 const styles = StyleSheet.create({
   root: { alignItems: 'stretch' },
-  metaLine: { fontFamily: 'monospace', fontSize: 14, paddingHorizontal: 4 },
+  hunkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    marginVertical: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  hunkLabel: { fontFamily: 'monospace', fontSize: 12 },
+  hunkContext: { fontFamily: 'monospace', fontSize: 12, flexShrink: 1 },
   row: { flexDirection: 'row', alignItems: 'flex-start' },
   gutterNum: { fontFamily: 'monospace', fontSize: 14, textAlign: 'right', marginRight: 8 },
   marker: { fontFamily: 'monospace', fontSize: 14, width: 12 },

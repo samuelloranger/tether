@@ -16,28 +16,34 @@ export function isImagePath(path: string): boolean {
   return IMAGE_EXTENSIONS.has(extension);
 }
 
-export interface DiffFileGroup {
-  dir: string;
-  files: DiffFileStat[];
-}
+export type FileTreeNode =
+  | { type: 'dir'; name: string; path: string; children: FileTreeNode[] }
+  | { type: 'file'; name: string; path: string; file: DiffFileStat };
 
-// Groups files by their immediate parent directory, preserving each group's
-// first-seen order (matches the order the server/git already reports them in).
-export function groupFilesByDirectory(files: DiffFileStat[]): DiffFileGroup[] {
-  const groups: DiffFileGroup[] = [];
-  const index = new Map<string, DiffFileGroup>();
+// Builds a real nested folder tree from flat file paths (like a file
+// explorer), instead of grouping by immediate parent directory only —
+// src/nested/deep.ts gets a "src" folder containing a "nested" folder
+// containing the file, rather than its own flat "src/nested" group.
+export function buildFileTree(files: DiffFileStat[]): FileTreeNode[] {
+  const root: FileTreeNode[] = [];
+  const dirIndex = new Map<string, FileTreeNode & { type: 'dir' }>();
   for (const file of files) {
-    const slash = file.path.lastIndexOf('/');
-    const dir = slash === -1 ? '' : file.path.slice(0, slash);
-    let group = index.get(dir);
-    if (!group) {
-      group = { dir, files: [] };
-      index.set(dir, group);
-      groups.push(group);
+    const segments = file.path.split('/');
+    let siblings = root;
+    let currentPath = '';
+    for (let i = 0; i < segments.length - 1; i++) {
+      currentPath = currentPath ? `${currentPath}/${segments[i]}` : segments[i];
+      let dir = dirIndex.get(currentPath);
+      if (!dir) {
+        dir = { type: 'dir', name: segments[i], path: currentPath, children: [] };
+        dirIndex.set(currentPath, dir);
+        siblings.push(dir);
+      }
+      siblings = dir.children;
     }
-    group.files.push(file);
+    siblings.push({ type: 'file', name: segments[segments.length - 1], path: file.path, file });
   }
-  return groups;
+  return root;
 }
 
 export type DiffLineKind = 'add' | 'remove' | 'meta' | 'context';
