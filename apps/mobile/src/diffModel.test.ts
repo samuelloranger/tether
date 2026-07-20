@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import {
   changeLabel,
+  buildFileTree,
   diffLineKinds,
   displayDiff,
-  groupFilesByDirectory,
   isImagePath,
   parseDiffLines,
   totalChanges,
@@ -47,18 +47,43 @@ test('isImagePath recognizes common image extensions case-insensitively', () => 
   expect(isImagePath('main.ts')).toBe(false);
 });
 
-test('groupFilesByDirectory groups files under their parent directory, root files under ""', () => {
+test('buildFileTree nests folders like a real file tree, not a flat path-prefix group', () => {
   const files = [
     { path: 'src/a.ts', insertions: 1, deletions: 0, binary: false },
     { path: 'README.md', insertions: 1, deletions: 0, binary: false },
     { path: 'src/b.ts', insertions: 0, deletions: 1, binary: false },
     { path: 'src/nested/c.ts', insertions: 2, deletions: 0, binary: false },
   ];
-  expect(groupFilesByDirectory(files)).toEqual([
-    { dir: 'src', files: [files[0], files[2]] },
-    { dir: '', files: [files[1]] },
-    { dir: 'src/nested', files: [files[3]] },
+  expect(buildFileTree(files)).toEqual([
+    {
+      type: 'dir',
+      name: 'src',
+      path: 'src',
+      children: [
+        { type: 'file', name: 'a.ts', path: 'src/a.ts', file: files[0] },
+        { type: 'file', name: 'b.ts', path: 'src/b.ts', file: files[2] },
+        {
+          type: 'dir',
+          name: 'nested',
+          path: 'src/nested',
+          children: [{ type: 'file', name: 'c.ts', path: 'src/nested/c.ts', file: files[3] }],
+        },
+      ],
+    },
+    { type: 'file', name: 'README.md', path: 'README.md', file: files[1] },
   ]);
+});
+
+test('buildFileTree reuses the same folder node across sibling files instead of duplicating it', () => {
+  const files = [
+    { path: 'src/a.ts', insertions: 1, deletions: 0, binary: false },
+    { path: 'src/nested/c.ts', insertions: 2, deletions: 0, binary: false },
+    { path: 'src/b.ts', insertions: 0, deletions: 1, binary: false },
+  ];
+  const tree = buildFileTree(files);
+  expect(tree).toHaveLength(1);
+  expect(tree[0].type).toBe('dir');
+  if (tree[0].type === 'dir') expect(tree[0].children).toHaveLength(3);
 });
 
 test('parseDiffLines assigns old/new line numbers per hunk and strips diff markers from content', () => {
