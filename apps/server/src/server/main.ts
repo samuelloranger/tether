@@ -24,7 +24,22 @@ function runningPid(): number | null {
   return pid && alive(pid) ? pid : null;
 }
 
-function start(): void {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Poll until the pid is gone or timeoutMs elapses. Used so stop()/start() never
+// hand off to each other while the old process still holds the port.
+async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const step = 100;
+  for (let waited = 0; waited < timeoutMs; waited += step) {
+    if (!alive(pid)) return true;
+    await sleep(step);
+  }
+  return !alive(pid);
+}
+
+async function start(): Promise<void> {
   const existing = runningPid();
   if (existing) {
     console.log(`tether already running (pid ${existing}) on :${PORT}`);
@@ -44,13 +59,27 @@ function start(): void {
     detached: true,
     stdio: ['ignore', out, out],
   });
-  if (child.pid) writeFileSync(PID_FILE, String(child.pid));
   child.unref();
+  if (!child.pid) {
+    console.error('tether failed to start: spawn returned no pid');
+    process.exitCode = 1;
+    return;
+  }
+  // spawn() succeeding only means the OS forked/exec'd; the child can still die
+  // in the first few hundred ms (e.g. EADDRINUSE if the old process hadn't
+  // released the port yet). Confirm it's still alive before trusting it.
+  await sleep(500);
+  if (!alive(child.pid)) {
+    console.error(`tether failed to start — check logs: ${LOG_FILE}`);
+    process.exitCode = 1;
+    return;
+  }
+  writeFileSync(PID_FILE, String(child.pid));
   console.log(`tether started (pid ${child.pid}) on :${PORT}`);
   console.log(`logs: ${LOG_FILE}`);
 }
 
-function stop(): void {
+async function stop(): Promise<void> {
   const pid = runningPid();
   if (!pid) {
     console.log('tether not running');
@@ -58,10 +87,23 @@ function stop(): void {
     return;
   }
   try {
-    process.kill(pid);
+    process.kill(pid, 'SIGTERM');
   } catch {}
+  let exited = await waitForExit(pid, 3000);
+  if (!exited) {
+    console.log(`tether (pid ${pid}) didn't exit after SIGTERM, sending SIGKILL…`);
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
+    exited = await waitForExit(pid, 2000);
+  }
   rmSync(PID_FILE, { force: true });
-  console.log(`tether stopped (pid ${pid})`);
+  if (exited) {
+    console.log(`tether stopped (pid ${pid})`);
+  } else {
+    console.error(`tether (pid ${pid}) still alive after SIGKILL — giving up`);
+    process.exitCode = 1;
+  }
 }
 
 async function status(): Promise<void> {
@@ -182,14 +224,14 @@ switch (cmd) {
     break;
   }
   case 'start':
-    start();
+    await start();
     break;
   case 'stop':
-    stop();
+    await stop();
     break;
   case 'restart':
-    stop();
-    start();
+    await stop();
+    await start();
     break;
   case 'status':
     await status();

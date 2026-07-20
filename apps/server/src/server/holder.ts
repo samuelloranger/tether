@@ -10,8 +10,35 @@
 // running from source (bun) or the compiled binary. argv is the tail after the
 // subcommand: <socketPath> <cols> <rows> <cwd> <cmd> [args...]
 
-import { unlinkSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { getProcessCwd } from './procCwd';
+
+// A process's session id, read straight from the kernel (/proc/<pid>/stat
+// field 6 — session — after the "pid (comm)" prefix, which we skip past by
+// index since comm can itself contain spaces/parens).
+function getSid(pid: number): number | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return Number(rest[3]);
+  } catch {
+    return null;
+  }
+}
+
+// Every live pid sharing a given session id — i.e. everything descended from
+// the shell that hasn't setsid'd itself into a session of its own.
+function pidsInSession(sid: number): number[] {
+  const pids: number[] = [];
+  try {
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) continue;
+      const pid = Number(entry);
+      if (getSid(pid) === sid) pids.push(pid);
+    }
+  } catch {}
+  return pids;
+}
 
 export function runHolder(argv: string[]): void {
   const [socketPath, colsArg, rowsArg, cwd, ...cmdArgs] = argv;
@@ -66,6 +93,18 @@ export function runHolder(argv: string[]): void {
   // Interactive shells ignore SIGTERM; SIGHUP is the "terminal went away" signal
   // they honor. Escalate to SIGKILL for anything that ignores both.
   function killPty() {
+    // Background jobs the shell was told to survive it (nohup, disown) never
+    // get the shell's SIGHUP forwarded to them and would otherwise keep
+    // running as orphans after an explicit "kill this terminal" — sweep the
+    // whole session synchronously, before touching the shell itself, so it
+    // can't race the holder's own exit-on-shell-death path below.
+    const sid = getSid(proc.pid) ?? proc.pid;
+    for (const pid of pidsInSession(sid)) {
+      if (pid === proc.pid) continue;
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
     proc.kill('SIGHUP');
     setTimeout(() => {
       try {

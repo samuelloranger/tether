@@ -22,8 +22,8 @@ export function shouldUpdate(current: string, latest: string): boolean {
 interface UpdateCtx {
   version: string;
   compiled: boolean;
-  start: () => void;
-  stop: () => void;
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
   runningPid: () => number | null;
 }
 
@@ -108,8 +108,8 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
   console.log(`Updated to ${rel.tag_name}.`);
   if (wasRunning) {
     console.log('Restarting server…');
-    ctx.stop();
-    ctx.start();
+    await ctx.stop();
+    await ctx.start();
   } else {
     console.log('Server not running. Start it with: tether start');
   }
