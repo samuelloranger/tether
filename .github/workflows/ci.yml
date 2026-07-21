@@ -23,13 +23,13 @@ jobs:
         run: bun lint
 
       - name: Server tests
-        run: bun run src/server/db.test.ts
+        run: bun test
         working-directory: apps/server
         env:
           TETHER_DB_PATH: /tmp/tether-ci.db
 
       - name: Mobile tests
-        run: bun run src/terminal.test.ts
+        run: bun test
         working-directory: apps/mobile
 
       - name: Expo dependency compatibility
