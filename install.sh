@@ -32,8 +32,8 @@ fi
 [ -n "$tag" ] || { echo "Could not resolve latest release tag" >&2; exit 1; }
 
 # macOS ships a .tar.gz (raw Mach-O download gets quarantined + loses its exec
-# bit); Linux ships the raw binary. Asset name embeds the tag.
-base="tether-${os}-${arch}-${tag}"
+# bit); Linux ships the raw binary. Asset names are stable (un-versioned).
+base="tether-${os}-${arch}"
 if [ "$os" = darwin ]; then asset="${base}.tar.gz"; else asset="$base"; fi
 
 url="https://github.com/${REPO}/releases/download/${tag}/${asset}"

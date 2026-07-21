@@ -14,6 +14,23 @@
 
 A persistent remote-shell console: real PTY shells on your server, streamed to your phone over WebSocket. Shells keep running when you disconnect — and survive server restarts.
 
+## Download
+
+Every link below always resolves to the **newest release** — no need to hunt through the release file list.
+
+| What | Platform | Get the latest |
+| --- | --- | --- |
+| **Server** | Linux / macOS | `curl -fsSL https://samlo.cloud/tether/install.sh \| sh` (auto-detects OS/arch) |
+| Server binary | Linux x64 | [`tether-linux-x64`](https://github.com/samuelloranger/tether/releases/latest/download/tether-linux-x64) |
+| Server binary | Linux arm64 | [`tether-linux-arm64`](https://github.com/samuelloranger/tether/releases/latest/download/tether-linux-arm64) |
+| Server binary | macOS Apple Silicon | [`tether-darwin-arm64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-arm64.tar.gz) |
+| Server binary | macOS Intel | [`tether-darwin-x64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-x64.tar.gz) |
+| **Mobile** | iOS | [AltStore source](#mobile-app-ios) (auto-updates) · or [`tether.ipa`](https://github.com/samuelloranger/tether/releases/latest/download/tether.ipa) |
+| **Mobile** | Android | [Obtainium](#mobile-app-android) (auto-updates) · or [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) |
+| **Desktop** | Linux / Windows / macOS | see [Desktop app](#desktop-app-linux--windows--macos) below |
+
+Each `…/releases/latest/download/<file>` link is a permanent, one-click pointer to that file in whatever the current release is — safe to bookmark or share. (Desktop installers are versioned by the Tauri bundler, so they're picked per-file from the release page instead.)
+
 ## Install the server
 
 ```bash
@@ -56,13 +73,13 @@ Install via [AltStore](https://altstore.io) (one-time setup: install AltServer o
 2. Tether appears in **Browse** — install it from there. Updates show up in AltStore automatically when a new release is published.
 3. Free Apple IDs sign apps for 7 days — AltStore auto-refreshes whenever it can reach AltServer on your network.
 
-(Manual alternative: grab `tether-vX.Y.Z.ipa` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and open it via **My Apps → +** in AltStore.)
+(Manual alternative: download [`tether.ipa`](https://github.com/samuelloranger/tether/releases/latest/download/tether.ipa) and open it via **My Apps → +** in AltStore.)
 
 Point the app at your server's IP and port on first launch.
 
 ## Mobile app (Android)
 
-Grab `tether-vX.Y.Z.apk` from the [latest release](https://github.com/samuelloranger/tether/releases/latest) and install it (allow installs from your browser when prompted).
+Download [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) and install it (allow installs from your browser when prompted).
 
 For automatic updates, add this repo to [Obtainium](https://github.com/ImranR98/Obtainium): **Add App →** `https://github.com/samuelloranger/tether` — it tracks releases and updates the APK for you.
 

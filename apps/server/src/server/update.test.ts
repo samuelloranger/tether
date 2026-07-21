@@ -6,14 +6,14 @@ function ok(cond: boolean, msg: string) {
   pass++;
 }
 
-// Linux ships the raw versioned binary; macOS wraps it in a .tar.gz.
-ok(assetName('linux', 'x64', 'v1.2.0') === 'tether-linux-x64-v1.2.0', 'linux x64');
-ok(assetName('linux', 'arm64', 'v1.2.0') === 'tether-linux-arm64-v1.2.0', 'linux arm64');
-ok(assetName('darwin', 'arm64', 'v1.2.0') === 'tether-darwin-arm64-v1.2.0.tar.gz', 'darwin arm64');
-ok(assetName('darwin', 'x64', 'v1.2.0') === 'tether-darwin-x64-v1.2.0.tar.gz', 'darwin x64');
+// Stable (un-versioned) names; macOS wraps the binary in a .tar.gz.
+ok(assetName('linux', 'x64') === 'tether-linux-x64', 'linux x64');
+ok(assetName('linux', 'arm64') === 'tether-linux-arm64', 'linux arm64');
+ok(assetName('darwin', 'arm64') === 'tether-darwin-arm64.tar.gz', 'darwin arm64');
+ok(assetName('darwin', 'x64') === 'tether-darwin-x64.tar.gz', 'darwin x64');
 let threw = false;
 try {
-  assetName('win32', 'x64', 'v1.2.0');
+  assetName('win32', 'x64');
 } catch {
   threw = true;
 }
