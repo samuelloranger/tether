@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { activityDotKey, activityLabel, type SessionActivity } from './activity';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { isRecentlyActive, PANEL_W } from './desktopNavigation';
@@ -22,6 +23,7 @@ export interface DrawerSession {
   status: 'running' | 'stopped';
   last_output_at: string | null;
   name?: string | null;
+  activity?: SessionActivity | null;
 }
 
 interface SessionDrawerProps {
@@ -136,12 +138,13 @@ export function SessionDrawer({
         {sessions.map((s) => {
           const active = activePreviewId === null && s.id === activeId;
           const live = active || isRecentlyActive(s.last_output_at);
-          const dotColor =
-            s.status === 'stopped'
-              ? theme.colors.textFaint
-              : live
-                ? theme.colors.success
-                : theme.colors.border;
+          const dotKey = activityDotKey(s.status, s.activity, live);
+          const dotColor = {
+            stopped: theme.colors.textFaint,
+            waiting: theme.colors.warning,
+            working: theme.colors.success,
+            idle: theme.colors.border,
+          }[dotKey];
           return (
             <View key={s.id} style={[styles.row, active && styles.rowActive]}>
               <TouchableOpacity
@@ -150,11 +153,14 @@ export function SessionDrawer({
                 onPress={() => onSelect(s.id)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={`Terminal ${s.id}${s.status === 'stopped' ? ', stopped' : live ? ', active' : ', idle'}`}
+                accessibilityLabel={`Terminal ${s.id}, ${activityLabel(dotKey)}`}
               >
                 <View style={[styles.dot, { backgroundColor: dotColor }]} />
                 <Text style={[styles.name, active && styles.nameActive]}>{s.name || s.id}</Text>
                 {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
+                {dotKey === 'waiting' && (
+                  <Text style={[styles.stopped, { color: theme.colors.warning }]}>input?</Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.kill}
