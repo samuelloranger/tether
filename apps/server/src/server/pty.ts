@@ -20,6 +20,7 @@ import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { COMPILED, selfArgv } from './runtime';
 import { type Activity, clearActivity, recordInput, recordOutput } from './sessionActivity';
+import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './sessionTitle';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
 // first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
@@ -139,6 +140,7 @@ export type SessionFrame =
   | { type: 'output'; chunk: string; id: number }
   | { type: 'exit'; exitCode?: number }
   | { type: 'diff'; summary: DiffSummary }
+  | { type: 'title'; title: string }
   | { type: 'activity'; activity: Activity };
 
 export type Subscriber = (data: SessionFrame) => void;
@@ -199,8 +201,15 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     const cwdReported = recordChunk(id, text);
     const cwd = getLiveCwd(id);
     if (cwdReported) instances.get(id)?.gitWatch.setRoot(cwd ? findGitRoot(cwd) : null);
+    const titleChanged = recordTitleChunk(id, text);
     const logId = addTerminalLog(id, text);
     broadcast(id, { type: 'output', chunk: text, id: logId });
+    // OSC title set or cleared — push the recomputed display title so attached
+    // clients relabel their tab without waiting on the session-list poll.
+    if (titleChanged) {
+      const title = autoTitle(getOscTitle(id), getLiveCwd(id), getSession(id)?.command ?? 'bash');
+      broadcast(id, { type: 'title', title });
+    }
     const activity = recordOutput(id, text);
     if (activity) broadcast(id, { type: 'activity', activity });
   };
@@ -236,6 +245,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       instances.get(id)?.subscribers.clear();
       instances.delete(id);
       clearLiveCwd(id);
+      clearTitle(id);
       clearInsertCount(id);
       clearActivity(id);
     }
@@ -291,6 +301,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
             if (instances.delete(id)) {
               instance.gitWatch.dispose();
               clearLiveCwd(id);
+              clearTitle(id);
               clearActivity(id);
               console.log(`Holder link for session "${id}" closed unexpectedly`);
             }
@@ -543,6 +554,7 @@ export function killSession(id: string) {
     instances.delete(id);
   }
   clearLiveCwd(id);
+  clearTitle(id);
   clearActivity(id);
   // Fallback for holders we aren't attached to (or that ignore the frame).
   if (!hadInstance) {

@@ -17,12 +17,14 @@ import type { AppColors } from './appTheme';
 import { isRecentlyActive, PANEL_W } from './desktopNavigation';
 import { confirmAction } from './dialog';
 import type { Presentation } from './presentations';
+import { sessionLabel } from './sessionLabel';
 
 export interface DrawerSession {
   id: string;
   status: 'running' | 'stopped';
   last_output_at: string | null;
   name?: string | null;
+  auto_title?: string | null;
   activity?: SessionActivity | null;
 }
 
@@ -156,7 +158,9 @@ export function SessionDrawer({
                 accessibilityLabel={`Terminal ${s.id}, ${activityLabel(dotKey)}`}
               >
                 <View style={[styles.dot, { backgroundColor: dotColor }]} />
-                <Text style={[styles.name, active && styles.nameActive]}>{s.name || s.id}</Text>
+                <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
+                  {sessionLabel(s)}
+                </Text>
                 {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
                 {dotKey === 'waiting' && (
                   <Text style={[styles.stopped, { color: theme.colors.warning }]}>input?</Text>
