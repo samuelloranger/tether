@@ -45,6 +45,12 @@ describe('keyToBytes — printable', () => {
 });
 
 describe('keyToBytes — named keys', () => {
+  it('maps Alt+Backspace to backward-kill-word (ESC DEL)', () => {
+    expect(keyToBytes(k('Backspace', { altKey: true }))).toBe('\x1b\x7f');
+  });
+  it('maps Ctrl+Backspace to werase (Ctrl+W)', () => {
+    expect(keyToBytes(k('Backspace', { ctrlKey: true }))).toBe('\x17');
+  });
   it('maps Enter/Backspace/Escape', () => {
     expect(keyToBytes(k('Enter'))).toBe('\r');
     expect(keyToBytes(k('Backspace'))).toBe('\x7f');
