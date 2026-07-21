@@ -90,6 +90,19 @@ acceptable because the badge is advisory and notifications are debounced.
 None. Activity state is in-memory, recomputed after server restart from signals 2–3
 within seconds. No DB migration for Part 1.
 
+### Desktop client (free win in Slice 1)
+
+The desktop (Tauri) app already has a native OS notification path
+(`apps/mobile/src/desktopNotify.ts`) and holds a live WebSocket while open. It simply
+maps the new `{type:'activity'}` frame to a native notification on `waiting` (and
+optionally `exited`), with the same focus-suppression rule: no notification if that
+session is the focused tab of the focused window. No dispatcher, no server work beyond
+Part 1 — ships as part of Slice 1.
+
+Limitation: requires the desktop app to be running. When closed, desktop users are
+covered by Part 2 channels (ntfy's desktop app and browser Web Push both work on
+desktop too).
+
 ## Part 2 — Notifications without APNs (the AltStore problem)
 
 Native push is impossible for a sideloaded app (no `aps-environment` entitlement with
@@ -177,6 +190,7 @@ infrastructure Apple already lets us use.
 
 Two independently shippable slices (each its own PR/release):
 
-1. **Slice 1: activity state + badges** (no notifications, no migration).
+1. **Slice 1: activity state + badges + desktop native notifications** (no server
+   dispatcher, no migration).
 2. **Slice 2: dispatcher + ntfy + webhook + config UI/CLI** (one DB migration).
 3. **Slice 3: Web Push PWA** (heaviest — crypto + PWA; ships last).
