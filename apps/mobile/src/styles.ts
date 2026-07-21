@@ -137,6 +137,17 @@ export function createStyles(c: AppColors) {
     spinIcon: {
       marginRight: 4,
     },
+    terminalArea: {
+      flex: 1,
+      position: 'relative',
+    },
+    connectionBannerOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      zIndex: 10,
+    },
     terminalScroll: {
       flex: 1,
       backgroundColor: c.background,

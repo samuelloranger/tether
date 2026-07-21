@@ -540,16 +540,14 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   onPress={() => selectPresentation(sessionPreview.id)}
                 />
               )}
-              {/* Connection banner — names the real state; no safety overclaim. */}
-              <ConnectionBanner
-                status={connectionStatus}
-                hasConnected={hasConnectedRef.current}
-                onEdit={() => setIsConfiguring(true)}
-              />
-
               {/* Terminal grid — vertical FlatList inside a horizontal ScrollView so
               wide (e.g. 80-col) output stays legible and scrolls sideways.
-              Tapping it focuses the hidden capture field to bring up the keyboard. */}
+              Tapping it focuses the hidden capture field to bring up the keyboard.
+              Wrapped in a relative container so the connection banner can overlay
+              the top without consuming flex height: a height change would recompute
+              rows and fire a spurious PTY resize (visible rewrap) on every
+              reconnect. */}
+              <View style={styles.terminalArea}>
               <View
                 style={styles.terminalScroll}
                 onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
@@ -613,6 +611,17 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     )}
                   </Pressable>
                 )}
+              </View>
+              {/* Connection banner — names the real state; no safety overclaim.
+              Absolute overlay (box-none) so its mount/unmount never resizes the
+              terminal grid. */}
+              <View style={styles.connectionBannerOverlay} pointerEvents="box-none">
+                <ConnectionBanner
+                  status={connectionStatus}
+                  hasConnected={hasConnectedRef.current}
+                  onEdit={() => setIsConfiguring(true)}
+                />
+              </View>
               </View>
             </>
           )}
