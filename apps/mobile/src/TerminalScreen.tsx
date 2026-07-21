@@ -169,6 +169,18 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     closeDiff,
     selectDiffFile,
     deselectDiffFile,
+    diffMode,
+    stageFile,
+    unstageFile,
+    discardFile,
+    toggleHunk,
+    commitStagedChanges,
+    historyEntries,
+    historyCommit,
+    loadGitLog,
+    selectCommit,
+    diffSideBySide,
+    toggleDiffSideBySide,
     selectTerminal,
     selectPresentation,
     closePresentation,
@@ -484,6 +496,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             <DiffView
               summary={changeSummary}
               selectedPath={diffSelectedPath}
+              diffMode={diffMode}
               diffText={diffText}
               diffTruncated={diffTruncated}
               diffLoading={diffLoading}
@@ -491,6 +504,17 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onSelectFile={selectDiffFile}
               onDeselectFile={deselectDiffFile}
               onBack={closeDiff}
+              onStageFile={stageFile}
+              onUnstageFile={unstageFile}
+              onDiscardFile={discardFile}
+              onToggleHunk={toggleHunk}
+              onCommit={commitStagedChanges}
+              historyEntries={historyEntries}
+              historyCommit={historyCommit}
+              onLoadHistory={loadGitLog}
+              onSelectCommit={selectCommit}
+              sideBySide={diffSideBySide}
+              onToggleSideBySide={toggleDiffSideBySide}
             />
           ) : activePresentation ? (
             <>

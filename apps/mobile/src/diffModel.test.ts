@@ -1,5 +1,8 @@
 import { expect, test } from 'bun:test';
 import {
+  annotateHunkIndices,
+  groupSummary,
+  pairDiffRows,
   buildFileTree,
   changeLabel,
   diffLineKinds,
@@ -115,4 +118,59 @@ test('parseDiffLines assigns old/new line numbers per hunk and strips diff marke
     { text: '+new line', kind: 'add', content: 'new line', oldLine: null, newLine: 2 },
     { text: ' trailing', kind: 'context', content: 'trailing', oldLine: 3, newLine: 3 },
   ]);
+});
+
+test('groupSummary splits staged and unstaged entries', () => {
+  const summary = {
+    files: [
+      { path: 'a.txt', insertions: 1, deletions: 0, binary: false, staged: true },
+      { path: 'a.txt', insertions: 2, deletions: 0, binary: false, staged: false },
+      { path: 'b.txt', insertions: 3, deletions: 1, binary: false, staged: false },
+      // Legacy payload without the flag counts as unstaged.
+      { path: 'c.txt', insertions: 1, deletions: 1, binary: false },
+    ],
+  };
+  const groups = groupSummary(summary);
+  expect(groups.staged.map((f) => f.path)).toEqual(['a.txt']);
+  expect(groups.unstaged.map((f) => f.path)).toEqual(['a.txt', 'b.txt', 'c.txt']);
+});
+
+test('annotateHunkIndices numbers hunk header lines in order', () => {
+  const diff = [
+    'diff --git a/x b/x',
+    '@@ -1,2 +1,2 @@',
+    '-a',
+    '+b',
+    '@@ -10,2 +10,2 @@',
+    '-c',
+    '+d',
+  ].join('\n');
+  const indices = annotateHunkIndices(parseDiffLines(diff));
+  expect(indices).toEqual([null, 0, null, null, 1, null, null]);
+});
+
+test('pairDiffRows aligns removes with adds side by side', () => {
+  const diff = [
+    '@@ -1,4 +1,4 @@',
+    ' keep',
+    '-old1',
+    '-old2',
+    '+new1',
+    ' tail',
+  ].join('\n');
+  const rows = pairDiffRows(parseDiffLines(diff));
+  // meta row spans both sides
+  expect(rows[0]).toEqual({ left: expect.objectContaining({ kind: 'meta' }), right: null, span: true });
+  expect(rows[1]).toEqual({
+    left: expect.objectContaining({ content: 'keep' }),
+    right: expect.objectContaining({ content: 'keep' }),
+    span: false,
+  });
+  // old1 pairs with new1; old2 has an empty right side
+  expect(rows[2].left?.content).toBe('old1');
+  expect(rows[2].right?.content).toBe('new1');
+  expect(rows[3].left?.content).toBe('old2');
+  expect(rows[3].right).toBeNull();
+  expect(rows[4].left?.content).toBe('tail');
+  expect(rows[4].right?.content).toBe('tail');
 });
