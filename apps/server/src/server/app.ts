@@ -40,6 +40,7 @@ import {
   writeToSession,
 } from './pty';
 import { getActivity } from './sessionActivity';
+import { autoTitle, getOscTitle } from './sessionTitle';
 import { resolveUploadPath } from './upload';
 import { readWorkspaceFile, WorkspaceFileError } from './workspaceFile';
 
@@ -185,6 +186,10 @@ app.get('/api/sessions', (c) => {
     listSessions().map((s) => ({
       ...s,
       activity: s.status === 'running' ? getActivity(s.id) : null,
+      auto_title:
+        s.status === 'running'
+          ? autoTitle(getOscTitle(s.id), getLiveCwd(s.id), s.command)
+          : s.command,
     })),
   );
 });

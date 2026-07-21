@@ -51,6 +51,7 @@ import { isDesktop, isMacDesktop } from './platform';
 import { findSessionPreview, previewUrl } from './presentations';
 import { SelectionView } from './SelectionView';
 import { type DrawerSession, SessionDrawer } from './SessionDrawer';
+import { sessionLabel } from './sessionLabel';
 import { AppearanceModal, RenameModal, SnippetsModal } from './SessionModals';
 import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
 import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
@@ -338,7 +339,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
 
   const sessionPreview = findSessionPreview(presentations, activeId);
   const backTarget = activePresentation?.sessionId ?? activeId;
-  const backLabel = drawerSessions.find((s) => s.id === backTarget)?.name || backTarget;
+  const backSession = drawerSessions.find((s) => s.id === backTarget);
+  const backLabel = backSession ? sessionLabel(backSession) : backTarget;
   const terminalVisible = !fileView && !diffOpen && !activePresentation;
 
   return (
