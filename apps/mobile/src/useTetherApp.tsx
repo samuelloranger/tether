@@ -62,6 +62,7 @@ import { isDesktop, isMacDesktop } from './platform';
 import { type Presentation, pickAutoSelectPreview } from './presentations';
 import { SelectionView } from './SelectionView';
 import type { DrawerSession } from './SessionDrawer';
+import { sessionLabel } from './sessionLabel';
 import { RenameModal, SnippetsModal } from './SessionModals';
 import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
 import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
@@ -467,6 +468,11 @@ export function useTetherApp() {
         const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
         ent.term.write(`\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`);
         if (id === activeIdRef.current) scheduleRender();
+      } else if (msg.type === 'title' && typeof msg.title === 'string') {
+        // Server recomputed the session's auto title (OSC 0/2 set or cleared).
+        setDrawerSessions((prev) =>
+          prev.map((row) => (row.id === id ? { ...row, auto_title: msg.title } : row)),
+        );
       } else if (msg.type === 'activity') {
         const activity = msg.activity as SessionActivity;
         setDrawerSessions((prev) =>
@@ -734,7 +740,7 @@ export function useTetherApp() {
     for (const row of rows) lastActivityRef.current.set(row.id, row.activity);
     if (!isDesktop) return;
     for (const row of alerts) {
-      void sendNativeNotification(row.name || row.id, 'Session is waiting for your input');
+      void sendNativeNotification(sessionLabel(row), 'Session is waiting for your input');
     }
   };
 
@@ -1499,7 +1505,8 @@ export function useTetherApp() {
     return () => document.removeEventListener('contextmenu', onCtx);
   }, [isConfiguring, activePresentationId, presentations]);
 
-  const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
+  const activeSession = drawerSessions.find((s) => s.id === activeId);
+  const activeName = activeSession ? sessionLabel(activeSession) : activeId;
   const activePresentation =
     presentations.find((preview) => preview.id === activePresentationId) || null;
   const closeFile = useCallback(() => setFileView(null), []);

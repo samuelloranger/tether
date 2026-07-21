@@ -7,6 +7,7 @@ import { type DesktopNavigationMode, PANEL_W, sessionActivity } from './desktopN
 import { confirmAction } from './dialog';
 import type { Presentation } from './presentations';
 import type { DrawerSession } from './SessionDrawer';
+import { sessionLabel } from './sessionLabel';
 
 export interface DesktopSessionNavigatorProps {
   mode: DesktopNavigationMode;
@@ -71,7 +72,7 @@ function SessionPanel({
       <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
         {sessions.map((session) => {
           const active = activePreviewId === null && session.id === activeId;
-          const label = session.name || session.id;
+          const label = sessionLabel(session);
           return (
             <View key={session.id} style={[styles.row, active && styles.rowActive]}>
               <TouchableOpacity
@@ -223,7 +224,7 @@ export function DesktopSessionNavigator({
     >
       {sessions.map((session) => {
         const active = activePreviewId === null && session.id === activeId;
-        const label = session.name || session.id;
+        const label = sessionLabel(session);
         return (
           <View key={session.id} style={[styles.tab, active && styles.tabActive]}>
             <TouchableOpacity
