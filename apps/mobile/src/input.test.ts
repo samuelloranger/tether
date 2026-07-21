@@ -116,21 +116,21 @@ function drive(edits: ((field: string) => string)[]): string {
   eq(r.value, SENT, 'value re-anchored to sentinel');
 }
 
-// 13. Below threshold, backspaces pass through unchanged
+// 13. Below threshold, empty-buffer backspaces pass through unchanged
 {
   let s = EMPTY_STREAK;
   for (let i = 0; i < STREAK_THRESHOLD; i++) {
-    const r = applyBackspaceStreak(s, '\x7f', 1000 + i * 100);
+    const r = applyBackspaceStreak(s, '\x7f', true, 1000 + i * 100);
     eq(r.bytes, '\x7f', `streak pass-through at ${i}`);
     s = r.streak;
   }
 }
 
-// 14. Past threshold, backspace upgrades to Ctrl+W (word delete)
+// 14. Past threshold, empty-buffer backspace upgrades to Ctrl+W (word delete)
 {
   let last = { streak: EMPTY_STREAK, bytes: '' };
   for (let i = 0; i <= STREAK_THRESHOLD; i++) {
-    last = applyBackspaceStreak(last.streak, '\x7f', 1000 + i * 100);
+    last = applyBackspaceStreak(last.streak, '\x7f', true, 1000 + i * 100);
   }
   eq(last.bytes, '\x17', 'streak upgrades to word delete past threshold');
 }
@@ -139,9 +139,9 @@ function drive(edits: ((field: string) => string)[]): string {
 {
   let s = EMPTY_STREAK;
   for (let i = 0; i <= STREAK_THRESHOLD; i++) {
-    ({ streak: s } = applyBackspaceStreak(s, '\x7f', 1000 + i * 100));
+    ({ streak: s } = applyBackspaceStreak(s, '\x7f', true, 1000 + i * 100));
   }
-  const r = applyBackspaceStreak(s, '\x7f', 100000);
+  const r = applyBackspaceStreak(s, '\x7f', true, 100000);
   eq(r.bytes, '\x7f', 'gap resets streak to char delete');
 }
 
@@ -149,12 +149,46 @@ function drive(edits: ((field: string) => string)[]): string {
 {
   let s = EMPTY_STREAK;
   for (let i = 0; i <= STREAK_THRESHOLD; i++) {
-    ({ streak: s } = applyBackspaceStreak(s, '\x7f', 1000 + i * 100));
+    ({ streak: s } = applyBackspaceStreak(s, '\x7f', true, 1000 + i * 100));
   }
-  const typed = applyBackspaceStreak(s, 'a', 2600);
+  const typed = applyBackspaceStreak(s, 'a', false, 2600);
   eq(typed.bytes, 'a', 'typing passes through');
-  const after = applyBackspaceStreak(typed.streak, '\x7f', 2700);
+  const after = applyBackspaceStreak(typed.streak, '\x7f', true, 2700);
   eq(after.bytes, '\x7f', 'typing reset the streak');
+}
+
+// 17. Deletes that consume local buffer (fromEmptyBuffer=false) never upgrade
+// and never build the streak, even when rapid — a long-press through typed
+// text stays char-precise.
+{
+  let s = EMPTY_STREAK;
+  for (let i = 0; i <= STREAK_THRESHOLD + 5; i++) {
+    const r = applyBackspaceStreak(s, '\x7f', false, 1000 + i * 100);
+    eq(r.bytes, '\x7f', `buffer-consuming delete stays char delete at ${i}`);
+    s = r.streak;
+  }
+}
+
+// 18. A buffer-consuming delete resets a streak already past threshold, so
+// word-delete does not carry over once local text starts being consumed again.
+{
+  let s = EMPTY_STREAK;
+  for (let i = 0; i <= STREAK_THRESHOLD; i++) {
+    ({ streak: s } = applyBackspaceStreak(s, '\x7f', true, 1000 + i * 100));
+  }
+  const consuming = applyBackspaceStreak(s, '\x7f', false, 2600);
+  eq(consuming.bytes, '\x7f', 'buffer-consuming delete resets past-threshold streak');
+  const next = applyBackspaceStreak(consuming.streak, '\x7f', true, 2700);
+  eq(next.bytes, '\x7f', 'streak restarts from 1 after buffer consumption');
+}
+
+// 19. applyFieldChange surfaces fromEmptyBuffer: true only on the sentinel-eaten
+// path (empty buffer), false when a real char is removed from local text.
+{
+  const eaten = applyFieldChange(SENT, '');
+  eq(eaten.fromEmptyBuffer, true, 'sentinel eaten is empty-buffer');
+  const midWord = applyFieldChange(`${SENT}abc`, `${SENT}ab`);
+  eq(midWord.fromEmptyBuffer, false, 'consuming local text is not empty-buffer');
 }
 
 

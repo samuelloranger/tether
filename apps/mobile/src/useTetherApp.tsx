@@ -1262,9 +1262,14 @@ export function useTetherApp() {
       resetField();
       return;
     }
-    const { bytes, value } = applyFieldChange(prevValueRef.current, next);
+    const { bytes, value, fromEmptyBuffer } = applyFieldChange(prevValueRef.current, next);
     if (bytes) {
-      const tracked = applyBackspaceStreak(backspaceStreakRef.current, bytes, Date.now());
+      const tracked = applyBackspaceStreak(
+        backspaceStreakRef.current,
+        bytes,
+        fromEmptyBuffer,
+        Date.now(),
+      );
       backspaceStreakRef.current = tracked.streak;
       sendInput(tracked.bytes);
       autoScroll.current = true;
