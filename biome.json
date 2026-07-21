@@ -28,7 +28,9 @@
     }
   },
   "linter": {
+    "enabled": true,
     "rules": {
+      "recommended": true,
       "suspicious": {
         "noTemplateCurlyInString": "off"
       }

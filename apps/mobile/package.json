@@ -35,8 +35,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "@types/react": "~19.2.2"
   },
   "scripts": {
     "start": "expo start",
@@ -44,6 +43,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "bun test",
     "build:web": "expo export --platform web",
     "tauri": "tauri",
