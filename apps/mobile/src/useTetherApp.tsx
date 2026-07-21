@@ -1707,7 +1707,7 @@ export function useTetherApp() {
         void notify('Discard failed', String(error), 'error');
       }
     },
-    [gitPost],
+    [gitPost, deselectDiffFile],
   );
 
   const toggleHunk = useCallback(
