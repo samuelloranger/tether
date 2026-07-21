@@ -1,5 +1,12 @@
 // Run: bun run src/input.test.ts  (from apps/mobile)
-import { applyFieldChange, computeInputDelta, SENT } from './input';
+import {
+  applyBackspaceStreak,
+  applyFieldChange,
+  computeInputDelta,
+  EMPTY_STREAK,
+  SENT,
+  STREAK_THRESHOLD,
+} from './input';
 
 let pass = 0;
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -108,5 +115,47 @@ function drive(edits: ((field: string) => string)[]): string {
   eq(r.bytes, '\x7f', 'backspace at empty sends one delete');
   eq(r.value, SENT, 'value re-anchored to sentinel');
 }
+
+// 13. Below threshold, backspaces pass through unchanged
+{
+  let s = EMPTY_STREAK;
+  for (let i = 0; i < STREAK_THRESHOLD; i++) {
+    const r = applyBackspaceStreak(s, '\x7f', 1000 + i * 100);
+    eq(r.bytes, '\x7f', `streak pass-through at ${i}`);
+    s = r.streak;
+  }
+}
+
+// 14. Past threshold, backspace upgrades to Ctrl+W (word delete)
+{
+  let last = { streak: EMPTY_STREAK, bytes: '' };
+  for (let i = 0; i <= STREAK_THRESHOLD; i++) {
+    last = applyBackspaceStreak(last.streak, '\x7f', 1000 + i * 100);
+  }
+  eq(last.bytes, '\x17', 'streak upgrades to word delete past threshold');
+}
+
+// 15. A gap >= 150ms resets the streak
+{
+  let s = EMPTY_STREAK;
+  for (let i = 0; i <= STREAK_THRESHOLD; i++) {
+    ({ streak: s } = applyBackspaceStreak(s, '\x7f', 1000 + i * 100));
+  }
+  const r = applyBackspaceStreak(s, '\x7f', 100000);
+  eq(r.bytes, '\x7f', 'gap resets streak to char delete');
+}
+
+// 16. Any non-backspace bytes reset the streak
+{
+  let s = EMPTY_STREAK;
+  for (let i = 0; i <= STREAK_THRESHOLD; i++) {
+    ({ streak: s } = applyBackspaceStreak(s, '\x7f', 1000 + i * 100));
+  }
+  const typed = applyBackspaceStreak(s, 'a', 2600);
+  eq(typed.bytes, 'a', 'typing passes through');
+  const after = applyBackspaceStreak(typed.streak, '\x7f', 2700);
+  eq(after.bytes, '\x7f', 'typing reset the streak');
+}
+
 
 console.log(`\n  ${pass} assertions passed\n`);

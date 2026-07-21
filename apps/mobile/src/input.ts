@@ -44,6 +44,31 @@ export function computeInputDelta(prev: string, next: string): InputDelta {
 // `value` — otherwise React Native reverts the native field to the stale
 // `value` and the next diff runs against the wrong baseline (emitting spurious
 // deletes that corrupt typing/dictation).
+// Hold-backspace word deletion: the capture field is pinned to a sentinel, so
+// when iOS/Android keyboards accelerate into word-delete mode the field still
+// only ever yields single-character deletes. The PTY owns the line state, so
+// the client can't know word boundaries — instead, detect the streak: after
+// STREAK_THRESHOLD rapid consecutive single deletes, upgrade each further
+// delete to Ctrl+W (tty werase) so the shell erases whole words.
+export interface BackspaceStreak {
+  count: number;
+  lastAt: number;
+}
+
+export const EMPTY_STREAK: BackspaceStreak = { count: 0, lastAt: 0 };
+export const STREAK_GAP_MS = 150;
+export const STREAK_THRESHOLD = 15;
+
+export function applyBackspaceStreak(
+  streak: BackspaceStreak,
+  bytes: string,
+  now: number,
+): { streak: BackspaceStreak; bytes: string } {
+  if (bytes !== '\x7f') return { streak: EMPTY_STREAK, bytes };
+  const count = now - streak.lastAt < STREAK_GAP_MS ? streak.count + 1 : 1;
+  return { streak: { count, lastAt: now }, bytes: count > STREAK_THRESHOLD ? '\x17' : '\x7f' };
+}
+
 export function applyFieldChange(
   prevValue: string,
   next: string,
