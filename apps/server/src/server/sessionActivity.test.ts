@@ -116,6 +116,17 @@ describe('activity state machine', () => {
     expect(getActivity('s', T0 + SILENCE_MS)).toBe('waiting');
   });
 
+  test('heuristic waiting is committed: input clears it, output broadcasts working', () => {
+    recordOutput('s', 'Do you want to proceed? (y/n) ', T0);
+    expect(getActivity('s', T0 + SILENCE_MS)).toBe('waiting');
+    // The read committed the reclassification, so input now clears it…
+    expect(recordInput('s', T0 + SILENCE_MS + 1)).toBe('working');
+    // …and from a committed heuristic `waiting`, fresh output is a real transition.
+    recordOutput('s', 'ok? [y/N] ', T0 + SILENCE_MS + 2);
+    expect(getActivity('s', T0 + 2 * SILENCE_MS + 2)).toBe('waiting');
+    expect(recordOutput('s', 'proceeding…\n', T0 + 2 * SILENCE_MS + 3)).toBe('working');
+  });
+
   test('silence + shell-prompt tail reads as idle', () => {
     recordOutput('s', 'sam@host:~/sites $ ', T0);
     expect(getActivity('s', T0 + SILENCE_MS)).toBe('idle');

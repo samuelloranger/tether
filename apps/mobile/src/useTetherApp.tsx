@@ -681,11 +681,11 @@ export function useTetherApp() {
     } catch {}
   };
 
-  // Desktop: native OS notification when a background session starts waiting
-  // for input (Claude Code permission prompt, y/n question, …).
+  // Desktop: native OS notification when a BACKGROUND session starts waiting
+  // for input (Claude Code permission prompt, y/n question, …). The active
+  // session is handled by the focus-aware emulator bell path further down.
   const notifyWaitingSessions = (rows: DrawerSession[]) => {
-    const hidden = typeof document !== 'undefined' && document.hidden;
-    const alerts = newlyWaiting(lastActivityRef.current, rows, activeIdRef.current, hidden);
+    const alerts = newlyWaiting(lastActivityRef.current, rows, activeIdRef.current);
     for (const row of rows) lastActivityRef.current.set(row.id, row.activity);
     if (!isDesktop) return;
     for (const row of alerts) {
@@ -752,18 +752,23 @@ export function useTetherApp() {
     } catch {}
   };
 
-  // Poll the session list and presentation metadata every 4s while foregrounded.
+  // Poll the session list and presentation metadata every 4s. The session
+  // poll keeps running while the desktop window is hidden — it is the only
+  // path that can surface a background session flipping to `waiting` when
+  // minimized (uncached sessions have no socket), and it's one cheap SQLite
+  // read per tick. Only the presentation poll pauses when hidden.
   useEffect(() => {
     if (isConfiguring) return;
     let iv: ReturnType<typeof setInterval> | null = null;
+    let hidden = false;
+    const tick = () => {
+      refreshSessions();
+      if (!hidden) refreshPresentations();
+    };
     const start = () => {
       if (iv) return;
-      refreshSessions();
-      refreshPresentations();
-      iv = setInterval(() => {
-        refreshSessions();
-        refreshPresentations();
-      }, 4000);
+      tick();
+      iv = setInterval(tick, 4000);
     };
     const stop = () => {
       if (iv) {
@@ -772,12 +777,15 @@ export function useTetherApp() {
       }
     };
     start();
-    // Desktop: pause polling while the window is hidden/minimized and resume with
-    // an immediate refresh on return, so we don't hammer the server in the tray
-    // and the list is never stale when the window comes back.
+    // Desktop: while hidden/minimized the interval keeps running (sessions
+    // only, per `hidden` in tick) and an immediate full refresh fires on
+    // return so the presentation list is never stale when the window comes back.
     let onVis: (() => void) | undefined;
     if (isDesktop && typeof document !== 'undefined') {
-      onVis = () => (document.hidden ? stop() : start());
+      onVis = () => {
+        hidden = document.hidden;
+        if (!hidden) tick();
+      };
       document.addEventListener('visibilitychange', onVis);
     }
     return () => {

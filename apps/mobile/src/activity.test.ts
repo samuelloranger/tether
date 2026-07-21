@@ -34,20 +34,18 @@ describe('newlyWaiting', () => {
 
   test('fires on the edge into waiting, once', () => {
     const prev = new Map([['a', 'working' as const]]);
-    expect(newlyWaiting(prev, [row('a', 'waiting')], null, false).map((r) => r.id)).toEqual(['a']);
+    expect(newlyWaiting(prev, [row('a', 'waiting')], null).map((r) => r.id)).toEqual(['a']);
     const prev2 = new Map([['a', 'waiting' as const]]);
-    expect(newlyWaiting(prev2, [row('a', 'waiting')], null, false)).toEqual([]);
+    expect(newlyWaiting(prev2, [row('a', 'waiting')], null)).toEqual([]);
   });
 
   test('unknown previous state still fires (first sighting)', () => {
-    expect(newlyWaiting(new Map(), [row('a', 'waiting')], null, false).length).toBe(1);
+    expect(newlyWaiting(new Map(), [row('a', 'waiting')], null).length).toBe(1);
   });
 
-  test('suppressed for the focused active session', () => {
-    const rows = [row('a', 'waiting')];
-    expect(newlyWaiting(new Map(), rows, 'a', false)).toEqual([]);
-    // …but fires when the window is hidden
-    expect(newlyWaiting(new Map(), rows, 'a', true).length).toBe(1);
+  test('active session always excluded (emulator bell path owns it)', () => {
+    expect(newlyWaiting(new Map(), [row('a', 'waiting')], 'a')).toEqual([]);
+    expect(newlyWaiting(new Map(), [row('a', 'waiting'), row('b', 'waiting')], 'a').map((r) => r.id)).toEqual(['b']);
   });
 
   test('ignores non-waiting and stopped rows', () => {
@@ -56,6 +54,6 @@ describe('newlyWaiting', () => {
       row('b', 'idle'),
       { id: 'c', status: 'stopped', activity: 'waiting' },
     ];
-    expect(newlyWaiting(new Map(), rows, null, false)).toEqual([]);
+    expect(newlyWaiting(new Map(), rows, null)).toEqual([]);
   });
 });
