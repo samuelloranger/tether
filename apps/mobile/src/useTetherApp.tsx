@@ -280,8 +280,25 @@ export function useTetherApp() {
       setBlinkOn(true); // steady caret, no interval
       return;
     }
-    const iv = setInterval(() => setBlinkOn((v) => !v), 530);
-    return () => clearInterval(iv);
+    // Desktop: no point blinking (and waking the caret row) in a hidden window.
+    let iv: ReturnType<typeof setInterval> | null = setInterval(() => setBlinkOn((v) => !v), 530);
+    let onVis: (() => void) | undefined;
+    if (isDesktop && typeof document !== 'undefined') {
+      onVis = () => {
+        if (document.hidden) {
+          if (iv) clearInterval(iv);
+          iv = null;
+          setBlinkOn(true);
+        } else if (!iv) {
+          iv = setInterval(() => setBlinkOn((v) => !v), 530);
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+    }
+    return () => {
+      if (iv) clearInterval(iv);
+      if (onVis) document.removeEventListener('visibilitychange', onVis);
+    };
   }, [reduceMotion]);
   const renderScheduled = useRef(false);
   const renderTimer = useRef<any>(null);
@@ -294,7 +311,13 @@ export function useTetherApp() {
   // fills the viewport with no wrapping and no horizontal scroll. The remote PTY
   // is resized to match. CHAR_RATIO ~ monospace advance width / font size.
   const { width: winWidth } = useWindowDimensions();
-  const CHAR_RATIO = 0.6;
+  // Fallback advance-width ratio (Fira Code is exactly 0.6em). Overridden by a
+  // real measurement below, so a different desktop font pick or the web's
+  // system-monospace fallback can't skew the column math (wrong numCols clips
+  // the right edge — every row is overflow:hidden — or wastes margin).
+  const FALLBACK_CHAR_RATIO = 0.6;
+  const [measuredCharRatio, setMeasuredCharRatio] = useState<number | null>(null);
+  const CHAR_RATIO = measuredCharRatio ?? FALLBACK_CHAR_RATIO;
   const [fontSize, setFontSize] = useState(11);
   const [fontFamily, setFontFamily] = useState('FiraCode_400Regular');
   const lineHeight = Math.round(fontSize * 1.3);
@@ -305,7 +328,8 @@ export function useTetherApp() {
     ? Math.max(120, winWidth - reservedNavigationWidth(desktopNavigationMode))
     : winWidth;
   const gridWidth = paneWidth - 12;
-  const numCols = Math.max(20, Math.floor(gridWidth / (fontSize * CHAR_RATIO)));
+  const charWidth = fontSize * CHAR_RATIO;
+  const numCols = Math.max(20, Math.floor(gridWidth / charWidth));
   const numRows = termHeight ? Math.max(6, Math.floor((termHeight - 12) / lineHeight)) : 24;
 
   // Helper to get/create the cache entry for a given id, sized to the current grid.
@@ -1687,6 +1711,13 @@ export function useTetherApp() {
     autoScroll.current = distanceFromBottom < 8;
   };
 
+  // Double-tap-to-copy target (mobile grid). Haptic tick is the feedback;
+  // no toast — the gesture is quiet by design.
+  const copyWord = useCallback((word: string) => {
+    void Clipboard.setStringAsync(word).catch(() => {});
+    void Haptics.selectionAsync().catch(() => {});
+  }, []);
+
   const renderRow = useCallback(
     ({ item }: { item: RenderRow }) => (
       <TermRow
@@ -1698,9 +1729,23 @@ export function useTetherApp() {
         cursorStyle={(cache.peek(activeId) ?? entryFor(activeId)).term.cursorStyle}
         fontFamily={fontFamily}
         onOpenLink={openFile}
+        charWidth={charWidth}
+        onCopyWord={isDesktop ? undefined : copyWord}
       />
     ),
-    [fontSize, lineHeight, gridWidth, blinkOn, activeId, entryFor, cache, fontFamily, openFile],
+    [
+      fontSize,
+      lineHeight,
+      gridWidth,
+      blinkOn,
+      activeId,
+      entryFor,
+      cache,
+      fontFamily,
+      openFile,
+      charWidth,
+      copyWord,
+    ],
   );
 
   // Map the connection state to the TitleBar's status union ('disconnected' → 'offline').
@@ -1715,13 +1760,41 @@ export function useTetherApp() {
 
   // The scrollable terminal grid, shared by the desktop and mobile surfaces.
   const terminalGrid = (
-    <FlatList
+    <>
+      {/* Invisible advance-width probe: 20 'M's at the current font. Yields the
+          font's true em-advance ratio (width / 20 / fontSize), replacing the
+          hardcoded 0.6 guess for column math. Re-keyed per font so a picker
+          change re-measures; ratio is size-independent so fontSize changes
+          don't need to. */}
+      <Text
+        key={`measure-${fontFamily}`}
+        style={{
+          position: 'absolute',
+          opacity: 0,
+          left: -10_000,
+          fontFamily,
+          fontSize,
+        }}
+        numberOfLines={1}
+        onLayout={(e) => {
+          const w = e.nativeEvent.layout.width;
+          const ratio = w / 20 / fontSize;
+          // Sanity envelope: a broken layout pass must not wedge cols at 20.
+          if (ratio > 0.3 && ratio < 1.2) setMeasuredCharRatio(ratio);
+        }}
+      >
+        {'M'.repeat(20)}
+      </Text>
+      <FlatList
       ref={listRef}
       style={{ flex: 1 }}
       contentContainerStyle={styles.terminalContent}
       data={screen}
       renderItem={renderRow}
-      keyExtractor={(_, i) => String(i)}
+      // Stable per-logical-line key from the emulator (survives lines moving
+      // into scrollback). Index keys re-keyed every visible row on each new
+      // scrollback line, remounting rows and defeating TermRow's memo.
+      keyExtractor={(row) => String(row.key)}
       // Rows are a fixed lineHeight, so give the list exact offsets — otherwise
       // RN-web's VirtualizedList estimates them and scrollToEnd lands a row short.
       getItemLayout={(_, index) => ({ length: lineHeight, offset: lineHeight * index, index })}
@@ -1749,7 +1822,8 @@ export function useTetherApp() {
       initialNumToRender={40}
       windowSize={11}
       removeClippedSubviews
-    />
+      />
+    </>
   );
 
   return {

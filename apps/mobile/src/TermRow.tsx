@@ -1,9 +1,10 @@
-import React from 'react';
-import { StyleSheet, Text, type TextStyle, View } from 'react-native';
+import React, { useRef } from 'react';
+import { type GestureResponderEvent, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { type LinkTarget, splitRunByLinks, urlColumns } from './links';
 import { isDesktop } from './platform';
 import type { CellStyle, RenderRow } from './terminal';
+import { wordAtColumn } from './wordAt';
 
 function runToStyle(
   s: CellStyle,
@@ -52,6 +53,8 @@ export const TermRow = React.memo(
     cursorStyle,
     fontFamily,
     onOpenLink,
+    charWidth,
+    onCopyWord,
   }: {
     row: RenderRow;
     fontSize: number;
@@ -61,8 +64,41 @@ export const TermRow = React.memo(
     cursorStyle: 'block' | 'bar' | 'underline';
     fontFamily: string;
     onOpenLink: (target: LinkTarget) => void;
+    // Monospace advance width, for mapping a tap's x-offset to a column.
+    charWidth?: number;
+    // Mobile: double-tap a word to copy it. Undefined on desktop (native selection).
+    onCopyWord?: (word: string) => void;
   }) {
     const { theme } = useAppTheme();
+    // Double-tap-to-copy (mobile). Plain touch handlers on the row View — not
+    // a Pressable — so the grid's tap-to-focus Pressable and FlatList scroll
+    // gestures keep working exactly as before; we only watch for two quick,
+    // low-travel touches and read the second one's column.
+    const touchStart = useRef({ x: 0, y: 0, t: 0 });
+    const lastTapAt = useRef(0);
+    const onTouchStart = (e: GestureResponderEvent) => {
+      touchStart.current = {
+        x: e.nativeEvent.locationX,
+        y: e.nativeEvent.locationY,
+        t: Date.now(),
+      };
+    };
+    const onTouchEnd = (e: GestureResponderEvent) => {
+      if (!onCopyWord || !charWidth) return;
+      const { x, y, t } = touchStart.current;
+      const now = Date.now();
+      const moved =
+        Math.abs(e.nativeEvent.locationX - x) > 10 || Math.abs(e.nativeEvent.locationY - y) > 10;
+      if (moved || now - t > 250) return; // a scroll/press, not a tap
+      if (now - lastTapAt.current < 300) {
+        lastTapAt.current = 0;
+        const text = row.runs.map((r) => r.text).join('');
+        const word = wordAtColumn(text, Math.floor(e.nativeEvent.locationX / charWidth));
+        if (word) onCopyWord(word);
+      } else {
+        lastTapAt.current = now;
+      }
+    };
     // Column → full URL, from spans the emulator resolved across soft-wrapped
     // rows. A wrapped link's fragments each carry the WHOLE url, so tapping any
     // fragment (on either row) opens the complete link.
@@ -70,7 +106,11 @@ export const TermRow = React.memo(
 
     let col = 0;
     return (
-      <View style={{ height: lineHeight, width, overflow: 'hidden' }}>
+      <View
+        style={{ height: lineHeight, width, overflow: 'hidden' }}
+        onTouchStart={onCopyWord ? onTouchStart : undefined}
+        onTouchEnd={onCopyWord ? onTouchEnd : undefined}
+      >
         <Text
           style={[
             [styles.termLine, { color: theme.terminal.fg }],
@@ -131,12 +171,18 @@ export const TermRow = React.memo(
     prev.fontFamily === next.fontFamily &&
     prev.cursorStyle === next.cursorStyle &&
     prev.onOpenLink === next.onOpenLink &&
+    prev.charWidth === next.charWidth &&
+    prev.onCopyWord === next.onCopyWord &&
     // Blink only invalidates the row that actually contains the caret.
     (prev.blinkOn === next.blinkOn || !rowHasCaret(next.row)),
 );
 
 const styles = StyleSheet.create({
-  termLine: {},
+  // includeFontPadding: Android adds ascender/descender padding by default,
+  // which shifts glyphs inside the fixed-lineHeight row and opens hairline
+  // seams between rows with background colors (TUI panels). Same setting as
+  // DiffLines/FileViewer.
+  termLine: { includeFontPadding: false },
   link: {
     textDecorationLine: 'underline',
   },
