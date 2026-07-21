@@ -27,10 +27,19 @@ type DownloadEvent =
   | { event: 'Finished' };
 
 // Tauri's webview cannot reliably hand URLs to the Windows shell through
-// React Native's browser-oriented Linking API.
+// React Native's browser-oriented Linking API. Goes through our own Rust
+// command (not the opener plugin) because the plugin spawns xdg-open with the
+// AppImage's injected library paths, which silently crash the browser it
+// launches — the Rust side strips those first. Outside Tauri (plain-browser
+// dev preview) fall back to a regular new tab.
 export async function openExternalUrl(url: string): Promise<void> {
-  const { openUrl } = await import('@tauri-apps/plugin-opener');
-  await openUrl(url);
+  const { isTauri } = await import('./platform');
+  if (!isTauri()) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('open_external', { url });
 }
 
 // Check for a newer signed build. Returns null when already current; throws on a
