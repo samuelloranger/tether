@@ -194,12 +194,15 @@ export function recordInput(id: string, now = Date.now()): Activity | null {
 
 // Read the current classification. Applies the silence heuristics lazily —
 // the 4s client poll of /api/sessions is the clock, so no server-side timer.
+// A heuristic reclassification is committed to the stored state so that
+// recordInput can clear a heuristic `waiting` and the next real output
+// broadcasts a proper `working` transition.
 export function getActivity(id: string, now = Date.now()): Activity | null {
   const st = stateBySession.get(id);
   if (!st) return null;
   if (st.activity === 'working' && now - st.lastOutputAt >= SILENCE_MS) {
-    if (WAITING_RE.test(st.tail)) return 'waiting';
-    if (PROMPT_RE.test(st.tail)) return 'idle';
+    if (WAITING_RE.test(st.tail)) transition(st, 'waiting', now);
+    else if (PROMPT_RE.test(st.tail)) transition(st, 'idle', now);
   }
   return st.activity;
 }

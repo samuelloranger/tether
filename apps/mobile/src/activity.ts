@@ -40,20 +40,21 @@ export function activityLabel(key: DotKey): string {
   }
 }
 
-// Sessions that just flipped to `waiting` and deserve a notification: not the
-// session the user is already looking at (unless the window is hidden), and
-// only on a working/idle/unknown → waiting edge, so a still-waiting session
-// doesn't re-notify on every 4s poll.
+// Background sessions that just flipped to `waiting` and deserve a
+// notification. Only fires on a working/idle/unknown → waiting edge, so a
+// still-waiting session doesn't re-notify on every 4s poll. The ACTIVE
+// session is always excluded: its alerts belong to the focus-aware emulator
+// bell path in useTetherApp (which sees blur/hidden), and handling it here
+// too would double-notify on every agent prompt.
 export function newlyWaiting(
   prev: ReadonlyMap<string, SessionActivity | null | undefined>,
   rows: ActivityRow[],
   activeId: string | null,
-  windowHidden: boolean,
 ): ActivityRow[] {
   return rows.filter((row) => {
     if (row.status !== 'running' || row.activity !== 'waiting') return false;
     if (prev.get(row.id) === 'waiting') return false;
-    if (row.id === activeId && !windowHidden) return false;
+    if (row.id === activeId) return false;
     return true;
   });
 }
