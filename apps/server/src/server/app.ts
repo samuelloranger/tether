@@ -396,7 +396,7 @@ app.get(
       onMessage(event, _ws) {
         try {
           const msg = JSON.parse(event.data as string);
-          if (msg.type === 'input') {
+          if (msg.type === 'input' && typeof msg.text === 'string') {
             writeToSession(sessionId, msg.text);
           } else if (msg.type === 'resize') {
             resizeSession(sessionId, onData, Number(msg.cols), Number(msg.rows));

@@ -88,6 +88,7 @@ const FISH_INIT =
 // unix socket (see holder.ts for the frame shapes). Holders live next to the
 // bashrc in the same config dir.
 const HOLDERS_DIR = path.join(RC_DIR, 'holders');
+const MAX_SESSIONS = Number(process.env.TETHER_MAX_SESSIONS || 50);
 mkdirSync(HOLDERS_DIR, { recursive: true });
 
 export const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
@@ -319,6 +320,13 @@ export async function startSession(
 
   const pending = pendingStarts.get(id);
   if (pending) return pending;
+
+  // Bound how many live holders one server will spawn — an authed client is
+  // semi-trusted, but a runaway/buggy client shouldn't be able to fork
+  // unlimited detached shell processes.
+  if (instances.size >= MAX_SESSIONS) {
+    throw new Error(`session cap reached (${MAX_SESSIONS})`);
+  }
 
   const promise = doStartSession(id, command, cols, rows).finally(() => {
     pendingStarts.delete(id);
