@@ -17,7 +17,9 @@ export function parsePresentArgs(argv: string[]): PresentArgs {
     if (argv.length > 2 || (target && target !== 'codex' && target !== 'claude')) {
       throw new Error('Usage: tether present agent-install [codex|claude]');
     }
-    return target ? { kind: 'agent-install', target } : { kind: 'agent-install' };
+    return target
+      ? { kind: 'agent-install', target: target as 'codex' | 'claude' }
+      : { kind: 'agent-install' };
   }
   if (!argv[0] || argv[0].startsWith('-') || argv[0].startsWith('agent-')) {
     throw new Error('Unknown present command');
@@ -41,7 +43,9 @@ export interface InstallDeps {
 export interface PresentDeps {
   port: string;
   tokenFile: string;
-  fetch?: typeof fetch;
+  // Just the call signature we use — not `typeof fetch`, whose extra members
+  // (preconnect) a plain test double has no reason to implement.
+  fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   hasCommand?: (name: string) => boolean;
 }
 

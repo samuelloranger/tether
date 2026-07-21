@@ -1,4 +1,4 @@
-import { expect, mock, test, beforeEach } from 'bun:test';
+import { beforeEach, expect, mock, test } from 'bun:test';
 
 const invoke = mock((_cmd: string, _args?: unknown) => Promise.resolve(undefined));
 mock.module('@tauri-apps/api/core', () => ({ invoke }));
@@ -72,7 +72,9 @@ test('getPassword flushes a pending fallback into the keychain once it is reacha
   );
   localStorageStub.setItem(FALLBACK_KEY, 'newer-pw-saved-during-outage');
   const pw = await getPassword();
-  expect(invoke).toHaveBeenCalledWith('secure_set_password', { password: 'newer-pw-saved-during-outage' });
+  expect(invoke).toHaveBeenCalledWith('secure_set_password', {
+    password: 'newer-pw-saved-during-outage',
+  });
   expect(pw).toBe('newer-pw-saved-during-outage');
   expect(localStorageStub.getItem(FALLBACK_KEY)).toBeNull();
 });

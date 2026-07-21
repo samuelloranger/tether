@@ -1,9 +1,17 @@
-import { KeyboardAvoidingView, View, Text, TextInput, TouchableOpacity, Platform, StyleSheet } from 'react-native';
-import TitleBar from './TitleBar';
-import { isDesktop, isMacDesktop } from './platform';
-import { createStyles, MONO } from './styles';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { isDesktop, isMacDesktop } from './platform';
+import { createStyles, MONO } from './styles';
+import TitleBar from './TitleBar';
 
 export type SetupMode = 'unknown' | 'create' | 'enter';
 export type TestStatus =
@@ -174,89 +182,96 @@ export function ConfigScreen({
   );
 }
 
-const createConfigStyles = (c: AppColors) => StyleSheet.create({
-  configContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    backgroundColor: c.background,
-  },
-  // Caps the login form width so it doesn't stretch across a wide desktop window.
-  configInner: {
-    width: '100%',
-    maxWidth: 400,
-  },
-  configLogoContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  configIconBox: {
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.accent,
-    marginBottom: 16,
-  },
-  configLogoIcon: {
-    fontSize: 32,
-    fontFamily: MONO,
-    fontWeight: 'bold',
-    color: c.accent,
-  },
-  configTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: c.text,
-    marginBottom: 8,
-  },
-  configSubtitle: {
-    fontSize: 12,
-    color: c.textMuted,
-    textAlign: 'center',
-  },
-  formContainer: {
-    backgroundColor: c.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: c.border,
-    padding: 20,
-  },
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    color: c.textMuted,
-    marginBottom: 6,
-    letterSpacing: 0.5,
-  },
-  configInput: {
-    backgroundColor: c.input,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 8,
-    color: c.text,
-    fontSize: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginBottom: 16,
-    fontFamily: MONO,
-  },
-  connectBtn: {
-    backgroundColor: c.accent,
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  connectBtnText: {
-    color: c.accentText,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  configHint: { color: c.textFaint, fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 12 },
-  testError: { color: c.danger, fontSize: 13, marginBottom: 10 },
-  testOkRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
-  testOk: { color: c.success, fontSize: 13 },
-});
+const createConfigStyles = (c: AppColors) =>
+  StyleSheet.create({
+    configContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 24,
+      backgroundColor: c.background,
+    },
+    // Caps the login form width so it doesn't stretch across a wide desktop window.
+    configInner: {
+      width: '100%',
+      maxWidth: 400,
+    },
+    configLogoContainer: {
+      alignItems: 'center',
+      marginBottom: 32,
+    },
+    configIconBox: {
+      padding: 16,
+      borderRadius: 16,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.accent,
+      marginBottom: 16,
+    },
+    configLogoIcon: {
+      fontSize: 32,
+      fontFamily: MONO,
+      fontWeight: 'bold',
+      color: c.accent,
+    },
+    configTitle: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: c.text,
+      marginBottom: 8,
+    },
+    configSubtitle: {
+      fontSize: 12,
+      color: c.textMuted,
+      textAlign: 'center',
+    },
+    formContainer: {
+      backgroundColor: c.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 20,
+    },
+    inputLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      color: c.textMuted,
+      marginBottom: 6,
+      letterSpacing: 0.5,
+    },
+    configInput: {
+      backgroundColor: c.input,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 8,
+      color: c.text,
+      fontSize: 14,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      marginBottom: 16,
+      fontFamily: MONO,
+    },
+    connectBtn: {
+      backgroundColor: c.accent,
+      paddingVertical: 14,
+      borderRadius: 8,
+      alignItems: 'center',
+      marginTop: 10,
+    },
+    connectBtnText: {
+      color: c.accentText,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    configHint: {
+      color: c.textFaint,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 4,
+      marginBottom: 12,
+    },
+    testError: { color: c.danger, fontSize: 13, marginBottom: 10 },
+    testOkRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
+    testOk: { color: c.success, fontSize: 13 },
+  });

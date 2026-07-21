@@ -1,68 +1,67 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import {
-  Text,
-  View,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  FlatList,
-  Pressable,
-  PanResponder,
-  KeyboardAvoidingView,
-  Keyboard,
-  Platform,
-  ActivityIndicator,
-  useWindowDimensions,
-  Modal,
-  Linking,
-  AccessibilityInfo,
-  type TextStyle,
-} from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Feather from '@expo/vector-icons/Feather';
+import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
+import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
-import * as Haptics from 'expo-haptics';
-import Feather from '@expo/vector-icons/Feather';
-import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
-import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
-import { TerminalEmulator, type RenderRow, type CellStyle } from './terminal';
-import { splitRunByLinks, urlColumns } from './links';
-import { SessionCache, nextTermId, type SessionEntry } from './sessionCache';
-import { SessionDrawer, type DrawerSession } from './SessionDrawer';
-import { applyFieldChange, SENT } from './input';
-import { getPassword, setPassword as persistPassword, authHeaders } from './secureConfig';
-import { httpBase, wsUrl, validateAddress } from './address';
-import { openTerminalSocket, type TerminalSocket } from './wsTransport';
-import { keyToBytes, COPY, PASTE } from './desktopKeys';
-import { notify, confirmAction } from './dialog';
-import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
-import TitleBar from './TitleBar';
 import { DragDropContentView } from 'expo-drag-drop-content-view';
-import { injectDragRegionStyles } from './dragRegion';
-import { injectTerminalScrollbarStyles } from './terminalScrollbar';
-import { createStyles } from './styles';
-import { useAppTheme } from './AppThemeProvider';
-import { isDesktop, isMacDesktop } from './platform';
-import { TermRow } from './TermRow';
-import { ArrowCluster } from './Dpad';
-import { ConnectionBanner } from './ConnectionBanner';
-import { UtilityBar } from './UtilityBar';
-import { OverflowMenu } from './OverflowMenu';
-import { RenameModal, SnippetsModal, AppearanceModal } from './SessionModals';
-import { SelectionView } from './SelectionView';
-import { ContextMenu } from './ContextMenu';
-import { UpdateModal } from './UpdateModal';
+import * as Haptics from 'expo-haptics';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  PanResponder,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  type TextStyle,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertModal } from './AlertModal';
+import { useAppTheme } from './AppThemeProvider';
+import { httpBase, validateAddress, wsUrl } from './address';
+import { ChangeBanner } from './ChangeBanner';
 import { ConfigScreen } from './ConfigScreen';
-import { mouseSeq } from './mouseSeq';
+import { ConnectionBanner } from './ConnectionBanner';
+import { ContextMenu } from './ContextMenu';
 import { DesktopSessionNavigator } from './DesktopSessionNavigator';
+import { DiffView } from './DiffView';
+import { ArrowCluster } from './Dpad';
+import { COPY, keyToBytes, PASTE } from './desktopKeys';
+import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
+import { confirmAction, notify } from './dialog';
+import { injectDragRegionStyles } from './dragRegion';
+import { FileViewer } from './FileViewer';
+import { applyFieldChange, SENT } from './input';
+import { splitRunByLinks, urlColumns } from './links';
+import { mouseSeq } from './mouseSeq';
+import { OverflowMenu } from './OverflowMenu';
 import { PresentationBanner } from './PresentationBanner';
 import { PresentationView } from './PresentationView';
+import { isDesktop, isMacDesktop } from './platform';
 import { findSessionPreview, previewUrl } from './presentations';
-import { FileViewer } from './FileViewer';
-import { DiffView } from './DiffView';
-import { ChangeBanner } from './ChangeBanner';
-
+import { SelectionView } from './SelectionView';
+import { type DrawerSession, SessionDrawer } from './SessionDrawer';
+import { AppearanceModal, RenameModal, SnippetsModal } from './SessionModals';
+import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
+import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
+import { createStyles } from './styles';
+import { TermRow } from './TermRow';
+import TitleBar from './TitleBar';
+import { type CellStyle, type RenderRow, TerminalEmulator } from './terminal';
+import { injectTerminalScrollbarStyles } from './terminalScrollbar';
+import { UpdateModal } from './UpdateModal';
+import { UtilityBar } from './UtilityBar';
+import { openTerminalSocket, type TerminalSocket } from './wsTransport';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -71,8 +70,7 @@ const KEY_SESSION_ID = 'tether_session_id';
 const KEY_FONT = 'tether_font_size';
 const KEY_SNIPPETS = 'tether_snippets';
 
-
-import { useTetherApp } from './useTetherApp';
+import type { useTetherApp } from './useTetherApp';
 
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
   const { theme } = useAppTheme();
@@ -81,7 +79,175 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     if (isDesktop) injectTerminalScrollbarStyles();
   }, []);
   const {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, closeFile, diffOpen, changeSummary, diffSelectedPath, diffText, diffTruncated, diffLoading, diffImage, openDiff, closeDiff, selectDiffFile, deselectDiffFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded,
+    insets,
+    serverIp,
+    setServerIp,
+    port,
+    setPort,
+    password,
+    setPassword,
+    passwordRef,
+    setupMode,
+    setSetupMode,
+    confirmPassword,
+    setConfirmPassword,
+    testStatus,
+    setTestStatus,
+    isConfiguring,
+    setIsConfiguring,
+    ready,
+    setReady,
+    readyRef,
+    lastConnectedRef,
+    connectionStatus,
+    setConnectionStatus,
+    hasConnectedRef,
+    screen,
+    setScreen,
+    inputText,
+    setInputText,
+    prevValueRef,
+    skipNextChangeRef,
+    termHeight,
+    setTermHeight,
+    mouseOn,
+    setMouseOn,
+    ctxMenu,
+    setCtxMenu,
+    updateInfo,
+    setUpdateInfo,
+    pendingUpdate,
+    updateProgress,
+    setUpdateProgress,
+    updating,
+    setUpdating,
+    ctrlArmed,
+    setCtrlArmed,
+    selectionViewOpen,
+    setSelectionViewOpen,
+    menuOpen,
+    setMenuOpen,
+    renameModalOpen,
+    setRenameModalOpen,
+    renameText,
+    setRenameText,
+    appearanceModalOpen,
+    setAppearanceModalOpen,
+    searchQuery,
+    setSearchQuery,
+    searchInputRef,
+    snippets,
+    setSnippets,
+    snippetsModalOpen,
+    setSnippetsModalOpen,
+    snippetDraft,
+    setSnippetDraft,
+    cache,
+    activeId,
+    setActiveId,
+    activeIdRef,
+    drawerOpen,
+    setDrawerOpen,
+    drawerSessions,
+    setDrawerSessions,
+    presentations,
+    activePresentation,
+    activePresentationId,
+    fileView,
+    fileLoading,
+    closeFile,
+    diffOpen,
+    changeSummary,
+    diffSelectedPath,
+    diffText,
+    diffTruncated,
+    diffLoading,
+    diffImage,
+    openDiff,
+    closeDiff,
+    selectDiffFile,
+    deselectDiffFile,
+    selectTerminal,
+    selectPresentation,
+    closePresentation,
+    refreshPresentations,
+    desktopNavigationMode,
+    selectDesktopNavigationMode,
+    listRef,
+    inputRef,
+    autoScroll,
+    scrolledRef,
+    lastContentHeight,
+    blinkOn,
+    setBlinkOn,
+    reduceMotion,
+    setReduceMotion,
+    renderScheduled,
+    mouseOnRef,
+    wheelAccum,
+    lastDy,
+    CHAR_RATIO,
+    fontSize,
+    setFontSize,
+    lineHeight,
+    paneWidth,
+    gridWidth,
+    numCols,
+    numRows,
+    entryFor,
+    wsSend,
+    panResponder,
+    scheduleRender,
+    resetTerminal,
+    applyWsMessage,
+    connect,
+    disconnect,
+    switchTo,
+    newTerminal,
+    killActiveOr,
+    changeFontSize,
+    persistSnippets,
+    addSnippet,
+    removeSnippet,
+    sendSnippet,
+    refreshSessions,
+    testConnection,
+    saveConfig,
+    sendInput,
+    cursorSeq,
+    getFullText,
+    searchText,
+    openSearch,
+    openSelectionView,
+    copySelection,
+    selectAllTerminal,
+    handlePaste,
+    handleKeyPress,
+    resetField,
+    handleChangeText,
+    handleSend,
+    disposePending,
+    checkForUpdatesManual,
+    startUpdate,
+    downloadUpdate,
+    dismissUpdate,
+    activeName,
+    activeBellCount,
+    upPct,
+    upLabel,
+    openRename,
+    submitRename,
+    hardResetSession,
+    onScroll,
+    renderRow,
+    terminalGrid,
+    titleBarStatus,
+    jumpPrompt,
+    uploadFile,
+    pickAndUploadImage,
+    fontFamily,
+    changeFontFamily,
   } = app;
 
   // Bell (BEL): brief red flash + haptic tick whenever the active session's
@@ -164,121 +330,149 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   const terminalVisible = !fileView && !diffOpen && !activePresentation;
 
   return (
-        /* Terminal Client Screen */
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.terminalContainer}
-        >
-          {bellFlash && (
-            <View
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: theme.colors.danger,
-                opacity: 0.12,
-                zIndex: 999,
-              }}
-            />
-          )}
-          {/* Desktop: full-width custom title bar spanning above the sidebar + terminal,
+    /* Terminal Client Screen */
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.terminalContainer}
+    >
+      {bellFlash && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: theme.colors.danger,
+            opacity: 0.12,
+            zIndex: 999,
+          }}
+        />
+      )}
+      {/* Desktop: full-width custom title bar spanning above the sidebar + terminal,
               so macOS traffic lights sit over the bar (not the sidebar) and the whole
               top edge is a drag region. */}
-          {isDesktop && (
-            <TitleBar
-              isMac={isMacDesktop}
-              title={activePresentation?.title || entryFor(activeId).term.title || activeName}
-              subtitle={activePresentation?.project || entryFor(activeId).term.cwd || `${serverIp}:${port}`}
-              status={titleBarStatus}
-              onNew={newTerminal}
-              onSettings={() => setIsConfiguring(true)}
-              onMenu={() => { if (terminalVisible) setMenuOpen(true); }}
-            />
-          )}
-          <View style={[styles.terminalBody, isDesktop && desktopNavigationMode === 'sidebar' && styles.terminalRow]}>
-          {/* Desktop session navigator chooses sidebar, hover overlay, or top tabs. */}
-          {isDesktop && (
-            <DesktopSessionNavigator
-              mode={desktopNavigationMode}
-              sessions={drawerSessions}
-              activeId={activeId}
-              onSelect={selectTerminal}
-              onNew={newTerminal}
-              onKill={killActiveOr}
-              previews={presentations}
-              activePreviewId={activePresentationId}
-              onSelectPreview={selectPresentation}
-              onClosePreview={closePresentation}
-              onSettings={() => setIsConfiguring(true)}
-            />
-          )}
+      {isDesktop && (
+        <TitleBar
+          isMac={isMacDesktop}
+          title={activePresentation?.title || entryFor(activeId).term.title || activeName}
+          subtitle={
+            activePresentation?.project || entryFor(activeId).term.cwd || `${serverIp}:${port}`
+          }
+          status={titleBarStatus}
+          onNew={newTerminal}
+          onSettings={() => setIsConfiguring(true)}
+          onMenu={() => {
+            if (terminalVisible) setMenuOpen(true);
+          }}
+        />
+      )}
+      <View
+        style={[
+          styles.terminalBody,
+          isDesktop && desktopNavigationMode === 'sidebar' && styles.terminalRow,
+        ]}
+      >
+        {/* Desktop session navigator chooses sidebar, hover overlay, or top tabs. */}
+        {isDesktop && (
+          <DesktopSessionNavigator
+            mode={desktopNavigationMode}
+            sessions={drawerSessions}
+            activeId={activeId}
+            onSelect={selectTerminal}
+            onNew={newTerminal}
+            onKill={killActiveOr}
+            previews={presentations}
+            activePreviewId={activePresentationId}
+            onSelectPreview={selectPresentation}
+            onClosePreview={closePresentation}
+            onSettings={() => setIsConfiguring(true)}
+          />
+        )}
 
-          <View style={styles.terminalMain}>
-            {/* Mobile header panel */}
-            {!isDesktop && (
-              <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.surface }}>
-                <View style={styles.header}>
-                  <TouchableOpacity
-                    style={styles.headerBtn}
-                    activeOpacity={0.6}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    onPress={() => { Keyboard.dismiss(); refreshSessions(); refreshPresentations(); setDrawerOpen(true); }}
-                    accessibilityRole="button"
-                    accessibilityLabel="Open terminal list"
-                  >
-                    <Feather name="menu" size={20} color={theme.colors.text} />
-                  </TouchableOpacity>
+        <View style={styles.terminalMain}>
+          {/* Mobile header panel */}
+          {!isDesktop && (
+            <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.surface }}>
+              <View style={styles.header}>
+                <TouchableOpacity
+                  style={styles.headerBtn}
+                  activeOpacity={0.6}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    refreshSessions();
+                    refreshPresentations();
+                    setDrawerOpen(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open terminal list"
+                >
+                  <Feather name="menu" size={20} color={theme.colors.text} />
+                </TouchableOpacity>
 
-                  <View style={styles.headerInfo}>
-                    <Text style={styles.headerTitle}>{activePresentation?.title || activeName}</Text>
-                    <Text style={styles.headerSubtitle}>{serverIp}:{port}</Text>
-                  </View>
-
-                  <View style={styles.headerControls}>
-                    {connectionStatus === 'connected' ? (
-                      <View style={[styles.statusBadge, styles.badgeConnected]}>
-                        <View style={[styles.badgeDot, styles.dotConnected]} />
-                        <Text style={styles.badgeTextConnected}>Connected</Text>
-                      </View>
-                    ) : connectionStatus === 'auth-failed' ? (
-                      <View style={[styles.statusBadge, styles.badgeOffline]}>
-                        <View style={[styles.badgeDot, styles.dotOffline]} />
-                        <Text style={styles.badgeTextOffline}>Auth</Text>
-                      </View>
-                    ) : connectionStatus === 'connecting' ? (
-                      <View style={[styles.statusBadge, styles.badgeConnecting]}>
-                        <ActivityIndicator size={8} color={theme.colors.warning} style={styles.spinIcon} />
-                        <Text style={styles.badgeTextConnecting}>Connecting…</Text>
-                      </View>
-                    ) : (
-                      <View style={[styles.statusBadge, styles.badgeOffline]}>
-                        <View style={[styles.badgeDot, styles.dotOffline]} />
-                        <Text style={styles.badgeTextOffline}>Offline</Text>
-                      </View>
-                    )}
-
-                    {terminalVisible && (
-                      <TouchableOpacity
-                        style={styles.headerBtn}
-                        activeOpacity={0.6}
-                        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                        onPress={() => setMenuOpen(true)}
-                        accessibilityRole="button"
-                        accessibilityLabel="Terminal menu"
-                      >
-                        <Feather name="more-vertical" size={19} color={theme.colors.text} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
+                <View style={styles.headerInfo}>
+                  <Text style={styles.headerTitle}>{activePresentation?.title || activeName}</Text>
+                  <Text style={styles.headerSubtitle}>
+                    {serverIp}:{port}
+                  </Text>
                 </View>
-              </SafeAreaView>
-            )}
+
+                <View style={styles.headerControls}>
+                  {connectionStatus === 'connected' ? (
+                    <View style={[styles.statusBadge, styles.badgeConnected]}>
+                      <View style={[styles.badgeDot, styles.dotConnected]} />
+                      <Text style={styles.badgeTextConnected}>Connected</Text>
+                    </View>
+                  ) : connectionStatus === 'auth-failed' ? (
+                    <View style={[styles.statusBadge, styles.badgeOffline]}>
+                      <View style={[styles.badgeDot, styles.dotOffline]} />
+                      <Text style={styles.badgeTextOffline}>Auth</Text>
+                    </View>
+                  ) : connectionStatus === 'connecting' ? (
+                    <View style={[styles.statusBadge, styles.badgeConnecting]}>
+                      <ActivityIndicator
+                        size={8}
+                        color={theme.colors.warning}
+                        style={styles.spinIcon}
+                      />
+                      <Text style={styles.badgeTextConnecting}>Connecting…</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.statusBadge, styles.badgeOffline]}>
+                      <View style={[styles.badgeDot, styles.dotOffline]} />
+                      <Text style={styles.badgeTextOffline}>Offline</Text>
+                    </View>
+                  )}
+
+                  {terminalVisible && (
+                    <TouchableOpacity
+                      style={styles.headerBtn}
+                      activeOpacity={0.6}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      onPress={() => setMenuOpen(true)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Terminal menu"
+                    >
+                      <Feather name="more-vertical" size={19} color={theme.colors.text} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </SafeAreaView>
+          )}
 
           {fileLoading && (
-            <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+            <View
+              style={{
+                position: 'absolute',
+                inset: 0,
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1,
+              }}
+            >
               <ActivityIndicator color={theme.colors.accent} />
             </View>
           )}
@@ -310,85 +504,92 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 url={previewUrl(serverIp, port, activePresentation.url)}
               />
             </>
-          ) : <>
-          <ChangeBanner summary={changeSummary} onPress={openDiff} />
-          {!isDesktop && sessionPreview && (
-            <PresentationBanner
-              label={`Preview ready: ${sessionPreview.title}`}
-              icon="layout"
-              onPress={() => selectPresentation(sessionPreview.id)}
-            />
-          )}
-          {/* Connection banner — names the real state; no safety overclaim. */}
-          <ConnectionBanner
-            status={connectionStatus}
-            hasConnected={hasConnectedRef.current}
-            onEdit={() => setIsConfiguring(true)}
-          />
+          ) : (
+            <>
+              <ChangeBanner summary={changeSummary} onPress={openDiff} />
+              {!isDesktop && sessionPreview && (
+                <PresentationBanner
+                  label={`Preview ready: ${sessionPreview.title}`}
+                  icon="layout"
+                  onPress={() => selectPresentation(sessionPreview.id)}
+                />
+              )}
+              {/* Connection banner — names the real state; no safety overclaim. */}
+              <ConnectionBanner
+                status={connectionStatus}
+                hasConnected={hasConnectedRef.current}
+                onEdit={() => setIsConfiguring(true)}
+              />
 
-          {/* Terminal grid — vertical FlatList inside a horizontal ScrollView so
+              {/* Terminal grid — vertical FlatList inside a horizontal ScrollView so
               wide (e.g. 80-col) output stays legible and scrolls sideways.
               Tapping it focuses the hidden capture field to bring up the keyboard. */}
-          <View
-            style={styles.terminalScroll}
-            onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
-            {...panResponder.panHandlers}
-          >
-            {isDesktop ? (
-              // Desktop: a plain, non-focusable surface. It must NOT be a Pressable:
-              // react-native-web's Pressable is focusable (tabIndex 0) and consumes a
-              // focused Enter as an "activate" gesture (PressResponder isValidKeyPress
-              // returns true for Enter regardless of role), so Enter never reaches the
-              // PTY. Keyboard is captured globally via the window keydown listener;
-              // text selection is native (selectable) and actions use the right-click
-              // menu — so no press handlers are needed here.
               <View
-                nativeID="tether-terminal"
-                style={{
-                  flex: 1,
-                  '--tether-scrollbar-track': theme.terminal.bg,
-                  '--tether-scrollbar-thumb': theme.colors.border,
-                  '--tether-scrollbar-thumb-hover': theme.colors.selected,
-                } as any}
+                style={styles.terminalScroll}
+                onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
+                {...panResponder.panHandlers}
               >
-                {terminalGrid}
-              </View>
-            ) : (
-              <Pressable
-                nativeID="tether-terminal"
-                style={{ flex: 1 }}
-                accessibilityRole="button"
-                accessibilityLabel="Terminal. Double-tap to type, long-press to select text."
-                onPressIn={() => {
-                  scrolledRef.current = false;
-                }}
-                onPress={() => {
-                  // Only a genuine tap focuses the input; a scroll-release must not
-                  // pop the keyboard.
-                  if (!scrolledRef.current) inputRef.current?.focus();
-                }}
-                onLongPress={openSelectionView}
-              >
-                {Platform.OS === 'ios' ? (
-                  <DragDropContentView
-                    style={{ flex: 1 }}
-                    onDrop={(event) => {
-                      for (const asset of event.assets) {
-                        if (!asset.uri) continue;
-                        const filename = asset.fileName || `drop-${Date.now()}`;
-                        uploadFile({ uri: asset.uri, name: filename, type: asset.type }, filename);
-                      }
-                    }}
+                {isDesktop ? (
+                  // Desktop: a plain, non-focusable surface. It must NOT be a Pressable:
+                  // react-native-web's Pressable is focusable (tabIndex 0) and consumes a
+                  // focused Enter as an "activate" gesture (PressResponder isValidKeyPress
+                  // returns true for Enter regardless of role), so Enter never reaches the
+                  // PTY. Keyboard is captured globally via the window keydown listener;
+                  // text selection is native (selectable) and actions use the right-click
+                  // menu — so no press handlers are needed here.
+                  <View
+                    nativeID="tether-terminal"
+                    style={
+                      {
+                        flex: 1,
+                        '--tether-scrollbar-track': theme.terminal.bg,
+                        '--tether-scrollbar-thumb': theme.colors.border,
+                        '--tether-scrollbar-thumb-hover': theme.colors.selected,
+                      } as any
+                    }
                   >
                     {terminalGrid}
-                  </DragDropContentView>
+                  </View>
                 ) : (
-                  terminalGrid
+                  <Pressable
+                    nativeID="tether-terminal"
+                    style={{ flex: 1 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Terminal. Double-tap to type, long-press to select text."
+                    onPressIn={() => {
+                      scrolledRef.current = false;
+                    }}
+                    onPress={() => {
+                      // Only a genuine tap focuses the input; a scroll-release must not
+                      // pop the keyboard.
+                      if (!scrolledRef.current) inputRef.current?.focus();
+                    }}
+                    onLongPress={openSelectionView}
+                  >
+                    {Platform.OS === 'ios' ? (
+                      <DragDropContentView
+                        style={{ flex: 1 }}
+                        onDrop={(event) => {
+                          for (const asset of event.assets) {
+                            if (!asset.uri) continue;
+                            const filename = asset.fileName || `drop-${Date.now()}`;
+                            uploadFile(
+                              { uri: asset.uri, name: filename, type: asset.type },
+                              filename,
+                            );
+                          }
+                        }}
+                      >
+                        {terminalGrid}
+                      </DragDropContentView>
+                    ) : (
+                      terminalGrid
+                    )}
+                  </Pressable>
                 )}
-              </Pressable>
-            )}
-          </View>
-          </>}
+              </View>
+            </>
+          )}
 
           {/* Session Drawer (overlay) — mobile only; desktop uses DesktopSessionNavigator. */}
           {!isDesktop && (
@@ -401,43 +602,54 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onKill={killActiveOr}
               previews={presentations}
               activePreviewId={activePresentationId}
-              onSelectPreview={(id) => { selectPresentation(id); setDrawerOpen(false); }}
+              onSelectPreview={(id) => {
+                selectPresentation(id);
+                setDrawerOpen(false);
+              }}
               onClosePreview={closePresentation}
               onClose={() => setDrawerOpen(false)}
-              onSettings={() => { setDrawerOpen(false); setIsConfiguring(true); }}
+              onSettings={() => {
+                setDrawerOpen(false);
+                setIsConfiguring(true);
+              }}
             />
           )}
 
           {/* Overflow menu (header ⋯) */}
-          {terminalVisible && <OverflowMenu
-            visible={menuOpen}
-            onClose={() => setMenuOpen(false)}
-            onRename={openRename}
-            onViewChanges={() => { setMenuOpen(false); void openDiff(); }}
-            fontSize={fontSize}
-            onFontDelta={changeFontSize}
-            onSearch={openSearch}
-            onJumpPromptUp={() => jumpPrompt(-1)}
-            onJumpPromptDown={() => jumpPrompt(1)}
-            onSnippets={() => {
-              setMenuOpen(false);
-              setSnippetsModalOpen(true);
-            }}
-            onAppearance={() => {
-              setMenuOpen(false);
-              setAppearanceModalOpen(true);
-            }}
-            onCheckUpdates={() => {
-              setMenuOpen(false);
-              void checkForUpdatesManual();
-            }}
-            onRestart={() => {
-              setMenuOpen(false);
-              hardResetSession();
-            }}
-            desktopNavigationMode={desktopNavigationMode}
-            onDesktopNavigationMode={selectDesktopNavigationMode}
-          />}
+          {terminalVisible && (
+            <OverflowMenu
+              visible={menuOpen}
+              onClose={() => setMenuOpen(false)}
+              onRename={openRename}
+              onViewChanges={() => {
+                setMenuOpen(false);
+                void openDiff();
+              }}
+              fontSize={fontSize}
+              onFontDelta={changeFontSize}
+              onSearch={openSearch}
+              onJumpPromptUp={() => jumpPrompt(-1)}
+              onJumpPromptDown={() => jumpPrompt(1)}
+              onSnippets={() => {
+                setMenuOpen(false);
+                setSnippetsModalOpen(true);
+              }}
+              onAppearance={() => {
+                setMenuOpen(false);
+                setAppearanceModalOpen(true);
+              }}
+              onCheckUpdates={() => {
+                setMenuOpen(false);
+                void checkForUpdatesManual();
+              }}
+              onRestart={() => {
+                setMenuOpen(false);
+                hardResetSession();
+              }}
+              desktopNavigationMode={desktopNavigationMode}
+              onDesktopNavigationMode={selectDesktopNavigationMode}
+            />
+          )}
 
           {/* Rename Modal */}
           <RenameModal
@@ -470,21 +682,23 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           />
 
           {/* Fullscreen selectable-text view (long-press the terminal to open) */}
-          {terminalVisible && <SelectionView
-            visible={selectionViewOpen}
-            onClose={() => {
-              setSelectionViewOpen(false);
-              setSearchQuery('');
-            }}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            searchInputRef={searchInputRef}
-            text={searchText}
-            insets={insets}
-            fontFamily={fontFamily}
-            fontSize={fontSize}
-            lineHeight={lineHeight}
-          />}
+          {terminalVisible && (
+            <SelectionView
+              visible={selectionViewOpen}
+              onClose={() => {
+                setSelectionViewOpen(false);
+                setSearchQuery('');
+              }}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              searchInputRef={searchInputRef}
+              text={searchText}
+              insets={insets}
+              fontFamily={fontFamily}
+              fontSize={fontSize}
+              lineHeight={lineHeight}
+            />
+          )}
 
           {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
           {!isDesktop && terminalVisible && (
@@ -543,33 +757,33 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               accessibilityLabel="Terminal IME composition target (hidden)"
             />
           )}
-          </View>
-          </View>
+        </View>
+      </View>
 
-          {/* Desktop right-click menu */}
-          {isDesktop && (
-            <ContextMenu
-              menu={ctxMenu}
-              onClose={() => setCtxMenu(null)}
-              onCopy={() => void copySelection()}
-              onPaste={() => void handlePaste()}
-              onSelectAll={selectAllTerminal}
-            />
-          )}
+      {/* Desktop right-click menu */}
+      {isDesktop && (
+        <ContextMenu
+          menu={ctxMenu}
+          onClose={() => setCtxMenu(null)}
+          onCopy={() => void copySelection()}
+          onPaste={() => void handlePaste()}
+          onSelectAll={selectAllTerminal}
+        />
+      )}
 
-          {/* Desktop self-update modal */}
-          {isDesktop && (
-            <UpdateModal
-              info={updateInfo}
-              updating={updating}
-              pct={upPct}
-              label={upLabel}
-              onDismiss={dismissUpdate}
-              onUpdate={startUpdate}
-              onDownload={downloadUpdate}
-            />
-          )}
-          {isDesktop && <AlertModal />}
-        </KeyboardAvoidingView>
+      {/* Desktop self-update modal */}
+      {isDesktop && (
+        <UpdateModal
+          info={updateInfo}
+          updating={updating}
+          pct={upPct}
+          label={upLabel}
+          onDismiss={dismissUpdate}
+          onUpdate={startUpdate}
+          onDownload={downloadUpdate}
+        />
+      )}
+      {isDesktop && <AlertModal />}
+    </KeyboardAvoidingView>
   );
 }

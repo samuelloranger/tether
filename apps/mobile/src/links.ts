@@ -9,7 +9,8 @@
 // opens the whole link.
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
-const FILE_RE = /(?:^|\s)((?:[\w.-]+\/)+[\w.-]+\.[\w-]+(?::[1-9]\d*(?::[1-9]\d*)?)?)(?=$|\s|[)\],;.])/g;
+const FILE_RE =
+  /(?:^|\s)((?:[\w.-]+\/)+[\w.-]+\.[\w-]+(?::[1-9]\d*(?::[1-9]\d*)?)?)(?=$|\s|[)\],;.])/g;
 
 export type LinkTarget =
   | { kind: 'external'; url: string }
@@ -26,7 +27,12 @@ export function parseFileTarget(token: string): Extract<LinkTarget, { kind: 'fil
   const match = /^(.*?)(?::([1-9]\d*)(?::([1-9]\d*))?)?$/.exec(clean);
   if (!match || !match[1].includes('/') || !/\/[\w.-]+\.[\w-]+$/.test(match[1])) return null;
   if (match[1].startsWith('/') || match[1].split('/').includes('..')) return null;
-  return { kind: 'file', path: match[1], ...(match[2] ? { line: Number(match[2]) } : {}), ...(match[3] ? { column: Number(match[3]) } : {}) };
+  return {
+    kind: 'file',
+    path: match[1],
+    ...(match[2] ? { line: Number(match[2]) } : {}),
+    ...(match[3] ? { column: Number(match[3]) } : {}),
+  };
 }
 
 // `texts[i]` is row i's plain text; `wrapped[i]` is true when row i soft-wraps

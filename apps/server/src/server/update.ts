@@ -19,11 +19,28 @@ export function shouldUpdate(current: string, latest: string): boolean {
   return current !== latest;
 }
 
+// Compare downloaded bytes against the expected hex sha256 (case-insensitive).
+export function verifyDigest(bytes: Uint8Array, expectedHex: string): boolean {
+  const actual = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+  return actual.toLowerCase() === expectedHex.trim().toLowerCase();
+}
+
+// Parse a `sha256sum`-style manifest and return the hex digest for a filename.
+export function digestForAsset(sumsText: string, assetName: string): string | null {
+  for (const line of sumsText.split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 2 && parts[parts.length - 1].replace(/^\*/, '') === assetName) {
+      return parts[0];
+    }
+  }
+  return null;
+}
+
 interface UpdateCtx {
   version: string;
   compiled: boolean;
-  start: () => void;
-  stop: () => void;
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
   runningPid: () => number | null;
 }
 
@@ -70,6 +87,31 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
   const dir = path.dirname(target);
   const bytes = await dl.arrayBuffer();
 
+  // Verify the downloaded bytes against the published SHA256SUMS.txt BEFORE we
+  // ever write, chmod, or execute them. The checksum is the trust decision — we
+  // must not run the untrusted binary as a "sanity check".
+  const sums = rel.assets.find((x) => x.name === `${asset}.sha256`);
+  if (!sums) {
+    console.error(`Release ${rel.tag_name} has no "${asset}.sha256" — refusing to update.`);
+    process.exit(1);
+  }
+  const sumsRes = await fetch(sums.browser_download_url, {
+    headers: { 'User-Agent': 'tether-update' },
+  });
+  if (!sumsRes.ok) {
+    console.error(`Could not fetch checksums (${sumsRes.status}). Aborting.`);
+    process.exit(1);
+  }
+  const expected = digestForAsset(await sumsRes.text(), asset);
+  if (!expected) {
+    console.error(`No published checksum for "${asset}". Aborting.`);
+    process.exit(1);
+  }
+  if (!verifyDigest(new Uint8Array(bytes), expected)) {
+    console.error('Update checksum mismatch — aborting (possible tampering).');
+    process.exit(1);
+  }
+
   let tmp: string;
   let staging: string | null = null;
   if (asset.endsWith('.tar.gz')) {
@@ -93,23 +135,14 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
   }
   chmodSync(tmp, 0o755);
 
-  // Sanity-check the downloaded binary before swapping it in.
-  const check = Bun.spawnSync([tmp, 'version']);
-  const printed = check.stdout.toString().trim();
-  if (!check.success || printed !== rel.tag_name) {
-    console.error(`Downloaded binary failed self-check (got "${printed}"). Aborting.`);
-    if (staging) rmSync(staging, { recursive: true, force: true });
-    process.exit(1);
-  }
-
   const wasRunning = ctx.runningPid() !== null;
   renameSync(tmp, target); // atomic swap; running process keeps the old inode
   if (staging) rmSync(staging, { recursive: true, force: true });
   console.log(`Updated to ${rel.tag_name}.`);
   if (wasRunning) {
     console.log('Restarting server…');
-    ctx.stop();
-    ctx.start();
+    await ctx.stop();
+    await ctx.start();
   } else {
     console.log('Server not running. Start it with: tether start');
   }

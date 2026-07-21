@@ -1,18 +1,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
+import {
+  createContext,
+  type PropsWithChildren,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useColorScheme } from 'react-native';
 import {
   APP_THEMES,
+  type AppTheme,
+  type DarkFlavor,
   DEFAULT_SYSTEM_DARK_FLAVOR,
   DEFAULT_THEME_PREFERENCE,
   parseDarkFlavor,
   parseThemePreference,
   resolveFlavor,
-  selectThemePreference,
   SYSTEM_DARK_THEME_STORAGE_KEY,
+  selectThemePreference,
   THEME_STORAGE_KEY,
-  type AppTheme,
-  type DarkFlavor,
   type ThemePreference,
 } from './appTheme';
 
@@ -42,15 +50,20 @@ export function AppThemeProvider({ children }: PropsWithChildren) {
       .catch(() => {});
   }, []);
 
-  const setPreference = useCallback((next: ThemePreference) => {
-    const selected = selectThemePreference(preference, systemDarkFlavor, next);
-    setPreferenceState(selected.preference);
-    setSystemDarkFlavor(selected.systemDarkFlavor);
-    if (selected.systemDarkFlavor !== systemDarkFlavor) {
-      void AsyncStorage.setItem(SYSTEM_DARK_THEME_STORAGE_KEY, selected.systemDarkFlavor).catch(() => {});
-    }
-    void AsyncStorage.setItem(THEME_STORAGE_KEY, next).catch(() => {});
-  }, [preference, systemDarkFlavor]);
+  const setPreference = useCallback(
+    (next: ThemePreference) => {
+      const selected = selectThemePreference(preference, systemDarkFlavor, next);
+      setPreferenceState(selected.preference);
+      setSystemDarkFlavor(selected.systemDarkFlavor);
+      if (selected.systemDarkFlavor !== systemDarkFlavor) {
+        void AsyncStorage.setItem(SYSTEM_DARK_THEME_STORAGE_KEY, selected.systemDarkFlavor).catch(
+          () => {},
+        );
+      }
+      void AsyncStorage.setItem(THEME_STORAGE_KEY, next).catch(() => {});
+    },
+    [preference, systemDarkFlavor],
+  );
 
   const flavor = resolveFlavor(preference, systemScheme, systemDarkFlavor);
   const value = useMemo(

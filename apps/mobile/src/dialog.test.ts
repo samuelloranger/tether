@@ -44,13 +44,19 @@ test('a second notify() while one is pending queues instead of replacing it', as
   await Promise.resolve();
 
   // Still showing the first one — the second hasn't been announced to the listener yet.
-  const firstReq = seen[seen.length - 1] as Extract<import('./dialog').AlertRequest, { kind: 'notify' }>;
+  const firstReq = seen[seen.length - 1] as Extract<
+    import('./dialog').AlertRequest,
+    { kind: 'notify' }
+  >;
   expect(firstReq.title).toBe('First');
 
   firstReq.resolve();
   await expect(first).resolves.toBeUndefined();
 
-  const secondReq = seen[seen.length - 1] as Extract<import('./dialog').AlertRequest, { kind: 'notify' }>;
+  const secondReq = seen[seen.length - 1] as Extract<
+    import('./dialog').AlertRequest,
+    { kind: 'notify' }
+  >;
   expect(secondReq.title).toBe('Second');
   secondReq.resolve();
   await expect(second).resolves.toBeUndefined();
@@ -67,7 +73,10 @@ test('confirmAction resolves true when the confirm button fires', async () => {
   });
   await Promise.resolve();
 
-  const req = seen[seen.length - 1] as Extract<import('./dialog').AlertRequest, { kind: 'confirm' }>;
+  const req = seen[seen.length - 1] as Extract<
+    import('./dialog').AlertRequest,
+    { kind: 'confirm' }
+  >;
   expect(req.kind).toBe('confirm');
   expect(req.confirmLabel).toBe('Kill');
   expect(req.destructive).toBe(true);
@@ -84,7 +93,10 @@ test('confirmAction resolves false when cancel fires', async () => {
   const pending = confirmAction('Kill session?', 'This cannot be undone.');
   await Promise.resolve();
 
-  const req = seen[seen.length - 1] as Extract<import('./dialog').AlertRequest, { kind: 'confirm' }>;
+  const req = seen[seen.length - 1] as Extract<
+    import('./dialog').AlertRequest,
+    { kind: 'confirm' }
+  >;
   req.resolve(false);
   await expect(pending).resolves.toBe(false);
   unsub();

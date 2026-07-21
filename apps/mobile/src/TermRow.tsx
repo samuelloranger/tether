@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, type TextStyle } from 'react-native';
-import type { RenderRow, CellStyle } from './terminal';
-import { splitRunByLinks, urlColumns, type LinkTarget } from './links';
-import { isDesktop } from './platform';
+import { StyleSheet, Text, type TextStyle, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
+import { type LinkTarget, splitRunByLinks, urlColumns } from './links';
+import { isDesktop } from './platform';
+import type { CellStyle, RenderRow } from './terminal';
 
 function runToStyle(
   s: CellStyle,
@@ -85,7 +85,13 @@ export const TermRow = React.memo(
           selectable={isDesktop}
         >
           {row.runs.map((run, i) => {
-            const st = runToStyle(run.style, blinkOn, cursorStyle, theme.colors.accent, theme.colors.accentText);
+            const st = runToStyle(
+              run.style,
+              blinkOn,
+              cursorStyle,
+              theme.colors.accent,
+              theme.colors.accentText,
+            );
             const segs = splitRunByLinks(run.text, col, urlAt);
             col += run.text.length;
             return segs.map((seg, j) =>
@@ -95,7 +101,10 @@ export const TermRow = React.memo(
                   style={[st, styles.link]}
                   onPress={(e) => {
                     if (isDesktop) {
-                      const mods = e.nativeEvent as unknown as { ctrlKey?: boolean; metaKey?: boolean };
+                      const mods = e.nativeEvent as unknown as {
+                        ctrlKey?: boolean;
+                        metaKey?: boolean;
+                      };
                       if (!mods.ctrlKey && !mods.metaKey) return;
                     }
                     onOpenLink(seg.target!);

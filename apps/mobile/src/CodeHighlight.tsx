@@ -1,5 +1,5 @@
-import { Text, type TextStyle } from 'react-native';
 import { Highlight, Prism, type PrismTheme } from 'prism-react-renderer';
+import { Text, type TextStyle } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { languageForPath } from './codeLanguage';
@@ -77,7 +77,10 @@ const TOKEN_STYLE_GROUPS: Array<{ types: string[]; colorKey: keyof AppColors }> 
   { types: ['punctuation'], colorKey: 'text' },
   { types: ['property', 'tag', 'constant', 'symbol', 'deleted'], colorKey: 'danger' },
   { types: ['boolean', 'number'], colorKey: 'warning' },
-  { types: ['selector', 'attr-name', 'string', 'char', 'builtin', 'inserted'], colorKey: 'success' },
+  {
+    types: ['selector', 'attr-name', 'string', 'char', 'builtin', 'inserted'],
+    colorKey: 'success',
+  },
   { types: ['operator', 'entity', 'url'], colorKey: 'info' },
   { types: ['atrule', 'attr-value', 'keyword'], colorKey: 'accent' },
   { types: ['function', 'class-name'], colorKey: 'info' },

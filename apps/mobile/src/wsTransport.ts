@@ -21,7 +21,6 @@ export interface TransportHandlers {
   onClose: () => void;
 }
 
-
 let connSeq = 0;
 
 function openRnSocket(
@@ -121,7 +120,9 @@ export function openTerminalSocket(
   // server would reject /api/ws with 401. Only native RN (header supported) and
   // Tauri (Rust bridge) can connect. Surface it as an immediate close.
   if (Platform.OS === 'web') {
-    console.warn('Terminal connection needs the desktop app (browser WebSockets cannot authenticate).');
+    console.warn(
+      'Terminal connection needs the desktop app (browser WebSockets cannot authenticate).',
+    );
     setTimeout(() => h.onClose(), 0);
     return { send: () => {}, close: () => {} };
   }

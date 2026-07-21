@@ -1,5 +1,5 @@
-import type { TerminalEmulator } from './terminal';
 import type { DiffSummary } from './diffModel';
+import type { TerminalEmulator } from './terminal';
 
 export interface SessionEntry {
   term: TerminalEmulator;
@@ -14,12 +14,21 @@ export interface SessionEntry {
 export class SessionCache {
   private map = new Map<string, SessionEntry>();
   private order: string[] = []; // most-recent first
+  private cap: number;
   constructor(
-    private cap = 3,
+    cap = 3,
     private onEvict?: (id: string, entry: SessionEntry) => void,
-  ) {}
+  ) {
+    // Guard against cap < 1, which would make touch() evict the entry it just
+    // created.
+    this.cap = Math.max(1, cap);
+  }
 
   get(id: string): SessionEntry | undefined {
+    return this.map.get(id);
+  }
+  // Read an entry without touching LRU order — safe to call during render.
+  peek(id: string): SessionEntry | undefined {
     return this.map.get(id);
   }
   has(id: string): boolean {

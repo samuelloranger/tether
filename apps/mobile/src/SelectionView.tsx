@@ -1,6 +1,14 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { type RefObject, useEffect, useRef, useState } from 'react';
+import {
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 
@@ -50,7 +58,10 @@ export function SelectionView({
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View
-        style={[styles.selectionViewContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+        style={[
+          styles.selectionViewContainer,
+          { paddingTop: insets.top, paddingBottom: insets.bottom },
+        ]}
       >
         <View style={styles.selectionViewHeader}>
           <Text style={styles.selectionViewTitle} numberOfLines={1} ellipsizeMode="tail">
@@ -83,7 +94,11 @@ export function SelectionView({
           // no line-count/font-size arithmetic, so it's correct regardless of
           // font size, device width, or line wrapping.
           <Text
-            style={[styles.selectionViewText, { fontFamily, fontSize, lineHeight }, styles.selectionViewMeasure]}
+            style={[
+              styles.selectionViewText,
+              { fontFamily, fontSize, lineHeight },
+              styles.selectionViewMeasure,
+            ]}
             onLayout={(e) => setMeasuredHeight(e.nativeEvent.layout.height)}
           >
             {text}
@@ -123,57 +138,57 @@ export function SelectionView({
 
 function createStyles(c: AppColors) {
   return StyleSheet.create({
-  selectionViewContainer: {
-    flex: 1,
-    backgroundColor: c.background,
-  },
-  selectionViewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: c.border,
-  },
-  selectionViewTitle: {
-    flexShrink: 1,
-    marginRight: 12,
-    fontSize: 16,
-    fontWeight: '700',
-    color: c.text,
-  },
-  selectionViewHeaderBtn: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-  },
-  searchInput: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    backgroundColor: c.input,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    color: c.text,
-    fontSize: 14,
-  },
-  selectionViewScroll: {
-    flex: 1,
-  },
-  selectionViewScrollContent: {
-    padding: 16,
-  },
-  selectionViewText: {
-    color: c.text,
-  },
-  // Same horizontal padding as selectionViewScrollContent, so the invisible
-  // measurement pass wraps lines identically to the real scroll content.
-  selectionViewMeasure: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    paddingHorizontal: 16,
-    opacity: 0,
-  },
+    selectionViewContainer: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    selectionViewHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    selectionViewTitle: {
+      flexShrink: 1,
+      marginRight: 12,
+      fontSize: 16,
+      fontWeight: '700',
+      color: c.text,
+    },
+    selectionViewHeaderBtn: {
+      paddingHorizontal: 4,
+      paddingVertical: 4,
+    },
+    searchInput: {
+      marginHorizontal: 16,
+      marginBottom: 8,
+      backgroundColor: c.input,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      color: c.text,
+      fontSize: 14,
+    },
+    selectionViewScroll: {
+      flex: 1,
+    },
+    selectionViewScrollContent: {
+      padding: 16,
+    },
+    selectionViewText: {
+      color: c.text,
+    },
+    // Same horizontal padding as selectionViewScrollContent, so the invisible
+    // measurement pass wraps lines identically to the real scroll content.
+    selectionViewMeasure: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      paddingHorizontal: 16,
+      opacity: 0,
+    },
   });
 }

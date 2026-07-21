@@ -1,5 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
 import { normalizeTokens, Prism } from 'prism-react-renderer';
+import { StyleSheet, Text, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { colorForTokenTypes } from './CodeHighlight';
 import { languageForPath } from './codeLanguage';
@@ -39,7 +39,10 @@ export function DiffLines({ diffText, path }: { diffText: string; path: string }
             <View key={index} style={[styles.hunkRow, { borderTopColor: theme.colors.border }]}>
               <Text style={[styles.hunkLabel, { color: theme.colors.textFaint }]}>⋯</Text>
               {hunkContext ? (
-                <Text numberOfLines={1} style={[styles.hunkContext, { color: theme.colors.textFaint }]}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.hunkContext, { color: theme.colors.textFaint }]}
+                >
                   {hunkContext}
                 </Text>
               ) : null}
@@ -58,16 +61,26 @@ export function DiffLines({ diffText, path }: { diffText: string; path: string }
             : line.kind === 'remove'
               ? theme.colors.danger
               : theme.colors.textFaint;
-        const tokens = grammar ? (normalizeTokens(Prism.tokenize(line.content, grammar))[0] ?? []) : null;
+        const tokens = grammar
+          ? (normalizeTokens(Prism.tokenize(line.content, grammar))[0] ?? [])
+          : null;
         return (
           <View key={index} style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}>
             <Text
-              style={[styles.gutterNum, TEXT_METRICS, { width: numberWidth, color: theme.colors.textFaint }]}
+              style={[
+                styles.gutterNum,
+                TEXT_METRICS,
+                { width: numberWidth, color: theme.colors.textFaint },
+              ]}
             >
               {line.oldLine ?? ''}
             </Text>
             <Text
-              style={[styles.gutterNum, TEXT_METRICS, { width: numberWidth, color: theme.colors.textFaint }]}
+              style={[
+                styles.gutterNum,
+                TEXT_METRICS,
+                { width: numberWidth, color: theme.colors.textFaint },
+              ]}
             >
               {line.newLine ?? ''}
             </Text>

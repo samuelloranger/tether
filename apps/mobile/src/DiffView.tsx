@@ -1,8 +1,15 @@
 import { useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
-import { buildFileTree, displayDiff, isImagePath, type DiffSummary } from './diffModel';
 import { DiffLines } from './DiffLines';
+import { buildFileTree, type DiffSummary, displayDiff, isImagePath } from './diffModel';
 import { FileTree } from './FileTree';
 import { ImageDiff } from './ImageDiff';
 
@@ -94,7 +101,12 @@ export function DiffView({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, minHeight: 48 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 48,
+  },
   back: { paddingHorizontal: 16, paddingVertical: 12 },
   backText: { ...TEXT_METRICS },
   path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
