@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.15.1",
+          "date": "2026-07-21",
+          "localizedDescription": "## What's Changed\n* fix(desktop): open links from AppImage installs by stripping runtime env by @samuelloranger in https://github.com/samuelloranger/tether/pull/48\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.0...v1.15.1",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.15.1/tether.ipa",
+          "size": 8654294,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.15.0",
           "date": "2026-07-21",
           "localizedDescription": "## What's Changed\n* Session auto-titles from OSC 0/2, cwd, and command by @samuelloranger in https://github.com/samuelloranger/tether/pull/46\n* Git diff view v2: staging, commits, history, side-by-side by @samuelloranger in https://github.com/samuelloranger/tether/pull/47\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.14.0...v1.15.0",
