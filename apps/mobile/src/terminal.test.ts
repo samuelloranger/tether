@@ -745,4 +745,16 @@ setTheme(APP_THEMES.mocha.terminal);
   eq(tight.slice(0, 3), ['abcdef', 'ghijKL', 'Mno'], 'reflow re-splits history when narrowed');
 }
 
+// 66. Combined cols+rows resize (rotation): rows pushed into scrollback by the
+// shrink are rewrapped at the new width too.
+{
+  const t = new TerminalEmulator(10, 4);
+  t.write('abcdefghijKLMno\r\nx'); // wrapped pair on rows 0-1, cursor line 'x' on row 2
+  t.resize(20, 2); // widen + shrink rows in ONE call
+  const rows = t
+    .getSnapshot()
+    .map((r) => r.runs.map((x) => x.text).join('').replace(/\s+$/, ''));
+  eq(rows[0], 'abcdefghijKLMno', 'combined resize reflows rows the shrink pushed to scrollback');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

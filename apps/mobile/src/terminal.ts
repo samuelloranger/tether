@@ -322,16 +322,12 @@ export class TerminalEmulator {
 
   resize(cols: number, rows: number) {
     if (cols === this.cols && rows === this.rows) return;
-    // Width changed → re-wrap scrollback history at the new width so old
-    // output doesn't stay ragged after a font-size change or rotation. The
-    // live screen is left alone: the shell/TUI repaints it on SIGWINCH, and
-    // leaving it keeps the cursor math untouched.
-    if (cols !== this.cols && !this.inAlt) this.reflowScrollback(cols);
+    const colsChanged = cols !== this.cols;
     this.cols = cols;
     // Rows: shrink moves TOP lines into scrollback so the bottom (where the
     // prompt lives) stays visible — this runs on every keyboard show/hide.
     // Grow pulls them back. Alt-screen apps repaint on SIGWINCH, so there we
-    // just truncate/pad. No column reflow (xterm doesn't reflow either).
+    // just truncate/pad.
     while (this.screen.length > rows) {
       if (!this.inAlt && this.cy > 0) {
         const top = this.screen.shift()!;
@@ -350,6 +346,14 @@ export class TerminalEmulator {
         this.screen.push(blankLine(cols));
       }
     }
+    // Width changed → re-wrap scrollback history at the new width so old
+    // output doesn't stay ragged after a font-size change or rotation. Runs
+    // AFTER the row loops above so screen rows a shrink just pushed into
+    // scrollback get rewrapped too (a combined cols+rows resize — rotation —
+    // would otherwise leave them at the old width). The live screen is left
+    // alone: the shell/TUI repaints it on SIGWINCH, and leaving it keeps the
+    // cursor math untouched.
+    if (colsChanged && !this.inAlt) this.reflowScrollback(cols);
     this.rows = rows;
     this.screen = this.screen.map((l) => this.fitLine(l, cols));
     this.cx = Math.min(this.cx, cols - 1);
