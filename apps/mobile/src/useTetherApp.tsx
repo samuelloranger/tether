@@ -54,7 +54,7 @@ import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
 import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
-import { applyFieldChange, SENT } from './input';
+import { applyBackspaceStreak, applyFieldChange, EMPTY_STREAK, SENT } from './input';
 import type { LinkTarget } from './links';
 import { mouseSeq } from './mouseSeq';
 import { OverflowMenu } from './OverflowMenu';
@@ -158,6 +158,7 @@ export function useTetherApp() {
   const [inputText, setInputText] = useState(SENT);
   // Mirrors the field's last value so onChangeText can diff against it.
   const prevValueRef = useRef(SENT);
+  const backspaceStreakRef = useRef(EMPTY_STREAK);
   // Set when handleKeyPress has already emitted a Ctrl-combo byte, so the
   // following onChangeText absorbs that char without re-sending it.
   const skipNextChangeRef = useRef(false);
@@ -1248,6 +1249,7 @@ export function useTetherApp() {
   const resetField = () => {
     setInputText(SENT);
     prevValueRef.current = SENT;
+    backspaceStreakRef.current = EMPTY_STREAK;
   };
 
   // Every field mutation (typing, dictation, swipe, autocorrect, Backspace)
@@ -1260,9 +1262,16 @@ export function useTetherApp() {
       resetField();
       return;
     }
-    const { bytes, value } = applyFieldChange(prevValueRef.current, next);
+    const { bytes, value, fromEmptyBuffer } = applyFieldChange(prevValueRef.current, next);
     if (bytes) {
-      sendInput(bytes);
+      const tracked = applyBackspaceStreak(
+        backspaceStreakRef.current,
+        bytes,
+        fromEmptyBuffer,
+        Date.now(),
+      );
+      backspaceStreakRef.current = tracked.streak;
+      sendInput(tracked.bytes);
       autoScroll.current = true;
     }
     // Keep the controlled value AND the diff baseline in lockstep — otherwise

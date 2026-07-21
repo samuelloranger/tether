@@ -121,7 +121,7 @@ export function DiffView({
   const renderDiffBody = (text: string, truncated: boolean, path: string, hunks: boolean) => (
     <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
       {splitView ? (
-        <SideBySideDiff diffText={displayDiff(text, truncated)} />
+        <SideBySideDiff diffText={displayDiff(text, truncated)} path={path} />
       ) : (
         <DiffLines
           diffText={displayDiff(text, truncated)}
