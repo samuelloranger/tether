@@ -1,5 +1,5 @@
 import { normalizeTokens, Prism } from 'prism-react-renderer';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { colorForTokenTypes } from './CodeHighlight';
 import { languageForPath } from './codeLanguage';
@@ -13,7 +13,20 @@ const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$/;
 // than the whole diff blob at once) so hunk gaps and interleaved +/- markup
 // never corrupt the grammar — see CodeHighlight's `path` doc comment for why
 // that matters.
-export function DiffLines({ diffText, path }: { diffText: string; path: string }) {
+export function DiffLines({
+  diffText,
+  path,
+  onHunkPress,
+  hunkActionLabel,
+}: {
+  diffText: string;
+  path: string;
+  // Stage/unstage affordance on each hunk header. The index passed is the
+  // ordinal over @@ headers — the same numbering the server's hunk endpoints
+  // consume (its splitHunks counts identically).
+  onHunkPress?: (hunkIndex: number) => void;
+  hunkActionLabel?: string;
+}) {
   const { theme } = useAppTheme();
   const language = languageForPath(path);
   const grammar = language ? Prism.languages[language] : undefined;
@@ -30,11 +43,16 @@ export function DiffLines({ diffText, path }: { diffText: string; path: string }
   );
   const numberWidth = String(maxLineNumber).length * 8 + 4;
 
+  // Ordinal over the hunk headers that survive the filter above — identical to
+  // the unfiltered ordinal since only non-hunk meta lines were dropped.
+  let hunkIndex = -1;
   return (
     <View style={styles.root}>
       {lines.map((line, index) => {
         const hunkContext = line.kind === 'meta' ? line.text.match(HUNK_HEADER)?.[1] : undefined;
         if (hunkContext !== undefined) {
+          hunkIndex++;
+          const thisHunk = hunkIndex;
           return (
             <View key={index} style={[styles.hunkRow, { borderTopColor: theme.colors.border }]}>
               <Text style={[styles.hunkLabel, { color: theme.colors.textFaint }]}>⋯</Text>
@@ -45,6 +63,18 @@ export function DiffLines({ diffText, path }: { diffText: string; path: string }
                 >
                   {hunkContext}
                 </Text>
+              ) : null}
+              {onHunkPress ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`${hunkActionLabel ?? 'Stage'} hunk ${thisHunk + 1}`}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={() => onHunkPress(thisHunk)}
+                >
+                  <Text style={[styles.hunkAction, { color: theme.colors.accent }]}>
+                    {hunkActionLabel ?? 'Stage'}
+                  </Text>
+                </TouchableOpacity>
               ) : null}
             </View>
           );
@@ -118,6 +148,7 @@ const styles = StyleSheet.create({
   },
   hunkLabel: { fontFamily: 'monospace', fontSize: 12 },
   hunkContext: { fontFamily: 'monospace', fontSize: 12, flexShrink: 1 },
+  hunkAction: { fontSize: 12, fontWeight: '600', paddingHorizontal: 8 },
   row: { flexDirection: 'row', alignItems: 'flex-start' },
   gutterNum: { fontFamily: 'monospace', fontSize: 14, textAlign: 'right', marginRight: 8 },
   marker: { fontFamily: 'monospace', fontSize: 14, width: 12 },

@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
-const MAX_DIFF_BYTES = 1_048_576;
+export const MAX_DIFF_BYTES = 1_048_576;
 
 const IMAGE_EXTENSIONS = new Set([
   '.png',
@@ -33,6 +33,9 @@ export interface DiffFileStat {
   insertions: number;
   deletions: number;
   binary: boolean;
+  // Index (staged) vs working-tree (unstaged) side. A partially staged file
+  // appears twice, once per side. Absent on older payloads.
+  staged?: boolean;
 }
 
 export interface DiffSummary {
@@ -158,20 +161,40 @@ function untrackedNumstat(root: string, requestedPath: string): DiffFileStat {
 }
 
 export function readDiffSummary(root: string): DiffSummary {
-  const out = runGit(root, ['diff', 'HEAD', '--numstat', '-z']);
-  const tracked = parseNumstatZ(out).map(({ insertions, deletions, binary, path }) => ({
-    path,
+  // Index vs HEAD (staged) and working tree vs index (unstaged), so the client
+  // can group files the way `git status` does. A path with both staged and
+  // unstaged edits yields one entry per side.
+  const pick = ({
     insertions,
     deletions,
     binary,
+    path,
+  }: ReturnType<typeof parseNumstatZ>[number]) => ({ path, insertions, deletions, binary });
+  const staged = parseNumstatZ(runGit(root, ['diff', '--cached', '--numstat', '-z'])).map((r) => ({
+    ...pick(r),
+    staged: true,
   }));
-  const untracked = listUntrackedFiles(root).map((p) => untrackedNumstat(root, p));
-  return { files: [...tracked, ...untracked] };
+  const unstaged = parseNumstatZ(runGit(root, ['diff', '--numstat', '-z'])).map((r) => ({
+    ...pick(r),
+    staged: false,
+  }));
+  const untracked = listUntrackedFiles(root).map((p) => ({
+    ...untrackedNumstat(root, p),
+    staged: false,
+  }));
+  return { files: [...staged, ...unstaged, ...untracked] };
 }
+
+// mode selects the comparison for per-file diffs: 'head' (HEAD vs working
+// tree — the pre-v2 behavior), 'staged' (HEAD vs index), or 'unstaged'
+// (index vs working tree). The staged/unstaged views line up hunk-for-hunk
+// with what gitOps' stage-hunk/unstage-hunk operate on.
+export type DiffMode = 'head' | 'staged' | 'unstaged';
 
 export async function readDiff(
   root: string,
   requestedPath?: string,
+  mode: DiffMode = 'head',
 ): Promise<{ diff: string; truncated: boolean }> {
   validatePath(requestedPath);
 
@@ -188,8 +211,14 @@ export async function readDiff(
     return { diff: out.toString('utf8'), truncated: false };
   }
 
+  // 'unstaged' must also cover files git doesn't track yet (index has nothing
+  // to compare) — those fall through to the /dev/null no-index diff below.
+  const inIndex = mode === 'unstaged' ? isTracked(root, requestedPath) : false;
   let out: Buffer;
-  if (isTracked(root, requestedPath)) {
+  if (mode !== 'head' && (mode === 'staged' || inIndex)) {
+    const modeArgs = mode === 'staged' ? ['diff', '--cached'] : ['diff'];
+    out = await runGitDiff(root, [...modeArgs, '--', requestedPath]);
+  } else if (isTracked(root, requestedPath)) {
     const renameRecord = parseNumstatZ(runGit(root, ['diff', 'HEAD', '--numstat', '-z'])).find(
       (r) => r.path === requestedPath && r.oldPath,
     );
