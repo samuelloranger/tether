@@ -1,8 +1,11 @@
-import { beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { app } from './app';
 import { setAuthHash } from './db';
 
 beforeEach(() => setAuthHash(null));
+// Reset after each too: these tests share the DB with the rest of the suite, so
+// a left-behind hash would fail auth.test's "no hash set" case when ordered after.
+afterEach(() => setAuthHash(null));
 
 test('setup rejects a cross-site Origin', async () => {
   const res = await app.request('/api/setup', {
