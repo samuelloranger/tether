@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.15.4",
+          "date": "2026-07-21",
+          "localizedDescription": "## What's Changed\n* fix(mobile): overlay reconnect banner so it stops resizing the terminal by @samuelloranger in https://github.com/samuelloranger/tether/pull/51\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.3...v1.15.4",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.15.4/tether.ipa",
+          "size": 8655994,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.15.3",
           "date": "2026-07-21",
           "localizedDescription": "## What's Changed\n* fix(desktop): steady caret when unfocused + kill refocus resize churn by @samuelloranger in https://github.com/samuelloranger/tether/pull/50\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.2...v1.15.3",
