@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
-import { subscribeAlert, type AlertRequest } from './dialog';
+import { type AlertRequest, subscribeAlert } from './dialog';
 
 // Desktop in-app replacement for native OS alert/confirm dialogs (see dialog.ts
 // for why). Renders nothing when no alert is pending.

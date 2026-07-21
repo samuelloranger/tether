@@ -1,5 +1,5 @@
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { FileTreeNode } from './diffModel';
 
@@ -39,7 +39,10 @@ export function FileTree({
                   color={theme.colors.textMuted}
                 />
                 <Feather name="folder" size={13} color={theme.colors.textMuted} />
-                <Text numberOfLines={1} style={[styles.dirLabel, { color: theme.colors.textMuted }]}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.dirLabel, { color: theme.colors.textMuted }]}
+                >
                   {node.name}
                 </Text>
               </TouchableOpacity>
@@ -81,9 +84,20 @@ export function FileTree({
 }
 
 const styles = StyleSheet.create({
-  dirRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingRight: 8 },
+  dirRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingRight: 8,
+  },
   dirLabel: { fontFamily: 'monospace', fontSize: 13 },
-  fileRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, paddingRight: 8 },
+  fileRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingRight: 8,
+  },
   filePath: { fontFamily: 'monospace', flex: 1, marginRight: 12 },
   fileStat: { fontFamily: 'monospace' },
 });

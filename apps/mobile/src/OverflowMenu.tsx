@@ -1,10 +1,10 @@
-import { Modal, Pressable, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Feather from '@expo/vector-icons/Feather';
-import { isDesktop } from './platform';
-import { desktopNavigationLabel, type DesktopNavigationMode } from './desktopNavigation';
+import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { type DesktopNavigationMode, desktopNavigationLabel } from './desktopNavigation';
+import { isDesktop } from './platform';
 
 // Header ⋯ overflow menu. Actions are passed in; the parent closes the menu.
 export function OverflowMenu({
@@ -114,7 +114,12 @@ export function OverflowMenu({
                       accessibilityState={{ selected: active }}
                       accessibilityLabel={`Navigation: ${desktopNavigationLabel(mode)}`}
                     >
-                      <Text style={[styles.navigationButtonText, active && styles.navigationButtonTextActive]}>
+                      <Text
+                        style={[
+                          styles.navigationButtonText,
+                          active && styles.navigationButtonTextActive,
+                        ]}
+                      >
                         {desktopNavigationLabel(mode)}
                       </Text>
                     </TouchableOpacity>
@@ -131,7 +136,9 @@ export function OverflowMenu({
           )}
           <TouchableOpacity style={styles.menuRow} onPress={onRestart}>
             <Feather name="refresh-cw" size={16} color={theme.colors.danger} />
-            <Text style={[styles.menuRowText, { color: theme.colors.danger }]}>Restart terminal</Text>
+            <Text style={[styles.menuRowText, { color: theme.colors.danger }]}>
+              Restart terminal
+            </Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>
@@ -139,89 +146,90 @@ export function OverflowMenu({
   );
 }
 
-const createStyles = (c: AppColors) => StyleSheet.create({
-  overflowMenuBackdrop: {
-    flex: 1,
-    backgroundColor: c.overlay,
-    justifyContent: 'flex-start',
-    alignItems: 'flex-end',
-  },
-  menuPanel: {
-    alignSelf: 'flex-end',
-    marginRight: 12,
-    minWidth: 240,
-    backgroundColor: c.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: c.border,
-    paddingVertical: 6,
-  },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  menuRowText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: c.text,
-  },
-  fontStepBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
-    backgroundColor: c.surfaceRaised,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fontStepText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: c.text,
-  },
-  fontSizeValue: {
-    minWidth: 24,
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '700',
-    color: c.text,
-  },
-  navigationSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: c.border,
-  },
-  navigationLabel: {
-    marginBottom: 7,
-    color: c.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-  },
-  navigationButtons: {
-    flexDirection: 'row',
-    gap: 5,
-  },
-  navigationButton: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: 6,
-    backgroundColor: c.surfaceRaised,
-    paddingVertical: 7,
-  },
-  navigationButtonActive: {
-    backgroundColor: c.selected,
-  },
-  navigationButtonText: {
-    color: c.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  navigationButtonTextActive: {
-    color: c.accent,
-  },
-});
+const createStyles = (c: AppColors) =>
+  StyleSheet.create({
+    overflowMenuBackdrop: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: 'flex-start',
+      alignItems: 'flex-end',
+    },
+    menuPanel: {
+      alignSelf: 'flex-end',
+      marginRight: 12,
+      minWidth: 240,
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: 6,
+    },
+    menuRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    menuRowText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: c.text,
+    },
+    fontStepBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: 6,
+      backgroundColor: c.surfaceRaised,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    fontStepText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: c.text,
+    },
+    fontSizeValue: {
+      minWidth: 24,
+      textAlign: 'center',
+      fontSize: 14,
+      fontWeight: '700',
+      color: c.text,
+    },
+    navigationSection: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderTopWidth: 1,
+      borderTopColor: c.border,
+    },
+    navigationLabel: {
+      marginBottom: 7,
+      color: c.textMuted,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.7,
+      textTransform: 'uppercase',
+    },
+    navigationButtons: {
+      flexDirection: 'row',
+      gap: 5,
+    },
+    navigationButton: {
+      flex: 1,
+      alignItems: 'center',
+      borderRadius: 6,
+      backgroundColor: c.surfaceRaised,
+      paddingVertical: 7,
+    },
+    navigationButtonActive: {
+      backgroundColor: c.selected,
+    },
+    navigationButtonText: {
+      color: c.textMuted,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    navigationButtonTextActive: {
+      color: c.accent,
+    },
+  });

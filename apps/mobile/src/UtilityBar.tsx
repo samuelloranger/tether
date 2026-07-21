@@ -1,10 +1,10 @@
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Keyboard } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import * as Haptics from 'expo-haptics';
-import { ArrowCluster } from './Dpad';
-import { MONO } from './styles';
+import { Keyboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { ArrowCluster } from './Dpad';
+import { MONO } from './styles';
 
 // Mobile terminal-shortcuts utility bar — desktop uses the real keyboard.
 export function UtilityBar({
@@ -39,7 +39,9 @@ export function UtilityBar({
             setCtrlArmed((v) => !v);
           }}
         >
-          <Text style={[styles.utilityBtnText, ctrlArmed && styles.utilityBtnTextActive]}>Ctrl</Text>
+          <Text style={[styles.utilityBtnText, ctrlArmed && styles.utilityBtnTextActive]}>
+            Ctrl
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.utilityBtn}
@@ -116,49 +118,50 @@ export function UtilityBar({
   );
 }
 
-const createStyles = (c: AppColors) => StyleSheet.create({
-  utilityBar: {
-    backgroundColor: c.surface,
-    borderTopWidth: 1,
-    borderTopColor: c.border,
-    paddingVertical: 8,
-  },
-  utilityScroll: {
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    gap: 6,
-  },
-  utilityBtn: {
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: c.surfaceRaised,
-  },
-  utilityBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    fontFamily: MONO,
-    color: c.text,
-  },
-  utilityBtnActive: {
-    backgroundColor: c.accent,
-  },
-  utilityBtnTextActive: {
-    color: c.accentText,
-  },
-  utilityIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: c.surfaceRaised,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  utilityGroupDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: c.border,
-    marginHorizontal: 2,
-  },
-});
+const createStyles = (c: AppColors) =>
+  StyleSheet.create({
+    utilityBar: {
+      backgroundColor: c.surface,
+      borderTopWidth: 1,
+      borderTopColor: c.border,
+      paddingVertical: 8,
+    },
+    utilityScroll: {
+      paddingHorizontal: 12,
+      alignItems: 'center',
+      gap: 6,
+    },
+    utilityBtn: {
+      height: 40,
+      justifyContent: 'center',
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      backgroundColor: c.surfaceRaised,
+    },
+    utilityBtnText: {
+      fontSize: 13,
+      fontWeight: '700',
+      fontFamily: MONO,
+      color: c.text,
+    },
+    utilityBtnActive: {
+      backgroundColor: c.accent,
+    },
+    utilityBtnTextActive: {
+      color: c.accentText,
+    },
+    utilityIconBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: c.surfaceRaised,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    utilityGroupDivider: {
+      width: 1,
+      height: 24,
+      backgroundColor: c.border,
+      marginHorizontal: 2,
+    },
+  });

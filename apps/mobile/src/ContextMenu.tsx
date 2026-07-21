@@ -1,5 +1,5 @@
-import { Modal, Pressable, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 
@@ -64,23 +64,23 @@ export function ContextMenu({
 
 function createStyles(c: AppColors) {
   return StyleSheet.create({
-  ctxBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 200 },
-  ctxMenu: {
-    position: 'absolute',
-    minWidth: 168,
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 8,
-    paddingVertical: 4,
-  },
-  ctxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  ctxText: { color: c.text, fontSize: 13 },
+    ctxBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 200 },
+    ctxMenu: {
+      position: 'absolute',
+      minWidth: 168,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 8,
+      paddingVertical: 4,
+    },
+    ctxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+    },
+    ctxText: { color: c.text, fontSize: 13 },
   });
 }

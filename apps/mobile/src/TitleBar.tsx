@@ -3,19 +3,20 @@
 // interactive controls opt out via NO_DRAG_PROPS. macOS keeps native traffic
 // lights (we reserve a left inset); Windows/Linux get the custom min/max/close
 // cluster on the right. See src/titlebarChrome.ts for the per-OS decisions.
-import { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+
 import Feather from '@expo/vector-icons/Feather';
-import { titlebarChrome } from './titlebarChrome';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { DRAG_PROPS, NO_DRAG_PROPS } from './dragRegion';
+import { titlebarChrome } from './titlebarChrome';
 import {
-  minimizeWindow,
-  toggleMaximizeWindow,
   closeWindow,
-  onMaximizeChange,
+  minimizeWindow,
   onFullscreenChange,
+  onMaximizeChange,
+  toggleMaximizeWindow,
 } from './windowControls';
 
 export interface TitleBarProps {
@@ -195,44 +196,63 @@ export default function TitleBar({
   );
 }
 
-const createStyles = (c: AppColors) => StyleSheet.create({
-  bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 40,
-    paddingLeft: 12,
-    backgroundColor: c.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: c.border,
-  },
-  info: { flex: 1, minWidth: 0 },
-  title: { color: c.text, fontSize: 13, lineHeight: 15, fontWeight: '600', ...COMPACT_TEXT },
-  subtitle: { color: c.textFaint, fontSize: 11, lineHeight: 13, ...COMPACT_TEXT },
-  actions: { flexDirection: 'row', alignItems: 'center' },
-  btn: { paddingHorizontal: 8, paddingVertical: 6 },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    marginRight: 4,
-  },
-  badgeOk: { backgroundColor: c.surfaceRaised },
-  badgeWarn: { backgroundColor: c.surfaceRaised },
-  badgeOff: { backgroundColor: c.surfaceRaised },
-  dot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
-  dotOk: { backgroundColor: c.success },
-  dotOff: { backgroundColor: c.textMuted },
-  badgeTextOk: { color: c.success, fontSize: 11, lineHeight: 13, fontWeight: '600', ...COMPACT_TEXT },
-  badgeTextWarn: { color: c.warning, fontSize: 11, lineHeight: 13, fontWeight: '600', ...COMPACT_TEXT },
-  badgeTextOff: { color: c.textMuted, fontSize: 11, lineHeight: 13, fontWeight: '600', ...COMPACT_TEXT },
-  winControls: { flexDirection: 'row', alignItems: 'center', marginLeft: 6 },
-  winBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  winClose: {},
-});
+const createStyles = (c: AppColors) =>
+  StyleSheet.create({
+    bar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      height: 40,
+      paddingLeft: 12,
+      backgroundColor: c.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    info: { flex: 1, minWidth: 0 },
+    title: { color: c.text, fontSize: 13, lineHeight: 15, fontWeight: '600', ...COMPACT_TEXT },
+    subtitle: { color: c.textFaint, fontSize: 11, lineHeight: 13, ...COMPACT_TEXT },
+    actions: { flexDirection: 'row', alignItems: 'center' },
+    btn: { paddingHorizontal: 8, paddingVertical: 6 },
+    badge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 999,
+      marginRight: 4,
+    },
+    badgeOk: { backgroundColor: c.surfaceRaised },
+    badgeWarn: { backgroundColor: c.surfaceRaised },
+    badgeOff: { backgroundColor: c.surfaceRaised },
+    dot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
+    dotOk: { backgroundColor: c.success },
+    dotOff: { backgroundColor: c.textMuted },
+    badgeTextOk: {
+      color: c.success,
+      fontSize: 11,
+      lineHeight: 13,
+      fontWeight: '600',
+      ...COMPACT_TEXT,
+    },
+    badgeTextWarn: {
+      color: c.warning,
+      fontSize: 11,
+      lineHeight: 13,
+      fontWeight: '600',
+      ...COMPACT_TEXT,
+    },
+    badgeTextOff: {
+      color: c.textMuted,
+      fontSize: 11,
+      lineHeight: 13,
+      fontWeight: '600',
+      ...COMPACT_TEXT,
+    },
+    winControls: { flexDirection: 'row', alignItems: 'center', marginLeft: 6 },
+    winBtn: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    winClose: {},
+  });

@@ -1,5 +1,5 @@
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 

@@ -1,4 +1,4 @@
-import { expect, mock, test, beforeEach } from 'bun:test';
+import { beforeEach, expect, mock, test } from 'bun:test';
 
 const isPermissionGranted = mock(() => Promise.resolve(false));
 const requestPermission = mock(() => Promise.resolve('granted' as const));

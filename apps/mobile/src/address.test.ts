@@ -26,7 +26,11 @@ eq('non-numeric port', validateAddress('h', 'abc'), {
   reason: 'Port must be between 1 and 65535.',
 });
 eq('httpBase', httpBase('h', '8085'), 'http://h:8085');
-eq('wsUrl', wsUrl('h', '8085', { sessionId: 'term-1', sinceId: 0 }), 'ws://h:8085/api/ws?sessionId=term-1&sinceId=0');
+eq(
+  'wsUrl',
+  wsUrl('h', '8085', { sessionId: 'term-1', sinceId: 0 }),
+  'ws://h:8085/api/ws?sessionId=term-1&sinceId=0',
+);
 
 console.log(`address.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

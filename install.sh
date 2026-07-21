@@ -53,10 +53,26 @@ mkdir -p "$BIN_DIR"
 tmpd="$(mktemp -d "${BIN_DIR}/.tether.XXXXXX")"
 trap 'rm -rf "$tmpd"' EXIT
 if [ "$os" = darwin ]; then
-  curl -fsSL "$url" -o "$tmpd/tether.tar.gz"
-  tar -xzf "$tmpd/tether.tar.gz" -C "$tmpd" tether
+  dl="$tmpd/tether.tar.gz"
 else
-  curl -fsSL "$url" -o "$tmpd/tether"
+  dl="$tmpd/tether"
+fi
+curl -fsSL "$url" -o "$dl"
+
+# Verify the download against the published "<asset>.sha256" BEFORE extracting
+# or executing it — the checksum is the trust decision, not a running of the
+# binary. A tampered release asset or MITM would fail here.
+expected="$(curl -fsSL "${url}.sha256" | awk '{print $1}' | head -1)"
+[ -n "$expected" ] || { echo "No published checksum for ${asset} — refusing to install." >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$dl" | awk '{print $1}')"
+else
+  actual="$(shasum -a 256 "$dl" | awk '{print $1}')"
+fi
+[ "$actual" = "$expected" ] || { echo "Checksum mismatch for ${asset} — aborting (possible tampering)." >&2; exit 1; }
+
+if [ "$os" = darwin ]; then
+  tar -xzf "$dl" -C "$tmpd" tether
 fi
 chmod +x "$tmpd/tether"
 mv -f "$tmpd/tether" "$DEST"

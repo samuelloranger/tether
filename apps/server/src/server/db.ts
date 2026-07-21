@@ -1,11 +1,15 @@
 import { Database } from 'bun:sqlite';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DB_PATH, OLD_DB_PATH, USING_DEFAULT_DB } from './paths';
 import { COMPILED } from './runtime';
 
 const DB_DIR = path.dirname(DB_PATH);
-mkdirSync(DB_DIR, { recursive: true });
+mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
+// The DB holds the argon2 password hash — keep the dir owner-only.
+try {
+  chmodSync(DB_DIR, 0o700);
+} catch {}
 
 // One-time migration: pre-binary installs kept the DB in the ~/.tether/app
 // source copy. Only for the installed binary on its default path (never a dev
@@ -83,6 +87,14 @@ const migrations = [
     version: 6,
     name: 'session_workspace_root',
     up: `ALTER TABLE sessions ADD COLUMN workspace_root TEXT;`,
+  },
+  {
+    version: 7,
+    name: 'drop_redundant_session_index',
+    // Fully covered by the composite idx_terminal_logs_session_id(session_id, id)
+    // from migration 5; the single-column index only added write cost on the hot
+    // per-keystroke insert path.
+    up: `DROP INDEX IF EXISTS idx_terminal_logs_session;`,
   },
 ];
 
@@ -204,6 +216,13 @@ export function clearLogs(sessionId: string) {
   insertCounts.delete(sessionId);
 }
 
+// Drop just the in-memory prune counter (without touching logs) — call when a
+// session stops but its logs are kept for replay, so the map doesn't grow
+// unbounded across many transient sessions.
+export function clearInsertCount(sessionId: string): void {
+  insertCounts.delete(sessionId);
+}
+
 export function setSessionStatus(id: string, status: 'running' | 'stopped') {
   db.query('UPDATE sessions SET status = $status WHERE id = $id').run({ $id: id, $status: status });
 }
@@ -243,6 +262,15 @@ export function setAuthHash(hash: string | null): void {
     return;
   }
   setSetting(AUTH_HASH_KEY, hash);
+}
+
+// Atomic first-run claim: INSERT ... DO NOTHING is a single statement, so two
+// concurrent /api/setup requests can't both pass a null-check and both write.
+export function setAuthHashIfUnset(hash: string): boolean {
+  const res = db
+    .query('INSERT INTO settings (key, value) VALUES ($key, $value) ON CONFLICT(key) DO NOTHING')
+    .run({ $key: AUTH_HASH_KEY, $value: hash });
+  return res.changes === 1;
 }
 
 // Fully remove a session (row + its logs) so it disappears from the list.

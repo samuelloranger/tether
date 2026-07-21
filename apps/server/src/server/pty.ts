@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import {
+  chmodSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -11,7 +12,7 @@ import {
 import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
-import { addTerminalLog, deleteSession, getSession, upsertSession } from './db';
+import { addTerminalLog, clearInsertCount, deleteSession, getSession, upsertSession } from './db';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
 import { findGitRoot } from './gitRoot';
 import { GitWatch } from './gitWatch';
@@ -50,7 +51,12 @@ const BASHRC = [
   "PS1='\\[$(_tether_osc7)\\]\\[\\e[36m\\]$(_tether_pwd)\\[\\e[0m\\]\\[\\e[33m\\]$(_tether_branch)\\[\\e[0m\\] \\[\\e[32m\\]❯\\[\\e[0m\\] '",
   '',
 ].join('\n');
-mkdirSync(RC_DIR, { recursive: true });
+mkdirSync(RC_DIR, { recursive: true, mode: 0o700 });
+// Tighten an existing dir too — the config dir holds the argon2 hash and the
+// holder IPC sockets, so no other local user should be able to traverse it.
+try {
+  chmodSync(RC_DIR, 0o700);
+} catch {}
 writeFileSync(RC_PATH, BASHRC);
 
 // zsh has no --rcfile-equivalent flag for interactive mode; the standard,
@@ -88,7 +94,11 @@ const FISH_INIT =
 // unix socket (see holder.ts for the frame shapes). Holders live next to the
 // bashrc in the same config dir.
 const HOLDERS_DIR = path.join(RC_DIR, 'holders');
-mkdirSync(HOLDERS_DIR, { recursive: true });
+const MAX_SESSIONS = Number(process.env.TETHER_MAX_SESSIONS || 50);
+mkdirSync(HOLDERS_DIR, { recursive: true, mode: 0o700 });
+try {
+  chmodSync(HOLDERS_DIR, 0o700);
+} catch {}
 
 export const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
 
@@ -222,6 +232,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       instances.get(id)?.subscribers.clear();
       instances.delete(id);
       clearLiveCwd(id);
+      clearInsertCount(id);
     }
   };
 
@@ -263,10 +274,20 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
           // Holder gone without an exit frame = it crashed or was killed hard.
           // Drop the instance so the next startSession spawns a fresh holder.
           const instance = instances.get(id);
-          if (!exited && instance?.sock && instances.delete(id)) {
-            instance.gitWatch.dispose();
-            clearLiveCwd(id);
-            console.log(`Holder link for session "${id}" closed unexpectedly`);
+          if (!exited && instance?.sock) {
+            // Notify attached clients before we clear them, else they keep a
+            // dead subscription and render a live-looking but stopped terminal.
+            for (const sub of instance.subscribers) {
+              try {
+                sub({ type: 'exit' });
+              } catch {}
+            }
+            instance.subscribers.clear();
+            if (instances.delete(id)) {
+              instance.gitWatch.dispose();
+              clearLiveCwd(id);
+              console.log(`Holder link for session "${id}" closed unexpectedly`);
+            }
           }
         },
         error() {},
@@ -319,6 +340,13 @@ export async function startSession(
 
   const pending = pendingStarts.get(id);
   if (pending) return pending;
+
+  // Bound how many live holders one server will spawn — an authed client is
+  // semi-trusted, but a runaway/buggy client shouldn't be able to fork
+  // unlimited detached shell processes.
+  if (instances.size >= MAX_SESSIONS) {
+    throw new Error(`session cap reached (${MAX_SESSIONS})`);
+  }
 
   const promise = doStartSession(id, command, cols, rows).finally(() => {
     pendingStarts.delete(id);
@@ -494,6 +522,14 @@ export function killSession(id: string) {
   const hadInstance = sendFrame(id, { t: 'k' });
   if (instance) {
     instance.gitWatch.dispose();
+    // Tell subscribers now: we delete the instance below, so the holder's later
+    // {t:'x'} frame would find no instance and never reach these clients.
+    for (const sub of instance.subscribers) {
+      try {
+        sub({ type: 'exit' });
+      } catch {}
+    }
+    instance.subscribers.clear();
     instances.delete(id);
   }
   clearLiveCwd(id);

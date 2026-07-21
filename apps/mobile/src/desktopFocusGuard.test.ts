@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { shouldForwardToTerminal, type FocusEl } from './desktopFocusGuard';
+import { type FocusEl, shouldForwardToTerminal } from './desktopFocusGuard';
 
 function el(overrides: Partial<FocusEl> = {}): FocusEl {
   return {
@@ -23,7 +23,10 @@ describe('shouldForwardToTerminal', () => {
   it('forwards when the terminal surface itself (or a descendant) is focused', () => {
     expect(shouldForwardToTerminal(el({ id: 'tether-terminal' }), false)).toBe(true);
     expect(
-      shouldForwardToTerminal(el({ closest: (sel) => (sel === '#tether-terminal' ? {} : null) }), false),
+      shouldForwardToTerminal(
+        el({ closest: (sel) => (sel === '#tether-terminal' ? {} : null) }),
+        false,
+      ),
     ).toBe(true);
   });
   it('does not forward when a real text field is focused', () => {
@@ -33,9 +36,12 @@ describe('shouldForwardToTerminal', () => {
   });
   it('does not forward when a focusable control (button/link/menuitem/tabindex) is focused', () => {
     expect(shouldForwardToTerminal(el({ tagName: 'BUTTON' }), false)).toBe(false);
-    expect(shouldForwardToTerminal(el({ getAttribute: (n) => (n === 'role' ? 'menuitem' : null) }), false)).toBe(
-      false,
-    );
+    expect(
+      shouldForwardToTerminal(
+        el({ getAttribute: (n) => (n === 'role' ? 'menuitem' : null) }),
+        false,
+      ),
+    ).toBe(false);
     expect(
       shouldForwardToTerminal(el({ getAttribute: (n) => (n === 'tabindex' ? '0' : null) }), false),
     ).toBe(false);

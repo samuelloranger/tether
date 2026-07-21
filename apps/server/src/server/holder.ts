@@ -10,8 +10,35 @@
 // running from source (bun) or the compiled binary. argv is the tail after the
 // subcommand: <socketPath> <cols> <rows> <cwd> <cmd> [args...]
 
-import { unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { getProcessCwd } from './procCwd';
+
+// A process's session id, read straight from the kernel (/proc/<pid>/stat
+// field 6 — session — after the "pid (comm)" prefix, which we skip past by
+// index since comm can itself contain spaces/parens).
+function getSid(pid: number): number | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return Number(rest[3]);
+  } catch {
+    return null;
+  }
+}
+
+// Every live pid sharing a given session id — i.e. everything descended from
+// the shell that hasn't setsid'd itself into a session of its own.
+function pidsInSession(sid: number): number[] {
+  const pids: number[] = [];
+  try {
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) continue;
+      const pid = Number(entry);
+      if (getSid(pid) === sid) pids.push(pid);
+    }
+  } catch {}
+  return pids;
+}
 
 export function runHolder(argv: string[]): void {
   const [socketPath, colsArg, rowsArg, cwd, ...cmdArgs] = argv;
@@ -25,7 +52,7 @@ export function runHolder(argv: string[]): void {
   const BUFFER_CAP = 2_000_000;
   let buffered: string[] = [];
   let bufferedBytes = 0;
-  let client: import('bun').Socket | null = null;
+  let client: import('bun').Socket<unknown> | null = null;
 
   function sendFrame(frame: string, rawLen: number) {
     if (client) {
@@ -66,6 +93,28 @@ export function runHolder(argv: string[]): void {
   // Interactive shells ignore SIGTERM; SIGHUP is the "terminal went away" signal
   // they honor. Escalate to SIGKILL for anything that ignores both.
   function killPty() {
+    // Background jobs the shell was told to survive it (nohup, disown) never
+    // get the shell's SIGHUP forwarded to them and would otherwise keep
+    // running as orphans after an explicit "kill this terminal" — sweep the
+    // whole session synchronously, before touching the shell itself, so it
+    // can't race the holder's own exit-on-shell-death path below.
+    const sid = getSid(proc.pid) ?? proc.pid;
+    // Freeze the session first so nothing new can fork out from under the scan,
+    // then re-enumerate and kill. A child forked between the two passes is still
+    // caught. (A child that setsid's into its own session is intentionally out
+    // of scope — that's how real daemons detach.)
+    for (const pid of pidsInSession(sid)) {
+      if (pid === proc.pid) continue;
+      try {
+        process.kill(pid, 'SIGSTOP');
+      } catch {}
+    }
+    for (const pid of pidsInSession(sid)) {
+      if (pid === proc.pid) continue;
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
     proc.kill('SIGHUP');
     setTimeout(() => {
       try {
@@ -75,48 +124,68 @@ export function runHolder(argv: string[]): void {
   }
 
   let lineBuf = '';
-  const server = Bun.listen({
-    unix: socketPath,
-    socket: {
-      open(sock) {
-        // One server at a time: a reconnecting tether server replaces the old link.
-        if (client) client.end();
-        client = sock;
-        // Fresh read (not just whatever was true at spawn time) so a
-        // reattaching server learns about every `cd` that happened while it
-        // was gone, not just the shell's starting directory.
-        const currentCwd = getProcessCwd(proc.pid);
-        if (currentCwd) sock.write(`${JSON.stringify({ t: 'c', d: currentCwd })}\n`);
-        for (const frame of buffered) sock.write(frame);
-        buffered = [];
-        bufferedBytes = 0;
+  // Write the pid file BEFORE the socket can accept connections, so a
+  // killSession fallback that reads "<sock>.pid" never hits an empty window.
+  writeFileSync(`${socketPath}.pid`, String(process.pid));
+  try {
+    chmodSync(`${socketPath}.pid`, 0o600);
+  } catch {}
+
+  let server: ReturnType<typeof Bun.listen>;
+  try {
+    server = Bun.listen({
+      unix: socketPath,
+      socket: {
+        open(sock) {
+          // One server at a time: a reconnecting tether server replaces the old link.
+          if (client) client.end();
+          client = sock;
+          // Fresh read (not just whatever was true at spawn time) so a
+          // reattaching server learns about every `cd` that happened while it
+          // was gone, not just the shell's starting directory.
+          const currentCwd = getProcessCwd(proc.pid);
+          if (currentCwd) sock.write(`${JSON.stringify({ t: 'c', d: currentCwd })}\n`);
+          for (const frame of buffered) sock.write(frame);
+          buffered = [];
+          bufferedBytes = 0;
+        },
+        data(_sock, buf) {
+          lineBuf += buf.toString('utf8');
+          let nl = lineBuf.indexOf('\n');
+          while (nl !== -1) {
+            const line = lineBuf.slice(0, nl);
+            lineBuf = lineBuf.slice(nl + 1);
+            nl = lineBuf.indexOf('\n');
+            if (!line) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.t === 'i' && proc.terminal) {
+                proc.terminal.write(Buffer.from(msg.d, 'base64').toString('utf8'));
+              } else if (msg.t === 'r' && proc.terminal) {
+                proc.terminal.resize(msg.c, msg.r);
+              } else if (msg.t === 'k') {
+                killPty();
+              }
+            } catch {}
+          }
+        },
+        close(sock) {
+          if (client === sock) client = null; // detached — keep running, buffer output
+        },
+        error() {},
       },
-      data(_sock, buf) {
-        lineBuf += buf.toString('utf8');
-        let nl = lineBuf.indexOf('\n');
-        while (nl !== -1) {
-          const line = lineBuf.slice(0, nl);
-          lineBuf = lineBuf.slice(nl + 1);
-          nl = lineBuf.indexOf('\n');
-          if (!line) continue;
-          try {
-            const msg = JSON.parse(line);
-            if (msg.t === 'i' && proc.terminal) {
-              proc.terminal.write(Buffer.from(msg.d, 'base64').toString('utf8'));
-            } else if (msg.t === 'r' && proc.terminal) {
-              proc.terminal.resize(msg.c, msg.r);
-            } else if (msg.t === 'k') {
-              killPty();
-            }
-          } catch {}
-        }
-      },
-      close(sock) {
-        if (client === sock) client = null; // detached — keep running, buffer output
-      },
-      error() {},
-    },
-  });
+    });
+  } catch (err) {
+    // The shell is already spawned; without a socket nobody can ever own or
+    // kill it. Take it down with us rather than leaking an orphan PTY.
+    try {
+      proc.kill('SIGKILL');
+    } catch {}
+    throw err;
+  }
+  try {
+    chmodSync(socketPath, 0o600);
+  } catch {}
 
   function cleanup() {
     try {
@@ -138,6 +207,4 @@ export function runHolder(argv: string[]): void {
   });
 
   process.on('SIGTERM', killPty);
-
-  writeFileSync(`${socketPath}.pid`, String(process.pid));
 }

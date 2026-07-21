@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import React, { useEffect, useRef } from 'react';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 
@@ -79,34 +79,35 @@ export const ArrowCluster = React.memo(function ArrowCluster({
   );
 });
 
-const createStyles = (c: AppColors) => StyleSheet.create({
-  arrowCluster: {
-    flexDirection: 'row',
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: c.surfaceRaised,
-    overflow: 'hidden',
-  },
-  arrowSeg: {
-    width: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowMid: {
-    width: 34,
-  },
-  arrowMidHalf: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowVDivider: {
-    width: 1,
-    backgroundColor: c.border,
-  },
-  arrowHDivider: {
-    height: 1,
-    marginHorizontal: 8,
-    backgroundColor: c.border,
-  },
-});
+const createStyles = (c: AppColors) =>
+  StyleSheet.create({
+    arrowCluster: {
+      flexDirection: 'row',
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: c.surfaceRaised,
+      overflow: 'hidden',
+    },
+    arrowSeg: {
+      width: 38,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    arrowMid: {
+      width: 34,
+    },
+    arrowMidHalf: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    arrowVDivider: {
+      width: 1,
+      backgroundColor: c.border,
+    },
+    arrowHDivider: {
+      height: 1,
+      marginHorizontal: 8,
+      backgroundColor: c.border,
+    },
+  });

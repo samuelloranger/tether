@@ -3,7 +3,10 @@ import { MAC_TRAFFIC_LIGHT_INSET, titlebarChrome } from './titlebarChrome';
 
 describe('titlebarChrome', () => {
   it('macOS: no custom controls, reserves traffic-light inset', () => {
-    expect(titlebarChrome(true)).toEqual({ showControls: false, leftInset: MAC_TRAFFIC_LIGHT_INSET });
+    expect(titlebarChrome(true)).toEqual({
+      showControls: false,
+      leftInset: MAC_TRAFFIC_LIGHT_INSET,
+    });
   });
   it('macOS fullscreen: inset collapses to 0 (traffic lights hidden)', () => {
     expect(titlebarChrome(true, true)).toEqual({ showControls: false, leftInset: 0 });

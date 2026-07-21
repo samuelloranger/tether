@@ -1,5 +1,5 @@
-import { computeLinkSpans, type LinkSpan, type LinkTarget } from './links';
 import { APP_THEMES } from './appTheme';
+import { computeLinkSpans, type LinkSpan, type LinkTarget } from './links';
 
 // A compact VT100/xterm terminal emulator: consumes the raw PTY byte stream and
 // maintains a screen grid + scrollback so cursor-addressed output (prompts,
@@ -53,6 +53,9 @@ export interface RenderRow {
 let DEFAULT_FG = APP_THEMES.mocha.terminal.fg;
 let DEFAULT_BG = APP_THEMES.mocha.terminal.bg;
 const MAX_SCROLLBACK = 1000;
+// Cap OSC/CSI accumulation so a garbled or hostile stream that opens an escape
+// sequence and never terminates it can't grow a buffer without bound.
+const MAX_SEQ_LEN = 4096;
 
 // The default Catppuccin Mocha ANSI palette, extended to xterm-256. Mutable:
 // setTheme() below replaces BASE_16/PALETTE/DEFAULT_FG/DEFAULT_BG at
@@ -66,8 +69,7 @@ function buildPalette(): string[] {
   const hex = (n: number) => n.toString(16).padStart(2, '0');
   for (let r = 0; r < 6; r++)
     for (let g = 0; g < 6; g++)
-      for (let b = 0; b < 6; b++)
-        pal.push(`#${hex(steps[r])}${hex(steps[g])}${hex(steps[b])}`);
+      for (let b = 0; b < 6; b++) pal.push(`#${hex(steps[r])}${hex(steps[g])}${hex(steps[b])}`);
   for (let i = 0; i < 24; i++) {
     const v = 8 + i * 10;
     pal.push(`#${hex(v)}${hex(v)}${hex(v)}`);
@@ -127,9 +129,31 @@ type ParserState = 'ground' | 'esc' | 'escInt' | 'csi' | 'osc' | 'oscEsc' | 'dcs
 // DEC Special Graphics (ESC ( 0) — the VT100 line-drawing set TUIs use for
 // borders (htop, less, dialog). Unmapped chars pass through.
 const DEC_GRAPHICS: Record<string, string> = {
-  '`': '◆', a: '▒', f: '°', g: '±', j: '┘', k: '┐', l: '┌', m: '└',
-  n: '┼', o: '⎺', p: '⎻', q: '─', r: '⎼', s: '⎽', t: '├', u: '┤',
-  v: '┴', w: '┬', x: '│', y: '≤', z: '≥', '{': 'π', '|': '≠', '}': '£', '~': '·',
+  '`': '◆',
+  a: '▒',
+  f: '°',
+  g: '±',
+  j: '┘',
+  k: '┐',
+  l: '┌',
+  m: '└',
+  n: '┼',
+  o: '⎺',
+  p: '⎻',
+  q: '─',
+  r: '⎼',
+  s: '⎽',
+  t: '├',
+  u: '┤',
+  v: '┴',
+  w: '┬',
+  x: '│',
+  y: '≤',
+  z: '≥',
+  '{': 'π',
+  '|': '≠',
+  '}': '£',
+  '~': '·',
 };
 
 // ponytail: coarse wcwidth — the wide CJK/Hangul/emoji blocks only; combining
@@ -369,6 +393,10 @@ export class TerminalEmulator {
             this.state = 'oscEsc';
           } else {
             this.oscBuf += ch;
+            if (this.oscBuf.length > MAX_SEQ_LEN) {
+              this.oscBuf = '';
+              this.state = 'ground';
+            }
           }
           break;
         case 'oscEsc':
@@ -471,6 +499,13 @@ export class TerminalEmulator {
   }
 
   private csi(ch: string, code: number) {
+    if (this.params.length + this.intermediate.length > MAX_SEQ_LEN) {
+      // Runaway parameter/intermediate run — abandon the sequence.
+      this.params = '';
+      this.intermediate = '';
+      this.state = 'ground';
+      return;
+    }
     if (code >= 0x30 && code <= 0x3f) {
       this.params += ch;
       return;
@@ -864,8 +899,7 @@ export class TerminalEmulator {
       else if (c === 22) {
         this.pen.bold = false;
         this.pen.dim = false;
-      }
-      else if (c === 23) this.pen.italic = false;
+      } else if (c === 23) this.pen.italic = false;
       else if (c === 24) this.pen.underline = false;
       else if (c === 27) this.pen.inverse = false;
       else if (c === 29) this.pen.strike = false;
@@ -873,13 +907,11 @@ export class TerminalEmulator {
       else if (c === 39) {
         this.pen.fg = undefined;
         this.pen.fgIndex = undefined;
-      }
-      else if (c >= 40 && c <= 47) this.pen.bgIndex = c - 40;
+      } else if (c >= 40 && c <= 47) this.pen.bgIndex = c - 40;
       else if (c === 49) {
         this.pen.bg = undefined;
         this.pen.bgIndex = undefined;
-      }
-      else if (c >= 90 && c <= 97) this.pen.fgIndex = c - 90 + 8;
+      } else if (c >= 90 && c <= 97) this.pen.fgIndex = c - 90 + 8;
       else if (c >= 100 && c <= 107) this.pen.bgIndex = c - 100 + 8;
       else if (c === 38 || c === 48) {
         const target = c === 38 ? 'fg' : 'bg';
@@ -891,7 +923,9 @@ export class TerminalEmulator {
           i += 2;
         } else if (codes[i + 1] === 2) {
           // 38;2;r;g;b  (24-bit truecolor)
-          const r = codes[i + 2], g = codes[i + 3], b = codes[i + 4];
+          const r = codes[i + 2],
+            g = codes[i + 3],
+            b = codes[i + 4];
           const hex = (v: number) => (v || 0).toString(16).padStart(2, '0');
           this.pen[target] = `#${hex(r)}${hex(g)}${hex(b)}`;
           this.pen[target === 'fg' ? 'fgIndex' : 'bgIndex'] = undefined;
@@ -955,7 +989,13 @@ export class TerminalEmulator {
     // Trim trailing blanks so empty tails don't paint background — but never trim
     // past the caret, so the cursor still renders at end of line.
     let end = line.length;
-    while (end > 0 && line[end - 1].ch === ' ' && !line[end - 1].bg && line[end - 1].bgIndex === undefined && !line[end - 1].inverse) {
+    while (
+      end > 0 &&
+      line[end - 1].ch === ' ' &&
+      !line[end - 1].bg &&
+      line[end - 1].bgIndex === undefined &&
+      !line[end - 1].inverse
+    ) {
       end--;
     }
     if (caretCol >= 0) end = Math.max(end, caretCol + 1);
@@ -978,7 +1018,7 @@ export class TerminalEmulator {
   }
 
   private cellStyle(cell: Cell): CellStyle {
-    let fg = cell.fgIndex === undefined ? cell.fg ?? DEFAULT_FG : PALETTE[cell.fgIndex];
+    let fg = cell.fgIndex === undefined ? (cell.fg ?? DEFAULT_FG) : PALETTE[cell.fgIndex];
     let bg = cell.bgIndex === undefined ? cell.bg : PALETTE[cell.bgIndex];
     if (cell.inverse) {
       const nfg = bg ?? DEFAULT_BG;
@@ -1021,7 +1061,12 @@ function runsEqual(a: RenderRun[], b: RenderRun[]): boolean {
 function linksEqual(a: LinkSpan[], b: LinkSpan[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i].start !== b[i].start || a[i].end !== b[i].end || !targetsEqual(a[i].target, b[i].target)) return false;
+    if (
+      a[i].start !== b[i].start ||
+      a[i].end !== b[i].end ||
+      !targetsEqual(a[i].target, b[i].target)
+    )
+      return false;
   }
   return true;
 }
@@ -1029,7 +1074,8 @@ function linksEqual(a: LinkSpan[], b: LinkSpan[]): boolean {
 function targetsEqual(a: LinkTarget, b: LinkTarget): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'external' && b.kind === 'external') return a.url === b.url;
-  if (a.kind === 'file' && b.kind === 'file') return a.path === b.path && a.line === b.line && a.column === b.column;
+  if (a.kind === 'file' && b.kind === 'file')
+    return a.path === b.path && a.line === b.line && a.column === b.column;
   return false;
 }
 

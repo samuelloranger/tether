@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { COPY, PASTE, keyToBytes, type KeyLike } from './desktopKeys';
+import { COPY, type KeyLike, keyToBytes, PASTE } from './desktopKeys';
 
 function k(key: string, mods: Partial<Omit<KeyLike, 'key'>> = {}): KeyLike {
   return {
