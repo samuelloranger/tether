@@ -109,6 +109,22 @@ async function fetchDiffImageUri(
   });
 }
 
+// Debounce a value: only surface a change that survives `delayMs`. A blip that
+// reverts within the window (A→B→A) is collapsed and never emitted, so it can't
+// drive downstream effects. delayMs<=0 passes through synchronously.
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    if (delayMs <= 0) {
+      setDebounced(value);
+      return;
+    }
+    const t = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 export function useTetherApp() {
   // Proceed once fonts settle OR fail — never gate the whole app on a font fetch.
   // In the Tauri desktop build the webview serves assets over the `tauri://`
@@ -303,24 +319,39 @@ export function useTetherApp() {
       setBlinkOn(true); // steady caret, no interval
       return;
     }
-    // Desktop: no point blinking (and waking the caret row) in a hidden window.
+    // Desktop: no point blinking (and waking the caret row) when the window is
+    // hidden (minimized) OR unfocused (visible but alt-tabbed away). Show a
+    // steady caret in both cases; only blink while the window has focus.
     let iv: ReturnType<typeof setInterval> | null = setInterval(() => setBlinkOn((v) => !v), 530);
     let onVis: (() => void) | undefined;
+    let onFocus: (() => void) | undefined;
+    let onBlur: (() => void) | undefined;
     if (isDesktop && typeof document !== 'undefined') {
-      onVis = () => {
-        if (document.hidden) {
-          if (iv) clearInterval(iv);
-          iv = null;
-          setBlinkOn(true);
-        } else if (!iv) {
-          iv = setInterval(() => setBlinkOn((v) => !v), 530);
-        }
+      const stop = () => {
+        if (iv) clearInterval(iv);
+        iv = null;
+        setBlinkOn(true);
       };
+      const start = () => {
+        if (!iv) iv = setInterval(() => setBlinkOn((v) => !v), 530);
+      };
+      const sync = () => {
+        if (document.hidden || !document.hasFocus()) stop();
+        else start();
+      };
+      onVis = sync;
+      onFocus = sync;
+      onBlur = sync;
       document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('focus', onFocus);
+      window.addEventListener('blur', onBlur);
+      sync();
     }
     return () => {
       if (iv) clearInterval(iv);
       if (onVis) document.removeEventListener('visibilitychange', onVis);
+      if (onFocus) window.removeEventListener('focus', onFocus);
+      if (onBlur) window.removeEventListener('blur', onBlur);
     };
   }, [reduceMotion]);
   const renderScheduled = useRef(false);
@@ -333,7 +364,15 @@ export function useTetherApp() {
   // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
   // fills the viewport with no wrapping and no horizontal scroll. The remote PTY
   // is resized to match. CHAR_RATIO ~ monospace advance width / font size.
-  const { width: winWidth } = useWindowDimensions();
+  const { width: rawWinWidth } = useWindowDimensions();
+  // Desktop (Tauri/WebKitGTK) reports a transient window size when the window
+  // regains focus after idle. Fed straight into the grid math it fires a
+  // spurious PTY {resize} and the shell rewraps twice (visible layout shift).
+  // Debounce the raw layout inputs so a blip that reverts within the window
+  // never reaches numCols/numRows. Mobile passes through (no such blip; and
+  // rotation should track immediately).
+  const layoutSettleMs = isDesktop ? 200 : 0;
+  const winWidth = useDebounced(rawWinWidth, layoutSettleMs);
   // Fallback advance-width ratio (Fira Code is exactly 0.6em). Overridden by a
   // real measurement below, so a different desktop font pick or the web's
   // system-monospace fallback can't skew the column math (wrong numCols clips
@@ -353,7 +392,10 @@ export function useTetherApp() {
   const gridWidth = paneWidth - 12;
   const charWidth = fontSize * CHAR_RATIO;
   const numCols = Math.max(20, Math.floor(gridWidth / charWidth));
-  const numRows = termHeight ? Math.max(6, Math.floor((termHeight - 12) / lineHeight)) : 24;
+  const stableTermHeight = useDebounced(termHeight, layoutSettleMs);
+  const numRows = stableTermHeight
+    ? Math.max(6, Math.floor((stableTermHeight - 12) / lineHeight))
+    : 24;
 
   // Helper to get/create the cache entry for a given id, sized to the current grid.
   const entryFor = (id: string): SessionEntry =>
