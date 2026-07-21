@@ -4,14 +4,16 @@ import path from 'node:path';
 const REPO_SLUG = process.env.TETHER_REPO_SLUG ?? 'samuelloranger/tether';
 
 // Map the running platform/arch to the release asset name. Throws on unsupported.
-// macOS ships a .tar.gz wrapping a stable inner `tether` binary (browser download
-// of a raw Mach-O drops the exec bit and gets quarantined → Gatekeeper blocks it;
-// a tarball extracted via CLI avoids both). Linux ships the raw binary.
-export function assetName(platform: NodeJS.Platform, arch: string, version: string): string {
+// Names are stable (un-versioned) so releases/latest/download/<name> is a
+// one-click link. macOS ships a .tar.gz wrapping a stable inner `tether` binary
+// (browser download of a raw Mach-O drops the exec bit and gets quarantined →
+// Gatekeeper blocks it; a tarball extracted via CLI avoids both). Linux ships
+// the raw binary.
+export function assetName(platform: NodeJS.Platform, arch: string): string {
   const os = platform === 'linux' ? 'linux' : platform === 'darwin' ? 'darwin' : null;
   const a = arch === 'x64' ? 'x64' : arch === 'arm64' ? 'arm64' : null;
   if (!os || !a) throw new Error(`Unsupported platform: ${platform}/${arch}`);
-  const base = `tether-${os}-${a}-${version}`;
+  const base = `tether-${os}-${a}`;
   return os === 'darwin' ? `${base}.tar.gz` : base;
 }
 
@@ -65,7 +67,7 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
     return;
   }
   // Asset name embeds the release tag, so resolve it after we know the tag.
-  const asset = assetName(process.platform, process.arch, rel.tag_name);
+  const asset = assetName(process.platform, process.arch);
   const match = rel.assets.find((x) => x.name === asset);
   if (!match) {
     console.error(`Release ${rel.tag_name} has no asset "${asset}".`);

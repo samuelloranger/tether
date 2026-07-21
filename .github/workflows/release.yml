@@ -119,7 +119,7 @@ jobs:
     if: github.event_name == 'release' || inputs.scope == 'all'
     runs-on: macos-15
     env:
-      IPA_NAME: ${{ github.event_name == 'release' && format('tether-{0}.ipa', github.ref_name) || 'tether-manual.ipa' }}
+      IPA_NAME: ${{ github.event_name == 'release' && 'tether.ipa' || 'tether-manual.ipa' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -217,8 +217,8 @@ jobs:
         if: github.event_name == 'release'
         run: |
           cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
-            "tether-${GITHUB_REF_NAME}.apk"
-          gh release upload "$GITHUB_REF_NAME" "tether-${GITHUB_REF_NAME}.apk" --clobber
+            "tether.apk"
+          gh release upload "$GITHUB_REF_NAME" "tether.apk" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -266,23 +266,36 @@ jobs:
             --define 'process.env.TETHER_VERSION="'"${GITHUB_REF_NAME}"'"' \
             --outfile tether \
             src/server/main.ts
+          # Stable (un-versioned) name is the primary asset — it makes
+          # github.com/.../releases/latest/download/<name> a one-click link.
           case "${{ matrix.asset }}" in
             *darwin*)
-              out="${{ matrix.asset }}-${GITHUB_REF_NAME}.tar.gz"
-              tar czf "$out" tether ;;
+              stable="${{ matrix.asset }}.tar.gz"
+              tar czf "$stable" tether ;;
             *)
-              out="${{ matrix.asset }}-${GITHUB_REF_NAME}"
-              mv tether "$out" ;;
+              stable="${{ matrix.asset }}"
+              mv tether "$stable" ;;
           esac
-          echo "ASSET=$out" >> "$GITHUB_ENV"
+          # Transitional versioned copy: installs running an older `tether update`
+          # still look for the version-stamped name, so keep it for one release
+          # cycle to avoid breaking their self-update across this rename.
+          versioned="${{ matrix.asset }}-${GITHUB_REF_NAME}"
+          case "${{ matrix.asset }}" in *darwin*) versioned="${versioned}.tar.gz" ;; esac
+          cp "$stable" "$versioned"
+          echo "ASSET=$stable" >> "$GITHUB_ENV"
+          echo "ASSET_VERSIONED=$versioned" >> "$GITHUB_ENV"
       - name: Checksum ${{ matrix.asset }}
         working-directory: apps/server
-        run: sha256sum "$ASSET" > "$ASSET.sha256"
+        run: |
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          sha256sum "$ASSET_VERSIONED" > "$ASSET_VERSIONED.sha256"
       - name: Attach to release
         if: github.event_name == 'release'
         working-directory: apps/server
         run: |
-          gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --clobber
+          gh release upload "$GITHUB_REF_NAME" \
+            "$ASSET" "$ASSET.sha256" \
+            "$ASSET_VERSIONED" "$ASSET_VERSIONED.sha256" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 

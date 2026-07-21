@@ -24,10 +24,16 @@ You can also set the password later from the phone the first time you connect (s
 
 ## 3. Install a client
 
-Pick the app for your device — both connect to the same server the same way.
+Pick the app for your device — both connect to the same server the same way. Every link here always resolves to the newest release:
 
-- **Phone (iOS)** — install via [AltStore](https://altstore.io): set up AltServer on your Mac/PC, add the Tether source, and install the app. New releases show up in AltStore automatically.
-- **Desktop (Linux / Windows / macOS)** — download the installer for your platform from the [latest release](https://github.com/samuelloranger/tether/releases/latest). See [Desktop app](/desktop) for the per-OS files and how it differs from mobile.
+| Device | Get the latest |
+| --- | --- |
+| **iOS** | [AltStore](https://altstore.io) source (auto-updates) — or [`tether.ipa`](https://github.com/samuelloranger/tether/releases/latest/download/tether.ipa) |
+| **Android** | [Obtainium](https://github.com/ImranR98/Obtainium) (auto-updates) — or [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) |
+| **Desktop** (Linux / Windows / macOS) | see [Desktop app](/desktop) for the per-OS installer |
+
+- **iOS via AltStore** — set up AltServer on your Mac/PC, add the Tether source, and install the app. New releases show up in AltStore automatically.
+- **Desktop** — download the installer for your platform; see [Desktop app](/desktop) for the per-OS files and how it differs from mobile.
 
 ## 4. Connect
 
