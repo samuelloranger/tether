@@ -5,7 +5,14 @@ import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { authMiddleware } from './auth';
-import { getAuthHash, getLogs, getSession, listSessions, renameSession, setAuthHash } from './db';
+import {
+  getAuthHash,
+  getLogs,
+  getSession,
+  listSessions,
+  renameSession,
+  setAuthHashIfUnset,
+} from './db';
 import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from './gitDiff';
 import { resolveGitRoot } from './gitRoot';
 import { getLiveCwd } from './liveCwd';
@@ -27,12 +34,25 @@ const app = new Hono();
 const presentations = new PresentationRegistry();
 export const presentationControlToken = createControlToken(PRESENT_CONTROL_TOKEN_FILE);
 
-function hasControlToken(value: string | undefined): boolean {
-  return (
-    !!value &&
-    value.length === presentationControlToken.length &&
-    timingSafeEqual(Buffer.from(value), Buffer.from(presentationControlToken))
-  );
+export function hasControlToken(value: string | undefined): boolean {
+  if (!value) return false;
+  const a = Buffer.from(value);
+  const b = Buffer.from(presentationControlToken);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// A browser attaches an Origin header; a native RN/Tauri client does not. When
+// an Origin is present we require it to match the Host we were reached on, so a
+// random web page can't script the unauthenticated first-run setup on the LAN.
+function setupOriginOk(c: { req: { header(name: string): string | undefined } }): boolean {
+  const origin = c.req.header('Origin');
+  if (!origin) return true; // native client — no browser same-origin concept
+  const host = c.req.header('Host');
+  try {
+    return !!host && new URL(origin).host === host;
+  } catch {
+    return false;
+  }
 }
 
 const PREVIEW_MIME_TYPES: Record<string, string> = {
@@ -128,11 +148,14 @@ app.get('/api/status', (c) => c.json({ needsSetup: getAuthHash() === null }));
 // First-run pairing (unauthenticated, one-time): set the password iff none exists.
 // TOFU — safe only on a trusted LAN/tunnel; self-locks once a hash is stored.
 app.post('/api/setup', async (c) => {
-  if (getAuthHash()) return c.json({ error: 'already_setup' }, 409);
+  if (!setupOriginOk(c)) return c.json({ error: 'forbidden_origin' }, 403);
   const body = await c.req.json().catch(() => ({}));
   const password = typeof body.password === 'string' ? body.password : '';
   if (password.length < 1) return c.json({ error: 'empty' }, 400);
-  setAuthHash(await Bun.password.hash(password, { algorithm: 'argon2id' }));
+  // Hash first, then attempt the atomic claim; if we lost the race the insert
+  // does nothing and we report already_setup — no check-then-write window.
+  const hash = await Bun.password.hash(password, { algorithm: 'argon2id' });
+  if (!setAuthHashIfUnset(hash)) return c.json({ error: 'already_setup' }, 409);
   return c.json({ ok: true });
 });
 
