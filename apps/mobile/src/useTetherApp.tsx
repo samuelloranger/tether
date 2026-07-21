@@ -1,72 +1,77 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import {
-  Text,
-  View,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  FlatList,
-  Pressable,
-  PanResponder,
-  KeyboardAvoidingView,
-  Keyboard,
-  Platform,
-  ActivityIndicator,
-  useWindowDimensions,
-  Modal,
-  Linking,
-  AccessibilityInfo,
-  type TextStyle,
-} from 'react-native';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Feather from '@expo/vector-icons/Feather';
+import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
+import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
+import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import Feather from '@expo/vector-icons/Feather';
-import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
-import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
-import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
-import { TerminalEmulator, setTheme, type RenderRow, type CellStyle } from './terminal';
-import { shellQuote } from './shell';
-import type { LinkTarget } from './links';
-import { SessionCache, nextTermId, type SessionEntry } from './sessionCache';
-import { isImagePath } from './diffModel';
-import type { DrawerSession } from './SessionDrawer';
-import { applyFieldChange, SENT } from './input';
-import { getPassword, setPassword as persistPassword, authHeaders } from './secureConfig';
-import { httpBase, wsUrl, validateAddress } from './address';
-import { openTerminalSocket, type TerminalSocket } from './wsTransport';
-import { keyToBytes, COPY, PASTE } from './desktopKeys';
-import { shouldForwardToTerminal } from './desktopFocusGuard';
-import { notify, confirmAction } from './dialog';
-import { fetchUpdate, installUpdate, openExternalUrl, openReleasesPage, type PendingUpdate } from './desktopUpdate';
-import TitleBar from './TitleBar';
-import { injectDragRegionStyles } from './dragRegion';
-import { createStyles } from './styles';
-import { isDesktop, isMacDesktop } from './platform';
-import { TermRow } from './TermRow';
-import { ArrowCluster } from './Dpad';
-import { ConnectionBanner } from './ConnectionBanner';
-import { UtilityBar } from './UtilityBar';
-import { OverflowMenu } from './OverflowMenu';
-import { RenameModal, SnippetsModal } from './SessionModals';
-import { SelectionView } from './SelectionView';
-import { ContextMenu } from './ContextMenu';
-import { UpdateModal } from './UpdateModal';
-import { ConfigScreen } from './ConfigScreen';
-import { mouseSeq } from './mouseSeq';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  PanResponder,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  type TextInput,
+  type TextStyle,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
+import { httpBase, validateAddress, wsUrl } from './address';
+import { ConfigScreen } from './ConfigScreen';
+import { ConnectionBanner } from './ConnectionBanner';
+import { ContextMenu } from './ContextMenu';
+import { ArrowCluster } from './Dpad';
+import { shouldForwardToTerminal } from './desktopFocusGuard';
+import { COPY, keyToBytes, PASTE } from './desktopKeys';
 import {
   DEFAULT_DESKTOP_NAVIGATION_MODE,
   DESKTOP_NAVIGATION_STORAGE_KEY,
+  type DesktopNavigationMode,
   parseDesktopNavigationMode,
   reservedNavigationWidth,
-  type DesktopNavigationMode,
 } from './desktopNavigation';
-import { pickAutoSelectPreview, type Presentation } from './presentations';
 import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
+import {
+  fetchUpdate,
+  installUpdate,
+  openExternalUrl,
+  openReleasesPage,
+  type PendingUpdate,
+} from './desktopUpdate';
+import { confirmAction, notify } from './dialog';
+import { isImagePath } from './diffModel';
+import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
-
+import { applyFieldChange, SENT } from './input';
+import type { LinkTarget } from './links';
+import { mouseSeq } from './mouseSeq';
+import { OverflowMenu } from './OverflowMenu';
+import { isDesktop, isMacDesktop } from './platform';
+import { type Presentation, pickAutoSelectPreview } from './presentations';
+import { SelectionView } from './SelectionView';
+import type { DrawerSession } from './SessionDrawer';
+import { RenameModal, SnippetsModal } from './SessionModals';
+import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
+import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
+import { shellQuote } from './shell';
+import { createStyles } from './styles';
+import { TermRow } from './TermRow';
+import TitleBar from './TitleBar';
+import { type CellStyle, type RenderRow, setTheme, TerminalEmulator } from './terminal';
+import { UpdateModal } from './UpdateModal';
+import { UtilityBar } from './UtilityBar';
+import { openTerminalSocket, type TerminalSocket } from './wsTransport';
 
 // Constants for async storage keys
 const KEY_SERVER_IP = 'tether_server_ip';
@@ -78,7 +83,10 @@ const KEY_MONO_FONT = 'tether_mono_font';
 
 // Fetches raw image bytes with the auth header <Image> can't attach itself,
 // and hands back a data URI so the same code path works native and web.
-async function fetchDiffImageUri(url: string, headers: Record<string, string>): Promise<string | null> {
+async function fetchDiffImageUri(
+  url: string,
+  headers: Record<string, string>,
+): Promise<string | null> {
   const res = await fetch(url, { headers });
   if (!res.ok) return null;
   const blob = await res.blob();
@@ -128,6 +136,10 @@ export function useTetherApp() {
   const [connectionStatus, setConnectionStatus] = useState<
     'connecting' | 'connected' | 'disconnected' | 'auth-failed'
   >('disconnected');
+  // Mirror for use inside long-lived WS handlers (onClose) that would otherwise
+  // capture a stale connectionStatus and clobber an auth-failed verdict.
+  const connectionStatusRef = useRef(connectionStatus);
+  connectionStatusRef.current = connectionStatus;
   // Distinguishes a first-ever connect ("Connecting…") from a dropped-and-retrying
   // socket ("Reconnecting…") so the banner never overclaims on the very first try.
   const hasConnectedRef = useRef(false);
@@ -150,7 +162,9 @@ export function useTetherApp() {
     canSelfInstall: boolean;
   } | null>(null);
   const pendingUpdate = useRef<PendingUpdate | null>(null);
-  const [updateProgress, setUpdateProgress] = useState<{ done: number; total: number } | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
   const [updating, setUpdating] = useState(false);
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const [selectionViewOpen, setSelectionViewOpen] = useState(false);
@@ -181,7 +195,9 @@ export function useTetherApp() {
   const [diffText, setDiffText] = useState<string | null>(null);
   const [diffTruncated, setDiffTruncated] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
-  const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(null);
+  const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(
+    null,
+  );
   const seenPresentationIds = useRef(new Set<string>());
   const presentationsPrimed = useRef(false);
   const [desktopNavigationMode, setDesktopNavigationMode] = useState<DesktopNavigationMode>(
@@ -205,15 +221,33 @@ export function useTetherApp() {
     gen: number;
     open: boolean;
     reconnectTimeout: any;
+    retry: number;
+    ping: any;
+    lastSeen: number;
   };
   const connections = useRef(new Map<string, ConnState>()).current;
   const connState = (id: string): ConnState => {
     let s = connections.get(id);
     if (!s) {
-      s = { sock: null, gen: 0, open: false, reconnectTimeout: null };
+      s = {
+        sock: null,
+        gen: 0,
+        open: false,
+        reconnectTimeout: null,
+        retry: 0,
+        ping: null,
+        lastSeen: 0,
+      };
       connections.set(id, s);
     }
     return s;
+  };
+
+  // Exponential backoff, capped, with jitter — so N tabs don't retry in lockstep
+  // and a downed server isn't hit at a steady rate per tab forever.
+  const backoffDelay = (attempt: number): number => {
+    const base = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
+    return base / 2 + Math.floor(Math.random() * (base / 2));
   };
   const listRef = useRef<FlatList<RenderRow> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
@@ -246,6 +280,7 @@ export function useTetherApp() {
     return () => clearInterval(iv);
   }, [reduceMotion]);
   const renderScheduled = useRef(false);
+  const renderTimer = useRef<any>(null);
   const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
   const wheelAccum = useRef(0);
   const lastDy = useRef(0);
@@ -318,26 +353,35 @@ export function useTetherApp() {
           const row = Math.max(1, Math.floor((e?.term.rows ?? 24) / 2));
           wsSend({ type: 'input', text: mouseSeq(btn, col, row, e?.term.mouseSgr ?? false) });
         };
-        while (wheelAccum.current >= STEP) { wheel(64); wheelAccum.current -= STEP; } // drag down → older
-        while (wheelAccum.current <= -STEP) { wheel(65); wheelAccum.current += STEP; } // drag up → newer
+        while (wheelAccum.current >= STEP) {
+          wheel(64);
+          wheelAccum.current -= STEP;
+        } // drag down → older
+        while (wheelAccum.current <= -STEP) {
+          wheel(65);
+          wheelAccum.current += STEP;
+        } // drag up → newer
       },
-    })
+    }),
   ).current;
 
   // Coalesce many PTY chunks into one render per frame.
   const scheduleRender = () => {
     if (renderScheduled.current) return;
     renderScheduled.current = true;
-    setTimeout(() => {
-      renderScheduled.current = false;
-      const e = cache.get(activeIdRef.current);
-      if (!e) return;
-      setScreen(e.term.getSnapshot());
-      if (e.term.mouseOn !== mouseOnRef.current) {
-        mouseOnRef.current = e.term.mouseOn;
-        setMouseOn(e.term.mouseOn);
-      }
-    }, isDesktop ? 16 : 33); // 60fps on desktop (no battery cost); 30fps on mobile halves render load
+    renderTimer.current = setTimeout(
+      () => {
+        renderScheduled.current = false;
+        const e = cache.get(activeIdRef.current);
+        if (!e) return;
+        setScreen(e.term.getSnapshot());
+        if (e.term.mouseOn !== mouseOnRef.current) {
+          mouseOnRef.current = e.term.mouseOn;
+          setMouseOn(e.term.mouseOn);
+        }
+      },
+      isDesktop ? 16 : 33,
+    ); // 60fps on desktop (no battery cost); 30fps on mobile halves render load
   };
 
   const resetTerminal = () => {
@@ -362,15 +406,17 @@ export function useTetherApp() {
         if (id === activeIdRef.current) setGitSummaryVersion((version) => version + 1);
       } else if (msg.type === 'output') {
         // Dedup: the server replays logs with ids > sinceId on (re)connect.
-        if (msg.id) {
-          if (msg.id <= ent.lastAppliedId) return;
-          ent.lastAppliedId = msg.id;
-          ent.sinceId = msg.id;
-        }
+        // Every output frame carries an id; a frame without one is malformed and
+        // must be dropped, else it would re-write verbatim on every replay.
+        if (typeof msg.id !== 'number') return;
+        if (msg.id <= ent.lastAppliedId) return;
+        ent.lastAppliedId = msg.id;
+        ent.sinceId = msg.id;
         ent.term.write(msg.chunk);
         if (id === activeIdRef.current) scheduleRender();
       } else if (msg.type === 'exit') {
-        ent.term.write(`\r\n\x1b[31m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
+        const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
+        ent.term.write(`\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`);
         if (id === activeIdRef.current) scheduleRender();
       } else if (msg.type === 'reset') {
         // Server pruned past our sinceId — replay would have a hole. Wipe and
@@ -412,20 +458,46 @@ export function useTetherApp() {
       onOpen: () => {
         if (!fresh()) return;
         st.open = true;
+        st.retry = 0; // success resets backoff
         if (id === activeIdRef.current) {
           hasConnectedRef.current = true;
           setConnectionStatus('connected');
         }
+        // Keepalive: if no frame arrives for a while the socket is likely
+        // half-open — force a close so the reconnect path runs instead of
+        // silently dropping keystrokes into a dead pipe.
+        st.lastSeen = Date.now();
+        if (st.ping) clearInterval(st.ping);
+        st.ping = setInterval(() => {
+          if (Date.now() - st.lastSeen > 30_000) {
+            try {
+              st.sock?.close();
+            } catch {}
+          }
+        }, 15_000);
       },
       onMessage: (data) => {
+        st.lastSeen = Date.now();
         if (fresh()) applyWsMessage(id, data);
       },
       onClose: () => {
         if (!fresh()) return;
         st.open = false;
+        if (st.ping) {
+          clearInterval(st.ping);
+          st.ping = null;
+        }
+        // The 4s HTTP poll is the auth authority. If it already declared the
+        // password wrong, don't overwrite that verdict and don't reconnect —
+        // reconnecting every few seconds would hammer the server forever and
+        // never succeed until the user changes the password.
+        if (connectionStatusRef.current === 'auth-failed') {
+          st.retry = 0;
+          return;
+        }
         if (id === activeIdRef.current) setConnectionStatus('disconnected');
         if (readyRef.current && cache.has(id)) {
-          st.reconnectTimeout = setTimeout(() => connect(id), 3000);
+          st.reconnectTimeout = setTimeout(() => connect(id), backoffDelay(st.retry++));
         }
       },
     });
@@ -437,6 +509,10 @@ export function useTetherApp() {
     if (st.reconnectTimeout) {
       clearTimeout(st.reconnectTimeout);
       st.reconnectTimeout = null;
+    }
+    if (st.ping) {
+      clearInterval(st.ping);
+      st.ping = null;
     }
     st.gen++; // invalidate any in-flight handlers
     st.open = false;
@@ -515,13 +591,15 @@ export function useTetherApp() {
     if (!isDesktop) return;
     AsyncStorage.getItem(KEY_MONO_FONT)
       .then((font) => {
-        if (font === 'FiraCode_400Regular' || font === 'JetBrainsMono_400Regular') setFontFamily(font);
+        if (font === 'FiraCode_400Regular' || font === 'JetBrainsMono_400Regular')
+          setFontFamily(font);
       })
       .catch(() => {});
   }, []);
 
   const changeFontFamily = (font: string) => {
-    if (!isDesktop || (font !== 'FiraCode_400Regular' && font !== 'JetBrainsMono_400Regular')) return;
+    if (!isDesktop || (font !== 'FiraCode_400Regular' && font !== 'JetBrainsMono_400Regular'))
+      return;
     setFontFamily(font);
     AsyncStorage.setItem(KEY_MONO_FONT, font);
   };
@@ -612,7 +690,11 @@ export function useTetherApp() {
         setPresentations(rows);
         return;
       }
-      const newPreview = pickAutoSelectPreview(rows, seenPresentationIds.current, activeIdRef.current);
+      const newPreview = pickAutoSelectPreview(
+        rows,
+        seenPresentationIds.current,
+        activeIdRef.current,
+      );
       seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
       setPresentations(rows);
       if (newPreview) setActivePresentationId(newPreview.id);
@@ -727,7 +809,10 @@ export function useTetherApp() {
     }
 
     loadConfig();
-    return () => disconnectAll();
+    return () => {
+      disconnectAll();
+      if (renderTimer.current) clearTimeout(renderTimer.current);
+    };
   }, []);
 
   // Size the emulator (and the remote PTY) to the on-screen grid so the shell
@@ -983,7 +1068,10 @@ export function useTetherApp() {
         // Unique per call regardless of the (possibly colliding, possibly
         // shared-across-a-multi-drop) display filename, so concurrent
         // uploads never race on the same staged cache file.
-        const staged = new File(Paths.cache, `${Date.now()}-${Math.random().toString(36).slice(2)}-${filename}`);
+        const staged = new File(
+          Paths.cache,
+          `${Date.now()}-${Math.random().toString(36).slice(2)}-${filename}`,
+        );
         try {
           await source.copy(staged, { overwrite: true });
           const result = await staged.upload(url, {
@@ -1007,7 +1095,11 @@ export function useTetherApp() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       sendInput(shellQuote(data.path!));
     } catch (err) {
-      void notify('Upload failed', `Could not upload the file to the server: ${String(err)}`, 'error');
+      void notify(
+        'Upload failed',
+        `Could not upload the file to the server: ${String(err)}`,
+        'error',
+      );
     }
   };
 
@@ -1113,7 +1205,12 @@ export function useTetherApp() {
   // normally. Ctrl/Cmd+C copies an active selection or sends SIGINT; Ctrl/Cmd+V
   // pastes from the clipboard.
   useEffect(() => {
-    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
+    if (
+      !isDesktop ||
+      isConfiguring ||
+      presentations.some((preview) => preview.id === activePresentationId)
+    )
+      return;
     // True while an IME/dead-key composition is in progress (accented Latin
     // chars like é/ñ/ö on many layouts, or CJK candidate windows). Composition
     // is driven by compositionstart/end, not keydown — forwarding the raw
@@ -1191,7 +1288,12 @@ export function useTetherApp() {
   // as SGR mouse-wheel events and the app scrolls its own history. Outside mouse
   // mode we don't intercept, so the list scrolls natively.
   useEffect(() => {
-    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
+    if (
+      !isDesktop ||
+      isConfiguring ||
+      presentations.some((preview) => preview.id === activePresentationId)
+    )
+      return;
     let accum = 0;
     const onWheel = (e: WheelEvent) => {
       const el = document.getElementById('tether-terminal');
@@ -1207,8 +1309,14 @@ export function useTetherApp() {
       const cols = term.cols || 80;
       const rows = term.rows || 24;
       const rect = el.getBoundingClientRect();
-      const col = Math.min(cols, Math.max(1, Math.floor((e.clientX - rect.left) / (rect.width / cols)) + 1));
-      const row = Math.min(rows, Math.max(1, Math.floor((e.clientY - rect.top) / (rect.height / rows)) + 1));
+      const col = Math.min(
+        cols,
+        Math.max(1, Math.floor((e.clientX - rect.left) / (rect.width / cols)) + 1),
+      );
+      const row = Math.min(
+        rows,
+        Math.max(1, Math.floor((e.clientY - rect.top) / (rect.height / rows)) + 1),
+      );
       const send = (btn: number) =>
         wsSend({ type: 'input', text: mouseSeq(btn, col, row, term.mouseSgr) });
       while (accum >= STEP) {
@@ -1233,7 +1341,11 @@ export function useTetherApp() {
       .then((u) => {
         if (u) {
           pendingUpdate.current = u;
-          setUpdateInfo({ version: u.version, current: u.current, canSelfInstall: u.canSelfInstall });
+          setUpdateInfo({
+            version: u.version,
+            current: u.current,
+            canSelfInstall: u.canSelfInstall,
+          });
         }
       })
       .catch(() => {});
@@ -1292,7 +1404,12 @@ export function useTetherApp() {
 
   // Desktop: right-click the terminal for a Copy / Paste / Select All menu.
   useEffect(() => {
-    if (!isDesktop || isConfiguring || presentations.some((preview) => preview.id === activePresentationId)) return;
+    if (
+      !isDesktop ||
+      isConfiguring ||
+      presentations.some((preview) => preview.id === activePresentationId)
+    )
+      return;
     const onCtx = (e: MouseEvent) => {
       const el = document.getElementById('tether-terminal');
       if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
@@ -1304,38 +1421,54 @@ export function useTetherApp() {
   }, [isConfiguring, activePresentationId, presentations]);
 
   const activeName = drawerSessions.find((s) => s.id === activeId)?.name || activeId;
-  const activePresentation = presentations.find((preview) => preview.id === activePresentationId) || null;
+  const activePresentation =
+    presentations.find((preview) => preview.id === activePresentationId) || null;
   const closeFile = useCallback(() => setFileView(null), []);
-  const openFile = useCallback(async (target: LinkTarget) => {
-    if (target.kind === 'external') {
+  const openFile = useCallback(
+    async (target: LinkTarget) => {
+      if (target.kind === 'external') {
+        try {
+          if (isDesktop) await openExternalUrl(target.url);
+          else await Linking.openURL(target.url);
+        } catch (error) {
+          void notify('Could not open link', String(error), 'error');
+        }
+        return;
+      }
+      setFileLoading(true);
       try {
-        if (isDesktop) await openExternalUrl(target.url);
-        else await Linking.openURL(target.url);
+        const sessionId = activeIdRef.current;
+        const query = new URLSearchParams({ path: target.path });
+        const res = await fetch(
+          `${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`,
+          {
+            headers: authHeaders(passwordRef.current),
+          },
+        );
+        const body = (await res.json().catch(() => ({}))) as {
+          path?: string;
+          content?: string;
+          error?: string;
+        };
+        if (!res.ok || typeof body.path !== 'string' || typeof body.content !== 'string') {
+          throw new Error(body.error || `Request failed (${res.status})`);
+        }
+        if (activeIdRef.current === sessionId) {
+          setFileView({
+            path: body.path,
+            content: body.content,
+            line: target.line,
+            column: target.column,
+          });
+        }
       } catch (error) {
-        void notify('Could not open link', String(error), 'error');
+        void notify('Could not open file', String(error), 'error');
+      } finally {
+        setFileLoading(false);
       }
-      return;
-    }
-    setFileLoading(true);
-    try {
-      const sessionId = activeIdRef.current;
-      const query = new URLSearchParams({ path: target.path });
-      const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`, {
-        headers: authHeaders(passwordRef.current),
-      });
-      const body = (await res.json().catch(() => ({}))) as { path?: string; content?: string; error?: string };
-      if (!res.ok || typeof body.path !== 'string' || typeof body.content !== 'string') {
-        throw new Error(body.error || `Request failed (${res.status})`);
-      }
-      if (activeIdRef.current === sessionId) {
-        setFileView({ path: body.path, content: body.content, line: target.line, column: target.column });
-      }
-    } catch (error) {
-      void notify('Could not open file', String(error), 'error');
-    } finally {
-      setFileLoading(false);
-    }
-  }, [serverIp, port]);
+    },
+    [serverIp, port],
+  );
   const closeDiff = useCallback(() => {
     setDiffOpen(false);
     setDiffSelectedPath(null);
@@ -1377,10 +1510,17 @@ export function useTetherApp() {
           return;
         }
         const query = new URLSearchParams({ path: filePath });
-        const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff?${query}`, {
-          headers: authHeaders(passwordRef.current),
-        });
-        const body = (await res.json().catch(() => ({}))) as { diff?: string; truncated?: boolean; error?: string };
+        const res = await fetch(
+          `${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff?${query}`,
+          {
+            headers: authHeaders(passwordRef.current),
+          },
+        );
+        const body = (await res.json().catch(() => ({}))) as {
+          diff?: string;
+          truncated?: boolean;
+          error?: string;
+        };
         if (!res.ok || typeof body.diff !== 'string') {
           throw new Error(body.error || `Request failed (${res.status})`);
         }
@@ -1401,13 +1541,14 @@ export function useTetherApp() {
     setDiffTruncated(false);
     setDiffImage(null);
   }, []);
-  const changeSummary = entryFor(activeId).diffSummary;
-  // Read live off the mutable emulator field — re-derives every render since
-  // entryFor/activeId are already render-time values, no extra state needed.
-  const activeBellCount = entryFor(activeId).term.bellCount;
-  // Read live off the mutable emulator field, same pattern as activeBellCount
-  // above.
-  const activePromptReturnCount = entryFor(activeId).term.promptReturnCount;
+  // Peek (non-touching) so render stays pure — the active entry is already
+  // MRU-resident from connect/switchTo; only the very first render (before any
+  // touch) falls back to entryFor, which creates it.
+  const activeEntry = cache.peek(activeId) ?? entryFor(activeId);
+  const changeSummary = activeEntry.diffSummary;
+  // Read live off the mutable emulator field — re-derives every render.
+  const activeBellCount = activeEntry.term.bellCount;
+  const activePromptReturnCount = activeEntry.term.promptReturnCount;
 
   // Desktop: native notification when a bell rings or a command finishes (new
   // shell prompt appears) while the window isn't focused. windowFocusedRef
@@ -1481,7 +1622,7 @@ export function useTetherApp() {
     const ok = await confirmAction(
       'Restart terminal',
       "This restarts the shell process and clears this terminal's scrollback history on the server. This can't be undone.",
-      { confirmLabel: 'Restart', destructive: true }
+      { confirmLabel: 'Restart', destructive: true },
     );
     if (!ok) return;
     resetTerminal();
@@ -1523,12 +1664,12 @@ export function useTetherApp() {
         lineHeight={lineHeight}
         width={gridWidth}
         blinkOn={blinkOn}
-        cursorStyle={entryFor(activeId).term.cursorStyle}
+        cursorStyle={(cache.peek(activeId) ?? entryFor(activeId)).term.cursorStyle}
         fontFamily={fontFamily}
         onOpenLink={openFile}
       />
     ),
-    [fontSize, lineHeight, gridWidth, blinkOn, activeId, entryFor, fontFamily, openFile],
+    [fontSize, lineHeight, gridWidth, blinkOn, activeId, entryFor, cache, fontFamily, openFile],
   );
 
   // Map the connection state to the TitleBar's status union ('disconnected' → 'offline').
@@ -1580,8 +1721,176 @@ export function useTetherApp() {
     />
   );
 
-
   return {
-    fontsLoaded, insets, serverIp, setServerIp, port, setPort, password, setPassword, passwordRef, setupMode, setSetupMode, confirmPassword, setConfirmPassword, testStatus, setTestStatus, isConfiguring, setIsConfiguring, ready, setReady, readyRef, lastConnectedRef, connectionStatus, setConnectionStatus, hasConnectedRef, screen, setScreen, inputText, setInputText, prevValueRef, skipNextChangeRef, termHeight, setTermHeight, mouseOn, setMouseOn, ctxMenu, setCtxMenu, updateInfo, setUpdateInfo, pendingUpdate, updateProgress, setUpdateProgress, updating, setUpdating, ctrlArmed, setCtrlArmed, selectionViewOpen, setSelectionViewOpen, menuOpen, setMenuOpen, renameModalOpen, setRenameModalOpen, renameText, setRenameText, appearanceModalOpen, setAppearanceModalOpen, searchQuery, setSearchQuery, searchInputRef, snippets, setSnippets, snippetsModalOpen, setSnippetsModalOpen, snippetDraft, setSnippetDraft, cache, activeId, setActiveId, activeIdRef, drawerOpen, setDrawerOpen, drawerSessions, setDrawerSessions, presentations, activePresentation, activePresentationId, fileView, fileLoading, openFile, closeFile, diffOpen, changeSummary, diffSelectedPath, diffText, diffTruncated, diffLoading, diffImage, openDiff, closeDiff, selectDiffFile, deselectDiffFile, selectTerminal, selectPresentation, closePresentation, refreshPresentations, desktopNavigationMode, selectDesktopNavigationMode, listRef, inputRef, autoScroll, scrolledRef, lastContentHeight, blinkOn, setBlinkOn, reduceMotion, setReduceMotion, renderScheduled, mouseOnRef, wheelAccum, lastDy, CHAR_RATIO, fontSize, setFontSize, lineHeight, paneWidth, gridWidth, numCols, numRows, entryFor, wsSend, panResponder, scheduleRender, resetTerminal, applyWsMessage, connect, disconnect, switchTo, newTerminal, killActiveOr, changeFontSize, persistSnippets, addSnippet, removeSnippet, sendSnippet, refreshSessions, testConnection, saveConfig, sendInput, cursorSeq, getFullText, searchText, openSearch, openSelectionView, copySelection, selectAllTerminal, handlePaste, handleKeyPress, resetField, handleChangeText, handleSend, disposePending, checkForUpdatesManual, startUpdate, downloadUpdate, dismissUpdate, activeName, activeBellCount, upPct, upLabel, openRename, submitRename, hardResetSession, onScroll, renderRow, terminalGrid, titleBarStatus, jumpPrompt, uploadFile, pickAndUploadImage, fontFamily, changeFontFamily,
+    fontsLoaded,
+    insets,
+    serverIp,
+    setServerIp,
+    port,
+    setPort,
+    password,
+    setPassword,
+    passwordRef,
+    setupMode,
+    setSetupMode,
+    confirmPassword,
+    setConfirmPassword,
+    testStatus,
+    setTestStatus,
+    isConfiguring,
+    setIsConfiguring,
+    ready,
+    setReady,
+    readyRef,
+    lastConnectedRef,
+    connectionStatus,
+    setConnectionStatus,
+    hasConnectedRef,
+    screen,
+    setScreen,
+    inputText,
+    setInputText,
+    prevValueRef,
+    skipNextChangeRef,
+    termHeight,
+    setTermHeight,
+    mouseOn,
+    setMouseOn,
+    ctxMenu,
+    setCtxMenu,
+    updateInfo,
+    setUpdateInfo,
+    pendingUpdate,
+    updateProgress,
+    setUpdateProgress,
+    updating,
+    setUpdating,
+    ctrlArmed,
+    setCtrlArmed,
+    selectionViewOpen,
+    setSelectionViewOpen,
+    menuOpen,
+    setMenuOpen,
+    renameModalOpen,
+    setRenameModalOpen,
+    renameText,
+    setRenameText,
+    appearanceModalOpen,
+    setAppearanceModalOpen,
+    searchQuery,
+    setSearchQuery,
+    searchInputRef,
+    snippets,
+    setSnippets,
+    snippetsModalOpen,
+    setSnippetsModalOpen,
+    snippetDraft,
+    setSnippetDraft,
+    cache,
+    activeId,
+    setActiveId,
+    activeIdRef,
+    drawerOpen,
+    setDrawerOpen,
+    drawerSessions,
+    setDrawerSessions,
+    presentations,
+    activePresentation,
+    activePresentationId,
+    fileView,
+    fileLoading,
+    openFile,
+    closeFile,
+    diffOpen,
+    changeSummary,
+    diffSelectedPath,
+    diffText,
+    diffTruncated,
+    diffLoading,
+    diffImage,
+    openDiff,
+    closeDiff,
+    selectDiffFile,
+    deselectDiffFile,
+    selectTerminal,
+    selectPresentation,
+    closePresentation,
+    refreshPresentations,
+    desktopNavigationMode,
+    selectDesktopNavigationMode,
+    listRef,
+    inputRef,
+    autoScroll,
+    scrolledRef,
+    lastContentHeight,
+    blinkOn,
+    setBlinkOn,
+    reduceMotion,
+    setReduceMotion,
+    renderScheduled,
+    mouseOnRef,
+    wheelAccum,
+    lastDy,
+    CHAR_RATIO,
+    fontSize,
+    setFontSize,
+    lineHeight,
+    paneWidth,
+    gridWidth,
+    numCols,
+    numRows,
+    entryFor,
+    wsSend,
+    panResponder,
+    scheduleRender,
+    resetTerminal,
+    applyWsMessage,
+    connect,
+    disconnect,
+    switchTo,
+    newTerminal,
+    killActiveOr,
+    changeFontSize,
+    persistSnippets,
+    addSnippet,
+    removeSnippet,
+    sendSnippet,
+    refreshSessions,
+    testConnection,
+    saveConfig,
+    sendInput,
+    cursorSeq,
+    getFullText,
+    searchText,
+    openSearch,
+    openSelectionView,
+    copySelection,
+    selectAllTerminal,
+    handlePaste,
+    handleKeyPress,
+    resetField,
+    handleChangeText,
+    handleSend,
+    disposePending,
+    checkForUpdatesManual,
+    startUpdate,
+    downloadUpdate,
+    dismissUpdate,
+    activeName,
+    activeBellCount,
+    upPct,
+    upLabel,
+    openRename,
+    submitRename,
+    hardResetSession,
+    onScroll,
+    renderRow,
+    terminalGrid,
+    titleBarStatus,
+    jumpPrompt,
+    uploadFile,
+    pickAndUploadImage,
+    fontFamily,
+    changeFontFamily,
   };
 }

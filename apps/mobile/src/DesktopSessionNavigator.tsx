@@ -1,12 +1,12 @@
+import Feather from '@expo/vector-icons/Feather';
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Feather from '@expo/vector-icons/Feather';
-import { confirmAction } from './dialog';
-import type { DrawerSession } from './SessionDrawer';
-import { PANEL_W, sessionActivity, type DesktopNavigationMode } from './desktopNavigation';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { type DesktopNavigationMode, PANEL_W, sessionActivity } from './desktopNavigation';
+import { confirmAction } from './dialog';
 import type { Presentation } from './presentations';
+import type { DrawerSession } from './SessionDrawer';
 
 export interface DesktopSessionNavigatorProps {
   mode: DesktopNavigationMode;
@@ -35,7 +35,18 @@ function confirmKill(id: string, onKill: (id: string) => void) {
   });
 }
 
-function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, previews, activePreviewId, onSelectPreview, onClosePreview, onSettings }: Omit<DesktopSessionNavigatorProps, 'mode'>) {
+function SessionPanel({
+  sessions,
+  activeId,
+  onSelect,
+  onNew,
+  onKill,
+  previews,
+  activePreviewId,
+  onSelectPreview,
+  onClosePreview,
+  onSettings,
+}: Omit<DesktopSessionNavigatorProps, 'mode'>) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
   return (
@@ -71,7 +82,19 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, previews, a
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={`Terminal ${label}`}
               >
-                <View style={[styles.dot, { backgroundColor: sessionActivity(session, active) === 'live' ? theme.colors.success : sessionActivity(session, active) === 'stopped' ? theme.colors.textFaint : theme.colors.border }]} />
+                <View
+                  style={[
+                    styles.dot,
+                    {
+                      backgroundColor:
+                        sessionActivity(session, active) === 'live'
+                          ? theme.colors.success
+                          : sessionActivity(session, active) === 'stopped'
+                            ? theme.colors.textFaint
+                            : theme.colors.border,
+                    },
+                  ]}
+                />
                 <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
                   {label}
                 </Text>
@@ -136,11 +159,34 @@ function SessionPanel({ sessions, activeId, onSelect, onNew, onKill, previews, a
   );
 }
 
-export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, onNew, onKill, previews, activePreviewId, onSelectPreview, onClosePreview, onSettings }: DesktopSessionNavigatorProps) {
+export function DesktopSessionNavigator({
+  mode,
+  sessions,
+  activeId,
+  onSelect,
+  onNew,
+  onKill,
+  previews,
+  activePreviewId,
+  onSelectPreview,
+  onClosePreview,
+  onSettings,
+}: DesktopSessionNavigatorProps) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
   const [hoverOpen, setHoverOpen] = useState(false);
-  const panelProps = { sessions, activeId, onSelect, onNew, onKill, previews, activePreviewId, onSelectPreview, onClosePreview, onSettings };
+  const panelProps = {
+    sessions,
+    activeId,
+    onSelect,
+    onNew,
+    onKill,
+    previews,
+    activePreviewId,
+    onSelectPreview,
+    onClosePreview,
+    onSettings,
+  };
   // react-native-web forwards these DOM hover handlers, but Expo's View type omits them.
   const hoverHandlers = {
     onMouseEnter: () => setHoverOpen(true),
@@ -148,23 +194,33 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
   } as any;
 
   if (mode === 'sidebar') {
-    return <View style={styles.sidebar}><SessionPanel {...panelProps} /></View>;
+    return (
+      <View style={styles.sidebar}>
+        <SessionPanel {...panelProps} />
+      </View>
+    );
   }
 
   if (mode === 'hover') {
     return (
-      <View
-        style={styles.hoverRegion}
-        {...hoverHandlers}
-      >
+      <View style={styles.hoverRegion} {...hoverHandlers}>
         <View style={styles.hoverTarget} />
-        {hoverOpen && <View style={styles.hoverPanel}><SessionPanel {...panelProps} /></View>}
+        {hoverOpen && (
+          <View style={styles.hoverPanel}>
+            <SessionPanel {...panelProps} />
+          </View>
+        )}
       </View>
     );
   }
 
   return (
-    <ScrollView horizontal style={styles.tabs} contentContainerStyle={styles.tabsContent} showsHorizontalScrollIndicator={false}>
+    <ScrollView
+      horizontal
+      style={styles.tabs}
+      contentContainerStyle={styles.tabsContent}
+      showsHorizontalScrollIndicator={false}
+    >
       {sessions.map((session) => {
         const active = activePreviewId === null && session.id === activeId;
         const label = session.name || session.id;
@@ -178,8 +234,22 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
               accessibilityState={{ selected: active }}
               accessibilityLabel={`Terminal ${label}`}
             >
-              <View style={[styles.dot, { backgroundColor: sessionActivity(session, active) === 'live' ? theme.colors.success : sessionActivity(session, active) === 'stopped' ? theme.colors.textFaint : theme.colors.border }]} />
-              <Text style={styles.tabText} numberOfLines={1}>{label}</Text>
+              <View
+                style={[
+                  styles.dot,
+                  {
+                    backgroundColor:
+                      sessionActivity(session, active) === 'live'
+                        ? theme.colors.success
+                        : sessionActivity(session, active) === 'stopped'
+                          ? theme.colors.textFaint
+                          : theme.colors.border,
+                  },
+                ]}
+              />
+              <Text style={styles.tabText} numberOfLines={1}>
+                {label}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.tabKill}
@@ -207,7 +277,9 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
               accessibilityLabel={`Preview ${preview.title}`}
             >
               <Feather name="layout" size={13} color={theme.colors.accent} />
-              <Text style={styles.tabText} numberOfLines={1}>{preview.title}</Text>
+              <Text style={styles.tabText} numberOfLines={1}>
+                {preview.title}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.tabKill}
@@ -226,32 +298,108 @@ export function DesktopSessionNavigator({ mode, sessions, activeId, onSelect, on
   );
 }
 
-const createStyles = (c: AppColors) => StyleSheet.create({
-  sidebar: { width: PANEL_W, flexShrink: 0 },
-  panel: { flex: 1, backgroundColor: c.surface, borderRightWidth: 1, borderRightColor: c.border },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.border },
-  headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  title: { color: c.text, fontSize: 11, lineHeight: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', ...COMPACT_TEXT },
-  settings: { padding: 3 },
-  list: { flex: 1, paddingVertical: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 6, borderRadius: 6 },
-  rowActive: { backgroundColor: c.selected },
-  rowMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingLeft: 9 },
-  dot: { width: 7, height: 7, borderRadius: 999 },
-  name: { flex: 1, minWidth: 0, color: c.textMuted, fontSize: 13, lineHeight: 16, ...COMPACT_TEXT },
-  nameActive: { color: c.text, fontWeight: '600' },
-  stopped: { color: c.textFaint, fontSize: 10, lineHeight: 12, marginRight: 4, ...COMPACT_TEXT },
-  kill: { padding: 7 },
-  newButton: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, margin: 12, paddingVertical: 10, borderRadius: 7, backgroundColor: c.accent },
-  newButtonText: { color: c.accentText, fontSize: 13, fontWeight: '700' },
-  hoverRegion: { position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 2 },
-  hoverTarget: { width: 12, flex: 1 },
-  hoverPanel: { position: 'absolute', top: 0, bottom: 0, left: 0, width: PANEL_W, shadowColor: c.overlay, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 },
-  tabs: { flexGrow: 0, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border },
-  tabsContent: { paddingHorizontal: 8 },
-  tab: { flexDirection: 'row', alignItems: 'center', maxWidth: 220, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: c.accent, backgroundColor: c.selected },
-  tabMain: { flexDirection: 'row', alignItems: 'center', gap: 7, minWidth: 0, paddingLeft: 12, paddingVertical: 10 },
-  tabText: { color: c.text, fontSize: 12, lineHeight: 15, fontWeight: '600', maxWidth: 150, ...COMPACT_TEXT },
-  tabKill: { padding: 8 },
-});
+const createStyles = (c: AppColors) =>
+  StyleSheet.create({
+    sidebar: { width: PANEL_W, flexShrink: 0 },
+    panel: { flex: 1, backgroundColor: c.surface, borderRightWidth: 1, borderRightColor: c.border },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 14,
+      paddingVertical: 13,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+    title: {
+      color: c.text,
+      fontSize: 11,
+      lineHeight: 13,
+      fontWeight: '700',
+      letterSpacing: 1.1,
+      textTransform: 'uppercase',
+      ...COMPACT_TEXT,
+    },
+    settings: { padding: 3 },
+    list: { flex: 1, paddingVertical: 6 },
+    row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 6, borderRadius: 6 },
+    rowActive: { backgroundColor: c.selected },
+    rowMain: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 9,
+      paddingLeft: 9,
+    },
+    dot: { width: 7, height: 7, borderRadius: 999 },
+    name: {
+      flex: 1,
+      minWidth: 0,
+      color: c.textMuted,
+      fontSize: 13,
+      lineHeight: 16,
+      ...COMPACT_TEXT,
+    },
+    nameActive: { color: c.text, fontWeight: '600' },
+    stopped: { color: c.textFaint, fontSize: 10, lineHeight: 12, marginRight: 4, ...COMPACT_TEXT },
+    kill: { padding: 7 },
+    newButton: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 8,
+      margin: 12,
+      paddingVertical: 10,
+      borderRadius: 7,
+      backgroundColor: c.accent,
+    },
+    newButtonText: { color: c.accentText, fontSize: 13, fontWeight: '700' },
+    hoverRegion: { position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 2 },
+    hoverTarget: { width: 12, flex: 1 },
+    hoverPanel: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: 0,
+      width: PANEL_W,
+      shadowColor: c.overlay,
+      shadowOpacity: 0.45,
+      shadowRadius: 16,
+      elevation: 12,
+    },
+    tabs: {
+      flexGrow: 0,
+      backgroundColor: c.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    tabsContent: { paddingHorizontal: 8 },
+    tab: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      maxWidth: 220,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
+    },
+    tabActive: { borderBottomColor: c.accent, backgroundColor: c.selected },
+    tabMain: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      minWidth: 0,
+      paddingLeft: 12,
+      paddingVertical: 10,
+    },
+    tabText: {
+      color: c.text,
+      fontSize: 12,
+      lineHeight: 15,
+      fontWeight: '600',
+      maxWidth: 150,
+      ...COMPACT_TEXT,
+    },
+    tabKill: { padding: 8 },
+  });

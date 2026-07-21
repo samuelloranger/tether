@@ -1,9 +1,17 @@
-import { Modal, Pressable, View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
-import { MONO } from './styles';
-import { THEME_OPTIONS } from './appTheme';
+import {
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { THEME_OPTIONS } from './appTheme';
+import { MONO } from './styles';
 
 const THEME_LABELS = {
   system: 'System',
@@ -12,6 +20,7 @@ const THEME_LABELS = {
   macchiato: 'Macchiato',
   mocha: 'Mocha',
 } as const;
+
 import { isDesktop } from './platform';
 
 const FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
@@ -157,7 +166,12 @@ export function AppearanceModal({
               key={id}
               style={[
                 styles.renameBtn,
-                { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
+                {
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  width: '100%',
+                },
               ]}
               onPress={() => setPreference(id)}
             >
@@ -173,12 +187,21 @@ export function AppearanceModal({
                   key={font}
                   style={[
                     styles.renameBtn,
-                    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
+                    {
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      width: '100%',
+                    },
                   ]}
                   onPress={() => onFontChange(font)}
                 >
-                  <Text style={[styles.renameBtnText, { fontFamily: font }]}>{font.split('_')[0]}</Text>
-                  {font === fontFamily && <Feather name="check" size={16} color={theme.colors.info} />}
+                  <Text style={[styles.renameBtnText, { fontFamily: font }]}>
+                    {font.split('_')[0]}
+                  </Text>
+                  {font === fontFamily && (
+                    <Feather name="check" size={16} color={theme.colors.info} />
+                  )}
                 </TouchableOpacity>
               ))}
             </>
@@ -191,86 +214,86 @@ export function AppearanceModal({
 
 function createStyles(c: AppColors) {
   return StyleSheet.create({
-  menuBackdrop: {
-    flex: 1,
-    backgroundColor: c.overlay,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  renamePanel: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: c.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: c.border,
-    padding: 20,
-    gap: 14,
-  },
-  renameTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: c.text,
-  },
-  renameInput: {
-    backgroundColor: c.input,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: c.text,
-    fontSize: 15,
-  },
-  renameBtns: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 20,
-  },
-  renameBtn: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-  },
-  renameBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: c.textMuted,
-  },
-  snippetEmpty: {
-    color: c.textFaint,
-    fontSize: 13,
-  },
-  snippetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  snippetSend: {
-    flex: 1,
-    backgroundColor: c.input,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  snippetText: {
-    color: c.text,
-    fontSize: 14,
-    fontFamily: MONO,
-  },
-  snippetDelete: {
-    padding: 8,
-  },
-  snippetAddRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  snippetAddBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: c.input,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+    menuBackdrop: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 32,
+    },
+    renamePanel: {
+      width: '100%',
+      maxWidth: 360,
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 20,
+      gap: 14,
+    },
+    renameTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: c.text,
+    },
+    renameInput: {
+      backgroundColor: c.input,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      color: c.text,
+      fontSize: 15,
+    },
+    renameBtns: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 20,
+    },
+    renameBtn: {
+      paddingHorizontal: 4,
+      paddingVertical: 4,
+    },
+    renameBtnText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: c.textMuted,
+    },
+    snippetEmpty: {
+      color: c.textFaint,
+      fontSize: 13,
+    },
+    snippetRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    snippetSend: {
+      flex: 1,
+      backgroundColor: c.input,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    snippetText: {
+      color: c.text,
+      fontSize: 14,
+      fontFamily: MONO,
+    },
+    snippetDelete: {
+      padding: 8,
+    },
+    snippetAddRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    snippetAddBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: c.input,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
   });
 }

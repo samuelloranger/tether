@@ -10,7 +10,7 @@
 // shells out to zenity as a separate, unparented, arbitrarily-positioned
 // process, which is worse. Desktop alerts are rendered in-app instead (see
 // AlertModal.tsx) via the queue below. Mobile keeps the native styled Alert.
-import { Platform, Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 const isDesktop = Platform.OS === 'web';
 

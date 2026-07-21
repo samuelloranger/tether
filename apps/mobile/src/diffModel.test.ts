@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
-  changeLabel,
   buildFileTree,
+  changeLabel,
   diffLineKinds,
   displayDiff,
   isImagePath,
@@ -96,8 +96,20 @@ test('parseDiffLines assigns old/new line numbers per hunk and strips diff marke
     ' trailing',
   ].join('\n');
   expect(parseDiffLines(diff)).toEqual([
-    { text: 'diff --git a/main.ts b/main.ts', kind: 'meta', content: 'diff --git a/main.ts b/main.ts', oldLine: null, newLine: null },
-    { text: '@@ -1,3 +1,3 @@', kind: 'meta', content: '@@ -1,3 +1,3 @@', oldLine: null, newLine: null },
+    {
+      text: 'diff --git a/main.ts b/main.ts',
+      kind: 'meta',
+      content: 'diff --git a/main.ts b/main.ts',
+      oldLine: null,
+      newLine: null,
+    },
+    {
+      text: '@@ -1,3 +1,3 @@',
+      kind: 'meta',
+      content: '@@ -1,3 +1,3 @@',
+      oldLine: null,
+      newLine: null,
+    },
     { text: ' unchanged', kind: 'context', content: 'unchanged', oldLine: 1, newLine: 1 },
     { text: '-old line', kind: 'remove', content: 'old line', oldLine: 2, newLine: null },
     { text: '+new line', kind: 'add', content: 'new line', oldLine: null, newLine: 2 },

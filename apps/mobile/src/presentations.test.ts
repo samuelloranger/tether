@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import { findSessionPreview, pickAutoSelectPreview, previewUrl, type Presentation } from './presentations';
+import {
+  findSessionPreview,
+  type Presentation,
+  pickAutoSelectPreview,
+  previewUrl,
+} from './presentations';
 
 function preview(overrides: Partial<Presentation> = {}): Presentation {
   return {
@@ -30,7 +35,10 @@ test('findSessionPreview returns the most recently created preview owned by a se
 });
 
 test('pickAutoSelectPreview only returns a preview new to `seen` and owned by the active session', () => {
-  const rows = [preview({ id: 'p1', sessionId: 'term-1' }), preview({ id: 'p2', sessionId: 'term-2' })];
+  const rows = [
+    preview({ id: 'p1', sessionId: 'term-1' }),
+    preview({ id: 'p2', sessionId: 'term-2' }),
+  ];
   expect(pickAutoSelectPreview(rows, new Set(), 'term-1')?.id).toBe('p1');
   expect(pickAutoSelectPreview(rows, new Set(), 'term-2')?.id).toBe('p2');
   expect(pickAutoSelectPreview(rows, new Set(['p1']), 'term-1')).toBeNull();

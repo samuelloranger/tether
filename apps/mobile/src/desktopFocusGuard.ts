@@ -14,7 +14,11 @@ export interface FocusEl {
   closest?(selector: string): unknown;
 }
 
-export function shouldForwardToTerminal(el: FocusEl | null, isBody: boolean, terminalVisible = true): boolean {
+export function shouldForwardToTerminal(
+  el: FocusEl | null,
+  isBody: boolean,
+  terminalVisible = true,
+): boolean {
   if (!terminalVisible) return false;
   if (!el || isBody) return true;
   const onTerminal = el.id === 'tether-terminal' || !!el.closest?.('#tether-terminal');

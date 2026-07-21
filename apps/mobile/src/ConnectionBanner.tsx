@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 
@@ -40,26 +40,26 @@ export function ConnectionBanner({
 
 function createStyles(c: AppColors) {
   return StyleSheet.create({
-  reconnectBanner: {
-    backgroundColor: c.surfaceRaised,
-    borderBottomWidth: 1,
-    borderBottomColor: c.warning,
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  reconnectBannerText: {
-    fontSize: 10,
-    color: c.warning,
-    textAlign: 'center',
-  },
-  reconnectBannerEdit: {
-    fontSize: 11,
-    color: c.info,
-    fontWeight: '600',
-  },
+    reconnectBanner: {
+      backgroundColor: c.surfaceRaised,
+      borderBottomWidth: 1,
+      borderBottomColor: c.warning,
+      paddingVertical: 6,
+      paddingHorizontal: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+    },
+    reconnectBannerText: {
+      fontSize: 10,
+      color: c.warning,
+      textAlign: 'center',
+    },
+    reconnectBannerEdit: {
+      fontSize: 11,
+      color: c.info,
+      fontWeight: '600',
+    },
   });
 }

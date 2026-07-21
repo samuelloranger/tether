@@ -15,5 +15,7 @@ export const isMacDesktop =
 // the packaged desktop app — false for the plain-browser `bun run web` dev
 // preview, which has no Rust backend to invoke.
 export function isTauri(): boolean {
-  return typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+  return (
+    typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined'
+  );
 }
