@@ -19,6 +19,7 @@ import { GitWatch } from './gitWatch';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { COMPILED, selfArgv } from './runtime';
+import { type Activity, clearActivity, recordInput, recordOutput } from './sessionActivity';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
 // first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
@@ -137,7 +138,8 @@ export function sessionEnv(
 export type SessionFrame =
   | { type: 'output'; chunk: string; id: number }
   | { type: 'exit'; exitCode?: number }
-  | { type: 'diff'; summary: DiffSummary };
+  | { type: 'diff'; summary: DiffSummary }
+  | { type: 'activity'; activity: Activity };
 
 export type Subscriber = (data: SessionFrame) => void;
 
@@ -199,6 +201,8 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
     if (cwdReported) instances.get(id)?.gitWatch.setRoot(cwd ? findGitRoot(cwd) : null);
     const logId = addTerminalLog(id, text);
     broadcast(id, { type: 'output', chunk: text, id: logId });
+    const activity = recordOutput(id, text);
+    if (activity) broadcast(id, { type: 'activity', activity });
   };
 
   const handleLine = (line: string) => {
@@ -233,6 +237,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       instances.delete(id);
       clearLiveCwd(id);
       clearInsertCount(id);
+      clearActivity(id);
     }
   };
 
@@ -286,6 +291,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
             if (instances.delete(id)) {
               instance.gitWatch.dispose();
               clearLiveCwd(id);
+              clearActivity(id);
               console.log(`Holder link for session "${id}" closed unexpectedly`);
             }
           }
@@ -474,6 +480,10 @@ export async function reattachHolders(): Promise<string[]> {
 }
 
 export function writeToSession(id: string, text: string) {
+  // Keystrokes answer whatever the program was waiting on — flip the badge
+  // immediately instead of waiting for echo output.
+  const activity = recordInput(id);
+  if (activity) broadcast(id, { type: 'activity', activity });
   return sendFrame(id, { t: 'i', d: Buffer.from(text, 'utf8').toString('base64') });
 }
 
@@ -533,6 +543,7 @@ export function killSession(id: string) {
     instances.delete(id);
   }
   clearLiveCwd(id);
+  clearActivity(id);
   // Fallback for holders we aren't attached to (or that ignore the frame).
   if (!hadInstance) {
     try {
