@@ -1,8 +1,8 @@
-import { normalizeTokens, Prism } from 'prism-react-renderer';
+import { Prism } from 'prism-react-renderer';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { colorForTokenTypes } from './CodeHighlight';
-import { languageForPath } from './codeLanguage';
+import { languageForPath, tokenizeLine } from './codeLanguage';
 import { parseDiffLines } from './diffModel';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
@@ -91,9 +91,7 @@ export function DiffLines({
             : line.kind === 'remove'
               ? theme.colors.danger
               : theme.colors.textFaint;
-        const tokens = grammar
-          ? (normalizeTokens(Prism.tokenize(line.content, grammar))[0] ?? [])
-          : null;
+        const tokens = tokenizeLine(line.content, grammar);
         return (
           <View key={index} style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}>
             <Text

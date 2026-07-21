@@ -1,5 +1,8 @@
+import { Prism } from 'prism-react-renderer';
 import { StyleSheet, Text, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
+import { colorForTokenTypes } from './CodeHighlight';
+import { languageForPath, tokenizeLine } from './codeLanguage';
 import { type DiffLine, pairDiffRows, parseDiffLines } from './diffModel';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
@@ -8,8 +11,10 @@ const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$/;
 // Split (two-column) rendering of a unified diff for wide panes: removed lines
 // on the left, added lines on the right, aligned within each change block.
 // Unified DiffLines stays the default; this is a width-gated alternative.
-export function SideBySideDiff({ diffText }: { diffText: string }) {
+export function SideBySideDiff({ diffText, path }: { diffText: string; path: string }) {
   const { theme } = useAppTheme();
+  const language = languageForPath(path);
+  const grammar = language ? Prism.languages[language] : undefined;
   const lines = parseDiffLines(diffText).filter(
     (line) => line.kind !== 'meta' || HUNK_HEADER.test(line.text),
   );
@@ -23,13 +28,23 @@ export function SideBySideDiff({ diffText }: { diffText: string }) {
           ? `${theme.colors.success}18`
           : undefined;
     const lineNumber = side === 'left' ? line?.oldLine : line?.newLine;
+    const tokens = line ? tokenizeLine(line.content, grammar) : null;
     return (
       <View style={[styles.cell, bg ? { backgroundColor: bg } : null]}>
         <Text style={[styles.gutterNum, TEXT_METRICS, { color: theme.colors.textFaint }]}>
           {lineNumber ?? ''}
         </Text>
         <Text selectable style={[styles.content, TEXT_METRICS, { color: theme.terminal.fg }]}>
-          {line?.content ?? ''}
+          {tokens
+            ? tokens.map((token, tokenIndex) => (
+                <Text
+                  key={tokenIndex}
+                  style={{ color: colorForTokenTypes(token.types, theme.colors) }}
+                >
+                  {token.content}
+                </Text>
+              ))
+            : (line?.content ?? '')}
         </Text>
       </View>
     );
