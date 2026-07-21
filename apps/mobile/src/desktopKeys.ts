@@ -98,7 +98,14 @@ export function keyToBytes(e: KeyLike, appCursor = false, isMac = false): string
   }
 
   if (key === 'Enter') return '\r';
-  if (key === 'Backspace') return '\x7f';
+  // Word deletion: Alt+Backspace sends readline backward-kill-word (ESC DEL,
+  // same Meta- convention as the Alt+Arrow word-motion below); Ctrl+Backspace
+  // sends werase (Ctrl+W) for the Windows/Linux habit.
+  if (key === 'Backspace') {
+    if (e.altKey) return '\x1b\x7f';
+    if (e.ctrlKey) return '\x17';
+    return '\x7f';
+  }
   if (key === 'Tab') return e.shiftKey ? '\x1b[Z' : '\t';
   if (key === 'Escape') return '\x1b';
 
