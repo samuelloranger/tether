@@ -41,6 +41,7 @@ import {
   parseDesktopNavigationMode,
   reservedNavigationWidth,
 } from './desktopNavigation';
+import { newlyWaiting, type SessionActivity } from './activity';
 import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
 import {
   fetchUpdate,
@@ -185,6 +186,9 @@ export function useTetherApp() {
   const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
+  // Last-seen activity per session, so waiting-notifications fire only on the
+  // edge into `waiting` (not on every 4s poll while it stays waiting).
+  const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
   const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
@@ -418,6 +422,12 @@ export function useTetherApp() {
         const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
         ent.term.write(`\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`);
         if (id === activeIdRef.current) scheduleRender();
+      } else if (msg.type === 'activity') {
+        const activity = msg.activity as SessionActivity;
+        setDrawerSessions((prev) =>
+          prev.map((row) => (row.id === id ? { ...row, activity } : row)),
+        );
+        notifyWaitingSessions([{ id, status: 'running', last_output_at: null, activity }]);
       } else if (msg.type === 'reset') {
         // Server pruned past our sinceId — replay would have a hole. Wipe and
         // let the full replay that follows rebuild the screen from scratch.
@@ -667,7 +677,20 @@ export function useTetherApp() {
       }
       const rows = (await res.json()) as DrawerSession[];
       setDrawerSessions(rows);
+      notifyWaitingSessions(rows);
     } catch {}
+  };
+
+  // Desktop: native OS notification when a BACKGROUND session starts waiting
+  // for input (Claude Code permission prompt, y/n question, …). The active
+  // session is handled by the focus-aware emulator bell path further down.
+  const notifyWaitingSessions = (rows: DrawerSession[]) => {
+    const alerts = newlyWaiting(lastActivityRef.current, rows, activeIdRef.current);
+    for (const row of rows) lastActivityRef.current.set(row.id, row.activity);
+    if (!isDesktop) return;
+    for (const row of alerts) {
+      void sendNativeNotification(row.name || row.id, 'Session is waiting for your input');
+    }
   };
 
   const refreshPresentations = async () => {
@@ -729,18 +752,23 @@ export function useTetherApp() {
     } catch {}
   };
 
-  // Poll the session list and presentation metadata every 4s while foregrounded.
+  // Poll the session list and presentation metadata every 4s. The session
+  // poll keeps running while the desktop window is hidden — it is the only
+  // path that can surface a background session flipping to `waiting` when
+  // minimized (uncached sessions have no socket), and it's one cheap SQLite
+  // read per tick. Only the presentation poll pauses when hidden.
   useEffect(() => {
     if (isConfiguring) return;
     let iv: ReturnType<typeof setInterval> | null = null;
+    let hidden = false;
+    const tick = () => {
+      refreshSessions();
+      if (!hidden) refreshPresentations();
+    };
     const start = () => {
       if (iv) return;
-      refreshSessions();
-      refreshPresentations();
-      iv = setInterval(() => {
-        refreshSessions();
-        refreshPresentations();
-      }, 4000);
+      tick();
+      iv = setInterval(tick, 4000);
     };
     const stop = () => {
       if (iv) {
@@ -749,12 +777,15 @@ export function useTetherApp() {
       }
     };
     start();
-    // Desktop: pause polling while the window is hidden/minimized and resume with
-    // an immediate refresh on return, so we don't hammer the server in the tray
-    // and the list is never stale when the window comes back.
+    // Desktop: while hidden/minimized the interval keeps running (sessions
+    // only, per `hidden` in tick) and an immediate full refresh fires on
+    // return so the presentation list is never stale when the window comes back.
     let onVis: (() => void) | undefined;
     if (isDesktop && typeof document !== 'undefined') {
-      onVis = () => (document.hidden ? stop() : start());
+      onVis = () => {
+        hidden = document.hidden;
+        if (!hidden) tick();
+      };
       document.addEventListener('visibilitychange', onVis);
     }
     return () => {

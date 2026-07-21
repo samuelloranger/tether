@@ -28,6 +28,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { getActivity } from './sessionActivity';
 import { resolveUploadPath } from './upload';
 import { readWorkspaceFile, WorkspaceFileError } from './workspaceFile';
 
@@ -165,9 +166,16 @@ app.get('/api/health', (c) => c.json({ ok: true }));
 
 // --- HTTP API Routes ---
 
-// List all sessions (active or stopped) from DB
+// List all sessions (active or stopped) from DB, annotated with the live
+// activity classification (null when the server hasn't seen output yet —
+// e.g. a detached holder after a server restart).
 app.get('/api/sessions', (c) => {
-  return c.json(listSessions());
+  return c.json(
+    listSessions().map((s) => ({
+      ...s,
+      activity: s.status === 'running' ? getActivity(s.id) : null,
+    })),
+  );
 });
 
 app.get('/api/sessions/:id/file', (c) => {
@@ -341,6 +349,8 @@ app.get(
               ws.send(JSON.stringify({ type: 'exit', exitCode: data.exitCode }));
             } else if (data.type === 'diff') {
               ws.send(JSON.stringify({ type: 'diff', summary: data.summary }));
+            } else if (data.type === 'activity') {
+              ws.send(JSON.stringify({ type: 'activity', activity: data.activity }));
             }
           } catch (wsErr) {
             // Swallow quietly to avoid PTY reader loop crashes
