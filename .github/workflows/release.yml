@@ -268,10 +268,14 @@ jobs:
               mv tether "$out" ;;
           esac
           echo "ASSET=$out" >> "$GITHUB_ENV"
+      - name: Checksum ${{ matrix.asset }}
+        working-directory: apps/server
+        run: sha256sum "$ASSET" > "$ASSET.sha256"
       - name: Attach to release
         if: github.event_name == 'release'
         working-directory: apps/server
-        run: gh release upload "$GITHUB_REF_NAME" "$ASSET" --clobber
+        run: |
+          gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
