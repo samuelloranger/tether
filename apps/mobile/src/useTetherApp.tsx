@@ -81,6 +81,15 @@ const KEY_SESSION_ID = 'tether_session_id';
 const KEY_FONT = 'tether_font_size';
 const KEY_SNIPPETS = 'tether_snippets';
 const KEY_MONO_FONT = 'tether_mono_font';
+const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
+
+export interface GitLogEntry {
+  sha: string;
+  shortSha: string;
+  author: string;
+  date: string;
+  subject: string;
+}
 
 // Fetches raw image bytes with the auth header <Image> can't attach itself,
 // and hands back a data URI so the same code path works native and web.
@@ -199,6 +208,18 @@ export function useTetherApp() {
   const [diffText, setDiffText] = useState<string | null>(null);
   const [diffTruncated, setDiffTruncated] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
+  // Which side of the index the selected file diff shows — drives which hunk
+  // endpoint a hunk tap hits, and must match the mode the diff was read with.
+  const [diffMode, setDiffMode] = useState<'staged' | 'unstaged' | null>(null);
+  const diffModeRef = useRef<'staged' | 'unstaged' | null>(null);
+  const diffSelectedPathRef = useRef<string | null>(null);
+  const [historyEntries, setHistoryEntries] = useState<GitLogEntry[] | null>(null);
+  const [historyCommit, setHistoryCommit] = useState<{
+    entry: GitLogEntry;
+    diff: string | null;
+    truncated: boolean;
+  } | null>(null);
+  const [diffSideBySide, setDiffSideBySide] = useState(false);
   const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(
     null,
   );
@@ -835,6 +856,9 @@ export function useTetherApp() {
           AsyncStorage.getItem(KEY_SESSION_ID),
           getPassword(),
           AsyncStorage.getItem(KEY_FONT).catch(() => null),
+          AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
+            .then((v) => setDiffSideBySide(v === 'true'))
+            .catch(() => null),
         ]);
 
         if (savedIp) setServerIp(savedIp);
@@ -1527,19 +1551,29 @@ export function useTetherApp() {
   const closeDiff = useCallback(() => {
     setDiffOpen(false);
     setDiffSelectedPath(null);
+    diffSelectedPathRef.current = null;
+    setDiffMode(null);
+    diffModeRef.current = null;
     setDiffText(null);
     setDiffTruncated(false);
     setDiffImage(null);
+    setHistoryCommit(null);
   }, []);
   const deselectDiffFile = useCallback(() => {
     setDiffSelectedPath(null);
+    diffSelectedPathRef.current = null;
+    setDiffMode(null);
+    diffModeRef.current = null;
     setDiffText(null);
     setDiffTruncated(false);
     setDiffImage(null);
   }, []);
   const selectDiffFile = useCallback(
-    async (filePath: string) => {
+    async (filePath: string, mode?: 'staged' | 'unstaged') => {
       setDiffSelectedPath(filePath);
+      diffSelectedPathRef.current = filePath;
+      setDiffMode(mode ?? null);
+      diffModeRef.current = mode ?? null;
       setDiffText(null);
       setDiffTruncated(false);
       setDiffImage(null);
@@ -1565,6 +1599,7 @@ export function useTetherApp() {
           return;
         }
         const query = new URLSearchParams({ path: filePath });
+        if (mode) query.set('mode', mode);
         const res = await fetch(
           `${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff?${query}`,
           {
@@ -1595,6 +1630,152 @@ export function useTetherApp() {
     setDiffText(null);
     setDiffTruncated(false);
     setDiffImage(null);
+    setHistoryCommit(null);
+  }, []);
+
+  // --- Git write ops + history (diff view v2) ---
+
+  const gitFetch = useCallback(
+    async (route: string, init?: RequestInit) => {
+      const sessionId = activeIdRef.current;
+      const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/git/${route}`, {
+        ...init,
+        headers: {
+          ...authHeaders(passwordRef.current),
+          'Content-Type': 'application/json',
+        },
+      });
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        throw new Error(typeof body.error === 'string' ? body.error : `Request failed (${res.status})`);
+      }
+      return body;
+    },
+    [serverIp, port],
+  );
+
+  const gitPost = useCallback(
+    (route: string, payload: unknown) =>
+      gitFetch(route, { method: 'POST', body: JSON.stringify(payload) }),
+    [gitFetch],
+  );
+
+  // Reload the open file diff after a staging op so hunk indices stay in sync
+  // with the server's view. The summary itself refreshes via the diff frame.
+  const refreshOpenDiff = useCallback(() => {
+    const path = diffSelectedPathRef.current;
+    const mode = diffModeRef.current;
+    if (path) void selectDiffFile(path, mode ?? undefined);
+  }, [selectDiffFile]);
+
+  const stageFile = useCallback(
+    async (path: string) => {
+      try {
+        await gitPost('stage', { path });
+        refreshOpenDiff();
+      } catch (error) {
+        void notify('Stage failed', String(error), 'error');
+      }
+    },
+    [gitPost, refreshOpenDiff],
+  );
+
+  const unstageFile = useCallback(
+    async (path: string) => {
+      try {
+        await gitPost('unstage', { path });
+        refreshOpenDiff();
+      } catch (error) {
+        void notify('Unstage failed', String(error), 'error');
+      }
+    },
+    [gitPost, refreshOpenDiff],
+  );
+
+  const discardFile = useCallback(
+    async (path: string) => {
+      const ok = await confirmAction(
+        `Discard changes to ${path}?`,
+        "Uncommitted changes to this file will be lost. This can't be undone.",
+        { confirmLabel: 'Discard', destructive: true },
+      );
+      if (!ok) return;
+      try {
+        await gitPost('discard', { path });
+        if (diffSelectedPathRef.current === path) deselectDiffFile();
+      } catch (error) {
+        void notify('Discard failed', String(error), 'error');
+      }
+    },
+    [gitPost],
+  );
+
+  const toggleHunk = useCallback(
+    async (path: string, hunkIndex: number, staged: boolean) => {
+      try {
+        await gitPost(staged ? 'unstage-hunk' : 'stage-hunk', { path, hunkIndex });
+      } catch (error) {
+        void notify(staged ? 'Unstage hunk failed' : 'Stage hunk failed', String(error), 'error');
+      }
+      // Success or 409-stale, the right move is the same: re-read the diff.
+      refreshOpenDiff();
+    },
+    [gitPost, refreshOpenDiff],
+  );
+
+  const commitStagedChanges = useCallback(
+    async (message: string) => {
+      try {
+        await gitPost('commit', { message });
+        return true;
+      } catch (error) {
+        void notify('Commit failed', String(error), 'error');
+        return false;
+      }
+    },
+    [gitPost],
+  );
+
+  const loadGitLog = useCallback(async () => {
+    try {
+      const entries = (await gitFetch('log')) as unknown as GitLogEntry[];
+      setHistoryEntries(entries);
+    } catch (error) {
+      setHistoryEntries([]);
+      void notify('Could not load history', String(error), 'error');
+    }
+  }, [gitFetch]);
+
+  const selectCommit = useCallback(
+    async (entry: GitLogEntry | null) => {
+      if (!entry) {
+        setHistoryCommit(null);
+        return;
+      }
+      setHistoryCommit({ entry, diff: null, truncated: false });
+      try {
+        const body = (await gitFetch(`commit/${entry.sha}/diff`)) as {
+          diff?: string;
+          truncated?: boolean;
+        };
+        setHistoryCommit({
+          entry,
+          diff: typeof body.diff === 'string' ? body.diff : '',
+          truncated: body.truncated === true,
+        });
+      } catch (error) {
+        setHistoryCommit(null);
+        void notify('Could not load commit', String(error), 'error');
+      }
+    },
+    [gitFetch],
+  );
+
+  const toggleDiffSideBySide = useCallback(() => {
+    setDiffSideBySide((prev) => {
+      AsyncStorage.setItem(KEY_DIFF_SIDE_BY_SIDE, String(!prev));
+      return !prev;
+    });
   }, []);
   // Peek (non-touching) so render stays pure — the active entry is already
   // MRU-resident from connect/switchTo; only the very first render (before any
@@ -1917,6 +2098,18 @@ export function useTetherApp() {
     closeDiff,
     selectDiffFile,
     deselectDiffFile,
+    diffMode,
+    stageFile,
+    unstageFile,
+    discardFile,
+    toggleHunk,
+    commitStagedChanges,
+    historyEntries,
+    historyCommit,
+    loadGitLog,
+    selectCommit,
+    diffSideBySide,
+    toggleDiffSideBySide,
     selectTerminal,
     selectPresentation,
     closePresentation,

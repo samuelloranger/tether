@@ -40,7 +40,7 @@ test('debounces native worktree events and suppresses an identical summary', asy
     await waitFor(() => seen.length === 2);
     expect(seen).toEqual([
       { files: [] },
-      { files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false }] },
+      { files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false }] },
     ]);
 
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
@@ -69,7 +69,7 @@ test('retargets to a new repository and stops publishing the old root', async ()
       writeFileSync(path.join(second, 'main.ts'), 'export const answer = 43;\n');
       await waitFor(() => seen.length === 3);
       expect(seen[2]).toEqual({
-        files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false }],
+        files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false }],
       });
       watch.dispose();
     });
@@ -102,8 +102,8 @@ test('captures changes that already existed before setRoot was first called', as
     expect(seen).toEqual([
       {
         files: [
-          { path: 'main.ts', insertions: 1, deletions: 1, binary: false },
-          { path: 'fresh.ts', insertions: 1, deletions: 0, binary: false },
+          { path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false },
+          { path: 'fresh.ts', insertions: 1, deletions: 0, binary: false, staged: false },
         ],
       },
     ]);
