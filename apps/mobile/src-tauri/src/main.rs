@@ -160,6 +160,51 @@ fn secure_clear_password() -> Result<(), String> {
     }
 }
 
+// Open a URL in the system browser. The opener plugin's open_url spawns
+// xdg-open with THIS process's environment — inside an AppImage that includes
+// the runtime-injected library paths (LD_LIBRARY_PATH, GDK/GIO/GST module
+// paths pointing into the mounted AppDir), which crash the spawned browser on
+// startup while the detached spawn still reports success. Strip those vars on
+// Linux before spawning so the browser launches against the host's own libs.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) urls can be opened".into());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::{Command, Stdio};
+        const APPIMAGE_VARS: [&str; 10] = [
+            "APPDIR",
+            "APPIMAGE",
+            "LD_LIBRARY_PATH",
+            "LD_PRELOAD",
+            "GDK_PIXBUF_MODULE_FILE",
+            "GDK_PIXBUF_MODULEDIR",
+            "GIO_MODULE_DIR",
+            "GST_PLUGIN_SYSTEM_PATH",
+            "GST_PLUGIN_SYSTEM_PATH_1_0",
+            "GTK_PATH",
+        ];
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if std::env::var_os("APPIMAGE").is_some() {
+            for var in APPIMAGE_VARS {
+                cmd.env_remove(var);
+            }
+        }
+        cmd.spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|e| e.to_string())
+    }
+}
+
 // NOTE: the webview CSP is left null (see tauri.conf.json). This shell loads
 // only the local bundled frontend — no remote page loads — so its XSS surface is
 // minimal, and a strict CSP breaks react-native-web's runtime-injected
@@ -198,7 +243,8 @@ fn main() {
             is_updatable,
             secure_get_password,
             secure_set_password,
-            secure_clear_password
+            secure_clear_password,
+            open_external
         ])
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");
