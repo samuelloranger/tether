@@ -41,6 +41,7 @@ import {
   parseDesktopNavigationMode,
   reservedNavigationWidth,
 } from './desktopNavigation';
+import { newlyWaiting, type SessionActivity } from './activity';
 import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
 import {
   fetchUpdate,
@@ -185,6 +186,9 @@ export function useTetherApp() {
   const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
+  // Last-seen activity per session, so waiting-notifications fire only on the
+  // edge into `waiting` (not on every 4s poll while it stays waiting).
+  const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
   const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
@@ -418,6 +422,12 @@ export function useTetherApp() {
         const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
         ent.term.write(`\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`);
         if (id === activeIdRef.current) scheduleRender();
+      } else if (msg.type === 'activity') {
+        const activity = msg.activity as SessionActivity;
+        setDrawerSessions((prev) =>
+          prev.map((row) => (row.id === id ? { ...row, activity } : row)),
+        );
+        notifyWaitingSessions([{ id, status: 'running', last_output_at: null, activity }]);
       } else if (msg.type === 'reset') {
         // Server pruned past our sinceId — replay would have a hole. Wipe and
         // let the full replay that follows rebuild the screen from scratch.
@@ -667,7 +677,20 @@ export function useTetherApp() {
       }
       const rows = (await res.json()) as DrawerSession[];
       setDrawerSessions(rows);
+      notifyWaitingSessions(rows);
     } catch {}
+  };
+
+  // Desktop: native OS notification when a background session starts waiting
+  // for input (Claude Code permission prompt, y/n question, …).
+  const notifyWaitingSessions = (rows: DrawerSession[]) => {
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    const alerts = newlyWaiting(lastActivityRef.current, rows, activeIdRef.current, hidden);
+    for (const row of rows) lastActivityRef.current.set(row.id, row.activity);
+    if (!isDesktop) return;
+    for (const row of alerts) {
+      void sendNativeNotification(row.name || row.id, 'Session is waiting for your input');
+    }
   };
 
   const refreshPresentations = async () => {
