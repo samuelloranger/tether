@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.13.1",
+          "date": "2026-07-21",
+          "localizedDescription": "## What's Changed\n* chore(release): drop transitional versioned server asset copies by @samuelloranger in https://github.com/samuelloranger/tether/pull/43\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.13.0...v1.13.1",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.13.1/tether.ipa",
+          "size": 8641409,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.13.0",
           "date": "2026-07-21",
           "localizedDescription": "## What's Changed\n* Audit remediation: security, reliability, mobile, supply-chain by @samuelloranger in https://github.com/samuelloranger/tether/pull/41\n* One-click latest-download grid + stable release asset names by @samuelloranger in https://github.com/samuelloranger/tether/pull/42\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.12.1...v1.13.0",
