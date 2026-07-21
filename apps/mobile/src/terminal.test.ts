@@ -691,4 +691,70 @@ setTheme(APP_THEMES.mocha.terminal);
   );
 }
 
+// 63. BCE: erase fills carry the pen's background so cleared areas paint.
+{
+  const t = new TerminalEmulator(10, 4);
+  t.write(`${E}[44m`); // blue bg pen
+  t.write(`${E}[2J`); // full clear with colored pen
+  const row = t.getSnapshot()[1];
+  eq(row.runs.length >= 1 && !!row.runs[0].style.bg, true, 'BCE: ED2 fill has pen bg');
+  const t2 = new TerminalEmulator(10, 4);
+  t2.write('hi');
+  t2.write(`${E}[2J`); // clear with DEFAULT pen — no bg painted
+  const row2 = t2.getSnapshot()[0];
+  eq(row2.runs.map((r) => !!r.style.bg).includes(true), false, 'BCE: default-pen ED2 stays unstyled');
+  const t3 = new TerminalEmulator(10, 4);
+  t3.write(`abc${E}[41m${E}[K`); // EL0 with red bg from cursor to EOL
+  const r3 = t3.getSnapshot()[0];
+  eq(!!r3.runs[r3.runs.length - 1].style.bg, true, 'BCE: EL0 fill has pen bg');
+}
+
+// 64. RenderRow.key is stable while lines shift into scrollback.
+{
+  const t = new TerminalEmulator(10, 3);
+  t.write('one\r\ntwo\r\nthree');
+  const before = t.getSnapshot();
+  const keyOfTwo = before.find((r) => r.runs.map((x) => x.text).join('').startsWith('two'))!.key;
+  t.write('\r\nfour\r\nfive'); // pushes rows into scrollback
+  const after = t.getSnapshot();
+  const twoRow = after.find((r) => r.runs.map((x) => x.text).join('').startsWith('two'))!;
+  eq(twoRow.key, keyOfTwo, 'row key survives move into scrollback');
+  const keys = after.map((r) => r.key);
+  eq(new Set(keys).size, keys.length, 'row keys are unique');
+}
+
+// 65. Scrollback reflows when the width changes.
+{
+  const t = new TerminalEmulator(10, 2);
+  // 'abcdefghijKLMno' wraps at 10 cols → 'abcdefghij' + 'KLMno' (soft wrap).
+  t.write('abcdefghijKLMno\r\n');
+  t.write('x\r\ny\r\nz'); // push the wrapped pair fully into scrollback
+  const narrow = t
+    .getSnapshot()
+    .map((r) => r.runs.map((x) => x.text).join('').replace(/\s+$/, ''));
+  eq(narrow[0], 'abcdefghij', 'pre-reflow first fragment');
+  t.resize(20, 2);
+  const wide = t
+    .getSnapshot()
+    .map((r) => r.runs.map((x) => x.text).join('').replace(/\s+$/, ''));
+  eq(wide[0], 'abcdefghijKLMno', 'reflow joins soft-wrapped history at the new width');
+  t.resize(6, 2);
+  const tight = t
+    .getSnapshot()
+    .map((r) => r.runs.map((x) => x.text).join('').replace(/\s+$/, ''));
+  eq(tight.slice(0, 3), ['abcdef', 'ghijKL', 'Mno'], 'reflow re-splits history when narrowed');
+}
+
+// 66. Combined cols+rows resize (rotation): rows pushed into scrollback by the
+// shrink are rewrapped at the new width too.
+{
+  const t = new TerminalEmulator(10, 4);
+  t.write('abcdefghijKLMno\r\nx'); // wrapped pair on rows 0-1, cursor line 'x' on row 2
+  t.resize(20, 2); // widen + shrink rows in ONE call
+  const rows = t
+    .getSnapshot()
+    .map((r) => r.runs.map((x) => x.text).join('').replace(/\s+$/, ''));
+  eq(rows[0], 'abcdefghijKLMno', 'combined resize reflows rows the shrink pushed to scrollback');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

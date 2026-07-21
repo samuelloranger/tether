@@ -40,6 +40,11 @@ export interface RenderRun {
 }
 
 export interface RenderRow {
+  // Stable identity of the underlying logical screen line. Monotonic per
+  // emulator; survives the line moving between screen and scrollback, so list
+  // renderers can key on it instead of the array index (index keys shift by
+  // one every time a line enters scrollback, remounting every visible row).
+  key: number;
   runs: RenderRun[];
   // True when this row's logical line continues on the next row (soft-wrap, not
   // a real newline) — used to rejoin URLs split across the grid width.
@@ -317,11 +322,12 @@ export class TerminalEmulator {
 
   resize(cols: number, rows: number) {
     if (cols === this.cols && rows === this.rows) return;
+    const colsChanged = cols !== this.cols;
     this.cols = cols;
     // Rows: shrink moves TOP lines into scrollback so the bottom (where the
     // prompt lives) stays visible — this runs on every keyboard show/hide.
     // Grow pulls them back. Alt-screen apps repaint on SIGWINCH, so there we
-    // just truncate/pad. No column reflow (xterm doesn't reflow either).
+    // just truncate/pad.
     while (this.screen.length > rows) {
       if (!this.inAlt && this.cy > 0) {
         const top = this.screen.shift()!;
@@ -340,12 +346,72 @@ export class TerminalEmulator {
         this.screen.push(blankLine(cols));
       }
     }
+    // Width changed → re-wrap scrollback history at the new width so old
+    // output doesn't stay ragged after a font-size change or rotation. Runs
+    // AFTER the row loops above so screen rows a shrink just pushed into
+    // scrollback get rewrapped too (a combined cols+rows resize — rotation —
+    // would otherwise leave them at the old width). The live screen is left
+    // alone: the shell/TUI repaints it on SIGWINCH, and leaving it keeps the
+    // cursor math untouched.
+    if (colsChanged && !this.inAlt) this.reflowScrollback(cols);
     this.rows = rows;
     this.screen = this.screen.map((l) => this.fitLine(l, cols));
     this.cx = Math.min(this.cx, cols - 1);
     this.cy = Math.min(this.cy, rows - 1);
     this.scrollTop = 0;
     this.scrollBot = rows - 1;
+  }
+
+  // Re-wrap scrollback at a new width. Soft-wrapped fragments (wrappedLines
+  // marks) are joined into their logical line, trailing default blanks
+  // trimmed, and the cells re-chunked at the new width with fresh wrap marks.
+  // A logical line whose last fragment continues onto the live screen is
+  // copied through untouched — reflowing half a line would tear it.
+  private reflowScrollback(cols: number) {
+    if (this.scrollback.length === 0) return;
+    const out: Cell[][] = [];
+    let i = 0;
+    while (i < this.scrollback.length) {
+      let last = i;
+      while (last < this.scrollback.length - 1 && this.wrappedLines.has(this.scrollback[last])) {
+        last++;
+      }
+      if (this.wrappedLines.has(this.scrollback[last])) {
+        // Continues into the screen — pass the fragments through as-is.
+        for (let j = i; j <= last; j++) out.push(this.scrollback[j]);
+        i = last + 1;
+        continue;
+      }
+      const promptStart = this.promptRows.has(this.scrollback[i]);
+      const chunk: Cell[] = [];
+      for (let j = i; j <= last; j++) chunk.push(...this.scrollback[j]);
+      let end = chunk.length;
+      while (
+        end > 0 &&
+        chunk[end - 1].ch === ' ' &&
+        !chunk[end - 1].bg &&
+        chunk[end - 1].bgIndex === undefined &&
+        !chunk[end - 1].inverse
+      ) {
+        end--;
+      }
+      const cells = chunk.slice(0, end);
+      const rows: Cell[][] = [];
+      if (cells.length === 0) rows.push(blankLine(cols));
+      else {
+        for (let p = 0; p < cells.length; p += cols) {
+          const row = cells.slice(p, p + cols);
+          while (row.length < cols) row.push(blankCell());
+          rows.push(row);
+        }
+      }
+      for (let k = 0; k < rows.length - 1; k++) this.wrappedLines.add(rows[k]);
+      if (promptStart) this.promptRows.add(rows[0]);
+      out.push(...rows);
+      i = last + 1;
+    }
+    while (out.length > MAX_SCROLLBACK) out.shift();
+    this.scrollback = out;
   }
 
   private fitLine(line: Cell[], cols: number): Cell[] {
@@ -814,42 +880,56 @@ export class TerminalEmulator {
         if (this.scrollback.length > MAX_SCROLLBACK) this.scrollback.shift();
       }
       this.screen.splice(this.scrollTop, 1);
-      this.screen.splice(this.scrollBot, 0, blankLine(this.cols));
+      this.screen.splice(this.scrollBot, 0, this.penBlankLine());
     }
   }
 
   private scrollDown(n: number) {
     for (let i = 0; i < n; i++) {
       this.screen.splice(this.scrollBot, 1);
-      this.screen.splice(this.scrollTop, 0, blankLine(this.cols));
+      this.screen.splice(this.scrollTop, 0, this.penBlankLine());
     }
   }
 
   private eraseDisplay(mode: number) {
     if (mode === 0) {
       this.eraseLine(0);
-      for (let y = this.cy + 1; y < this.rows; y++) this.screen[y] = blankLine(this.cols);
+      for (let y = this.cy + 1; y < this.rows; y++) this.screen[y] = this.penBlankLine();
     } else if (mode === 1) {
       this.eraseLine(1);
-      for (let y = 0; y < this.cy; y++) this.screen[y] = blankLine(this.cols);
+      for (let y = 0; y < this.cy; y++) this.screen[y] = this.penBlankLine();
     } else if (mode === 2 || mode === 3) {
-      for (let y = 0; y < this.rows; y++) this.screen[y] = blankLine(this.cols);
+      for (let y = 0; y < this.rows; y++) this.screen[y] = this.penBlankLine();
       if (mode === 3) this.scrollback = [];
     }
+  }
+
+  // Background Color Erase (BCE): erase/scroll fills take the pen's current
+  // background (xterm semantics), so a TUI that sets a bg then clears paints
+  // the whole area — not just cells it explicitly wrote. fg/attrs never copy.
+  private penBlank(): Cell {
+    const cell: Cell = { ch: ' ' };
+    if (this.pen.bgIndex !== undefined) cell.bgIndex = this.pen.bgIndex;
+    else if (this.pen.bg) cell.bg = this.pen.bg;
+    return cell;
+  }
+
+  private penBlankLine(): Cell[] {
+    return Array.from({ length: this.cols }, () => this.penBlank());
   }
 
   private eraseLine(mode: number) {
     const line = this.screen[this.cy];
     // An erased line is no longer a full soft-wrap continuation.
     this.wrappedLines.delete(line);
-    if (mode === 0) for (let x = this.cx; x < this.cols; x++) line[x] = blankCell();
-    else if (mode === 1) for (let x = 0; x <= this.cx; x++) line[x] = blankCell();
-    else if (mode === 2) for (let x = 0; x < this.cols; x++) line[x] = blankCell();
+    if (mode === 0) for (let x = this.cx; x < this.cols; x++) line[x] = this.penBlank();
+    else if (mode === 1) for (let x = 0; x <= this.cx; x++) line[x] = this.penBlank();
+    else if (mode === 2) for (let x = 0; x < this.cols; x++) line[x] = this.penBlank();
   }
 
   private eraseChars(n: number) {
     const line = this.screen[this.cy];
-    for (let x = this.cx; x < Math.min(this.cols, this.cx + n); x++) line[x] = blankCell();
+    for (let x = this.cx; x < Math.min(this.cols, this.cx + n); x++) line[x] = this.penBlank();
   }
 
   private insertChars(n: number) {
@@ -872,7 +952,7 @@ export class TerminalEmulator {
     if (this.cy < this.scrollTop || this.cy > this.scrollBot) return;
     for (let i = 0; i < n; i++) {
       this.screen.splice(this.scrollBot, 1);
-      this.screen.splice(this.cy, 0, blankLine(this.cols));
+      this.screen.splice(this.cy, 0, this.penBlankLine());
     }
   }
 
@@ -880,7 +960,7 @@ export class TerminalEmulator {
     if (this.cy < this.scrollTop || this.cy > this.scrollBot) return;
     for (let i = 0; i < n; i++) {
       this.screen.splice(this.cy, 1);
-      this.screen.splice(this.scrollBot, 0, blankLine(this.cols));
+      this.screen.splice(this.scrollBot, 0, this.penBlankLine());
     }
   }
 
@@ -938,6 +1018,19 @@ export class TerminalEmulator {
   // --- Render snapshot ---
   private prevRows: RenderRow[] = [];
 
+  // See RenderRow.key. WeakMap keyed on the line array itself, same pattern
+  // as wrappedLines — identity follows the line through splice/shift/scroll.
+  private lineIds = new WeakMap<Cell[], number>();
+  private lineIdSeq = 1;
+  private idFor(line: Cell[]): number {
+    let id = this.lineIds.get(line);
+    if (id === undefined) {
+      id = this.lineIdSeq++;
+      this.lineIds.set(line, id);
+    }
+    return id;
+  }
+
   // Returns one RenderRow per line, REUSING the previous frame's object for any
   // row whose content is unchanged. Referential stability lets a memoized row
   // component skip re-rendering — critical when a TUI repaints continuously
@@ -961,14 +1054,16 @@ export class TerminalEmulator {
     const out: RenderRow[] = new Array(lines.length);
     for (let i = 0; i < lines.length; i++) {
       const prev = this.prevRows[i];
+      const key = this.idFor(lines[i]);
       out[i] =
         prev &&
+        prev.key === key &&
         prev.wrapped === wrapped[i] &&
         prev.promptStart === promptFlags[i] &&
         runsEqual(prev.runs, rowRuns[i]) &&
         linksEqual(prev.links, links[i])
           ? prev
-          : { runs: rowRuns[i], wrapped: wrapped[i], links: links[i], promptStart: promptFlags[i] };
+          : { key, runs: rowRuns[i], wrapped: wrapped[i], links: links[i], promptStart: promptFlags[i] };
     }
     this.prevRows = out;
     return out;
