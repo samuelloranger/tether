@@ -266,36 +266,26 @@ jobs:
             --define 'process.env.TETHER_VERSION="'"${GITHUB_REF_NAME}"'"' \
             --outfile tether \
             src/server/main.ts
-          # Stable (un-versioned) name is the primary asset — it makes
-          # github.com/.../releases/latest/download/<name> a one-click link.
+          # Stable (un-versioned) name — makes
+          # github.com/.../releases/latest/download/<name> a one-click link, and
+          # is what `tether update` (v1.13.0+) resolves. The transitional
+          # versioned copy was dropped after v1.13.0 carried both names.
           case "${{ matrix.asset }}" in
             *darwin*)
-              stable="${{ matrix.asset }}.tar.gz"
-              tar czf "$stable" tether ;;
+              out="${{ matrix.asset }}.tar.gz"
+              tar czf "$out" tether ;;
             *)
-              stable="${{ matrix.asset }}"
-              mv tether "$stable" ;;
+              out="${{ matrix.asset }}"
+              mv tether "$out" ;;
           esac
-          # Transitional versioned copy: installs running an older `tether update`
-          # still look for the version-stamped name, so keep it for one release
-          # cycle to avoid breaking their self-update across this rename.
-          versioned="${{ matrix.asset }}-${GITHUB_REF_NAME}"
-          case "${{ matrix.asset }}" in *darwin*) versioned="${versioned}.tar.gz" ;; esac
-          cp "$stable" "$versioned"
-          echo "ASSET=$stable" >> "$GITHUB_ENV"
-          echo "ASSET_VERSIONED=$versioned" >> "$GITHUB_ENV"
+          echo "ASSET=$out" >> "$GITHUB_ENV"
       - name: Checksum ${{ matrix.asset }}
         working-directory: apps/server
-        run: |
-          sha256sum "$ASSET" > "$ASSET.sha256"
-          sha256sum "$ASSET_VERSIONED" > "$ASSET_VERSIONED.sha256"
+        run: sha256sum "$ASSET" > "$ASSET.sha256"
       - name: Attach to release
         if: github.event_name == 'release'
         working-directory: apps/server
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            "$ASSET" "$ASSET.sha256" \
-            "$ASSET_VERSIONED" "$ASSET_VERSIONED.sha256" --clobber
+        run: gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
