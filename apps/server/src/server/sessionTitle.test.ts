@@ -106,3 +106,9 @@ describe('autoTitle', () => {
     expect(autoTitle(null, '/', 'zsh')).toBe('zsh');
   });
 });
+
+test('sequence split at the lone ESC byte is reassembled', () => {
+  const mid = updateTitle(INITIAL_TITLE_STATE, 'text\x1b');
+  const next = updateTitle(mid, ']0;esc-split\x07');
+  expect(next.title).toBe('esc-split');
+});

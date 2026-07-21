@@ -36,7 +36,11 @@ export function updateTitle(state: TitleState, chunk: string): TitleState {
   const tail = joined.slice(consumed);
   const oscStart = tail.lastIndexOf('\x1b]');
   const changed = title !== state.title;
-  if (oscStart === -1) return { title, residual: '', changed };
+  if (oscStart === -1) {
+    // A chunk ending in a lone ESC may be an OSC split before its ']' — carry
+    // the ESC so the next chunk can complete the sequence.
+    return { title, residual: tail.endsWith('\x1b') ? '\x1b' : '', changed };
+  }
   const rest = tail.slice(oscStart);
   // biome-ignore lint/suspicious/noControlCharactersInRegex: same ESC/BEL terminators as OSC_TITLE_RE above.
   const residual = /\x07|\x1b\\/.test(rest) ? '' : rest.slice(-MAX_RESIDUAL);
