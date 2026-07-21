@@ -3,6 +3,8 @@ export interface DiffFileStat {
   insertions: number;
   deletions: number;
   binary: boolean;
+  // Index (staged) vs working-tree (unstaged) side; absent on older servers.
+  staged?: boolean;
 }
 
 export interface DiffSummary {
@@ -117,4 +119,74 @@ export function parseDiffLines(diff: string): DiffLine[] {
     if (kind === 'add') return { text, kind, content, oldLine: null, newLine: newLine++ };
     return { text, kind, content, oldLine: oldLine++, newLine: newLine++ };
   });
+}
+
+// --- Diff view v2: staged grouping, hunk actions, side-by-side ---
+
+export interface SummaryGroups {
+  staged: DiffFileStat[];
+  unstaged: DiffFileStat[];
+}
+
+// Splits the summary the way `git status` does. Servers before the staged
+// split omit the flag — those entries read as unstaged, matching the old
+// single-list behavior.
+export function groupSummary(summary: DiffSummary): SummaryGroups {
+  const staged = summary.files.filter((f) => f.staged === true);
+  const unstaged = summary.files.filter((f) => f.staged !== true);
+  return { staged, unstaged };
+}
+
+const HUNK_START = /^@@ -\d/;
+
+// Ordinal hunk index for each parsed diff line (null for non-header lines).
+// The index is what the stage-hunk/unstage-hunk endpoints consume — it must
+// count hunks exactly the way the server's splitHunks does: one per @@ header.
+export function annotateHunkIndices(lines: DiffLine[]): (number | null)[] {
+  let hunk = -1;
+  return lines.map((line) => {
+    if (line.kind === 'meta' && HUNK_START.test(line.text)) {
+      hunk++;
+      return hunk;
+    }
+    return null;
+  });
+}
+
+export interface SideBySideRow {
+  left: DiffLine | null;
+  right: DiffLine | null;
+  // Meta rows (file headers, hunk headers) span the full width.
+  span: boolean;
+}
+
+// Pairs a unified diff's remove/add runs into aligned two-column rows: within
+// each change block the i-th removed line sits opposite the i-th added line,
+// leftovers get a blank opposite cell, and context/meta lines occupy both
+// sides. Feeds the desktop/tablet split view.
+export function pairDiffRows(lines: DiffLine[]): SideBySideRow[] {
+  const rows: SideBySideRow[] = [];
+  let removes: DiffLine[] = [];
+  let adds: DiffLine[] = [];
+  const flush = () => {
+    const n = Math.max(removes.length, adds.length);
+    for (let i = 0; i < n; i++) {
+      rows.push({ left: removes[i] ?? null, right: adds[i] ?? null, span: false });
+    }
+    removes = [];
+    adds = [];
+  };
+  for (const line of lines) {
+    if (line.kind === 'remove') {
+      removes.push(line);
+    } else if (line.kind === 'add') {
+      adds.push(line);
+    } else {
+      flush();
+      if (line.kind === 'meta') rows.push({ left: line, right: null, span: true });
+      else rows.push({ left: line, right: line, span: false });
+    }
+  }
+  flush();
+  return rows;
 }

@@ -46,7 +46,9 @@ test('pushes git summaries to every subscriber and primes later subscribers', as
     await waitFor(() => getLiveCwd(id) === root);
 
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
-    const changed = { files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false }] };
+    const changed = {
+      files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false }],
+    };
     await waitFor(() =>
       frames.some((frame) => frame.type === 'diff' && frame.summary.files.length === 1),
     );
@@ -138,7 +140,9 @@ test('starts watching when a repository is initialized without changing cwd', as
     );
     expect(frames).toContainEqual({
       type: 'diff',
-      summary: { files: [{ path: 'main.txt', insertions: 1, deletions: 1, binary: false }] },
+      summary: {
+        files: [{ path: 'main.txt', insertions: 1, deletions: 1, binary: false, staged: false }],
+      },
     });
   } finally {
     unsubscribe();

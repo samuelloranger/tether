@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { authMiddleware } from './auth';
@@ -14,6 +14,17 @@ import {
   setAuthHashIfUnset,
 } from './db';
 import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from './gitDiff';
+import {
+  commitStaged,
+  discardPath,
+  GitOpsError,
+  readCommitDiff,
+  readLog,
+  stageHunk,
+  stagePath,
+  unstageHunk,
+  unstagePath,
+} from './gitOps';
 import { resolveGitRoot } from './gitRoot';
 import { getLiveCwd } from './liveCwd';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
@@ -210,7 +221,9 @@ app.get('/api/sessions/:id/diff', async (c) => {
   const cwd = getLiveCwd(c.req.param('id'));
   if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
   try {
-    return c.json(await readDiff(resolveGitRoot(cwd), c.req.query('path')));
+    const modeParam = c.req.query('mode');
+    const mode = modeParam === 'staged' || modeParam === 'unstaged' ? modeParam : 'head';
+    return c.json(await readDiff(resolveGitRoot(cwd), c.req.query('path'), mode));
   } catch (error) {
     if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
     throw error;
@@ -239,6 +252,98 @@ app.get('/api/sessions/:id/diff/file', (c) => {
   } catch (error) {
     if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
     throw error;
+  }
+});
+
+// --- Git write ops (stage/unstage/discard/commit) and history ---
+// Same trust anchor as the diff read routes: the session's live cwd resolved
+// to its git root — a tree the authenticated shell user already controls.
+
+// Resolves the session's git root or returns the error response to send.
+function gitRootFor(c: Context, id: string): { root: string } | { response: Response } {
+  const session = getSession(id);
+  if (!session) return { response: c.json({ error: 'session not found' }, 404) };
+  const cwd = getLiveCwd(id);
+  if (!cwd)
+    return {
+      response: c.json({ error: 'waiting for shell to report its working directory' }, 409),
+    };
+  return { root: resolveGitRoot(cwd) };
+}
+
+function handleGitError(c: Context, error: unknown): Response {
+  if (error instanceof GitOpsError || error instanceof GitDiffError) {
+    return c.json({ error: error.message }, error.status);
+  }
+  throw error;
+}
+
+app.post('/api/sessions/:id/git/:op{stage-hunk|unstage-hunk}', async (c) => {
+  const reverse = c.req.param('op') === 'unstage-hunk';
+  try {
+    const resolved = gitRootFor(c, c.req.param('id'));
+    if ('response' in resolved) return resolved.response;
+    const body = (await c.req.json().catch(() => ({}))) as { path?: string; hunkIndex?: number };
+    if (typeof body.path !== 'string' || !body.path || typeof body.hunkIndex !== 'number') {
+      return c.json({ error: 'path and hunkIndex required' }, 400);
+    }
+    (reverse ? unstageHunk : stageHunk)(resolved.root, body.path, body.hunkIndex);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.post('/api/sessions/:id/git/:op{stage|unstage|discard}', async (c) => {
+  const op = c.req.param('op') as 'stage' | 'unstage' | 'discard';
+  try {
+    const resolved = gitRootFor(c, c.req.param('id'));
+    if ('response' in resolved) return resolved.response;
+    const body = (await c.req.json().catch(() => ({}))) as { path?: string };
+    if (typeof body.path !== 'string' || !body.path) {
+      return c.json({ error: 'path required' }, 400);
+    }
+    const fn = op === 'stage' ? stagePath : op === 'unstage' ? unstagePath : discardPath;
+    fn(resolved.root, body.path);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.post('/api/sessions/:id/git/commit', async (c) => {
+  try {
+    const resolved = gitRootFor(c, c.req.param('id'));
+    if ('response' in resolved) return resolved.response;
+    const body = (await c.req.json().catch(() => ({}))) as { message?: string };
+    if (typeof body.message !== 'string' || !body.message.trim()) {
+      return c.json({ error: 'message required' }, 400);
+    }
+    commitStaged(resolved.root, body.message);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.get('/api/sessions/:id/git/log', (c) => {
+  try {
+    const resolved = gitRootFor(c, c.req.param('id'));
+    if ('response' in resolved) return resolved.response;
+    const limit = Number(c.req.query('limit') ?? 50);
+    return c.json(readLog(resolved.root, Number.isFinite(limit) ? limit : 50));
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.get('/api/sessions/:id/git/commit/:sha/diff', async (c) => {
+  try {
+    const resolved = gitRootFor(c, c.req.param('id'));
+    if ('response' in resolved) return resolved.response;
+    return c.json(await readCommitDiff(resolved.root, c.req.param('sha'), c.req.query('path')));
+  } catch (error) {
+    return handleGitError(c, error);
   }
 });
 

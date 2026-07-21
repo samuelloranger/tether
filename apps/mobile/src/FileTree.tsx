@@ -7,18 +7,28 @@ const INDENT = 16;
 
 // Renders a real nested folder tree (like a file explorer) — folders indent
 // their contents one level deeper instead of listing full path prefixes.
+export interface FileAction {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  destructive?: boolean;
+  onPress: (path: string) => void;
+}
+
 export function FileTree({
   nodes,
   depth = 0,
   collapsedDirs,
   onToggleDir,
   onSelectFile,
+  fileActions,
 }: {
   nodes: FileTreeNode[];
   depth?: number;
   collapsedDirs: Set<string>;
   onToggleDir: (path: string) => void;
   onSelectFile: (path: string) => void;
+  // Inline per-file actions (stage/unstage/discard) shown after the stats.
+  fileActions?: FileAction[];
 }) {
   const { theme } = useAppTheme();
   return (
@@ -53,6 +63,7 @@ export function FileTree({
                   collapsedDirs={collapsedDirs}
                   onToggleDir={onToggleDir}
                   onSelectFile={onSelectFile}
+                  fileActions={fileActions}
                 />
               )}
             </View>
@@ -76,6 +87,22 @@ export function FileTree({
                 <Text style={{ color: theme.colors.danger }}>-{file.deletions}</Text>
               </Text>
             )}
+            {fileActions?.map((action) => (
+              <TouchableOpacity
+                key={action.label}
+                accessibilityRole="button"
+                accessibilityLabel={`${action.label} ${node.path}`}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                style={styles.actionButton}
+                onPress={() => action.onPress(node.path)}
+              >
+                <Feather
+                  name={action.icon}
+                  size={15}
+                  color={action.destructive ? theme.colors.danger : theme.colors.accent}
+                />
+              </TouchableOpacity>
+            ))}
           </TouchableOpacity>
         );
       })}
@@ -100,4 +127,5 @@ const styles = StyleSheet.create({
   },
   filePath: { fontFamily: 'monospace', flex: 1, marginRight: 12 },
   fileStat: { fontFamily: 'monospace' },
+  actionButton: { paddingHorizontal: 6 },
 });

@@ -24,7 +24,7 @@ test('summarizes an unstaged change against HEAD', () => {
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
     const summary = readDiffSummary(root);
     expect(summary.files).toEqual([
-      { path: 'main.ts', insertions: 1, deletions: 1, binary: false },
+      { path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false },
     ]);
   });
 });
@@ -59,7 +59,7 @@ test('summarizes an untracked file as an addition', () => {
     writeFileSync(path.join(root, 'fresh.ts'), 'export const x = 1;\nexport const y = 2;\n');
     const summary = readDiffSummary(root);
     expect(summary.files).toEqual([
-      { path: 'fresh.ts', insertions: 2, deletions: 0, binary: false },
+      { path: 'fresh.ts', insertions: 2, deletions: 0, binary: false, staged: false },
     ]);
   });
 });
@@ -69,7 +69,8 @@ test('summarizes a rename with a clean path, not "old => new"', () => {
     execSync('git mv main.ts renamed.ts', { cwd: root });
     const summary = readDiffSummary(root);
     expect(summary.files).toEqual([
-      { path: 'renamed.ts', insertions: 0, deletions: 0, binary: false },
+      // `git mv` stages the rename, so it reports on the index side.
+      { path: 'renamed.ts', insertions: 0, deletions: 0, binary: false, staged: true },
     ]);
   });
 });
@@ -98,7 +99,7 @@ test('flags a binary file as binary with zero insertions/deletions', () => {
     writeFileSync(path.join(root, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]));
     const summary = readDiffSummary(root);
     expect(summary.files).toEqual([
-      { path: 'logo.png', insertions: 0, deletions: 0, binary: true },
+      { path: 'logo.png', insertions: 0, deletions: 0, binary: true, staged: false },
     ]);
   });
 });
