@@ -1,8 +1,17 @@
 #!/usr/bin/env bun
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { LOG_FILE, PID_FILE, PRESENT_CONTROL_TOKEN_FILE, STATE_DIR } from './paths';
+import { processStartTime } from './procIdentity';
 import { COMPILED, selfArgv, VERSION } from './runtime';
 
 const PORT = process.env.TETHER_PORT ?? '8085';
@@ -20,8 +29,13 @@ function alive(pid: number): boolean {
 
 function runningPid(): number | null {
   if (!existsSync(PID_FILE)) return null;
-  const pid = Number(readFileSync(PID_FILE, 'utf8').trim());
-  return pid && alive(pid) ? pid : null;
+  const [pidStr, token = ''] = readFileSync(PID_FILE, 'utf8').trim().split(' ');
+  const pid = Number(pidStr);
+  if (!pid || !alive(pid)) return null;
+  // A recycled PID won't have the start time we recorded — treat it as dead so
+  // stop()/status() never signal an unrelated process that reused the number.
+  if (token && processStartTime(pid) !== token) return null;
+  return pid;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -45,6 +59,25 @@ async function start(): Promise<void> {
     console.log(`tether already running (pid ${existing}) on :${PORT}`);
     return;
   }
+  // Atomically claim the pid file so two concurrent `start`s can't both spawn a
+  // daemon (the loser would otherwise die on EADDRINUSE after already forking).
+  let lockFd: number;
+  try {
+    lockFd = openSync(PID_FILE, 'wx');
+  } catch {
+    if (runningPid()) {
+      console.log('tether already running');
+      return;
+    }
+    // Stale/empty pid file from a crashed start — clear it and claim once more.
+    rmSync(PID_FILE, { force: true });
+    try {
+      lockFd = openSync(PID_FILE, 'wx');
+    } catch {
+      console.log('tether is already starting');
+      return;
+    }
+  }
   const out = openSync(LOG_FILE, 'a');
   // Scrub Claude Code agent vars so a daemon (re)started from an agent's shell
   // doesn't leak CLAUDE_CODE_CHILD_SESSION into every tether PTY (breaks /resume).
@@ -62,6 +95,8 @@ async function start(): Promise<void> {
   child.unref();
   if (!child.pid) {
     console.error('tether failed to start: spawn returned no pid');
+    closeSync(lockFd);
+    rmSync(PID_FILE, { force: true });
     process.exitCode = 1;
     return;
   }
@@ -71,10 +106,14 @@ async function start(): Promise<void> {
   await sleep(500);
   if (!alive(child.pid)) {
     console.error(`tether failed to start — check logs: ${LOG_FILE}`);
+    closeSync(lockFd);
+    rmSync(PID_FILE, { force: true });
     process.exitCode = 1;
     return;
   }
-  writeFileSync(PID_FILE, String(child.pid));
+  const token = processStartTime(child.pid) ?? '';
+  writeFileSync(PID_FILE, `${child.pid} ${token}`);
+  closeSync(lockFd);
   console.log(`tether started (pid ${child.pid}) on :${PORT}`);
   console.log(`logs: ${LOG_FILE}`);
 }

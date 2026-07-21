@@ -19,6 +19,7 @@ import { getLiveCwd } from './liveCwd';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
 import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
 import {
+  getActiveSession,
   getDefaultShell,
   killSession,
   resizeSession,
@@ -387,6 +388,12 @@ app.get(
             // subscribe here would never get cleaned up.
             if (closed) return;
             unsubscribe = subscribeToSession(sessionId, onData, cols, rows);
+            // If the session exited during the awaits above, subscribe returned
+            // the no-op and no exit will ever arrive — tell the client now so it
+            // doesn't render a dead terminal as live.
+            if (!getActiveSession(sessionId)) {
+              ws.send(JSON.stringify({ type: 'exit' }));
+            }
           } catch (err) {
             console.error('Error inside settled WebSocket init:', err);
           }
