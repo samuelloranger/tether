@@ -1,7 +1,5 @@
-name: Deploy documentation to GitHub Pages
+name: Publish docs to samlo.cloud
 
-# Deploy on pushes to main that touch the docs (release runs deploy from a tag
-# ref, which the github-pages environment rejects — it only allows main).
 on:
   push:
     branches: [main]
@@ -13,34 +11,35 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: github-pages
+  group: docs-publish
   cancel-in-progress: false
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-      - run: bun run docs:build
-      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
-        with:
-          path: docs/.vitepress/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+      - name: Build docs
+        env:
+          GITHUB_ACTIONS: "true"   # config sets base=/tether/ under Actions
+        run: bun run docs:build
+      - name: Push built docs to samlo-cloud
+        env:
+          TOKEN: ${{ secrets.SAMLO_CLOUD_DOCS_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/samuelloranger/samlo-cloud.git" out
+          rm -rf out/docs/tether
+          mkdir -p out/docs/tether
+          cp -r docs/.vitepress/dist/. out/docs/tether/
+          cd out
+          git config user.name  "docs-bot"
+          git config user.email "docs-bot@samlo.cloud"
+          git add docs/tether
+          git diff --cached --quiet || git commit -m "docs(tether): sync ${GITHUB_SHA::7}"
+          git push
