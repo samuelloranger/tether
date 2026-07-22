@@ -3,7 +3,7 @@ import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Clipboard from 'expo-clipboard';
+import { readClipboard, writeClipboard } from './clipboard';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -410,7 +410,7 @@ export function useTetherApp() {
         // Guard like onReply: now that background tabs stay live, an OSC 52
         // sequence arriving in a backgrounded tab must not silently overwrite
         // the device clipboard while the user is looking at a different tab.
-        if (id === activeIdRef.current) void Clipboard.setStringAsync(text).catch(() => {});
+        if (id === activeIdRef.current) void writeClipboard(text).catch(() => {});
       };
       return { term, sinceId: 0, lastAppliedId: 0, diffSummary: { files: [] } };
     });
@@ -1143,7 +1143,7 @@ export function useTetherApp() {
     const sel = typeof window !== 'undefined' ? window.getSelection()?.toString() : '';
     // Fall back to the whole displayed transcript when nothing is selected.
     const text = sel || getFullText();
-    if (text) await Clipboard.setStringAsync(text);
+    if (text) await writeClipboard(text);
   };
 
   const selectAllTerminal = () => {
@@ -1256,7 +1256,7 @@ export function useTetherApp() {
   const handlePaste = async () => {
     let text = '';
     try {
-      text = await Clipboard.getStringAsync();
+      text = await readClipboard();
     } catch {
       void notify('Paste failed', 'Could not read the clipboard.', 'error');
       return;
@@ -1953,7 +1953,7 @@ export function useTetherApp() {
   // Double-tap-to-copy target (mobile grid). Haptic tick is the feedback;
   // no toast — the gesture is quiet by design.
   const copyWord = useCallback((word: string) => {
-    void Clipboard.setStringAsync(word).catch(() => {});
+    void writeClipboard(word).catch(() => {});
     void Haptics.selectionAsync().catch(() => {});
   }, []);
 

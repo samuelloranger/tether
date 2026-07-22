@@ -232,6 +232,10 @@ fn main() {
         // Native OS dialogs (message/confirm) — replaces WebKitGTK's "JavaScript"
         // titled window.alert/confirm.
         .plugin(tauri_plugin_dialog::init())
+        // Native OS clipboard read/write — the WebKitGTK webview denies
+        // navigator.clipboard.readText() (paste), so route clipboard through the
+        // plugin instead (see src/clipboard.ts).
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Open the release page in the system browser for package-managed
         // (deb/rpm) installs that can't self-update.
         .plugin(tauri_plugin_opener::init())
