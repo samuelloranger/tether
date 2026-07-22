@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.15.9",
+          "date": "2026-07-22",
+          "localizedDescription": "**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.8...v1.15.9",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.15.9/tether.ipa",
+          "size": 8656728,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.15.7",
           "date": "2026-07-22",
           "localizedDescription": "**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.6...v1.15.7",
