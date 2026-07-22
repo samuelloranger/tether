@@ -396,6 +396,10 @@ export function useTetherApp() {
   const numRows = stableTermHeight
     ? Math.max(6, Math.floor((stableTermHeight - 12) / lineHeight))
     : 24;
+  // Latest settled grid, readable from a delayed callback without a stale
+  // closure. Used to re-fit the PTY after a reconnect once layout settles.
+  const dimsRef = useRef({ numCols, numRows });
+  dimsRef.current = { numCols, numRows };
 
   // Helper to get/create the cache entry for a given id, sized to the current grid.
   const entryFor = (id: string): SessionEntry =>
@@ -949,6 +953,22 @@ export function useTetherApp() {
     cache.get(activeIdRef.current)?.term.resize(numCols, numRows);
     wsSend({ type: 'resize', cols: numCols, rows: numRows });
     scheduleRender();
+    // A reconnect after idle coincides with the desktop webview's focus-regain,
+    // which reports a transient (often halved on macOS Retina) layout size — see
+    // the debounce note above numCols/numRows. The debounce holds it back from
+    // the steady grid, but this effect fires on `connectionStatus` immediately,
+    // so the size we just sent may be that mid-transient blip and the PTY rewraps
+    // into a fraction of the pane. Re-fit once layout has settled, from the ref
+    // so we send the settled grid, not this render's captured value. No-op on
+    // platforms with no transient (delivers the same size the effect already did).
+    if (!isDesktop || connectionStatus !== 'connected') return;
+    const t = setTimeout(() => {
+      const { numCols: c, numRows: r } = dimsRef.current;
+      cache.get(activeIdRef.current)?.term.resize(c, r);
+      wsSend({ type: 'resize', cols: c, rows: r });
+      scheduleRender();
+    }, layoutSettleMs + 250);
+    return () => clearTimeout(t);
   }, [numCols, numRows, connectionStatus, activeId]);
 
   // 2. Open the initial connection once the app becomes ready. Tab switches no
