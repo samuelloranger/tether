@@ -5,7 +5,7 @@ Tether is a Bun + TypeScript monorepo (Bun workspaces).
 ## Monorepo
 
 - `apps/server/` — Bun + Hono backend. Spawns PTYs, logs to SQLite, serves the API/WebSocket. Ships as a single compiled binary that is also the `tether` CLI.
-- `apps/mobile/` — Expo React Native app. VT emulator, session drawer, LRU tab cache. The only client (no web UI).
+- `apps/mobile/` — Expo React Native app (iOS/Android). VT emulator, session drawer, LRU tab cache. Also the source of the **desktop** client: `apps/mobile/src-tauri` wraps the same UI in a [Tauri](https://tauri.app) window for Linux/Windows/macOS. No in-browser client (a browser can't send the password header on the WS upgrade).
 
 ## Server
 
