@@ -24,6 +24,10 @@
     "typescript": "~7.0.2",
     "vitepress": "1.6.4"
   },
+  "overrides": {
+    "expo-modules-core": "57.0.6",
+    "expo-modules-jsi": "57.0.3"
+  },
   "patchedDependencies": {
     "expo-modules-jsi@57.0.3": "patches/expo-modules-jsi@57.0.3.patch"
   }

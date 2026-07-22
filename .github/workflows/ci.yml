@@ -33,5 +33,9 @@ jobs:
         working-directory: apps/mobile
 
       - name: Expo dependency compatibility
-        run: npx expo install --check
+        # Advisory only: we intentionally pin expo to 57.0.7 (see root overrides
+        # forcing expo-modules-core@57.0.6 → jsi@57.0.3, the version our iOS Swift
+        # patch targets). Expo's "expected" 57.0.8 pulls jsi@57.0.4, which fails
+        # to compile on Xcode 26.3. Never hard-fail the build on this drift.
+        run: npx expo install --check || echo "::warning::expo install --check reported drift (expected — expo pinned to 57.0.7 for iOS build)"
         working-directory: apps/mobile
