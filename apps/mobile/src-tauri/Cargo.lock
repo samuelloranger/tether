@@ -4313,7 +4313,7 @@ dependencies = [
 
 [[package]]
 name = "tether-desktop"
-version = "1.15.4"
+version = "1.15.5"
 dependencies = [
  "futures-util",
  "keyring",
