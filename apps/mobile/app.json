@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tether",
     "slug": "tether-mobile",
-    "version": "1.15.6",
+    "version": "1.15.7",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "tether",
