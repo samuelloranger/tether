@@ -29,7 +29,15 @@ function alive(pid: number): boolean {
 
 function runningPid(): number | null {
   if (!existsSync(PID_FILE)) return null;
-  const [pidStr, token = ''] = readFileSync(PID_FILE, 'utf8').trim().split(' ');
+  // Split on the FIRST space only: the token is `ps -o lstart=` output on
+  // macOS ("Wed 22 Jul 14:22:39 2026"), which itself contains spaces. A naive
+  // split(' ') kept just "Wed", so the compare below always failed and every
+  // control command thought the daemon was dead. Linux's starttime has no
+  // space, so it was unaffected.
+  const raw = readFileSync(PID_FILE, 'utf8').trim();
+  const sp = raw.indexOf(' ');
+  const pidStr = sp === -1 ? raw : raw.slice(0, sp);
+  const token = sp === -1 ? '' : raw.slice(sp + 1);
   const pid = Number(pidStr);
   if (!pid || !alive(pid)) return null;
   // A recycled PID won't have the start time we recorded — treat it as dead so
