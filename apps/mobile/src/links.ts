@@ -9,6 +9,26 @@
 // opens the whole link.
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
+
+// `[^\s]+` greedily swallows trailing punctuation that visually follows a URL
+// but isn't part of it — a URL wrapped in parens like `(https://x/)` matches
+// through the `)`, so tapping opens `https://x/)` (which servers 301 to `/)/`).
+// Strip trailing sentence/bracket punctuation, but keep a `)` when the URL has a
+// matching unclosed `(` (e.g. Wikipedia `..._(disambiguation)`).
+function trimUrlEnd(url: string): string {
+  while (url.length > 0) {
+    const ch = url[url.length - 1];
+    if (ch === ')') {
+      const opens = (url.match(/\(/g) ?? []).length;
+      const closes = (url.match(/\)/g) ?? []).length;
+      if (closes <= opens) break; // balanced — the `)` belongs to the URL
+    } else if (!'.,;:!?\'"]}>'.includes(ch)) {
+      break;
+    }
+    url = url.slice(0, -1);
+  }
+  return url;
+}
 const FILE_RE =
   /(?:^|\s)((?:[\w.-]+\/)+[\w.-]+\.[\w-]+(?::[1-9]\d*(?::[1-9]\d*)?)?)(?=$|\s|[)\],;.])/g;
 
@@ -58,9 +78,11 @@ export function computeLinkSpans(texts: string[], wrapped: boolean[]): LinkSpan[
     let m: RegExpExecArray | null;
     // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop
     while ((m = URL_RE.exec(joined))) {
+      const url = trimUrlEnd(m[0]);
+      if (!url) continue;
       const s = m.index;
-      const e = s + m[0].length;
-      const target: LinkTarget = { kind: 'external', url: m[0] };
+      const e = s + url.length;
+      const target: LinkTarget = { kind: 'external', url };
       for (let k = i; k <= j; k++) {
         const rowStart = offs[k - i];
         const rowEnd = rowStart + texts[k].length;
