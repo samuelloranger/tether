@@ -57,6 +57,7 @@ import type { FileView } from './fileView';
 import { applyBackspaceStreak, applyFieldChange, EMPTY_STREAK, SENT } from './input';
 import type { LinkTarget } from './links';
 import { mouseSeq } from './mouseSeq';
+import { cellFromPoint, clickSeqs, motionSeq, pressSeq, releaseSeq } from './mouseInput';
 import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
 import { type Presentation, pickAutoSelectPreview } from './presentations';
@@ -83,6 +84,7 @@ const KEY_FONT = 'tether_font_size';
 const KEY_SNIPPETS = 'tether_snippets';
 const KEY_MONO_FONT = 'tether_mono_font';
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
+const KEY_MOUSE_ENABLED = 'tether_mouse_enabled';
 
 export interface GitLogEntry {
   sha: string;
@@ -180,6 +182,10 @@ export function useTetherApp() {
   const skipNextChangeRef = useRef(false);
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
+  // User kill switch for mouse forwarding (default on). When off, gestures behave
+  // as if the app never enabled mouse reporting even while it has.
+  const [mouseEnabled, setMouseEnabled] = useState(true);
+  const mouseEnabledRef = useRef(true); // stable mirror for gesture handlers
   // Desktop right-click menu anchor (null when closed).
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   // Desktop self-update modal: version info when an update is pending, live
@@ -359,6 +365,13 @@ export function useTetherApp() {
   const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
   const wheelAccum = useRef(0);
   const lastDy = useRef(0);
+  // Absolute on-screen rect of the terminal surface, for mapping touches → cells.
+  const termRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
+  const setTermRect = (r: { left: number; top: number; width: number; height: number }) => {
+    termRectRef.current = r;
+  };
+  const dragCell = useRef({ col: 0, row: 0 }); // last reported cell during a 1-finger drag
+  const dragActive = useRef(false); // true once a 1-finger press was sent (not wheel gestures)
 
   // --- Terminal sizing ---
   // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
@@ -427,40 +440,103 @@ export function useTetherApp() {
     if (st?.open && st.sock) st.sock.send(JSON.stringify(obj));
   };
 
-  // When the remote enables mouse reporting (TUIs like Claude Code), translate
-  // vertical swipes into scroll-wheel events so the app scrolls its own history.
+  // When the remote enables mouse reporting (TUIs like Claude Code, vim, tmux):
+  // one-finger pan = mouse drag (press/motion/release), two-finger pan = wheel
+  // scroll so TUIs still page their own history. Tap = click is handled by the
+  // Pressable's onPress via onTerminalTap. All gated on mouseActive via the refs.
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
-        mouseOnRef.current && Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 4,
+        mouseOnRef.current && mouseEnabledRef.current && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
       onMoveShouldSetPanResponderCapture: (_, g) =>
-        mouseOnRef.current && Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 4,
-      onPanResponderGrant: () => {
+        mouseOnRef.current && mouseEnabledRef.current && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
+      onPanResponderGrant: (e, g) => {
         lastDy.current = 0;
         wheelAccum.current = 0;
+        dragActive.current = false;
+        if (g.numberActiveTouches >= 2) return; // two-finger → wheel, no press
+        const term = cache.get(activeIdRef.current)?.term;
+        if (!term) return;
+        const { col, row } = cellFromPoint(
+          e.nativeEvent.pageX,
+          e.nativeEvent.pageY,
+          termRectRef.current,
+          term.cols || 80,
+          term.rows || 24,
+        );
+        dragCell.current = { col, row };
+        dragActive.current = true;
+        wsSend({ type: 'input', text: pressSeq(col, row, term.mouseSgr) });
       },
-      onPanResponderMove: (_, g) => {
-        const STEP = 22;
-        const delta = g.dy - lastDy.current;
-        lastDy.current = g.dy;
-        wheelAccum.current += delta;
-        const e = cache.get(activeIdRef.current);
-        const wheel = (btn: number) => {
-          const col = Math.max(1, Math.floor((e?.term.cols ?? 80) / 2));
-          const row = Math.max(1, Math.floor((e?.term.rows ?? 24) / 2));
-          wsSend({ type: 'input', text: mouseSeq(btn, col, row, e?.term.mouseSgr ?? false) });
-        };
-        while (wheelAccum.current >= STEP) {
-          wheel(64);
-          wheelAccum.current -= STEP;
-        } // drag down → older
-        while (wheelAccum.current <= -STEP) {
-          wheel(65);
-          wheelAccum.current += STEP;
-        } // drag up → newer
+      onPanResponderMove: (e, g) => {
+        const term = cache.get(activeIdRef.current)?.term;
+        if (!term) return;
+        if (g.numberActiveTouches >= 2) {
+          // Two-finger: scroll history via wheel events (previous behaviour).
+          const STEP = 22;
+          const delta = g.dy - lastDy.current;
+          lastDy.current = g.dy;
+          wheelAccum.current += delta;
+          const col = Math.max(1, Math.floor((term.cols || 80) / 2));
+          const row = Math.max(1, Math.floor((term.rows || 24) / 2));
+          const wheel = (btn: number) =>
+            wsSend({ type: 'input', text: mouseSeq(btn, col, row, term.mouseSgr) });
+          while (wheelAccum.current >= STEP) {
+            wheel(64);
+            wheelAccum.current -= STEP;
+          }
+          while (wheelAccum.current <= -STEP) {
+            wheel(65);
+            wheelAccum.current += STEP;
+          }
+          return;
+        }
+        // One-finger: drag motion when the cell changes.
+        const { col, row } = cellFromPoint(
+          e.nativeEvent.pageX,
+          e.nativeEvent.pageY,
+          termRectRef.current,
+          term.cols || 80,
+          term.rows || 24,
+        );
+        if (col === dragCell.current.col && row === dragCell.current.row) return;
+        dragCell.current = { col, row };
+        const seq = motionSeq(col, row, term.mouseMode, term.mouseSgr);
+        if (seq) wsSend({ type: 'input', text: seq });
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.numberActiveTouches >= 1) return; // multi-touch lift; still touching
+        // Only release if a one-finger press was actually sent. A two-finger wheel
+        // gesture sends no press, so it must not emit a stray button-up at a stale
+        // cell (would perturb vim/tmux selection).
+        if (!dragActive.current) return;
+        dragActive.current = false;
+        const term = cache.get(activeIdRef.current)?.term;
+        if (!term) return;
+        const { col, row } = dragCell.current;
+        const seq = releaseSeq(col, row, term.mouseMode, term.mouseSgr);
+        if (seq) wsSend({ type: 'input', text: seq });
       },
     }),
   ).current;
+
+  // Tap → click when mouse reporting is active. Returns true when it consumed the
+  // tap (so the caller skips focusing the keyboard).
+  const onTerminalTap = (pageX: number, pageY: number): boolean => {
+    const term = cache.get(activeIdRef.current)?.term;
+    if (!term?.mouseOn || !mouseEnabledRef.current) return false;
+    const { col, row } = cellFromPoint(
+      pageX,
+      pageY,
+      termRectRef.current,
+      term.cols || 80,
+      term.rows || 24,
+    );
+    for (const text of clickSeqs(col, row, term.mouseMode, term.mouseSgr)) {
+      wsSend({ type: 'input', text });
+    }
+    return true;
+  };
 
   // Coalesce many PTY chunks into one render per frame.
   const scheduleRender = () => {
@@ -695,6 +771,18 @@ export function useTetherApp() {
     });
   };
 
+  const toggleMouseEnabled = () => {
+    setMouseEnabled((prev) => {
+      const next = !prev;
+      mouseEnabledRef.current = next;
+      AsyncStorage.setItem(KEY_MOUSE_ENABLED, String(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  // Effective mouse gate: the app enabled reporting AND the user hasn't disabled it.
+  const mouseActive = mouseOn && mouseEnabled;
+
   useEffect(() => {
     if (!isDesktop) return;
     AsyncStorage.getItem(KEY_MONO_FONT)
@@ -903,16 +991,18 @@ export function useTetherApp() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const [savedIp, savedPort, savedSession, savedPw, savedFont] = await Promise.all([
-          AsyncStorage.getItem(KEY_SERVER_IP),
-          AsyncStorage.getItem(KEY_PORT),
-          AsyncStorage.getItem(KEY_SESSION_ID),
-          getPassword(),
-          AsyncStorage.getItem(KEY_FONT).catch(() => null),
-          AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
-            .then((v) => setDiffSideBySide(v === 'true'))
-            .catch(() => null),
-        ]);
+        const [savedIp, savedPort, savedSession, savedPw, savedFont, , savedMouseEnabled] =
+          await Promise.all([
+            AsyncStorage.getItem(KEY_SERVER_IP),
+            AsyncStorage.getItem(KEY_PORT),
+            AsyncStorage.getItem(KEY_SESSION_ID),
+            getPassword(),
+            AsyncStorage.getItem(KEY_FONT).catch(() => null),
+            AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
+              .then((v) => setDiffSideBySide(v === 'true'))
+              .catch(() => null),
+            AsyncStorage.getItem(KEY_MOUSE_ENABLED).catch(() => null),
+          ]);
 
         if (savedIp) setServerIp(savedIp);
         if (savedPort) setPort(savedPort);
@@ -926,6 +1016,10 @@ export function useTetherApp() {
         }
         const fontSize = Number(savedFont);
         if (Number.isFinite(fontSize) && fontSize >= 8 && fontSize <= 24) setFontSize(fontSize);
+        if (savedMouseEnabled === 'false') {
+          setMouseEnabled(false);
+          mouseEnabledRef.current = false;
+        }
         // Auto-connect only when BOTH an address AND a password are stored. An
         // upgrading user with an address but no password stays on setup to enter
         // the now-required password (migration path).
@@ -1455,7 +1549,7 @@ export function useTetherApp() {
       const el = document.getElementById('tether-terminal');
       if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
       const term = cache.get(activeIdRef.current)?.term;
-      if (!term?.mouseOn) return; // let the list scroll natively
+      if (!term?.mouseOn || !mouseEnabledRef.current) return; // let the list scroll natively
       e.preventDefault();
       const STEP = 40;
       accum += e.deltaY;
@@ -1488,6 +1582,78 @@ export function useTetherApp() {
     return () => window.removeEventListener('wheel', onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfiguring, activePresentationId, presentations]);
+
+  // Desktop: forward real mouse click/drag to the PTY when the app enabled mouse
+  // reporting and the user hasn't disabled it. Shift bypasses reporting so native
+  // text selection still works (xterm.js convention).
+  useEffect(() => {
+    if (!isDesktop || isConfiguring) return;
+    const el = () => document.getElementById('tether-terminal');
+    let down = false;
+    let lastCol = 0;
+    let lastRow = 0;
+
+    const activeTerm = () => {
+      const term = cache.get(activeIdRef.current)?.term;
+      if (!term?.mouseOn || !mouseEnabledRef.current) return null;
+      return term;
+    };
+    const cellOf = (e: MouseEvent, term: { cols: number; rows: number }) => {
+      const node = el();
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return cellFromPoint(e.clientX, e.clientY, rect, term.cols || 80, term.rows || 24);
+    };
+    const modsOf = (e: MouseEvent) => (e.altKey ? 8 : 0) | (e.ctrlKey ? 16 : 0);
+
+    const onDown = (e: MouseEvent) => {
+      const node = el();
+      if (!node || !(e.target instanceof Node) || !node.contains(e.target)) return;
+      if (e.shiftKey) return; // native selection
+      const term = activeTerm();
+      if (!term) return;
+      const cell = cellOf(e, term);
+      if (!cell) return;
+      e.preventDefault();
+      down = true;
+      lastCol = cell.col;
+      lastRow = cell.row;
+      wsSend({
+        type: 'input',
+        text: pressSeq(cell.col, cell.row, term.mouseSgr, e.button, modsOf(e)),
+      });
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!down) return;
+      const term = activeTerm();
+      if (!term) return;
+      const cell = cellOf(e, term);
+      if (!cell || (cell.col === lastCol && cell.row === lastRow)) return;
+      lastCol = cell.col;
+      lastRow = cell.row;
+      const seq = motionSeq(cell.col, cell.row, term.mouseMode, term.mouseSgr, e.button, modsOf(e));
+      if (seq) wsSend({ type: 'input', text: seq });
+    };
+    const onUp = (e: MouseEvent) => {
+      if (!down) return;
+      down = false;
+      const term = activeTerm();
+      if (!term) return;
+      const cell = cellOf(e, term) ?? { col: lastCol, row: lastRow };
+      const seq = releaseSeq(cell.col, cell.row, term.mouseMode, term.mouseSgr, e.button, modsOf(e));
+      if (seq) wsSend({ type: 'input', text: seq });
+    };
+
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConfiguring]);
 
   // Desktop: check for a newer signed build once on launch. If one exists, open
   // the update modal; stay silent on "up to date" or an unreachable feed.
@@ -2063,7 +2229,7 @@ export function useTetherApp() {
         scrolledRef.current = true;
       }}
       scrollEventThrottle={100}
-      scrollEnabled={!mouseOn}
+      scrollEnabled={!mouseActive}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="none"
       onContentSizeChange={(_w, h) => {
@@ -2120,6 +2286,8 @@ export function useTetherApp() {
     setTermHeight,
     mouseOn,
     setMouseOn,
+    mouseEnabled,
+    toggleMouseEnabled,
     ctxMenu,
     setCtxMenu,
     updateInfo,
@@ -2218,6 +2386,8 @@ export function useTetherApp() {
     entryFor,
     wsSend,
     panResponder,
+    setTermRect,
+    onTerminalTap,
     scheduleRender,
     resetTerminal,
     applyWsMessage,
