@@ -41,6 +41,10 @@ Sources: xterm control sequences (invisible-island ctlseqs) and xterm.js.
 - **Desktop:** real `mousedown`/`mousemove`/`mouseup` → press/motion/release.
   **Shift held bypasses reporting** so native text selection still works (xterm.js
   convention).
+- **User kill switch:** a persisted **Mouse control** toggle (default on) lets the
+  user disable all mouse forwarding even while an app has reporting enabled — so
+  they can fall back to native scroll/tap/select on demand. Shift-bypass on
+  desktop is the per-gesture escape hatch; this toggle is the global one.
 - **Out of scope (YAGNI):** hilite tracking (1001), pixel mode (1016), UTF-8
   mouse (1005), urxvt (1015). Left unimplemented; modes just stay `off`.
 
@@ -127,6 +131,21 @@ listeners scoped to `#tether-terminal`, active only when `mouseOn`:
 - **Shift held on down → skip reporting entirely** so native selection passes
   through.
 
+### 6. User kill switch — `OverflowMenu` + `useTetherApp.tsx`
+
+- `mouseEnabled: boolean` user preference, default `true`, persisted with the same
+  mechanism as `fontSize` (AsyncStorage / secure config), so it survives restarts.
+- **Mouse control** toggle added to the overflow (`⋯`) menu, near Font size.
+- The UI's effective gate becomes `mouseActive = term.mouseOn && mouseEnabled`.
+  Every new forwarding path (mobile tap/pan, desktop mouse listeners) checks
+  `mouseActive`, not raw `mouseOn`. When `mouseEnabled` is false, gestures behave
+  exactly as when the app never enabled reporting (tap = keyboard, swipe = native
+  scroll), and the desktop mouse listeners are detached.
+- The emulator still tracks `mouseMode` while disabled, so toggling back on
+  resumes reporting live with no reconnect.
+- `scrollEnabled` on the list uses `!mouseActive` (was `!mouseOn`) so disabling
+  mouse control restores native scrolling immediately.
+
 ## Data flow
 
 ```
@@ -160,6 +179,9 @@ sources are new.
   in x10; `dragSeqs` motion gated to button/any and deduped per cell.
 - `terminal.parser.test.ts` (extend): DECSET 9/1000/1002/1003/1006 set the right
   `mouseMode`/`mouseSgr`; disabling resets to `off`; `mouseOn` getter tracks it.
+- Kill switch: `mouseActive` is false when `mouseEnabled` is false regardless of
+  `mouseOn`; toggling `mouseEnabled` back on with a live `mouseMode` re-enables
+  forwarding (asserted at the gate/helper level, not via UI).
 
 ## Non-goals
 
