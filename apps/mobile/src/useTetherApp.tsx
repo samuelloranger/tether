@@ -83,6 +83,7 @@ const KEY_FONT = 'tether_font_size';
 const KEY_SNIPPETS = 'tether_snippets';
 const KEY_MONO_FONT = 'tether_mono_font';
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
+const KEY_MOUSE_ENABLED = 'tether_mouse_enabled';
 
 export interface GitLogEntry {
   sha: string;
@@ -180,6 +181,10 @@ export function useTetherApp() {
   const skipNextChangeRef = useRef(false);
   const [termHeight, setTermHeight] = useState(0);
   const [mouseOn, setMouseOn] = useState(false);
+  // User kill switch for mouse forwarding (default on). When off, gestures behave
+  // as if the app never enabled mouse reporting even while it has.
+  const [mouseEnabled, setMouseEnabled] = useState(true);
+  const mouseEnabledRef = useRef(true); // stable mirror for gesture handlers
   // Desktop right-click menu anchor (null when closed).
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   // Desktop self-update modal: version info when an update is pending, live
@@ -432,9 +437,15 @@ export function useTetherApp() {
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
-        mouseOnRef.current && Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 4,
+        mouseOnRef.current &&
+        mouseEnabledRef.current &&
+        Math.abs(g.dy) > Math.abs(g.dx) &&
+        Math.abs(g.dy) > 4,
       onMoveShouldSetPanResponderCapture: (_, g) =>
-        mouseOnRef.current && Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 4,
+        mouseOnRef.current &&
+        mouseEnabledRef.current &&
+        Math.abs(g.dy) > Math.abs(g.dx) &&
+        Math.abs(g.dy) > 4,
       onPanResponderGrant: () => {
         lastDy.current = 0;
         wheelAccum.current = 0;
@@ -695,6 +706,18 @@ export function useTetherApp() {
     });
   };
 
+  const toggleMouseEnabled = () => {
+    setMouseEnabled((prev) => {
+      const next = !prev;
+      mouseEnabledRef.current = next;
+      AsyncStorage.setItem(KEY_MOUSE_ENABLED, String(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  // Effective mouse gate: the app enabled reporting AND the user hasn't disabled it.
+  const mouseActive = mouseOn && mouseEnabled;
+
   useEffect(() => {
     if (!isDesktop) return;
     AsyncStorage.getItem(KEY_MONO_FONT)
@@ -903,16 +926,18 @@ export function useTetherApp() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const [savedIp, savedPort, savedSession, savedPw, savedFont] = await Promise.all([
-          AsyncStorage.getItem(KEY_SERVER_IP),
-          AsyncStorage.getItem(KEY_PORT),
-          AsyncStorage.getItem(KEY_SESSION_ID),
-          getPassword(),
-          AsyncStorage.getItem(KEY_FONT).catch(() => null),
-          AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
-            .then((v) => setDiffSideBySide(v === 'true'))
-            .catch(() => null),
-        ]);
+        const [savedIp, savedPort, savedSession, savedPw, savedFont, , savedMouseEnabled] =
+          await Promise.all([
+            AsyncStorage.getItem(KEY_SERVER_IP),
+            AsyncStorage.getItem(KEY_PORT),
+            AsyncStorage.getItem(KEY_SESSION_ID),
+            getPassword(),
+            AsyncStorage.getItem(KEY_FONT).catch(() => null),
+            AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
+              .then((v) => setDiffSideBySide(v === 'true'))
+              .catch(() => null),
+            AsyncStorage.getItem(KEY_MOUSE_ENABLED).catch(() => null),
+          ]);
 
         if (savedIp) setServerIp(savedIp);
         if (savedPort) setPort(savedPort);
@@ -926,6 +951,10 @@ export function useTetherApp() {
         }
         const fontSize = Number(savedFont);
         if (Number.isFinite(fontSize) && fontSize >= 8 && fontSize <= 24) setFontSize(fontSize);
+        if (savedMouseEnabled === 'false') {
+          setMouseEnabled(false);
+          mouseEnabledRef.current = false;
+        }
         // Auto-connect only when BOTH an address AND a password are stored. An
         // upgrading user with an address but no password stays on setup to enter
         // the now-required password (migration path).
@@ -1455,7 +1484,7 @@ export function useTetherApp() {
       const el = document.getElementById('tether-terminal');
       if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
       const term = cache.get(activeIdRef.current)?.term;
-      if (!term?.mouseOn) return; // let the list scroll natively
+      if (!term?.mouseOn || !mouseEnabledRef.current) return; // let the list scroll natively
       e.preventDefault();
       const STEP = 40;
       accum += e.deltaY;
@@ -2063,7 +2092,7 @@ export function useTetherApp() {
         scrolledRef.current = true;
       }}
       scrollEventThrottle={100}
-      scrollEnabled={!mouseOn}
+      scrollEnabled={!mouseActive}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="none"
       onContentSizeChange={(_w, h) => {
@@ -2120,6 +2149,8 @@ export function useTetherApp() {
     setTermHeight,
     mouseOn,
     setMouseOn,
+    mouseEnabled,
+    toggleMouseEnabled,
     ctxMenu,
     setCtxMenu,
     updateInfo,
