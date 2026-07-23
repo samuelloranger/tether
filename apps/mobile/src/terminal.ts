@@ -185,6 +185,9 @@ function charWidth(cp: number): 1 | 2 {
   return 1;
 }
 
+// Mouse-reporting mode the app negotiated via DECSET 9/1000/1002/1003.
+export type MouseMode = 'off' | 'x10' | 'normal' | 'button' | 'any';
+
 export class TerminalEmulator {
   cols: number;
   rows: number;
@@ -217,9 +220,15 @@ export class TerminalEmulator {
 
   private pen: CellStyle & PaletteStyle = {};
 
-  // True when the app has enabled mouse reporting (?1000/1002/1003h). Lets the
-  // UI forward swipes as scroll-wheel events so TUIs scroll their own history.
-  mouseOn = false;
+  // Which mouse-reporting mode the app negotiated (DECSET 9/1000/1002/1003).
+  // 'off' ⇒ no reporting. Lets the UI decide press-only vs drag vs any-motion.
+  mouseMode: MouseMode = 'off';
+
+  // True when reporting is active in any mode. Kept as a getter so existing
+  // call sites (scroll gate, wheel forwarders) read it unchanged.
+  get mouseOn(): boolean {
+    return this.mouseMode !== 'off';
+  }
 
   // True when the app negotiated SGR mouse encoding (?1006h). Off ⇒ the UI must
   // send legacy X10 mouse reports, which is what those apps parse.
@@ -296,7 +305,7 @@ export class TerminalEmulator {
     this.scrollTop = 0;
     this.scrollBot = this.rows - 1;
     this.pen = {};
-    this.mouseOn = false;
+    this.mouseMode = 'off';
     this.mouseSgr = false;
     this.cursorVisible = true;
     this.cursorStyle = 'block';
@@ -736,8 +745,14 @@ export class TerminalEmulator {
     for (const m of params) {
       if (m === 1049 || m === 47 || m === 1047) {
         this.setAltScreen(on);
-      } else if (m === 1000 || m === 1002 || m === 1003) {
-        this.mouseOn = on; // mouse reporting enabled/disabled
+      } else if (m === 9) {
+        this.mouseMode = on ? 'x10' : 'off';
+      } else if (m === 1000) {
+        this.mouseMode = on ? 'normal' : 'off';
+      } else if (m === 1002) {
+        this.mouseMode = on ? 'button' : 'off';
+      } else if (m === 1003) {
+        this.mouseMode = on ? 'any' : 'off';
       } else if (m === 25) {
         this.cursorVisible = on; // DECTCEM
       } else if (m === 1006) {
