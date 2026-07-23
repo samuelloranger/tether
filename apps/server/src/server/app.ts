@@ -437,10 +437,23 @@ app.get(
     // Stable per-connection output handler. Defined synchronously in onOpen so it
     // also serves as this client's key for per-client PTY sizing (onMessage/resize).
     let onData: Subscriber = () => {};
+    // Server-driven keepalive. An idle shell emits no PTY output, so without
+    // this the client's 30s "no frame → assume half-open" watchdog force-closes
+    // every quiet session — the user sees a spurious "Reconnecting…" every time
+    // they return to the window after being away. A cheap ping frame keeps the
+    // client's lastSeen fresh; the client ignores the unknown `ping` type.
+    let keepAlive: ReturnType<typeof setInterval> | null = null;
 
     return {
       onOpen(_event, ws) {
         console.log(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
+
+        // 20s < the client's 30s watchdog, so a quiet session never trips it.
+        keepAlive = setInterval(() => {
+          try {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          } catch {}
+        }, 20_000);
 
         onData = (data) => {
           // ponytail: no queueing for slow clients — if the socket's send
@@ -536,6 +549,7 @@ app.get(
       onClose() {
         console.log(`WebSocket closed for session "${sessionId}"`);
         closed = true;
+        if (keepAlive) clearInterval(keepAlive);
         unsubscribe();
       },
     };

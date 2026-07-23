@@ -222,6 +222,10 @@ export function useTetherApp() {
   // Last-seen activity per session, so waiting-notifications fire only on the
   // edge into `waiting` (not on every 4s poll while it stays waiting).
   const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
+  // Real OS window focus (distinct from the visibilitychange listener, which
+  // only catches minimize/hide, not "visible but alt-tabbed away"). Declared
+  // here so the ws message handler can gate active-tab notifications on it.
+  const windowFocusedRef = useRef(true);
   const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
@@ -434,12 +438,44 @@ export function useTetherApp() {
         // the device clipboard while the user is looking at a different tab.
         if (id === activeIdRef.current) void writeClipboard(text).catch(() => {});
       };
-      return { term, sinceId: 0, lastAppliedId: 0, diffSummary: { files: [] } };
+      return {
+        term,
+        sinceId: 0,
+        lastAppliedId: 0,
+        diffSummary: { files: [] },
+        lastBellCount: 0,
+        lastNotifyCount: 0,
+      };
     });
 
   // Send only when the socket is actually OPEN. `connectionStatus` (React state)
   // lags the real socket state — e.g. mid-switch the new socket is CONNECTING —
   // so guarding on it throws INVALID_STATE_ERR. readyState is the source of truth.
+  // Desktop OS notification on a new terminal bell or explicit desktop-notify
+  // escape (OSC 9 / 99 / 777) — mirrors what a real terminal (Ghostty, iTerm2,
+  // kitty) does. Fires for ANY cache-resident tab, since they all stream live:
+  // a background tab notifies unconditionally; the active tab only when the
+  // window is unfocused (don't notify the surface the user is already looking
+  // at). Counters always advance so a suppressed edge isn't replayed on blur.
+  const maybeNotify = (id: string, ent: SessionEntry) => {
+    if (!isDesktop) return;
+    const isActive = id === activeIdRef.current;
+    const gated = isActive && windowFocusedRef.current; // suppress, but consume
+    const notifyFired = ent.term.notifyCount > ent.lastNotifyCount;
+    const bellFired = ent.term.bellCount > ent.lastBellCount;
+    ent.lastNotifyCount = ent.term.notifyCount;
+    ent.lastBellCount = ent.term.bellCount;
+    if (gated || (!notifyFired && !bellFired)) return;
+    const label = sessionLabel(drawerSessions.find((s) => s.id === id) ?? { id });
+    if (notifyFired) {
+      // Explicit notify wins over a co-arriving bell (e.g. iTerm2-with-bell).
+      const { title, body } = ent.term.lastNotify;
+      void sendNativeNotification(title || label, body || 'Needs your input');
+    } else {
+      void sendNativeNotification(label, 'Terminal bell');
+    }
+  };
+
   const wsSend = (obj: unknown) => {
     const st = connections.get(activeIdRef.current);
     if (st?.open && st.sock) st.sock.send(JSON.stringify(obj));
@@ -602,6 +638,7 @@ export function useTetherApp() {
         ent.lastAppliedId = msg.id;
         ent.sinceId = msg.id;
         ent.term.write(msg.chunk);
+        maybeNotify(id, ent);
         if (id === activeIdRef.current) scheduleRender();
       } else if (msg.type === 'exit') {
         const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
@@ -624,6 +661,11 @@ export function useTetherApp() {
         ent.term.reset();
         ent.sinceId = 0;
         ent.lastAppliedId = 0;
+        // reset() zeroes the emulator's bell/notify counters, so the watermarks
+        // must drop too — otherwise the first post-reset notification (count 1)
+        // stays below the stale watermark and is silently swallowed.
+        ent.lastBellCount = 0;
+        ent.lastNotifyCount = 0;
         if (id === activeIdRef.current) scheduleRender();
       }
     } catch (err) {
@@ -2043,19 +2085,26 @@ export function useTetherApp() {
   const activeEntry = cache.peek(activeId) ?? entryFor(activeId);
   const changeSummary = activeEntry.diffSummary;
   // Read live off the mutable emulator field — re-derives every render.
+  // activeBellCount drives TerminalScreen's on-screen visual bell flash; the
+  // OS notification path lives in maybeNotify (per-session, in the ws handler).
   const activeBellCount = activeEntry.term.bellCount;
   const activePromptReturnCount = activeEntry.term.promptReturnCount;
 
-  // Desktop: native notification when a bell rings or a command finishes (new
-  // shell prompt appears) while the window isn't focused. windowFocusedRef
-  // tracks real OS focus — distinct from the visibilitychange listener
-  // earlier in this file, which only catches minimize/hide, not "visible but
-  // alt-tabbed away".
-  const windowFocusedRef = useRef(true);
+  // Desktop: keep windowFocusedRef (declared up top) in sync with real OS
+  // focus so the ws handler can suppress notifications for the focused tab.
   useEffect(() => {
     if (!isDesktop || typeof window === 'undefined') return;
     const onFocus = () => {
       windowFocusedRef.current = true;
+      // If the webview was fully suspended while we were away (some Linux
+      // compositors freeze background window JS), the keepalive watchdog can
+      // fire on resume before the server's queued ping is processed and force
+      // a needless reconnect. Refresh lastSeen for every live socket so the
+      // next ping (≤20s out) lands inside the 30s window first.
+      const now = Date.now();
+      for (const st of connections.values()) {
+        if (st.open) st.lastSeen = now;
+      }
     };
     const onBlur = () => {
       windowFocusedRef.current = false;
@@ -2067,18 +2116,19 @@ export function useTetherApp() {
       window.removeEventListener('blur', onBlur);
     };
   }, []);
-  const prevBellCountForNotifyRef = useRef(0);
+  // "Command finished" (new shell prompt) stays active-tab-only + unfocused:
+  // every backgrounded tab returns to a prompt constantly, so notifying on it
+  // for background sessions would be pure spam. Bell / explicit OSC-notify are
+  // handled per-session in the ws handler instead (they fire for any tab).
   const prevPromptReturnCountRef = useRef(0);
   useEffect(() => {
     if (!isDesktop) return;
-    const bellFired = activeBellCount > prevBellCountForNotifyRef.current;
     const promptReturned = activePromptReturnCount > prevPromptReturnCountRef.current;
-    prevBellCountForNotifyRef.current = activeBellCount;
     prevPromptReturnCountRef.current = activePromptReturnCount;
-    if ((bellFired || promptReturned) && !windowFocusedRef.current) {
-      void sendNativeNotification('Tether', bellFired ? 'Terminal bell' : 'Command finished');
+    if (promptReturned && !windowFocusedRef.current) {
+      void sendNativeNotification('Tether', 'Command finished');
     }
-  }, [activeBellCount, activePromptReturnCount]);
+  }, [activePromptReturnCount]);
 
   // Update-modal progress display.
   const upPct =
