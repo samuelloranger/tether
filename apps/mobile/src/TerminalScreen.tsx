@@ -220,6 +220,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     newTerminal,
     killActiveOr,
     changeFontSize,
+    mouseEnabled,
+    toggleMouseEnabled,
     persistSnippets,
     addSnippet,
     removeSnippet,
@@ -662,6 +664,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               }}
               fontSize={fontSize}
               onFontDelta={changeFontSize}
+              mouseEnabled={mouseEnabled}
+              onToggleMouse={toggleMouseEnabled}
               onSearch={openSearch}
               onJumpPromptUp={() => jumpPrompt(-1)}
               onJumpPromptDown={() => jumpPrompt(1)}

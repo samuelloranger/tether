@@ -14,6 +14,8 @@ export function OverflowMenu({
   onViewChanges,
   fontSize,
   onFontDelta,
+  mouseEnabled,
+  onToggleMouse,
   onSearch,
   onJumpPromptUp,
   onJumpPromptDown,
@@ -30,6 +32,8 @@ export function OverflowMenu({
   onViewChanges: () => void;
   fontSize: number;
   onFontDelta: (delta: number) => void;
+  mouseEnabled: boolean;
+  onToggleMouse: () => void;
   onSearch: () => void;
   onJumpPromptUp: () => void;
   onJumpPromptDown: () => void;
@@ -76,6 +80,17 @@ export function OverflowMenu({
               <Text style={styles.fontStepText}>+</Text>
             </TouchableOpacity>
           </View>
+          <TouchableOpacity style={styles.menuRow} onPress={onToggleMouse}>
+            <Feather name="mouse-pointer" size={16} color={theme.colors.text} />
+            <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
+              Mouse control
+            </Text>
+            <Feather
+              name={mouseEnabled ? 'toggle-right' : 'toggle-left'}
+              size={20}
+              color={mouseEnabled ? theme.colors.accent : theme.colors.textMuted}
+            />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.menuRow} onPress={onSearch}>
             <Feather name="search" size={16} color={theme.colors.text} />
             <Text style={styles.menuRowText}>Search displayed transcript</Text>
