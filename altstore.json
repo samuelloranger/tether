@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.16.4",
+          "date": "2026-07-23",
+          "localizedDescription": "## What's Changed\n* feat(desktop): notifications controls in the ⋯ overflow menu by @samuelloranger in https://github.com/samuelloranger/tether/pull/58\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.16.3...v1.16.4",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.16.4/tether.ipa",
+          "size": 8663344,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.16.3",
           "date": "2026-07-23",
           "localizedDescription": "## What's Changed\n* fix(desktop): send notification before awaiting permission by @samuelloranger in https://github.com/samuelloranger/tether/pull/57\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.16.2...v1.16.3",
