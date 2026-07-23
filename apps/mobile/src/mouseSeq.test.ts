@@ -22,3 +22,18 @@ describe('mouseSeq — legacy X10 encoding', () => {
     expect(seq).toBe(`\x1b[Ma${String.fromCharCode(127)}${String.fromCharCode(127)}`);
   });
 });
+
+describe('mouseSeq — press/release/motion', () => {
+  it('SGR release uses final m and keeps the real button', () => {
+    expect(mouseSeq(0, 5, 3, true, { release: true })).toBe('\x1b[<0;5;3m');
+  });
+  it('SGR motion ORs +32 into the button, final M', () => {
+    expect(mouseSeq(0, 5, 3, true, { motion: true })).toBe('\x1b[<32;5;3M');
+  });
+  it('X10 release sets the low two button bits to 3', () => {
+    expect(mouseSeq(0, 1, 1, false, { release: true })).toBe('\x1b[M#!!');
+  });
+  it('X10 motion ORs +32 into Cb', () => {
+    expect(mouseSeq(0, 1, 1, false, { motion: true })).toBe('\x1b[M@!!');
+  });
+});
