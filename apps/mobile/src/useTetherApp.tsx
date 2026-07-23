@@ -57,7 +57,7 @@ import type { FileView } from './fileView';
 import { applyBackspaceStreak, applyFieldChange, EMPTY_STREAK, SENT } from './input';
 import type { LinkTarget } from './links';
 import { mouseSeq } from './mouseSeq';
-import { cellFromPoint, motionSeq, pressSeq, releaseSeq } from './mouseInput';
+import { cellFromPoint, clickSeqs, motionSeq, pressSeq, releaseSeq } from './mouseInput';
 import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
 import { type Presentation, pickAutoSelectPreview } from './presentations';
@@ -365,6 +365,12 @@ export function useTetherApp() {
   const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
   const wheelAccum = useRef(0);
   const lastDy = useRef(0);
+  // Absolute on-screen rect of the terminal surface, for mapping touches → cells.
+  const termRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
+  const setTermRect = (r: { left: number; top: number; width: number; height: number }) => {
+    termRectRef.current = r;
+  };
+  const dragCell = useRef({ col: 0, row: 0 }); // last reported cell during a 1-finger drag
 
   // --- Terminal sizing ---
   // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
@@ -433,46 +439,96 @@ export function useTetherApp() {
     if (st?.open && st.sock) st.sock.send(JSON.stringify(obj));
   };
 
-  // When the remote enables mouse reporting (TUIs like Claude Code), translate
-  // vertical swipes into scroll-wheel events so the app scrolls its own history.
+  // When the remote enables mouse reporting (TUIs like Claude Code, vim, tmux):
+  // one-finger pan = mouse drag (press/motion/release), two-finger pan = wheel
+  // scroll so TUIs still page their own history. Tap = click is handled by the
+  // Pressable's onPress via onTerminalTap. All gated on mouseActive via the refs.
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
-        mouseOnRef.current &&
-        mouseEnabledRef.current &&
-        Math.abs(g.dy) > Math.abs(g.dx) &&
-        Math.abs(g.dy) > 4,
+        mouseOnRef.current && mouseEnabledRef.current && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
       onMoveShouldSetPanResponderCapture: (_, g) =>
-        mouseOnRef.current &&
-        mouseEnabledRef.current &&
-        Math.abs(g.dy) > Math.abs(g.dx) &&
-        Math.abs(g.dy) > 4,
-      onPanResponderGrant: () => {
+        mouseOnRef.current && mouseEnabledRef.current && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
+      onPanResponderGrant: (e, g) => {
         lastDy.current = 0;
         wheelAccum.current = 0;
+        if (g.numberActiveTouches >= 2) return; // two-finger → wheel, no press
+        const term = cache.get(activeIdRef.current)?.term;
+        if (!term) return;
+        const { col, row } = cellFromPoint(
+          e.nativeEvent.pageX,
+          e.nativeEvent.pageY,
+          termRectRef.current,
+          term.cols || 80,
+          term.rows || 24,
+        );
+        dragCell.current = { col, row };
+        wsSend({ type: 'input', text: pressSeq(col, row, term.mouseSgr) });
       },
-      onPanResponderMove: (_, g) => {
-        const STEP = 22;
-        const delta = g.dy - lastDy.current;
-        lastDy.current = g.dy;
-        wheelAccum.current += delta;
-        const e = cache.get(activeIdRef.current);
-        const wheel = (btn: number) => {
-          const col = Math.max(1, Math.floor((e?.term.cols ?? 80) / 2));
-          const row = Math.max(1, Math.floor((e?.term.rows ?? 24) / 2));
-          wsSend({ type: 'input', text: mouseSeq(btn, col, row, e?.term.mouseSgr ?? false) });
-        };
-        while (wheelAccum.current >= STEP) {
-          wheel(64);
-          wheelAccum.current -= STEP;
-        } // drag down → older
-        while (wheelAccum.current <= -STEP) {
-          wheel(65);
-          wheelAccum.current += STEP;
-        } // drag up → newer
+      onPanResponderMove: (e, g) => {
+        const term = cache.get(activeIdRef.current)?.term;
+        if (!term) return;
+        if (g.numberActiveTouches >= 2) {
+          // Two-finger: scroll history via wheel events (previous behaviour).
+          const STEP = 22;
+          const delta = g.dy - lastDy.current;
+          lastDy.current = g.dy;
+          wheelAccum.current += delta;
+          const col = Math.max(1, Math.floor((term.cols || 80) / 2));
+          const row = Math.max(1, Math.floor((term.rows || 24) / 2));
+          const wheel = (btn: number) =>
+            wsSend({ type: 'input', text: mouseSeq(btn, col, row, term.mouseSgr) });
+          while (wheelAccum.current >= STEP) {
+            wheel(64);
+            wheelAccum.current -= STEP;
+          }
+          while (wheelAccum.current <= -STEP) {
+            wheel(65);
+            wheelAccum.current += STEP;
+          }
+          return;
+        }
+        // One-finger: drag motion when the cell changes.
+        const { col, row } = cellFromPoint(
+          e.nativeEvent.pageX,
+          e.nativeEvent.pageY,
+          termRectRef.current,
+          term.cols || 80,
+          term.rows || 24,
+        );
+        if (col === dragCell.current.col && row === dragCell.current.row) return;
+        dragCell.current = { col, row };
+        const seq = motionSeq(col, row, term.mouseMode, term.mouseSgr);
+        if (seq) wsSend({ type: 'input', text: seq });
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.numberActiveTouches >= 1) return; // multi-touch lift; still touching
+        const term = cache.get(activeIdRef.current)?.term;
+        if (!term) return;
+        const { col, row } = dragCell.current;
+        const seq = releaseSeq(col, row, term.mouseMode, term.mouseSgr);
+        if (seq) wsSend({ type: 'input', text: seq });
       },
     }),
   ).current;
+
+  // Tap → click when mouse reporting is active. Returns true when it consumed the
+  // tap (so the caller skips focusing the keyboard).
+  const onTerminalTap = (pageX: number, pageY: number): boolean => {
+    const term = cache.get(activeIdRef.current)?.term;
+    if (!term?.mouseOn || !mouseEnabledRef.current) return false;
+    const { col, row } = cellFromPoint(
+      pageX,
+      pageY,
+      termRectRef.current,
+      term.cols || 80,
+      term.rows || 24,
+    );
+    for (const text of clickSeqs(col, row, term.mouseMode, term.mouseSgr)) {
+      wsSend({ type: 'input', text });
+    }
+    return true;
+  };
 
   // Coalesce many PTY chunks into one render per frame.
   const scheduleRender = () => {
@@ -2322,6 +2378,8 @@ export function useTetherApp() {
     entryFor,
     wsSend,
     panResponder,
+    setTermRect,
+    onTerminalTap,
     scheduleRender,
     resetTerminal,
     applyWsMessage,

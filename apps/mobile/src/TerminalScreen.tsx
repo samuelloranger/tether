@@ -211,6 +211,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     entryFor,
     wsSend,
     panResponder,
+    setTermRect,
+    onTerminalTap,
     scheduleRender,
     resetTerminal,
     applyWsMessage,
@@ -552,7 +554,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               <View style={styles.terminalArea}>
               <View
                 style={styles.terminalScroll}
-                onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
+                onLayout={(e) => {
+                  setTermHeight(e.nativeEvent.layout.height);
+                  e.currentTarget.measureInWindow((x, y, w, h) =>
+                    setTermRect({ left: x, top: y, width: w, height: h }),
+                  );
+                }}
                 {...panResponder.panHandlers}
               >
                 {isDesktop ? (
@@ -585,10 +592,14 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     onPressIn={() => {
                       scrolledRef.current = false;
                     }}
-                    onPress={() => {
-                      // Only a genuine tap focuses the input; a scroll-release must not
-                      // pop the keyboard.
-                      if (!scrolledRef.current) inputRef.current?.focus();
+                    onPress={(e) => {
+                      // A scroll-release must not pop the keyboard.
+                      if (scrolledRef.current) return;
+                      // When mouse reporting is active, a tap is a click at that cell;
+                      // otherwise it focuses the keyboard as before.
+                      if (!onTerminalTap(e.nativeEvent.pageX, e.nativeEvent.pageY)) {
+                        inputRef.current?.focus();
+                      }
                     }}
                     onLongPress={openSelectionView}
                   >
