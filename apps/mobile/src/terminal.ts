@@ -270,6 +270,9 @@ export class TerminalEmulator {
   // message from the most recent one.
   notifyCount = 0;
   lastNotify: { title: string; body: string } = { title: '', body: '' };
+  // In-flight kitty (OSC 99) notifications keyed by their `i` identifier,
+  // accumulated across chunks until a completing (d≠0) chunk fires them.
+  private kittyNotif = new Map<string, { title: string; body: string }>();
 
   // Set by OSC 0 ("icon name + title") or OSC 2 ("title"). Empty until the
   // remote shell/app sends one.
@@ -325,6 +328,7 @@ export class TerminalEmulator {
     this.promptReturnCount = 0;
     this.notifyCount = 0;
     this.lastNotify = { title: '', body: '' };
+    this.kittyNotif.clear();
     this.title = '';
     this.cwd = '';
     this.promptRows = new WeakSet();
@@ -809,11 +813,7 @@ export class TerminalEmulator {
       // iTerm2 growl notification: the whole payload is the message body.
       this.raiseNotify('', pt);
     } else if (ps === '99') {
-      // kitty notification: "<metadata>;<payload>" — metadata is a
-      // colon-separated key=val list (i=id, d=done, …) we don't need; the
-      // payload after the first ';' is the human-readable message.
-      const bodySep = pt.indexOf(';');
-      if (bodySep !== -1) this.raiseNotify('', pt.slice(bodySep + 1));
+      this.dispatchKittyNotify(pt);
     } else if (ps === '777') {
       // rxvt/ghostty: "notify;<title>;<body>" (body optional). Other 777
       // subcommands (precmd, …) are ignored.
@@ -869,6 +869,43 @@ export class TerminalEmulator {
   private raiseNotify(title: string, body: string) {
     this.lastNotify = { title, body };
     this.notifyCount++;
+  }
+
+  // kitty desktop-notification protocol (OSC 99): "<metadata>;<payload>".
+  // metadata is a colon-separated key=val list; the keys we honor:
+  //   i = identifier grouping chunks of one notification
+  //   d = "done" — d=0 means more chunks follow; anything else (or absent)
+  //       completes the notification
+  //   p = payload type — 'title' (default) or 'body'; other types (close,
+  //       alive, …) carry no user-facing text, so they never notify
+  //   e = encoding — e=1 means the payload is base64
+  // Chunks are accumulated per id until a completing chunk arrives.
+  private dispatchKittyNotify(pt: string) {
+    const bodySep = pt.indexOf(';');
+    if (bodySep === -1) return;
+    const meta = new Map<string, string>();
+    for (const kv of pt.slice(0, bodySep).split(':')) {
+      const eq = kv.indexOf('=');
+      if (eq !== -1) meta.set(kv.slice(0, eq), kv.slice(eq + 1));
+    }
+    let payload = pt.slice(bodySep + 1);
+    if (meta.get('e') === '1') {
+      try {
+        payload = base64ToUtf8(payload);
+      } catch {
+        return; // malformed base64 — drop, same as other malformed OSC payloads
+      }
+    }
+    const id = meta.get('i') ?? '';
+    const ptype = meta.get('p') ?? 'title';
+    const buf = this.kittyNotif.get(id) ?? { title: '', body: '' };
+    if (ptype === 'title') buf.title += payload;
+    else if (ptype === 'body') buf.body += payload;
+    // Any other payload type (close/alive/…) contributes no text.
+    this.kittyNotif.set(id, buf);
+    if (meta.get('d') === '0') return; // incomplete — wait for the final chunk
+    this.kittyNotif.delete(id);
+    if (buf.title || buf.body) this.raiseNotify(buf.title, buf.body);
   }
 
   // --- Grid operations ---

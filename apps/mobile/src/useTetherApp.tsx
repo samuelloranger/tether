@@ -661,6 +661,11 @@ export function useTetherApp() {
         ent.term.reset();
         ent.sinceId = 0;
         ent.lastAppliedId = 0;
+        // reset() zeroes the emulator's bell/notify counters, so the watermarks
+        // must drop too — otherwise the first post-reset notification (count 1)
+        // stays below the stale watermark and is silently swallowed.
+        ent.lastBellCount = 0;
+        ent.lastNotifyCount = 0;
         if (id === activeIdRef.current) scheduleRender();
       }
     } catch (err) {

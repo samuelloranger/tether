@@ -115,18 +115,44 @@ test('OSC 777 non-notify subcommand is ignored', () => {
   expect(t.notifyCount).toBe(0);
 });
 
-test('OSC 99 (kitty): payload after metadata is the message', () => {
+test('OSC 99 (kitty): complete single frame fires, default payload is title', () => {
   const t = new TerminalEmulator(80, 24);
-  t.write('\x1b]99;i=1:d=0;Claude needs your input\x1b\\');
+  // No d= key means done (d defaults to 1); no p= means the payload is a title.
+  t.write('\x1b]99;i=1;Claude needs your input\x1b\\');
   expect(t.notifyCount).toBe(1);
-  expect(t.lastNotify.body).toBe('Claude needs your input');
+  expect(t.lastNotify).toEqual({ title: 'Claude needs your input', body: '' });
 });
 
 test('OSC 99 with empty metadata still fires', () => {
   const t = new TerminalEmulator(80, 24);
-  t.write('\x1b]99;;just a body\x1b\\');
+  t.write('\x1b]99;;just a title\x1b\\');
   expect(t.notifyCount).toBe(1);
-  expect(t.lastNotify.body).toBe('just a body');
+  expect(t.lastNotify.title).toBe('just a title');
+});
+
+test('OSC 99 chunked (d=0 …then d=1): fires once, assembles title + body', () => {
+  const t = new TerminalEmulator(80, 24);
+  // d=0 = more chunks coming -> must NOT fire yet.
+  t.write('\x1b]99;i=7:d=0;My Title\x1b\\');
+  expect(t.notifyCount).toBe(0);
+  // Final chunk (d defaults to done) switches payload to body -> fires once.
+  t.write('\x1b]99;i=7:p=body;the body text\x1b\\');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify).toEqual({ title: 'My Title', body: 'the body text' });
+});
+
+test('OSC 99 base64-encoded payload (e=1) is decoded', () => {
+  const t = new TerminalEmulator(80, 24);
+  const b64 = Buffer.from('héllo', 'utf8').toString('base64');
+  t.write(`\x1b]99;i=1:e=1;${b64}\x1b\\`);
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify.title).toBe('héllo');
+});
+
+test('OSC 99 close/other payload types do not raise a notification', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]99;i=1:p=close;\x1b\\');
+  expect(t.notifyCount).toBe(0);
 });
 
 test('reset() clears notification state', () => {
