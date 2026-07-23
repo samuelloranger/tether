@@ -160,12 +160,38 @@ fn secure_clear_password() -> Result<(), String> {
     }
 }
 
-// Open a URL in the system browser. The opener plugin's open_url spawns
-// xdg-open with THIS process's environment — inside an AppImage that includes
-// the runtime-injected library paths (LD_LIBRARY_PATH, GDK/GIO/GST module
-// paths pointing into the mounted AppDir), which crash the spawned browser on
-// startup while the detached spawn still reports success. Strip those vars on
-// Linux before spawning so the browser launches against the host's own libs.
+// On GNOME 46+ the notification plugin flashes-and-vanishes (the notify-rust
+// handle is dropped the instant show() returns, which GNOME treats as a close —
+// tauri #14095). Shell out to notify-send instead, which displays reliably.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+fn send_os_notification(_app: AppHandle, title: String, body: String) -> Result<(), String> {
+    let status = std::process::Command::new("notify-send")
+        .args(["--app-name=Tether", "--urgency=normal", "--expire-time=5000", &title, &body])
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("notify-send exited {status}"))
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn send_os_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| e.to_string())
+}
+
+// Open a URL in the system browser. On Linux the opener plugin spawns xdg-open
+// with THIS process's env — inside an AppImage that includes runtime-injected
+// library paths that crash the spawned browser — so strip those vars first.
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -248,7 +274,8 @@ fn main() {
             secure_get_password,
             secure_set_password,
             secure_clear_password,
-            open_external
+            open_external,
+            send_os_notification
         ])
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");

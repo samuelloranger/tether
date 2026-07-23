@@ -262,16 +262,11 @@ export class TerminalEmulator {
   // by the desktop app to notify when a long-running command completes.
   promptReturnCount = 0;
 
-  // Monotonically increasing counter, incremented once per explicit desktop
-  // notification escape: OSC 9 (iTerm2), OSC 99 (kitty), OSC 777;notify
-  // (rxvt/ghostty). These are what Claude Code / long-running tools emit to
-  // ask the terminal to raise an OS notification — the desktop app mirrors a
-  // real terminal (Ghostty et al.) by surfacing them. `lastNotify` holds the
-  // message from the most recent one.
+  // Bumped once per desktop-notification escape — OSC 9 (iTerm2), OSC 99
+  // (kitty), OSC 777;notify (rxvt/ghostty); `lastNotify` holds the latest one.
   notifyCount = 0;
   lastNotify: { title: string; body: string } = { title: '', body: '' };
-  // In-flight kitty (OSC 99) notifications keyed by their `i` identifier,
-  // accumulated across chunks until a completing (d≠0) chunk fires them.
+  // In-flight kitty (OSC 99) notifications by `i` id, accumulated across chunks.
   private kittyNotif = new Map<string, { title: string; body: string }>();
 
   // Set by OSC 0 ("icon name + title") or OSC 2 ("title"). Empty until the
@@ -871,15 +866,9 @@ export class TerminalEmulator {
     this.notifyCount++;
   }
 
-  // kitty desktop-notification protocol (OSC 99): "<metadata>;<payload>".
-  // metadata is a colon-separated key=val list; the keys we honor:
-  //   i = identifier grouping chunks of one notification
-  //   d = "done" — d=0 means more chunks follow; anything else (or absent)
-  //       completes the notification
-  //   p = payload type — 'title' (default) or 'body'; other types (close,
-  //       alive, …) carry no user-facing text, so they never notify
-  //   e = encoding — e=1 means the payload is base64
-  // Chunks are accumulated per id until a completing chunk arrives.
+  // kitty notification protocol (OSC 99): "<metadata>;<payload>". Metadata is a
+  // colon-separated key=val list — i=id, d=0 means more chunks follow (else
+  // done), p=title|body (default title; other types carry no text), e=1 base64.
   private dispatchKittyNotify(pt: string) {
     const bodySep = pt.indexOf(';');
     if (bodySep === -1) return;

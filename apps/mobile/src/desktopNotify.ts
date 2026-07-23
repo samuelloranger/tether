@@ -1,15 +1,18 @@
-// Desktop native notifications via the Tauri notification plugin. No-op
-// anywhere but the actual Tauri desktop runtime — callers gate on `isDesktop`
-// before calling these (see useTetherApp.tsx).
+// Desktop native notifications. The actual send goes through the Rust command
+// `send_os_notification`, which picks the right mechanism per platform: on
+// Linux it shells out to `notify-send` (the Tauri/notify-rust plugin path
+// flashes-and-vanishes on GNOME 46+ because the notification handle is dropped
+// the instant show() returns — tauri #14095 / plugins-workspace #2566), and on
+// macOS/Windows it uses the notification plugin. Callers gate on `isDesktop`.
 let permissionGranted: boolean | null = null;
 
 function loadPlugin() {
   return import('@tauri-apps/plugin-notification');
 }
 
-// Call once at app startup (eager, not lazy on first trigger — product
-// decision). Safe to call again; a subsequent call after permission was
-// granted is a cheap no-op (single isPermissionGranted() check).
+// Call once at app startup. On macOS/Windows this surfaces the OS permission
+// prompt so the plugin-backed send (used there) can display. Linux has no
+// permission model and uses notify-send, so this is a best-effort no-op there.
 export async function ensureNotificationPermission(): Promise<void> {
   try {
     const { isPermissionGranted, requestPermission } = await loadPlugin();
@@ -19,36 +22,22 @@ export async function ensureNotificationPermission(): Promise<void> {
       permissionGranted = result === 'granted';
     }
   } catch {
-    // Plugin unavailable (e.g. plain-browser dev preview) — leave the verdict
-    // unknown; notify() still best-effort attempts to send.
+    // Plugin unavailable (e.g. plain-browser dev preview) — ignore.
   }
 }
 
 export async function notify(title: string, body: string): Promise<void> {
   try {
-    const mod = await loadPlugin();
-    // Send FIRST, unconditionally. We must NOT await a permission request
-    // before sending: on a Linux desktop portal requestPermission() can stay
-    // pending indefinitely (no prompt is ever shown), which would drop the
-    // very notification this path exists to deliver. sendNotification is a
-    // no-op where a platform genuinely denies, so sending first is safe.
-    mod.sendNotification({ title, body });
-    // Refresh the grant out-of-band (fire-and-forget) for platforms that do
-    // gate — never blocking, so a hung request can't stall future sends.
-    if (permissionGranted !== true) {
-      void (async () => {
-        try {
-          permissionGranted = await mod.isPermissionGranted();
-          if (!permissionGranted) {
-            permissionGranted = (await mod.requestPermission()) === 'granted';
-          }
-        } catch {
-          // ignore — sends don't depend on this
-        }
-      })();
-    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('send_os_notification', { title, body });
   } catch {
-    // Plugin missing or the send threw (e.g. D-Bus unavailable) — nothing more
-    // we can do; never let a notification failure crash the caller.
+    // Rust command missing/failed — fall back to the JS plugin (best-effort,
+    // fire-and-forget so a hung permission request can't block it).
+    try {
+      const mod = await loadPlugin();
+      mod.sendNotification({ title, body });
+    } catch {
+      // Nothing more we can do; never let a notification failure reach callers.
+    }
   }
 }

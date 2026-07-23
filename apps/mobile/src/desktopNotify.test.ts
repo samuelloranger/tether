@@ -9,12 +9,17 @@ mock.module('@tauri-apps/plugin-notification', () => ({
   sendNotification,
 }));
 
+const invoke = mock((_cmd: string, _args?: unknown) => Promise.resolve());
+mock.module('@tauri-apps/api/core', () => ({ invoke }));
+
 const { ensureNotificationPermission, notify } = await import('./desktopNotify');
 
 beforeEach(() => {
   isPermissionGranted.mockClear();
   requestPermission.mockClear();
   sendNotification.mockClear();
+  invoke.mockClear();
+  invoke.mockImplementation(() => Promise.resolve());
 });
 
 test('ensureNotificationPermission requests permission when not already granted', async () => {
@@ -30,36 +35,22 @@ test('ensureNotificationPermission does not re-request when already granted', as
   expect(requestPermission).not.toHaveBeenCalled();
 });
 
-test('notify sends a notification once permission is granted', async () => {
-  isPermissionGranted.mockImplementation(() => Promise.resolve(true));
-  await ensureNotificationPermission();
+test('notify routes through the send_os_notification Rust command', async () => {
   await notify('title', 'body');
-  expect(sendNotification).toHaveBeenCalledWith({ title: 'title', body: 'body' });
+  expect(invoke).toHaveBeenCalledWith('send_os_notification', { title: 'title', body: 'body' });
+  expect(sendNotification).not.toHaveBeenCalled();
 });
 
-test('notify still attempts to send even when the permission verdict is not granted', async () => {
-  // Linux (libnotify/D-Bus) has no real permission model, so a stale/false
-  // verdict must not silently swallow every notification. Best-effort: send
-  // anyway rather than hard-gate on `granted`.
-  isPermissionGranted.mockImplementation(() => Promise.resolve(false));
-  requestPermission.mockImplementation(() => Promise.resolve('denied'));
-  await ensureNotificationPermission();
-  await notify('title', 'body');
-  expect(sendNotification).toHaveBeenCalledWith({ title: 'title', body: 'body' });
+test('notify falls back to the JS plugin when the Rust command is unavailable', async () => {
+  invoke.mockImplementation(() => Promise.reject(new Error('no command')));
+  await notify('t', 'b');
+  expect(sendNotification).toHaveBeenCalledWith({ title: 't', body: 'b' });
 });
 
-test('notify sends even when requestPermission never resolves (hung Linux portal)', async () => {
-  isPermissionGranted.mockImplementation(() => Promise.resolve(false));
-  requestPermission.mockImplementation(() => new Promise(() => {})); // never resolves
-  await notify('title', 'body');
-  expect(sendNotification).toHaveBeenCalledWith({ title: 'title', body: 'body' });
-});
-
-test('notify swallows a missing/failing plugin without throwing', async () => {
-  isPermissionGranted.mockImplementation(() => Promise.resolve(true));
-  await ensureNotificationPermission();
+test('notify swallows a failing fallback without throwing', async () => {
+  invoke.mockImplementation(() => Promise.reject(new Error('no command')));
   sendNotification.mockImplementationOnce(() => {
-    throw new Error('D-Bus unavailable');
+    throw new Error('D-Bus down');
   });
   await expect(notify('t', 'b')).resolves.toBeUndefined();
 });

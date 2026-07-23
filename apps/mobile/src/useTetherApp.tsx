@@ -456,12 +456,10 @@ export function useTetherApp() {
   // Send only when the socket is actually OPEN. `connectionStatus` (React state)
   // lags the real socket state — e.g. mid-switch the new socket is CONNECTING —
   // so guarding on it throws INVALID_STATE_ERR. readyState is the source of truth.
-  // Desktop OS notification on a new terminal bell or explicit desktop-notify
-  // escape (OSC 9 / 99 / 777) — mirrors what a real terminal (Ghostty, iTerm2,
-  // kitty) does. Fires for ANY cache-resident tab, since they all stream live:
-  // a background tab notifies unconditionally; the active tab only when the
-  // window is unfocused (don't notify the surface the user is already looking
-  // at). Counters always advance so a suppressed edge isn't replayed on blur.
+  // OS notification on a new bell or desktop-notify escape (OSC 9/99/777), for
+  // any cache-resident tab. Background tabs always fire; the active tab only
+  // when the window is unfocused. Counters always advance so a suppressed edge
+  // isn't replayed on blur.
   const maybeNotify = (id: string, ent: SessionEntry) => {
     if (!isDesktop || !notificationsEnabledRef.current) return;
     const isActive = id === activeIdRef.current;
@@ -852,9 +850,8 @@ export function useTetherApp() {
     });
   };
 
-  // Fire a notification straight through desktopNotify (bypassing maybeNotify's
-  // focus/preference gates) so the user can verify the whole OS chain —
-  // permission + daemon + display — in one tap, regardless of focus.
+  // Fires straight through desktopNotify (no focus/preference gate) so the user
+  // can verify the OS notification chain in one tap.
   const testNotification = () => {
     void sendNativeNotification('Tether', 'Test notification — notifications are working ✅');
   };
