@@ -37,10 +37,22 @@ test('notify sends a notification once permission is granted', async () => {
   expect(sendNotification).toHaveBeenCalledWith({ title: 'title', body: 'body' });
 });
 
-test('notify no-ops when permission was denied', async () => {
+test('notify still attempts to send even when the permission verdict is not granted', async () => {
+  // Linux (libnotify/D-Bus) has no real permission model, so a stale/false
+  // verdict must not silently swallow every notification. Best-effort: send
+  // anyway rather than hard-gate on `granted`.
   isPermissionGranted.mockImplementation(() => Promise.resolve(false));
   requestPermission.mockImplementation(() => Promise.resolve('denied'));
   await ensureNotificationPermission();
   await notify('title', 'body');
-  expect(sendNotification).not.toHaveBeenCalled();
+  expect(sendNotification).toHaveBeenCalledWith({ title: 'title', body: 'body' });
+});
+
+test('notify swallows a missing/failing plugin without throwing', async () => {
+  isPermissionGranted.mockImplementation(() => Promise.resolve(true));
+  await ensureNotificationPermission();
+  sendNotification.mockImplementationOnce(() => {
+    throw new Error('D-Bus unavailable');
+  });
+  await expect(notify('t', 'b')).resolves.toBeUndefined();
 });
