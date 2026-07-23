@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.16.3",
+          "date": "2026-07-23",
+          "localizedDescription": "## What's Changed\n* fix(desktop): send notification before awaiting permission by @samuelloranger in https://github.com/samuelloranger/tether/pull/57\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.16.2...v1.16.3",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.16.3/tether.ipa",
+          "size": 8663048,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.16.2",
           "date": "2026-07-23",
           "localizedDescription": "## What's Changed\n* fix(desktop): don't hard-gate notifications on the permission verdict by @samuelloranger in https://github.com/samuelloranger/tether/pull/56\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.16.1...v1.16.2",
