@@ -371,6 +371,7 @@ export function useTetherApp() {
     termRectRef.current = r;
   };
   const dragCell = useRef({ col: 0, row: 0 }); // last reported cell during a 1-finger drag
+  const dragActive = useRef(false); // true once a 1-finger press was sent (not wheel gestures)
 
   // --- Terminal sizing ---
   // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
@@ -452,6 +453,7 @@ export function useTetherApp() {
       onPanResponderGrant: (e, g) => {
         lastDy.current = 0;
         wheelAccum.current = 0;
+        dragActive.current = false;
         if (g.numberActiveTouches >= 2) return; // two-finger → wheel, no press
         const term = cache.get(activeIdRef.current)?.term;
         if (!term) return;
@@ -463,6 +465,7 @@ export function useTetherApp() {
           term.rows || 24,
         );
         dragCell.current = { col, row };
+        dragActive.current = true;
         wsSend({ type: 'input', text: pressSeq(col, row, term.mouseSgr) });
       },
       onPanResponderMove: (e, g) => {
@@ -503,6 +506,11 @@ export function useTetherApp() {
       },
       onPanResponderRelease: (_, g) => {
         if (g.numberActiveTouches >= 1) return; // multi-touch lift; still touching
+        // Only release if a one-finger press was actually sent. A two-finger wheel
+        // gesture sends no press, so it must not emit a stray button-up at a stale
+        // cell (would perturb vim/tmux selection).
+        if (!dragActive.current) return;
+        dragActive.current = false;
         const term = cache.get(activeIdRef.current)?.term;
         if (!term) return;
         const { col, row } = dragCell.current;
