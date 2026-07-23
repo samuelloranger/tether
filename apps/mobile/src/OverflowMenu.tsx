@@ -21,6 +21,9 @@ export function OverflowMenu({
   onJumpPromptDown,
   onSnippets,
   onAppearance,
+  notificationsEnabled,
+  onToggleNotifications,
+  onTestNotification,
   onCheckUpdates,
   onRestart,
   desktopNavigationMode,
@@ -39,6 +42,9 @@ export function OverflowMenu({
   onJumpPromptDown: () => void;
   onSnippets: () => void;
   onAppearance: () => void;
+  notificationsEnabled?: boolean;
+  onToggleNotifications?: () => void;
+  onTestNotification?: () => void;
   onCheckUpdates: () => void;
   onRestart: () => void;
   desktopNavigationMode?: DesktopNavigationMode;
@@ -111,6 +117,25 @@ export function OverflowMenu({
             <Feather name="droplet" size={16} color={theme.colors.text} />
             <Text style={styles.menuRowText}>Appearance</Text>
           </TouchableOpacity>
+          {isDesktop && onToggleNotifications && (
+            <TouchableOpacity style={styles.menuRow} onPress={onToggleNotifications}>
+              <Feather name="bell" size={16} color={theme.colors.text} />
+              <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
+                Notifications
+              </Text>
+              <Feather
+                name={notificationsEnabled ? 'toggle-right' : 'toggle-left'}
+                size={20}
+                color={notificationsEnabled ? theme.colors.accent : theme.colors.textMuted}
+              />
+            </TouchableOpacity>
+          )}
+          {isDesktop && notificationsEnabled && onTestNotification && (
+            <TouchableOpacity style={styles.menuRow} onPress={onTestNotification}>
+              <Feather name="send" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>Send test notification</Text>
+            </TouchableOpacity>
+          )}
           {isDesktop && desktopNavigationMode && onDesktopNavigationMode && (
             <View style={styles.navigationSection}>
               <Text style={styles.navigationLabel}>Navigation</Text>

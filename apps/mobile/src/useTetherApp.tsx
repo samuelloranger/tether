@@ -85,6 +85,7 @@ const KEY_SNIPPETS = 'tether_snippets';
 const KEY_MONO_FONT = 'tether_mono_font';
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
 const KEY_MOUSE_ENABLED = 'tether_mouse_enabled';
+const KEY_NOTIFICATIONS_ENABLED = 'tether_notifications_enabled';
 
 export interface GitLogEntry {
   sha: string;
@@ -186,6 +187,10 @@ export function useTetherApp() {
   // as if the app never enabled mouse reporting even while it has.
   const [mouseEnabled, setMouseEnabled] = useState(true);
   const mouseEnabledRef = useRef(true); // stable mirror for gesture handlers
+  // Desktop OS notifications on/off (user preference, persisted). The ref is the
+  // stable mirror read by maybeNotify inside the ws handler.
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const notificationsEnabledRef = useRef(true);
   // Desktop right-click menu anchor (null when closed).
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   // Desktop self-update modal: version info when an update is pending, live
@@ -458,7 +463,7 @@ export function useTetherApp() {
   // window is unfocused (don't notify the surface the user is already looking
   // at). Counters always advance so a suppressed edge isn't replayed on blur.
   const maybeNotify = (id: string, ent: SessionEntry) => {
-    if (!isDesktop) return;
+    if (!isDesktop || !notificationsEnabledRef.current) return;
     const isActive = id === activeIdRef.current;
     const gated = isActive && windowFocusedRef.current; // suppress, but consume
     const notifyFired = ent.term.notifyCount > ent.lastNotifyCount;
@@ -838,6 +843,22 @@ export function useTetherApp() {
     });
   };
 
+  const toggleNotificationsEnabled = () => {
+    setNotificationsEnabled((prev) => {
+      const next = !prev;
+      notificationsEnabledRef.current = next;
+      AsyncStorage.setItem(KEY_NOTIFICATIONS_ENABLED, String(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  // Fire a notification straight through desktopNotify (bypassing maybeNotify's
+  // focus/preference gates) so the user can verify the whole OS chain —
+  // permission + daemon + display — in one tap, regardless of focus.
+  const testNotification = () => {
+    void sendNativeNotification('Tether', 'Test notification — notifications are working ✅');
+  };
+
   // Effective mouse gate: the app enabled reporting AND the user hasn't disabled it.
   const mouseActive = mouseOn && mouseEnabled;
 
@@ -1049,18 +1070,27 @@ export function useTetherApp() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const [savedIp, savedPort, savedSession, savedPw, savedFont, , savedMouseEnabled] =
-          await Promise.all([
-            AsyncStorage.getItem(KEY_SERVER_IP),
-            AsyncStorage.getItem(KEY_PORT),
-            AsyncStorage.getItem(KEY_SESSION_ID),
-            getPassword(),
-            AsyncStorage.getItem(KEY_FONT).catch(() => null),
-            AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
-              .then((v) => setDiffSideBySide(v === 'true'))
-              .catch(() => null),
-            AsyncStorage.getItem(KEY_MOUSE_ENABLED).catch(() => null),
-          ]);
+        const [
+          savedIp,
+          savedPort,
+          savedSession,
+          savedPw,
+          savedFont,
+          ,
+          savedMouseEnabled,
+          savedNotificationsEnabled,
+        ] = await Promise.all([
+          AsyncStorage.getItem(KEY_SERVER_IP),
+          AsyncStorage.getItem(KEY_PORT),
+          AsyncStorage.getItem(KEY_SESSION_ID),
+          getPassword(),
+          AsyncStorage.getItem(KEY_FONT).catch(() => null),
+          AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
+            .then((v) => setDiffSideBySide(v === 'true'))
+            .catch(() => null),
+          AsyncStorage.getItem(KEY_MOUSE_ENABLED).catch(() => null),
+          AsyncStorage.getItem(KEY_NOTIFICATIONS_ENABLED).catch(() => null),
+        ]);
 
         if (savedIp) setServerIp(savedIp);
         if (savedPort) setPort(savedPort);
@@ -1077,6 +1107,10 @@ export function useTetherApp() {
         if (savedMouseEnabled === 'false') {
           setMouseEnabled(false);
           mouseEnabledRef.current = false;
+        }
+        if (savedNotificationsEnabled === 'false') {
+          setNotificationsEnabled(false);
+          notificationsEnabledRef.current = false;
         }
         // Auto-connect only when BOTH an address AND a password are stored. An
         // upgrading user with an address but no password stays on setup to enter
@@ -2354,6 +2388,9 @@ export function useTetherApp() {
     setMouseOn,
     mouseEnabled,
     toggleMouseEnabled,
+    notificationsEnabled,
+    toggleNotificationsEnabled,
+    testNotification,
     ctxMenu,
     setCtxMenu,
     updateInfo,

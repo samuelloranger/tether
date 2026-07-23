@@ -224,6 +224,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     changeFontSize,
     mouseEnabled,
     toggleMouseEnabled,
+    notificationsEnabled,
+    toggleNotificationsEnabled,
+    testNotification,
     persistSnippets,
     addSnippet,
     removeSnippet,
@@ -697,6 +700,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onAppearance={() => {
                 setMenuOpen(false);
                 setAppearanceModalOpen(true);
+              }}
+              notificationsEnabled={notificationsEnabled}
+              onToggleNotifications={toggleNotificationsEnabled}
+              onTestNotification={() => {
+                setMenuOpen(false);
+                testNotification();
               }}
               onCheckUpdates={() => {
                 setMenuOpen(false);
