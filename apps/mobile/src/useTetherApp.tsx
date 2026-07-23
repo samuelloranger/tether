@@ -57,6 +57,7 @@ import type { FileView } from './fileView';
 import { applyBackspaceStreak, applyFieldChange, EMPTY_STREAK, SENT } from './input';
 import type { LinkTarget } from './links';
 import { mouseSeq } from './mouseSeq';
+import { cellFromPoint, motionSeq, pressSeq, releaseSeq } from './mouseInput';
 import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
 import { type Presentation, pickAutoSelectPreview } from './presentations';
@@ -1517,6 +1518,78 @@ export function useTetherApp() {
     return () => window.removeEventListener('wheel', onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfiguring, activePresentationId, presentations]);
+
+  // Desktop: forward real mouse click/drag to the PTY when the app enabled mouse
+  // reporting and the user hasn't disabled it. Shift bypasses reporting so native
+  // text selection still works (xterm.js convention).
+  useEffect(() => {
+    if (!isDesktop || isConfiguring) return;
+    const el = () => document.getElementById('tether-terminal');
+    let down = false;
+    let lastCol = 0;
+    let lastRow = 0;
+
+    const activeTerm = () => {
+      const term = cache.get(activeIdRef.current)?.term;
+      if (!term?.mouseOn || !mouseEnabledRef.current) return null;
+      return term;
+    };
+    const cellOf = (e: MouseEvent, term: { cols: number; rows: number }) => {
+      const node = el();
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return cellFromPoint(e.clientX, e.clientY, rect, term.cols || 80, term.rows || 24);
+    };
+    const modsOf = (e: MouseEvent) => (e.altKey ? 8 : 0) | (e.ctrlKey ? 16 : 0);
+
+    const onDown = (e: MouseEvent) => {
+      const node = el();
+      if (!node || !(e.target instanceof Node) || !node.contains(e.target)) return;
+      if (e.shiftKey) return; // native selection
+      const term = activeTerm();
+      if (!term) return;
+      const cell = cellOf(e, term);
+      if (!cell) return;
+      e.preventDefault();
+      down = true;
+      lastCol = cell.col;
+      lastRow = cell.row;
+      wsSend({
+        type: 'input',
+        text: pressSeq(cell.col, cell.row, term.mouseSgr, e.button, modsOf(e)),
+      });
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!down) return;
+      const term = activeTerm();
+      if (!term) return;
+      const cell = cellOf(e, term);
+      if (!cell || (cell.col === lastCol && cell.row === lastRow)) return;
+      lastCol = cell.col;
+      lastRow = cell.row;
+      const seq = motionSeq(cell.col, cell.row, term.mouseMode, term.mouseSgr, e.button, modsOf(e));
+      if (seq) wsSend({ type: 'input', text: seq });
+    };
+    const onUp = (e: MouseEvent) => {
+      if (!down) return;
+      down = false;
+      const term = activeTerm();
+      if (!term) return;
+      const cell = cellOf(e, term) ?? { col: lastCol, row: lastRow };
+      const seq = releaseSeq(cell.col, cell.row, term.mouseMode, term.mouseSgr, e.button, modsOf(e));
+      if (seq) wsSend({ type: 'input', text: seq });
+    };
+
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConfiguring]);
 
   // Desktop: check for a newer signed build once on launch. If one exists, open
   // the update modal; stay silent on "up to date" or an unreachable feed.
