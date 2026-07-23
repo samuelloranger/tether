@@ -2,6 +2,11 @@
 
 Newest first. Full notes on each [GitHub release](https://github.com/samuelloranger/tether/releases).
 
+## v1.16 — mouse click & drag
+
+- **Mouse reporting** — tap/click and drag now reach the PTY, so vim mouse mode, tmux pane clicks, and htop/mc work on phone and desktop. Mobile: tap = click, one-finger drag = drag-select, two-finger drag = wheel scroll. Desktop: real mouse, with **Shift** held to bypass reporting for native text selection.
+- **Mouse control toggle** (`⋯` menu) to disable forwarding on demand — falls back to native scroll/tap; the choice persists.
+
 ## v1.15 — auto-titles & git diff v2
 
 - **Session auto-titles** — tabs name themselves from OSC 0/2 title sequences, the shell's cwd, and the running command, so you can tell terminals apart at a glance.
