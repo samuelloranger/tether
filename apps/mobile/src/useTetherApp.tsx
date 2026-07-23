@@ -547,7 +547,15 @@ export function useTetherApp() {
         renderScheduled.current = false;
         const e = cache.get(activeIdRef.current);
         if (!e) return;
-        setScreen(e.term.getSnapshot());
+        const snap = e.term.getSnapshot();
+        setScreen(snap);
+        // Re-assert follow-tail every batch, not only when content height changes.
+        // Once scrollback caps (MAX_SCROLLBACK), the row count — and thus content
+        // height — stops growing, so onContentSizeChange goes silent and can no
+        // longer re-pin. Overshoot the offset; RN clamps it to the true bottom.
+        if (autoScroll.current) {
+          listRef.current?.scrollToOffset({ offset: snap.length * lineHeight, animated: false });
+        }
         if (e.term.mouseOn !== mouseOnRef.current) {
           mouseOnRef.current = e.term.mouseOn;
           setMouseOn(e.term.mouseOn);

@@ -62,3 +62,21 @@ test('mouse mode: tracks SGR encoding independently', () => {
   t.write('\x1b[?1006l');
   expect(t.mouseSgr).toBe(false);
 });
+
+test('scrollback caps: snapshot length stops growing (auto-scroll follow trigger)', () => {
+  const rows = 24;
+  const t = new TerminalEmulator(80, rows);
+  const feed = (n: number) => {
+    let s = '';
+    for (let i = 0; i < n; i++) s += `line\r\n`;
+    t.write(s);
+  };
+  feed(1500);
+  const len1 = t.getSnapshot().length;
+  feed(1000);
+  const len2 = t.getSnapshot().length;
+  // Once scrollback is capped, total rendered rows are constant — this is why a
+  // height-change-only follow-tail goes silent during long agent output.
+  expect(len1).toBe(len2);
+  expect(len1).toBe(1000 + rows); // MAX_SCROLLBACK + screen rows
+});
