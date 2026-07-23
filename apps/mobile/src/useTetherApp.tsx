@@ -413,6 +413,11 @@ export function useTetherApp() {
   // closure. Used to re-fit the PTY after a reconnect once layout settles.
   const dimsRef = useRef({ numCols, numRows });
   dimsRef.current = { numCols, numRows };
+  // Fresh row height for scheduleRender's follow-tail — the render callback may be
+  // a stale closure (installed at connect()), so reading a captured lineHeight
+  // would use the pre-font-change value and land the offset short of the bottom.
+  const lineHeightRef = useRef(lineHeight);
+  lineHeightRef.current = lineHeight;
 
   // Helper to get/create the cache entry for a given id, sized to the current grid.
   const entryFor = (id: string): SessionEntry =>
@@ -547,7 +552,18 @@ export function useTetherApp() {
         renderScheduled.current = false;
         const e = cache.get(activeIdRef.current);
         if (!e) return;
-        setScreen(e.term.getSnapshot());
+        const snap = e.term.getSnapshot();
+        setScreen(snap);
+        // Re-assert follow-tail every batch, not only when content height changes.
+        // Once scrollback caps (MAX_SCROLLBACK), the row count — and thus content
+        // height — stops growing, so onContentSizeChange goes silent and can no
+        // longer re-pin. Overshoot the offset; RN clamps it to the true bottom.
+        if (autoScroll.current) {
+          listRef.current?.scrollToOffset({
+            offset: snap.length * lineHeightRef.current,
+            animated: false,
+          });
+        }
         if (e.term.mouseOn !== mouseOnRef.current) {
           mouseOnRef.current = e.term.mouseOn;
           setMouseOn(e.term.mouseOn);
