@@ -48,6 +48,13 @@ test('notify still attempts to send even when the permission verdict is not gran
   expect(sendNotification).toHaveBeenCalledWith({ title: 'title', body: 'body' });
 });
 
+test('notify sends even when requestPermission never resolves (hung Linux portal)', async () => {
+  isPermissionGranted.mockImplementation(() => Promise.resolve(false));
+  requestPermission.mockImplementation(() => new Promise(() => {})); // never resolves
+  await notify('title', 'body');
+  expect(sendNotification).toHaveBeenCalledWith({ title: 'title', body: 'body' });
+});
+
 test('notify swallows a missing/failing plugin without throwing', async () => {
   isPermissionGranted.mockImplementation(() => Promise.resolve(true));
   await ensureNotificationPermission();

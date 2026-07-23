@@ -27,22 +27,26 @@ export async function ensureNotificationPermission(): Promise<void> {
 export async function notify(title: string, body: string): Promise<void> {
   try {
     const mod = await loadPlugin();
-    // Best-effort acquire if we don't already hold a grant. Crucially we do NOT
-    // hard-gate the send on the verdict: Linux (libnotify/D-Bus, e.g. Fedora/
-    // GNOME) has no real permission model, and a false/unresolved verdict there
-    // must not silently swallow every notification. sendNotification is a no-op
-    // on platforms that genuinely deny, so attempting is safe everywhere.
-    if (permissionGranted !== true) {
-      try {
-        permissionGranted = await mod.isPermissionGranted();
-        if (!permissionGranted) {
-          permissionGranted = (await mod.requestPermission()) === 'granted';
-        }
-      } catch {
-        // ignore — fall through and still attempt the send
-      }
-    }
+    // Send FIRST, unconditionally. We must NOT await a permission request
+    // before sending: on a Linux desktop portal requestPermission() can stay
+    // pending indefinitely (no prompt is ever shown), which would drop the
+    // very notification this path exists to deliver. sendNotification is a
+    // no-op where a platform genuinely denies, so sending first is safe.
     mod.sendNotification({ title, body });
+    // Refresh the grant out-of-band (fire-and-forget) for platforms that do
+    // gate — never blocking, so a hung request can't stall future sends.
+    if (permissionGranted !== true) {
+      void (async () => {
+        try {
+          permissionGranted = await mod.isPermissionGranted();
+          if (!permissionGranted) {
+            permissionGranted = (await mod.requestPermission()) === 'granted';
+          }
+        } catch {
+          // ignore — sends don't depend on this
+        }
+      })();
+    }
   } catch {
     // Plugin missing or the send threw (e.g. D-Bus unavailable) — nothing more
     // we can do; never let a notification failure crash the caller.
