@@ -29,3 +29,36 @@ test('unterminated CSI params do not grow without bound', () => {
   t.write('world');
   expect(screenText(t)).toContain('world');
 });
+
+test('mouse mode: maps each DECSET mode to the right mouseMode', () => {
+  let t = new TerminalEmulator(80, 24);
+  t.write('\x1b[?9h');
+  expect(t.mouseMode).toBe('x10');
+  t = new TerminalEmulator(80, 24);
+  t.write('\x1b[?1000h');
+  expect(t.mouseMode).toBe('normal');
+  t = new TerminalEmulator(80, 24);
+  t.write('\x1b[?1002h');
+  expect(t.mouseMode).toBe('button');
+  t = new TerminalEmulator(80, 24);
+  t.write('\x1b[?1003h');
+  expect(t.mouseMode).toBe('any');
+});
+
+test('mouse mode: mouseOn getter tracks mouseMode', () => {
+  const t = new TerminalEmulator(80, 24);
+  expect(t.mouseOn).toBe(false);
+  t.write('\x1b[?1000h');
+  expect(t.mouseOn).toBe(true);
+  t.write('\x1b[?1000l');
+  expect(t.mouseMode).toBe('off');
+  expect(t.mouseOn).toBe(false);
+});
+
+test('mouse mode: tracks SGR encoding independently', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b[?1006h');
+  expect(t.mouseSgr).toBe(true);
+  t.write('\x1b[?1006l');
+  expect(t.mouseSgr).toBe(false);
+});

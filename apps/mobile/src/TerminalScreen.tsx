@@ -211,6 +211,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     entryFor,
     wsSend,
     panResponder,
+    setTermRect,
+    onTerminalTap,
     scheduleRender,
     resetTerminal,
     applyWsMessage,
@@ -220,6 +222,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     newTerminal,
     killActiveOr,
     changeFontSize,
+    mouseEnabled,
+    toggleMouseEnabled,
     persistSnippets,
     addSnippet,
     removeSnippet,
@@ -267,6 +271,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   // bellCount advances, so a background/completed job is noticeable without
   // watching the screen.
   const prevBellCount = useRef(0);
+  const lastTapRef = useRef(0); // ms of last terminal tap, for double-tap-to-focus
   const [bellFlash, setBellFlash] = useState(false);
   useEffect(() => {
     if (activeBellCount > prevBellCount.current) {
@@ -550,7 +555,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               <View style={styles.terminalArea}>
               <View
                 style={styles.terminalScroll}
-                onLayout={(e) => setTermHeight(e.nativeEvent.layout.height)}
+                onLayout={(e) => {
+                  setTermHeight(e.nativeEvent.layout.height);
+                  e.currentTarget.measureInWindow((x, y, w, h) =>
+                    setTermRect({ left: x, top: y, width: w, height: h }),
+                  );
+                }}
                 {...panResponder.panHandlers}
               >
                 {isDesktop ? (
@@ -583,10 +593,23 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     onPressIn={() => {
                       scrolledRef.current = false;
                     }}
-                    onPress={() => {
-                      // Only a genuine tap focuses the input; a scroll-release must not
-                      // pop the keyboard.
-                      if (!scrolledRef.current) inputRef.current?.focus();
+                    onPress={(e) => {
+                      // A scroll-release must not pop the keyboard.
+                      if (scrolledRef.current) return;
+                      // A double-tap always refocuses the keyboard — the only way back
+                      // to typing while a TUI has mouse reporting on (single tap = click).
+                      const now = Date.now();
+                      const isDouble = now - lastTapRef.current < 300;
+                      lastTapRef.current = now;
+                      if (isDouble) {
+                        inputRef.current?.focus();
+                        return;
+                      }
+                      // When mouse reporting is active, a single tap is a click at that
+                      // cell; otherwise it focuses the keyboard as before.
+                      if (!onTerminalTap(e.nativeEvent.pageX, e.nativeEvent.pageY)) {
+                        inputRef.current?.focus();
+                      }
                     }}
                     onLongPress={openSelectionView}
                   >
@@ -662,6 +685,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               }}
               fontSize={fontSize}
               onFontDelta={changeFontSize}
+              mouseEnabled={mouseEnabled}
+              onToggleMouse={toggleMouseEnabled}
               onSearch={openSearch}
               onJumpPromptUp={() => jumpPrompt(-1)}
               onJumpPromptDown={() => jumpPrompt(1)}
