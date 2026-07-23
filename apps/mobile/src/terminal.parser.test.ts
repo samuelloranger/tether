@@ -80,3 +80,59 @@ test('scrollback caps: snapshot length stops growing (auto-scroll follow trigger
   expect(len1).toBe(len2);
   expect(len1).toBe(1000 + rows); // MAX_SCROLLBACK + screen rows
 });
+
+test('OSC 9 (iTerm2) notification: increments notifyCount, sets body', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]9;Claude needs your input\x07');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify).toEqual({ title: '', body: 'Claude needs your input' });
+});
+
+test('OSC 9 with ST terminator also fires', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]9;hello\x1b\\');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify.body).toBe('hello');
+});
+
+test('OSC 777;notify (rxvt/ghostty): title and body', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]777;notify;Claude;needs your input\x1b\\');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify).toEqual({ title: 'Claude', body: 'needs your input' });
+});
+
+test('OSC 777;notify with only a title (no body)', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]777;notify;Build finished\x1b\\');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify).toEqual({ title: 'Build finished', body: '' });
+});
+
+test('OSC 777 non-notify subcommand is ignored', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]777;precmd\x1b\\');
+  expect(t.notifyCount).toBe(0);
+});
+
+test('OSC 99 (kitty): payload after metadata is the message', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]99;i=1:d=0;Claude needs your input\x1b\\');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify.body).toBe('Claude needs your input');
+});
+
+test('OSC 99 with empty metadata still fires', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]99;;just a body\x1b\\');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify.body).toBe('just a body');
+});
+
+test('reset() clears notification state', () => {
+  const t = new TerminalEmulator(80, 24);
+  t.write('\x1b]9;x\x07');
+  t.reset();
+  expect(t.notifyCount).toBe(0);
+  expect(t.lastNotify).toEqual({ title: '', body: '' });
+});

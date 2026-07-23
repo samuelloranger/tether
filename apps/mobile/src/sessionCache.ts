@@ -6,11 +6,18 @@ export interface SessionEntry {
   sinceId: number;
   lastAppliedId: number;
   diffSummary: DiffSummary;
+  // Last emulator bell/notify counts we already turned into an OS
+  // notification, so a desktop notification fires once per new bell / OSC
+  // notify edge (not on every output frame). Tracked per session because
+  // every cache-resident tab streams live, not just the active one.
+  lastBellCount: number;
+  lastNotifyCount: number;
 }
 
-// LRU cache of terminal emulators. Only the active session has a live WS; cached
-// background emulators are frozen. The active session is always most-recently
-// touched, so it is never the eviction victim (cap >= 1).
+// LRU cache of terminal emulators. Every cache-resident session keeps its own
+// live WS and streams in the background; only input/clipboard are gated to the
+// active tab. The active session is always most-recently touched, so it is
+// never the eviction victim (cap >= 1).
 export class SessionCache {
   private map = new Map<string, SessionEntry>();
   private order: string[] = []; // most-recent first

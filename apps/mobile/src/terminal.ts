@@ -262,6 +262,15 @@ export class TerminalEmulator {
   // by the desktop app to notify when a long-running command completes.
   promptReturnCount = 0;
 
+  // Monotonically increasing counter, incremented once per explicit desktop
+  // notification escape: OSC 9 (iTerm2), OSC 99 (kitty), OSC 777;notify
+  // (rxvt/ghostty). These are what Claude Code / long-running tools emit to
+  // ask the terminal to raise an OS notification — the desktop app mirrors a
+  // real terminal (Ghostty et al.) by surfacing them. `lastNotify` holds the
+  // message from the most recent one.
+  notifyCount = 0;
+  lastNotify: { title: string; body: string } = { title: '', body: '' };
+
   // Set by OSC 0 ("icon name + title") or OSC 2 ("title"). Empty until the
   // remote shell/app sends one.
   title = '';
@@ -314,6 +323,8 @@ export class TerminalEmulator {
     this.applicationCursor = false;
     this.bellCount = 0;
     this.promptReturnCount = 0;
+    this.notifyCount = 0;
+    this.lastNotify = { title: '', body: '' };
     this.title = '';
     this.cwd = '';
     this.promptRows = new WeakSet();
@@ -794,6 +805,20 @@ export class TerminalEmulator {
     const pt = sep === -1 ? '' : buf.slice(sep + 1);
     if (ps === '0' || ps === '2') {
       this.title = pt;
+    } else if (ps === '9') {
+      // iTerm2 growl notification: the whole payload is the message body.
+      this.raiseNotify('', pt);
+    } else if (ps === '99') {
+      // kitty notification: "<metadata>;<payload>" — metadata is a
+      // colon-separated key=val list (i=id, d=done, …) we don't need; the
+      // payload after the first ';' is the human-readable message.
+      const bodySep = pt.indexOf(';');
+      if (bodySep !== -1) this.raiseNotify('', pt.slice(bodySep + 1));
+    } else if (ps === '777') {
+      // rxvt/ghostty: "notify;<title>;<body>" (body optional). Other 777
+      // subcommands (precmd, …) are ignored.
+      const parts = pt.split(';');
+      if (parts[0] === 'notify') this.raiseNotify(parts[1] ?? '', parts[2] ?? '');
     } else if (ps === '7') {
       const m = /^file:\/\/[^/]*(\/.*)$/.exec(pt);
       if (m) {
@@ -839,6 +864,11 @@ export class TerminalEmulator {
         // Malformed base64 — drop silently, same as other malformed OSC payloads.
       }
     }
+  }
+
+  private raiseNotify(title: string, body: string) {
+    this.lastNotify = { title, body };
+    this.notifyCount++;
   }
 
   // --- Grid operations ---
