@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.16.1",
+          "date": "2026-07-23",
+          "localizedDescription": "## What's Changed\n* fix(desktop): surface agent notifications + stop refocus reconnect by @samuelloranger in https://github.com/samuelloranger/tether/pull/55\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.10...v1.16.1",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.16.1/tether.ipa",
+          "size": 8662175,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.15.10",
           "date": "2026-07-22",
           "localizedDescription": "**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.9...v1.15.10",
