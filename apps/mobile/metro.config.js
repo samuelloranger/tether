@@ -9,4 +9,16 @@ const config = getDefaultConfig(__dirname);
 // build output anyway.
 config.resolver.blockList = [/apps\/mobile\/src-tauri\/target\/.*/];
 
+// @xterm/headless ships a broken `module` field (`lib/xterm.mjs` — no such dir;
+// the package only has `lib-headless/`). Metro-web prefers `module` and fails to
+// bundle. Pin the import to the package's real `main` entry on every platform.
+const xtermHeadlessMain = require.resolve('@xterm/headless', { paths: [__dirname] });
+const defaultResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === '@xterm/headless') {
+    return { type: 'sourceFile', filePath: xtermHeadlessMain };
+  }
+  return (defaultResolveRequest ?? context.resolveRequest)(context, moduleName, platform);
+};
+
 module.exports = config;

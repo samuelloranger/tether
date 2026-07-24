@@ -32,6 +32,10 @@ jobs:
         run: bun test
         working-directory: apps/mobile
 
+      - name: Web bundle (desktop build uses this — catches web-only module resolution)
+        run: bun run build:web
+        working-directory: apps/mobile
+
       - name: Expo dependency compatibility
         # Advisory only: we intentionally pin expo to 57.0.7 (see root overrides
         # forcing expo-modules-core@57.0.6 → jsi@57.0.3, the version our iOS Swift
