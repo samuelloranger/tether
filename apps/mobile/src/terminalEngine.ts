@@ -156,7 +156,10 @@ export class TerminalEngine {
     // input separately, so onData here carries only auto-replies.
     this.term.onData((d) => this.onReply?.(d));
     this.term.onLineFeed(() => {
-      this.fed++;
+      // Only normal-buffer feeds grow scrollback. The alt screen (vim/less) has
+      // a fixed viewport, so counting its feeds would inflate the trim math and
+      // wrongly prune promptIds/OSC 8 spans after the app exits full-screen.
+      if (this.term.buffer.active.type === 'normal') this.fed++;
     });
     // OSC 133;A marks a prompt start; ;D reports command-return. Record the
     // prompt at the cursor's current monotonic logical id.
@@ -323,9 +326,11 @@ export class TerminalEngine {
     }
   }
 
-  // Number of logical lines trimmed off the top of scrollback so far.
+  // Number of logical lines trimmed off the top of scrollback so far. Always
+  // measured against the NORMAL buffer length so it stays stable while the alt
+  // screen is active (the alt buffer has no scrollback and a fixed length).
   private trimmedCount(): number {
-    return Math.max(0, this.fed + 1 - this.term.buffer.active.length);
+    return Math.max(0, this.fed + 1 - this.term.buffer.normal.length);
   }
 
   // Stable, monotonically-increasing id of the row the cursor sits on.
@@ -423,6 +428,7 @@ export class TerminalEngine {
     this.promptIds.clear();
     this.osc8Spans.clear();
     this.osc8Open = null;
+    this.kittyNotif.clear(); // drop any half-assembled kitty OSC 99 chunk
   }
 
   getSnapshot(): RenderRow[] {
