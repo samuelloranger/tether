@@ -1,12 +1,29 @@
 import './xtermPolyfill';
 import { type IBufferCell, type IBufferLine, Terminal } from '@xterm/headless';
 import { computeLinkSpans, type LinkSpan } from './links';
-import { base64ToUtf8, type CellStyle, PALETTE, type RenderRow } from './terminal';
+import {
+  base64ToUtf8,
+  type CellStyle,
+  DEFAULT_BG,
+  DEFAULT_FG,
+  PALETTE,
+  type RenderRow,
+} from './terminal';
 
 const MAX_SCROLLBACK = 1000;
 
 function hex6(n: number): string {
   return `#${(n & 0xffffff).toString(16).padStart(6, '0')}`;
+}
+
+// xterm OSC 10/11 reply color format: each "#rrggbb" hex byte doubled, e.g.
+// "#1e1e2e" -> "rgb:1e1e/1e1e/2e2e".
+function hexToOscColor(hex: string): string {
+  const h = hex.replace('#', '');
+  const r = h.slice(0, 2);
+  const g = h.slice(2, 4);
+  const b = h.slice(4, 6);
+  return `rgb:${r}${r}/${g}${g}/${b}${b}`;
 }
 
 function fgOf(cell: IBufferCell): string | undefined {
@@ -21,6 +38,17 @@ function bgOf(cell: IBufferCell): string | undefined {
   if (cell.isBgRGB()) return hex6(cell.getBgColor());
   if (cell.isBgPalette()) return PALETTE[cell.getBgColor()] ?? undefined;
   return undefined;
+}
+
+// Exclusive column after the last non-blank cell on a line (for clamping an
+// OSC 8 span that closed on a later row).
+function lastContentCol(line: IBufferLine): number {
+  let last = 0;
+  for (let x = 0; x < line.length; x++) {
+    const c = line.getCell(x);
+    if (c && (c.getChars() || '').trim() !== '') last = x + c.getWidth();
+  }
+  return last;
 }
 
 function styleOf(cell: IBufferCell, caret: boolean): CellStyle {
@@ -100,6 +128,7 @@ export class TerminalEngine {
   cursorStyle: 'block' | 'bar' | 'underline' = 'block';
   mouseMode: 'off' | 'x10' | 'normal' | 'button' | 'any' = 'off';
   mouseSgr = false;
+  cursorVisible = true; // DECTCEM (CSI ?25 h/l)
   onReply: ((data: string) => void) | null = null;
   onClipboardWrite: ((text: string) => void) | null = null;
 
@@ -151,10 +180,12 @@ export class TerminalEngine {
     // via non-consuming DECSET/DECRST handlers.
     this.term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
       if (params.includes(1006)) this.mouseSgr = true;
+      if (params.includes(25)) this.cursorVisible = true; // DECTCEM show
       return false;
     });
     this.term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
       if (params.includes(1006)) this.mouseSgr = false;
+      if (params.includes(25)) this.cursorVisible = false; // DECTCEM hide
       return false;
     });
     // DECSCUSR (CSI Ps SP q) — cursor shape.
@@ -198,6 +229,16 @@ export class TerminalEngine {
     // OSC 99 — kitty notification protocol (chunked).
     this.term.parser.registerOscHandler(99, (data) => {
       this.dispatchKittyNotify(data);
+      return true;
+    });
+    // OSC 10/11 — fg/bg color query. Reply with the app theme's default (setting
+    // the color is intentionally unsupported — themes are fixed). Matches legacy.
+    this.term.parser.registerOscHandler(10, (data) => {
+      if (data === '?') this.onReply?.(`\x1b]10;${hexToOscColor(DEFAULT_FG)}\x1b\\`);
+      return true;
+    });
+    this.term.parser.registerOscHandler(11, (data) => {
+      if (data === '?') this.onReply?.(`\x1b]11;${hexToOscColor(DEFAULT_BG)}\x1b\\`);
       return true;
     });
     // OSC 52 — clipboard write ("<selectors>;<base64|empty>"); query ('?') ignored.
@@ -289,10 +330,19 @@ export class TerminalEngine {
     const o = this.osc8Open;
     if (!o) return;
     this.osc8Open = null;
+    const buf = this.term.buffer.active;
     const endId = this.cursorLogicalId();
-    const endCol = this.term.buffer.active.cursorX;
-    // Multi-row links clamp to the start row's end (hit-test simplicity).
-    const end = endId === o.startId ? endCol : this.term.cols;
+    let end: number;
+    if (endId === o.startId) {
+      end = buf.cursorX; // link opened + closed on the same row
+    } else {
+      // Link text ran onto later rows (soft-wrap or newline). We only tag the
+      // start row (headless has no per-cell URL to tag continuations); clamp to
+      // that row's actual content end so trailing blank cells aren't tagged.
+      const startY = o.startId - this.trimmedCount();
+      const line = startY >= 0 && startY < buf.length ? buf.getLine(startY) : null;
+      end = line ? lastContentCol(line) : this.term.cols;
+    }
     if (end <= o.startCol) return;
     const list = this.osc8Spans.get(o.startId) ?? [];
     list.push({ start: o.startCol, end, target: { kind: 'external', url: o.url } });
@@ -306,8 +356,14 @@ export class TerminalEngine {
     return this.term.rows;
   }
 
-  write(data: string): void {
-    this.term.write(data, () => this.syncModes());
+  // `onFlush` runs after xterm drains this write — by then OSC/BEL handlers have
+  // bumped bellCount/notifyCount, so the ws handler can check notifications there
+  // (a synchronous read right after write() sees stale counters — xterm is async).
+  write(data: string, onFlush?: () => void): void {
+    this.term.write(data, () => {
+      this.syncModes();
+      onFlush?.();
+    });
   }
 
   // Test/detail helper: resolve once xterm has flushed its write queue.
@@ -333,6 +389,7 @@ export class TerminalEngine {
     this.cursorStyle = 'block';
     this.mouseMode = 'off';
     this.mouseSgr = false;
+    this.cursorVisible = true;
     this.prevRows = [];
     this.fed = 0;
     this.promptIds.clear();
@@ -366,7 +423,7 @@ export class TerminalEngine {
         texts[y] = '';
         continue;
       }
-      const caretCol = y === cursorAbs ? buf.cursorX : -1;
+      const caretCol = this.cursorVisible && y === cursorAbs ? buf.cursorX : -1;
       rowRuns[y] = this.runsFor(line, caretCol);
       wrappedFlags[y] = line.isWrapped;
       texts[y] = rowRuns[y].map((r) => r.text).join('');
