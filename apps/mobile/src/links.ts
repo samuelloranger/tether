@@ -55,24 +55,59 @@ export function parseFileTarget(token: string): Extract<LinkTarget, { kind: 'fil
   };
 }
 
+// TUIs that lay out their own text (Claude Code, gh, …) hard-wrap: they emit an
+// explicit newline plus an indent instead of letting the grid autowrap, so
+// `isWrapped` is false and a URL cut at their right margin looks like two
+// unrelated rows. Their margin is their own box width, not the grid width, so we
+// can't test "row is full" — instead require two signals: the row ENDS with a
+// real URL (nothing after it, so a cut is plausible), and the next row's first
+// token carries URL structure (`/ ? # & = `) rather than reading as prose. That
+// rejects the common false glue (`…/v2.0.2` followed by `Release builds …`).
+// Returns the leading indent columns to skip on `next`, or -1 when they don't join.
+const URL_AT_EOL_RE = /(?:^|\s)https?:\/\/\S{8,}$/;
+const URL_CONT_RE = /^[A-Za-z0-9\-._~%+:@]*[/?#&=][^\s]*/;
+
+function hardWrapSkip(row: string, next: string): number {
+  if (!URL_AT_EOL_RE.test(row)) return -1;
+  const body = next.trimStart();
+  if (!body || !URL_CONT_RE.test(body)) return -1;
+  return next.length - body.length;
+}
+
 // `texts[i]` is row i's plain text; `wrapped[i]` is true when row i soft-wraps
 // into row i+1. Returns one LinkSpan[] per row (empty when the row has no link).
 export function computeLinkSpans(texts: string[], wrapped: boolean[]): LinkSpan[][] {
   const out: LinkSpan[][] = texts.map(() => []);
   let i = 0;
   while (i < texts.length) {
-    // Extend the group across every soft-wrap boundary.
+    // Extend the group across every wrap boundary — soft (grid autowrap) or hard
+    // (TUI-emitted newline + indent). `skips[k - i]` is how many leading indent
+    // columns of row k were dropped when joining.
     let j = i;
-    while (wrapped[j] && j + 1 < texts.length) j++;
+    const skips: number[] = [0];
+    while (j + 1 < texts.length) {
+      if (wrapped[j]) {
+        skips.push(0);
+        j++;
+        continue;
+      }
+      const skip = hardWrapSkip(texts[j], texts[j + 1]);
+      if (skip < 0) break;
+      skips.push(skip);
+      j++;
+    }
 
     // Cumulative start offset of each row within the joined logical line.
-    const joined = texts.slice(i, j + 1).join('');
+    const parts: string[] = [];
     const offs: number[] = [];
     let acc = 0;
     for (let k = i; k <= j; k++) {
+      const part = texts[k].slice(skips[k - i]);
+      parts.push(part);
       offs.push(acc);
-      acc += texts[k].length;
+      acc += part.length;
     }
+    const joined = parts.join('');
 
     URL_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
@@ -84,11 +119,12 @@ export function computeLinkSpans(texts: string[], wrapped: boolean[]): LinkSpan[
       const e = s + url.length;
       const target: LinkTarget = { kind: 'external', url };
       for (let k = i; k <= j; k++) {
+        const skip = skips[k - i];
         const rowStart = offs[k - i];
-        const rowEnd = rowStart + texts[k].length;
+        const rowEnd = rowStart + parts[k - i].length;
         const a = Math.max(s, rowStart);
         const b = Math.min(e, rowEnd);
-        if (a < b) out[k].push({ start: a - rowStart, end: b - rowStart, target });
+        if (a < b) out[k].push({ start: a - rowStart + skip, end: b - rowStart + skip, target });
       }
     }
     FILE_RE.lastIndex = 0;
@@ -99,11 +135,12 @@ export function computeLinkSpans(texts: string[], wrapped: boolean[]): LinkSpan[
       const s = m.index + m[0].indexOf(raw);
       const e = s + raw.length;
       for (let k = i; k <= j; k++) {
+        const skip = skips[k - i];
         const rowStart = offs[k - i];
-        const rowEnd = rowStart + texts[k].length;
+        const rowEnd = rowStart + parts[k - i].length;
         const a = Math.max(s, rowStart);
         const b = Math.min(e, rowEnd);
-        if (a < b) out[k].push({ start: a - rowStart, end: b - rowStart, target });
+        if (a < b) out[k].push({ start: a - rowStart + skip, end: b - rowStart + skip, target });
       }
     }
 

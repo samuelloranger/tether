@@ -49,3 +49,28 @@ test('soft-wrapped file links carry the whole typed target', () => {
   expect(spans[0][0].target).toEqual({ kind: 'file', path });
   expect(spans[1][0].target).toEqual({ kind: 'file', path });
 });
+
+test('hard-wrapped url (TUI newline + indent) is stitched into one target', () => {
+  // Real Claude Code output: "…/teth" then "\e[3G" indent then "er/releases/tag/v2.0.2".
+  const url = 'https://github.com/samuelloranger/tether/releases/tag/v2.0.2';
+  const spans = computeLinkSpans(
+    ['  v2.0.2 released — https://github.com/samuelloranger/teth', '  er/releases/tag/v2.0.2'],
+    [false, false],
+  );
+  expect(spans[0][0].target).toEqual({ kind: 'external', url });
+  expect(spans[1][0].target).toEqual({ kind: 'external', url });
+  expect(spans[1][0].start).toBe(2); // indent excluded from the tappable span
+  expect(spans[1][0].end).toBe(24);
+});
+
+test('prose after a complete url is not glued onto it', () => {
+  const spans = computeLinkSpans(
+    ['  v2.0.2 — https://github.com/x/releases/tag/v2.0.2', '  Release builds + CI in flight.'],
+    [false, false],
+  );
+  expect(spans[0][0].target).toEqual({
+    kind: 'external',
+    url: 'https://github.com/x/releases/tag/v2.0.2',
+  });
+  expect(spans[1].length).toBe(0);
+});
