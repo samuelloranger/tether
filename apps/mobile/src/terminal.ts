@@ -96,7 +96,7 @@ function hexToOscColor(hex: string): string {
 // contain multi-byte UTF-8) needs the decodeURIComponent trick below rather
 // than TextDecoder, whose Hermes support is less consistently available
 // across RN versions than atob/decodeURIComponent.
-function base64ToUtf8(b64: string): string {
+export function base64ToUtf8(b64: string): string {
   const latin1 = atob(b64);
   const percentEncoded = latin1
     .split('')

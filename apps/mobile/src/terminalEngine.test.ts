@@ -120,3 +120,50 @@ test('DECSCUSR cursor style bar (6) then block (2)', async () => {
   await write(t, '\x1b[2 q');
   expect(t.cursorStyle).toBe('block');
 });
+
+test('OSC 2 sets title, OSC 7 sets cwd', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b]2;My Title\x07');
+  expect(t.title).toBe('My Title');
+  await write(t, '\x1b]7;file://host/home/sam\x07');
+  expect(t.cwd).toBe('/home/sam');
+});
+
+test('bell increments bellCount', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x07');
+  expect(t.bellCount).toBe(1);
+});
+
+test('OSC 777 notify sets lastNotify + count', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b]777;notify;Build done;All green\x07');
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify).toEqual({ title: 'Build done', body: 'All green' });
+});
+
+test('OSC 99 kitty notify (chunked: d=0 waits for final)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b]99;i=1:d=0:p=title;Hello\x07'); // incomplete — buffer only
+  expect(t.notifyCount).toBe(0);
+  await write(t, '\x1b]99;i=1:p=body;World\x07'); // done — fires once
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify).toEqual({ title: 'Hello', body: 'World' });
+});
+
+test('OSC 52 fires onClipboardWrite with decoded text', async () => {
+  const t = new TerminalEngine(20, 4);
+  let got = '';
+  t.onClipboardWrite = (s) => {
+    got = s;
+  };
+  const b64 = Buffer.from('copied').toString('base64');
+  await write(t, `\x1b]52;c;${b64}\x07`);
+  expect(got).toBe('copied');
+});
+
+test('promptReturnCount increments once per OSC 133;A', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b]133;A\x07cmd\r\n\x1b]133;A\x07');
+  expect(t.promptReturnCount).toBe(2);
+});

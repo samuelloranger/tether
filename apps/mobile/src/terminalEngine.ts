@@ -1,7 +1,7 @@
 import './xtermPolyfill';
 import { type IBufferCell, type IBufferLine, Terminal } from '@xterm/headless';
 import { computeLinkSpans, type LinkSpan } from './links';
-import { type CellStyle, PALETTE, type RenderRow } from './terminal';
+import { base64ToUtf8, type CellStyle, PALETTE, type RenderRow } from './terminal';
 
 const MAX_SCROLLBACK = 1000;
 
@@ -121,8 +121,12 @@ export class TerminalEngine {
     // OSC 133;A marks a prompt start; ;D reports command-return. Record the
     // prompt at the cursor's current monotonic logical id.
     this.term.parser.registerOscHandler(133, (data) => {
-      if (data.startsWith('A')) this.promptIds.add(this.cursorLogicalId());
-      else if (data.startsWith('D')) this.promptReturnCount++;
+      // ;A = new prompt start (previous command finished) — mark the row and
+      // bump the return counter (matches the legacy emulator's semantics).
+      if (data.startsWith('A')) {
+        this.promptIds.add(this.cursorLogicalId());
+        this.promptReturnCount++;
+      }
       return false; // let xterm run its own OSC 133 handling too
     });
     // SGR mouse encoding (DECSET 1006) is not exposed on term.modes — observe it
@@ -141,6 +145,92 @@ export class TerminalEngine {
       this.cursorStyle = p === 5 || p === 6 ? 'bar' : p === 3 || p === 4 ? 'underline' : 'block';
       return false;
     });
+
+    // Title (OSC 0/2) and bell come through xterm's own events.
+    this.term.onTitleChange((t2) => {
+      this.title = t2;
+    });
+    this.term.onBell(() => {
+      this.bellCount++;
+    });
+
+    // OSC 7 — cwd report (file://host/path).
+    this.term.parser.registerOscHandler(7, (data) => {
+      const m = /^file:\/\/[^/]*(\/.*)$/.exec(data);
+      if (m) {
+        try {
+          this.cwd = decodeURIComponent(m[1]);
+        } catch {
+          this.cwd = m[1];
+        }
+      }
+      return true;
+    });
+    // OSC 9 — iTerm2 growl: whole payload is the body.
+    this.term.parser.registerOscHandler(9, (data) => {
+      this.raiseNotify('', data);
+      return true;
+    });
+    // OSC 777 — rxvt/ghostty "notify;<title>;<body>".
+    this.term.parser.registerOscHandler(777, (data) => {
+      const parts = data.split(';');
+      if (parts[0] === 'notify') this.raiseNotify(parts[1] ?? '', parts[2] ?? '');
+      return true;
+    });
+    // OSC 99 — kitty notification protocol (chunked).
+    this.term.parser.registerOscHandler(99, (data) => {
+      this.dispatchKittyNotify(data);
+      return true;
+    });
+    // OSC 52 — clipboard write ("<selectors>;<base64|empty>"); query ('?') ignored.
+    this.term.parser.registerOscHandler(52, (data) => {
+      const sep = data.indexOf(';');
+      if (sep === -1) return true;
+      const payload = data.slice(sep + 1);
+      if (payload === '?') return true;
+      try {
+        this.onClipboardWrite?.(base64ToUtf8(payload));
+      } catch {
+        // malformed base64 — drop silently
+      }
+      return true;
+    });
+  }
+
+  private raiseNotify(title: string, body: string): void {
+    this.lastNotify = { title, body };
+    this.notifyCount++;
+  }
+
+  // kitty OSC 99: "<metadata>;<payload>" — colon-separated key=val metadata
+  // (i=id, d=0 more chunks follow, p=title|body, e=1 base64). Ported verbatim
+  // from the legacy emulator.
+  private kittyNotif = new Map<string, { title: string; body: string }>();
+  private dispatchKittyNotify(pt: string): void {
+    const bodySep = pt.indexOf(';');
+    if (bodySep === -1) return;
+    const meta = new Map<string, string>();
+    for (const kv of pt.slice(0, bodySep).split(':')) {
+      const eq = kv.indexOf('=');
+      if (eq !== -1) meta.set(kv.slice(0, eq), kv.slice(eq + 1));
+    }
+    let payload = pt.slice(bodySep + 1);
+    if (meta.get('e') === '1') {
+      try {
+        payload = base64ToUtf8(payload);
+      } catch {
+        return;
+      }
+    }
+    const id = meta.get('i') ?? '';
+    const ptype = meta.get('p') ?? 'title';
+    const buf = this.kittyNotif.get(id) ?? { title: '', body: '' };
+    if (ptype === 'title') buf.title += payload;
+    else if (ptype === 'body') buf.body += payload;
+    this.kittyNotif.set(id, buf);
+    if (meta.get('d') === '0') return;
+    this.kittyNotif.delete(id);
+    if (buf.title || buf.body) this.raiseNotify(buf.title, buf.body);
   }
 
   private syncModes(): void {
