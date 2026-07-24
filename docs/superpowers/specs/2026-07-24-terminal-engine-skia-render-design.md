@@ -21,7 +21,9 @@ Real terminals (and xterm.js's own renderers) don't flow text — they **paint a
 - **Perf** on heavy output / fast scroll (GPU-composited).
 - **Keep one parser core** and the exact feature set (links, selection, prompt-jump, cursor, themes, mouse).
 
-Non-goals: changing the parser (Part 1); redesigning desktop/web render (see Platform split).
+- **Links must work** (explicit user requirement). Both regex-detected URLs *and* OSC 8 explicit hyperlinks must be tappable in the Skia renderer. OSC 8 was dropped in Part 1 (headless has no per-cell URL getter) — Part 2 restores it: the engine tracks OSC 8 open/close during writes and emits the resulting column ranges into each row's `links` (as an `external` target), so the canvas hit-test treats regex and OSC 8 links identically.
+
+Non-goals: changing the parser core (Part 1); redesigning desktop/web render (see Platform split).
 
 ## Decisions
 
@@ -47,6 +49,7 @@ Same discipline as Part 1. `@shopify/react-native-skia` is native (JSI + a large
 1. **Builds & links** on this Expo 57 / RN 0.86 project (Android gradle + iOS `expo run:ios`) without disturbing the pinned jsi patch.
 2. A trivial `<Canvas>` drawing a rect + a `Text`/`Glyphs` node with a loaded monospace font renders on device.
 3. `matchFont`/`useFont` can load a monospace TTF and report a stable per-glyph advance (so `cellW` is exact).
+4. **OSC 8 read-back**: confirm the adapter can reconstruct OSC 8 hyperlink column ranges by tracking the OSC 8 open/close handler against the cursor position during writes (headless exposes no per-cell URL, so this is the only path). If it proves unreliable, OSC 8 links degrade to non-tappable (regex links still work) — but this must be decided by evidence, not assumed.
 
 If Skia won't build on the pinned toolchain, fall back: harden the `<Text>` renderer (measure real advance, clamp wide chars) — a smaller reliability gain, no native dep.
 
