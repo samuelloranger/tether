@@ -123,6 +123,37 @@ test('OSC 8 link closed after newline is clamped to text, not trailing blanks (#
   expect(links[0].end).toBe(5); // "CLICK", not clamped to cols=40
 });
 
+test('SGR 7 reverse video swaps fg/bg into resolved colors (#B)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, `${E}[38;2;255;0;0;48;2;0;0;255mX${E}[7mY${E}[0m`);
+  const runs = t.getSnapshot()[0].runs.filter((r) => r.text.trim());
+  const x = runs.find((r) => r.text.includes('X'))!;
+  const y = runs.find((r) => r.text.includes('Y'))!;
+  // X: fg red / bg blue; Y: reversed → fg blue / bg red.
+  expect(x.style.fg?.toLowerCase()).toBe('#ff0000');
+  expect(x.style.bg?.toLowerCase()).toBe('#0000ff');
+  expect(y.style.fg?.toLowerCase()).toBe('#0000ff');
+  expect(y.style.bg?.toLowerCase()).toBe('#ff0000');
+  expect(y.style.inverse).toBeUndefined(); // resolved, not flagged
+});
+
+test('OSC 8 label spanning a newline tags every covered row (#C)', async () => {
+  const t = new TerminalEngine(40, 4);
+  // label "abc" then newline then "def", closed on row 1
+  await write(t, `${E}]8;;https://ex.com${E}\\abc\r\ndef${E}]8;;${E}\\`);
+  const snap = t.getSnapshot();
+  const r0 = snap[0].links;
+  const r1 = snap[1].links;
+  expect(r0.length).toBe(1);
+  expect(r0[0].start).toBe(0);
+  expect(r0[0].end).toBe(3); // "abc"
+  expect(r1.length).toBe(1);
+  expect(r1[0].start).toBe(0);
+  expect(r1[0].end).toBe(3); // "def" also tappable
+  const tgt = r1[0].target;
+  expect(tgt.kind === 'external' && tgt.url).toBe('https://ex.com');
+});
+
 test('URL produces a link span', async () => {
   const t = new TerminalEngine(60, 3);
   await write(t, 'see https://example.com now');

@@ -641,12 +641,14 @@ export function useTetherApp() {
         if (msg.id <= ent.lastAppliedId) return;
         ent.lastAppliedId = msg.id;
         ent.sinceId = msg.id;
-        // Check notifications in the flush callback: xterm processes writes
-        // async, so bell/notify counters aren't bumped until it drains. A
-        // synchronous maybeNotify here would read stale counters and miss BEL /
-        // OSC 9/99/777 until a later frame.
-        ent.term.write(msg.chunk, () => maybeNotify(id, ent));
-        if (id === activeIdRef.current) scheduleRender();
+        // Both notification checks AND the render must run in the flush callback:
+        // xterm parses writes async, so a synchronous maybeNotify/scheduleRender
+        // here would read the buffer before msg.chunk is applied — missing BEL /
+        // OSC 9/99/777 and leaving the final chunk unrendered until a later frame.
+        ent.term.write(msg.chunk, () => {
+          maybeNotify(id, ent);
+          if (id === activeIdRef.current) scheduleRender();
+        });
       } else if (msg.type === 'exit') {
         const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
         ent.term.write(`\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`);

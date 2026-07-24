@@ -53,8 +53,16 @@ function lastContentCol(line: IBufferLine): number {
 
 function styleOf(cell: IBufferCell, caret: boolean): CellStyle {
   const s: CellStyle = {};
-  const fg = fgOf(cell);
-  const bg = bgOf(cell);
+  let fg = fgOf(cell);
+  let bg = bgOf(cell);
+  // Resolve SGR 7 reverse video by swapping fg/bg here — TermRow renders only
+  // resolved fg/bg and never consumes an `inverse` flag (matches legacy).
+  if (cell.isInverse()) {
+    const nfg = bg ?? DEFAULT_BG;
+    const nbg = fg ?? DEFAULT_FG;
+    fg = nfg;
+    bg = nbg;
+  }
   if (fg) s.fg = fg;
   if (bg) s.bg = bg;
   if (cell.isBold()) s.bold = true;
@@ -62,7 +70,6 @@ function styleOf(cell: IBufferCell, caret: boolean): CellStyle {
   if (cell.isItalic()) s.italic = true;
   if (cell.isUnderline()) s.underline = true;
   if (cell.isStrikethrough()) s.strike = true;
-  if (cell.isInverse()) s.inverse = true;
   if (caret) s.caret = true;
   return s;
 }
@@ -331,22 +338,28 @@ export class TerminalEngine {
     if (!o) return;
     this.osc8Open = null;
     const buf = this.term.buffer.active;
+    const trimmed = this.trimmedCount();
     const endId = this.cursorLogicalId();
-    let end: number;
-    if (endId === o.startId) {
-      end = buf.cursorX; // link opened + closed on the same row
-    } else {
-      // Link text ran onto later rows (soft-wrap or newline). We only tag the
-      // start row (headless has no per-cell URL to tag continuations); clamp to
-      // that row's actual content end so trailing blank cells aren't tagged.
-      const startY = o.startId - this.trimmedCount();
-      const line = startY >= 0 && startY < buf.length ? buf.getLine(startY) : null;
-      end = line ? lastContentCol(line) : this.term.cols;
+    const endCol = buf.cursorX;
+    // The hyperlinked label can span multiple logical rows (soft-wrap or a
+    // newline before the close). Tag every covered row so the whole label is
+    // tappable — start row from startCol, interior rows fully, end row up to the
+    // cursor. (headless has no per-cell URL, so we reconstruct from the range.)
+    for (let id = o.startId; id <= endId; id++) {
+      const startCol = id === o.startId ? o.startCol : 0;
+      let end: number;
+      if (id === endId) {
+        end = endCol;
+      } else {
+        const y = id - trimmed;
+        const line = y >= 0 && y < buf.length ? buf.getLine(y) : null;
+        end = line ? lastContentCol(line) : this.term.cols;
+      }
+      if (end <= startCol) continue;
+      const list = this.osc8Spans.get(id) ?? [];
+      list.push({ start: startCol, end, target: { kind: 'external', url: o.url } });
+      this.osc8Spans.set(id, list);
     }
-    if (end <= o.startCol) return;
-    const list = this.osc8Spans.get(o.startId) ?? [];
-    list.push({ start: o.startCol, end, target: { kind: 'external', url: o.url } });
-    this.osc8Spans.set(o.startId, list);
   }
 
   get cols(): number {
