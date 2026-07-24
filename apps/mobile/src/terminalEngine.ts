@@ -459,7 +459,10 @@ export class TerminalEngine {
       }
       const caretCol = this.cursorVisible && y === cursorAbs ? buf.cursorX : -1;
       rowRuns[y] = this.runsFor(line, caretCol);
-      wrappedFlags[y] = line.isWrapped;
+      // xterm's `isWrapped` means "this row is a CONTINUATION of the previous
+      // one"; computeLinkSpans wants "this row wraps INTO the next", so read the
+      // flag off the following line.
+      wrappedFlags[y] = buf.getLine(y + 1)?.isWrapped ?? false;
       texts[y] = rowRuns[y].map((r) => r.text).join('');
     }
     const linkSpans = computeLinkSpans(texts, wrappedFlags);

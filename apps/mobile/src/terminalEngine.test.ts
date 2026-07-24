@@ -294,3 +294,13 @@ test('promptReturnCount increments once per OSC 133;A', async () => {
   await write(t, '\x1b]133;A\x07cmd\r\n\x1b]133;A\x07');
   expect(t.promptReturnCount).toBe(2);
 });
+
+test('a URL soft-wrapped across the grid width stays one tappable link', async () => {
+  const t = new TerminalEngine(20, 6);
+  const url = 'https://example.com/test/hello';
+  await write(t, url);
+  const snap = t.getSnapshot();
+  const all = snap.flatMap((r) => r.links);
+  expect(all.length).toBe(2); // one span per wrapped row
+  for (const l of all) expect(l.target).toEqual({ kind: 'external', url });
+});
