@@ -83,6 +83,46 @@ test('OSC 8 hyperlink → tappable link span (text != url)', async () => {
   expect(target.kind === 'external' && target.url).toBe('https://ex.com');
 });
 
+test('bell/notify counters are updated by the time write onFlush fires (#1)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await new Promise<void>((resolve) => {
+    t.write('\x07\x1b]777;notify;T;B\x07', () => {
+      // onFlush must run AFTER xterm parsed the chunk → counters current.
+      expect(t.bellCount).toBe(1);
+      expect(t.notifyCount).toBe(1);
+      resolve();
+    });
+  });
+});
+
+test('DECTCEM ?25l hides caret; ?25h restores it (#4)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, 'hi\x1b[?25l');
+  expect(t.cursorVisible).toBe(false);
+  expect(t.getSnapshot()[0].runs.some((r) => r.style.caret)).toBe(false);
+  await write(t, '\x1b[?25h');
+  expect(t.cursorVisible).toBe(true);
+  expect(t.getSnapshot()[0].runs.some((r) => r.style.caret)).toBe(true);
+});
+
+test('OSC 10/11 color query reply uses theme default (#3)', async () => {
+  const t = new TerminalEngine(20, 4);
+  const replies: string[] = [];
+  t.onReply = (d) => replies.push(d);
+  await write(t, '\x1b]10;?\x07\x1b]11;?\x07');
+  expect(replies.some((r) => r.startsWith('\x1b]10;rgb:'))).toBe(true);
+  expect(replies.some((r) => r.startsWith('\x1b]11;rgb:'))).toBe(true);
+});
+
+test('OSC 8 link closed after newline is clamped to text, not trailing blanks (#2)', async () => {
+  const t = new TerminalEngine(40, 4);
+  await write(t, `${E}]8;;https://ex.com${E}\\CLICK\r\n${E}]8;;${E}\\`);
+  const links = t.getSnapshot()[0].links;
+  expect(links.length).toBe(1);
+  expect(links[0].start).toBe(0);
+  expect(links[0].end).toBe(5); // "CLICK", not clamped to cols=40
+});
+
 test('URL produces a link span', async () => {
   const t = new TerminalEngine(60, 3);
   await write(t, 'see https://example.com now');
