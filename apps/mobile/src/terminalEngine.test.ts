@@ -72,6 +72,17 @@ test('logical key survives scrollback trim (>cap lines)', async () => {
   expect(Math.min(...liveKeys)).toBeGreaterThan(markKey);
 });
 
+test('OSC 8 hyperlink → tappable link span (text != url)', async () => {
+  const t = new TerminalEngine(40, 4);
+  await write(t, `${E}]8;;https://ex.com${E}\\CLICK${E}]8;;${E}\\`);
+  const links = t.getSnapshot()[0].links;
+  expect(links.length).toBe(1);
+  expect(links[0].start).toBe(0);
+  expect(links[0].end).toBe(5); // "CLICK"
+  const target = links[0].target;
+  expect(target.kind === 'external' && target.url).toBe('https://ex.com');
+});
+
 test('URL produces a link span', async () => {
   const t = new TerminalEngine(60, 3);
   await write(t, 'see https://example.com now');
