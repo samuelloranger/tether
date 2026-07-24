@@ -78,7 +78,7 @@ getGrid(): GridSnapshot   // reuses row objects like getSnapshot for cheap diffi
 - **Font**: `useFont(require('fira-code.ttf'), fontSize)` from the `@expo-google-fonts/fira-code` package's TTF. Measure advance once via `font.getGlyphWidths`/`measureText('M')` → `cellW`. `cellH = round(fontSize * lineHeight)` (reuse current 1.3).
 - **Paint loop**: for each visible row `r` and cell `c`: fill `bg` rect at `(c*cellW, r*cellH, width*cellW, cellH)` only when non-default; draw glyph at baseline; wide cells (`width===2`) span `2*cellW`; skip `width===0` spacer cells. Underline/strike as lines; inverse swaps fg/bg; dim lowers alpha.
 - **Cursor**: overlay rect/bar/underline at `(col*cellW, row*cellH)` in accent; block caret inverts the glyph. Blink via a shared value, gated by `reduceMotion`.
-- **Virtual scroll**: a vertical `Gesture.Pan` (react-native-gesture-handler, already present) drives a `scrollTop` shared value into `[0, (totalRows-viewRows)*cellH]`; only rows in `[scrollTop/cellH, +viewRows]` are painted. Momentum via `withDecay`. `autoScroll` (stick-to-bottom) preserved: when at bottom, new output keeps `scrollTop` pinned.
+- **Virtual scroll**: driven by RN's built-in `PanResponder` (already used in `TerminalScreen`; avoids adding gesture-handler/reanimated). A `scrollTop` (React state or a Skia reactive value, decided in Phase 0 by the resolved skia version) is clamped to `[0, (totalRows-viewRows)*cellH]`; only rows in `[scrollTop/cellH, +viewRows]` are painted. Simple velocity-based momentum on release. `autoScroll` (stick-to-bottom) preserved: when at bottom, new output keeps `scrollTop` pinned. (If the resolved skia version *requires* reanimated anyway, adopt it for the scroll value — Phase 0 decides.)
 - **Tap → cell**: `col = floor(x/cellW)`, `row = floor((y+scrollTop)/cellH)`. Reuse the existing mouse-report path (`mouseSeq`) and keyboard-focus tap logic — just a new coordinate source.
 - **Links**: hit-test the tapped cell against the row's `links` spans (already column ranges) → open target. Same `links.ts` data.
 - **Selection**: mobile already delegates selection to the fullscreen `SelectionView` (long-press → selectable text from `getFullText`). Keep that unchanged — no in-canvas selection needed. (Double-tap-to-copy-word maps a tapped cell to `wordAt`.)
@@ -100,7 +100,7 @@ getGrid(): GridSnapshot   // reuses row objects like getSnapshot for cheap diffi
 | Risk | Mitigation |
 |---|---|
 | react-native-skia won't build on pinned Expo 57 / jsi patch | Phase-0 gate before any build; fallback = harden `<Text>` renderer |
-| Hand-built scroll feels worse than FlatList | Reuse gesture-handler + `withDecay`; tune; keep stick-to-bottom semantics |
+| Hand-built scroll feels worse than FlatList | RN `PanResponder` + velocity momentum; tune; keep stick-to-bottom semantics. Skia (and possibly its reanimated dep) is the only new native package |
 | Font advance not truly monospace for all glyphs (emoji/CJK) | Measure ASCII advance for `cellW`; force wide cells to `2*cellW` regardless of glyph metrics (grid is authoritative, not the font) |
 | Per-frame grid build + paint cost | `getGrid()` reuses row objects; only paint visible rows; repaint only on `onWriteParsed` / scroll |
 | Desktop accidentally gets Skia | Explicit `.native`/`.web` file split; verify bundler resolution in tests |
