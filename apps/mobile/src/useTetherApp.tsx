@@ -71,7 +71,8 @@ import { shellQuote } from './shell';
 import { createStyles } from './styles';
 import { TermRow } from './TermRow';
 import TitleBar from './TitleBar';
-import { type CellStyle, type RenderRow, setTheme, TerminalEmulator } from './terminal';
+import { type CellStyle, type RenderRow, setTheme } from './terminal';
+import { TerminalEngine } from './terminalEngine';
 import { UpdateModal } from './UpdateModal';
 import { UtilityBar } from './UtilityBar';
 import { openTerminalSocket, type TerminalSocket } from './wsTransport';
@@ -431,7 +432,7 @@ export function useTetherApp() {
   // Helper to get/create the cache entry for a given id, sized to the current grid.
   const entryFor = (id: string): SessionEntry =>
     cache.touch(id, () => {
-      const term = new TerminalEmulator(numCols || 80, numRows || 24);
+      const term = new TerminalEngine(numCols || 80, numRows || 24);
       // Backgrounded sessions do hold a live socket now, but only the active
       // tab is allowed to send input — route everyone else's replies nowhere.
       term.onReply = (text) => {

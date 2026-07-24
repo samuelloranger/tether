@@ -4,3 +4,5 @@
 const nav = (globalThis as any).navigator ?? ((globalThis as any).navigator = {});
 if (typeof nav.userAgent !== 'string') nav.userAgent = 'ReactNative';
 if (typeof nav.platform !== 'string') nav.platform = 'ReactNative';
+
+export {};
