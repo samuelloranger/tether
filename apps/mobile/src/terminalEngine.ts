@@ -1,5 +1,6 @@
 import './xtermPolyfill';
 import { type IBufferCell, type IBufferLine, Terminal } from '@xterm/headless';
+import { computeLinkSpans, type LinkSpan } from './links';
 import { type CellStyle, PALETTE, type RenderRow } from './terminal';
 
 const MAX_SCROLLBACK = 1000;
@@ -60,12 +61,31 @@ function runsEqual(a: RenderRow['runs'], b: RenderRow['runs']): boolean {
   return true;
 }
 
+function targetEq(a: LinkSpan['target'], b: LinkSpan['target']): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'external' && b.kind === 'external') return a.url === b.url;
+  if (a.kind === 'file' && b.kind === 'file')
+    return a.path === b.path && a.line === b.line && a.column === b.column;
+  return false;
+}
+
+function linksEqual(a: RenderRow['links'], b: RenderRow['links']): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].start !== b[i].start || a[i].end !== b[i].end || !targetEq(a[i].target, b[i].target))
+      return false;
+  }
+  return true;
+}
+
 // Adapter wrapping @xterm/headless with the TerminalEmulator public surface, so
 // it is a drop-in replacement. Reads term.buffer.active to emit RenderRow[].
 export class TerminalEngine {
   private term: Terminal;
   private cell: IBufferCell | undefined;
   private prevRows: RenderRow[] = [];
+  private fed = 0; // linefeeds seen — drives the trim/logical-id math
+  private promptIds = new Set<number>(); // monotonic logical ids marked by OSC 133;A
 
   bellCount = 0;
   notifyCount = 0;
@@ -95,6 +115,27 @@ export class TerminalEngine {
     // xterm emits generated replies (DSR/DA) through onData; the app sends user
     // input separately, so onData here carries only auto-replies.
     this.term.onData((d) => this.onReply?.(d));
+    this.term.onLineFeed(() => {
+      this.fed++;
+    });
+    // OSC 133;A marks a prompt start; ;D reports command-return. Record the
+    // prompt at the cursor's current monotonic logical id.
+    this.term.parser.registerOscHandler(133, (data) => {
+      if (data.startsWith('A')) this.promptIds.add(this.cursorLogicalId());
+      else if (data.startsWith('D')) this.promptReturnCount++;
+      return false; // let xterm run its own OSC 133 handling too
+    });
+  }
+
+  // Number of logical lines trimmed off the top of scrollback so far.
+  private trimmedCount(): number {
+    return Math.max(0, this.fed + 1 - this.term.buffer.active.length);
+  }
+
+  // Stable, monotonically-increasing id of the row the cursor sits on.
+  private cursorLogicalId(): number {
+    const buf = this.term.buffer.active;
+    return this.trimmedCount() + buf.baseY + buf.cursorY;
   }
 
   get cols(): number {
@@ -132,34 +173,57 @@ export class TerminalEngine {
     this.mouseMode = 'off';
     this.mouseSgr = false;
     this.prevRows = [];
+    this.fed = 0;
+    this.promptIds.clear();
   }
 
   getSnapshot(): RenderRow[] {
     const buf = this.term.buffer.active;
     const total = buf.length;
     const cursorAbs = buf.baseY + buf.cursorY;
-    const out: RenderRow[] = new Array(total);
+    const trimmed = this.trimmedCount();
+
+    // Prune prompt ids that have scrolled off the top so the Set stays bounded.
+    if (this.promptIds.size) {
+      for (const id of this.promptIds) if (id < trimmed) this.promptIds.delete(id);
+    }
+
+    // First pass: per-row runs + text, so links can be resolved across soft wraps.
+    const rowRuns: RenderRow['runs'][] = new Array(total);
+    const wrappedFlags: boolean[] = new Array(total);
+    const texts: string[] = new Array(total);
     for (let y = 0; y < total; y++) {
       const line = buf.getLine(y);
       if (!line) {
-        out[y] = {
-          key: y,
-          runs: [{ text: '', style: {} }],
-          wrapped: false,
-          links: [],
-          promptStart: false,
-        };
+        rowRuns[y] = [{ text: '', style: {} }];
+        wrappedFlags[y] = false;
+        texts[y] = '';
         continue;
       }
       const caretCol = y === cursorAbs ? buf.cursorX : -1;
-      const runs = this.runsFor(line, caretCol);
-      const wrapped = line.isWrapped;
-      const key = y;
+      rowRuns[y] = this.runsFor(line, caretCol);
+      wrappedFlags[y] = line.isWrapped;
+      texts[y] = rowRuns[y].map((r) => r.text).join('');
+    }
+    const linkSpans = computeLinkSpans(texts, wrappedFlags);
+
+    const out: RenderRow[] = new Array(total);
+    for (let y = 0; y < total; y++) {
+      const key = trimmed + y;
+      const runs = rowRuns[y];
+      const wrapped = wrappedFlags[y];
+      const links = linkSpans[y] ?? [];
+      const promptStart = this.promptIds.has(key);
       const prev = this.prevRows[y];
       out[y] =
-        prev && prev.key === key && prev.wrapped === wrapped && runsEqual(prev.runs, runs)
+        prev &&
+        prev.key === key &&
+        prev.wrapped === wrapped &&
+        prev.promptStart === promptStart &&
+        runsEqual(prev.runs, runs) &&
+        linksEqual(prev.links, links)
           ? prev
-          : { key, runs, wrapped, links: [], promptStart: false };
+          : { key, runs, wrapped, links, promptStart };
     }
     this.prevRows = out;
     return out;
@@ -187,7 +251,11 @@ export class TerminalEngine {
     return runs;
   }
 
-  jumpToPrompt(_fromRow: number, _dir: 1 | -1): number | null {
-    return null; // implemented in Task 3
+  jumpToPrompt(fromRow: number, dir: 1 | -1): number | null {
+    const snap = this.prevRows.length ? this.prevRows : this.getSnapshot();
+    for (let i = fromRow + dir; i >= 0 && i < snap.length; i += dir) {
+      if (snap[i].promptStart) return i;
+    }
+    return null;
   }
 }
