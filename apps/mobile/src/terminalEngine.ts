@@ -86,6 +86,8 @@ export class TerminalEngine {
   private prevRows: RenderRow[] = [];
   private fed = 0; // linefeeds seen — drives the trim/logical-id math
   private promptIds = new Set<number>(); // monotonic logical ids marked by OSC 133;A
+  private osc8Spans = new Map<number, LinkSpan[]>(); // logical row id -> OSC 8 link spans
+  private osc8Open: { url: string; startId: number; startCol: number } | null = null;
 
   bellCount = 0;
   notifyCount = 0;
@@ -128,6 +130,22 @@ export class TerminalEngine {
         this.promptReturnCount++;
       }
       return false; // let xterm run its own OSC 133 handling too
+    });
+    // OSC 8 explicit hyperlinks: "params;URI" (empty URI closes). xterm headless
+    // exposes no per-cell URL, so track open/close against the cursor and emit
+    // column ranges into the row's link spans (text != URL, unlike regex links).
+    this.term.parser.registerOscHandler(8, (data) => {
+      const semi = data.indexOf(';');
+      const uri = semi === -1 ? '' : data.slice(semi + 1);
+      this.closeOsc8();
+      if (uri) {
+        this.osc8Open = {
+          url: uri,
+          startId: this.cursorLogicalId(),
+          startCol: this.term.buffer.active.cursorX,
+        };
+      }
+      return true;
     });
     // SGR mouse encoding (DECSET 1006) is not exposed on term.modes — observe it
     // via non-consuming DECSET/DECRST handlers.
@@ -266,6 +284,21 @@ export class TerminalEngine {
     return this.trimmedCount() + buf.baseY + buf.cursorY;
   }
 
+  // Finalize an open OSC 8 link from its start marker to the cursor now.
+  private closeOsc8(): void {
+    const o = this.osc8Open;
+    if (!o) return;
+    this.osc8Open = null;
+    const endId = this.cursorLogicalId();
+    const endCol = this.term.buffer.active.cursorX;
+    // Multi-row links clamp to the start row's end (hit-test simplicity).
+    const end = endId === o.startId ? endCol : this.term.cols;
+    if (end <= o.startCol) return;
+    const list = this.osc8Spans.get(o.startId) ?? [];
+    list.push({ start: o.startCol, end, target: { kind: 'external', url: o.url } });
+    this.osc8Spans.set(o.startId, list);
+  }
+
   get cols(): number {
     return this.term.cols;
   }
@@ -303,6 +336,8 @@ export class TerminalEngine {
     this.prevRows = [];
     this.fed = 0;
     this.promptIds.clear();
+    this.osc8Spans.clear();
+    this.osc8Open = null;
   }
 
   getSnapshot(): RenderRow[] {
@@ -311,9 +346,12 @@ export class TerminalEngine {
     const cursorAbs = buf.baseY + buf.cursorY;
     const trimmed = this.trimmedCount();
 
-    // Prune prompt ids that have scrolled off the top so the Set stays bounded.
+    // Prune prompt ids / OSC 8 spans that scrolled off the top (bounded Sets/Maps).
     if (this.promptIds.size) {
       for (const id of this.promptIds) if (id < trimmed) this.promptIds.delete(id);
+    }
+    if (this.osc8Spans.size) {
+      for (const id of this.osc8Spans.keys()) if (id < trimmed) this.osc8Spans.delete(id);
     }
 
     // First pass: per-row runs + text, so links can be resolved across soft wraps.
@@ -340,7 +378,9 @@ export class TerminalEngine {
       const key = trimmed + y;
       const runs = rowRuns[y];
       const wrapped = wrappedFlags[y];
-      const links = linkSpans[y] ?? [];
+      // OSC 8 explicit hyperlinks take precedence over regex-detected URLs.
+      const osc8 = this.osc8Spans.get(key);
+      const links = osc8?.length ? osc8 : (linkSpans[y] ?? []);
       const promptStart = this.promptIds.has(key);
       const prev = this.prevRows[y];
       out[y] =
