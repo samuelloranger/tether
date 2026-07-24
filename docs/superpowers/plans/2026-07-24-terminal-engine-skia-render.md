@@ -1,3 +1,5 @@
+> **DROPPED (2026-07-24):** Part 2 (Skia render) was implemented on branch `feat/skia-terminal-render`, tested on device, and **abandoned**. The existing `<Text>` renderer (Part 1) was already good enough; Skia added reanimated/native-build complexity, a CJK-glyph regression, and a laggy custom scroll for marginal alignment gain. Kept for historical record only. Do NOT execute.
+
 # Terminal Engine Skia Render (Part 2) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
