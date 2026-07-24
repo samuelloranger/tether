@@ -38,6 +38,8 @@ The desktop (Tauri) and web builds render via react-native-web and rely on **nat
 
 This matches the existing `PresentationView.native/.web` pattern, keeps the shared **engine** (parser + grid contract), and confines the rewrite to where the pain is. The alignment fix is mobile-only by design.
 
+**Desktop is intentionally frozen, not co-maintained.** The web/desktop `<Text>` path is left exactly as-is and receives **zero Part-2 investment** (no Skia, no CanvasKit-on-web, no in-canvas selection). Rationale: the desktop client is slated for a future ground-up native rewrite around libghostty, which will replace this render path wholesale. Spending effort unifying the render now would be thrown away. So "platform split" here means: **build the Skia renderer for native (iOS/Android); leave desktop on the legacy renderer until the libghostty rewrite retires it.** Phase 0 and all Part-2 testing target **iOS + Android only**.
+
 ## Phase 0 — Feasibility gate (MUST run before build)
 
 Same discipline as Part 1. `@shopify/react-native-skia` is native (JSI + a large native lib); Expo 57 / RN 0.86 pin a jsi Swift patch (do not bump Expo past 57.0.7). Unknowns to prove **on the Android sim + a real iOS build** before committing:
