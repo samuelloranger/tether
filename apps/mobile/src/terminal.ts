@@ -55,8 +55,8 @@ export interface RenderRow {
   promptStart: boolean;
 }
 
-let DEFAULT_FG = APP_THEMES.mocha.terminal.fg;
-let DEFAULT_BG = APP_THEMES.mocha.terminal.bg;
+export let DEFAULT_FG = APP_THEMES.mocha.terminal.fg;
+export let DEFAULT_BG = APP_THEMES.mocha.terminal.bg;
 const MAX_SCROLLBACK = 1000;
 // Cap OSC/CSI accumulation so a garbled or hostile stream that opens an escape
 // sequence and never terminates it can't grow a buffer without bound.
@@ -105,7 +105,7 @@ function base64ToUtf8(b64: string): string {
   return decodeURIComponent(percentEncoded);
 }
 
-let PALETTE = buildPalette();
+export let PALETTE = buildPalette();
 
 export interface Theme {
   base16: string[]; // exactly 16 ANSI colors
