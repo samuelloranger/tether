@@ -176,6 +176,29 @@ test('trailing default blanks are trimmed from row text (#E)', async () => {
   expect(t.getSnapshot()[1].runs.map((r) => r.text).join('')).toBe('');
 });
 
+test('alt-screen feeds do not inflate trim / prune normal-buffer prompts (#1)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b]133;A\x07prompt\r\n');
+  const key0 = t.getSnapshot().find((r) => r.promptStart)?.key;
+  expect(key0).toBeGreaterThanOrEqual(0);
+  await write(t, '\x1b[?1049h'); // enter alt screen
+  for (let i = 0; i < 60; i++) t.write('x\r\n');
+  await t.drain();
+  await write(t, '\x1b[?1049l'); // leave alt screen
+  const row = t.getSnapshot().find((r) => r.promptStart);
+  expect(row).toBeDefined(); // promptId survived (not pruned by inflated trim)
+  expect(row?.key).toBe(key0); // and its logical key is stable
+});
+
+test('reset clears half-assembled kitty OSC 99 chunks (#3)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b]99;i=1:d=0:p=title;Hello\x07'); // incomplete, buffered
+  t.reset();
+  await write(t, '\x1b]99;i=1:p=body;World\x07'); // final chunk after reset
+  expect(t.notifyCount).toBe(1);
+  expect(t.lastNotify).toEqual({ title: '', body: 'World' }); // no stale "Hello"
+});
+
 test('URL produces a link span', async () => {
   const t = new TerminalEngine(60, 3);
   await write(t, 'see https://example.com now');
