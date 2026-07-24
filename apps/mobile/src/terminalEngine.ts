@@ -121,7 +121,9 @@ export class TerminalEngine {
   private prevRows: RenderRow[] = [];
   private fed = 0; // linefeeds seen — drives the trim/logical-id math
   private promptIds = new Set<number>(); // monotonic logical ids marked by OSC 133;A
-  private osc8Spans = new Map<number, LinkSpan[]>(); // logical row id -> OSC 8 link spans
+  // logical row id -> OSC 8 spans + the label text captured at close, so a later
+  // repaint of the row (CR/EL overwriting those cells) invalidates the stale span.
+  private osc8Spans = new Map<number, { span: LinkSpan; text: string }[]>();
   private osc8Open: { url: string; startId: number; startCol: number } | null = null;
 
   bellCount = 0;
@@ -347,19 +349,32 @@ export class TerminalEngine {
     // cursor. (headless has no per-cell URL, so we reconstruct from the range.)
     for (let id = o.startId; id <= endId; id++) {
       const startCol = id === o.startId ? o.startCol : 0;
-      let end: number;
-      if (id === endId) {
-        end = endCol;
-      } else {
-        const y = id - trimmed;
-        const line = y >= 0 && y < buf.length ? buf.getLine(y) : null;
-        end = line ? lastContentCol(line) : this.term.cols;
-      }
+      const y = id - trimmed;
+      const line = y >= 0 && y < buf.length ? buf.getLine(y) : null;
+      const end = id === endId ? endCol : line ? lastContentCol(line) : this.term.cols;
       if (end <= startCol) continue;
+      const span: LinkSpan = { start: startCol, end, target: { kind: 'external', url: o.url } };
+      const text = line ? line.translateToString(false, startCol, end) : '';
       const list = this.osc8Spans.get(id) ?? [];
-      list.push({ start: startCol, end, target: { kind: 'external', url: o.url } });
+      list.push({ span, text });
       this.osc8Spans.set(id, list);
     }
+  }
+
+  // OSC 8 spans for a row whose labeled cells still hold the captured text.
+  // A repaint (overwrite/erase) changes the text → the stale span is dropped.
+  private freshOsc8(id: number): LinkSpan[] {
+    const entries = this.osc8Spans.get(id);
+    if (!entries) return [];
+    const y = id - this.trimmedCount();
+    const line = y >= 0 && y < this.term.buffer.active.length ? this.term.buffer.active.getLine(y) : null;
+    if (!line) return [];
+    const kept = entries.filter((e) => line.translateToString(false, e.span.start, e.span.end) === e.text);
+    if (kept.length !== entries.length) {
+      if (kept.length) this.osc8Spans.set(id, kept);
+      else this.osc8Spans.delete(id);
+    }
+    return kept.map((e) => e.span);
   }
 
   get cols(): number {
@@ -448,9 +463,10 @@ export class TerminalEngine {
       const key = trimmed + y;
       const runs = rowRuns[y];
       const wrapped = wrappedFlags[y];
-      // OSC 8 explicit hyperlinks take precedence over regex-detected URLs.
-      const osc8 = this.osc8Spans.get(key);
-      const links = osc8?.length ? osc8 : (linkSpans[y] ?? []);
+      // OSC 8 explicit hyperlinks (validated against current row content) take
+      // precedence over regex-detected URLs.
+      const osc8 = this.osc8Spans.has(key) ? this.freshOsc8(key) : [];
+      const links = osc8.length ? osc8 : (linkSpans[y] ?? []);
       const promptStart = this.promptIds.has(key);
       const prev = this.prevRows[y];
       out[y] =
@@ -468,9 +484,26 @@ export class TerminalEngine {
   }
 
   private runsFor(line: IBufferLine, caretCol: number): RenderRow['runs'] {
+    // Trim trailing default blanks so empty tails don't pad copied/searched text
+    // or paint background — but keep bg-colored / inverse cells and never trim
+    // past the caret (matches the legacy emulator).
+    let end = 0;
+    for (let x = 0; x < line.length; x++) {
+      const cell = line.getCell(x, this.cell);
+      this.cell = cell;
+      if (!cell) continue;
+      const w = cell.getWidth() || 1;
+      const chars = cell.getChars();
+      const significant =
+        (chars !== '' && chars.trim() !== '') || bgOf(cell) !== undefined || cell.isInverse();
+      if (significant) end = x + w;
+    }
+    if (caretCol >= 0) end = Math.max(end, caretCol + 1);
+    if (end === 0) return [{ text: '', style: {} }];
+
     const runs: RenderRow['runs'] = [];
     let cur: { text: string; style: CellStyle } | null = null;
-    for (let x = 0; x < line.length; x++) {
+    for (let x = 0; x < end; x++) {
       const cell = line.getCell(x, this.cell);
       this.cell = cell;
       if (!cell) continue;

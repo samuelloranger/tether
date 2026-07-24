@@ -154,6 +154,28 @@ test('OSC 8 label spanning a newline tags every covered row (#C)', async () => {
   expect(tgt.kind === 'external' && tgt.url).toBe('https://ex.com');
 });
 
+test('OSC 8 span is dropped when the row is repainted over it (#D)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, `${E}]8;;https://ex.com${E}\\LINK${E}]8;;${E}\\`);
+  expect(t.getSnapshot()[0].links.length).toBe(1);
+  // Repaint the row: CR to col 0, overwrite the linked cells with plain text.
+  await write(t, '\rPLAIN');
+  const links = t.getSnapshot()[0].links;
+  expect(links.some((l) => l.target.kind === 'external' && l.target.url === 'https://ex.com')).toBe(
+    false,
+  );
+});
+
+test('trailing default blanks are trimmed from row text (#E)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, 'hi');
+  // caret cell keeps 1 trailing space on the cursor row (legacy parity), NOT
+  // full-width padding — the 20-col row must not become "hi" + 18 spaces.
+  expect(t.getSnapshot()[0].runs.map((r) => r.text).join('')).toBe('hi ');
+  // a non-cursor blank row emits no padding at all
+  expect(t.getSnapshot()[1].runs.map((r) => r.text).join('')).toBe('');
+});
+
 test('URL produces a link span', async () => {
   const t = new TerminalEngine(60, 3);
   await write(t, 'see https://example.com now');
