@@ -90,3 +90,33 @@ test('OSC 133;A marks promptStart and jumpToPrompt finds it', async () => {
   expect(promptRow).toBeGreaterThanOrEqual(0);
   expect(t.jumpToPrompt(snap.length - 1, -1)).toBe(promptRow);
 });
+
+test('DECCKM sets applicationCursor', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b[?1h');
+  expect(t.applicationCursor).toBe(true);
+  await write(t, '\x1b[?1l');
+  expect(t.applicationCursor).toBe(false);
+});
+
+test('bracketed paste mode 2004', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b[?2004h');
+  expect(t.bracketedPaste).toBe(true);
+});
+
+test('SGR mouse mode 1006 + 1000', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b[?1000h\x1b[?1006h');
+  expect(t.mouseOn).toBe(true);
+  expect(t.mouseMode).toBe('normal');
+  expect(t.mouseSgr).toBe(true);
+});
+
+test('DECSCUSR cursor style bar (6) then block (2)', async () => {
+  const t = new TerminalEngine(20, 4);
+  await write(t, '\x1b[6 q');
+  expect(t.cursorStyle).toBe('bar');
+  await write(t, '\x1b[2 q');
+  expect(t.cursorStyle).toBe('block');
+});

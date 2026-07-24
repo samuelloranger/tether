@@ -125,6 +125,44 @@ export class TerminalEngine {
       else if (data.startsWith('D')) this.promptReturnCount++;
       return false; // let xterm run its own OSC 133 handling too
     });
+    // SGR mouse encoding (DECSET 1006) is not exposed on term.modes — observe it
+    // via non-consuming DECSET/DECRST handlers.
+    this.term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+      if (params.includes(1006)) this.mouseSgr = true;
+      return false;
+    });
+    this.term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
+      if (params.includes(1006)) this.mouseSgr = false;
+      return false;
+    });
+    // DECSCUSR (CSI Ps SP q) — cursor shape.
+    this.term.parser.registerCsiHandler({ intermediates: ' ', final: 'q' }, (params) => {
+      const p = (params[0] as number) ?? 1;
+      this.cursorStyle = p === 5 || p === 6 ? 'bar' : p === 3 || p === 4 ? 'underline' : 'block';
+      return false;
+    });
+  }
+
+  private syncModes(): void {
+    const m = this.term.modes;
+    this.applicationCursor = m.applicationCursorKeysMode;
+    this.bracketedPaste = m.bracketedPasteMode;
+    switch (m.mouseTrackingMode) {
+      case 'x10':
+        this.mouseMode = 'x10';
+        break;
+      case 'vt200':
+        this.mouseMode = 'normal';
+        break;
+      case 'drag':
+        this.mouseMode = 'button';
+        break;
+      case 'any':
+        this.mouseMode = 'any';
+        break;
+      default:
+        this.mouseMode = 'off';
+    }
   }
 
   // Number of logical lines trimmed off the top of scrollback so far.
@@ -146,7 +184,7 @@ export class TerminalEngine {
   }
 
   write(data: string): void {
-    this.term.write(data);
+    this.term.write(data, () => this.syncModes());
   }
 
   // Test/detail helper: resolve once xterm has flushed its write queue.
