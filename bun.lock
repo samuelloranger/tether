@@ -14,7 +14,7 @@
     },
     "apps/mobile": {
       "name": "tether-mobile",
-      "version": "1.15.8",
+      "version": "1.16.1",
       "dependencies": {
         "@expo-google-fonts/fira-code": "^0.4.1",
         "@expo-google-fonts/jetbrains-mono": "^0.4.1",
@@ -28,6 +28,7 @@
         "@tauri-apps/plugin-opener": "^2",
         "@tauri-apps/plugin-process": "^2",
         "@tauri-apps/plugin-updater": "^2",
+        "@xterm/headless": "6.0.0",
         "expo": "~57.0.7",
         "expo-clipboard": "~57.0.1",
         "expo-drag-drop-content-view": "^0.9.2",
@@ -54,7 +55,7 @@
     },
     "apps/server": {
       "name": "tether",
-      "version": "1.15.8",
+      "version": "1.16.1",
       "bin": {
         "tether": "./src/server/main.ts",
       },
@@ -647,6 +648,8 @@
     "@vueuse/shared": ["@vueuse/shared@12.8.2", "", { "dependencies": { "vue": "^3.5.13" } }, "sha512-dznP38YzxZoNloI0qpEfpkms8knDtaoQ6Y/sfS0L7Yki4zh40LFHEhur0odJC6xTHG5dxWVPiUWBXn+wCG2s5w=="],
 
     "@xmldom/xmldom": ["@xmldom/xmldom@0.8.13", "", {}, "sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw=="],
+
+    "@xterm/headless": ["@xterm/headless@6.0.0", "", {}, "sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw=="],
 
     "abort-controller": ["abort-controller@3.0.0", "", { "dependencies": { "event-target-shim": "^5.0.0" } }, "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg=="],
 

@@ -1,8 +1,8 @@
 import type { DiffSummary } from './diffModel';
-import type { TerminalEmulator } from './terminal';
+import type { TerminalEngine } from './terminalEngine';
 
 export interface SessionEntry {
-  term: TerminalEmulator;
+  term: TerminalEngine;
   sinceId: number;
   lastAppliedId: number;
   diffSummary: DiffSummary;

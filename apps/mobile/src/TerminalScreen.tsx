@@ -58,7 +58,7 @@ import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
 import { createStyles } from './styles';
 import { TermRow } from './TermRow';
 import TitleBar from './TitleBar';
-import { type CellStyle, type RenderRow, TerminalEmulator } from './terminal';
+import type { CellStyle, RenderRow } from './terminal';
 import { injectTerminalScrollbarStyles } from './terminalScrollbar';
 import { UpdateModal } from './UpdateModal';
 import { UtilityBar } from './UtilityBar';
