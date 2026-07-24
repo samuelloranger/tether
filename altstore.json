@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "1.16.1",
+          "date": "2026-07-23",
+          "localizedDescription": "## Desktop notifications + reconnection fixes\n\n### Notifications\nClaude Code (and any tool) can now raise **native desktop notifications** through the Tether client when a session needs attention.\n\n- Terminal emulator parses the desktop-notification escapes agents emit: **OSC 9** (iTerm2), **OSC 99** (kitty, chunk-aware), **OSC 777;notify** (rxvt/ghostty), plus the terminal bell.\n- Notifications fire per-session for any cache-resident tab: background tabs always; the active tab only when the window is unfocused (so it won't nag the surface you're looking at).\n- **Linux (GNOME 46+):** notifications are sent via `notify-send`, working around a Tauri/notify-rust bug where the plugin's `show()` succeeds but the notification is closed instantly ([tauri #14095](https://github.com/tauri-apps/tauri/issues/14095) / [plugins-workspace #2566](https://github.com/tauri-apps/plugins-workspace/issues/2566)). macOS/Windows use the notification plugin.\n- New **⋯ → Notifications** menu: on/off toggle + **Send test notification** to verify the OS chain in one tap.\n\nTo get notifications from Claude Code, set `\"preferredNotifChannel\": \"ghostty\"` in `~/.claude/settings.json` (Tether keeps `TERM` neutral rather than impersonating a terminal).\n\n### Reconnection\nFixed the spurious **\"Reconnecting…\"** on every window refocus: the server now sends a keepalive ping so an idle session's socket isn't torn down by the client's no-frame watchdog.",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.16.1/tether.ipa",
+          "size": 8663082,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "1.16.4",
           "date": "2026-07-23",
           "localizedDescription": "## What's Changed\n* feat(desktop): notifications controls in the ⋯ overflow menu by @samuelloranger in https://github.com/samuelloranger/tether/pull/58\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.16.3...v1.16.4",
@@ -38,14 +46,6 @@
           "localizedDescription": "## What's Changed\n* fix(desktop): don't hard-gate notifications on the permission verdict by @samuelloranger in https://github.com/samuelloranger/tether/pull/56\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.16.1...v1.16.2",
           "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.16.2/tether.ipa",
           "size": 8662764,
-          "minOSVersion": "15.1"
-        },
-        {
-          "version": "1.16.1",
-          "date": "2026-07-23",
-          "localizedDescription": "## What's Changed\n* fix(desktop): surface agent notifications + stop refocus reconnect by @samuelloranger in https://github.com/samuelloranger/tether/pull/55\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v1.15.10...v1.16.1",
-          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v1.16.1/tether.ipa",
-          "size": 8662175,
           "minOSVersion": "15.1"
         },
         {
