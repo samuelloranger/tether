@@ -1,11 +1,20 @@
 name: Release builds
 
-# Publishing a GitHub release (tag vX.Y.Z) builds and attaches every desktop,
-# mobile, and server artifact, then syncs altstore.json on main. Manual runs are
-# build-only: they upload workflow artifacts without modifying a release.
+# scripts/release.sh creates a DRAFT release (vX.Y.Z); that fires `release:
+# created` here. This workflow builds and attaches every desktop, mobile, and
+# server artifact, and only when all of them succeed does the `publish` job take
+# the release out of draft — which is also the point the git tag comes into
+# existence. A failed build therefore can never become the public
+# `releases/latest` that install.sh and `tether update` resolve stable asset names
+# from (how v2.0.0 shipped with every desktop bundle broken). altstore.json syncs
+# after publish. Manual runs are build-only: they upload workflow artifacts
+# without touching a release.
+#
+# Trigger is `created` ONLY, never `published` — the publish job publishes, and
+# listening for that too would re-trigger the whole workflow.
 on:
   release:
-    types: [published]
+    types: [created]
   workflow_dispatch:
     inputs:
       scope:
@@ -18,6 +27,13 @@ on:
 
 permissions:
   contents: write
+
+# A draft release has no git tag yet, so github.ref_name is the default branch,
+# not vX.Y.Z. Every job must take the version from the event payload instead —
+# otherwise the server binary bakes in TETHER_VERSION="main" and the asset uploads
+# target a tag that does not exist. Falls back to ref_name for manual runs.
+env:
+  TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
 jobs:
   desktop:
@@ -98,7 +114,7 @@ jobs:
         with:
           projectPath: apps/mobile
           args: ${{ matrix.args }}
-          tagName: ${{ github.event_name == 'release' && github.ref_name || '' }}
+          tagName: ${{ github.event_name == 'release' && env.TAG || '' }}
           releaseId: ${{ github.event_name == 'release' && github.event.release.id || '' }}
 
       # tauri-action has no built-in workflow-artifact upload; on manual runs,
@@ -135,7 +151,7 @@ jobs:
         if: github.event_name == 'release'
         working-directory: apps/mobile
         run: |
-          V="${GITHUB_REF_NAME#v}"
+          V="${TAG#v}"
           jq --arg v "$V" '.expo.version = $v' app.json > app.json.tmp && mv app.json.tmp app.json
 
       - name: Prebuild iOS project
@@ -162,7 +178,7 @@ jobs:
       - name: Attach IPA to release
         if: github.event_name == 'release'
         working-directory: apps/mobile
-        run: gh release upload "$GITHUB_REF_NAME" "$IPA_NAME" --clobber
+        run: gh release upload "$TAG" "$IPA_NAME" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -191,7 +207,7 @@ jobs:
         if: github.event_name == 'release'
         working-directory: apps/mobile
         run: |
-          V="${GITHUB_REF_NAME#v}"
+          V="${TAG#v}"
           jq --arg v "$V" '.expo.version = $v' app.json > app.json.tmp && mv app.json.tmp app.json
 
       - name: Prebuild Android project
@@ -218,7 +234,7 @@ jobs:
         run: |
           cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
             "tether.apk"
-          gh release upload "$GITHUB_REF_NAME" "tether.apk" --clobber
+          gh release upload "$TAG" "tether.apk" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -263,7 +279,7 @@ jobs:
         run: |
           bun build --compile --minify \
             --target=${{ matrix.target }} \
-            --define 'process.env.TETHER_VERSION="'"${GITHUB_REF_NAME}"'"' \
+            --define 'process.env.TETHER_VERSION="'"${TAG}"'"' \
             --outfile tether \
             src/server/main.ts
           # Stable (un-versioned) name — makes
@@ -285,7 +301,7 @@ jobs:
       - name: Attach to release
         if: github.event_name == 'release'
         working-directory: apps/server
-        run: gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --clobber
+        run: gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -296,9 +312,24 @@ jobs:
           name: ${{ matrix.asset }}-${{ github.sha }}
           path: apps/server/${{ env.ASSET }}
 
+  # The gate. Every artifact job must succeed before the release stops being a
+  # draft — and publishing is also what creates the git tag (at the commit
+  # release.sh passed as --target). Until this runs, `releases/latest` still points
+  # at the previous good release, so install.sh and `tether update` keep working
+  # even if a build leg fails.
+  publish:
+    if: github.event_name == 'release'
+    needs: [desktop, ios, android, server]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   altstore:
     if: github.event_name == 'release'
-    needs: ios
+    needs: publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -306,7 +337,7 @@ jobs:
           ref: main # release event checks out the tag; the manifest lives on main
 
       - name: Sync altstore.json from the release
-        run: scripts/altstore-release.sh "$GITHUB_REF_NAME"
+        run: scripts/altstore-release.sh "$TAG"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -315,5 +346,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add altstore.json
-          git diff --cached --quiet || git commit -m "altstore: $GITHUB_REF_NAME"
+          git diff --cached --quiet || git commit -m "altstore: $TAG"
           git push

@@ -52,12 +52,36 @@ if [ "$FORCE" = false ] && [ "$DRY_RUN" = false ]; then
   fi
 fi
 
+# Require CI to be green on the exact commit we are about to release. release.sh
+# used to validate less than CI did (lint+format here vs. lint + server tests +
+# mobile tests + build:web there) — and build:web is what broke every desktop
+# bundle in v2.0.0. Gating on CI keeps one definition of "good" instead of two
+# that drift.
+if [ "$DRY_RUN" = false ]; then
+  HEAD_SHA=$(git rev-parse HEAD)
+  echo "Checking CI status for $HEAD_SHA..."
+  CI_CONCLUSION=$(gh run list --commit "$HEAD_SHA" --workflow CI --limit 1 \
+    --json conclusion -q '.[0].conclusion' 2>/dev/null || true)
+  if [ "$CI_CONCLUSION" != "success" ]; then
+    echo "Error: CI is not green on HEAD ($HEAD_SHA): ${CI_CONCLUSION:-no run found}." >&2
+    echo "Push the commit and wait for CI, or re-run with --force to override." >&2
+    [ "$FORCE" = false ] && exit 1
+    echo "Warning: --force set, releasing over a non-green CI run." >&2
+  fi
+fi
+
 # Detect current version
 CURRENT_VERSION=$(jq -r .version apps/mobile/package.json)
 echo "Current version: $CURRENT_VERSION"
 
 # Parse SemVer parts
 IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+
+if [ -z "$BUMP_TYPE" ] && [ -z "$TARGET_VERSION" ] && [ ! -t 0 ]; then
+  echo "Error: no bump specified and stdin is not a TTY (the interactive prompt" >&2
+  echo "cannot run here). Pass --patch, --minor, --major, or an explicit version." >&2
+  exit 1
+fi
 
 if [ -z "$BUMP_TYPE" ] && [ -z "$TARGET_VERSION" ]; then
   # Interactive mode
@@ -135,13 +159,39 @@ else
   echo "Updated apps/mobile/src-tauri/Cargo.lock"
 fi
 
+# The complete set of files a release is allowed to modify. Anything else showing
+# up dirty below means `bun format` reformatted real source, which must be its own
+# commit — not silently swept into (or, worse, dropped from) the release.
+VERSION_FILES=(
+  package.json
+  apps/server/package.json
+  apps/mobile/package.json
+  apps/mobile/app.json
+  apps/mobile/src-tauri/tauri.conf.json
+  apps/mobile/src-tauri/Cargo.toml
+  apps/mobile/src-tauri/Cargo.lock
+)
+
 # Validation
 echo "Running validation checks (lint & format)..."
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would run: bun lint && bun format"
 else
   bun lint
+  # `bun format` is `biome check --write` — it mutates. Stage the files we own,
+  # run it, re-stage them (it normalizes jq's JSON output), then require the tree
+  # to be otherwise clean. Previously a reformat of any source file landed in the
+  # working tree, was never staged (the add list is version files only), and got
+  # left behind by the push.
+  git add "${VERSION_FILES[@]}"
   bun format
+  git add "${VERSION_FILES[@]}"
+  if ! git diff --quiet; then
+    echo "Error: formatting modified files outside the version bump:" >&2
+    git diff --name-only >&2
+    echo "Commit those separately, then re-run the release." >&2
+    exit 1
+  fi
 fi
 
 # Git Ops
@@ -151,27 +201,40 @@ echo "Preparing Git commit on branch '$BRANCH'..."
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would run: git add ... && git commit -m 'release: v$TARGET_VERSION'"
   echo "[dry-run] Would run: git push origin $BRANCH"
-  echo "[dry-run] Would run: gh release create v$TARGET_VERSION --generate-notes"
+  echo "[dry-run] Would run: gh release create v$TARGET_VERSION --draft --target $BRANCH --generate-notes"
 else
-  # Stage the modified files
-  git add package.json \
-          apps/server/package.json \
-          apps/mobile/package.json \
-          apps/mobile/app.json \
-          apps/mobile/src-tauri/tauri.conf.json \
-          apps/mobile/src-tauri/Cargo.toml \
-          apps/mobile/src-tauri/Cargo.lock
+  git add "${VERSION_FILES[@]}"
 
   git commit -m "release: v$TARGET_VERSION"
   echo "Pushing changes to origin/$BRANCH..."
   git push origin "$BRANCH"
 
-  echo "Creating GitHub Release..."
-  if ! gh release create "v$TARGET_VERSION" --generate-notes; then
-    echo "Warning: Release creation failed. Check your gh CLI authorization or permissions." >&2
-  else
-    echo "Successfully created release v$TARGET_VERSION"
+  # Created as a DRAFT on purpose. release.yml builds on `release: created`,
+  # attaches every artifact, and only then flips the release out of draft. A
+  # failed build therefore never becomes the public `releases/latest` that
+  # install.sh and `tether update` resolve stable asset names from — the exact way
+  # v2.0.0 shipped a release with no working desktop bundles.
+  #
+  # Note: a draft release does not create the git tag. --target pins which commit
+  # the tag is cut from when the publish job promotes it.
+  echo "Creating draft GitHub Release..."
+  if ! gh release create "v$TARGET_VERSION" \
+      --draft \
+      --target "$BRANCH" \
+      --generate-notes; then
+    echo "Error: release creation failed. The version bump has already been pushed;" >&2
+    echo "re-run 'gh release create v$TARGET_VERSION --draft --target $BRANCH --generate-notes'" >&2
+    echo "once the cause is fixed." >&2
+    exit 1
   fi
+  echo "Created draft release v$TARGET_VERSION"
 fi
 
 echo "Release process completed successfully!"
+if [ "$DRY_RUN" = false ]; then
+  echo
+  echo "Draft release v$TARGET_VERSION created. Builds are running now."
+  echo "It publishes automatically once every artifact is attached."
+  echo "  Watch:   gh run watch \$(gh run list --workflow 'Release builds' --limit 1 --json databaseId -q '.[0].databaseId')"
+  echo "  Inspect: gh release view v$TARGET_VERSION"
+fi
