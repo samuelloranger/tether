@@ -201,7 +201,7 @@ echo "Preparing Git commit on branch '$BRANCH'..."
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would run: git add ... && git commit -m 'release: v$TARGET_VERSION'"
   echo "[dry-run] Would run: git push origin $BRANCH"
-  echo "[dry-run] Would run: gh release create v$TARGET_VERSION --draft --target $BRANCH --generate-notes"
+  echo "[dry-run] Would run: git tag -a v$TARGET_VERSION && git push origin v$TARGET_VERSION"
 else
   git add "${VERSION_FILES[@]}"
 
@@ -209,32 +209,32 @@ else
   echo "Pushing changes to origin/$BRANCH..."
   git push origin "$BRANCH"
 
-  # Created as a DRAFT on purpose. release.yml builds on `release: created`,
-  # attaches every artifact, and only then flips the release out of draft. A
-  # failed build therefore never becomes the public `releases/latest` that
-  # install.sh and `tether update` resolve stable asset names from — the exact way
-  # v2.0.0 shipped a release with no working desktop bundles.
+  # Pushing the tag is what starts release.yml. That workflow opens a DRAFT
+  # release, attaches every artifact to it, and only then publishes — so a failed
+  # build never becomes the public `releases/latest` that install.sh and
+  # `tether update` resolve stable asset names from (the exact way v2.0.0 shipped
+  # a release with no working desktop bundles).
   #
-  # Note: a draft release does not create the git tag. --target pins which commit
-  # the tag is cut from when the publish job promotes it.
-  echo "Creating draft GitHub Release..."
-  if ! gh release create "v$TARGET_VERSION" \
-      --draft \
-      --target "$BRANCH" \
-      --generate-notes; then
-    echo "Error: release creation failed. The version bump has already been pushed;" >&2
-    echo "re-run 'gh release create v$TARGET_VERSION --draft --target $BRANCH --generate-notes'" >&2
-    echo "once the cause is fixed." >&2
+  # The tag, unlike a release, has to exist up front: GitHub does not run
+  # workflows for draft releases, so CI cannot be triggered by a draft — it has to
+  # create one. A bare tag is invisible to both clients, which resolve the releases
+  # API, so nothing user-facing exists until the publish job runs.
+  echo "Tagging v$TARGET_VERSION..."
+  git tag -a "v$TARGET_VERSION" -m "v$TARGET_VERSION"
+  if ! git push origin "v$TARGET_VERSION"; then
+    echo "Error: tag push failed. The version bump is already pushed; delete the" >&2
+    echo "local tag ('git tag -d v$TARGET_VERSION'), fix the cause, and re-run." >&2
     exit 1
   fi
-  echo "Created draft release v$TARGET_VERSION"
+  echo "Pushed tag v$TARGET_VERSION"
 fi
 
 echo "Release process completed successfully!"
 if [ "$DRY_RUN" = false ]; then
   echo
-  echo "Draft release v$TARGET_VERSION created. Builds are running now."
-  echo "It publishes automatically once every artifact is attached."
+  echo "Tag v$TARGET_VERSION pushed. Builds are running now."
+  echo "A draft release is opened, filled, and published automatically once every"
+  echo "artifact is attached. Nothing is user-visible until then."
   echo "  Watch:   gh run watch \$(gh run list --workflow 'Release builds' --limit 1 --json databaseId -q '.[0].databaseId')"
   echo "  Inspect: gh release view v$TARGET_VERSION"
 fi

@@ -7,7 +7,7 @@ description: Use when cutting, publishing, or rolling back a tether release — 
 
 ## Overview
 
-One command cuts a release: `scripts/release.sh --patch|--minor|--major`. It bumps 7 version files, gates on CI, pushes, and creates a **draft** GitHub release. CI then builds every artifact and only publishes the release if all of them succeed.
+One command cuts a release: `scripts/release.sh --patch|--minor|--major`. It bumps 7 version files, gates on CI, pushes, and pushes the tag `vX.Y.Z`. The tag starts `Release builds`, which opens a **draft** release, attaches every artifact to it, and publishes only if all four artifact jobs succeed.
 
 **Core invariant: a release becomes public only after every artifact is built.** `install.sh` and `tether update` resolve the GitHub `/releases/latest` API, which excludes drafts. So a failed build leaves users on the previous good release instead of a broken "latest". v2.0.0 published before builds ran, shipped with every desktop bundle broken, and needed an emergency v2.0.1.
 
@@ -29,30 +29,30 @@ Publication is automatic once `desktop`, `ios`, `android`, and `server` all pass
 | Check what publish is waiting on | `gh run view --log-failed` |
 | Inspect the pending draft | `gh release view vX.Y.Z` |
 | Roll back a bad published release | `gh release edit vX.Y.Z --prerelease` |
-| Abandon a draft that can't be fixed | `gh release delete vX.Y.Z` |
+| Abandon a release that can't be fixed | `gh release delete vX.Y.Z --cleanup-tag` |
 
 `--prerelease` is the rollback: the `/releases/latest` API skips prereleases, so `latest` falls back to the previous stable release and installs recover in ~seconds. Do that first, diagnose second.
 
 ## Non-Negotiables
 
-**Never `gh release create` without `--draft`.** Publishing before builds finish is precisely the v2.0.0 failure. The workflow triggers on `release: created`, so a draft still builds everything.
+**Never trigger the workflow from a `release` event.** GitHub does not run workflows for draft releases at all — `created`, `edited`, and `deleted` are all suppressed for drafts, and only `published` fires, which is too late to gate on. This was tried and silently did nothing: the draft was created, no run started. CI cannot be triggered *by* a draft; it has to *create* one. Hence the tag-push trigger.
 
-**Never add `published` to the workflow's trigger types.** The `publish` job publishes; listening for that event too makes the workflow re-trigger itself.
+**Never create the release by hand.** The `draft` job owns it. A release you create yourself skips the gate, which is the entire point of the pipeline.
 
 **Never `--force` past the CI gate to save time.** The gate exists because `release.sh` validates less than CI does — CI also runs server tests, mobile tests, and `build:web`. `build:web` is the check that would have caught v2.0.0. `--force` is for a genuinely broken CI run, not an impatient one.
 
-**A draft release has no git tag.** The tag is created at publish, from the commit `--target` pinned. So inside build jobs `github.ref_name` is the branch, not `vX.Y.Z` — every job reads the version from the workflow-level `TAG` env (`github.event.release.tag_name`). If you add a job that needs the version, use `$TAG`. Using `github.ref_name` bakes `TETHER_VERSION="main"` into the server binary.
+**A tag existing is not a release existing.** `install.sh` and `tether update` both resolve the releases API, which never sees a tag with no published release — that's why pushing the tag up front is safe. Don't "fix" a stuck release by publishing manually.
 
 ## When a Build Leg Fails
 
 The release stays a draft — users are unaffected, so there is no emergency. Fix forward:
 
 1. `gh run view --log-failed` to find the failing leg.
-2. Commit the fix to `main`, let CI go green.
-3. `gh release delete vX.Y.Z` (removes the draft; no tag exists yet, so nothing to clean up).
-4. Re-run `./scripts/release.sh` at the **same** version — pass it explicitly: `./scripts/release.sh 2.0.4`.
+2. If the fix is outside the build (a flaky runner, a transient fetch), just re-run the workflow — the `draft` job reuses the existing draft instead of erroring on the duplicate tag.
+3. Otherwise commit the fix to `main` and let CI go green, then `gh release delete vX.Y.Z --cleanup-tag` to remove both the draft and the tag.
+4. Release the **next** patch version. Re-running `release.sh` at the same version fails: the version files already hold it, so the bump produces no diff and `git commit` aborts.
 
-Do not hand-upload the missing asset and publish manually. That reintroduces the untested-artifact hole the draft gate closes.
+Do not hand-upload the missing asset and publish manually. That reintroduces the untested-artifact hole the gate closes.
 
 ## Known Landmines
 
