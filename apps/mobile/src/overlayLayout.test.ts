@@ -1,4 +1,4 @@
-import { availableOverlayHeight } from './overlayLayout';
+import { availableOverlayHeight, contentRelativeScrollStyle } from './overlayLayout';
 
 test('reserves top offset and bottom breathing room for an overlay menu', () => {
   expect(availableOverlayHeight(640, 76, 12)).toBe(552);
@@ -6,4 +6,12 @@ test('reserves top offset and bottom breathing room for an overlay menu', () => 
 
 test('does not return a negative height on an extremely short viewport', () => {
   expect(availableOverlayHeight(60, 76, 12)).toBe(0);
+});
+
+test('keeps an overflow menu content-sized until it reaches its available height', () => {
+  expect(contentRelativeScrollStyle(552)).toEqual({
+    flexGrow: 0,
+    flexShrink: 1,
+    maxHeight: 552,
+  });
 });
