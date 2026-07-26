@@ -4,7 +4,7 @@
 
 **Goal:** Replace the mobile terminal's four-key D-pad with one 44 px drag-and-hold puck that sends and repeats cardinal terminal arrows.
 
-**Architecture:** Keep `UtilityBar` responsible for encoding and sending terminal bytes through its existing `onArrow` callback. Move gesture classification into `dpadModel.ts` so it can be tested without React Native, and have `Dpad.tsx` use `PanResponder` plus an animated thumb to turn pointer movement into direction transitions and repeat scheduling.
+**Architecture:** Keep `UtilityBar` responsible for encoding, sending terminal bytes, and issuing one light haptic through its existing `onArrow` callback. Move gesture classification into `dpadModel.ts` so it can be tested without React Native, and have `Dpad.tsx` use `PanResponder` plus an animated thumb to turn pointer movement into direction transitions and repeat scheduling.
 
 **Tech Stack:** React Native `PanResponder` and `Animated`, Expo Haptics, TypeScript, Bun tests, Biome, Expo web export.
 
@@ -147,13 +147,9 @@ const activate = (next: DPadDirection | null) => {
   stopRepeat();
   activeRef.current = next;
   if (!next) return;
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   onArrow(next);
   delayRef.current = setTimeout(() => {
-    intervalRef.current = setInterval(() => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      onArrow(activeRef.current!);
-    }, 60);
+    intervalRef.current = setInterval(() => onArrow(activeRef.current!), 60);
   }, 350);
 };
 
@@ -169,7 +165,7 @@ const finish = () => {
 };
 ```
 
-Configure `onStartShouldSetPanResponder` and `onMoveShouldSetPanResponder` to return `true` so a left/right drag beginning on the puck cannot scroll the enclosing horizontal shortcut bar. Call `finish` from release, responder termination, and effect cleanup. Remove `D_PAD_DIRECTIONS` after replacing the four-button JSX. Give the root `accessibilityRole="adjustable"` and label it `Terminal arrow control. Drag in a direction and hold to repeat.`
+Configure `onStartShouldSetPanResponder` and `onMoveShouldSetPanResponder` to return `true` so a left/right drag beginning on the puck cannot scroll the enclosing horizontal shortcut bar. Call `finish` from release, responder termination, and effect cleanup. Remove `D_PAD_DIRECTIONS` after replacing the four-button JSX. Do not add haptics to `Dpad.tsx`: each `onArrow` call reaches `UtilityBar`, which already issues the required light haptic once per emitted arrow. Give the root `accessibilityRole="adjustable"` and label it `Terminal arrow control. Drag in a direction and hold to repeat.`
 
 - [ ] **Step 3: Run tests, typecheck, and inspect the built web UI**
 

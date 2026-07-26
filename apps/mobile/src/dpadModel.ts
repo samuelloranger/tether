@@ -2,14 +2,7 @@ import { MIN_TOUCH_TARGET } from './interaction';
 
 export const D_PAD_BUTTON_SIZE = MIN_TOUCH_TARGET;
 
-export const D_PAD_DIRECTIONS = [
-  { label: 'left', final: 'D' },
-  { label: 'up', final: 'A' },
-  { label: 'down', final: 'B' },
-  { label: 'right', final: 'C' },
-] as const;
-
-export type DPadDirection = (typeof D_PAD_DIRECTIONS)[number]['final'];
+export type DPadDirection = 'A' | 'B' | 'C' | 'D';
 
 export const D_PAD_THRESHOLD = 8;
 

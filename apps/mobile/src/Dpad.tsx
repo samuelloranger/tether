@@ -1,80 +1,98 @@
 import Feather from '@expo/vector-icons/Feather';
-import React, { useEffect, useRef } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Animated, PanResponder, StyleSheet, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import {
+  D_PAD_BUTTON_SIZE,
+  resolveDPadDirection,
+  thumbOffset,
+  type DPadDirection,
+} from './dpadModel';
 
-// Press-and-hold repeat for navigation keys: fire once on press, then repeat
-// after 350ms at 60ms — mirrors hardware key-repeat.
-function RepeatBtn({
-  onFire,
-  style,
-  label,
-  children,
-}: {
-  onFire: () => void;
-  style: object;
-  label: string;
-  children: React.ReactNode;
-}) {
-  const delay = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const iv = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stop = () => {
-    if (delay.current) clearTimeout(delay.current);
-    if (iv.current) clearInterval(iv.current);
-    delay.current = null;
-    iv.current = null;
-  };
-  useEffect(() => stop, []);
-  return (
-    <TouchableOpacity
-      style={style}
-      activeOpacity={0.6}
-      onPressIn={() => {
-        onFire();
-        delay.current = setTimeout(() => {
-          iv.current = setInterval(onFire, 60);
-        }, 350);
-      }}
-      onPressOut={stop}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-    >
-      {children}
-    </TouchableOpacity>
-  );
-}
-
-// Directional pad, styled after the arrow clusters in Blink/Termius: one
-// capsule with three segments (left | up-over-down | right) instead of four
-// separate buttons — reads as a single control and halves the width four
-// loose buttons would cost in an already-tight toolbar.
+// One compact directional puck: drag from center to select an arrow and hold
+// there to repeat. It captures its own gestures so horizontal directions do
+// not compete with the surrounding horizontally scrollable shortcut bar.
 export const ArrowCluster = React.memo(function ArrowCluster({
   onArrow,
 }: {
-  onArrow: (dir: 'A' | 'B' | 'C' | 'D') => void;
+  onArrow: (dir: DPadDirection) => void;
 }) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
+  const onArrowRef = useRef(onArrow);
+  onArrowRef.current = onArrow;
+  const thumb = useRef(new Animated.ValueXY()).current;
+  const activeRef = useRef<DPadDirection | null>(null);
+  const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopRepeat = useCallback(() => {
+    if (delayRef.current) clearTimeout(delayRef.current);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    delayRef.current = null;
+    intervalRef.current = null;
+  }, []);
+
+  const activate = useCallback(
+    (next: DPadDirection | null) => {
+      if (next === activeRef.current) return;
+      stopRepeat();
+      activeRef.current = next;
+      if (!next) return;
+      onArrowRef.current(next);
+      delayRef.current = setTimeout(() => {
+        intervalRef.current = setInterval(() => {
+          const active = activeRef.current;
+          if (active) onArrowRef.current(active);
+        }, 60);
+      }, 350);
+    },
+    [stopRepeat],
+  );
+
+  const update = useCallback(
+    (dx: number, dy: number) => {
+      thumb.setValue(thumbOffset(dx, dy));
+      activate(resolveDPadDirection(dx, dy, activeRef.current));
+    },
+    [activate, thumb],
+  );
+
+  const finish = useCallback(() => {
+    stopRepeat();
+    activeRef.current = null;
+    Animated.spring(thumb, { toValue: { x: 0, y: 0 }, useNativeDriver: true }).start();
+  }, [stopRepeat, thumb]);
+
+  useEffect(() => stopRepeat, [stopRepeat]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => update(0, 0),
+        onPanResponderMove: (_event, gesture) => update(gesture.dx, gesture.dy),
+        onPanResponderRelease: finish,
+        onPanResponderTerminate: finish,
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [finish, update],
+  );
+
   return (
-    <View style={styles.arrowCluster}>
-      <RepeatBtn style={styles.arrowSeg} label="Arrow left" onFire={() => onArrow('D')}>
-        <Feather name="chevron-left" size={18} color={theme.colors.text} />
-      </RepeatBtn>
-      <View style={styles.arrowVDivider} />
-      <View style={styles.arrowMid}>
-        <RepeatBtn style={styles.arrowMidHalf} label="Arrow up" onFire={() => onArrow('A')}>
-          <Feather name="chevron-up" size={15} color={theme.colors.text} />
-        </RepeatBtn>
-        <View style={styles.arrowHDivider} />
-        <RepeatBtn style={styles.arrowMidHalf} label="Arrow down" onFire={() => onArrow('B')}>
-          <Feather name="chevron-down" size={15} color={theme.colors.text} />
-        </RepeatBtn>
-      </View>
-      <View style={styles.arrowVDivider} />
-      <RepeatBtn style={styles.arrowSeg} label="Arrow right" onFire={() => onArrow('C')}>
-        <Feather name="chevron-right" size={18} color={theme.colors.text} />
-      </RepeatBtn>
+    <View
+      {...panResponder.panHandlers}
+      style={styles.arrowCluster}
+      accessibilityRole="adjustable"
+      accessibilityLabel="Terminal arrow control. Drag in a direction and hold to repeat."
+    >
+      <Feather name="move" size={17} color={theme.colors.textFaint} pointerEvents="none" />
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.thumb, { transform: thumb.getTranslateTransform() }]}
+      />
     </View>
   );
 });
@@ -82,32 +100,19 @@ export const ArrowCluster = React.memo(function ArrowCluster({
 const createStyles = (c: AppColors) =>
   StyleSheet.create({
     arrowCluster: {
-      flexDirection: 'row',
-      height: 40,
+      width: D_PAD_BUTTON_SIZE,
+      height: D_PAD_BUTTON_SIZE,
       borderRadius: 8,
       backgroundColor: c.surfaceRaised,
-      overflow: 'hidden',
-    },
-    arrowSeg: {
-      width: 38,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    arrowMid: {
-      width: 34,
-    },
-    arrowMidHalf: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    arrowVDivider: {
-      width: 1,
-      backgroundColor: c.border,
-    },
-    arrowHDivider: {
-      height: 1,
-      marginHorizontal: 8,
-      backgroundColor: c.border,
+    thumb: {
+      position: 'absolute',
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: c.accent,
+      opacity: 0.88,
     },
   });

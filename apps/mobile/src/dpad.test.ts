@@ -1,19 +1,12 @@
 import {
   D_PAD_BUTTON_SIZE,
-  D_PAD_DIRECTIONS,
   resolveDPadDirection,
   thumbOffset,
 } from './dpadModel';
 import { MIN_TOUCH_TARGET } from './interaction';
 
-test('D-pad gives every direction a full touch target and binds Down to B', () => {
+test('D-pad is a full touch target', () => {
   expect(D_PAD_BUTTON_SIZE).toBe(MIN_TOUCH_TARGET);
-  expect(D_PAD_DIRECTIONS).toEqual([
-    { label: 'left', final: 'D' },
-    { label: 'up', final: 'A' },
-    { label: 'down', final: 'B' },
-    { label: 'right', final: 'C' },
-  ]);
 });
 
 test('D-pad remains neutral inside the center threshold', () => {
