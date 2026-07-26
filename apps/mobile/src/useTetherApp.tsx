@@ -1086,11 +1086,11 @@ export function useTetherApp() {
   };
 
   // Open a frozen, natively selectable snapshot of the current transcript.
-  const openSelectionView = () => {
-    const snapshot = entryFor(activeIdRef.current).term.getSnapshot();
-    if (!snapshotText(snapshot)) return;
+  const openSelectionView = async () => {
     setMenuOpen(false);
     setSearchQuery('');
+    const snapshot = await entryFor(activeIdRef.current).term.getSettledSnapshot();
+    if (!snapshotText(snapshot)) return;
     setScreen(snapshot);
     setSelectionViewOpen(true);
   };

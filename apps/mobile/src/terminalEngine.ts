@@ -411,6 +411,11 @@ export class TerminalEngine {
     return new Promise((resolve) => this.term.write('', resolve));
   }
 
+  async getSettledSnapshot(): Promise<RenderRow[]> {
+    await this.drain();
+    return this.getSnapshot();
+  }
+
   serialize(): string {
     return this.serializeAddon.serialize();
   }

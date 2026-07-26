@@ -31,6 +31,13 @@ test('plain text lands on row 0', async () => {
   expect(rowText(t, 0)).toBe('hello');
 });
 
+test('settled snapshot includes output still queued in xterm', async () => {
+  const t = new TerminalEngine(20, 5);
+  t.write('latest');
+  const snapshot = await t.getSettledSnapshot();
+  expect(snapshot[0].runs.map((run) => run.text).join('').trimEnd()).toBe('latest');
+});
+
 test('truecolor SGR sets run fg', async () => {
   const t = new TerminalEngine(20, 5);
   await write(t, `${E}[38;2;255;0;0mR${E}[0m`);
