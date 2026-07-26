@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { registerTetherLinks } from '../src/terminalRendererLinks';
 import type { RendererCommand, RendererEvent } from '../src/terminalRendererProtocol';
+import { touchScrollLines } from '../src/terminalTouchScroll';
 
 declare global {
   interface Window {
@@ -29,6 +30,41 @@ const terminal = new Terminal({
 const fit = new FitAddon();
 terminal.loadAddon(fit);
 terminal.open(document.getElementById('terminal')!);
+
+let lastTouchY: number | null = null;
+let touchRemainder = 0;
+terminal.element!.addEventListener(
+  'touchstart',
+  (event) => {
+    if (event.touches.length !== 1) {
+      lastTouchY = null;
+      return;
+    }
+    lastTouchY = event.touches[0].clientY;
+    touchRemainder = 0;
+  },
+  { passive: true },
+);
+terminal.element!.addEventListener(
+  'touchmove',
+  (event) => {
+    if (lastTouchY === null || event.touches.length !== 1) return;
+    const currentY = event.touches[0].clientY;
+    const screenHeight =
+      terminal.element!.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect().height ??
+      0;
+    const result = touchScrollLines(lastTouchY - currentY, touchRemainder, screenHeight / terminal.rows);
+    lastTouchY = currentY;
+    touchRemainder = result.remainder;
+    if (result.lines) terminal.scrollLines(result.lines);
+    event.preventDefault();
+  },
+  { passive: false },
+);
+terminal.element!.addEventListener('touchend', () => {
+  lastTouchY = null;
+  touchRemainder = 0;
+});
 
 registerTetherLinks(terminal, (target) => post({ type: 'openLink', target }));
 terminal.onData((text) => post({ type: 'input', text }));
