@@ -3,7 +3,16 @@ import type { LinkTarget } from './links';
 export type RendererTheme = { foreground: string; background: string };
 
 export type RendererCommand =
-  | { v: 1; type: 'hydrate'; data: string; cols: number; rows: number; theme: RendererTheme }
+  | {
+      v: 1;
+      type: 'hydrate';
+      data: string;
+      cols: number;
+      rows: number;
+      theme: RendererTheme;
+      fontFamily: string;
+      fontSize: number;
+    }
   | { v: 1; type: 'write'; data: string }
   | { v: 1; type: 'resize'; cols: number; rows: number }
   | { v: 1; type: 'focus' }
@@ -72,8 +81,24 @@ export class RendererQueue {
 
   constructor(private send: (command: RendererCommand) => void) {}
 
-  hydrate(data: string, cols: number, rows: number, theme: RendererTheme): void {
-    this.latestHydrate = { v: 1, type: 'hydrate', data, cols, rows, theme };
+  hydrate(
+    data: string,
+    cols: number,
+    rows: number,
+    theme: RendererTheme,
+    fontFamily: string,
+    fontSize: number,
+  ): void {
+    this.latestHydrate = {
+      v: 1,
+      type: 'hydrate',
+      data,
+      cols,
+      rows,
+      theme,
+      fontFamily,
+      fontSize,
+    };
     this.hydrated = false;
     this.flush();
   }

@@ -5,5 +5,5 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true
   },
-  "exclude": ["src-tauri", "dist", "**/*.test.ts"]
+  "exclude": ["src-tauri", "dist", "scripts", "terminal-renderer", "**/*.test.ts"]
 }
