@@ -2,6 +2,7 @@ import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { changeBannerLabel, type DiffSummary } from './diffModel';
+import { MIN_TOUCH_TARGET } from './interaction';
 
 export function ChangeBanner({ summary, onPress }: { summary: DiffSummary; onPress: () => void }) {
   const { theme } = useAppTheme();
@@ -32,6 +33,7 @@ function createStyles(c: AppColors) {
       backgroundColor: c.surfaceRaised,
       borderBottomWidth: 1,
       borderBottomColor: c.border,
+      minHeight: MIN_TOUCH_TARGET,
       paddingVertical: 6,
       paddingHorizontal: 16,
       flexDirection: 'row',

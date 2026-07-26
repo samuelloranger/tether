@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { useAppTheme } from './AppThemeProvider';
 import { CodeHighlight } from './CodeHighlight';
 import { type FileView, lineOffset } from './fileView';
+import { MIN_TOUCH_TARGET } from './interaction';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 
@@ -64,7 +65,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     minHeight: 48,
   },
-  back: { paddingHorizontal: 16, paddingVertical: 12 },
+  back: {
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   backText: { ...TEXT_METRICS },
   path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
   vertical: { flex: 1 },

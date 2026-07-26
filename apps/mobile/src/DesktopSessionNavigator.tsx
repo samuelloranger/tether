@@ -3,11 +3,13 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
-import { type DesktopNavigationMode, PANEL_W, sessionActivity } from './desktopNavigation';
+import { isRecentlyActive, type DesktopNavigationMode, PANEL_W } from './desktopNavigation';
 import { confirmAction } from './dialog';
 import type { Presentation } from './presentations';
 import type { DrawerSession } from './SessionDrawer';
 import { sessionLabel } from './sessionLabel';
+import { activityDotKey, terminalAccessibilityLabel } from './activity';
+import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 
 export interface DesktopSessionNavigatorProps {
   mode: DesktopNavigationMode;
@@ -23,7 +25,6 @@ export interface DesktopSessionNavigatorProps {
   onSettings: () => void;
 }
 
-const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 const COMPACT_TEXT = { includeFontPadding: false } as const;
 
 function confirmKill(id: string, onKill: (id: string) => void) {
@@ -59,7 +60,7 @@ function SessionPanel({
         </View>
         <TouchableOpacity
           style={styles.settings}
-          hitSlop={HIT}
+          hitSlop={HIT_SLOP}
           activeOpacity={0.6}
           onPress={onSettings}
           accessibilityRole="button"
@@ -73,6 +74,8 @@ function SessionPanel({
         {sessions.map((session) => {
           const active = activePreviewId === null && session.id === activeId;
           const label = sessionLabel(session);
+          const live = active || isRecentlyActive(session.last_output_at);
+          const dotKey = activityDotKey(session.status, session.activity, live);
           return (
             <View key={session.id} style={[styles.row, active && styles.rowActive]}>
               <TouchableOpacity
@@ -81,18 +84,25 @@ function SessionPanel({
                 onPress={() => onSelect(session.id)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={`Terminal ${label}`}
+                accessibilityLabel={terminalAccessibilityLabel(
+                  label,
+                  session.status,
+                  session.activity,
+                  live,
+                )}
               >
                 <View
                   style={[
                     styles.dot,
                     {
                       backgroundColor:
-                        sessionActivity(session, active) === 'live'
+                        dotKey === 'working'
                           ? theme.colors.success
-                          : sessionActivity(session, active) === 'stopped'
-                            ? theme.colors.textFaint
-                            : theme.colors.border,
+                          : dotKey === 'waiting'
+                            ? theme.colors.warning
+                            : dotKey === 'stopped'
+                              ? theme.colors.textFaint
+                              : theme.colors.border,
                     },
                   ]}
                 />
@@ -103,7 +113,7 @@ function SessionPanel({
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.kill}
-                hitSlop={HIT}
+                hitSlop={HIT_SLOP}
                 activeOpacity={0.6}
                 onPress={() => confirmKill(session.id, onKill)}
                 accessibilityRole="button"
@@ -133,7 +143,7 @@ function SessionPanel({
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.kill}
-                hitSlop={HIT}
+                hitSlop={HIT_SLOP}
                 activeOpacity={0.6}
                 onPress={() => onClosePreview(preview.id)}
                 accessibilityRole="button"
@@ -225,6 +235,8 @@ export function DesktopSessionNavigator({
       {sessions.map((session) => {
         const active = activePreviewId === null && session.id === activeId;
         const label = sessionLabel(session);
+        const live = active || isRecentlyActive(session.last_output_at);
+        const dotKey = activityDotKey(session.status, session.activity, live);
         return (
           <View key={session.id} style={[styles.tab, active && styles.tabActive]}>
             <TouchableOpacity
@@ -233,18 +245,25 @@ export function DesktopSessionNavigator({
               onPress={() => onSelect(session.id)}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={`Terminal ${label}`}
+              accessibilityLabel={terminalAccessibilityLabel(
+                label,
+                session.status,
+                session.activity,
+                live,
+              )}
             >
               <View
                 style={[
                   styles.dot,
                   {
                     backgroundColor:
-                      sessionActivity(session, active) === 'live'
+                      dotKey === 'working'
                         ? theme.colors.success
-                        : sessionActivity(session, active) === 'stopped'
-                          ? theme.colors.textFaint
-                          : theme.colors.border,
+                        : dotKey === 'waiting'
+                          ? theme.colors.warning
+                          : dotKey === 'stopped'
+                            ? theme.colors.textFaint
+                            : theme.colors.border,
                   },
                 ]}
               />
@@ -254,7 +273,7 @@ export function DesktopSessionNavigator({
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.tabKill}
-              hitSlop={HIT}
+              hitSlop={HIT_SLOP}
               activeOpacity={0.6}
               onPress={() => confirmKill(session.id, onKill)}
               accessibilityRole="button"
@@ -284,7 +303,7 @@ export function DesktopSessionNavigator({
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.tabKill}
-              hitSlop={HIT}
+              hitSlop={HIT_SLOP}
               activeOpacity={0.6}
               onPress={() => onClosePreview(preview.id)}
               accessibilityRole="button"
@@ -322,13 +341,24 @@ const createStyles = (c: AppColors) =>
       textTransform: 'uppercase',
       ...COMPACT_TEXT,
     },
-    settings: { padding: 3 },
+    settings: {
+      minWidth: MIN_TOUCH_TARGET,
+      minHeight: MIN_TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     list: { flex: 1, paddingVertical: 6 },
-    row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 6, borderRadius: 6 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginHorizontal: 6,
+      borderRadius: SURFACE_RADIUS.control,
+    },
     rowActive: { backgroundColor: c.selected },
     rowMain: {
       flex: 1,
       minWidth: 0,
+      minHeight: MIN_TOUCH_TARGET,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
@@ -346,7 +376,12 @@ const createStyles = (c: AppColors) =>
     },
     nameActive: { color: c.text, fontWeight: '600' },
     stopped: { color: c.textFaint, fontSize: 10, lineHeight: 12, marginRight: 4, ...COMPACT_TEXT },
-    kill: { padding: 7 },
+    kill: {
+      minWidth: MIN_TOUCH_TARGET,
+      minHeight: MIN_TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     newButton: {
       flexDirection: 'row',
       justifyContent: 'center',
@@ -354,7 +389,8 @@ const createStyles = (c: AppColors) =>
       gap: 8,
       margin: 12,
       paddingVertical: 10,
-      borderRadius: 7,
+      borderRadius: SURFACE_RADIUS.control,
+      minHeight: MIN_TOUCH_TARGET,
       backgroundColor: c.accent,
     },
     newButtonText: { color: c.accentText, fontSize: 13, fontWeight: '700' },
@@ -391,6 +427,7 @@ const createStyles = (c: AppColors) =>
       alignItems: 'center',
       gap: 7,
       minWidth: 0,
+      minHeight: MIN_TOUCH_TARGET,
       paddingLeft: 12,
       paddingVertical: 10,
     },
@@ -402,5 +439,10 @@ const createStyles = (c: AppColors) =>
       maxWidth: 150,
       ...COMPACT_TEXT,
     },
-    tabKill: { padding: 8 },
+    tabKill: {
+      minWidth: MIN_TOUCH_TARGET,
+      minHeight: MIN_TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
   });

@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { type ActivityRow, activityDotKey, activityLabel, newlyWaiting } from './activity';
+import {
+  type ActivityRow,
+  activityDotKey,
+  activityLabel,
+  newlyWaiting,
+  terminalAccessibilityLabel,
+} from './activity';
 
 describe('activityDotKey', () => {
   test('stopped wins regardless of activity', () => {
@@ -23,6 +29,12 @@ test('activityLabel covers every key', () => {
   expect(activityLabel('working')).toBe('working');
   expect(activityLabel('idle')).toBe('idle');
   expect(activityLabel('stopped')).toBe('stopped');
+});
+
+test('terminal accessibility labels expose a session name and its actionable activity', () => {
+  expect(terminalAccessibilityLabel('Build agent', 'running', 'waiting', false)).toBe(
+    'Terminal Build agent, needs input',
+  );
 });
 
 describe('newlyWaiting', () => {
