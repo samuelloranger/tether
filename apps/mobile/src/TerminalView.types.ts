@@ -25,4 +25,5 @@ export interface TerminalViewProps {
   onOpenLink(target: LinkTarget): void;
   onSelection?(text: string): void;
   onFallback(reason: string): void;
+  onRecover(): void;
 }

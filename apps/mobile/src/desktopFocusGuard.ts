@@ -21,17 +21,21 @@ export function shouldForwardToTerminal(
 ): boolean {
   if (!terminalVisible) return false;
   if (!el || isBody) return true;
-  const onTerminal = el.id === 'tether-terminal' || !!el.closest?.('#tether-terminal');
-  if (onTerminal) return true;
   const tag = el.tagName;
-  const role = el.getAttribute('role');
   if (
     tag === 'INPUT' ||
     tag === 'TEXTAREA' ||
     tag === 'SELECT' ||
+    el.isContentEditable
+  ) {
+    return false;
+  }
+  const onTerminal = el.id === 'tether-terminal' || !!el.closest?.('#tether-terminal');
+  if (onTerminal) return true;
+  const role = el.getAttribute('role');
+  if (
     tag === 'BUTTON' ||
     tag === 'A' ||
-    el.isContentEditable ||
     role === 'button' ||
     role === 'link' ||
     role === 'menuitem' ||

@@ -6,7 +6,7 @@ import { parseRendererEvent, RendererQueue } from './terminalRendererProtocol';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ onInput, onResize, onOpenLink, onSelection, onFallback }, ref) => {
+  ({ onInput, onResize, onOpenLink, onSelection, onFallback, onRecover }, ref) => {
     const webView = useRef<WebView>(null);
     const queue = useMemo(
       () =>
@@ -59,7 +59,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     };
 
     const recover = () => {
-      queue.notReady();
+      queue.recover(onRecover);
       webView.current?.reload();
     };
 

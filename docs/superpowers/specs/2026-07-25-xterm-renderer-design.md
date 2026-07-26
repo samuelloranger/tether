@@ -1,7 +1,7 @@
 # Full xterm.js Renderer
 
-**Date:** 2026-07-25  
-**Board:** #395  
+**Date:** 2026-07-25
+**Board:** #395
 **Status:** Approved direction; implementation gated by the feasibility test below
 
 ## Problem

@@ -52,6 +52,32 @@ test('RendererQueue hydrates before writes and survives a remount', () => {
   expect(sent.at(-1)).toEqual({ v: 1, type: 'write', data: 'remount' });
 });
 
+test('RendererQueue recovery replaces stale state before queued live writes', () => {
+  const sent: RendererCommand[] = [];
+  const queue = new RendererQueue((command) => sent.push(command));
+  const hydrate = (data: string) =>
+    queue.hydrate(
+      data,
+      80,
+      24,
+      { foreground: '#fff', background: '#000' },
+      'monospace',
+      12,
+    );
+
+  hydrate('old state');
+  queue.ready();
+  queue.write('already rendered');
+  queue.recover(() => hydrate('fresh state'));
+  queue.write('during recovery');
+  queue.ready();
+
+  expect(sent.slice(-2)).toEqual([
+    expect.objectContaining({ type: 'hydrate', data: 'fresh state' }),
+    { v: 1, type: 'write', data: 'during recovery' },
+  ]);
+});
+
 test('RendererQueue replaces React Native font keys at the native WebView boundary', () => {
   const sent: RendererCommand[] = [];
   const queue = new RendererQueue((command) => sent.push(command), { native: true });

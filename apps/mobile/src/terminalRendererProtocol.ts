@@ -143,6 +143,11 @@ export class RendererQueue {
     this.hydrated = false;
   }
 
+  recover(rehydrate: () => void): void {
+    this.notReady();
+    rehydrate();
+  }
+
   clear(): void {
     this.pendingWrites = [];
   }

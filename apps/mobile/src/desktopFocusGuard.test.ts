@@ -29,6 +29,17 @@ describe('shouldForwardToTerminal', () => {
       ),
     ).toBe(true);
   });
+  it('leaves xterm helper textarea input to xterm', () => {
+    expect(
+      shouldForwardToTerminal(
+        el({
+          tagName: 'TEXTAREA',
+          closest: (sel) => (sel === '#tether-terminal' ? {} : null),
+        }),
+        false,
+      ),
+    ).toBe(false);
+  });
   it('does not forward when a real text field is focused', () => {
     expect(shouldForwardToTerminal(el({ tagName: 'INPUT' }), false)).toBe(false);
     expect(shouldForwardToTerminal(el({ tagName: 'TEXTAREA' }), false)).toBe(false);

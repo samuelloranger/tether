@@ -535,6 +535,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                       onOpenLink={openFile}
                       onSelection={onRendererSelection}
                       onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
+                      onRecover={hydrateRenderer}
                     />
                   </DragDropContentView>
                 ) : (
@@ -545,6 +546,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     onOpenLink={openFile}
                     onSelection={onRendererSelection}
                     onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
+                    onRecover={hydrateRenderer}
                   />
                 )}
               </View>
