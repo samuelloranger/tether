@@ -70,6 +70,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         originWhitelist={['*']}
         javaScriptEnabled
         scrollEnabled
+        hideKeyboardAccessoryView
         bounces={false}
         overScrollMode="never"
         style={styles.view}
