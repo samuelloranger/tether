@@ -14,6 +14,7 @@ Replace the terminal shortcut bar's four-button D-pad with one compact direction
 - Crossing into another direction sends that direction once and restarts the repeat delay.
 - Releasing always cancels timers and restores neutral state.
 - The visual thumb moves toward the active direction and springs back on release. Every emitted arrow, including held-repeat ticks, triggers light haptic feedback.
+- Its idle thumb uses a thin horizontal-and-vertical axis with four small chevrons, rather than a filled dot or generic move glyph.
 
 ## Architecture
 

@@ -92,7 +92,14 @@ export const ArrowCluster = React.memo(function ArrowCluster({
         pointerEvents="none"
         style={{ transform: thumb.getTranslateTransform() }}
       >
-        <Feather name="move" size={18} color={theme.colors.text} />
+        <View style={styles.axisGlyph}>
+          <View style={[styles.axisLine, styles.axisHorizontal]} />
+          <View style={[styles.axisLine, styles.axisVertical]} />
+          <Feather name="chevron-left" size={11} color={theme.colors.text} style={styles.chevronLeft} />
+          <Feather name="chevron-up" size={11} color={theme.colors.text} style={styles.chevronUp} />
+          <Feather name="chevron-down" size={11} color={theme.colors.text} style={styles.chevronDown} />
+          <Feather name="chevron-right" size={11} color={theme.colors.text} style={styles.chevronRight} />
+        </View>
       </Animated.View>
     </View>
   );
@@ -107,5 +114,46 @@ const createStyles = (c: AppColors) =>
       backgroundColor: c.surfaceRaised,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    axisGlyph: {
+      width: 22,
+      height: 22,
+      position: 'relative',
+    },
+    axisLine: {
+      position: 'absolute',
+      backgroundColor: c.textMuted,
+    },
+    axisHorizontal: {
+      top: 10.5,
+      left: 4,
+      right: 4,
+      height: 1,
+    },
+    axisVertical: {
+      top: 4,
+      bottom: 4,
+      left: 10.5,
+      width: 1,
+    },
+    chevronLeft: {
+      position: 'absolute',
+      left: 0,
+      top: 5.5,
+    },
+    chevronUp: {
+      position: 'absolute',
+      top: 0,
+      left: 5.5,
+    },
+    chevronDown: {
+      position: 'absolute',
+      bottom: 0,
+      left: 5.5,
+    },
+    chevronRight: {
+      position: 'absolute',
+      right: 0,
+      top: 5.5,
     },
   });
