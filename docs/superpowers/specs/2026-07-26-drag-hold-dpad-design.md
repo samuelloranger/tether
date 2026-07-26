@@ -13,7 +13,7 @@ Replace the terminal shortcut bar's four-button D-pad with one compact direction
 - Holding that direction repeats after 350 ms, then every 60 ms.
 - Crossing into another direction sends that direction once and restarts the repeat delay.
 - Releasing always cancels timers and restores neutral state.
-- The visual thumb moves toward the active direction and springs back on release. Haptics fire on direction selection or change, never on repeats.
+- The visual thumb moves toward the active direction and springs back on release. Every emitted arrow, including held-repeat ticks, triggers light haptic feedback.
 
 ## Architecture
 
