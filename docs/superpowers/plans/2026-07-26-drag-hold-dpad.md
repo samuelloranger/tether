@@ -63,7 +63,7 @@ test('D-pad keeps its active direction near an axis boundary', () => {
 });
 
 test('D-pad thumb stays bounded inside its control', () => {
-  expect(thumbOffset(100, -100)).toEqual({ x: 11, y: -11 });
+  expect(thumbOffset(100, -100)).toEqual({ x: 8, y: -8 });
 });
 ```
 
