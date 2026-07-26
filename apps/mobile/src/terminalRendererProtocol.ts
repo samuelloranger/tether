@@ -89,6 +89,7 @@ export class RendererQueue {
     fontFamily: string,
     fontSize: number,
   ): void {
+    if (this.latestHydrate) this.pendingWrites = [];
     this.latestHydrate = {
       v: 1,
       type: 'hydrate',

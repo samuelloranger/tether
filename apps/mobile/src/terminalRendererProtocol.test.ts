@@ -51,6 +51,30 @@ test('RendererQueue hydrates before writes and survives a remount', () => {
   expect(sent.at(-1)).toEqual({ v: 1, type: 'write', data: 'remount' });
 });
 
+test('RendererQueue drops writes belonging to a superseded hydration', () => {
+  const sent: RendererCommand[] = [];
+  const queue = new RendererQueue((command) => sent.push(command));
+  const theme = { foreground: '#fff', background: '#000' };
+  queue.hydrate('term-1', 80, 24, theme, 'monospace', 12);
+  queue.write('stale');
+  queue.hydrate('term-2', 100, 30, theme, 'monospace', 12);
+  queue.write('fresh');
+  queue.ready();
+  expect(sent).toEqual([
+    {
+      v: 1,
+      type: 'hydrate',
+      data: 'term-2',
+      cols: 100,
+      rows: 30,
+      theme,
+      fontFamily: 'monospace',
+      fontSize: 12,
+    },
+    { v: 1, type: 'write', data: 'fresh' },
+  ]);
+});
+
 test('OutputBatcher joins active-session chunks into one delivery', () => {
   const scheduled: (() => void)[] = [];
   const writes: string[] = [];
