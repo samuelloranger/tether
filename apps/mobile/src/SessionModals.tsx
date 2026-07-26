@@ -11,6 +11,7 @@ import {
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { THEME_OPTIONS } from './appTheme';
+import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { MONO } from './styles';
 
 const THEME_LABELS = {
@@ -225,7 +226,7 @@ function createStyles(c: AppColors) {
       width: '100%',
       maxWidth: 360,
       backgroundColor: c.surface,
-      borderRadius: 12,
+      borderRadius: SURFACE_RADIUS.panel,
       borderWidth: 1,
       borderColor: c.border,
       padding: 20,
@@ -238,7 +239,8 @@ function createStyles(c: AppColors) {
     },
     renameInput: {
       backgroundColor: c.input,
-      borderRadius: 8,
+      minHeight: MIN_TOUCH_TARGET,
+      borderRadius: SURFACE_RADIUS.control,
       paddingHorizontal: 12,
       paddingVertical: 10,
       color: c.text,
@@ -250,8 +252,9 @@ function createStyles(c: AppColors) {
       gap: 20,
     },
     renameBtn: {
-      paddingHorizontal: 4,
-      paddingVertical: 4,
+      minHeight: MIN_TOUCH_TARGET,
+      paddingHorizontal: 8,
+      justifyContent: 'center',
     },
     renameBtnText: {
       fontSize: 14,
@@ -270,7 +273,8 @@ function createStyles(c: AppColors) {
     snippetSend: {
       flex: 1,
       backgroundColor: c.input,
-      borderRadius: 8,
+      minHeight: MIN_TOUCH_TARGET,
+      borderRadius: SURFACE_RADIUS.control,
       paddingHorizontal: 12,
       paddingVertical: 10,
     },
@@ -280,7 +284,10 @@ function createStyles(c: AppColors) {
       fontFamily: MONO,
     },
     snippetDelete: {
-      padding: 8,
+      minWidth: MIN_TOUCH_TARGET,
+      minHeight: MIN_TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     snippetAddRow: {
       flexDirection: 'row',
@@ -288,9 +295,9 @@ function createStyles(c: AppColors) {
       gap: 8,
     },
     snippetAddBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 8,
+      width: MIN_TOUCH_TARGET,
+      height: MIN_TOUCH_TARGET,
+      borderRadius: SURFACE_RADIUS.control,
       backgroundColor: c.input,
       justifyContent: 'center',
       alignItems: 'center',

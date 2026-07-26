@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { type DesktopNavigationMode, desktopNavigationLabel } from './desktopNavigation';
+import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop } from './platform';
 
 // Header ⋯ overflow menu. Actions are passed in; the parent closes the menu.
@@ -73,7 +74,9 @@ export function OverflowMenu({
             <TouchableOpacity
               style={styles.fontStepBtn}
               onPress={() => onFontDelta(-1)}
+              accessibilityRole="button"
               accessibilityLabel="Decrease font size"
+              hitSlop={HIT_SLOP}
             >
               <Text style={styles.fontStepText}>−</Text>
             </TouchableOpacity>
@@ -81,7 +84,9 @@ export function OverflowMenu({
             <TouchableOpacity
               style={styles.fontStepBtn}
               onPress={() => onFontDelta(1)}
+              accessibilityRole="button"
               accessibilityLabel="Increase font size"
+              hitSlop={HIT_SLOP}
             >
               <Text style={styles.fontStepText}>+</Text>
             </TouchableOpacity>
@@ -174,7 +179,7 @@ export function OverflowMenu({
               <Text style={styles.menuRowText}>Check for updates</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={styles.menuRow} onPress={onRestart}>
+          <TouchableOpacity style={[styles.menuRow, styles.menuRowDestructive]} onPress={onRestart}>
             <Feather name="refresh-cw" size={16} color={theme.colors.danger} />
             <Text style={[styles.menuRowText, { color: theme.colors.danger }]}>
               Restart terminal
@@ -199,7 +204,7 @@ const createStyles = (c: AppColors) =>
       marginRight: 12,
       minWidth: 240,
       backgroundColor: c.surface,
-      borderRadius: 12,
+      borderRadius: SURFACE_RADIUS.panel,
       borderWidth: 1,
       borderColor: c.border,
       paddingVertical: 6,
@@ -208,6 +213,7 @@ const createStyles = (c: AppColors) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
+      minHeight: MIN_TOUCH_TARGET,
       paddingHorizontal: 16,
       paddingVertical: 12,
     },
@@ -217,9 +223,9 @@ const createStyles = (c: AppColors) =>
       color: c.text,
     },
     fontStepBtn: {
-      width: 30,
-      height: 30,
-      borderRadius: 6,
+      width: MIN_TOUCH_TARGET,
+      height: MIN_TOUCH_TARGET,
+      borderRadius: SURFACE_RADIUS.control,
       backgroundColor: c.surfaceRaised,
       justifyContent: 'center',
       alignItems: 'center',
@@ -257,7 +263,9 @@ const createStyles = (c: AppColors) =>
     navigationButton: {
       flex: 1,
       alignItems: 'center',
-      borderRadius: 6,
+      minHeight: MIN_TOUCH_TARGET,
+      justifyContent: 'center',
+      borderRadius: SURFACE_RADIUS.control,
       backgroundColor: c.surfaceRaised,
       paddingVertical: 7,
     },
@@ -271,5 +279,10 @@ const createStyles = (c: AppColors) =>
     },
     navigationButtonTextActive: {
       color: c.accent,
+    },
+    menuRowDestructive: {
+      borderTopWidth: 1,
+      borderTopColor: c.border,
+      marginTop: 6,
     },
   });

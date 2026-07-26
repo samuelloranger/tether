@@ -21,6 +21,7 @@ import {
 } from './diffModel';
 import { FileTree } from './FileTree';
 import { ImageDiff } from './ImageDiff';
+import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { SideBySideDiff } from './SideBySideDiff';
 import type { GitLogEntry } from './useTetherApp';
 
@@ -353,11 +354,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     minHeight: 48,
   },
-  back: { paddingHorizontal: 16, paddingVertical: 12 },
+  back: {
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   backText: { ...TEXT_METRICS },
   path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
   tabs: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
-  tab: { paddingHorizontal: 16, paddingVertical: 10 },
+  tab: {
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   vertical: { flex: 1 },
   content: { padding: 16, alignItems: 'stretch' },
@@ -369,7 +380,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 4,
   },
-  commitRow: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 2 },
+  commitRow: {
+    minHeight: MIN_TOUCH_TARGET,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 2,
+  },
   commitSubject: { fontSize: 14 },
   commitMeta: { fontFamily: 'monospace', fontSize: 12 },
   commitBar: {
@@ -382,14 +398,15 @@ const styles = StyleSheet.create({
   commitInput: {
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
+    borderRadius: SURFACE_RADIUS.control,
     paddingHorizontal: 10,
     paddingVertical: 8,
     maxHeight: 96,
     fontSize: 14,
   },
   commitButton: {
-    borderRadius: 8,
+    minHeight: MIN_TOUCH_TARGET,
+    borderRadius: SURFACE_RADIUS.control,
     paddingHorizontal: 16,
     paddingVertical: 10,
     alignItems: 'center',

@@ -4,6 +4,7 @@ import { Keyboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from '
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { ArrowCluster } from './Dpad';
+import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { MONO } from './styles';
 
 // Mobile terminal-shortcuts utility bar — desktop uses the real keyboard.
@@ -38,6 +39,9 @@ export function UtilityBar({
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             setCtrlArmed((v) => !v);
           }}
+          accessibilityRole="button"
+          accessibilityLabel="Control modifier"
+          accessibilityState={{ selected: ctrlArmed }}
         >
           <Text style={[styles.utilityBtnText, ctrlArmed && styles.utilityBtnTextActive]}>
             Ctrl
@@ -132,10 +136,10 @@ const createStyles = (c: AppColors) =>
       gap: 6,
     },
     utilityBtn: {
-      height: 40,
+      minHeight: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       paddingHorizontal: 14,
-      borderRadius: 8,
+      borderRadius: SURFACE_RADIUS.control,
       backgroundColor: c.surfaceRaised,
     },
     utilityBtnText: {
@@ -151,9 +155,9 @@ const createStyles = (c: AppColors) =>
       color: c.accentText,
     },
     utilityIconBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 8,
+      width: MIN_TOUCH_TARGET,
+      height: MIN_TOUCH_TARGET,
+      borderRadius: SURFACE_RADIUS.control,
       backgroundColor: c.surfaceRaised,
       justifyContent: 'center',
       alignItems: 'center',
