@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import type { Terminal } from '@xterm/xterm';
 import {
   OutputBatcher,
   parseRendererEvent,
   RendererQueue,
   type RendererCommand,
 } from './terminalRendererProtocol';
-import { rendererLinksForRow } from './terminalRendererLinks';
+import { registerTetherLinks, rendererLinksForRow } from './terminalRendererLinks';
 
 describe('parseRendererEvent', () => {
   test('accepts known versioned events and rejects malformed data', () => {
@@ -161,5 +162,24 @@ test('renderer links preserve a wrapped target and convert columns to xterm coor
       text: 'src/app.ts:12:3',
       target: { kind: 'file', path: 'src/app.ts', line: 12, column: 3 },
     },
+  ]);
+});
+
+test('OSC 8 links use the app link handler instead of WebView navigation', () => {
+  const opened: unknown[] = [];
+  const terminal = {
+    options: {},
+    registerLinkProvider: () => ({ dispose() {} }),
+  } as unknown as Terminal;
+
+  registerTetherLinks(terminal, (target) => opened.push(target));
+  terminal.options.linkHandler?.activate(
+    {} as MouseEvent,
+    'https://example.com/from-osc-8',
+    {} as never,
+  );
+
+  expect(opened).toEqual([
+    { kind: 'external', url: 'https://example.com/from-osc-8' },
   ]);
 });

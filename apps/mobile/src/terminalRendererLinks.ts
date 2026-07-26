@@ -28,6 +28,9 @@ export function registerTetherLinks(
   terminal: Terminal,
   activate: (target: LinkTarget) => void,
 ): IDisposable {
+  terminal.options.linkHandler = {
+    activate: (_event, url) => activate({ kind: 'external', url }),
+  };
   return terminal.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
       const buffer = terminal.buffer.active;
