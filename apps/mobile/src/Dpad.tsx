@@ -88,11 +88,12 @@ export const ArrowCluster = React.memo(function ArrowCluster({
       accessibilityRole="adjustable"
       accessibilityLabel="Terminal arrow control. Drag in a direction and hold to repeat."
     >
-      <Feather name="move" size={17} color={theme.colors.textFaint} pointerEvents="none" />
       <Animated.View
         pointerEvents="none"
-        style={[styles.thumb, { transform: thumb.getTranslateTransform() }]}
-      />
+        style={{ transform: thumb.getTranslateTransform() }}
+      >
+        <Feather name="move" size={18} color={theme.colors.text} />
+      </Animated.View>
     </View>
   );
 });
@@ -106,13 +107,5 @@ const createStyles = (c: AppColors) =>
       backgroundColor: c.surfaceRaised,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    thumb: {
-      position: 'absolute',
-      width: 16,
-      height: 16,
-      borderRadius: 8,
-      backgroundColor: c.accent,
-      opacity: 0.88,
     },
   });
