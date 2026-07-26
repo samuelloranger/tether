@@ -48,6 +48,17 @@ test('bold + wide char occupy correct columns', async () => {
   expect(s.runs.find((r) => r.text.includes('A'))?.style.bold).toBe(true);
 });
 
+test('serialize restores scrollback, styles and cursor content', async () => {
+  const source = new TerminalEngine(20, 5);
+  await write(source, `${E}[31mred${E}[0m\r\none\r\ntwo\r\nthree\r\nfour\r\nfive`);
+  const restored = new TerminalEngine(20, 5);
+  await write(restored, source.serialize());
+  expect(restored.getSnapshot().map((_, i) => rowText(restored, i))).toEqual(
+    source.getSnapshot().map((_, i) => rowText(source, i)),
+  );
+  expect(findRow(restored, 'red')?.runs[0].style.fg).toBe(findRow(source, 'red')?.runs[0].style.fg);
+});
+
 function findRow(t: TerminalEngine, needle: string) {
   return t.getSnapshot().find((r) => r.runs.map((x) => x.text).join('').includes(needle));
 }

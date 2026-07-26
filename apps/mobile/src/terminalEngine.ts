@@ -1,5 +1,7 @@
 import './xtermPolyfill';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import { type IBufferCell, type IBufferLine, Terminal } from '@xterm/headless';
+import type { Terminal as BrowserTerminal } from '@xterm/xterm';
 import { computeLinkSpans, type LinkSpan } from './links';
 import {
   base64ToUtf8,
@@ -117,6 +119,7 @@ function linksEqual(a: RenderRow['links'], b: RenderRow['links']): boolean {
 // it is a drop-in replacement. Reads term.buffer.active to emit RenderRow[].
 export class TerminalEngine {
   private term: Terminal;
+  private serializeAddon = new SerializeAddon();
   private cell: IBufferCell | undefined;
   private prevRows: RenderRow[] = [];
   private fed = 0; // linefeeds seen — drives the trim/logical-id math
@@ -152,6 +155,10 @@ export class TerminalEngine {
       scrollback: MAX_SCROLLBACK,
       allowProposedApi: true,
     });
+    // SerializeAddon uses only xterm's public buffer API and works with the
+    // headless Terminal at runtime, but its published type names the browser
+    // Terminal class specifically.
+    this.serializeAddon.activate(this.term as unknown as BrowserTerminal);
     // xterm emits generated replies (DSR/DA) through onData; the app sends user
     // input separately, so onData here carries only auto-replies.
     this.term.onData((d) => this.onReply?.(d));
@@ -402,6 +409,10 @@ export class TerminalEngine {
   // Test/detail helper: resolve once xterm has flushed its write queue.
   drain(): Promise<void> {
     return new Promise((resolve) => this.term.write('', resolve));
+  }
+
+  serialize(): string {
+    return this.serializeAddon.serialize();
   }
 
   resize(cols: number, rows: number): void {
