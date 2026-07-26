@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "2.1.2",
+          "date": "2026-07-26",
+          "localizedDescription": "**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.1.1...v2.1.2",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v2.1.2/tether.ipa",
+          "size": 8926658,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "2.1.1",
           "date": "2026-07-26",
           "localizedDescription": "## What's Changed\n* feat(ui): polish terminal application UX by @samuelloranger in https://github.com/samuelloranger/tether/pull/61\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.1.0...v2.1.1",
