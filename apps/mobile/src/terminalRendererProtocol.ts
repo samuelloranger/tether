@@ -81,7 +81,10 @@ export class RendererQueue {
   private latestHydrate: Extract<RendererCommand, { type: 'hydrate' }> | null = null;
   private pendingWrites: string[] = [];
 
-  constructor(private send: (command: RendererCommand) => void) {}
+  constructor(
+    private send: (command: RendererCommand) => void,
+    private options: { native?: boolean } = {},
+  ) {}
 
   hydrate(
     data: string,
@@ -99,7 +102,9 @@ export class RendererQueue {
       cols,
       rows,
       theme,
-      fontFamily,
+      fontFamily: this.options.native
+        ? 'ui-monospace, "SFMono-Regular", Menlo, monospace'
+        : fontFamily,
       fontSize,
     };
     this.hydrated = false;

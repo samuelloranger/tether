@@ -1,5 +1,4 @@
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { registerTetherLinks } from '../src/terminalRendererLinks';
@@ -28,23 +27,8 @@ const terminal = new Terminal({
   scrollback: 1000,
 });
 const fit = new FitAddon();
-const isAndroid = /Android/i.test(navigator.userAgent);
 terminal.loadAddon(fit);
 terminal.open(document.getElementById('terminal')!);
-
-if (!isAndroid) {
-  try {
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => {
-      webgl.dispose();
-      post({ type: 'rendererFallback', reason: 'webgl-context-lost' });
-      terminal.refresh(0, terminal.rows - 1);
-    });
-    terminal.loadAddon(webgl);
-  } catch (error) {
-    post({ type: 'rendererFallback', reason: String(error) });
-  }
-}
 
 registerTetherLinks(terminal, (target) => post({ type: 'openLink', target }));
 terminal.onData((text) => post({ type: 'input', text }));
@@ -73,7 +57,7 @@ window.__tetherDispatch = (command) => {
     case 'hydrate':
       terminal.reset();
       terminal.options.theme = command.theme;
-      terminal.options.fontFamily = isAndroid ? 'monospace' : command.fontFamily;
+      terminal.options.fontFamily = command.fontFamily;
       terminal.options.fontSize = command.fontSize;
       terminal.resize(command.cols, command.rows);
       terminal.write(command.data, fitAndReport);

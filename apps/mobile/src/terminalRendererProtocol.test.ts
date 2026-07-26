@@ -51,6 +51,24 @@ test('RendererQueue hydrates before writes and survives a remount', () => {
   expect(sent.at(-1)).toEqual({ v: 1, type: 'write', data: 'remount' });
 });
 
+test('RendererQueue replaces React Native font keys at the native WebView boundary', () => {
+  const sent: RendererCommand[] = [];
+  const queue = new RendererQueue((command) => sent.push(command), { native: true });
+  queue.hydrate(
+    '',
+    80,
+    24,
+    { foreground: '#fff', background: '#000' },
+    'FiraCode_400Regular',
+    13,
+  );
+  queue.ready();
+  expect(sent[0]).toMatchObject({
+    type: 'hydrate',
+    fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, monospace',
+  });
+});
+
 test('RendererQueue drops writes belonging to a superseded hydration', () => {
   const sent: RendererCommand[] = [];
   const queue = new RendererQueue((command) => sent.push(command));

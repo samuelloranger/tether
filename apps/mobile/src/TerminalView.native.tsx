@@ -10,10 +10,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const webView = useRef<WebView>(null);
     const queue = useMemo(
       () =>
-        new RendererQueue((command) => {
-          const json = JSON.stringify(command);
-          webView.current?.injectJavaScript(`window.__tetherDispatch(${json});true;`);
-        }),
+        new RendererQueue(
+          (command) => {
+            const json = JSON.stringify(command);
+            webView.current?.injectJavaScript(`window.__tetherDispatch(${json});true;`);
+          },
+          { native: true },
+        ),
       [],
     );
 
@@ -66,7 +69,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         source={{ html: terminalRendererHtml() }}
         originWhitelist={['*']}
         javaScriptEnabled
-        scrollEnabled={false}
+        scrollEnabled
         bounces={false}
         overScrollMode="never"
         style={styles.view}
