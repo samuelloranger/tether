@@ -7,22 +7,14 @@ import { readClipboard, writeClipboard } from './clipboard';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   ActivityIndicator,
-  FlatList,
-  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
-  PanResponder,
   Platform,
-  Pressable,
-  ScrollView,
   Text,
   type TextInput,
-  type TextStyle,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,7 +31,6 @@ import {
   DESKTOP_NAVIGATION_STORAGE_KEY,
   type DesktopNavigationMode,
   parseDesktopNavigationMode,
-  reservedNavigationWidth,
 } from './desktopNavigation';
 import { newlyWaiting, type SessionActivity } from './activity';
 import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
@@ -56,8 +47,6 @@ import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
 import { applyBackspaceStreak, applyFieldChange, EMPTY_STREAK, SENT } from './input';
 import type { LinkTarget } from './links';
-import { mouseSeq } from './mouseSeq';
-import { cellFromPoint, clickSeqs, motionSeq, pressSeq, releaseSeq } from './mouseInput';
 import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
 import { type Presentation, pickAutoSelectPreview } from './presentations';
@@ -68,11 +57,11 @@ import { RenameModal, SnippetsModal } from './SessionModals';
 import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
 import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
 import { shellQuote } from './shell';
-import { createStyles } from './styles';
-import { TermRow } from './TermRow';
 import TitleBar from './TitleBar';
-import { type CellStyle, type RenderRow, setTheme } from './terminal';
+import { type RenderRow, setTheme } from './terminal';
 import { TerminalEngine } from './terminalEngine';
+import { OutputBatcher } from './terminalRendererProtocol';
+import type { TerminalViewHandle } from './TerminalView.types';
 import { UpdateModal } from './UpdateModal';
 import { UtilityBar } from './UtilityBar';
 import { openTerminalSocket, type TerminalSocket } from './wsTransport';
@@ -113,22 +102,6 @@ async function fetchDiffImageUri(
   });
 }
 
-// Debounce a value: only surface a change that survives `delayMs`. A blip that
-// reverts within the window (A→B→A) is collapsed and never emitted, so it can't
-// drive downstream effects. delayMs<=0 passes through synchronously.
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    if (delayMs <= 0) {
-      setDebounced(value);
-      return;
-    }
-    const t = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(t);
-  }, [value, delayMs]);
-  return debounced;
-}
-
 export function useTetherApp() {
   // Proceed once fonts settle OR fail — never gate the whole app on a font fetch.
   // In the Tauri desktop build the webview serves assets over the `tauri://`
@@ -139,7 +112,6 @@ export function useTetherApp() {
   const fontsLoaded = fontsReady || !!fontError;
   const insets = useSafeAreaInsets();
   const { theme } = useAppTheme();
-  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
 
   // Connection states
   const [serverIp, setServerIp] = useState('192.168.50.30');
@@ -182,8 +154,6 @@ export function useTetherApp() {
   // Set when handleKeyPress has already emitted a Ctrl-combo byte, so the
   // following onChangeText absorbs that char without re-sending it.
   const skipNextChangeRef = useRef(false);
-  const [termHeight, setTermHeight] = useState(0);
-  const [mouseOn, setMouseOn] = useState(false);
   // User kill switch for mouse forwarding (default on). When off, gestures behave
   // as if the app never enabled mouse reporting even while it has.
   const [mouseEnabled, setMouseEnabled] = useState(true);
@@ -223,6 +193,18 @@ export function useTetherApp() {
   const cache = useRef(new SessionCache(3, (id) => disconnectRef.current(id))).current;
   const [activeId, setActiveId] = useState('term-1');
   const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
+  const terminalViewRef = useRef<TerminalViewHandle | null>(null);
+  const terminalSelectionRef = useRef('');
+  const rendererResizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const outputBatcherRef = useRef<OutputBatcher | null>(null);
+  if (!outputBatcherRef.current) {
+    outputBatcherRef.current = new OutputBatcher(
+      () => activeIdRef.current,
+      (data) => terminalViewRef.current?.write(data),
+      (flush) => requestAnimationFrame(flush),
+    );
+  }
+  const outputBatcher = outputBatcherRef.current;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
   // Last-seen activity per session, so waiting-notifications fire only on the
@@ -238,6 +220,7 @@ export function useTetherApp() {
   const [fileLoading, setFileLoading] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
   const [, setGitSummaryVersion] = useState(0);
+  const [, setTerminalMetadataVersion] = useState(0);
   const [diffSelectedPath, setDiffSelectedPath] = useState<string | null>(null);
   const [diffText, setDiffText] = useState<string | null>(null);
   const [diffTruncated, setDiffTruncated] = useState(false);
@@ -265,9 +248,7 @@ export function useTetherApp() {
 
   useEffect(() => {
     setTheme(theme.terminal);
-    const active = cache.get(activeIdRef.current);
-    if (active) setScreen(active.term.getSnapshot());
-  }, [theme, cache]);
+  }, [theme]);
 
   // References
   // Per-session terminal sockets, abstracted over platform (RN WebSocket on
@@ -308,136 +289,22 @@ export function useTetherApp() {
     const base = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
     return base / 2 + Math.floor(Math.random() * (base / 2));
   };
-  const listRef = useRef<FlatList<RenderRow> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
-  const autoScroll = useRef(true);
-  // True while the current touch has scrolled the list, so a scroll-release
-  // isn't misread as a tap that focuses the input and pops the keyboard.
-  const scrolledRef = useRef(false);
-  const lastContentHeight = useRef(0);
-  const [blinkOn, setBlinkOn] = useState(true);
-  const [reduceMotion, setReduceMotion] = useState(false);
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then((v) => {
-      if (mounted) setReduceMotion(v);
-    });
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) =>
-      setReduceMotion(v),
-    );
-    return () => {
-      mounted = false;
-      sub.remove();
-    };
-  }, []);
-  useEffect(() => {
-    if (reduceMotion) {
-      setBlinkOn(true); // steady caret, no interval
-      return;
-    }
-    // Desktop: no point blinking (and waking the caret row) when the window is
-    // hidden (minimized) OR unfocused (visible but alt-tabbed away). Show a
-    // steady caret in both cases; only blink while the window has focus.
-    let iv: ReturnType<typeof setInterval> | null = setInterval(() => setBlinkOn((v) => !v), 530);
-    let onVis: (() => void) | undefined;
-    let onFocus: (() => void) | undefined;
-    let onBlur: (() => void) | undefined;
-    if (isDesktop && typeof document !== 'undefined') {
-      const stop = () => {
-        if (iv) clearInterval(iv);
-        iv = null;
-        setBlinkOn(true);
-      };
-      const start = () => {
-        if (!iv) iv = setInterval(() => setBlinkOn((v) => !v), 530);
-      };
-      const sync = () => {
-        if (document.hidden || !document.hasFocus()) stop();
-        else start();
-      };
-      onVis = sync;
-      onFocus = sync;
-      onBlur = sync;
-      document.addEventListener('visibilitychange', onVis);
-      window.addEventListener('focus', onFocus);
-      window.addEventListener('blur', onBlur);
-      sync();
-    }
-    return () => {
-      if (iv) clearInterval(iv);
-      if (onVis) document.removeEventListener('visibilitychange', onVis);
-      if (onFocus) window.removeEventListener('focus', onFocus);
-      if (onBlur) window.removeEventListener('blur', onBlur);
-    };
-  }, [reduceMotion]);
-  const renderScheduled = useRef(false);
-  const renderTimer = useRef<any>(null);
-  const mouseOnRef = useRef(false); // stable mirror of mouseOn for the pan handler
-  const wheelAccum = useRef(0);
-  const lastDy = useRef(0);
-  // Absolute on-screen rect of the terminal surface, for mapping touches → cells.
-  const termRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
-  const setTermRect = (r: { left: number; top: number; width: number; height: number }) => {
-    termRectRef.current = r;
-  };
-  const dragCell = useRef({ col: 0, row: 0 }); // last reported cell during a 1-finger drag
-  const dragActive = useRef(false); // true once a 1-finger press was sent (not wheel gestures)
 
-  // --- Terminal sizing ---
-  // Auto-fit BOTH cols and rows to the screen at a readable font so the shell/TUI
-  // fills the viewport with no wrapping and no horizontal scroll. The remote PTY
-  // is resized to match. CHAR_RATIO ~ monospace advance width / font size.
-  const { width: rawWinWidth } = useWindowDimensions();
-  // Desktop (Tauri/WebKitGTK) reports a transient window size when the window
-  // regains focus after idle. Fed straight into the grid math it fires a
-  // spurious PTY {resize} and the shell rewraps twice (visible layout shift).
-  // Debounce the raw layout inputs so a blip that reverts within the window
-  // never reaches numCols/numRows. Mobile passes through (no such blip; and
-  // rotation should track immediately).
-  const layoutSettleMs = isDesktop ? 200 : 0;
-  const winWidth = useDebounced(rawWinWidth, layoutSettleMs);
-  // Fallback advance-width ratio (Fira Code is exactly 0.6em). Overridden by a
-  // real measurement below, so a different desktop font pick or the web's
-  // system-monospace fallback can't skew the column math (wrong numCols clips
-  // the right edge — every row is overflow:hidden — or wastes margin).
-  const FALLBACK_CHAR_RATIO = 0.6;
-  const [measuredCharRatio, setMeasuredCharRatio] = useState<number | null>(null);
-  const CHAR_RATIO = measuredCharRatio ?? FALLBACK_CHAR_RATIO;
   const [fontSize, setFontSize] = useState(11);
   const [fontFamily, setFontFamily] = useState('FiraCode_400Regular');
   const lineHeight = Math.round(fontSize * 1.3);
-  // Desktop docks a fixed-width sidebar, so the terminal pane is narrower than
-  // the window — fit the grid (and the PTY resize) to the pane, not the window,
-  // or the rightmost columns overflow off-screen.
-  const paneWidth = isDesktop
-    ? Math.max(120, winWidth - reservedNavigationWidth(desktopNavigationMode))
-    : winWidth;
-  const gridWidth = paneWidth - 12;
-  const charWidth = fontSize * CHAR_RATIO;
-  const numCols = Math.max(20, Math.floor(gridWidth / charWidth));
-  const stableTermHeight = useDebounced(termHeight, layoutSettleMs);
-  const numRows = stableTermHeight
-    ? Math.max(6, Math.floor((stableTermHeight - 12) / lineHeight))
-    : 24;
-  // Latest settled grid, readable from a delayed callback without a stale
-  // closure. Used to re-fit the PTY after a reconnect once layout settles.
-  const dimsRef = useRef({ numCols, numRows });
-  dimsRef.current = { numCols, numRows };
-  // Fresh row height for scheduleRender's follow-tail — the render callback may be
-  // a stale closure (installed at connect()), so reading a captured lineHeight
-  // would use the pre-font-change value and land the offset short of the bottom.
-  const lineHeightRef = useRef(lineHeight);
-  lineHeightRef.current = lineHeight;
+  // The renderer reports exact fitted dimensions immediately after mount.
+  const dimsRef = useRef({ numCols: 80, numRows: 24 });
 
   // Helper to get/create the cache entry for a given id, sized to the current grid.
   const entryFor = (id: string): SessionEntry =>
     cache.touch(id, () => {
-      const term = new TerminalEngine(numCols || 80, numRows || 24);
-      // Backgrounded sessions do hold a live socket now, but only the active
-      // tab is allowed to send input — route everyone else's replies nowhere.
-      term.onReply = (text) => {
-        if (id === activeIdRef.current) wsSend({ type: 'input', text });
-      };
+      const { numCols: cols, numRows: rows } = dimsRef.current;
+      const term = new TerminalEngine(cols || 80, rows || 24);
+      // The full xterm renderer owns user input and terminal-generated replies.
+      // Headless xterm remains the background metadata/serialization model.
+      term.onReply = null;
       term.onClipboardWrite = (text) => {
         // Guard like onReply: now that background tabs stay live, an OSC 52
         // sequence arriving in a backgrounded tab must not silently overwrite
@@ -485,133 +352,38 @@ export function useTetherApp() {
     if (st?.open && st.sock) st.sock.send(JSON.stringify(obj));
   };
 
-  // When the remote enables mouse reporting (TUIs like Claude Code, vim, tmux):
-  // one-finger pan = mouse drag (press/motion/release), two-finger pan = wheel
-  // scroll so TUIs still page their own history. Tap = click is handled by the
-  // Pressable's onPress via onTerminalTap. All gated on mouseActive via the refs.
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) =>
-        mouseOnRef.current && mouseEnabledRef.current && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
-      onMoveShouldSetPanResponderCapture: (_, g) =>
-        mouseOnRef.current && mouseEnabledRef.current && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
-      onPanResponderGrant: (e, g) => {
-        lastDy.current = 0;
-        wheelAccum.current = 0;
-        dragActive.current = false;
-        if (g.numberActiveTouches >= 2) return; // two-finger → wheel, no press
-        const term = cache.get(activeIdRef.current)?.term;
-        if (!term) return;
-        const { col, row } = cellFromPoint(
-          e.nativeEvent.pageX,
-          e.nativeEvent.pageY,
-          termRectRef.current,
-          term.cols || 80,
-          term.rows || 24,
-        );
-        dragCell.current = { col, row };
-        dragActive.current = true;
-        wsSend({ type: 'input', text: pressSeq(col, row, term.mouseSgr) });
-      },
-      onPanResponderMove: (e, g) => {
-        const term = cache.get(activeIdRef.current)?.term;
-        if (!term) return;
-        if (g.numberActiveTouches >= 2) {
-          // Two-finger: scroll history via wheel events (previous behaviour).
-          const STEP = 22;
-          const delta = g.dy - lastDy.current;
-          lastDy.current = g.dy;
-          wheelAccum.current += delta;
-          const col = Math.max(1, Math.floor((term.cols || 80) / 2));
-          const row = Math.max(1, Math.floor((term.rows || 24) / 2));
-          const wheel = (btn: number) =>
-            wsSend({ type: 'input', text: mouseSeq(btn, col, row, term.mouseSgr) });
-          while (wheelAccum.current >= STEP) {
-            wheel(64);
-            wheelAccum.current -= STEP;
-          }
-          while (wheelAccum.current <= -STEP) {
-            wheel(65);
-            wheelAccum.current += STEP;
-          }
-          return;
-        }
-        // One-finger: drag motion when the cell changes.
-        const { col, row } = cellFromPoint(
-          e.nativeEvent.pageX,
-          e.nativeEvent.pageY,
-          termRectRef.current,
-          term.cols || 80,
-          term.rows || 24,
-        );
-        if (col === dragCell.current.col && row === dragCell.current.row) return;
-        dragCell.current = { col, row };
-        const seq = motionSeq(col, row, term.mouseMode, term.mouseSgr);
-        if (seq) wsSend({ type: 'input', text: seq });
-      },
-      onPanResponderRelease: (_, g) => {
-        if (g.numberActiveTouches >= 1) return; // multi-touch lift; still touching
-        // Only release if a one-finger press was actually sent. A two-finger wheel
-        // gesture sends no press, so it must not emit a stray button-up at a stale
-        // cell (would perturb vim/tmux selection).
-        if (!dragActive.current) return;
-        dragActive.current = false;
-        const term = cache.get(activeIdRef.current)?.term;
-        if (!term) return;
-        const { col, row } = dragCell.current;
-        const seq = releaseSeq(col, row, term.mouseMode, term.mouseSgr);
-        if (seq) wsSend({ type: 'input', text: seq });
-      },
-    }),
-  ).current;
-
-  // Tap → click when mouse reporting is active. Returns true when it consumed the
-  // tap (so the caller skips focusing the keyboard).
-  const onTerminalTap = (pageX: number, pageY: number): boolean => {
-    const term = cache.get(activeIdRef.current)?.term;
-    if (!term?.mouseOn || !mouseEnabledRef.current) return false;
-    const { col, row } = cellFromPoint(
-      pageX,
-      pageY,
-      termRectRef.current,
-      term.cols || 80,
-      term.rows || 24,
+  const hydrateRenderer = (id = activeIdRef.current) => {
+    const ent = entryFor(id);
+    outputBatcher.clear();
+    terminalViewRef.current?.hydrate(
+      ent.term.serialize(),
+      ent.term.cols,
+      ent.term.rows,
+      { foreground: theme.terminal.fg, background: theme.terminal.bg },
+      fontFamily,
+      fontSize,
     );
-    for (const text of clickSeqs(col, row, term.mouseMode, term.mouseSgr)) {
-      wsSend({ type: 'input', text });
-    }
-    return true;
   };
 
-  // Coalesce many PTY chunks into one render per frame.
-  const scheduleRender = () => {
-    if (renderScheduled.current) return;
-    renderScheduled.current = true;
-    renderTimer.current = setTimeout(
-      () => {
-        renderScheduled.current = false;
-        const e = cache.get(activeIdRef.current);
-        if (!e) return;
-        const snap = e.term.getSnapshot();
-        setScreen(snap);
-        // Re-assert follow-tail every batch, not only when content height changes.
-        // Once scrollback caps (MAX_SCROLLBACK), the row count — and thus content
-        // height — stops growing, so onContentSizeChange goes silent and can no
-        // longer re-pin. Overshoot the offset; RN clamps it to the true bottom.
-        if (autoScroll.current) {
-          listRef.current?.scrollToOffset({
-            offset: snap.length * lineHeightRef.current,
-            animated: false,
-          });
-        }
-        if (e.term.mouseOn !== mouseOnRef.current) {
-          mouseOnRef.current = e.term.mouseOn;
-          setMouseOn(e.term.mouseOn);
-        }
-      },
-      isDesktop ? 16 : 33,
-    ); // 60fps on desktop (no battery cost); 30fps on mobile halves render load
+  const onRendererResize = (cols: number, rows: number) => {
+    const current = dimsRef.current;
+    if (current.numCols === cols && current.numRows === rows) return;
+    dimsRef.current = { numCols: cols, numRows: rows };
+    cache.get(activeIdRef.current)?.term.resize(cols, rows);
+    if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
+    rendererResizeTimer.current = setTimeout(() => {
+      wsSend({ type: 'resize', cols, rows });
+      rendererResizeTimer.current = null;
+    }, isDesktop ? 120 : 60);
   };
+
+  const onRendererSelection = (text: string) => {
+    terminalSelectionRef.current = text;
+  };
+
+  useEffect(() => {
+    hydrateRenderer();
+  }, [activeId, theme, fontFamily, fontSize]);
 
   const resetTerminal = () => {
     const e = cache.get(activeIdRef.current);
@@ -619,8 +391,7 @@ export function useTetherApp() {
       e.term.reset();
       e.sinceId = 0;
       e.lastAppliedId = 0;
-      setScreen(e.term.getSnapshot());
-      lastContentHeight.current = 0;
+      hydrateRenderer();
     }
   };
 
@@ -641,18 +412,31 @@ export function useTetherApp() {
         if (msg.id <= ent.lastAppliedId) return;
         ent.lastAppliedId = msg.id;
         ent.sinceId = msg.id;
-        // Both notification checks AND the render must run in the flush callback:
-        // xterm parses writes async, so a synchronous maybeNotify/scheduleRender
-        // here would read the buffer before msg.chunk is applied — missing BEL /
-        // OSC 9/99/777 and leaving the final chunk unrendered until a later frame.
+        const previousMetadata = [
+          ent.term.bellCount,
+          ent.term.promptReturnCount,
+          ent.term.title,
+          ent.term.cwd,
+        ] as const;
+        // Headless parsing feeds metadata/notifications; the active browser
+        // renderer receives the same bytes once per animation frame.
         ent.term.write(msg.chunk, () => {
           maybeNotify(id, ent);
-          if (id === activeIdRef.current) scheduleRender();
+          if (
+            id === activeIdRef.current &&
+            (ent.term.bellCount !== previousMetadata[0] ||
+              ent.term.promptReturnCount !== previousMetadata[1] ||
+              ent.term.title !== previousMetadata[2] ||
+              ent.term.cwd !== previousMetadata[3])
+          ) {
+            setTerminalMetadataVersion((version) => version + 1);
+          }
+          outputBatcher.push(id, msg.chunk);
         });
       } else if (msg.type === 'exit') {
         const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
-        ent.term.write(`\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`);
-        if (id === activeIdRef.current) scheduleRender();
+        const text = `\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`;
+        ent.term.write(text, () => outputBatcher.push(id, text));
       } else if (msg.type === 'title' && typeof msg.title === 'string') {
         // Server recomputed the session's auto title (OSC 0/2 set or cleared).
         setDrawerSessions((prev) =>
@@ -675,7 +459,7 @@ export function useTetherApp() {
         // stays below the stale watermark and is silently swallowed.
         ent.lastBellCount = 0;
         ent.lastNotifyCount = 0;
-        if (id === activeIdRef.current) scheduleRender();
+        if (id === activeIdRef.current) hydrateRenderer(id);
       }
     } catch (err) {
       console.error('ws message error:', err);
@@ -696,8 +480,8 @@ export function useTetherApp() {
     const url = wsUrl(serverIp, port, {
       sessionId: id,
       sinceId: e.sinceId,
-      cols: numCols,
-      rows: numRows,
+      cols: dimsRef.current.numCols,
+      rows: dimsRef.current.numRows,
     });
 
     // Each connect bumps this id's generation; a superseded socket's late
@@ -788,10 +572,8 @@ export function useTetherApp() {
     activeIdRef.current = id;
     setActiveId(id);
     AsyncStorage.setItem(KEY_SESSION_ID, id);
-    const e = entryFor(id); // creates fresh if uncached; resizes handled by effect
-    setScreen(e.term.getSnapshot()); // instant paint of last-known screen
-    autoScroll.current = true;
-    lastContentHeight.current = 0;
+    entryFor(id);
+    hydrateRenderer(id);
     const st = connections.get(id);
     if (st?.open) {
       setConnectionStatus('connected'); // already live — no reconnect flicker
@@ -861,9 +643,6 @@ export function useTetherApp() {
   const testNotification = () => {
     void sendNativeNotification('Tether', 'Test notification — notifications are working ✅');
   };
-
-  // Effective mouse gate: the app enabled reporting AND the user hasn't disabled it.
-  const mouseActive = mouseOn && mouseEnabled;
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -1132,33 +911,10 @@ export function useTetherApp() {
     loadConfig();
     return () => {
       disconnectAll();
-      if (renderTimer.current) clearTimeout(renderTimer.current);
+      outputBatcher.clear();
+      if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
     };
   }, []);
-
-  // Size the emulator (and the remote PTY) to the on-screen grid so the shell
-  // fills the viewport. Re-runs when the fit changes or the socket connects.
-  useEffect(() => {
-    cache.get(activeIdRef.current)?.term.resize(numCols, numRows);
-    wsSend({ type: 'resize', cols: numCols, rows: numRows });
-    scheduleRender();
-    // A reconnect after idle coincides with the desktop webview's focus-regain,
-    // which reports a transient (often halved on macOS Retina) layout size — see
-    // the debounce note above numCols/numRows. The debounce holds it back from
-    // the steady grid, but this effect fires on `connectionStatus` immediately,
-    // so the size we just sent may be that mid-transient blip and the PTY rewraps
-    // into a fraction of the pane. Re-fit once layout has settled, from the ref
-    // so we send the settled grid, not this render's captured value. No-op on
-    // platforms with no transient (delivers the same size the effect already did).
-    if (!isDesktop || connectionStatus !== 'connected') return;
-    const t = setTimeout(() => {
-      const { numCols: c, numRows: r } = dimsRef.current;
-      cache.get(activeIdRef.current)?.term.resize(c, r);
-      wsSend({ type: 'resize', cols: c, rows: r });
-      scheduleRender();
-    }, layoutSettleMs + 250);
-    return () => clearTimeout(t);
-  }, [numCols, numRows, connectionStatus, activeId]);
 
   // 2. Open the initial connection once the app becomes ready. Tab switches no
   // longer touch this effect — switchTo() connects the newly-active tab itself
@@ -1170,15 +926,6 @@ export function useTetherApp() {
     connect(activeIdRef.current);
     return () => disconnectAll();
   }, [ready]);
-
-  // Stick to the bottom when the keyboard opens (view shrinks, no new content).
-  useEffect(() => {
-    const sub = Keyboard.addListener('keyboardDidShow', () => {
-      autoScroll.current = true;
-      listRef.current?.scrollToEnd({ animated: true });
-    });
-    return () => sub.remove();
-  }, []);
 
   // Probe the server, then either create the first password (TOFU) or validate an
   // existing one — driving the setup screen to a testable "Reachable ✓" state.
@@ -1291,6 +1038,11 @@ export function useTetherApp() {
   };
 
   const sendInput = (text: string) => {
+    if (
+      !mouseEnabledRef.current &&
+      (text.startsWith('\x1b[<') || text.startsWith('\x1b[M'))
+    )
+      return;
     wsSend({ type: 'input', text });
   };
 
@@ -1302,16 +1054,17 @@ export function useTetherApp() {
 
   // Full plain-text transcript (visible screen + scrollback) for the
   // selectable view and the Copy All fallback.
-  const getFullText = () =>
-    screen
+  const snapshotText = (rows: RenderRow[]) =>
+    rows
       .map((r) => r.runs.map((run) => run.text).join(''))
       .join('\n')
       .replace(/\n+$/, '');
+  const getFullText = () => snapshotText(entryFor(activeIdRef.current).term.getSnapshot());
 
   // Transcript filtered to lines matching the query — memoized: the previous
   // version re-split the whole scrollback on every keystroke and every render.
   const searchText = useMemo(() => {
-    const full = getFullText();
+    const full = snapshotText(screen);
     const q = searchQuery.trim().toLowerCase();
     if (!q) return full;
     return full
@@ -1320,7 +1073,7 @@ export function useTetherApp() {
       .join('\n');
   }, [screen, searchQuery]);
 
-  // Scrolls the FlatList to the nearest prompt-start row in `dir`, using the
+  // Scrolls xterm to the nearest prompt-start row in `dir`, using the
   // start/end of the currently-known scrollback as the search origin.
   const jumpPrompt = (dir: 1 | -1) => {
     const term = entryFor(activeIdRef.current).term;
@@ -1329,12 +1082,13 @@ export function useTetherApp() {
     const target = term.jumpToPrompt(from, dir);
     if (target === null) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    listRef.current?.scrollToIndex({ index: target, animated: true });
+    terminalViewRef.current?.scrollToLine(target);
   };
 
   const openSearch = () => {
     setMenuOpen(false);
     setSearchQuery('');
+    setScreen(entryFor(activeIdRef.current).term.getSnapshot());
     setSelectionViewOpen(true);
     setTimeout(() => searchInputRef.current?.focus(), 250);
   };
@@ -1343,27 +1097,22 @@ export function useTetherApp() {
   // of everything currently visible + scrollback, instead of copying
   // straight to the clipboard.
   const openSelectionView = () => {
-    if (!getFullText()) return;
+    const snapshot = entryFor(activeIdRef.current).term.getSnapshot();
+    if (!snapshotText(snapshot)) return;
+    setScreen(snapshot);
     setSelectionViewOpen(true);
   };
 
   // Desktop context-menu actions.
   const copySelection = async () => {
-    const sel = typeof window !== 'undefined' ? window.getSelection()?.toString() : '';
+    const sel = terminalSelectionRef.current;
     // Fall back to the whole displayed transcript when nothing is selected.
     const text = sel || getFullText();
     if (text) await writeClipboard(text);
   };
 
   const selectAllTerminal = () => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return;
-    const el = document.getElementById('tether-terminal');
-    const sel = window.getSelection();
-    if (!el || !sel) return;
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    sel.removeAllRanges();
-    sel.addRange(range);
+    terminalViewRef.current?.selectAll();
   };
 
   // Uploads bytes into a per-session upload dir under ~/.tether/uploads on
@@ -1488,7 +1237,6 @@ export function useTetherApp() {
       setCtrlArmed(false);
       if (/^[a-zA-Z]$/.test(key)) {
         sendInput(String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64));
-        autoScroll.current = true;
         // The printed letter still lands in the field and will fire
         // onChangeText next — swallow it there instead of sending it literally.
         skipNextChangeRef.current = true;
@@ -1523,7 +1271,6 @@ export function useTetherApp() {
       );
       backspaceStreakRef.current = tracked.streak;
       sendInput(tracked.bytes);
-      autoScroll.current = true;
     }
     // Keep the controlled value AND the diff baseline in lockstep — otherwise
     // React Native reverts the field to the old value and the next diff runs
@@ -1534,7 +1281,6 @@ export function useTetherApp() {
 
   // Return key: send carriage return (raw-mode TUIs like Claude Code expect \r).
   const handleSend = () => {
-    autoScroll.current = true;
     sendInput('\r');
     resetField();
   };
@@ -1591,7 +1337,6 @@ export function useTetherApp() {
       if (e.data) {
         const ent = cache.get(activeIdRef.current);
         sendInput(ent?.term.bracketedPaste ? `\x1b[200~${e.data}\x1b[201~` : e.data);
-        autoScroll.current = true;
       }
       // The composed text landed in the hidden desktop composition-target
       // input's own DOM value (composition was never preventDefault()'d so the
@@ -1614,7 +1359,6 @@ export function useTetherApp() {
         return;
       }
       sendInput(bytes);
-      autoScroll.current = true;
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('compositionstart', onCompositionStart);
@@ -1627,128 +1371,6 @@ export function useTetherApp() {
     // sendInput/handlePaste delegate to refs, so a stable listener is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfiguring, activePresentationId, presentations, fileView, diffOpen]);
-
-  // Desktop: when the remote app enables mouse reporting (Claude Code, vim,
-  // less…), the FlatList is frozen (scrollEnabled=false), so forward the wheel
-  // as SGR mouse-wheel events and the app scrolls its own history. Outside mouse
-  // mode we don't intercept, so the list scrolls natively.
-  useEffect(() => {
-    if (
-      !isDesktop ||
-      isConfiguring ||
-      presentations.some((preview) => preview.id === activePresentationId)
-    )
-      return;
-    let accum = 0;
-    const onWheel = (e: WheelEvent) => {
-      const el = document.getElementById('tether-terminal');
-      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
-      const term = cache.get(activeIdRef.current)?.term;
-      if (!term?.mouseOn || !mouseEnabledRef.current) return; // let the list scroll natively
-      e.preventDefault();
-      const STEP = 40;
-      accum += e.deltaY;
-      // Report the cell under the pointer (not the grid centre) so split-pane
-      // TUIs (tmux, vim) route the scroll to the right pane. Derive the cell
-      // from the element's rendered size — accurate regardless of font metrics.
-      const cols = term.cols || 80;
-      const rows = term.rows || 24;
-      const rect = el.getBoundingClientRect();
-      const col = Math.min(
-        cols,
-        Math.max(1, Math.floor((e.clientX - rect.left) / (rect.width / cols)) + 1),
-      );
-      const row = Math.min(
-        rows,
-        Math.max(1, Math.floor((e.clientY - rect.top) / (rect.height / rows)) + 1),
-      );
-      const send = (btn: number) =>
-        wsSend({ type: 'input', text: mouseSeq(btn, col, row, term.mouseSgr) });
-      while (accum >= STEP) {
-        send(65); // wheel down → forward/newer
-        accum -= STEP;
-      }
-      while (accum <= -STEP) {
-        send(64); // wheel up → back/older
-        accum += STEP;
-      }
-    };
-    window.addEventListener('wheel', onWheel, { passive: false });
-    return () => window.removeEventListener('wheel', onWheel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring, activePresentationId, presentations]);
-
-  // Desktop: forward real mouse click/drag to the PTY when the app enabled mouse
-  // reporting and the user hasn't disabled it. Shift bypasses reporting so native
-  // text selection still works (xterm.js convention).
-  useEffect(() => {
-    if (!isDesktop || isConfiguring) return;
-    const el = () => document.getElementById('tether-terminal');
-    let down = false;
-    let lastCol = 0;
-    let lastRow = 0;
-
-    const activeTerm = () => {
-      const term = cache.get(activeIdRef.current)?.term;
-      if (!term?.mouseOn || !mouseEnabledRef.current) return null;
-      return term;
-    };
-    const cellOf = (e: MouseEvent, term: { cols: number; rows: number }) => {
-      const node = el();
-      if (!node) return null;
-      const rect = node.getBoundingClientRect();
-      return cellFromPoint(e.clientX, e.clientY, rect, term.cols || 80, term.rows || 24);
-    };
-    const modsOf = (e: MouseEvent) => (e.altKey ? 8 : 0) | (e.ctrlKey ? 16 : 0);
-
-    const onDown = (e: MouseEvent) => {
-      const node = el();
-      if (!node || !(e.target instanceof Node) || !node.contains(e.target)) return;
-      if (e.shiftKey) return; // native selection
-      const term = activeTerm();
-      if (!term) return;
-      const cell = cellOf(e, term);
-      if (!cell) return;
-      e.preventDefault();
-      down = true;
-      lastCol = cell.col;
-      lastRow = cell.row;
-      wsSend({
-        type: 'input',
-        text: pressSeq(cell.col, cell.row, term.mouseSgr, e.button, modsOf(e)),
-      });
-    };
-    const onMove = (e: MouseEvent) => {
-      if (!down) return;
-      const term = activeTerm();
-      if (!term) return;
-      const cell = cellOf(e, term);
-      if (!cell || (cell.col === lastCol && cell.row === lastRow)) return;
-      lastCol = cell.col;
-      lastRow = cell.row;
-      const seq = motionSeq(cell.col, cell.row, term.mouseMode, term.mouseSgr, e.button, modsOf(e));
-      if (seq) wsSend({ type: 'input', text: seq });
-    };
-    const onUp = (e: MouseEvent) => {
-      if (!down) return;
-      down = false;
-      const term = activeTerm();
-      if (!term) return;
-      const cell = cellOf(e, term) ?? { col: lastCol, row: lastRow };
-      const seq = releaseSeq(cell.col, cell.row, term.mouseMode, term.mouseSgr, e.button, modsOf(e));
-      if (seq) wsSend({ type: 'input', text: seq });
-    };
-
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring]);
 
   // Desktop: check for a newer signed build once on launch. If one exists, open
   // the update modal; stay silent on "up to date" or an unreachable feed.
@@ -2221,61 +1843,6 @@ export function useTetherApp() {
     }
   };
 
-  const onScroll = (e: any) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const contentHeight = contentSize.height;
-
-    // If the content height changed, this scroll event is likely triggered by
-    // new messages being added to the log/scrollback. Do not update autoScroll
-    // status based on this transient offset (which hasn't caught up to the bottom yet).
-    if (contentHeight !== lastContentHeight.current) {
-      lastContentHeight.current = contentHeight;
-      return;
-    }
-
-    const distanceFromBottom = contentHeight - layoutMeasurement.height - contentOffset.y;
-    // Re-arm auto-scroll only at the true bottom; 40px "near bottom" used to
-    // yank the viewport away while reading history during streaming output.
-    autoScroll.current = distanceFromBottom < 8;
-  };
-
-  // Double-tap-to-copy target (mobile grid). Haptic tick is the feedback;
-  // no toast — the gesture is quiet by design.
-  const copyWord = useCallback((word: string) => {
-    void writeClipboard(word).catch(() => {});
-    void Haptics.selectionAsync().catch(() => {});
-  }, []);
-
-  const renderRow = useCallback(
-    ({ item }: { item: RenderRow }) => (
-      <TermRow
-        row={item}
-        fontSize={fontSize}
-        lineHeight={lineHeight}
-        width={gridWidth}
-        blinkOn={blinkOn}
-        cursorStyle={(cache.peek(activeId) ?? entryFor(activeId)).term.cursorStyle}
-        fontFamily={fontFamily}
-        onOpenLink={openFile}
-        charWidth={charWidth}
-        onCopyWord={isDesktop ? undefined : copyWord}
-      />
-    ),
-    [
-      fontSize,
-      lineHeight,
-      gridWidth,
-      blinkOn,
-      activeId,
-      entryFor,
-      cache,
-      fontFamily,
-      openFile,
-      charWidth,
-      copyWord,
-    ],
-  );
-
   // Map the connection state to the TitleBar's status union ('disconnected' → 'offline').
   const titleBarStatus: 'connected' | 'connecting' | 'auth-failed' | 'offline' =
     connectionStatus === 'connected'
@@ -2285,74 +1852,6 @@ export function useTetherApp() {
         : connectionStatus === 'auth-failed'
           ? 'auth-failed'
           : 'offline';
-
-  // The scrollable terminal grid, shared by the desktop and mobile surfaces.
-  const terminalGrid = (
-    <>
-      {/* Invisible advance-width probe: 20 'M's at the current font. Yields the
-          font's true em-advance ratio (width / 20 / fontSize), replacing the
-          hardcoded 0.6 guess for column math. Re-keyed per font so a picker
-          change re-measures; ratio is size-independent so fontSize changes
-          don't need to. */}
-      <Text
-        key={`measure-${fontFamily}`}
-        style={{
-          position: 'absolute',
-          opacity: 0,
-          left: -10_000,
-          fontFamily,
-          fontSize,
-        }}
-        numberOfLines={1}
-        onLayout={(e) => {
-          const w = e.nativeEvent.layout.width;
-          const ratio = w / 20 / fontSize;
-          // Sanity envelope: a broken layout pass must not wedge cols at 20.
-          if (ratio > 0.3 && ratio < 1.2) setMeasuredCharRatio(ratio);
-        }}
-      >
-        {'M'.repeat(20)}
-      </Text>
-      <FlatList
-      ref={listRef}
-      style={{ flex: 1 }}
-      contentContainerStyle={styles.terminalContent}
-      data={screen}
-      renderItem={renderRow}
-      // Stable per-logical-line key from the emulator (survives lines moving
-      // into scrollback). Index keys re-keyed every visible row on each new
-      // scrollback line, remounting rows and defeating TermRow's memo.
-      keyExtractor={(row) => String(row.key)}
-      // Rows are a fixed lineHeight, so give the list exact offsets — otherwise
-      // RN-web's VirtualizedList estimates them and scrollToEnd lands a row short.
-      getItemLayout={(_, index) => ({ length: lineHeight, offset: lineHeight * index, index })}
-      onScroll={onScroll}
-      onScrollBeginDrag={() => {
-        autoScroll.current = false;
-        scrolledRef.current = true;
-      }}
-      scrollEventThrottle={100}
-      scrollEnabled={!mouseActive}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="none"
-      onContentSizeChange={(_w, h) => {
-        // Scroll to the height reported by THIS event, not scrollToEnd (which reads
-        // the list's internal content length — that lags a row behind a just-
-        // appended row, landing the view short). Offset past max is clamped to the
-        // true bottom.
-        if (autoScroll.current) listRef.current?.scrollToOffset({ offset: h, animated: false });
-      }}
-      ListEmptyComponent={
-        connectionStatus === 'connected' ? (
-          <Text style={styles.terminalEmpty}>Connected. Type a command to begin.</Text>
-        ) : null
-      }
-      initialNumToRender={40}
-      windowSize={11}
-      removeClippedSubviews
-      />
-    </>
-  );
 
   return {
     fontsLoaded,
@@ -2379,16 +1878,10 @@ export function useTetherApp() {
     connectionStatus,
     setConnectionStatus,
     hasConnectedRef,
-    screen,
-    setScreen,
     inputText,
     setInputText,
     prevValueRef,
     skipNextChangeRef,
-    termHeight,
-    setTermHeight,
-    mouseOn,
-    setMouseOn,
     mouseEnabled,
     toggleMouseEnabled,
     notificationsEnabled,
@@ -2468,33 +1961,16 @@ export function useTetherApp() {
     refreshPresentations,
     desktopNavigationMode,
     selectDesktopNavigationMode,
-    listRef,
     inputRef,
-    autoScroll,
-    scrolledRef,
-    lastContentHeight,
-    blinkOn,
-    setBlinkOn,
-    reduceMotion,
-    setReduceMotion,
-    renderScheduled,
-    mouseOnRef,
-    wheelAccum,
-    lastDy,
-    CHAR_RATIO,
     fontSize,
     setFontSize,
     lineHeight,
-    paneWidth,
-    gridWidth,
-    numCols,
-    numRows,
     entryFor,
+    terminalViewRef,
+    hydrateRenderer,
+    onRendererResize,
+    onRendererSelection,
     wsSend,
-    panResponder,
-    setTermRect,
-    onTerminalTap,
-    scheduleRender,
     resetTerminal,
     applyWsMessage,
     connect,
@@ -2535,9 +2011,6 @@ export function useTetherApp() {
     openRename,
     submitRename,
     hardResetSession,
-    onScroll,
-    renderRow,
-    terminalGrid,
     titleBarStatus,
     jumpPrompt,
     uploadFile,

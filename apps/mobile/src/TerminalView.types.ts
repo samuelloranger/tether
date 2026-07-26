@@ -13,6 +13,8 @@ export interface TerminalViewHandle {
   ): void;
   write(data: string): void;
   resize(cols: number, rows: number): void;
+  scrollToLine(line: number): void;
+  selectAll(): void;
   focus(): void;
 }
 
@@ -21,5 +23,6 @@ export interface TerminalViewProps {
   onInput(text: string): void;
   onResize(cols: number, rows: number): void;
   onOpenLink(target: LinkTarget): void;
+  onSelection?(text: string): void;
   onFallback(reason: string): void;
 }

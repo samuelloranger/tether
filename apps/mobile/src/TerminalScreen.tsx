@@ -16,7 +16,6 @@ import {
   Modal,
   PanResponder,
   Platform,
-  Pressable,
   ScrollView,
   Text,
   TextInput,
@@ -60,6 +59,7 @@ import { TermRow } from './TermRow';
 import TitleBar from './TitleBar';
 import type { CellStyle, RenderRow } from './terminal';
 import { injectTerminalScrollbarStyles } from './terminalScrollbar';
+import { TerminalView } from './TerminalView';
 import { UpdateModal } from './UpdateModal';
 import { UtilityBar } from './UtilityBar';
 import { openTerminalSocket, type TerminalSocket } from './wsTransport';
@@ -104,16 +104,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     connectionStatus,
     setConnectionStatus,
     hasConnectedRef,
-    screen,
-    setScreen,
     inputText,
     setInputText,
     prevValueRef,
     skipNextChangeRef,
-    termHeight,
-    setTermHeight,
-    mouseOn,
-    setMouseOn,
     ctxMenu,
     setCtxMenu,
     updateInfo,
@@ -157,6 +151,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     activePresentationId,
     fileView,
     fileLoading,
+    openFile,
     closeFile,
     diffOpen,
     changeSummary,
@@ -187,33 +182,16 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     refreshPresentations,
     desktopNavigationMode,
     selectDesktopNavigationMode,
-    listRef,
     inputRef,
-    autoScroll,
-    scrolledRef,
-    lastContentHeight,
-    blinkOn,
-    setBlinkOn,
-    reduceMotion,
-    setReduceMotion,
-    renderScheduled,
-    mouseOnRef,
-    wheelAccum,
-    lastDy,
-    CHAR_RATIO,
     fontSize,
     setFontSize,
     lineHeight,
-    paneWidth,
-    gridWidth,
-    numCols,
-    numRows,
     entryFor,
+    terminalViewRef,
+    hydrateRenderer,
+    onRendererResize,
+    onRendererSelection,
     wsSend,
-    panResponder,
-    setTermRect,
-    onTerminalTap,
-    scheduleRender,
     resetTerminal,
     applyWsMessage,
     connect,
@@ -259,9 +237,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     openRename,
     submitRename,
     hardResetSession,
-    onScroll,
-    renderRow,
-    terminalGrid,
     titleBarStatus,
     jumpPrompt,
     uploadFile,
@@ -274,7 +249,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   // bellCount advances, so a background/completed job is noticeable without
   // watching the screen.
   const prevBellCount = useRef(0);
-  const lastTapRef = useRef(0); // ms of last terminal tap, for double-tap-to-focus
   const [bellFlash, setBellFlash] = useState(false);
   useEffect(() => {
     if (activeBellCount > prevBellCount.current) {
@@ -314,25 +288,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     // so a stale node reference would silently stop receiving drops.
   }, [uploadFile, activePresentation, fileView, diffOpen]);
 
-  // Desktop: clicking the terminal focuses the hidden IME composition-target
-  // input (see the isDesktop TextInput above) — needed so the browser has an
-  // actual editable element to attach dead-key/CJK composition sessions to.
-  // A plain mousedown listener (not a Pressable) so this stays consistent with
-  // the terminal surface remaining a non-focusable View — Pressable would make
-  // Enter "activate" it instead of reaching the PTY (see the isDesktop render
-  // branch's comment on this exact failure mode).
-  useEffect(() => {
-    if (!isDesktop) return;
-    const el = document.getElementById('tether-terminal');
-    if (!el) return;
-    const onMouseDown = () => inputRef.current?.focus();
-    el.addEventListener('mousedown', onMouseDown);
-    return () => el.removeEventListener('mousedown', onMouseDown);
-    // Re-run when a presentation opens/closes: the #tether-terminal node
-    // unmounts/remounts across that transition (see the render branch below),
-    // so an empty deps array would keep this bound to a detached node forever.
-  }, [activePresentation, fileView, diffOpen]);
-
   // OverflowMenu/SelectionView force-unmount below when a takeover is
   // active (bypassing their own onClose), which can happen while either is
   // open — e.g. a new preview auto-selected in the background. Reset their
@@ -350,6 +305,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   const backSession = drawerSessions.find((s) => s.id === backTarget);
   const backLabel = backSession ? sessionLabel(backSession) : backTarget;
   const terminalVisible = !fileView && !diffOpen && !activePresentation;
+  useEffect(() => {
+    if (terminalVisible) hydrateRenderer();
+  }, [terminalVisible]);
 
   return (
     /* Terminal Client Screen */
@@ -556,86 +514,39 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               rows and fire a spurious PTY resize (visible rewrap) on every
               reconnect. */}
               <View style={styles.terminalArea}>
-              <View
-                style={styles.terminalScroll}
-                onLayout={(e) => {
-                  setTermHeight(e.nativeEvent.layout.height);
-                  e.currentTarget.measureInWindow((x, y, w, h) =>
-                    setTermRect({ left: x, top: y, width: w, height: h }),
-                  );
-                }}
-                {...panResponder.panHandlers}
-              >
-                {isDesktop ? (
-                  // Desktop: a plain, non-focusable surface. It must NOT be a Pressable:
-                  // react-native-web's Pressable is focusable (tabIndex 0) and consumes a
-                  // focused Enter as an "activate" gesture (PressResponder isValidKeyPress
-                  // returns true for Enter regardless of role), so Enter never reaches the
-                  // PTY. Keyboard is captured globally via the window keydown listener;
-                  // text selection is native (selectable) and actions use the right-click
-                  // menu — so no press handlers are needed here.
-                  <View
-                    nativeID="tether-terminal"
-                    style={
-                      {
-                        flex: 1,
-                        '--tether-scrollbar-track': theme.terminal.bg,
-                        '--tether-scrollbar-thumb': theme.colors.border,
-                        '--tether-scrollbar-thumb-hover': theme.colors.selected,
-                      } as any
-                    }
-                  >
-                    {terminalGrid}
-                  </View>
-                ) : (
-                  <Pressable
-                    nativeID="tether-terminal"
+              <View nativeID="tether-terminal" style={styles.terminalScroll}>
+                {Platform.OS === 'ios' ? (
+                  <DragDropContentView
                     style={{ flex: 1 }}
-                    accessibilityRole="button"
-                    accessibilityLabel="Terminal. Double-tap to type, long-press to select text."
-                    onPressIn={() => {
-                      scrolledRef.current = false;
-                    }}
-                    onPress={(e) => {
-                      // A scroll-release must not pop the keyboard.
-                      if (scrolledRef.current) return;
-                      // A double-tap always refocuses the keyboard — the only way back
-                      // to typing while a TUI has mouse reporting on (single tap = click).
-                      const now = Date.now();
-                      const isDouble = now - lastTapRef.current < 300;
-                      lastTapRef.current = now;
-                      if (isDouble) {
-                        inputRef.current?.focus();
-                        return;
-                      }
-                      // When mouse reporting is active, a single tap is a click at that
-                      // cell; otherwise it focuses the keyboard as before.
-                      if (!onTerminalTap(e.nativeEvent.pageX, e.nativeEvent.pageY)) {
-                        inputRef.current?.focus();
+                    onDrop={(event) => {
+                      for (const asset of event.assets) {
+                        if (!asset.uri) continue;
+                        const filename = asset.fileName || `drop-${Date.now()}`;
+                        uploadFile(
+                          { uri: asset.uri, name: filename, type: asset.type },
+                          filename,
+                        );
                       }
                     }}
-                    onLongPress={openSelectionView}
                   >
-                    {Platform.OS === 'ios' ? (
-                      <DragDropContentView
-                        style={{ flex: 1 }}
-                        onDrop={(event) => {
-                          for (const asset of event.assets) {
-                            if (!asset.uri) continue;
-                            const filename = asset.fileName || `drop-${Date.now()}`;
-                            uploadFile(
-                              { uri: asset.uri, name: filename, type: asset.type },
-                              filename,
-                            );
-                          }
-                        }}
-                      >
-                        {terminalGrid}
-                      </DragDropContentView>
-                    ) : (
-                      terminalGrid
-                    )}
-                  </Pressable>
+                    <TerminalView
+                      ref={terminalViewRef}
+                      onInput={sendInput}
+                      onResize={onRendererResize}
+                      onOpenLink={openFile}
+                      onSelection={onRendererSelection}
+                      onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
+                    />
+                  </DragDropContentView>
+                ) : (
+                  <TerminalView
+                    ref={terminalViewRef}
+                    onInput={sendInput}
+                    onResize={onRendererResize}
+                    onOpenLink={openFile}
+                    onSelection={onRendererSelection}
+                    onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
+                  />
                 )}
               </View>
               {/* Connection banner — names the real state; no safety overclaim.

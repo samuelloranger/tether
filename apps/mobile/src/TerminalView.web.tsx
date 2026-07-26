@@ -8,8 +8,10 @@ import { RendererQueue, type RendererCommand } from './terminalRendererProtocol'
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ onInput, onResize, onOpenLink, onFallback }, ref) => {
+  ({ onInput, onResize, onOpenLink, onSelection, onFallback }, ref) => {
     const container = useRef<HTMLDivElement>(null);
+    const callbacks = useRef({ onInput, onResize, onOpenLink, onSelection, onFallback });
+    callbacks.current = { onInput, onResize, onOpenLink, onSelection, onFallback };
     const dispatch = useRef<(command: RendererCommand) => void>(() => {});
     const queue = useMemo(() => new RendererQueue((command) => dispatch.current(command)), []);
 
@@ -19,6 +21,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         hydrate: (...args) => queue.hydrate(...args),
         write: (data) => queue.write(data),
         resize: (cols, rows) => queue.resize(cols, rows),
+        scrollToLine: (line) => queue.scrollToLine(line),
+        selectAll: () => queue.selectAll(),
         focus: () => queue.focus(),
       }),
       [queue],
@@ -41,17 +45,20 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         webgl.onContextLoss(() => {
           webgl?.dispose();
           webgl = null;
-          onFallback('webgl-context-lost');
+          callbacks.current.onFallback('webgl-context-lost');
           terminal.refresh(0, terminal.rows - 1);
         });
         terminal.loadAddon(webgl);
       } catch (error) {
         webgl = null;
-        onFallback(String(error));
+        callbacks.current.onFallback(String(error));
       }
 
-      const links = registerTetherLinks(terminal, onOpenLink);
-      const input = terminal.onData(onInput);
+      const links = registerTetherLinks(terminal, (target) => callbacks.current.onOpenLink(target));
+      const input = terminal.onData((data) => callbacks.current.onInput(data));
+      const selection = terminal.onSelectionChange(() =>
+        callbacks.current.onSelection?.(terminal.getSelection()),
+      );
       let lastCols = 0;
       let lastRows = 0;
       const fitAndReport = () => {
@@ -63,7 +70,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         if (terminal.cols === lastCols && terminal.rows === lastRows) return;
         lastCols = terminal.cols;
         lastRows = terminal.rows;
-        onResize(lastCols, lastRows);
+        callbacks.current.onResize(lastCols, lastRows);
       };
       const observer = new ResizeObserver(fitAndReport);
       observer.observe(container.current);
@@ -86,6 +93,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
               terminal.resize(command.cols, command.rows);
             }
             break;
+          case 'scroll':
+            terminal.scrollToLine(command.line);
+            break;
+          case 'selectAll':
+            terminal.selectAll();
+            break;
           case 'focus':
             terminal.focus();
             break;
@@ -101,11 +114,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         queue.notReady();
         observer.disconnect();
         input.dispose();
+        selection.dispose();
         links.dispose();
         webgl?.dispose();
         terminal.dispose();
       };
-    }, [onFallback, onInput, onOpenLink, onResize, queue]);
+    }, [queue]);
 
     return (
       <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>

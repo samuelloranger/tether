@@ -15,6 +15,8 @@ export type RendererCommand =
     }
   | { v: 1; type: 'write'; data: string }
   | { v: 1; type: 'resize'; cols: number; rows: number }
+  | { v: 1; type: 'scroll'; line: number }
+  | { v: 1; type: 'selectAll' }
   | { v: 1; type: 'focus' }
   | { v: 1; type: 'dispose' };
 
@@ -114,6 +116,14 @@ export class RendererQueue {
     if (this.isReady && this.hydrated) this.send({ v: 1, type: 'resize', cols, rows });
   }
 
+  scrollToLine(line: number): void {
+    if (this.isReady && this.hydrated) this.send({ v: 1, type: 'scroll', line });
+  }
+
+  selectAll(): void {
+    if (this.isReady && this.hydrated) this.send({ v: 1, type: 'selectAll' });
+  }
+
   focus(): void {
     if (this.isReady && this.hydrated) this.send({ v: 1, type: 'focus' });
   }
@@ -147,6 +157,7 @@ export class OutputBatcher {
   private chunks: string[] = [];
   private sessionId: string | null = null;
   private scheduled = false;
+  private generation = 0;
 
   constructor(
     private activeSession: () => string,
@@ -160,7 +171,10 @@ export class OutputBatcher {
     this.chunks.push(chunk);
     if (this.scheduled) return;
     this.scheduled = true;
-    this.schedule(() => this.flushNow());
+    const generation = this.generation;
+    this.schedule(() => {
+      if (generation === this.generation) this.flushNow();
+    });
   }
 
   flushNow(): void {
@@ -173,6 +187,8 @@ export class OutputBatcher {
   }
 
   clear(): void {
+    this.generation += 1;
+    this.scheduled = false;
     this.chunks = [];
     this.sessionId = null;
   }

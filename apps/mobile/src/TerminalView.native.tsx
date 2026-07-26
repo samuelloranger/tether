@@ -6,7 +6,7 @@ import { parseRendererEvent, RendererQueue } from './terminalRendererProtocol';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ onInput, onResize, onOpenLink, onFallback }, ref) => {
+  ({ onInput, onResize, onOpenLink, onSelection, onFallback }, ref) => {
     const webView = useRef<WebView>(null);
     const queue = useMemo(
       () =>
@@ -23,6 +23,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         hydrate: (...args) => queue.hydrate(...args),
         write: (data) => queue.write(data),
         resize: (cols, rows) => queue.resize(cols, rows),
+        scrollToLine: (line) => queue.scrollToLine(line),
+        selectAll: () => queue.selectAll(),
         focus: () => queue.focus(),
       }),
       [queue],
@@ -48,6 +50,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           onFallback(message.reason);
           break;
         case 'selection':
+          onSelection?.(message.text);
           break;
       }
     };

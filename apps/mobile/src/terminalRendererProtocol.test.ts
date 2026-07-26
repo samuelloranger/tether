@@ -91,6 +91,41 @@ test('OutputBatcher joins active-session chunks into one delivery', () => {
   expect(writes).toEqual(['ab']);
 });
 
+test('OutputBatcher cannot flush a new session from an old scheduled callback', () => {
+  let activeId = 'term-1';
+  const scheduled: (() => void)[] = [];
+  const writes: string[] = [];
+  const batcher = new OutputBatcher(
+    () => activeId,
+    (chunk) => writes.push(chunk),
+    (flush) => scheduled.push(flush),
+  );
+  batcher.push('term-1', 'stale');
+  batcher.clear();
+  activeId = 'term-2';
+  batcher.push('term-2', 'fresh');
+
+  expect(scheduled).toHaveLength(2);
+  scheduled[0]();
+  expect(writes).toEqual([]);
+  scheduled[1]();
+  expect(writes).toEqual(['fresh']);
+});
+
+test('RendererQueue forwards scroll only after hydration', () => {
+  const sent: RendererCommand[] = [];
+  const queue = new RendererQueue((command) => sent.push(command));
+  queue.scrollToLine(42);
+  queue.hydrate('state', 80, 24, { foreground: '#fff', background: '#000' }, 'monospace', 12);
+  queue.ready();
+  queue.scrollToLine(42);
+  queue.selectAll();
+  expect(sent.slice(-2)).toEqual([
+    { v: 1, type: 'scroll', line: 42 },
+    { v: 1, type: 'selectAll' },
+  ]);
+});
+
 test('renderer links preserve a wrapped target and convert columns to xterm coordinates', () => {
   const links = rendererLinksForRow(
     ['see https://example.com/long/', 'path and src/app.ts:12:3'],

@@ -82,6 +82,12 @@ window.__tetherDispatch = (command) => {
         terminal.resize(command.cols, command.rows);
       }
       break;
+    case 'scroll':
+      terminal.scrollToLine(command.line);
+      break;
+    case 'selectAll':
+      terminal.selectAll();
+      break;
     case 'focus':
       terminal.focus();
       break;
