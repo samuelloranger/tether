@@ -1,4 +1,5 @@
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -12,6 +13,7 @@ import type { AppColors } from './appTheme';
 import { isDesktop, isMacDesktop } from './platform';
 import { createStyles, MONO } from './styles';
 import TitleBar from './TitleBar';
+import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 
 export type SetupMode = 'unknown' | 'create' | 'enter';
 export type TestStatus =
@@ -157,15 +159,26 @@ export function ConfigScreen({
             )}
 
             {testStatus.kind === 'ok' ? (
-              <TouchableOpacity style={styles.connectBtn} onPress={onSave}>
+              <TouchableOpacity
+                style={styles.connectBtn}
+                onPress={onSave}
+                accessibilityRole="button"
+                accessibilityLabel="Save and connect"
+              >
                 <Text style={styles.connectBtnText}>Save &amp; Connect</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={styles.connectBtn}
+                style={[styles.connectBtn, testStatus.kind === 'testing' && styles.connectBtnDisabled]}
                 onPress={onTest}
                 disabled={testStatus.kind === 'testing'}
+                accessibilityRole="button"
+                accessibilityLabel={setupMode === 'create' ? 'Create password' : 'Test connection'}
+                accessibilityState={{ disabled: testStatus.kind === 'testing' }}
               >
+                {testStatus.kind === 'testing' && (
+                  <ActivityIndicator size="small" color={theme.colors.accentText} />
+                )}
                 <Text style={styles.connectBtnText}>
                   {testStatus.kind === 'testing'
                     ? 'Testing…'
@@ -202,7 +215,7 @@ const createConfigStyles = (c: AppColors) =>
     },
     configIconBox: {
       padding: 16,
-      borderRadius: 16,
+      borderRadius: SURFACE_RADIUS.hero,
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.accent,
@@ -227,7 +240,7 @@ const createConfigStyles = (c: AppColors) =>
     },
     formContainer: {
       backgroundColor: c.surface,
-      borderRadius: 16,
+      borderRadius: SURFACE_RADIUS.hero,
       borderWidth: 1,
       borderColor: c.border,
       padding: 20,
@@ -244,7 +257,7 @@ const createConfigStyles = (c: AppColors) =>
       backgroundColor: c.input,
       borderWidth: 1,
       borderColor: c.border,
-      borderRadius: 8,
+      borderRadius: SURFACE_RADIUS.control,
       color: c.text,
       fontSize: 14,
       paddingVertical: 10,
@@ -254,11 +267,16 @@ const createConfigStyles = (c: AppColors) =>
     },
     connectBtn: {
       backgroundColor: c.accent,
-      paddingVertical: 14,
-      borderRadius: 8,
+      minHeight: MIN_TOUCH_TARGET,
+      paddingHorizontal: 16,
+      borderRadius: SURFACE_RADIUS.control,
       alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 8,
       marginTop: 10,
     },
+    connectBtnDisabled: { opacity: 0.65 },
     connectBtnText: {
       color: c.accentText,
       fontSize: 14,
