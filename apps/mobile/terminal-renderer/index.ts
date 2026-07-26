@@ -28,19 +28,22 @@ const terminal = new Terminal({
   scrollback: 1000,
 });
 const fit = new FitAddon();
+const isAndroid = /Android/i.test(navigator.userAgent);
 terminal.loadAddon(fit);
 terminal.open(document.getElementById('terminal')!);
 
-try {
-  const webgl = new WebglAddon();
-  webgl.onContextLoss(() => {
-    webgl.dispose();
-    post({ type: 'rendererFallback', reason: 'webgl-context-lost' });
-    terminal.refresh(0, terminal.rows - 1);
-  });
-  terminal.loadAddon(webgl);
-} catch (error) {
-  post({ type: 'rendererFallback', reason: String(error) });
+if (!isAndroid) {
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => {
+      webgl.dispose();
+      post({ type: 'rendererFallback', reason: 'webgl-context-lost' });
+      terminal.refresh(0, terminal.rows - 1);
+    });
+    terminal.loadAddon(webgl);
+  } catch (error) {
+    post({ type: 'rendererFallback', reason: String(error) });
+  }
 }
 
 registerTetherLinks(terminal, (target) => post({ type: 'openLink', target }));
@@ -58,6 +61,7 @@ const fitAndReport = () => {
   if (terminal.cols === lastCols && terminal.rows === lastRows) return;
   lastCols = terminal.cols;
   lastRows = terminal.rows;
+  terminal.refresh(0, terminal.rows - 1);
   post({ type: 'resize', cols: lastCols, rows: lastRows });
 };
 
@@ -69,7 +73,7 @@ window.__tetherDispatch = (command) => {
     case 'hydrate':
       terminal.reset();
       terminal.options.theme = command.theme;
-      terminal.options.fontFamily = command.fontFamily;
+      terminal.options.fontFamily = isAndroid ? 'monospace' : command.fontFamily;
       terminal.options.fontSize = command.fontSize;
       terminal.resize(command.cols, command.rows);
       terminal.write(command.data, fitAndReport);
