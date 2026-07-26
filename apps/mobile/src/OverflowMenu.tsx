@@ -14,7 +14,7 @@ import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { type DesktopNavigationMode, desktopNavigationLabel } from './desktopNavigation';
 import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
-import { availableOverlayHeight } from './overlayLayout';
+import { availableOverlayHeight, contentRelativeScrollStyle } from './overlayLayout';
 import { isDesktop } from './platform';
 
 // Header ⋯ overflow menu. Actions are passed in; the parent closes the menu.
@@ -70,8 +70,9 @@ export function OverflowMenu({
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.overflowMenuBackdrop} onPress={onClose}>
-        <Pressable style={[styles.menuPanel, { marginTop: topOffset, maxHeight }]} onPress={() => {}}>
+        <Pressable style={[styles.menuPanel, { marginTop: topOffset }]} onPress={() => {}}>
           <ScrollView
+            style={contentRelativeScrollStyle(maxHeight)}
             contentContainerStyle={styles.menuContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
