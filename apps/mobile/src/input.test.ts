@@ -1,4 +1,5 @@
 // Run: bun run src/input.test.ts  (from apps/mobile)
+import * as input from './input';
 import {
   applyBackspaceStreak,
   applyFieldChange,
@@ -62,6 +63,28 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 {
   const d = computeInputDelta(`${SENT}teh`, `${SENT}t`);
   eq(d.bytes, '\x7f\x7f', 'multi-char backspace');
+}
+
+// 8. The armed Ctrl control transforms the actual input delta, rather than
+// relying on a separate native keypress event to arrive first.
+{
+  const applyCtrlModifier = (
+    input as {
+      applyCtrlModifier?: (armed: boolean, bytes: string) => { bytes: string; consumed: boolean };
+    }
+  ).applyCtrlModifier;
+  eq(applyCtrlModifier?.(true, 'c'), { bytes: String.fromCharCode(3), consumed: true }, 'Ctrl+C emits SIGINT');
+  eq(applyCtrlModifier?.(true, 'V'), { bytes: String.fromCharCode(22), consumed: true }, 'Ctrl+V emits SYN');
+  eq(
+    applyCtrlModifier?.(true, 'hello'),
+    { bytes: 'hello', consumed: true },
+    'Ctrl disarms without rewriting dictated text',
+  );
+  eq(
+    applyCtrlModifier?.(false, 'c'),
+    { bytes: 'c', consumed: false },
+    'plain text remains unmodified without Ctrl',
+  );
 }
 
 // --- applyFieldChange: models the controlled-value loop ---

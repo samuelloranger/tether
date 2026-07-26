@@ -18,6 +18,7 @@ export type RendererCommand =
   | { v: 1; type: 'scroll'; line: number }
   | { v: 1; type: 'selectAll' }
   | { v: 1; type: 'focus' }
+  | { v: 1; type: 'blur' }
   | { v: 1; type: 'dispose' };
 
 export type RendererEvent =
@@ -131,6 +132,10 @@ export class RendererQueue {
 
   focus(): void {
     if (this.isReady && this.hydrated) this.send({ v: 1, type: 'focus' });
+  }
+
+  blur(): void {
+    if (this.isReady && this.hydrated) this.send({ v: 1, type: 'blur' });
   }
 
   ready(): void {

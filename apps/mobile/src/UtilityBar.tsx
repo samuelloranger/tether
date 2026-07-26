@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
 import * as Haptics from 'expo-haptics';
-import { Keyboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { ArrowCluster } from './Dpad';
@@ -15,6 +15,7 @@ export function UtilityBar({
   cursorSeq,
   onPaste,
   onImagePick,
+  onHideKeyboard,
 }: {
   ctrlArmed: boolean;
   setCtrlArmed: (updater: (prev: boolean) => boolean) => void;
@@ -22,6 +23,7 @@ export function UtilityBar({
   cursorSeq: (final: string) => string;
   onPaste: () => void;
   onImagePick: () => void;
+  onHideKeyboard: () => void;
 }) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
@@ -111,7 +113,7 @@ export function UtilityBar({
         <TouchableOpacity
           style={styles.utilityIconBtn}
           activeOpacity={0.6}
-          onPress={() => Keyboard.dismiss()}
+          onPress={onHideKeyboard}
           accessibilityRole="button"
           accessibilityLabel="Hide keyboard"
         >

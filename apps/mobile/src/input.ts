@@ -39,6 +39,20 @@ export function computeInputDelta(prev: string, next: string): InputDelta {
   };
 }
 
+// The mobile Ctrl control arms one terminal-style modifier for the next input
+// delta. Apply it here — where the actual text arrives — instead of depending
+// on a separate native keypress event to be delivered in a particular order.
+export function applyCtrlModifier(armed: boolean, bytes: string): { bytes: string; consumed: boolean } {
+  if (!armed || !bytes) return { bytes, consumed: false };
+  if (bytes.length === 1 && /^[a-zA-Z]$/.test(bytes)) {
+    return {
+      bytes: String.fromCharCode(bytes.toUpperCase().charCodeAt(0) - 64),
+      consumed: true,
+    };
+  }
+  return { bytes, consumed: true };
+}
+
 // Hold-backspace word deletion: the capture field is pinned to a sentinel, so
 // when iOS/Android keyboards accelerate into word-delete mode the field still
 // only ever yields single-character deletes. The PTY owns the line state, so
