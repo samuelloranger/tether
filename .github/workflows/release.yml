@@ -25,6 +25,7 @@ on:
         type: choice
         options:
           - desktop
+          - ios
           - all
         default: desktop
 
@@ -61,6 +62,7 @@ jobs:
 
   desktop:
     needs: draft
+    if: github.event_name == 'push' || inputs.scope == 'desktop' || inputs.scope == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -157,7 +159,7 @@ jobs:
 
   ios:
     needs: draft
-    if: github.event_name == 'push' || inputs.scope == 'all'
+    if: github.event_name == 'push' || inputs.scope == 'ios' || inputs.scope == 'all'
     runs-on: macos-15
     env:
       IPA_NAME: ${{ github.event_name == 'push' && 'tether.ipa' || 'tether-manual.ipa' }}
