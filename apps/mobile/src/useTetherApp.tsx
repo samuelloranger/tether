@@ -45,7 +45,7 @@ import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
 import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
-import { applyBackspaceStreak, applyFieldChange, EMPTY_STREAK, SENT } from './input';
+import { applyBackspaceStreak, applyCtrlModifier, applyFieldChange, EMPTY_STREAK, SENT } from './input';
 import type { LinkTarget } from './links';
 import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
@@ -151,9 +151,6 @@ export function useTetherApp() {
   // Mirrors the field's last value so onChangeText can diff against it.
   const prevValueRef = useRef(SENT);
   const backspaceStreakRef = useRef(EMPTY_STREAK);
-  // Set when handleKeyPress has already emitted a Ctrl-combo byte, so the
-  // following onChangeText absorbs that char without re-sending it.
-  const skipNextChangeRef = useRef(false);
   // User kill switch for mouse forwarding (default on). When off, gestures behave
   // as if the app never enabled mouse reporting even while it has.
   const [mouseEnabled, setMouseEnabled] = useState(true);
@@ -1217,26 +1214,6 @@ export function useTetherApp() {
     sendInput(e?.term.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text);
   };
 
-  // Type straight into the terminal: forward each keystroke to the PTY as it is
-  // pressed (the shell echoes it back for display). The capture field is pinned
-  // to a zero-width sentinel so nothing accumulates locally and Backspace keeps
-  // firing on iOS even before anything is typed.
-  const handleKeyPress = (e: { nativeEvent: { key: string } }) => {
-    const key = e.nativeEvent.key;
-    // Only Ctrl-combos are handled here now; all printable text and Backspace
-    // are handled by the onChangeText delta (see handleChangeText).
-    if (ctrlArmed) {
-      setCtrlArmed(false);
-      if (/^[a-zA-Z]$/.test(key)) {
-        sendInput(String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64));
-        // The printed letter still lands in the field and will fire
-        // onChangeText next — swallow it there instead of sending it literally.
-        skipNextChangeRef.current = true;
-      }
-      // Non-letter while armed: fall through, modifier dropped.
-    }
-  };
-
   const resetField = () => {
     setInputText(SENT);
     prevValueRef.current = SENT;
@@ -1246,23 +1223,22 @@ export function useTetherApp() {
   // Every field mutation (typing, dictation, swipe, autocorrect, Backspace)
   // arrives here. Diff against the previous value and forward the delta.
   const handleChangeText = (next: string) => {
-    if (skipNextChangeRef.current) {
-      // A Ctrl-combo already emitted its byte; discard the trailing char and
-      // re-anchor so the controlled value doesn't drift out of sync.
-      skipNextChangeRef.current = false;
-      resetField();
-      return;
-    }
     const { bytes, value, fromEmptyBuffer } = applyFieldChange(prevValueRef.current, next);
     if (bytes) {
+      const ctrl = applyCtrlModifier(ctrlArmed, bytes);
+      if (ctrl.consumed) setCtrlArmed(false);
       const tracked = applyBackspaceStreak(
         backspaceStreakRef.current,
-        bytes,
+        ctrl.bytes,
         fromEmptyBuffer,
         Date.now(),
       );
       backspaceStreakRef.current = tracked.streak;
       sendInput(tracked.bytes);
+      if (ctrl.consumed) {
+        resetField();
+        return;
+      }
     }
     // Keep the controlled value AND the diff baseline in lockstep — otherwise
     // React Native reverts the field to the old value and the next diff runs
@@ -1273,6 +1249,7 @@ export function useTetherApp() {
 
   // Return key: send carriage return (raw-mode TUIs like Claude Code expect \r).
   const handleSend = () => {
+    setCtrlArmed(false);
     sendInput('\r');
     resetField();
   };
@@ -1873,7 +1850,6 @@ export function useTetherApp() {
     inputText,
     setInputText,
     prevValueRef,
-    skipNextChangeRef,
     mouseEnabled,
     toggleMouseEnabled,
     notificationsEnabled,
@@ -1986,7 +1962,6 @@ export function useTetherApp() {
     copySelection,
     selectAllTerminal,
     handlePaste,
-    handleKeyPress,
     resetField,
     handleChangeText,
     handleSend,

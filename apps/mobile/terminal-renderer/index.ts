@@ -115,6 +115,9 @@ window.__tetherDispatch = (command) => {
     case 'focus':
       terminal.focus();
       break;
+    case 'blur':
+      terminal.blur();
+      break;
     case 'dispose':
       terminal.dispose();
       break;

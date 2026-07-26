@@ -24,6 +24,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         scrollToLine: (line) => queue.scrollToLine(line),
         selectAll: () => queue.selectAll(),
         focus: () => queue.focus(),
+        blur: () => queue.blur(),
       }),
       [queue],
     );
@@ -101,6 +102,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             break;
           case 'focus':
             terminal.focus();
+            break;
+          case 'blur':
+            terminal.blur();
             break;
           case 'dispose':
             terminal.dispose();

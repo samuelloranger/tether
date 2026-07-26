@@ -107,7 +107,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     inputText,
     setInputText,
     prevValueRef,
-    skipNextChangeRef,
     ctxMenu,
     setCtxMenu,
     updateInfo,
@@ -220,7 +219,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     copySelection,
     selectAllTerminal,
     handlePaste,
-    handleKeyPress,
     resetField,
     handleChangeText,
     handleSend,
@@ -690,6 +688,11 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               cursorSeq={cursorSeq}
               onPaste={handlePaste}
               onImagePick={pickAndUploadImage}
+              onHideKeyboard={() => {
+                terminalViewRef.current?.blur();
+                inputRef.current?.blur();
+                Keyboard.dismiss();
+              }}
             />
           )}
 
@@ -701,7 +704,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               ref={inputRef}
               style={styles.hiddenInput}
               value={inputText}
-              onKeyPress={handleKeyPress}
               onChangeText={handleChangeText}
               onSubmitEditing={handleSend}
               autoCapitalize="none"

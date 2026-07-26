@@ -16,6 +16,7 @@ export interface TerminalViewHandle {
   scrollToLine(line: number): void;
   selectAll(): void;
   focus(): void;
+  blur(): void;
 }
 
 export interface TerminalViewProps {

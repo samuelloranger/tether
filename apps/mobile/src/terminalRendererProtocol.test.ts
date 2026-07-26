@@ -171,6 +171,16 @@ test('RendererQueue forwards scroll only after hydration', () => {
   ]);
 });
 
+test('RendererQueue forwards blur only after hydration', () => {
+  const sent: RendererCommand[] = [];
+  const queue = new RendererQueue((command) => sent.push(command));
+  queue.blur();
+  queue.hydrate('state', 80, 24, { foreground: '#fff', background: '#000' }, 'monospace', 12);
+  queue.ready();
+  queue.blur();
+  expect(sent.at(-1)).toEqual({ v: 1, type: 'blur' });
+});
+
 test('renderer links preserve a wrapped target and convert columns to xterm coordinates', () => {
   const links = rendererLinksForRow(
     ['see https://example.com/long/', 'path and src/app.ts:12:3'],
