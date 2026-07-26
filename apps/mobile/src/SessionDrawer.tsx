@@ -11,13 +11,20 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { activityDotKey, activityLabel, type SessionActivity } from './activity';
+import {
+  activityDotKey,
+  activityLabel,
+  terminalAccessibilityLabel,
+  type SessionActivity,
+} from './activity';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { isRecentlyActive, PANEL_W } from './desktopNavigation';
 import { confirmAction } from './dialog';
 import type { Presentation } from './presentations';
 import { sessionLabel } from './sessionLabel';
+import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
+import { motionSpec } from './motion';
 
 export interface DrawerSession {
   id: string;
@@ -45,8 +52,6 @@ interface SessionDrawerProps {
   // mounted) instead of a slide-in overlay.
   docked?: boolean;
 }
-
-const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 // Kill needs a confirm. confirmAction shows a native OS dialog on desktop (the
 // Tauri plugin — not window.confirm, which WebKitGTK titles "JavaScript") and
@@ -102,8 +107,8 @@ export function SessionDrawer({
         return;
       }
       Animated.parallel([
-        Animated.timing(tx, { toValue: 0, duration: 240, useNativeDriver: true }),
-        Animated.timing(fade, { toValue: 1, duration: 240, useNativeDriver: true }),
+        Animated.timing(tx, { toValue: 0, ...motionSpec('drawerEnter', false) }),
+        Animated.timing(fade, { toValue: 1, ...motionSpec('drawerEnter', false) }),
       ]).start();
     } else if (mounted) {
       if (reduceMotion.current) {
@@ -111,8 +116,8 @@ export function SessionDrawer({
         return;
       }
       Animated.parallel([
-        Animated.timing(tx, { toValue: -PANEL_W, duration: 160, useNativeDriver: true }),
-        Animated.timing(fade, { toValue: 0, duration: 160, useNativeDriver: true }),
+        Animated.timing(tx, { toValue: -PANEL_W, ...motionSpec('drawerExit', false) }),
+        Animated.timing(fade, { toValue: 0, ...motionSpec('drawerExit', false) }),
       ]).start(({ finished }) => {
         if (finished) setMounted(false);
       });
@@ -126,7 +131,7 @@ export function SessionDrawer({
         <Text style={styles.title}>Workspace</Text>
         <TouchableOpacity
           style={styles.settingsBtn}
-          hitSlop={HIT}
+          hitSlop={HIT_SLOP}
           activeOpacity={0.6}
           onPress={onSettings}
           accessibilityRole="button"
@@ -155,7 +160,7 @@ export function SessionDrawer({
                 onPress={() => onSelect(s.id)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={`Terminal ${s.id}, ${activityLabel(dotKey)}`}
+                accessibilityLabel={terminalAccessibilityLabel(sessionLabel(s), s.status, s.activity, live)}
               >
                 <View style={[styles.dot, { backgroundColor: dotColor }]} />
                 <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
@@ -168,7 +173,7 @@ export function SessionDrawer({
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.kill}
-                hitSlop={HIT}
+                hitSlop={HIT_SLOP}
                 activeOpacity={0.6}
                 onPress={() => confirmKill(s.id, onKill)}
                 accessibilityRole="button"
@@ -203,7 +208,7 @@ export function SessionDrawer({
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.kill}
-                hitSlop={HIT}
+                hitSlop={HIT_SLOP}
                 activeOpacity={0.6}
                 onPress={() => onClosePreview(preview.id)}
                 accessibilityRole="button"
@@ -277,7 +282,13 @@ const createStyles = (c: AppColors) =>
     // (no mobile status bar to clear).
     panelDocked: { position: 'relative', paddingTop: 12, alignSelf: 'stretch' },
     header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-    settingsBtn: { marginLeft: 'auto', padding: 4 },
+    settingsBtn: {
+      marginLeft: 'auto',
+      minWidth: MIN_TOUCH_TARGET,
+      minHeight: MIN_TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     title: {
       color: c.textMuted,
       fontSize: 11,
@@ -289,9 +300,9 @@ const createStyles = (c: AppColors) =>
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderRadius: 8,
+      borderRadius: SURFACE_RADIUS.control,
       marginBottom: 4,
-      minHeight: 44,
+      minHeight: MIN_TOUCH_TARGET,
       backgroundColor: c.surfaceRaised,
     },
     rowActive: { backgroundColor: c.selected },
@@ -299,6 +310,7 @@ const createStyles = (c: AppColors) =>
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
+      minHeight: MIN_TOUCH_TARGET,
       paddingHorizontal: 10,
       paddingVertical: 11,
     },
@@ -308,6 +320,8 @@ const createStyles = (c: AppColors) =>
     nameActive: { color: c.accent, fontWeight: '700' },
     stopped: { color: c.textFaint, fontSize: 10, marginLeft: 8 },
     kill: {
+      minWidth: MIN_TOUCH_TARGET,
+      minHeight: MIN_TOUCH_TARGET,
       paddingHorizontal: 12,
       paddingVertical: 11,
       alignItems: 'center',
@@ -320,7 +334,8 @@ const createStyles = (c: AppColors) =>
       gap: 6,
       marginVertical: 12,
       paddingVertical: 13,
-      borderRadius: 8,
+      borderRadius: SURFACE_RADIUS.control,
+      minHeight: MIN_TOUCH_TARGET,
       backgroundColor: c.accent,
     },
     newBtnText: { color: c.accentText, fontWeight: '600', fontSize: 13 },

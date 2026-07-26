@@ -40,6 +40,15 @@ export function activityLabel(key: DotKey): string {
   }
 }
 
+export function terminalAccessibilityLabel(
+  label: string,
+  status: ActivityRow['status'],
+  activity: ActivityRow['activity'],
+  live: boolean,
+): string {
+  return `Terminal ${label}, ${activityLabel(activityDotKey(status, activity, live))}`;
+}
+
 // Background sessions that just flipped to `waiting` and deserve a
 // notification. Only fires on a working/idle/unknown → waiting edge, so a
 // still-waiting session doesn't re-notify on every 4s poll. The ACTIVE
