@@ -1085,20 +1085,12 @@ export function useTetherApp() {
     terminalViewRef.current?.scrollToLine(target);
   };
 
-  const openSearch = () => {
-    setMenuOpen(false);
-    setSearchQuery('');
-    setScreen(entryFor(activeIdRef.current).term.getSnapshot());
-    setSelectionViewOpen(true);
-    setTimeout(() => searchInputRef.current?.focus(), 250);
-  };
-
-  // Long-press the terminal to open a fullscreen, natively-selectable view
-  // of everything currently visible + scrollback, instead of copying
-  // straight to the clipboard.
+  // Open a frozen, natively selectable snapshot of the current transcript.
   const openSelectionView = () => {
     const snapshot = entryFor(activeIdRef.current).term.getSnapshot();
     if (!snapshotText(snapshot)) return;
+    setMenuOpen(false);
+    setSearchQuery('');
     setScreen(snapshot);
     setSelectionViewOpen(true);
   };
@@ -1990,7 +1982,6 @@ export function useTetherApp() {
     cursorSeq,
     getFullText,
     searchText,
-    openSearch,
     openSelectionView,
     copySelection,
     selectAllTerminal,

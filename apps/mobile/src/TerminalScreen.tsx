@@ -216,7 +216,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     cursorSeq,
     getFullText,
     searchText,
-    openSearch,
     openSelectionView,
     copySelection,
     selectAllTerminal,
@@ -601,7 +600,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onFontDelta={changeFontSize}
               mouseEnabled={mouseEnabled}
               onToggleMouse={toggleMouseEnabled}
-              onSearch={openSearch}
+              onSelectText={openSelectionView}
               onJumpPromptUp={() => jumpPrompt(-1)}
               onJumpPromptDown={() => jumpPrompt(1)}
               onSnippets={() => {

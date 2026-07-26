@@ -28,7 +28,7 @@
 - Consumes: `openSelectionView(): void`, which snapshots the active `TerminalEngine`.
 - Produces: `OverflowMenu` prop `onSelectText: () => void`.
 
-- [ ] **Step 1: Establish the current verification baseline**
+- [x] **Step 1: Establish the current verification baseline**
 
 Run:
 
@@ -39,7 +39,7 @@ bun --cwd apps/mobile typecheck
 
 Expected: 175 tests pass and TypeScript exits successfully.
 
-- [ ] **Step 2: Rename the overflow action and callback**
+- [x] **Step 2: Rename the overflow action and callback**
 
 In `OverflowMenu.tsx`, replace `onSearch` with `onSelectText` in the prop list
 and type, then replace the search row with:
@@ -51,7 +51,7 @@ and type, then replace the search row with:
 </TouchableOpacity>
 ```
 
-- [ ] **Step 3: Route the menu action to the frozen snapshot path**
+- [x] **Step 3: Route the menu action to the frozen snapshot path**
 
 In `TerminalScreen.tsx`, replace:
 
@@ -67,7 +67,7 @@ onSelectText={openSelectionView}
 
 Remove `openSearch` from the values destructured from `useTetherApp`.
 
-- [ ] **Step 4: Make opening behavior self-contained**
+- [x] **Step 4: Make opening behavior self-contained**
 
 Delete the redundant `openSearch` function in `useTetherApp.tsx`. Update
 `openSelectionView` so every entry point closes the menu, clears an old filter,
@@ -86,7 +86,7 @@ const openSelectionView = () => {
 
 Remove `openSearch` from the hook return object.
 
-- [ ] **Step 5: Verify behavior and regressions**
+- [x] **Step 5: Verify behavior and regressions**
 
 Run:
 
@@ -101,7 +101,7 @@ errors are reported. The frozen-snapshot guarantee is structural: `setScreen`
 is called only when opening the selection view, never from the streaming output
 path.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/mobile/src/OverflowMenu.tsx apps/mobile/src/TerminalScreen.tsx apps/mobile/src/useTetherApp.tsx
