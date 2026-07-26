@@ -1,10 +1,20 @@
 import Feather from '@expo/vector-icons/Feather';
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { type DesktopNavigationMode, desktopNavigationLabel } from './desktopNavigation';
 import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
+import { availableOverlayHeight } from './overlayLayout';
 import { isDesktop } from './platform';
 
 // Header ⋯ overflow menu. Actions are passed in; the parent closes the menu.
@@ -52,12 +62,20 @@ export function OverflowMenu({
   onDesktopNavigationMode?: (mode: DesktopNavigationMode) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
+  const topOffset = insets.top + 52;
+  const maxHeight = availableOverlayHeight(height, topOffset, 12);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.overflowMenuBackdrop} onPress={onClose}>
-        <Pressable style={[styles.menuPanel, { marginTop: insets.top + 52 }]} onPress={() => {}}>
+        <Pressable style={[styles.menuPanel, { marginTop: topOffset, maxHeight }]} onPress={() => {}}>
+          <ScrollView
+            contentContainerStyle={styles.menuContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
           <TouchableOpacity style={styles.menuRow} onPress={onRename}>
             <Feather name="edit-2" size={16} color={theme.colors.text} />
             <Text style={styles.menuRowText}>Rename terminal</Text>
@@ -185,6 +203,7 @@ export function OverflowMenu({
               Restart terminal
             </Text>
           </TouchableOpacity>
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -207,8 +226,9 @@ const createStyles = (c: AppColors) =>
       borderRadius: SURFACE_RADIUS.panel,
       borderWidth: 1,
       borderColor: c.border,
-      paddingVertical: 6,
+      overflow: 'hidden',
     },
+    menuContent: { paddingVertical: 6 },
     menuRow: {
       flexDirection: 'row',
       alignItems: 'center',
