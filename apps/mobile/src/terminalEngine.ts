@@ -3,29 +3,17 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import { type IBufferCell, type IBufferLine, Terminal } from '@xterm/headless';
 import type { Terminal as BrowserTerminal } from '@xterm/xterm';
 import { computeLinkSpans, type LinkSpan } from './links';
+import { type CellStyle, DEFAULT_BG, DEFAULT_FG, PALETTE, type RenderRow } from './terminal';
 import {
-  base64ToUtf8,
-  type CellStyle,
-  DEFAULT_BG,
-  DEFAULT_FG,
-  PALETTE,
-  type RenderRow,
-} from './terminal';
+  type ControlHost,
+  registerTerminalControls,
+  type TerminalControls,
+} from './terminalControls';
 
 const MAX_SCROLLBACK = 1000;
 
 function hex6(n: number): string {
   return `#${(n & 0xffffff).toString(16).padStart(6, '0')}`;
-}
-
-// xterm OSC 10/11 reply color format: each "#rrggbb" hex byte doubled, e.g.
-// "#1e1e2e" -> "rgb:1e1e/1e1e/2e2e".
-function hexToOscColor(hex: string): string {
-  const h = hex.replace('#', '');
-  const r = h.slice(0, 2);
-  const g = h.slice(2, 4);
-  const b = h.slice(4, 6);
-  return `rgb:${r}${r}/${g}${g}/${b}${b}`;
 }
 
 function fgOf(cell: IBufferCell): string | undefined {
@@ -128,6 +116,7 @@ export class TerminalEngine {
   // repaint of the row (CR/EL overwriting those cells) invalidates the stale span.
   private osc8Spans = new Map<number, { span: LinkSpan; text: string }[]>();
   private osc8Open: { url: string; startId: number; startCol: number } | null = null;
+  private controls: TerminalControls;
 
   bellCount = 0;
   notifyCount = 0;
@@ -195,120 +184,41 @@ export class TerminalEngine {
       }
       return true;
     });
-    // SGR mouse encoding (DECSET 1006) is not exposed on term.modes — observe it
-    // via non-consuming DECSET/DECRST handlers.
-    this.term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
-      if (params.includes(1006)) this.mouseSgr = true;
-      if (params.includes(25)) this.cursorVisible = true; // DECTCEM show
-      return false;
-    });
-    this.term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
-      if (params.includes(1006)) this.mouseSgr = false;
-      if (params.includes(25)) this.cursorVisible = false; // DECTCEM hide
-      return false;
-    });
-    // DECSCUSR (CSI Ps SP q) — cursor shape.
-    this.term.parser.registerCsiHandler({ intermediates: ' ', final: 'q' }, (params) => {
-      const p = (params[0] as number) ?? 1;
-      this.cursorStyle = p === 5 || p === 6 ? 'bar' : p === 3 || p === 4 ? 'underline' : 'block';
-      return false;
-    });
-
-    // Title (OSC 0/2) and bell come through xterm's own events.
-    this.term.onTitleChange((t2) => {
-      this.title = t2;
-    });
-    this.term.onBell(() => {
-      this.bellCount++;
-    });
-
-    // OSC 7 — cwd report (file://host/path).
-    this.term.parser.registerOscHandler(7, (data) => {
-      const m = /^file:\/\/[^/]*(\/.*)$/.exec(data);
-      if (m) {
-        try {
-          this.cwd = decodeURIComponent(m[1]);
-        } catch {
-          this.cwd = m[1];
-        }
-      }
-      return true;
-    });
-    // OSC 9 — iTerm2 growl: whole payload is the body.
-    this.term.parser.registerOscHandler(9, (data) => {
-      this.raiseNotify('', data);
-      return true;
-    });
-    // OSC 777 — rxvt/ghostty "notify;<title>;<body>".
-    this.term.parser.registerOscHandler(777, (data) => {
-      const parts = data.split(';');
-      if (parts[0] === 'notify') this.raiseNotify(parts[1] ?? '', parts[2] ?? '');
-      return true;
-    });
-    // OSC 99 — kitty notification protocol (chunked).
-    this.term.parser.registerOscHandler(99, (data) => {
-      this.dispatchKittyNotify(data);
-      return true;
-    });
-    // OSC 10/11 — fg/bg color query. Reply with the app theme's default (setting
-    // the color is intentionally unsupported — themes are fixed). Matches legacy.
-    this.term.parser.registerOscHandler(10, (data) => {
-      if (data === '?') this.onReply?.(`\x1b]10;${hexToOscColor(DEFAULT_FG)}\x1b\\`);
-      return true;
-    });
-    this.term.parser.registerOscHandler(11, (data) => {
-      if (data === '?') this.onReply?.(`\x1b]11;${hexToOscColor(DEFAULT_BG)}\x1b\\`);
-      return true;
-    });
-    // OSC 52 — clipboard write ("<selectors>;<base64|empty>"); query ('?') ignored.
-    this.term.parser.registerOscHandler(52, (data) => {
-      const sep = data.indexOf(';');
-      if (sep === -1) return true;
-      const payload = data.slice(sep + 1);
-      if (payload === '?') return true;
-      try {
-        this.onClipboardWrite?.(base64ToUtf8(payload));
-      } catch {
-        // malformed base64 — drop silently
-      }
-      return true;
-    });
+    // Everything below is buffer-independent control state, shared with the
+    // renderer page so whichever host is parsing can report it — see
+    // terminalControls.ts.
+    this.controls = registerTerminalControls(
+      this.term as unknown as ControlHost,
+      {
+        title: (t2) => {
+          this.title = t2;
+        },
+        bell: () => {
+          this.bellCount++;
+        },
+        cwd: (path) => {
+          this.cwd = path;
+        },
+        notify: (title, body) => this.raiseNotify(title, body),
+        cursorStyle: (style) => {
+          this.cursorStyle = style;
+        },
+        mouseSgr: (enabled) => {
+          this.mouseSgr = enabled;
+        },
+        cursorVisible: (visible) => {
+          this.cursorVisible = visible;
+        },
+        reply: (data) => this.onReply?.(data),
+        clipboardWrite: (text) => this.onClipboardWrite?.(text),
+      },
+      { foreground: DEFAULT_FG, background: DEFAULT_BG },
+    );
   }
 
   private raiseNotify(title: string, body: string): void {
     this.lastNotify = { title, body };
     this.notifyCount++;
-  }
-
-  // kitty OSC 99: "<metadata>;<payload>" — colon-separated key=val metadata
-  // (i=id, d=0 more chunks follow, p=title|body, e=1 base64). Ported verbatim
-  // from the legacy emulator.
-  private kittyNotif = new Map<string, { title: string; body: string }>();
-  private dispatchKittyNotify(pt: string): void {
-    const bodySep = pt.indexOf(';');
-    if (bodySep === -1) return;
-    const meta = new Map<string, string>();
-    for (const kv of pt.slice(0, bodySep).split(':')) {
-      const eq = kv.indexOf('=');
-      if (eq !== -1) meta.set(kv.slice(0, eq), kv.slice(eq + 1));
-    }
-    let payload = pt.slice(bodySep + 1);
-    if (meta.get('e') === '1') {
-      try {
-        payload = base64ToUtf8(payload);
-      } catch {
-        return;
-      }
-    }
-    const id = meta.get('i') ?? '';
-    const ptype = meta.get('p') ?? 'title';
-    const buf = this.kittyNotif.get(id) ?? { title: '', body: '' };
-    if (ptype === 'title') buf.title += payload;
-    else if (ptype === 'body') buf.body += payload;
-    this.kittyNotif.set(id, buf);
-    if (meta.get('d') === '0') return;
-    this.kittyNotif.delete(id);
-    if (buf.title || buf.body) this.raiseNotify(buf.title, buf.body);
   }
 
   private syncModes(): void {
@@ -447,7 +357,7 @@ export class TerminalEngine {
     this.promptIds.clear();
     this.osc8Spans.clear();
     this.osc8Open = null;
-    this.kittyNotif.clear(); // drop any half-assembled kitty OSC 99 chunk
+    this.controls.reset(); // drop any half-assembled kitty OSC 99 chunk
   }
 
   getSnapshot(): RenderRow[] {
