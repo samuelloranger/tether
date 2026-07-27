@@ -53,6 +53,37 @@ export function applyCtrlModifier(armed: boolean, bytes: string): { bytes: strin
   return { bytes, consumed: true };
 }
 
+// Ctrl also has to reach the keys that never pass through the capture field —
+// everything the mobile utility bar and the D-pad send directly (Tab, Esc,
+// arrows, Home/End/PgUp/PgDn/Del). Terminals encode a modified cursor or
+// tilde key by injecting parameter 5 (Ctrl) into the CSI form, e.g. Right is
+// ESC[C or ESC O C unmodified but ESC[1;5C with Ctrl, and Del is ESC[3~ but
+// ESC[3;5~. SS3 (application-cursor) sequences have no modifier form, so they
+// are rewritten to CSI here. Keys with no Ctrl encoding at all (Tab, Esc) pass
+// through unchanged but still consume the armed modifier, so it never stays
+// stuck armed and silently rewrites the next typed letter.
+const ESC = '\x1b';
+const CURSOR_FINALS = 'ABCDHF';
+
+export function applyCtrlToKey(armed: boolean, bytes: string): { bytes: string; consumed: boolean } {
+  if (!armed || !bytes) return { bytes, consumed: false };
+  // CSI/SS3 cursor key: ESC[X or ESC O X, X = A-D (arrows) or H/F (Home/End).
+  if (
+    bytes.length === 3 &&
+    bytes[0] === ESC &&
+    (bytes[1] === '[' || bytes[1] === 'O') &&
+    CURSOR_FINALS.includes(bytes[2])
+  ) {
+    return { bytes: `${ESC}[1;5${bytes[2]}`, consumed: true };
+  }
+  // CSI tilde key: ESC[N~ (3 = Del, 5 = PgUp, 6 = PgDn).
+  if (bytes.length > 3 && bytes[0] === ESC && bytes[1] === '[' && bytes.endsWith('~')) {
+    const params = bytes.slice(2, -1);
+    if (/^\d+$/.test(params)) return { bytes: `${ESC}[${params};5~`, consumed: true };
+  }
+  return applyCtrlModifier(armed, bytes);
+}
+
 // Hold-backspace word deletion: the capture field is pinned to a sentinel, so
 // when iOS/Android keyboards accelerate into word-delete mode the field still
 // only ever yields single-character deletes. The PTY owns the line state, so

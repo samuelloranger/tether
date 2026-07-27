@@ -23,6 +23,10 @@ export type RendererCommand =
 
 export type RendererEvent =
   | { v: 1; type: 'ready' }
+  // Answer to the liveness probe. Not emitted by the renderer bundle — the
+  // native side injects the postMessage, gated on the renderer's own global, so
+  // a pong proves the content process is up AND still running our page.
+  | { v: 1; type: 'pong' }
   | { v: 1; type: 'input'; text: string }
   | { v: 1; type: 'resize'; cols: number; rows: number }
   | { v: 1; type: 'openLink'; target: LinkTarget }
@@ -55,6 +59,8 @@ export function parseRendererEvent(data: string): RendererEvent | null {
   switch (value.type) {
     case 'ready':
       return { v: 1, type: 'ready' };
+    case 'pong':
+      return { v: 1, type: 'pong' };
     case 'input':
       return typeof value.text === 'string' ? { v: 1, type: 'input', text: value.text } : null;
     case 'resize':

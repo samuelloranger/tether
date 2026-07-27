@@ -2,6 +2,7 @@
 import * as input from './input';
 import {
   applyBackspaceStreak,
+  applyCtrlToKey,
   applyFieldChange,
   computeInputDelta,
   EMPTY_STREAK,
@@ -85,6 +86,28 @@ function eq(actual: unknown, expected: unknown, msg: string) {
     { bytes: 'c', consumed: false },
     'plain text remains unmodified without Ctrl',
   );
+}
+
+// 8b. Ctrl also reaches the keys that never pass through the capture field —
+// the utility bar and D-pad send them directly, so they must pick up the armed
+// modifier (CSI parameter 5) and always consume it.
+{
+  eq(applyCtrlToKey(true, '\x1b[C'), { bytes: '\x1b[1;5C', consumed: true }, 'Ctrl+Right (CSI)');
+  eq(
+    applyCtrlToKey(true, '\x1bOC'),
+    { bytes: '\x1b[1;5C', consumed: true },
+    'Ctrl+Right rewrites SS3 to CSI (SS3 has no modifier form)',
+  );
+  eq(applyCtrlToKey(true, '\x1b[H'), { bytes: '\x1b[1;5H', consumed: true }, 'Ctrl+Home');
+  eq(applyCtrlToKey(true, '\x1b[3~'), { bytes: '\x1b[3;5~', consumed: true }, 'Ctrl+Del');
+  eq(applyCtrlToKey(true, '\x1b[6~'), { bytes: '\x1b[6;5~', consumed: true }, 'Ctrl+PgDn');
+  eq(
+    applyCtrlToKey(true, '\t'),
+    { bytes: '\t', consumed: true },
+    'Tab has no Ctrl encoding but still disarms, so Ctrl never sticks',
+  );
+  eq(applyCtrlToKey(true, 'c'), { bytes: String.fromCharCode(3), consumed: true }, 'Ctrl+C');
+  eq(applyCtrlToKey(false, '\x1b[C'), { bytes: '\x1b[C', consumed: false }, 'unarmed passthrough');
 }
 
 // --- applyFieldChange: models the controlled-value loop ---

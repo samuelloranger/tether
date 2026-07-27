@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -45,7 +46,14 @@ import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
 import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
-import { applyBackspaceStreak, applyCtrlModifier, applyFieldChange, EMPTY_STREAK, SENT } from './input';
+import {
+  applyBackspaceStreak,
+  applyCtrlModifier,
+  applyCtrlToKey,
+  applyFieldChange,
+  EMPTY_STREAK,
+  SENT,
+} from './input';
 import type { LinkTarget } from './links';
 import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
@@ -53,6 +61,7 @@ import { type Presentation, pickAutoSelectPreview } from './presentations';
 import { SelectionView } from './SelectionView';
 import type { DrawerSession } from './SessionDrawer';
 import { sessionLabel } from './sessionLabel';
+import { resumeAction } from './resume';
 import { RenameModal, SnippetsModal } from './SessionModals';
 import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
 import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
@@ -174,6 +183,10 @@ export function useTetherApp() {
   );
   const [updating, setUpdating] = useState(false);
   const [ctrlArmed, setCtrlArmed] = useState(false);
+  // Utility-bar page lives here, not in UtilityBar: the bar unmounts whenever
+  // the terminal is hidden or a session switch remounts it, and a local
+  // useState would silently snap back to page 0 every time.
+  const [utilityPage, setUtilityPage] = useState(0);
   const [selectionViewOpen, setSelectionViewOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameModalOpen, setRenameModalOpen] = useState(false);
@@ -924,6 +937,34 @@ export function useTetherApp() {
     return () => disconnectAll();
   }, [ready]);
 
+  // 2b. Re-establish sockets when the app comes back to the foreground. iOS
+  // suspends the JS timers and kills sockets while backgrounded, so without this
+  // a resumed app sits on "Connecting…" until an exponential backoff (up to 30s)
+  // or the 15s keepalive sweep happens to fire. See resumeAction for the cases.
+  useEffect(() => {
+    if (!ready) return;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const now = Date.now();
+      for (const [id, st] of Array.from(connections)) {
+        switch (resumeAction(st, now)) {
+          case 'reconnect':
+            st.retry = 0; // resume is new information, not another failed retry
+            connect(id);
+            break;
+          case 'close':
+            try {
+              st.sock?.close(); // onClose reconnects
+            } catch {}
+            break;
+          case 'none':
+            break;
+        }
+      }
+    });
+    return () => subscription.remove();
+  }, [ready]);
+
   // Probe the server, then either create the first password (TOFU) or validate an
   // existing one — driving the setup screen to a testable "Reachable ✓" state.
   const testConnection = async () => {
@@ -1048,6 +1089,16 @@ export function useTetherApp() {
   // desktop keyboard mapper so both honour application-cursor mode.
   const cursorSeq = (final: string) =>
     `\x1b${cache.get(activeIdRef.current)?.term.applicationCursor ? 'O' : '['}${final}`;
+
+  // Every key the mobile utility bar / D-pad sends goes through here instead of
+  // sendInput, so the armed Ctrl modifier applies to bar keys too (Ctrl+arrow,
+  // Ctrl+Del) and is always consumed — pressing a bar key while Ctrl is armed
+  // must never leave it armed for the next typed letter.
+  const sendKey = (bytes: string) => {
+    const ctrl = applyCtrlToKey(ctrlArmed, bytes);
+    if (ctrl.consumed) setCtrlArmed(false);
+    sendInput(ctrl.bytes);
+  };
 
   // Full plain-text transcript (visible screen + scrollback) for the
   // selectable view and the Copy All fallback.
@@ -1866,6 +1917,8 @@ export function useTetherApp() {
     setUpdating,
     ctrlArmed,
     setCtrlArmed,
+    utilityPage,
+    setUtilityPage,
     selectionViewOpen,
     setSelectionViewOpen,
     menuOpen,
@@ -1955,6 +2008,7 @@ export function useTetherApp() {
     testConnection,
     saveConfig,
     sendInput,
+    sendKey,
     cursorSeq,
     getFullText,
     searchText,

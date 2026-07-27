@@ -118,6 +118,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     setUpdating,
     ctrlArmed,
     setCtrlArmed,
+    utilityPage,
+    setUtilityPage,
     selectionViewOpen,
     setSelectionViewOpen,
     menuOpen,
@@ -212,6 +214,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     testConnection,
     saveConfig,
     sendInput,
+    sendKey,
     cursorSeq,
     getFullText,
     searchText,
@@ -684,8 +687,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             <UtilityBar
               ctrlArmed={ctrlArmed}
               setCtrlArmed={setCtrlArmed}
-              sendInput={sendInput}
+              sendKey={sendKey}
               cursorSeq={cursorSeq}
+              page={utilityPage}
+              setPage={setUtilityPage}
               onPaste={handlePaste}
               onImagePick={pickAndUploadImage}
               onHideKeyboard={() => {

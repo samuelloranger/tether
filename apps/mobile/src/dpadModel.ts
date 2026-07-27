@@ -6,6 +6,13 @@ export type DPadDirection = 'A' | 'B' | 'C' | 'D';
 
 export const D_PAD_THRESHOLD = 8;
 
+// Auto-repeat: first key on activation, then one every D_PAD_REPEAT_MS after a
+// D_PAD_REPEAT_DELAY_MS hold. Capped — an accidentally pinned finger would
+// otherwise stream ~16 arrow keys/second into the PTY forever.
+export const D_PAD_REPEAT_DELAY_MS = 350;
+export const D_PAD_REPEAT_MS = 60;
+export const D_PAD_MAX_REPEATS = 120;
+
 const SWITCH_RATIO = 1.25;
 const THUMB_LIMIT = 11;
 
@@ -26,6 +33,16 @@ export function resolveDPadDirection(
   const dominant = activeIsHorizontal ? horizontal : vertical;
   const opposing = activeIsHorizontal ? vertical : horizontal;
   return opposing < dominant * SWITCH_RATIO ? active : candidate;
+}
+
+// Where the touch landed inside the puck, as an offset from its center. A tap
+// on a chevron is therefore already past D_PAD_THRESHOLD and fires that arrow —
+// without this a plain tap resolves to no direction and does nothing at all.
+// Drags then add the pan delta to this origin, so a gesture that starts off
+// center is not double-counted.
+export function grantOffset(locationX: number, locationY: number): { x: number; y: number } {
+  const center = D_PAD_BUTTON_SIZE / 2;
+  return { x: locationX - center, y: locationY - center };
 }
 
 export function thumbOffset(dx: number, dy: number): { x: number; y: number } {

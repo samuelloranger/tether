@@ -15,6 +15,7 @@ describe('parseRendererEvent', () => {
       type: 'input',
       text: 'ls\r',
     });
+    expect(parseRendererEvent('{"v":1,"type":"pong"}')).toEqual({ v: 1, type: 'pong' });
     expect(parseRendererEvent('{"v":2,"type":"input","text":"x"}')).toBeNull();
     expect(parseRendererEvent('{"v":1,"type":"resize","cols":0,"rows":24}')).toBeNull();
     expect(parseRendererEvent('not json')).toBeNull();

@@ -1,5 +1,7 @@
 import {
   D_PAD_BUTTON_SIZE,
+  D_PAD_MAX_REPEATS,
+  grantOffset,
   resolveDPadDirection,
   thumbOffset,
 } from './dpadModel';
@@ -26,6 +28,23 @@ test('D-pad maps cardinals and diagonals to terminal finals', () => {
 test('D-pad keeps its active direction near an axis boundary', () => {
   expect(resolveDPadDirection(15, 16, 'C')).toBe('C');
   expect(resolveDPadDirection(10, 20, 'C')).toBe('B');
+});
+
+test('D-pad tap on a chevron resolves to that direction', () => {
+  const center = D_PAD_BUTTON_SIZE / 2;
+  // Left chevron sits ~16pt left of center — a plain tap there must send Left.
+  const left = grantOffset(center - 16, center);
+  expect(resolveDPadDirection(left.x, left.y, null)).toBe('D');
+  const up = grantOffset(center, center - 16);
+  expect(resolveDPadDirection(up.x, up.y, null)).toBe('A');
+  // A dead-center tap is still neutral.
+  const middle = grantOffset(center, center);
+  expect(resolveDPadDirection(middle.x, middle.y, null)).toBeNull();
+});
+
+test('D-pad auto-repeat is capped', () => {
+  expect(D_PAD_MAX_REPEATS).toBeGreaterThan(0);
+  expect(D_PAD_MAX_REPEATS).toBeLessThanOrEqual(200);
 });
 
 test('D-pad thumb stays bounded inside its control', () => {
