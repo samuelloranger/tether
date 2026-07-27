@@ -163,3 +163,63 @@ test('degrades to empty and closes a partial watcher for a non-repository root',
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// The bug behind "cd into another folder is slow": a directory that merely
+// contains checkouts is itself a repo with no commits, so git reports nothing
+// as ignored and the walk descended into every project — 508k directories and
+// ~14s of synchronous blocking on the PTY output path, plus one inotify watch
+// per directory. Nested repositories are boundaries for the parent's diff, so
+// there was never a reason to look inside them.
+test('does not walk into nested repositories', async () => {
+  await withRepo(async (parent) => {
+    const nested = path.join(parent, 'child-repo');
+    mkdirSync(nested);
+    execSync('git init -q', { cwd: nested });
+    mkdirSync(path.join(nested, 'node_modules', 'pkg'), { recursive: true });
+    mkdirSync(path.join(parent, 'src'));
+
+    const watched: string[] = [];
+    const spy = spyOn(nodeFs, 'watch').mockImplementation(((dir: string) => {
+      watched.push(String(dir));
+      return { close() {} } as unknown as nodeFs.FSWatcher;
+    }) as typeof nodeFs.watch);
+
+    const watcher = new GitWatch(() => {}, 150);
+    try {
+      watcher.setRoot(parent);
+      expect(watched).toContain(path.join(parent, 'src'));
+      expect(watched.some((dir) => dir.startsWith(nested))).toBe(false);
+    } finally {
+      watcher.dispose();
+      spy.mockRestore();
+    }
+  });
+});
+
+// Belt and braces for a tree nobody anticipated: watch less rather than freeze
+// the server and exhaust the kernel's inotify allowance. The cap is injectable
+// so this exercises the real branch without creating thousands of inodes.
+test('stops watching past the directory cap instead of blocking', async () => {
+  await withRepo(async (root) => {
+    let dir = root;
+    for (let i = 0; i < 20; i++) dir = path.join(dir, `d${i}`);
+    mkdirSync(dir, { recursive: true });
+
+    const watched: string[] = [];
+    const spy = spyOn(nodeFs, 'watch').mockImplementation(((target: string) => {
+      watched.push(String(target));
+      return { close() {} } as unknown as nodeFs.FSWatcher;
+    }) as typeof nodeFs.watch);
+
+    const watcher = new GitWatch(() => {}, 150, 5);
+    try {
+      watcher.setRoot(root);
+      // 5 working-tree dirs, plus the separate recursive watch on .git.
+      expect(watched.filter((target) => !target.endsWith('.git'))).toHaveLength(5);
+      expect(watched).toContain(root);
+    } finally {
+      watcher.dispose();
+      spy.mockRestore();
+    }
+  });
+});

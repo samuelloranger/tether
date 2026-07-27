@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { type FSWatcher, readdirSync, statSync, watch } from 'node:fs';
+import { existsSync, type FSWatcher, readdirSync, statSync, watch } from 'node:fs';
 import path from 'node:path';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY, GitDiffError, readDiffSummary } from './gitDiff';
 import { resolveGitDir } from './gitRoot';
@@ -36,6 +36,19 @@ function listIgnoredDirs(root: string): Set<string> {
   );
 }
 
+// Hard ceiling on watched directories. Ignore-pruning plus the nested-repo
+// boundary keeps a normal project far below this; the cap only exists so a tree
+// nobody anticipated degrades into "watch less" instead of freezing the server
+// and exhausting the kernel's inotify allowance (one watch per directory,
+// default limit 8192 on many systems).
+const MAX_WATCHED_DIRS = 4096;
+
+// A directory with its own .git is a separate repository (or a submodule):
+// the parent's diff treats it as an opaque entry.
+function isNestedRepo(dir: string): boolean {
+  return existsSync(path.join(dir, '.git'));
+}
+
 export class GitWatch {
   private root: string | null | undefined;
   private handles: FSWatcher[] = [];
@@ -44,10 +57,12 @@ export class GitWatch {
   private timer?: ReturnType<typeof setTimeout>;
   private lastSummary: DiffSummary | null = null;
   private disposed = false;
+  private truncated = false;
 
   constructor(
     private readonly onChange: (summary: DiffSummary) => void,
     private readonly debounceMs = 150,
+    private readonly maxWatchedDirs = MAX_WATCHED_DIRS,
   ) {}
 
   setRoot(root: string | null) {
@@ -58,7 +73,14 @@ export class GitWatch {
 
     if (root) {
       this.ignoredDirs = listIgnoredDirs(root);
+      this.truncated = false;
       this.walk(root, root);
+      if (this.truncated) {
+        console.warn(
+          `tether: "${root}" has more than ${this.maxWatchedDirs} directories to watch; ` +
+            'working-tree changes below the watched subset will only appear on the next git event.',
+        );
+      }
       try {
         this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
       } catch (err) {
@@ -72,6 +94,10 @@ export class GitWatch {
   // directories can be pruned from the traversal entirely — see
   // listIgnoredDirs above for why that matters.
   private walk(root: string, dir: string) {
+    if (this.watchedDirs.size >= this.maxWatchedDirs) {
+      this.truncated = true;
+      return;
+    }
     this.watchDir(root, dir);
     let names: string[];
     try {
@@ -89,7 +115,16 @@ export class GitWatch {
       } catch {
         continue;
       }
-      if (isDir) this.walk(root, child);
+      if (!isDir) continue;
+      // A nested repository is a boundary. `git status` in the parent reports
+      // the whole directory as one entry and never looks inside, so watching
+      // its contents cannot change this repo's diff — it only costs watches.
+      // Skipping it matters: a directory that merely *contains* checkouts (no
+      // commits of its own, so nothing is ignored) otherwise drags every
+      // project's node_modules into the walk. Measured at 508k directories and
+      // ~14s of blocking on one such tree, which is what made `cd` hang.
+      if (isNestedRepo(child)) continue;
+      this.walk(root, child);
     }
   }
 
