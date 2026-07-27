@@ -46,14 +46,7 @@ import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
 import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
-import {
-  applyBackspaceStreak,
-  applyCtrlModifier,
-  applyCtrlToKey,
-  applyFieldChange,
-  EMPTY_STREAK,
-  SENT,
-} from './input';
+import { applyBackspaceStreak, applyCtrlToKey, EMPTY_STREAK } from './input';
 import type { LinkTarget } from './links';
 import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
@@ -61,6 +54,7 @@ import { type Presentation, pickAutoSelectPreview } from './presentations';
 import { SelectionView } from './SelectionView';
 import type { DrawerSession } from './SessionDrawer';
 import { sessionLabel } from './sessionLabel';
+import type { PtyInputSource } from './ptyInput';
 import { resumeAction } from './resume';
 import { RenameModal, SnippetsModal } from './SessionModals';
 import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
@@ -156,9 +150,6 @@ export function useTetherApp() {
   // socket ("Reconnecting…") so the banner never overclaims on the very first try.
   const hasConnectedRef = useRef(false);
   const [screen, setScreen] = useState<RenderRow[]>([]);
-  const [inputText, setInputText] = useState(SENT);
-  // Mirrors the field's last value so onChangeText can diff against it.
-  const prevValueRef = useRef(SENT);
   const backspaceStreakRef = useRef(EMPTY_STREAK);
   // User kill switch for mouse forwarding (default on). When off, gestures behave
   // as if the app never enabled mouse reporting even while it has.
@@ -728,7 +719,7 @@ export function useTetherApp() {
 
   const sendSnippet = (s: string) => {
     setSnippetsModalOpen(false);
-    sendInput(s);
+    sendPaste(s);
   };
 
   const refreshSessions = async () => {
@@ -1085,30 +1076,59 @@ export function useTetherApp() {
     }
   };
 
-  const sendInput = (text: string) => {
-    if (
-      !mouseEnabledRef.current &&
-      (text.startsWith('\x1b[<') || text.startsWith('\x1b[M'))
-    )
-      return;
-    wsSend({ type: 'input', text });
+  // The single path from anything in the app to the PTY. Every caller declares
+  // where its bytes came from, because that — not the call site — decides what
+  // happens to them:
+  //
+  //   typed   a character the user just entered (renderer keyboard)
+  //   key     a discrete key press (utility bar, D-pad, desktop key mapper)
+  //   paste   a block of text inserted wholesale (clipboard, snippet, file path)
+  //   program bytes the app generated itself (mouse reports, control sequences)
+  //
+  // Six call sites used to each decide this for themselves and two got it wrong,
+  // which is how Ctrl+C shipped twice as a literal "c". Adding an input surface
+  // now means picking a source, not re-deriving the rules.
+  const sendToPty = (source: PtyInputSource, text: string) => {
+    if (!text) return;
+    // Mouse reports are program output no matter who hands them over — xterm
+    // emits them through the same channel as typing. Treating them as typed
+    // would let a tap consume an armed Ctrl.
+    const isMouseReport = text.startsWith('\x1b[<') || text.startsWith('\x1b[M');
+    if (isMouseReport && !mouseEnabledRef.current) return;
+
+    let bytes = text;
+    if (!isMouseReport && (source === 'typed' || source === 'key')) {
+      const ctrl = applyCtrlToKey(ctrlArmedRef.current, bytes);
+      if (ctrl.consumed) setCtrlArmed(false);
+      bytes = ctrl.bytes;
+    }
+    // Hold-backspace accelerates to word delete. Only typing can build the
+    // streak, and any other deliberate input ends it — pressing a bar key or
+    // pasting means the user stopped holding Backspace, so the next delete must
+    // start over as a single character. Program bytes (mouse reports) are not
+    // user input and leave the streak alone.
+    if (source === 'typed') {
+      const tracked = applyBackspaceStreak(backspaceStreakRef.current, bytes, Date.now());
+      backspaceStreakRef.current = tracked.streak;
+      bytes = tracked.bytes;
+    } else if (source === 'key' || source === 'paste') {
+      backspaceStreakRef.current = EMPTY_STREAK;
+    }
+    wsSend({ type: 'input', text: bytes });
   };
+
+  const sendTyped = (text: string) => sendToPty('typed', text);
+  const sendKey = (bytes: string) => sendToPty('key', bytes);
+  // Paste deliberately leaves an armed Ctrl alone: the modifier was armed for a
+  // keystroke, and swallowing it on an unrelated paste is a surprise.
+  const sendPaste = (text: string) => sendToPty('paste', text);
+  const sendProgram = (text: string) => sendToPty('program', text);
 
   // Cursor keys (arrows/Home/End) encode as SS3 (ESC O x) when the active app has
   // DECCKM on, else CSI (ESC [ x). Used by the mobile key bar and shared with the
   // desktop keyboard mapper so both honour application-cursor mode.
   const cursorSeq = (final: string) =>
     `\x1b${cache.get(activeIdRef.current)?.term.applicationCursor ? 'O' : '['}${final}`;
-
-  // Every key the mobile utility bar / D-pad sends goes through here instead of
-  // sendInput, so the armed Ctrl modifier applies to bar keys too (Ctrl+arrow,
-  // Ctrl+Del) and is always consumed — pressing a bar key while Ctrl is armed
-  // must never leave it armed for the next typed letter.
-  const sendKey = (bytes: string) => {
-    const ctrl = applyCtrlToKey(ctrlArmedRef.current, bytes);
-    if (ctrl.consumed) setCtrlArmed(false);
-    sendInput(ctrl.bytes);
-  };
 
   // Full plain-text transcript (visible screen + scrollback) for the
   // selectable view and the Copy All fallback.
@@ -1229,7 +1249,7 @@ export function useTetherApp() {
       }
       if (!data.ok) throw new Error(data.error || 'upload failed');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      sendInput(shellQuote(data.path!));
+      sendPaste(shellQuote(data.path!));
     } catch (err) {
       void notify(
         'Upload failed',
@@ -1272,47 +1292,7 @@ export function useTetherApp() {
     if (!text) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const e = cache.get(activeIdRef.current);
-    sendInput(e?.term.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text);
-  };
-
-  const resetField = () => {
-    setInputText(SENT);
-    prevValueRef.current = SENT;
-    backspaceStreakRef.current = EMPTY_STREAK;
-  };
-
-  // Every field mutation (typing, dictation, swipe, autocorrect, Backspace)
-  // arrives here. Diff against the previous value and forward the delta.
-  const handleChangeText = (next: string) => {
-    const { bytes, value, fromEmptyBuffer } = applyFieldChange(prevValueRef.current, next);
-    if (bytes) {
-      const ctrl = applyCtrlModifier(ctrlArmedRef.current, bytes);
-      if (ctrl.consumed) setCtrlArmed(false);
-      const tracked = applyBackspaceStreak(
-        backspaceStreakRef.current,
-        ctrl.bytes,
-        fromEmptyBuffer,
-        Date.now(),
-      );
-      backspaceStreakRef.current = tracked.streak;
-      sendInput(tracked.bytes);
-      if (ctrl.consumed) {
-        resetField();
-        return;
-      }
-    }
-    // Keep the controlled value AND the diff baseline in lockstep — otherwise
-    // React Native reverts the field to the old value and the next diff runs
-    // against a stale prev (corrupting typing/dictation).
-    setInputText(value);
-    prevValueRef.current = value;
-  };
-
-  // Return key: send carriage return (raw-mode TUIs like Claude Code expect \r).
-  const handleSend = () => {
-    setCtrlArmed(false);
-    sendInput('\r');
-    resetField();
+    sendPaste(e?.term.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text);
   };
 
   // Desktop: install the window drag-region CSS once (custom title bar).
@@ -1366,7 +1346,7 @@ export function useTetherApp() {
       if (!focused()) return;
       if (e.data) {
         const ent = cache.get(activeIdRef.current);
-        sendInput(ent?.term.bracketedPaste ? `\x1b[200~${e.data}\x1b[201~` : e.data);
+        sendPaste(ent?.term.bracketedPaste ? `\x1b[200~${e.data}\x1b[201~` : e.data);
       }
       // The composed text landed in the hidden desktop composition-target
       // input's own DOM value (composition was never preventDefault()'d so the
@@ -1388,7 +1368,7 @@ export function useTetherApp() {
         void handlePaste();
         return;
       }
-      sendInput(bytes);
+      sendKey(bytes);
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('compositionstart', onCompositionStart);
@@ -1398,7 +1378,7 @@ export function useTetherApp() {
       window.removeEventListener('compositionstart', onCompositionStart);
       window.removeEventListener('compositionend', onCompositionEnd);
     };
-    // sendInput/handlePaste delegate to refs, so a stable listener is fine.
+    // sendKey/handlePaste delegate to refs, so a stable listener is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfiguring, activePresentationId, presentations, fileView, diffOpen]);
 
@@ -1908,9 +1888,6 @@ export function useTetherApp() {
     connectionStatus,
     setConnectionStatus,
     hasConnectedRef,
-    inputText,
-    setInputText,
-    prevValueRef,
     mouseEnabled,
     toggleMouseEnabled,
     notificationsEnabled,
@@ -2017,8 +1994,10 @@ export function useTetherApp() {
     refreshSessions,
     testConnection,
     saveConfig,
-    sendInput,
+    sendTyped,
     sendKey,
+    sendPaste,
+    sendProgram,
     cursorSeq,
     getFullText,
     searchText,
@@ -2026,9 +2005,6 @@ export function useTetherApp() {
     copySelection,
     selectAllTerminal,
     handlePaste,
-    resetField,
-    handleChangeText,
-    handleSend,
     disposePending,
     checkForUpdatesManual,
     startUpdate,

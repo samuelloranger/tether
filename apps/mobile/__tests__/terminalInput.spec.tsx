@@ -133,3 +133,23 @@ test('Ctrl modifies a cursor key from the renderer into its CSI form', async () 
   rendererProps?.onInput('\x1b[C');
   expect(sentInput()).toEqual(['\x1b[1;5C']);
 });
+
+test('holding backspace accelerates to word delete', async () => {
+  await mountTerminal();
+  // The renderer emits one \x7f per key repeat. Below the streak threshold each
+  // stays a single-character delete; past it they become Ctrl+W (tty werase),
+  // which is the behaviour that silently disappeared when the WebView took over
+  // input from the hidden capture field.
+  for (let i = 0; i <= 16; i++) rendererProps?.onInput('\x7f');
+  const sent = sentInput();
+  expect(sent.slice(0, 15)).toEqual(Array(15).fill('\x7f'));
+  expect(sent.at(-1)).toBe('\x17');
+});
+
+test('a bar key between backspaces breaks the streak', async () => {
+  const view = await mountTerminal();
+  for (let i = 0; i <= 16; i++) rendererProps?.onInput('\x7f');
+  fireEvent.press(view.getByLabelText('Esc'));
+  rendererProps?.onInput('\x7f');
+  expect(sentInput().at(-1)).toBe('\x7f');
+});

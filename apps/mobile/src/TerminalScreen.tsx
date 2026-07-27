@@ -40,7 +40,6 @@ import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from
 import { confirmAction, notify } from './dialog';
 import { injectDragRegionStyles } from './dragRegion';
 import { FileViewer } from './FileViewer';
-import { applyFieldChange, SENT } from './input';
 import { splitRunByLinks, urlColumns } from './links';
 import { mouseSeq } from './mouseSeq';
 import { OverflowMenu } from './OverflowMenu';
@@ -104,9 +103,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     connectionStatus,
     setConnectionStatus,
     hasConnectedRef,
-    inputText,
-    setInputText,
-    prevValueRef,
     ctxMenu,
     setCtxMenu,
     updateInfo,
@@ -213,7 +209,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     refreshSessions,
     testConnection,
     saveConfig,
-    sendInput,
+    sendTyped,
     sendKey,
     cursorSeq,
     getFullText,
@@ -222,9 +218,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     copySelection,
     selectAllTerminal,
     handlePaste,
-    resetField,
-    handleChangeText,
-    handleSend,
     disposePending,
     checkForUpdatesManual,
     startUpdate,
@@ -510,8 +503,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               own helper textarea inside the page, which is what raises the soft
               keyboard, so typed characters arrive as renderer `input` events and
               NOT through the hidden RN capture field below. That is why onInput
-              is sendKey and not sendInput: sendKey is where the armed Ctrl
-              modifier is applied, and typing is the main thing Ctrl modifies.
+              is sendTyped: that is where the armed Ctrl modifier is applied,
+              and typing is the main thing Ctrl modifies.
               Wrapped in a relative container so the connection banner can overlay
               the top without consuming flex height: a height change would recompute
               rows and fire a spurious PTY resize (visible rewrap) on every
@@ -534,7 +527,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   >
                     <TerminalView
                       ref={terminalViewRef}
-                      onInput={sendKey}
+                      onInput={sendTyped}
                       onResize={onRendererResize}
                       onOpenLink={openFile}
                       onSelection={onRendererSelection}
@@ -545,7 +538,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 ) : (
                   <TerminalView
                     ref={terminalViewRef}
-                    onInput={sendKey}
+                    onInput={sendTyped}
                     onResize={onRendererResize}
                     onOpenLink={openFile}
                     onSelection={onRendererSelection}
@@ -701,32 +694,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 inputRef.current?.blur();
                 Keyboard.dismiss();
               }}
-            />
-          )}
-
-          {/* Hidden keyboard-capture field (mobile). NOTE: nothing focuses this
-              any more — the renderer's own textarea owns the soft keyboard (see
-              the terminal grid above), so handleChangeText and the backspace
-              streak machinery it drives are currently unreachable on mobile.
-              Left mounted rather than deleted because the dictation/word-delete
-              behaviour it implements has no equivalent in the renderer yet.
-              Desktop reads the physical keyboard globally instead. */}
-          {!isDesktop && terminalVisible && (
-            <TextInput
-              ref={inputRef}
-              style={styles.hiddenInput}
-              value={inputText}
-              onChangeText={handleChangeText}
-              onSubmitEditing={handleSend}
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              autoComplete="off"
-              blurOnSubmit={false}
-              keyboardAppearance={theme.keyboardAppearance}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              accessibilityLabel="Terminal input (hidden)"
             />
           )}
 
