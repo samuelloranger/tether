@@ -506,9 +506,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   onPress={() => selectPresentation(sessionPreview.id)}
                 />
               )}
-              {/* Terminal grid — vertical FlatList inside a horizontal ScrollView so
-              wide (e.g. 80-col) output stays legible and scrolls sideways.
-              Tapping it focuses the hidden capture field to bring up the keyboard.
+              {/* Terminal grid — the renderer WebView. Tapping it focuses xterm's
+              own helper textarea inside the page, which is what raises the soft
+              keyboard, so typed characters arrive as renderer `input` events and
+              NOT through the hidden RN capture field below. That is why onInput
+              is sendKey and not sendInput: sendKey is where the armed Ctrl
+              modifier is applied, and typing is the main thing Ctrl modifies.
               Wrapped in a relative container so the connection banner can overlay
               the top without consuming flex height: a height change would recompute
               rows and fire a spurious PTY resize (visible rewrap) on every
@@ -531,7 +534,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   >
                     <TerminalView
                       ref={terminalViewRef}
-                      onInput={sendInput}
+                      onInput={sendKey}
                       onResize={onRendererResize}
                       onOpenLink={openFile}
                       onSelection={onRendererSelection}
@@ -542,7 +545,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 ) : (
                   <TerminalView
                     ref={terminalViewRef}
-                    onInput={sendInput}
+                    onInput={sendKey}
                     onResize={onRendererResize}
                     onOpenLink={openFile}
                     onSelection={onRendererSelection}
@@ -701,9 +704,13 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             />
           )}
 
-          {/* Hidden keyboard-capture field (mobile): tapping the terminal focuses
-              it, so typing goes straight into the terminal (the shell echoes it
-              back). Desktop reads the physical keyboard globally instead. */}
+          {/* Hidden keyboard-capture field (mobile). NOTE: nothing focuses this
+              any more — the renderer's own textarea owns the soft keyboard (see
+              the terminal grid above), so handleChangeText and the backspace
+              streak machinery it drives are currently unreachable on mobile.
+              Left mounted rather than deleted because the dictation/word-delete
+              behaviour it implements has no equivalent in the renderer yet.
+              Desktop reads the physical keyboard globally instead. */}
           {!isDesktop && terminalVisible && (
             <TextInput
               ref={inputRef}
