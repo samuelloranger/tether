@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { Terminal } from '@xterm/xterm';
+import { registerTetherLinks, rendererLinksForRow } from './terminalRendererLinks';
 import {
   OutputBatcher,
   parseRendererEvent,
-  RendererQueue,
   type RendererCommand,
+  RendererQueue,
 } from './terminalRendererProtocol';
-import { registerTetherLinks, rendererLinksForRow } from './terminalRendererLinks';
 
 describe('parseRendererEvent', () => {
   test('accepts known versioned events and rejects malformed data', () => {
@@ -26,14 +26,7 @@ test('RendererQueue hydrates before writes and survives a remount', () => {
   const sent: RendererCommand[] = [];
   const queue = new RendererQueue((command) => sent.push(command));
   queue.write('before');
-  queue.hydrate(
-    'state',
-    80,
-    24,
-    { foreground: '#fff', background: '#000' },
-    'Fira Code',
-    13,
-  );
+  queue.hydrate('state', 80, 24, { foreground: '#fff', background: '#000' }, 'Fira Code', 13);
   queue.ready();
   queue.write('after');
   expect(sent.map((command) => command.type)).toEqual(['hydrate', 'write', 'write']);
@@ -44,7 +37,7 @@ test('RendererQueue hydrates before writes and survives a remount', () => {
     cols: 80,
     rows: 24,
     theme: { foreground: '#fff', background: '#000' },
-    fontFamily: 'Fira Code',
+    fontFamily: '"Fira Code", ui-monospace, "SFMono-Regular", Menlo, monospace',
     fontSize: 13,
   });
   queue.notReady();
@@ -57,14 +50,7 @@ test('RendererQueue recovery replaces stale state before queued live writes', ()
   const sent: RendererCommand[] = [];
   const queue = new RendererQueue((command) => sent.push(command));
   const hydrate = (data: string) =>
-    queue.hydrate(
-      data,
-      80,
-      24,
-      { foreground: '#fff', background: '#000' },
-      'monospace',
-      12,
-    );
+    queue.hydrate(data, 80, 24, { foreground: '#fff', background: '#000' }, 'monospace', 12);
 
   hydrate('old state');
   queue.ready();
@@ -79,21 +65,18 @@ test('RendererQueue recovery replaces stale state before queued live writes', ()
   ]);
 });
 
-test('RendererQueue replaces React Native font keys at the native WebView boundary', () => {
+// The page embeds the same TTFs the app bundles, so the RN family name is used
+// as-is and the system stack is only a fallback for the frames before the
+// data-URI font decodes. It used to be replaced outright, which is why the font
+// picker had no effect on mobile.
+test('RendererQueue keeps the chosen font and appends a system fallback', () => {
   const sent: RendererCommand[] = [];
-  const queue = new RendererQueue((command) => sent.push(command), { native: true });
-  queue.hydrate(
-    '',
-    80,
-    24,
-    { foreground: '#fff', background: '#000' },
-    'FiraCode_400Regular',
-    13,
-  );
+  const queue = new RendererQueue((command) => sent.push(command));
+  queue.hydrate('', 80, 24, { foreground: '#fff', background: '#000' }, 'FiraCode_400Regular', 13);
   queue.ready();
   expect(sent[0]).toMatchObject({
     type: 'hydrate',
-    fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, monospace',
+    fontFamily: '"FiraCode_400Regular", ui-monospace, "SFMono-Regular", Menlo, monospace',
   });
 });
 
@@ -101,6 +84,7 @@ test('RendererQueue drops writes belonging to a superseded hydration', () => {
   const sent: RendererCommand[] = [];
   const queue = new RendererQueue((command) => sent.push(command));
   const theme = { foreground: '#fff', background: '#000' };
+  const font = '"monospace", ui-monospace, "SFMono-Regular", Menlo, monospace';
   queue.hydrate('term-1', 80, 24, theme, 'monospace', 12);
   queue.write('stale');
   queue.hydrate('term-2', 100, 30, theme, 'monospace', 12);
@@ -114,7 +98,7 @@ test('RendererQueue drops writes belonging to a superseded hydration', () => {
       cols: 100,
       rows: 30,
       theme,
-      fontFamily: 'monospace',
+      fontFamily: font,
       fontSize: 12,
     },
     { v: 1, type: 'write', data: 'fresh' },
@@ -216,7 +200,5 @@ test('OSC 8 links use the app link handler instead of WebView navigation', () =>
     {} as never,
   );
 
-  expect(opened).toEqual([
-    { kind: 'external', url: 'https://example.com/from-osc-8' },
-  ]);
+  expect(opened).toEqual([{ kind: 'external', url: 'https://example.com/from-osc-8' }]);
 });

@@ -37,7 +37,9 @@ jobs:
         working-directory: apps/mobile
 
       - name: Verify native renderer bundle
-        run: bun run build:terminal-renderer && git diff --exit-code -- src/terminalRenderer.generated.ts
+        run: |
+          bun run build:terminal-renderer
+          git diff --exit-code -- src/terminalRenderer.generated.ts src/terminalFonts.generated.ts
         working-directory: apps/mobile
 
       - name: Web bundle (desktop build uses this — catches web-only module resolution)

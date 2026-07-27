@@ -379,9 +379,12 @@ export class TerminalEngine {
     const entries = this.osc8Spans.get(id);
     if (!entries) return [];
     const y = id - this.trimmedCount();
-    const line = y >= 0 && y < this.term.buffer.active.length ? this.term.buffer.active.getLine(y) : null;
+    const line =
+      y >= 0 && y < this.term.buffer.active.length ? this.term.buffer.active.getLine(y) : null;
     if (!line) return [];
-    const kept = entries.filter((e) => line.translateToString(false, e.span.start, e.span.end) === e.text);
+    const kept = entries.filter(
+      (e) => line.translateToString(false, e.span.start, e.span.end) === e.text,
+    );
     if (kept.length !== entries.length) {
       if (kept.length) this.osc8Spans.set(id, kept);
       else this.osc8Spans.delete(id);

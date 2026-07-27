@@ -11,20 +11,15 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  activityDotKey,
-  activityLabel,
-  terminalAccessibilityLabel,
-  type SessionActivity,
-} from './activity';
 import { useAppTheme } from './AppThemeProvider';
+import { activityDotKey, type SessionActivity, terminalAccessibilityLabel } from './activity';
 import type { AppColors } from './appTheme';
 import { isRecentlyActive, PANEL_W } from './desktopNavigation';
 import { confirmAction } from './dialog';
-import type { Presentation } from './presentations';
-import { sessionLabel } from './sessionLabel';
 import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { motionSpec } from './motion';
+import type { Presentation } from './presentations';
+import { sessionLabel } from './sessionLabel';
 
 export interface DrawerSession {
   id: string;
@@ -160,7 +155,12 @@ export function SessionDrawer({
                 onPress={() => onSelect(s.id)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={terminalAccessibilityLabel(sessionLabel(s), s.status, s.activity, live)}
+                accessibilityLabel={terminalAccessibilityLabel(
+                  sessionLabel(s),
+                  s.status,
+                  s.activity,
+                  live,
+                )}
               >
                 <View style={[styles.dot, { backgroundColor: dotColor }]} />
                 <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>

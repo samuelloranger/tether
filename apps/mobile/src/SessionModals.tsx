@@ -22,8 +22,6 @@ const THEME_LABELS = {
   mocha: 'Mocha',
 } as const;
 
-import { isDesktop } from './platform';
-
 const FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
 
 // Rename the active terminal.
@@ -180,33 +178,27 @@ export function AppearanceModal({
               {id === preference && <Feather name="check" size={16} color={theme.colors.info} />}
             </TouchableOpacity>
           ))}
-          {isDesktop && (
-            <>
-              <Text style={[styles.renameTitle, { marginTop: 12 }]}>Font</Text>
-              {FONTS.map((font) => (
-                <TouchableOpacity
-                  key={font}
-                  style={[
-                    styles.renameBtn,
-                    {
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      width: '100%',
-                    },
-                  ]}
-                  onPress={() => onFontChange(font)}
-                >
-                  <Text style={[styles.renameBtnText, { fontFamily: font }]}>
-                    {font.split('_')[0]}
-                  </Text>
-                  {font === fontFamily && (
-                    <Feather name="check" size={16} color={theme.colors.info} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </>
-          )}
+          {/* Not desktop-only any more: the renderer page embeds the same fonts,
+              so the pick applies to the mobile terminal too. */}
+          <Text style={[styles.renameTitle, { marginTop: 12 }]}>Font</Text>
+          {FONTS.map((font) => (
+            <TouchableOpacity
+              key={font}
+              style={[
+                styles.renameBtn,
+                {
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  width: '100%',
+                },
+              ]}
+              onPress={() => onFontChange(font)}
+            >
+              <Text style={[styles.renameBtnText, { fontFamily: font }]}>{font.split('_')[0]}</Text>
+              {font === fontFamily && <Feather name="check" size={16} color={theme.colors.info} />}
+            </TouchableOpacity>
+          ))}
         </Pressable>
       </Pressable>
     </Modal>

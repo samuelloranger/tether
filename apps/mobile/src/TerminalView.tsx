@@ -2,10 +2,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
-import { registerTetherLinks } from './terminalRendererLinks';
-import { TERMINAL_RENDERER_CSS } from './terminalRenderer.generated';
-import { RendererQueue, type RendererCommand } from './terminalRendererProtocol';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
+import { TERMINAL_RENDERER_CSS } from './terminalRenderer.generated';
+import { registerTetherLinks } from './terminalRendererLinks';
+import { type RendererCommand, RendererQueue } from './terminalRendererProtocol';
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   ({ onInput, onResize, onOpenLink, onSelection, onFallback, onStatus }, ref) => {
@@ -110,9 +110,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             break;
           case 'blur':
             terminal.blur();
-            break;
-          case 'dispose':
-            terminal.dispose();
             break;
         }
       };

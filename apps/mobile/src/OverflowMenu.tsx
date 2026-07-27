@@ -77,133 +77,136 @@ export function OverflowMenu({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-          <TouchableOpacity style={styles.menuRow} onPress={onRename}>
-            <Feather name="edit-2" size={16} color={theme.colors.text} />
-            <Text style={styles.menuRowText}>Rename terminal</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuRow} onPress={onViewChanges}>
-            <Feather name="git-branch" size={16} color={theme.colors.text} />
-            <Text style={styles.menuRowText}>View changes</Text>
-          </TouchableOpacity>
-          <View style={styles.menuRow}>
-            <Feather name="type" size={16} color={theme.colors.text} />
-            <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
-              Font size
-            </Text>
-            <TouchableOpacity
-              style={styles.fontStepBtn}
-              onPress={() => onFontDelta(-1)}
-              accessibilityRole="button"
-              accessibilityLabel="Decrease font size"
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={styles.fontStepText}>−</Text>
+            <TouchableOpacity style={styles.menuRow} onPress={onRename}>
+              <Feather name="edit-2" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>Rename terminal</Text>
             </TouchableOpacity>
-            <Text style={styles.fontSizeValue}>{fontSize}</Text>
-            <TouchableOpacity
-              style={styles.fontStepBtn}
-              onPress={() => onFontDelta(1)}
-              accessibilityRole="button"
-              accessibilityLabel="Increase font size"
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={styles.fontStepText}>+</Text>
+            <TouchableOpacity style={styles.menuRow} onPress={onViewChanges}>
+              <Feather name="git-branch" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>View changes</Text>
             </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.menuRow} onPress={onToggleMouse}>
-            <Feather name="mouse-pointer" size={16} color={theme.colors.text} />
-            <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
-              Mouse control
-            </Text>
-            <Feather
-              name={mouseEnabled ? 'toggle-right' : 'toggle-left'}
-              size={20}
-              color={mouseEnabled ? theme.colors.accent : theme.colors.textMuted}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuRow} onPress={onSelectText}>
-            <Feather name="copy" size={16} color={theme.colors.text} />
-            <Text style={styles.menuRowText}>Select terminal text</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuRow} onPress={onJumpPromptUp}>
-            <Feather name="chevron-up" size={16} color={theme.colors.text} />
-            <Text style={styles.menuRowText}>Jump to previous command</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuRow} onPress={onJumpPromptDown}>
-            <Feather name="chevron-down" size={16} color={theme.colors.text} />
-            <Text style={styles.menuRowText}>Jump to next command</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuRow} onPress={onSnippets}>
-            <Feather name="terminal" size={16} color={theme.colors.text} />
-            <Text style={styles.menuRowText}>Saved commands</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuRow} onPress={onAppearance}>
-            <Feather name="droplet" size={16} color={theme.colors.text} />
-            <Text style={styles.menuRowText}>Appearance</Text>
-          </TouchableOpacity>
-          {isDesktop && onToggleNotifications && (
-            <TouchableOpacity style={styles.menuRow} onPress={onToggleNotifications}>
-              <Feather name="bell" size={16} color={theme.colors.text} />
+            <View style={styles.menuRow}>
+              <Feather name="type" size={16} color={theme.colors.text} />
               <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
-                Notifications
+                Font size
+              </Text>
+              <TouchableOpacity
+                style={styles.fontStepBtn}
+                onPress={() => onFontDelta(-1)}
+                accessibilityRole="button"
+                accessibilityLabel="Decrease font size"
+                hitSlop={HIT_SLOP}
+              >
+                <Text style={styles.fontStepText}>−</Text>
+              </TouchableOpacity>
+              <Text style={styles.fontSizeValue}>{fontSize}</Text>
+              <TouchableOpacity
+                style={styles.fontStepBtn}
+                onPress={() => onFontDelta(1)}
+                accessibilityRole="button"
+                accessibilityLabel="Increase font size"
+                hitSlop={HIT_SLOP}
+              >
+                <Text style={styles.fontStepText}>+</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.menuRow} onPress={onToggleMouse}>
+              <Feather name="mouse-pointer" size={16} color={theme.colors.text} />
+              <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
+                Mouse control
               </Text>
               <Feather
-                name={notificationsEnabled ? 'toggle-right' : 'toggle-left'}
+                name={mouseEnabled ? 'toggle-right' : 'toggle-left'}
                 size={20}
-                color={notificationsEnabled ? theme.colors.accent : theme.colors.textMuted}
+                color={mouseEnabled ? theme.colors.accent : theme.colors.textMuted}
               />
             </TouchableOpacity>
-          )}
-          {isDesktop && notificationsEnabled && onTestNotification && (
-            <TouchableOpacity style={styles.menuRow} onPress={onTestNotification}>
-              <Feather name="send" size={16} color={theme.colors.text} />
-              <Text style={styles.menuRowText}>Send test notification</Text>
+            <TouchableOpacity style={styles.menuRow} onPress={onSelectText}>
+              <Feather name="copy" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>Select terminal text</Text>
             </TouchableOpacity>
-          )}
-          {isDesktop && desktopNavigationMode && onDesktopNavigationMode && (
-            <View style={styles.navigationSection}>
-              <Text style={styles.navigationLabel}>Navigation</Text>
-              <View style={styles.navigationButtons}>
-                {(['sidebar', 'hover', 'tabs'] as const).map((mode) => {
-                  const active = desktopNavigationMode === mode;
-                  return (
-                    <TouchableOpacity
-                      key={mode}
-                      style={[styles.navigationButton, active && styles.navigationButtonActive]}
-                      onPress={() => {
-                        onDesktopNavigationMode(mode);
-                        onClose();
-                      }}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}
-                      accessibilityLabel={`Navigation: ${desktopNavigationLabel(mode)}`}
-                    >
-                      <Text
-                        style={[
-                          styles.navigationButtonText,
-                          active && styles.navigationButtonTextActive,
-                        ]}
+            <TouchableOpacity style={styles.menuRow} onPress={onJumpPromptUp}>
+              <Feather name="chevron-up" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>Jump to previous command</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuRow} onPress={onJumpPromptDown}>
+              <Feather name="chevron-down" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>Jump to next command</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuRow} onPress={onSnippets}>
+              <Feather name="terminal" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>Saved commands</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuRow} onPress={onAppearance}>
+              <Feather name="droplet" size={16} color={theme.colors.text} />
+              <Text style={styles.menuRowText}>Appearance</Text>
+            </TouchableOpacity>
+            {isDesktop && onToggleNotifications && (
+              <TouchableOpacity style={styles.menuRow} onPress={onToggleNotifications}>
+                <Feather name="bell" size={16} color={theme.colors.text} />
+                <Text style={[styles.menuRowText, { flex: 1 }]} numberOfLines={1}>
+                  Notifications
+                </Text>
+                <Feather
+                  name={notificationsEnabled ? 'toggle-right' : 'toggle-left'}
+                  size={20}
+                  color={notificationsEnabled ? theme.colors.accent : theme.colors.textMuted}
+                />
+              </TouchableOpacity>
+            )}
+            {isDesktop && notificationsEnabled && onTestNotification && (
+              <TouchableOpacity style={styles.menuRow} onPress={onTestNotification}>
+                <Feather name="send" size={16} color={theme.colors.text} />
+                <Text style={styles.menuRowText}>Send test notification</Text>
+              </TouchableOpacity>
+            )}
+            {isDesktop && desktopNavigationMode && onDesktopNavigationMode && (
+              <View style={styles.navigationSection}>
+                <Text style={styles.navigationLabel}>Navigation</Text>
+                <View style={styles.navigationButtons}>
+                  {(['sidebar', 'hover', 'tabs'] as const).map((mode) => {
+                    const active = desktopNavigationMode === mode;
+                    return (
+                      <TouchableOpacity
+                        key={mode}
+                        style={[styles.navigationButton, active && styles.navigationButtonActive]}
+                        onPress={() => {
+                          onDesktopNavigationMode(mode);
+                          onClose();
+                        }}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`Navigation: ${desktopNavigationLabel(mode)}`}
                       >
-                        {desktopNavigationLabel(mode)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                        <Text
+                          style={[
+                            styles.navigationButtonText,
+                            active && styles.navigationButtonTextActive,
+                          ]}
+                        >
+                          {desktopNavigationLabel(mode)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
-            </View>
-          )}
-          {isDesktop && (
-            <TouchableOpacity style={styles.menuRow} onPress={onCheckUpdates}>
-              <Feather name="download" size={16} color={theme.colors.text} />
-              <Text style={styles.menuRowText}>Check for updates</Text>
+            )}
+            {isDesktop && (
+              <TouchableOpacity style={styles.menuRow} onPress={onCheckUpdates}>
+                <Feather name="download" size={16} color={theme.colors.text} />
+                <Text style={styles.menuRowText}>Check for updates</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[styles.menuRow, styles.menuRowDestructive]}
+              onPress={onRestart}
+            >
+              <Feather name="refresh-cw" size={16} color={theme.colors.danger} />
+              <Text style={[styles.menuRowText, { color: theme.colors.danger }]}>
+                Restart terminal
+              </Text>
             </TouchableOpacity>
-          )}
-          <TouchableOpacity style={[styles.menuRow, styles.menuRowDestructive]} onPress={onRestart}>
-            <Feather name="refresh-cw" size={16} color={theme.colors.danger} />
-            <Text style={[styles.menuRowText, { color: theme.colors.danger }]}>
-              Restart terminal
-            </Text>
-          </TouchableOpacity>
           </ScrollView>
         </Pressable>
       </Pressable>

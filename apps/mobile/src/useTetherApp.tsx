@@ -1,30 +1,15 @@
-import Feather from '@expo/vector-icons/Feather';
 import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
 import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { readClipboard, writeClipboard } from './clipboard';
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  AppState,
-  KeyboardAvoidingView,
-  Linking,
-  Modal,
-  Platform,
-  Text,
-  type TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Linking, type TextInput } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
+import { newlyWaiting, type SessionActivity } from './activity';
 import { httpBase, validateAddress, wsUrl } from './address';
-import { ConfigScreen } from './ConfigScreen';
-import { ConnectionBanner } from './ConnectionBanner';
-import { ContextMenu } from './ContextMenu';
-import { ArrowCluster } from './Dpad';
+import { readClipboard, writeClipboard } from './clipboard';
 import { shouldForwardToTerminal } from './desktopFocusGuard';
 import { COPY, keyToBytes, PASTE } from './desktopKeys';
 import {
@@ -33,7 +18,6 @@ import {
   type DesktopNavigationMode,
   parseDesktopNavigationMode,
 } from './desktopNavigation';
-import { newlyWaiting, type SessionActivity } from './activity';
 import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
 import {
   fetchUpdate,
@@ -48,25 +32,19 @@ import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
 import { applyBackspaceStreak, applyCtrlToKey, EMPTY_STREAK } from './input';
 import type { LinkTarget } from './links';
-import { OverflowMenu } from './OverflowMenu';
 import { isDesktop, isMacDesktop } from './platform';
 import { type Presentation, pickAutoSelectPreview } from './presentations';
-import { SelectionView } from './SelectionView';
-import type { DrawerSession } from './SessionDrawer';
-import { sessionLabel } from './sessionLabel';
 import type { PtyInputSource } from './ptyInput';
 import { resumeAction } from './resume';
-import { RenameModal, SnippetsModal } from './SessionModals';
+import type { DrawerSession } from './SessionDrawer';
 import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
 import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
+import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
-import TitleBar from './TitleBar';
+import type { TerminalViewHandle } from './TerminalView.types';
 import { type RenderRow, setTheme } from './terminal';
 import { TerminalEngine } from './terminalEngine';
 import { OutputBatcher } from './terminalRendererProtocol';
-import type { TerminalViewHandle } from './TerminalView.types';
-import { UpdateModal } from './UpdateModal';
-import { UtilityBar } from './UtilityBar';
 import { openTerminalSocket, type TerminalSocket } from './wsTransport';
 
 // Constants for async storage keys
@@ -382,10 +360,13 @@ export function useTetherApp() {
     dimsRef.current = { numCols: cols, numRows: rows };
     cache.get(activeIdRef.current)?.term.resize(cols, rows);
     if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
-    rendererResizeTimer.current = setTimeout(() => {
-      wsSend({ type: 'resize', cols, rows });
-      rendererResizeTimer.current = null;
-    }, isDesktop ? 120 : 60);
+    rendererResizeTimer.current = setTimeout(
+      () => {
+        wsSend({ type: 'resize', cols, rows });
+        rendererResizeTimer.current = null;
+      },
+      isDesktop ? 120 : 60,
+    );
   };
 
   const onRendererSelection = (text: string) => {
@@ -666,8 +647,7 @@ export function useTetherApp() {
   }, []);
 
   const changeFontFamily = (font: string) => {
-    if (!isDesktop || (font !== 'FiraCode_400Regular' && font !== 'JetBrainsMono_400Regular'))
-      return;
+    if (font !== 'FiraCode_400Regular' && font !== 'JetBrainsMono_400Regular') return;
     setFontFamily(font);
     AsyncStorage.setItem(KEY_MONO_FONT, font);
   };
@@ -1609,16 +1589,21 @@ export function useTetherApp() {
   const gitFetch = useCallback(
     async (route: string, init?: RequestInit) => {
       const sessionId = activeIdRef.current;
-      const res = await fetch(`${httpBase(serverIp, port)}/api/sessions/${sessionId}/git/${route}`, {
-        ...init,
-        headers: {
-          ...authHeaders(passwordRef.current),
-          'Content-Type': 'application/json',
+      const res = await fetch(
+        `${httpBase(serverIp, port)}/api/sessions/${sessionId}/git/${route}`,
+        {
+          ...init,
+          headers: {
+            ...authHeaders(passwordRef.current),
+            'Content-Type': 'application/json',
+          },
         },
-      });
+      );
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
-        throw new Error(typeof body.error === 'string' ? body.error : `Request failed (${res.status})`);
+        throw new Error(
+          typeof body.error === 'string' ? body.error : `Request failed (${res.status})`,
+        );
       }
       return body;
     },

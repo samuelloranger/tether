@@ -11,7 +11,8 @@
       "apps/**/*.tsx",
       "*.json",
       "!apps/**/dist",
-      "!apps/**/node_modules"
+      "!apps/**/node_modules",
+      "!apps/mobile/src/*.generated.ts"
     ]
   },
   "formatter": {
@@ -35,5 +36,51 @@
         "noTemplateCurlyInString": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "apps/mobile/src/CodeHighlight.tsx",
+        "apps/mobile/src/DiffLines.tsx",
+        "apps/mobile/src/SideBySideDiff.tsx",
+        "apps/mobile/src/DiffView.tsx",
+        "apps/mobile/src/SelectionView.tsx",
+        "apps/mobile/src/TermRow.tsx",
+        "apps/mobile/src/SessionModals.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noArrayIndexKey": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/mobile/src/FileViewer.tsx",
+        "apps/mobile/src/SessionDrawer.tsx",
+        "apps/mobile/src/ConnectionBanner.tsx",
+        "apps/mobile/src/useTetherApp.tsx",
+        "apps/mobile/src/TerminalScreen.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useExhaustiveDependencies": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/mobile/src/links.ts", "apps/mobile/src/xtermPolyfill.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noAssignInExpressions": "off"
+          }
+        }
+      }
+    }
+  ]
 }

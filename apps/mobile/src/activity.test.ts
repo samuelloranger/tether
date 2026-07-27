@@ -57,7 +57,9 @@ describe('newlyWaiting', () => {
 
   test('active session always excluded (emulator bell path owns it)', () => {
     expect(newlyWaiting(new Map(), [row('a', 'waiting')], 'a')).toEqual([]);
-    expect(newlyWaiting(new Map(), [row('a', 'waiting'), row('b', 'waiting')], 'a').map((r) => r.id)).toEqual(['b']);
+    expect(
+      newlyWaiting(new Map(), [row('a', 'waiting'), row('b', 'waiting')], 'a').map((r) => r.id),
+    ).toEqual(['b']);
   });
 
   test('ignores non-waiting and stopped rows', () => {

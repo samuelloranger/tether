@@ -1,75 +1,42 @@
 import Feather from '@expo/vector-icons/Feather';
-import { FiraCode_400Regular } from '@expo-google-fonts/fira-code/400Regular';
-import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Clipboard from 'expo-clipboard';
 import { DragDropContentView } from 'expo-drag-drop-content-view';
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   ActivityIndicator,
-  FlatList,
   Keyboard,
   KeyboardAvoidingView,
-  Linking,
-  Modal,
-  PanResponder,
   Platform,
-  ScrollView,
   Text,
   TextInput,
-  type TextStyle,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AlertModal } from './AlertModal';
 import { useAppTheme } from './AppThemeProvider';
-import { httpBase, validateAddress, wsUrl } from './address';
 import { ChangeBanner } from './ChangeBanner';
-import { ConfigScreen } from './ConfigScreen';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ContextMenu } from './ContextMenu';
 import { DesktopSessionNavigator } from './DesktopSessionNavigator';
 import { DiffView } from './DiffView';
-import { ArrowCluster } from './Dpad';
-import { COPY, keyToBytes, PASTE } from './desktopKeys';
-import { fetchUpdate, installUpdate, openReleasesPage, type PendingUpdate } from './desktopUpdate';
-import { confirmAction, notify } from './dialog';
-import { injectDragRegionStyles } from './dragRegion';
 import { FileViewer } from './FileViewer';
-import { splitRunByLinks, urlColumns } from './links';
-import { mouseSeq } from './mouseSeq';
 import { OverflowMenu } from './OverflowMenu';
 import { PresentationBanner } from './PresentationBanner';
 import { PresentationView } from './PresentationView';
 import { isDesktop, isMacDesktop } from './platform';
 import { findSessionPreview, previewUrl } from './presentations';
-import { SelectionView } from './SelectionView';
-import { type DrawerSession, SessionDrawer } from './SessionDrawer';
-import { sessionLabel } from './sessionLabel';
-import { AppearanceModal, RenameModal, SnippetsModal } from './SessionModals';
-import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
-import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
 import type { RendererStatus } from './rendererLifecycle';
+import { SelectionView } from './SelectionView';
+import { SessionDrawer } from './SessionDrawer';
+import { AppearanceModal, RenameModal, SnippetsModal } from './SessionModals';
+import { sessionLabel } from './sessionLabel';
 import { createStyles } from './styles';
-import { TermRow } from './TermRow';
-import TitleBar from './TitleBar';
-import type { CellStyle, RenderRow } from './terminal';
-import { injectTerminalScrollbarStyles } from './terminalScrollbar';
 import { TerminalView } from './TerminalView';
+import TitleBar from './TitleBar';
+import { injectTerminalScrollbarStyles } from './terminalScrollbar';
 import { UpdateModal } from './UpdateModal';
 import { UtilityBar } from './UtilityBar';
-import { openTerminalSocket, type TerminalSocket } from './wsTransport';
-
-// Constants for async storage keys
-const KEY_SERVER_IP = 'tether_server_ip';
-const KEY_PORT = 'tether_port';
-const KEY_SESSION_ID = 'tether_session_id';
-const KEY_FONT = 'tether_font_size';
-const KEY_SNIPPETS = 'tether_snippets';
 
 import type { useTetherApp } from './useTetherApp';
 
@@ -81,39 +48,16 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     if (isDesktop) injectTerminalScrollbarStyles();
   }, []);
   const {
-    fontsLoaded,
     insets,
     serverIp,
-    setServerIp,
     port,
-    setPort,
-    password,
-    setPassword,
-    passwordRef,
-    setupMode,
-    setSetupMode,
-    confirmPassword,
-    setConfirmPassword,
-    testStatus,
-    setTestStatus,
-    isConfiguring,
     setIsConfiguring,
-    ready,
-    setReady,
-    readyRef,
-    lastConnectedRef,
     connectionStatus,
-    setConnectionStatus,
     hasConnectedRef,
     ctxMenu,
     setCtxMenu,
     updateInfo,
-    setUpdateInfo,
-    pendingUpdate,
-    updateProgress,
-    setUpdateProgress,
     updating,
-    setUpdating,
     ctrlArmed,
     setCtrlArmed,
     utilityPage,
@@ -132,19 +76,14 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     setSearchQuery,
     searchInputRef,
     snippets,
-    setSnippets,
     snippetsModalOpen,
     setSnippetsModalOpen,
     snippetDraft,
     setSnippetDraft,
-    cache,
     activeId,
-    setActiveId,
-    activeIdRef,
     drawerOpen,
     setDrawerOpen,
     drawerSessions,
-    setDrawerSessions,
     presentations,
     activePresentation,
     activePresentationId,
@@ -183,19 +122,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     selectDesktopNavigationMode,
     inputRef,
     fontSize,
-    setFontSize,
     lineHeight,
     entryFor,
     terminalViewRef,
     hydrateRenderer,
     onRendererResize,
     onRendererSelection,
-    wsSend,
-    resetTerminal,
-    applyWsMessage,
-    connect,
-    disconnect,
-    switchTo,
     newTerminal,
     killActiveOr,
     changeFontSize,
@@ -204,17 +136,13 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     notificationsEnabled,
     toggleNotificationsEnabled,
     testNotification,
-    persistSnippets,
     addSnippet,
     removeSnippet,
     sendSnippet,
     refreshSessions,
-    testConnection,
-    saveConfig,
     sendTyped,
     sendKey,
     cursorSeq,
-    getFullText,
     searchText,
     openSelectionView,
     copySelection,
@@ -512,21 +440,33 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               rows and fire a spurious PTY resize (visible rewrap) on every
               reconnect. */}
               <View style={styles.terminalArea}>
-              <View nativeID="tether-terminal" style={styles.terminalScroll}>
-                {Platform.OS === 'ios' ? (
-                  <DragDropContentView
-                    style={{ flex: 1 }}
-                    onDrop={(event) => {
-                      for (const asset of event.assets) {
-                        if (!asset.uri) continue;
-                        const filename = asset.fileName || `drop-${Date.now()}`;
-                        uploadFile(
-                          { uri: asset.uri, name: filename, type: asset.type },
-                          filename,
-                        );
-                      }
-                    }}
-                  >
+                <View nativeID="tether-terminal" style={styles.terminalScroll}>
+                  {Platform.OS === 'ios' ? (
+                    <DragDropContentView
+                      style={{ flex: 1 }}
+                      onDrop={(event) => {
+                        for (const asset of event.assets) {
+                          if (!asset.uri) continue;
+                          const filename = asset.fileName || `drop-${Date.now()}`;
+                          uploadFile(
+                            { uri: asset.uri, name: filename, type: asset.type },
+                            filename,
+                          );
+                        }
+                      }}
+                    >
+                      <TerminalView
+                        ref={terminalViewRef}
+                        onInput={sendTyped}
+                        onResize={onRendererResize}
+                        onOpenLink={openFile}
+                        onSelection={onRendererSelection}
+                        onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
+                        onRecover={hydrateRenderer}
+                        onStatus={setRendererStatus}
+                      />
+                    </DragDropContentView>
+                  ) : (
                     <TerminalView
                       ref={terminalViewRef}
                       onInput={sendTyped}
@@ -537,50 +477,38 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                       onRecover={hydrateRenderer}
                       onStatus={setRendererStatus}
                     />
-                  </DragDropContentView>
-                ) : (
-                  <TerminalView
-                    ref={terminalViewRef}
-                    onInput={sendTyped}
-                    onResize={onRendererResize}
-                    onOpenLink={openFile}
-                    onSelection={onRendererSelection}
-                    onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
-                    onRecover={hydrateRenderer}
-                    onStatus={setRendererStatus}
-                  />
-                )}
-              </View>
-              {/* Renderer died and could not be brought back automatically. Say
+                  )}
+                </View>
+                {/* Renderer died and could not be brought back automatically. Say
               so, rather than leaving the WebView's blank white rectangle looking
               like a load that never finishes. */}
-              {rendererStatus === 'stalled' && (
-                <View style={styles.rendererStalled}>
-                  <Text style={styles.rendererStalledText}>
-                    The terminal display stopped responding. Your session is still running on the
-                    server — reloading only redraws it.
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.rendererStalledButton}
-                    onPress={() => terminalViewRef.current?.retry()}
-                    accessibilityRole="button"
-                    accessibilityLabel="Reload terminal display"
-                  >
-                    <Text style={styles.rendererStalledButtonText}>Reload display</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+                {rendererStatus === 'stalled' && (
+                  <View style={styles.rendererStalled}>
+                    <Text style={styles.rendererStalledText}>
+                      The terminal display stopped responding. Your session is still running on the
+                      server — reloading only redraws it.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.rendererStalledButton}
+                      onPress={() => terminalViewRef.current?.retry()}
+                      accessibilityRole="button"
+                      accessibilityLabel="Reload terminal display"
+                    >
+                      <Text style={styles.rendererStalledButtonText}>Reload display</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
-              {/* Connection banner — names the real state; no safety overclaim.
+                {/* Connection banner — names the real state; no safety overclaim.
               Absolute overlay (box-none) so its mount/unmount never resizes the
               terminal grid. */}
-              <View style={styles.connectionBannerOverlay} pointerEvents="box-none">
-                <ConnectionBanner
-                  status={connectionStatus}
-                  hasConnected={hasConnectedRef.current}
-                  onEdit={() => setIsConfiguring(true)}
-                />
-              </View>
+                <View style={styles.connectionBannerOverlay} pointerEvents="box-none">
+                  <ConnectionBanner
+                    status={connectionStatus}
+                    hasConnected={hasConnectedRef.current}
+                    onEdit={() => setIsConfiguring(true)}
+                  />
+                </View>
               </View>
             </>
           )}

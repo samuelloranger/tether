@@ -14,7 +14,6 @@ jest.mock('expo-haptics', () => ({
   ImpactFeedbackStyle: { Light: 'light', Medium: 'medium' },
 }));
 
-
 // Fonts, clipboard and the drag-drop view all reach for native modules that do
 // not exist under jest. The components under test never assert on them.
 jest.mock('@expo-google-fonts/fira-code/useFonts', () => ({ useFonts: () => [true, null] }));

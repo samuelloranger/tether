@@ -1,7 +1,10 @@
 // The mobile Ctrl control arms one terminal-style modifier for the next input.
 // Apply it where the bytes actually arrive, rather than depending on a separate
 // native keypress event being delivered in a particular order.
-export function applyCtrlModifier(armed: boolean, bytes: string): { bytes: string; consumed: boolean } {
+export function applyCtrlModifier(
+  armed: boolean,
+  bytes: string,
+): { bytes: string; consumed: boolean } {
   if (!armed || !bytes) return { bytes, consumed: false };
   if (bytes.length === 1 && /^[a-zA-Z]$/.test(bytes)) {
     return {
@@ -24,7 +27,10 @@ export function applyCtrlModifier(armed: boolean, bytes: string): { bytes: strin
 const ESC = '\x1b';
 const CURSOR_FINALS = 'ABCDHF';
 
-export function applyCtrlToKey(armed: boolean, bytes: string): { bytes: string; consumed: boolean } {
+export function applyCtrlToKey(
+  armed: boolean,
+  bytes: string,
+): { bytes: string; consumed: boolean } {
   if (!armed || !bytes) return { bytes, consumed: false };
   // CSI/SS3 cursor key: ESC[X or ESC O X, X = A-D (arrows) or H/F (Home/End).
   if (

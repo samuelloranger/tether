@@ -61,7 +61,10 @@ module.exports = {
     ],
   },
   moduleNameMapper: {
-    // A ~1MB generated string; no component test needs its contents.
+    // Generated strings measured in hundreds of KB (the minified renderer bundle
+    // and the base64 fonts). No component test needs their contents, and parsing
+    // them on every run is pure cost.
     'terminalRenderer\\.generated$': `${mobile}/__tests__/mocks/rendererBundle.ts`,
+    'terminalFonts\\.generated$': `${mobile}/__tests__/mocks/rendererFonts.ts`,
   },
 };

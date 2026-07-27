@@ -1,10 +1,10 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { AppState, StyleSheet } from 'react-native';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { RendererLifecycle } from './rendererLifecycle';
+import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 import { terminalRendererHtml } from './terminalRendererHtml';
 import { parseRendererEvent, RendererQueue } from './terminalRendererProtocol';
-import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 
 // Liveness probe. Gated on the renderer's own global so a bare about:blank page
 // (which still has the ReactNativeWebView bridge) cannot answer for it.
@@ -20,13 +20,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const [instance, setInstance] = useState(0);
     const queue = useMemo(
       () =>
-        new RendererQueue(
-          (command) => {
-            const json = JSON.stringify(command);
-            webView.current?.injectJavaScript(`window.__tetherDispatch(${json});true;`);
-          },
-          { native: true },
-        ),
+        new RendererQueue((command) => {
+          const json = JSON.stringify(command);
+          webView.current?.injectJavaScript(`window.__tetherDispatch(${json});true;`);
+        }),
       [],
     );
 

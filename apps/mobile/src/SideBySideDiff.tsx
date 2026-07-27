@@ -54,10 +54,7 @@ export function SideBySideDiff({ diffText, path }: { diffText: string; path: str
     <View style={styles.root}>
       {rows.map((row, index) =>
         row.span ? (
-          <View
-            key={index}
-            style={[styles.hunkRow, { borderTopColor: theme.colors.border }]}
-          >
+          <View key={index} style={[styles.hunkRow, { borderTopColor: theme.colors.border }]}>
             <Text style={[styles.hunkLabel, { color: theme.colors.textFaint }]}>
               ⋯ {row.left?.text.match(HUNK_HEADER)?.[1] ?? ''}
             </Text>

@@ -51,9 +51,13 @@ terminal.element!.addEventListener(
     if (lastTouchY === null || event.touches.length !== 1) return;
     const currentY = event.touches[0].clientY;
     const screenHeight =
-      terminal.element!.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect().height ??
-      0;
-    const result = touchScrollLines(lastTouchY - currentY, touchRemainder, screenHeight / terminal.rows);
+      terminal.element!.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
+        .height ?? 0;
+    const result = touchScrollLines(
+      lastTouchY - currentY,
+      touchRemainder,
+      screenHeight / terminal.rows,
+    );
     lastTouchY = currentY;
     touchRemainder = result.remainder;
     if (result.lines) terminal.scrollLines(result.lines);
@@ -117,9 +121,6 @@ window.__tetherDispatch = (command) => {
       break;
     case 'blur':
       terminal.blur();
-      break;
-    case 'dispose':
-      terminal.dispose();
       break;
   }
 };

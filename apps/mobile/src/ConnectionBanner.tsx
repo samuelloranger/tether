@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AccessibilityInfo, Animated, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
-import { connectionPresentation, type ConnectionStatus } from './connectionPresentation';
+import { type ConnectionStatus, connectionPresentation } from './connectionPresentation';
 import { HIT_SLOP } from './interaction';
 import { motionSpec } from './motion';
 
@@ -28,7 +28,9 @@ export function ConnectionBanner({
   const translateY = useRef(new Animated.Value(visible ? 0 : -8)).current;
 
   useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then(setReduceMotion)
+      .catch(() => {});
     const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
     return () => subscription.remove();
   }, []);

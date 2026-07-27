@@ -17,8 +17,16 @@ function eq(actual: unknown, expected: unknown, msg: string) {
       applyCtrlModifier?: (armed: boolean, bytes: string) => { bytes: string; consumed: boolean };
     }
   ).applyCtrlModifier;
-  eq(applyCtrlModifier?.(true, 'c'), { bytes: String.fromCharCode(3), consumed: true }, 'Ctrl+C emits SIGINT');
-  eq(applyCtrlModifier?.(true, 'V'), { bytes: String.fromCharCode(22), consumed: true }, 'Ctrl+V emits SYN');
+  eq(
+    applyCtrlModifier?.(true, 'c'),
+    { bytes: String.fromCharCode(3), consumed: true },
+    'Ctrl+C emits SIGINT',
+  );
+  eq(
+    applyCtrlModifier?.(true, 'V'),
+    { bytes: String.fromCharCode(22), consumed: true },
+    'Ctrl+V emits SYN',
+  );
   eq(
     applyCtrlModifier?.(true, 'hello'),
     { bytes: 'hello', consumed: true },

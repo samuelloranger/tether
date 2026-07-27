@@ -10,10 +10,10 @@ import {
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop, isMacDesktop } from './platform';
 import { createStyles, MONO } from './styles';
 import TitleBar from './TitleBar';
-import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 
 export type SetupMode = 'unknown' | 'create' | 'enter';
 export type TestStatus =
@@ -169,7 +169,10 @@ export function ConfigScreen({
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={[styles.connectBtn, testStatus.kind === 'testing' && styles.connectBtnDisabled]}
+                style={[
+                  styles.connectBtn,
+                  testStatus.kind === 'testing' && styles.connectBtnDisabled,
+                ]}
                 onPress={onTest}
                 disabled={testStatus.kind === 'testing'}
                 accessibilityRole="button"

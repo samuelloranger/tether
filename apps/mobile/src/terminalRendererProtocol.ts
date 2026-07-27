@@ -18,8 +18,7 @@ export type RendererCommand =
   | { v: 1; type: 'scroll'; line: number }
   | { v: 1; type: 'selectAll' }
   | { v: 1; type: 'focus' }
-  | { v: 1; type: 'blur' }
-  | { v: 1; type: 'dispose' };
+  | { v: 1; type: 'blur' };
 
 export type RendererEvent =
   | { v: 1; type: 'ready' }
@@ -70,9 +69,7 @@ export function parseRendererEvent(data: string): RendererEvent | null {
     case 'openLink':
       return linkTarget(value.target) ? { v: 1, type: 'openLink', target: value.target } : null;
     case 'selection':
-      return typeof value.text === 'string'
-        ? { v: 1, type: 'selection', text: value.text }
-        : null;
+      return typeof value.text === 'string' ? { v: 1, type: 'selection', text: value.text } : null;
     case 'rendererFallback':
       return typeof value.reason === 'string'
         ? { v: 1, type: 'rendererFallback', reason: value.reason }
@@ -88,10 +85,7 @@ export class RendererQueue {
   private latestHydrate: Extract<RendererCommand, { type: 'hydrate' }> | null = null;
   private pendingWrites: string[] = [];
 
-  constructor(
-    private send: (command: RendererCommand) => void,
-    private options: { native?: boolean } = {},
-  ) {}
+  constructor(private send: (command: RendererCommand) => void) {}
 
   hydrate(
     data: string,
@@ -109,9 +103,11 @@ export class RendererQueue {
       cols,
       rows,
       theme,
-      fontFamily: this.options.native
-        ? 'ui-monospace, "SFMono-Regular", Menlo, monospace'
-        : fontFamily,
+      // The page carries the same TTFs the app bundles (see the @font-face block
+      // in terminalRendererHtml), so the user's pick applies on native too. The
+      // system stack stays as a fallback for the first frames before the data
+      // URI font decodes.
+      fontFamily: `"${fontFamily}", ui-monospace, "SFMono-Regular", Menlo, monospace`,
       fontSize,
     };
     this.hydrated = false;

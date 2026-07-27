@@ -8,10 +8,10 @@ import {
   D_PAD_MAX_REPEATS,
   D_PAD_REPEAT_DELAY_MS,
   D_PAD_REPEAT_MS,
+  type DPadDirection,
   grantOffset,
   resolveDPadDirection,
   thumbOffset,
-  type DPadDirection,
 } from './dpadModel';
 
 const A11Y_ACTIONS: { name: DPadDirection; label: string }[] = [
@@ -129,17 +129,29 @@ export const ArrowCluster = React.memo(function ArrowCluster({
         if (action) onArrowRef.current(action.name);
       }}
     >
-      <Animated.View
-        pointerEvents="none"
-        style={{ transform: thumb.getTranslateTransform() }}
-      >
+      <Animated.View pointerEvents="none" style={{ transform: thumb.getTranslateTransform() }}>
         <View style={styles.axisGlyph}>
           <View style={[styles.axisLine, styles.axisHorizontal]} />
           <View style={[styles.axisLine, styles.axisVertical]} />
-          <Feather name="chevron-left" size={11} color={theme.colors.text} style={styles.chevronLeft} />
+          <Feather
+            name="chevron-left"
+            size={11}
+            color={theme.colors.text}
+            style={styles.chevronLeft}
+          />
           <Feather name="chevron-up" size={11} color={theme.colors.text} style={styles.chevronUp} />
-          <Feather name="chevron-down" size={11} color={theme.colors.text} style={styles.chevronDown} />
-          <Feather name="chevron-right" size={11} color={theme.colors.text} style={styles.chevronRight} />
+          <Feather
+            name="chevron-down"
+            size={11}
+            color={theme.colors.text}
+            style={styles.chevronDown}
+          />
+          <Feather
+            name="chevron-right"
+            size={11}
+            color={theme.colors.text}
+            style={styles.chevronRight}
+          />
         </View>
       </Animated.View>
     </View>

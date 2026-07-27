@@ -22,12 +22,7 @@ export function shouldForwardToTerminal(
   if (!terminalVisible) return false;
   if (!el || isBody) return true;
   const tag = el.tagName;
-  if (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    el.isContentEditable
-  ) {
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) {
     return false;
   }
   const onTerminal = el.id === 'tether-terminal' || !!el.closest?.('#tether-terminal');

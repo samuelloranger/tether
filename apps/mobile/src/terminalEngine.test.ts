@@ -22,7 +22,11 @@ async function write(t: TerminalEngine, data: string): Promise<void> {
   await t.drain();
 }
 function rowText(t: TerminalEngine, i: number): string {
-  return t.getSnapshot()[i].runs.map((r) => r.text).join('').replace(/\s+$/, '');
+  return t
+    .getSnapshot()
+    [i].runs.map((r) => r.text)
+    .join('')
+    .replace(/\s+$/, '');
 }
 
 test('plain text lands on row 0', async () => {
@@ -35,7 +39,12 @@ test('settled snapshot includes output still queued in xterm', async () => {
   const t = new TerminalEngine(20, 5);
   t.write('latest');
   const snapshot = await t.getSettledSnapshot();
-  expect(snapshot[0].runs.map((run) => run.text).join('').trimEnd()).toBe('latest');
+  expect(
+    snapshot[0].runs
+      .map((run) => run.text)
+      .join('')
+      .trimEnd(),
+  ).toBe('latest');
 });
 
 test('truecolor SGR sets run fg', async () => {
@@ -67,7 +76,12 @@ test('serialize restores scrollback, styles and cursor content', async () => {
 });
 
 function findRow(t: TerminalEngine, needle: string) {
-  return t.getSnapshot().find((r) => r.runs.map((x) => x.text).join('').includes(needle));
+  return t.getSnapshot().find((r) =>
+    r.runs
+      .map((x) => x.text)
+      .join('')
+      .includes(needle),
+  );
 }
 
 test('row key is stable when a line scrolls into scrollback', async () => {
@@ -189,9 +203,19 @@ test('trailing default blanks are trimmed from row text (#E)', async () => {
   await write(t, 'hi');
   // caret cell keeps 1 trailing space on the cursor row (legacy parity), NOT
   // full-width padding — the 20-col row must not become "hi" + 18 spaces.
-  expect(t.getSnapshot()[0].runs.map((r) => r.text).join('')).toBe('hi ');
+  expect(
+    t
+      .getSnapshot()[0]
+      .runs.map((r) => r.text)
+      .join(''),
+  ).toBe('hi ');
   // a non-cursor blank row emits no padding at all
-  expect(t.getSnapshot()[1].runs.map((r) => r.text).join('')).toBe('');
+  expect(
+    t
+      .getSnapshot()[1]
+      .runs.map((r) => r.text)
+      .join(''),
+  ).toBe('');
 });
 
 test('alt-screen feeds do not inflate trim / prune normal-buffer prompts (#1)', async () => {

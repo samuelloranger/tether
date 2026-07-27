@@ -2,14 +2,14 @@ import Feather from '@expo/vector-icons/Feather';
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
+import { activityDotKey, terminalAccessibilityLabel } from './activity';
 import type { AppColors } from './appTheme';
-import { isRecentlyActive, type DesktopNavigationMode, PANEL_W } from './desktopNavigation';
+import { type DesktopNavigationMode, isRecentlyActive, PANEL_W } from './desktopNavigation';
 import { confirmAction } from './dialog';
+import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import type { Presentation } from './presentations';
 import type { DrawerSession } from './SessionDrawer';
 import { sessionLabel } from './sessionLabel';
-import { activityDotKey, terminalAccessibilityLabel } from './activity';
-import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 
 export interface DesktopSessionNavigatorProps {
   mode: DesktopNavigationMode;

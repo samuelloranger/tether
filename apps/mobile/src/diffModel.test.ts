@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
 import {
   annotateHunkIndices,
-  groupSummary,
-  pairDiffRows,
   buildFileTree,
   changeLabel,
   diffLineKinds,
   displayDiff,
+  groupSummary,
   isImagePath,
+  pairDiffRows,
   parseDiffLines,
   totalChanges,
 } from './diffModel';
@@ -150,17 +150,14 @@ test('annotateHunkIndices numbers hunk header lines in order', () => {
 });
 
 test('pairDiffRows aligns removes with adds side by side', () => {
-  const diff = [
-    '@@ -1,4 +1,4 @@',
-    ' keep',
-    '-old1',
-    '-old2',
-    '+new1',
-    ' tail',
-  ].join('\n');
+  const diff = ['@@ -1,4 +1,4 @@', ' keep', '-old1', '-old2', '+new1', ' tail'].join('\n');
   const rows = pairDiffRows(parseDiffLines(diff));
   // meta row spans both sides
-  expect(rows[0]).toEqual({ left: expect.objectContaining({ kind: 'meta' }), right: null, span: true });
+  expect(rows[0]).toEqual({
+    left: expect.objectContaining({ kind: 'meta' }),
+    right: null,
+    span: true,
+  });
   expect(rows[1]).toEqual({
     left: expect.objectContaining({ content: 'keep' }),
     right: expect.objectContaining({ content: 'keep' }),
