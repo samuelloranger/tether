@@ -158,6 +158,12 @@ interface SessionInstance {
 
 const instances = new Map<string, SessionInstance>();
 
+// Sessions an explicit kill already deleted. The holder answers `{t:'k'}` with a
+// `{t:'x'}` exit frame a moment later, and that handler used to re-`upsertSession`
+// the row killSession had just deleted — the closed tab reappeared as 'stopped'
+// and only a second kill (no live instance left, so no 'x' frame) stuck.
+const killed = new Set<string>();
+
 // PTY dims from the network are untrusted: NaN/0/huge values wedge or crash the
 // terminal. Clamp to a sane envelope.
 export function clampDims(cols: unknown, rows: unknown): { cols: number; rows: number } {
@@ -238,8 +244,13 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       if (tail) pendingOutput.push(tail);
       flushOutput();
       console.log(`PTY process for session "${id}" exited with code ${msg.code}`);
-      const sess = getSession(id);
-      upsertSession(id, sess?.command ?? 'bash', 'stopped');
+      if (killed.delete(id)) {
+        // Explicitly killed: the row is already gone and must stay gone.
+        deleteSession(id);
+      } else {
+        const sess = getSession(id);
+        upsertSession(id, sess?.command ?? 'bash', 'stopped');
+      }
       broadcast(id, { type: 'exit', exitCode: msg.code });
       instances.get(id)?.gitWatch.dispose();
       instances.get(id)?.subscribers.clear();
@@ -401,6 +412,7 @@ async function doStartSession(
   rows: number,
 ): Promise<SessionInstance> {
   const dims = clampDims(cols, rows);
+  killed.delete(id); // a reused id is a new session, not the killed one
   upsertSession(id, command, 'running', realpathSync(process.cwd()));
 
   // A holder may already be running from before a server restart — reattach.
@@ -541,6 +553,9 @@ export function subscribeToSession(id: string, callback: Subscriber, cols: numbe
 export function killSession(id: string) {
   const instance = instances.get(id);
   const hadInstance = sendFrame(id, { t: 'k' });
+  // The holder's exit frame lands after we return; flag it so the 'x' handler
+  // doesn't resurrect the row (see `killed`).
+  if (hadInstance) killed.add(id);
   if (instance) {
     instance.gitWatch.dispose();
     // Tell subscribers now: we delete the instance below, so the holder's later
