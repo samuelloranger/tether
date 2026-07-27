@@ -151,6 +151,40 @@ export function createStyles(c: AppColors) {
       right: 0,
       zIndex: 10,
     },
+    // Covers the terminal when the renderer page is gone. Opaque on purpose:
+    // what is underneath is the WebView's own blank white, which is exactly the
+    // "is it loading forever?" state this replaces.
+    rendererStalled: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      paddingHorizontal: 32,
+      backgroundColor: c.background,
+    },
+    rendererStalledText: {
+      color: c.textMuted,
+      fontSize: 14,
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+    rendererStalledButton: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: 20,
+      borderRadius: 8,
+      backgroundColor: c.accent,
+    },
+    rendererStalledButtonText: {
+      color: c.accentText,
+      fontSize: 14,
+      fontWeight: '700',
+    },
     terminalScroll: {
       flex: 1,
       backgroundColor: c.background,

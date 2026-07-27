@@ -8,10 +8,10 @@ import { RendererQueue, type RendererCommand } from './terminalRendererProtocol'
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ onInput, onResize, onOpenLink, onSelection, onFallback }, ref) => {
+  ({ onInput, onResize, onOpenLink, onSelection, onFallback, onStatus }, ref) => {
     const container = useRef<HTMLDivElement>(null);
-    const callbacks = useRef({ onInput, onResize, onOpenLink, onSelection, onFallback });
-    callbacks.current = { onInput, onResize, onOpenLink, onSelection, onFallback };
+    const callbacks = useRef({ onInput, onResize, onOpenLink, onSelection, onFallback, onStatus });
+    callbacks.current = { onInput, onResize, onOpenLink, onSelection, onFallback, onStatus };
     const dispatch = useRef<(command: RendererCommand) => void>(() => {});
     const queue = useMemo(() => new RendererQueue((command) => dispatch.current(command)), []);
 
@@ -25,6 +25,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         selectAll: () => queue.selectAll(),
         focus: () => queue.focus(),
         blur: () => queue.blur(),
+        // Desktop renders xterm straight into the DOM: there is no separate page
+        // to lose, so there is nothing to recover from and nothing to retry.
+        retry: () => {},
       }),
       [queue],
     );
@@ -55,6 +58,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         callbacks.current.onFallback(String(error));
       }
 
+      // Same DOM, same JS context — it is ready the moment it is constructed.
+      callbacks.current.onStatus?.('ready');
       const links = registerTetherLinks(terminal, (target) => callbacks.current.onOpenLink(target));
       const input = terminal.onData((data) => callbacks.current.onInput(data));
       const selection = terminal.onSelectionChange(() =>

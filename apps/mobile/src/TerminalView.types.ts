@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
 import type { LinkTarget } from './links';
+import type { RendererStatus } from './rendererLifecycle';
 import type { RendererTheme } from './terminalRendererProtocol';
 
 export interface TerminalViewHandle {
@@ -17,6 +18,8 @@ export interface TerminalViewHandle {
   selectAll(): void;
   focus(): void;
   blur(): void;
+  /** Manual recovery from the stalled UI: throw the page away and start over. */
+  retry(): void;
 }
 
 export interface TerminalViewProps {
@@ -27,4 +30,6 @@ export interface TerminalViewProps {
   onSelection?(text: string): void;
   onFallback(reason: string): void;
   onRecover(): void;
+  /** Renderer readiness, so a dead page can be shown instead of a blank one. */
+  onStatus?(status: RendererStatus): void;
 }

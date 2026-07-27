@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { TerminalViewProps } from '../src/TerminalView.types';
 
 // This is the test that both v2.2.1 and v2.3.1 needed and did not have.
@@ -38,6 +38,7 @@ jest.mock('../src/TerminalView', () => {
       rendererProps = props;
       return <View testID="terminal-renderer" />;
     },
+    __esModule: true,
   };
 });
 
@@ -152,4 +153,16 @@ test('a bar key between backspaces breaks the streak', async () => {
   fireEvent.press(view.getByLabelText('Esc'));
   rendererProps?.onInput('\x7f');
   expect(sentInput().at(-1)).toBe('\x7f');
+});
+
+test('a stalled renderer is surfaced instead of leaving a blank rectangle', async () => {
+  const view = await mountTerminal();
+  expect(view.queryByLabelText('Reload terminal display')).toBeNull();
+
+  // What the user hit: the WebView page is gone and could not be brought back.
+  await act(async () => rendererProps?.onStatus?.('stalled'));
+  expect(view.getByLabelText('Reload terminal display')).toBeTruthy();
+
+  await act(async () => rendererProps?.onStatus?.('ready'));
+  expect(view.queryByLabelText('Reload terminal display')).toBeNull();
 });

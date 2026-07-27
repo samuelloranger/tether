@@ -53,6 +53,7 @@ import { sessionLabel } from './sessionLabel';
 import { AppearanceModal, RenameModal, SnippetsModal } from './SessionModals';
 import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
 import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
+import type { RendererStatus } from './rendererLifecycle';
 import { createStyles } from './styles';
 import { TermRow } from './TermRow';
 import TitleBar from './TitleBar';
@@ -75,6 +76,7 @@ import type { useTetherApp } from './useTetherApp';
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const [rendererStatus, setRendererStatus] = useState<RendererStatus>('loading');
   useEffect(() => {
     if (isDesktop) injectTerminalScrollbarStyles();
   }, []);
@@ -533,6 +535,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                       onSelection={onRendererSelection}
                       onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
                       onRecover={hydrateRenderer}
+                      onStatus={setRendererStatus}
                     />
                   </DragDropContentView>
                 ) : (
@@ -544,9 +547,30 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     onSelection={onRendererSelection}
                     onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
                     onRecover={hydrateRenderer}
+                    onStatus={setRendererStatus}
                   />
                 )}
               </View>
+              {/* Renderer died and could not be brought back automatically. Say
+              so, rather than leaving the WebView's blank white rectangle looking
+              like a load that never finishes. */}
+              {rendererStatus === 'stalled' && (
+                <View style={styles.rendererStalled}>
+                  <Text style={styles.rendererStalledText}>
+                    The terminal display stopped responding. Your session is still running on the
+                    server — reloading only redraws it.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.rendererStalledButton}
+                    onPress={() => terminalViewRef.current?.retry()}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reload terminal display"
+                  >
+                    <Text style={styles.rendererStalledButtonText}>Reload display</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {/* Connection banner — names the real state; no safety overclaim.
               Absolute overlay (box-none) so its mount/unmount never resizes the
               terminal grid. */}

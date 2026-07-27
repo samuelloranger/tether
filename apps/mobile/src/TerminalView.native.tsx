@@ -1,17 +1,17 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { AppState, StyleSheet } from 'react-native';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
-import { RendererWatchdog } from './rendererWatchdog';
+import { RendererLifecycle } from './rendererLifecycle';
 import { terminalRendererHtml } from './terminalRendererHtml';
 import { parseRendererEvent, RendererQueue } from './terminalRendererProtocol';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 
 // Liveness probe. Gated on the renderer's own global so a bare about:blank page
-// (which still has the ReactNativeWebView bridge) can't answer for it.
+// (which still has the ReactNativeWebView bridge) cannot answer for it.
 const PROBE_JS = `window.__tetherDispatch && window.ReactNativeWebView.postMessage(JSON.stringify({v:1,type:'pong'}));true;`;
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ onInput, onResize, onOpenLink, onSelection, onFallback, onRecover }, ref) => {
+  ({ onInput, onResize, onOpenLink, onSelection, onFallback, onRecover, onStatus }, ref) => {
     const webView = useRef<WebView>(null);
     // Bumping this remounts the WebView. Recovery must remount rather than
     // reload(): once iOS has reclaimed the content process there is nothing left
@@ -30,6 +30,24 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       [],
     );
 
+    // Callbacks are read through refs so the lifecycle can be built once; it owns
+    // timers, and rebuilding it on every render would rearm them.
+    const callbacks = useRef({ onRecover, onStatus });
+    callbacks.current = { onRecover, onStatus };
+
+    const lifecycle = useMemo(
+      () =>
+        new RendererLifecycle({
+          probe: () => webView.current?.injectJavaScript(PROBE_JS),
+          remount: () => {
+            queue.recover(() => callbacks.current.onRecover());
+            setInstance((n) => n + 1);
+          },
+          onStatus: (status) => callbacks.current.onStatus?.(status),
+        }),
+      [queue],
+    );
+
     useImperativeHandle(
       ref,
       () => ({
@@ -40,47 +58,32 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         selectAll: () => queue.selectAll(),
         focus: () => queue.focus(),
         blur: () => queue.blur(),
+        retry: () => lifecycle.retry(),
       }),
-      [queue],
+      [queue, lifecycle],
     );
 
-    const onRecoverRef = useRef(onRecover);
-    onRecoverRef.current = onRecover;
-
-    const remount = useCallback(() => {
-      queue.recover(() => onRecoverRef.current());
-      setInstance((n) => n + 1);
-    }, [queue]);
-
-    const watchdog = useMemo(
-      () =>
-        new RendererWatchdog(
-          () => webView.current?.injectJavaScript(PROBE_JS),
-          remount,
-        ),
-      [remount],
-    );
-
-    // Foregrounding is when a reclaimed content process shows up, so that's when
-    // the renderer gets asked to prove it's alive.
+    // Foregrounding is when a reclaimed content process shows up, so that is when
+    // the renderer gets asked to prove it is alive.
     useEffect(() => {
       const subscription = AppState.addEventListener('change', (state) => {
-        if (state === 'active') watchdog.check();
+        if (state === 'active') lifecycle.foregrounded();
       });
       return () => {
         subscription.remove();
-        watchdog.stop();
+        lifecycle.dispose();
       };
-    }, [watchdog]);
+    }, [lifecycle]);
 
     const onMessage = (event: WebViewMessageEvent) => {
       const message = parseRendererEvent(event.nativeEvent.data);
       if (!message) return;
       // Any well-formed message proves the page is running.
-      watchdog.alive();
+      lifecycle.sawMessage();
       switch (message.type) {
         case 'ready':
           queue.ready();
+          lifecycle.pageReady();
           break;
         case 'pong':
           break;
@@ -114,10 +117,15 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         bounces={false}
         overScrollMode="never"
         style={styles.view}
-        onLoadStart={() => queue.notReady()}
+        onLoadStart={() => {
+          queue.notReady();
+          lifecycle.loadStarted();
+        }}
         onMessage={onMessage}
-        onContentProcessDidTerminate={remount}
-        onRenderProcessGone={remount}
+        onError={() => lifecycle.crashed()}
+        onHttpError={() => lifecycle.crashed()}
+        onContentProcessDidTerminate={() => lifecycle.crashed()}
+        onRenderProcessGone={() => lifecycle.crashed()}
         onShouldStartLoadWithRequest={({ url }) => url === 'about:blank'}
       />
     );
