@@ -2,10 +2,11 @@
 // each key maps to one control in the bar's CONTROLS table, so adding a key or
 // a page here is enough to change the UI.
 //
-// Item counts are balanced (6 + 6) on purpose: the bar is a single fixed-height
-// row with no wrapping, so a page wider than the screen clips instead of
-// reflowing. Keep each page's rendered width under ~340pt (narrowest supported
-// phone minus horizontal padding) when editing.
+// Item counts are balanced (6 + 6) on purpose. The bar is a single fixed-height
+// row with no wrapping and no scrolling, and each page spends one more slot on
+// its inline pager arrow, so a page wider than the screen clips instead of
+// reflowing. Keep each page at 6 keys, and prefer short labels — on a narrow
+// phone the widest ones ellipsize.
 export const UTILITY_BAR_PAGES = [
   ['ctrl', 'tab', 'esc', 'dpad', 'paste', 'hide'],
   ['del', 'home', 'end', 'pgup', 'pgdn', 'image'],
