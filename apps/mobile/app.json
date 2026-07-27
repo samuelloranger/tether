@@ -25,10 +25,16 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/icon.png",
-          "imageWidth": 220,
+          "image": "./assets/splash-light.png",
+          "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#05070e"
+          "backgroundColor": "#eff1f5",
+          "fade": true,
+          "duration": 320,
+          "dark": {
+            "image": "./assets/splash-dark.png",
+            "backgroundColor": "#05070e"
+          }
         }
       ],
       "expo-font",
