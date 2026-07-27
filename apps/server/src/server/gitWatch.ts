@@ -43,6 +43,10 @@ function listIgnoredDirs(root: string): Set<string> {
 // default limit 8192 on many systems).
 const MAX_WATCHED_DIRS = 4096;
 
+// How long one scan slice may hold the event loop. The scan runs in slices
+// because setRoot is called from the PTY output path: `cd` must not wait on it.
+const SCAN_SLICE_MS = 8;
+
 // A directory with its own .git is a separate repository (or a submodule):
 // the parent's diff treats it as an opaque entry.
 function isNestedRepo(dir: string): boolean {
@@ -58,6 +62,16 @@ export class GitWatch {
   private lastSummary: DiffSummary | null = null;
   private disposed = false;
   private truncated = false;
+  // Directories still to visit, and a generation stamp so a scan still in
+  // flight when the root changes (another `cd`) abandons its remaining work.
+  private queue: string[] = [];
+  private scanGen = 0;
+  private scanTimer?: ReturnType<typeof setTimeout>;
+  // Resolves when the deferred scan for the current root has finished placing
+  // its watches. Nothing in the server waits on it — it exists so tests can
+  // assert on the finished state instead of racing the slices.
+  private settled: Promise<void> = Promise.resolve();
+  private settle: () => void = () => {};
 
   constructor(
     private readonly onChange: (summary: DiffSummary) => void,
@@ -65,37 +79,89 @@ export class GitWatch {
     private readonly maxWatchedDirs = MAX_WATCHED_DIRS,
   ) {}
 
+  // Returns immediately. This is called from the PTY output path in pty.ts, so
+  // anything expensive here stalls the terminal the user just typed `cd` into —
+  // and every other session with it, since it is one event loop. Setting up the
+  // watch is therefore deferred and time-sliced: the user lands in the new
+  // directory first, the diff summary arrives a tick later, and the working-tree
+  // watches fill in behind it.
   setRoot(root: string | null) {
     if (this.disposed || root === this.root) return;
+    this.cancelScan();
     this.closeHandles();
     this.root = root;
     this.lastSummary = null;
+    this.truncated = false;
 
-    if (root) {
-      this.ignoredDirs = listIgnoredDirs(root);
-      this.truncated = false;
-      this.walk(root, root);
-      if (this.truncated) {
-        console.warn(
-          `tether: "${root}" has more than ${this.maxWatchedDirs} directories to watch; ` +
-            'working-tree changes below the watched subset will only appear on the next git event.',
-        );
-      }
-      try {
-        this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
-      } catch (err) {
-        console.warn(`tether: could not watch git dir for "${root}":`, err);
-      }
+    if (!root) {
+      this.refresh();
+      return;
     }
-    this.refresh();
+    this.settled = new Promise<void>((resolve) => {
+      this.settle = resolve;
+    });
+    const gen = ++this.scanGen;
+    this.scanTimer = setTimeout(() => this.beginScan(root, gen), 0);
   }
 
-  // Manual recursive walk (instead of node:fs's {recursive:true}) so ignored
-  // directories can be pruned from the traversal entirely — see
-  // listIgnoredDirs above for why that matters.
-  private walk(root: string, dir: string) {
+  // First slice: the cheap-but-blocking setup, then publish the diff summary
+  // before walking, because the summary is the part the user actually sees.
+  /** Awaits the deferred scan for the current root (tests). */
+  whenScanned(): Promise<void> {
+    return this.settled;
+  }
+
+  private beginScan(root: string, gen: number) {
+    this.scanTimer = undefined;
+    if (this.disposed || gen !== this.scanGen) return;
+    this.ignoredDirs = listIgnoredDirs(root);
+    try {
+      this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
+    } catch (err) {
+      console.warn(`tether: could not watch git dir for "${root}":`, err);
+    }
+    this.refresh();
+    this.queue = [root];
+    this.scanSlice(root, gen);
+  }
+
+  private scanSlice = (root: string, gen: number) => {
+    this.scanTimer = undefined;
+    if (this.disposed || gen !== this.scanGen) return;
+    const deadline = Date.now() + SCAN_SLICE_MS;
+    while (this.queue.length > 0 && Date.now() < deadline) {
+      const dir = this.queue.shift();
+      if (dir) this.visit(root, dir);
+    }
+    if (this.queue.length > 0) {
+      this.scanTimer = setTimeout(() => this.scanSlice(root, gen), 0);
+      return;
+    }
+    if (this.truncated) {
+      console.warn(
+        `tether: "${root}" has more than ${this.maxWatchedDirs} directories to watch; ` +
+          'working-tree changes below the watched subset will only appear on the next git event.',
+      );
+    }
+    this.settle();
+  };
+
+  private cancelScan() {
+    this.scanGen++;
+    this.queue = [];
+    if (this.scanTimer) clearTimeout(this.scanTimer);
+    this.scanTimer = undefined;
+    this.settle(); // never leave an awaited scan hanging
+  }
+
+  // One directory per call, queueing its children (instead of node:fs's
+  // {recursive:true}) so ignored directories can be pruned from the traversal
+  // entirely — see listIgnoredDirs above for why that matters — and so the scan
+  // can be interrupted between directories.
+  private visit(root: string, dir: string) {
     if (this.watchedDirs.size >= this.maxWatchedDirs) {
       this.truncated = true;
+      this.queue = [];
       return;
     }
     this.watchDir(root, dir);
@@ -124,7 +190,7 @@ export class GitWatch {
       // project's node_modules into the walk. Measured at 508k directories and
       // ~14s of blocking on one such tree, which is what made `cd` hang.
       if (isNestedRepo(child)) continue;
-      this.walk(root, child);
+      this.queue.push(child);
     }
   }
 
@@ -145,7 +211,14 @@ export class GitWatch {
         } catch {
           return; // deleted/renamed away
         }
-        if (isDir) this.walk(root, child);
+        if (!isDir) return;
+        // A whole tree can appear at once (a clone, an install). Queue it so it
+        // is scanned in slices like any other, never in one blocking burst.
+        this.queue.push(child);
+        if (!this.scanTimer && this.root === root) {
+          const gen = this.scanGen;
+          this.scanTimer = setTimeout(() => this.scanSlice(root, gen), 0);
+        }
       });
       this.addHandle(handle);
     } catch (err) {
@@ -157,6 +230,7 @@ export class GitWatch {
     this.disposed = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+    this.cancelScan();
     this.closeHandles();
   }
 

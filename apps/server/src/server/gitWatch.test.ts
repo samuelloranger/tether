@@ -32,6 +32,7 @@ test('debounces native worktree events and suppresses an identical summary', asy
     const seen: DiffSummary[] = [];
     const watch = new GitWatch((summary) => seen.push(summary), 150);
     watch.setRoot(root);
+    await watch.whenScanned();
     expect(seen).toEqual([{ files: [] }]);
 
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
@@ -60,15 +61,18 @@ test('retargets to a new repository and stops publishing the old root', async ()
       const seen: DiffSummary[] = [];
       const watch = new GitWatch((summary) => seen.push(summary), 150);
       watch.setRoot(first);
+      // Retargeted before the deferred scan for `first` ever ran, so `first` is
+      // never scanned and never published — two quick `cd`s cost one scan.
       watch.setRoot(second);
+      await watch.whenScanned();
 
       writeFileSync(path.join(first, 'main.ts'), 'export const answer = 43;\n');
       await Bun.sleep(250);
-      expect(seen).toEqual([{ files: [] }, { files: [] }]);
+      expect(seen).toEqual([{ files: [] }]);
 
       writeFileSync(path.join(second, 'main.ts'), 'export const answer = 43;\n');
-      await waitFor(() => seen.length === 3);
-      expect(seen[2]).toEqual({
+      await waitFor(() => seen.length === 2);
+      expect(seen[1]).toEqual({
         files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false }],
       });
       watch.dispose();
@@ -81,6 +85,7 @@ test('dispose prevents later watcher callbacks', async () => {
     const seen: DiffSummary[] = [];
     const watch = new GitWatch((summary) => seen.push(summary), 150);
     watch.setRoot(root);
+    await watch.whenScanned();
     watch.dispose();
 
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
@@ -99,6 +104,7 @@ test('captures changes that already existed before setRoot was first called', as
     const seen: DiffSummary[] = [];
     const watch = new GitWatch((summary) => seen.push(summary), 50);
     watch.setRoot(root);
+    await watch.whenScanned();
     expect(seen).toEqual([
       {
         files: [
@@ -121,6 +127,7 @@ test('does not open a watch inside a gitignored directory (e.g. node_modules)', 
     const watchSpy = spyOn(nodeFs, 'watch');
     const watch = new GitWatch(() => {}, 50);
     watch.setRoot(root);
+    await watch.whenScanned();
     await Bun.sleep(50);
     watch.dispose();
 
@@ -140,6 +147,7 @@ test('logs instead of throwing when a watch cannot be created', async () => {
     try {
       const watch = new GitWatch(() => {}, 50);
       expect(() => watch.setRoot(root)).not.toThrow();
+      await watch.whenScanned();
       expect(warnSpy).toHaveBeenCalled();
       watch.dispose();
     } finally {
@@ -155,6 +163,7 @@ test('degrades to empty and closes a partial watcher for a non-repository root',
     const seen: DiffSummary[] = [];
     const watch = new GitWatch((summary) => seen.push(summary), 50);
     watch.setRoot(root);
+    await watch.whenScanned();
     writeFileSync(path.join(root, 'plain.txt'), 'changed\n');
     await Bun.sleep(100);
     expect(seen).toEqual([{ files: [] }]);
@@ -187,6 +196,7 @@ test('does not walk into nested repositories', async () => {
     const watcher = new GitWatch(() => {}, 150);
     try {
       watcher.setRoot(parent);
+      await watcher.whenScanned();
       expect(watched).toContain(path.join(parent, 'src'));
       expect(watched.some((dir) => dir.startsWith(nested))).toBe(false);
     } finally {
@@ -214,12 +224,42 @@ test('stops watching past the directory cap instead of blocking', async () => {
     const watcher = new GitWatch(() => {}, 150, 5);
     try {
       watcher.setRoot(root);
+      await watcher.whenScanned();
       // 5 working-tree dirs, plus the separate recursive watch on .git.
       expect(watched.filter((target) => !target.endsWith('.git'))).toHaveLength(5);
       expect(watched).toContain(root);
     } finally {
       watcher.dispose();
       spy.mockRestore();
+    }
+  });
+});
+
+// setRoot is called from the PTY output path, so `cd` waits on whatever it
+// does. It must hand back control immediately and set the watch up afterwards:
+// the user lands in the new directory first, the diff summary arrives a tick
+// later, the working-tree watches fill in behind it.
+test('setRoot returns before doing any of the work', async () => {
+  await withRepo(async (root) => {
+    for (let i = 0; i < 40; i++) {
+      mkdirSync(path.join(root, `dir-${i}`, 'nested', 'deeper'), { recursive: true });
+    }
+
+    const seen: DiffSummary[] = [];
+    const watcher = new GitWatch((summary) => seen.push(summary), 150);
+    try {
+      const start = performance.now();
+      watcher.setRoot(root);
+      const blocked = performance.now() - start;
+
+      // Nothing has happened yet: no git subprocess, no readdir, no summary.
+      expect(seen).toEqual([]);
+      expect(blocked).toBeLessThan(5);
+
+      await watcher.whenScanned();
+      expect(seen).toEqual([{ files: [] }]);
+    } finally {
+      watcher.dispose();
     }
   });
 });
