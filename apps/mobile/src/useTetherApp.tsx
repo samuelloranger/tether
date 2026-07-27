@@ -182,7 +182,17 @@ export function useTetherApp() {
     null,
   );
   const [updating, setUpdating] = useState(false);
-  const [ctrlArmed, setCtrlArmed] = useState(false);
+  // The armed Ctrl modifier is mirrored in a ref because sendKey both reads and
+  // consumes it. Reading React state instead means two keys dispatched in the
+  // same tick (autorepeat, a burst of onData, the D-pad's 60ms repeat) both see
+  // it armed and both get rewritten — the disarm has not re-rendered yet.
+  const [ctrlArmed, setCtrlArmedState] = useState(false);
+  const ctrlArmedRef = useRef(false);
+  const setCtrlArmed = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    const value = typeof next === 'function' ? next(ctrlArmedRef.current) : next;
+    ctrlArmedRef.current = value;
+    setCtrlArmedState(value);
+  }, []);
   // Utility-bar page lives here, not in UtilityBar: the bar unmounts whenever
   // the terminal is hidden or a session switch remounts it, and a local
   // useState would silently snap back to page 0 every time.
@@ -1095,7 +1105,7 @@ export function useTetherApp() {
   // Ctrl+Del) and is always consumed — pressing a bar key while Ctrl is armed
   // must never leave it armed for the next typed letter.
   const sendKey = (bytes: string) => {
-    const ctrl = applyCtrlToKey(ctrlArmed, bytes);
+    const ctrl = applyCtrlToKey(ctrlArmedRef.current, bytes);
     if (ctrl.consumed) setCtrlArmed(false);
     sendInput(ctrl.bytes);
   };
@@ -1276,7 +1286,7 @@ export function useTetherApp() {
   const handleChangeText = (next: string) => {
     const { bytes, value, fromEmptyBuffer } = applyFieldChange(prevValueRef.current, next);
     if (bytes) {
-      const ctrl = applyCtrlModifier(ctrlArmed, bytes);
+      const ctrl = applyCtrlModifier(ctrlArmedRef.current, bytes);
       if (ctrl.consumed) setCtrlArmed(false);
       const tracked = applyBackspaceStreak(
         backspaceStreakRef.current,

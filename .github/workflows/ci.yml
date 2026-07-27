@@ -28,8 +28,12 @@ jobs:
         env:
           TETHER_DB_PATH: /tmp/tether-ci.db
 
-      - name: Mobile tests
-        run: bun test
+      - name: Mobile tests (pure logic)
+        run: bun test src
+        working-directory: apps/mobile
+
+      - name: Mobile tests (components)
+        run: bun run test:ui
         working-directory: apps/mobile
 
       - name: Verify native renderer bundle
