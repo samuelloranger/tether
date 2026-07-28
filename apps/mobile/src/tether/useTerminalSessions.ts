@@ -392,6 +392,10 @@ export function useTerminalSessions({
     onClearView();
     if (action === 'none') return;
     sendFocus(false);
+    // The user picked this session explicitly, so the host is adopted. Without
+    // this, the host's next poll would run the adoption branch and reconnect —
+    // disconnecting the socket that was just opened.
+    adoptedHostsRef.current.add(hostId);
     activeHostIdRef.current = hostId;
     activeIdRef.current = id;
     activeKeyRef.current = targetKey;
@@ -461,6 +465,8 @@ export function useTerminalSessions({
   // connecting to the default `term-1` before the list arrives spawns a stray
   // terminal on every newly added host.
   const adoptedHostsRef = useRef(new Set<string>());
+  // Hosts we opened a socket for purely to show a failed connection state.
+  const probedHostsRef = useRef(new Set<string>());
   const isWindowFocused = () => windowFocusedRef.current;
   const activeClient = clientForKey(activeKeyRef.current);
 
@@ -521,7 +527,23 @@ export function useTerminalSessions({
       },
       onHealth: (profile, result) => {
         updateHealthRef.current(profile, result);
-        if (result === 'success') void onReachableRef.current?.(profile);
+        if (result === 'success') {
+          void onReachableRef.current?.(profile);
+          return;
+        }
+        // The host answered with a failure, so there is no session list coming.
+        // Open the socket to surface the real connection state — but do NOT mark
+        // the host adopted: if it later recovers, its list must still be able to
+        // adopt an existing session instead of leaving us on the default id.
+        if (
+          profile.id === activeHostIdRef.current &&
+          !adoptedHostsRef.current.has(profile.id) &&
+          !probedHostsRef.current.has(profile.id) &&
+          readyRef.current
+        ) {
+          probedHostsRef.current.add(profile.id);
+          connectRef.current(activeKeyRef.current);
+        }
       },
     });
     void polling.start().catch(() => {});
@@ -530,18 +552,7 @@ export function useTerminalSessions({
   // biome-ignore lint/correctness/useExhaustiveDependencies: connect reads the current client ref at call time.
   useEffect(() => {
     if (!ready) return;
-    // If the host answers, the session-list handler above connects. If it never
-    // does (offline, wrong password), connect anyway so the UI shows the real
-    // connection state instead of sitting idle.
-    const fallback = setTimeout(() => {
-      if (adoptedHostsRef.current.has(activeHostIdRef.current)) return;
-      adoptedHostsRef.current.add(activeHostIdRef.current);
-      connectRef.current(activeKeyRef.current);
-    }, 3000);
-    return () => {
-      clearTimeout(fallback);
-      disconnectAll();
-    };
+    return disconnectAll;
   }, [ready]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: resume callbacks read active transport state at event time.
   useEffect(() => {
