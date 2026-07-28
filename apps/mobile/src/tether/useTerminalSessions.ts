@@ -275,6 +275,13 @@ export function useTerminalSessions({
     state.client = clientForKey(key);
     if (key === activeKeyRef.current) setConnectionStatus('connecting');
     const generation = ++state.gen;
+    // A transport may invoke onOpen before openSocket returns, leaving
+    // state.sock unassigned inside the handler. Send on a microtask, by which
+    // point the assignment below has run.
+    const reportFocus = (focused: boolean) =>
+      queueMicrotask(() => {
+        if (state.gen === generation) state.sock?.send(JSON.stringify(focusFrame(focused)));
+      });
     try {
       state.sock = state.client.openSocket(
         '/api/ws',
@@ -292,8 +299,14 @@ export function useTerminalSessions({
             if (key === activeKeyRef.current) {
               setHasConnected(true);
               setConnectionStatus('connected');
-              state.sock?.send(JSON.stringify(focusFrame(appStateRef.current === 'active')));
-            } else state.sock?.send(JSON.stringify(focusFrame(false)));
+              // A fresh connection is focused unless the app is known to be
+              // backgrounded. AppState.currentState can be 'unknown' before the
+              // first transition, and treating that as unfocused would silence
+              // notifications for the session the user is looking at.
+              reportFocus(
+                appStateRef.current !== 'background' && appStateRef.current !== 'inactive',
+              );
+            } else reportFocus(false);
             state.lastSeen = Date.now();
             if (state.ping) clearInterval(state.ping);
             state.ping = setInterval(() => {
