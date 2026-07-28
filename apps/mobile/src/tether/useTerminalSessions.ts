@@ -98,6 +98,7 @@ export function useTerminalSessions({
   const readyRef = useRef(ready);
   readyRef.current = ready;
   const disconnectRef = useRef<(key: string) => void>(() => {});
+  const connectRef = useRef<(key: string) => void>(() => {});
   const cache = useRef(createSessionCache((key) => disconnectRef.current(key))).current;
   const connections = useRef(new Map<string, TerminalConnectionState>()).current;
   const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
@@ -274,6 +275,13 @@ export function useTerminalSessions({
     state.client = clientForKey(key);
     if (key === activeKeyRef.current) setConnectionStatus('connecting');
     const generation = ++state.gen;
+    // A transport may invoke onOpen before openSocket returns, leaving
+    // state.sock unassigned inside the handler. Send on a microtask, by which
+    // point the assignment below has run.
+    const reportFocus = (focused: boolean) =>
+      queueMicrotask(() => {
+        if (state.gen === generation) state.sock?.send(JSON.stringify(focusFrame(focused)));
+      });
     try {
       state.sock = state.client.openSocket(
         '/api/ws',
@@ -291,8 +299,14 @@ export function useTerminalSessions({
             if (key === activeKeyRef.current) {
               setHasConnected(true);
               setConnectionStatus('connected');
-              state.sock?.send(JSON.stringify(focusFrame(appStateRef.current === 'active')));
-            } else state.sock?.send(JSON.stringify(focusFrame(false)));
+              // A fresh connection is focused unless the app is known to be
+              // backgrounded. AppState.currentState can be 'unknown' before the
+              // first transition, and treating that as unfocused would silence
+              // notifications for the session the user is looking at.
+              reportFocus(
+                appStateRef.current !== 'background' && appStateRef.current !== 'inactive',
+              );
+            } else reportFocus(false);
             state.lastSeen = Date.now();
             if (state.ping) clearInterval(state.ping);
             state.ping = setInterval(() => {
@@ -336,6 +350,9 @@ export function useTerminalSessions({
     }
   };
   disconnectRef.current = disconnect;
+  // Read at call time so the polling effect does not depend on a new closure
+  // every render (same pattern as disconnectRef above).
+  connectRef.current = connect;
   const updateHealth = (profile: HostProfile, result: PollResult) => {
     const current = healthRef.current.get(profile.id) ?? initialHostHealth();
     const next =
@@ -388,6 +405,10 @@ export function useTerminalSessions({
     onClearView();
     if (action === 'none') return;
     sendFocus(false);
+    // The user picked this session explicitly, so the host is adopted. Without
+    // this, the host's next poll would run the adoption branch and reconnect —
+    // disconnecting the socket that was just opened.
+    adoptedHostsRef.current.add(hostId);
     activeHostIdRef.current = hostId;
     activeIdRef.current = id;
     activeKeyRef.current = targetKey;
@@ -452,6 +473,13 @@ export function useTerminalSessions({
   const setWindowFocused = (focused: boolean) => {
     windowFocusedRef.current = focused;
   };
+  // A host's first connect waits for its session list. Opening a socket for a
+  // session id the server does not know *creates* it (app.ts startSession), so
+  // connecting to the default `term-1` before the list arrives spawns a stray
+  // terminal on every newly added host.
+  const adoptedHostsRef = useRef(new Set<string>());
+  // Hosts we opened a socket for purely to show a failed connection state.
+  const probedHostsRef = useRef(new Set<string>());
   const isWindowFocused = () => windowFocusedRef.current;
   const activeClient = clientForKey(activeKeyRef.current);
 
@@ -493,10 +521,42 @@ export function useTerminalSessions({
           ...rows,
         ]);
         if (profile.id === activeHostIdRef.current) notifyWaitingSessionsRef.current(rows);
+        if (profile.id === activeHostIdRef.current && !adoptedHostsRef.current.has(profile.id)) {
+          adoptedHostsRef.current.add(profile.id);
+          // Adopt the most recent live session rather than creating another one.
+          // Only a host with no sessions at all gets a fresh `term-1`.
+          const running = rows.filter((row) => row.status === 'running');
+          if (running.length && !running.some((row) => row.id === activeIdRef.current)) {
+            const newest = [...running].sort((a, b) =>
+              (b.last_output_at ?? '').localeCompare(a.last_output_at ?? ''),
+            )[0];
+            activeIdRef.current = newest.id;
+            activeKeyRef.current = sessionKey(profile.id, newest.id);
+            setActiveId(newest.id);
+            void AsyncStorage.setItem(activeSessionStorageKey(profile.id), newest.id);
+          }
+          if (readyRef.current) connectRef.current(activeKeyRef.current);
+        }
       },
       onHealth: (profile, result) => {
         updateHealthRef.current(profile, result);
-        if (result === 'success') void onReachableRef.current?.(profile);
+        if (result === 'success') {
+          void onReachableRef.current?.(profile);
+          return;
+        }
+        // The host answered with a failure, so there is no session list coming.
+        // Open the socket to surface the real connection state — but do NOT mark
+        // the host adopted: if it later recovers, its list must still be able to
+        // adopt an existing session instead of leaving us on the default id.
+        if (
+          profile.id === activeHostIdRef.current &&
+          !adoptedHostsRef.current.has(profile.id) &&
+          !probedHostsRef.current.has(profile.id) &&
+          readyRef.current
+        ) {
+          probedHostsRef.current.add(profile.id);
+          connectRef.current(activeKeyRef.current);
+        }
       },
     });
     void polling.start().catch(() => {});
@@ -505,7 +565,6 @@ export function useTerminalSessions({
   // biome-ignore lint/correctness/useExhaustiveDependencies: connect reads the current client ref at call time.
   useEffect(() => {
     if (!ready) return;
-    connect(activeKeyRef.current);
     return disconnectAll;
   }, [ready]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: resume callbacks read active transport state at event time.

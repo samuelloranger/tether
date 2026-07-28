@@ -314,10 +314,13 @@ export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {
     async (hostId: string, identity: { name: string; color: string }) => {
       const profile = profiles?.find((candidate) => candidate.id === hostId);
       if (!profile) return;
+      // One name per machine. Whatever is saved here becomes the profile name
+      // and the identity the server reports, so the page cannot show one name
+      // in its header and a different one in its Name field.
       await updateProfile(hostId, {
+        name: identity.name,
         identityName: identity.name,
         color: identity.color,
-        ...(profile.name === profile.host ? { name: identity.name } : {}),
       });
     },
     [profiles, updateProfile],
@@ -327,12 +330,17 @@ export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {
       try {
         const identity = await clientFor(profile).loadIdentity();
         if (profile.identityName === identity.name) return;
-        await updateIdentity(profile.id, identity);
+        // Record what the server calls itself (deep links match on it) without
+        // overwriting a name the user chose. Only an unnamed host adopts it.
+        await updateProfile(profile.id, {
+          identityName: identity.name,
+          ...(profile.name === profile.host ? { name: identity.name } : {}),
+        });
       } catch {
         // A dead or malformed host must not affect its neighbours' poll cycle.
       }
     },
-    [clientFor, updateIdentity],
+    [clientFor, updateProfile],
   );
 
   return {

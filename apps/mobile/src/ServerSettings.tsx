@@ -109,7 +109,13 @@ export function ServerSettings({
     void Promise.all([loadServerConfig(client), loadServerVersion(client)])
       .then(([nextConfig, nextVersion]) => {
         setConfig(nextConfig);
-        setDraft(createServerSettingsDraft(nextConfig));
+        // One name per machine: seed from the name shown everywhere else in the
+        // app, so the field cannot contradict the header. Saving pushes it to
+        // the server, which is what other clients read.
+        const named = host?.name
+          ? { ...nextConfig, identity: { ...nextConfig.identity, name: host.name } }
+          : nextConfig;
+        setDraft(createServerSettingsDraft(named));
         setVersion(nextVersion);
       })
       .catch((error) =>
@@ -119,7 +125,7 @@ export function ServerSettings({
         }),
       )
       .finally(() => setLoading(false));
-  }, [client, health, visible]);
+  }, [client, health, visible, host?.name]);
 
   const dirty = useMemo(
     () => !!config && !!draft && isServerSettingsDirty(config, draft),
@@ -358,6 +364,7 @@ export function ServerSettings({
             <Section title="Name & colour">
               <Field
                 label="Name"
+                hint="Shown on every client and used in notifications."
                 value={draft.identity.name}
                 editable={!readOnly}
                 error={validationErrors.identityName}
@@ -605,12 +612,14 @@ function Section({
 }
 function Field({
   label,
+  hint,
   secure,
   numeric,
   error,
   ...props
 }: {
   label: string;
+  hint?: string;
   value: string;
   editable?: boolean;
   secure?: boolean;
@@ -641,9 +650,13 @@ function Field({
           backgroundColor: theme.colors.input,
         }}
       />
-      {error && (
+      {error ? (
         <Text style={[typeScale.label, { color: theme.colors.danger, marginTop: 4 }]}>{error}</Text>
-      )}
+      ) : hint ? (
+        <Text style={[typeScale.caption, { color: theme.colors.textFaint, marginTop: 4 }]}>
+          {hint}
+        </Text>
+      ) : null}
     </View>
   );
 }
