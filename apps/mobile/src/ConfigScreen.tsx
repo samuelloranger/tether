@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -54,6 +55,7 @@ export function ConfigScreen({
   onReorderHosts,
   onServerSettings,
   healthByHost,
+  renderHostPage,
 }: {
   serverIp: string;
   setServerIp: (t: string) => void;
@@ -79,11 +81,16 @@ export function ConfigScreen({
   onReorderHosts?: (ids: string[]) => void;
   onServerSettings?: (hostId: string) => void;
   healthByHost?: Record<string, HostHealthStatus>;
+  renderHostPage?: (host: HostProfile, onBack: () => void) => React.ReactNode;
 }) {
   const { theme } = useAppTheme();
   const shared = createStyles(theme.colors);
   const styles = createConfigStyles(theme.colors);
-  const [hostsOpen, setHostsOpen] = useState(false);
+  // Settings opens on the Hosts list. The three-input connection form is for
+  // adding or repairing one host, not the front door — with hosts configured,
+  // landing there asked "which server?" when the answer was already stored.
+  const [hostsOpen, setHostsOpen] = useState(true);
+  const [openHostId, setOpenHostId] = useState<string | null>(null);
   if (storeError) {
     return (
       <View style={styles.configContainer}>
@@ -100,6 +107,9 @@ export function ConfigScreen({
       </View>
     );
   }
+  // One host, one page — rendered as a screen, not an overlay.
+  const openHost = openHostId ? hosts?.find((host) => host.id === openHostId) : null;
+  if (openHost && renderHostPage) return renderHostPage(openHost, () => setOpenHostId(null));
   if (hostsOpen && hosts && onAddHost && onReorderHosts) {
     return (
       <HostsScreen
@@ -112,10 +122,7 @@ export function ConfigScreen({
         }}
         // One destination per host. The drawer gear lands here too, so the
         // ambiguity that left this screen unreachable cannot come back.
-        onOpen={(id) => {
-          setHostsOpen(false);
-          onServerSettings?.(id);
-        }}
+        onOpen={(id) => setOpenHostId(id)}
         onReorder={onReorderHosts}
       />
     );

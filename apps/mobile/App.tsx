@@ -35,6 +35,34 @@ function AppInner({ onReady }: { onReady: () => void }) {
     if (launchReady) onReady();
   }, [launchReady, onReady]);
   if (!app.fontsLoaded) return null;
+  // Rendered once, above both branches. Mounted inside a branch it unmounted
+  // mid-flight when the app flipped config <-> terminal, and react-native-web
+  // left the open Modal's backdrop behind — a permanent dim over a dead app.
+  const serverSettings = (
+    <ServerSettings
+      visible={app.serverSettingsOpen}
+      host={app.serverSettingsHost}
+      client={app.serverSettingsClient}
+      health={
+        app.serverSettingsHost
+          ? (app.healthByHost[app.serverSettingsHost.id] ?? 'unknown')
+          : 'unknown'
+      }
+      onClose={app.closeServerSettings}
+      onRetry={() => app.serverSettingsHost && app.refreshHost(app.serverSettingsHost.id)}
+      onUnauthorized={() => {
+        const host = app.serverSettingsHost;
+        app.closeServerSettings();
+        if (host) void app.openEditHost(host.id);
+      }}
+      onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
+      onPasswordChanged={(password) =>
+        app.serverSettingsHost
+          ? app.replaceStoredPassword(app.serverSettingsHost.id, password)
+          : Promise.resolve()
+      }
+    />
+  );
   if (app.isConfiguring) {
     return (
       <SafeAreaView style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
@@ -62,30 +90,26 @@ function AppInner({ onReady }: { onReady: () => void }) {
           onUpdateHost={(hostId, changes) => void app.updateProfile(hostId, changes)}
           onReorderHosts={(ids) => void app.reorderHosts(ids)}
           onServerSettings={app.openServerSettings}
+          healthByHost={app.healthByHost}
+          renderHostPage={(host, onBack) => (
+            <ServerSettings
+              inline
+              visible
+              host={host}
+              client={app.clientFor(host)}
+              health={app.healthByHost[host.id] ?? 'unknown'}
+              onClose={onBack}
+              onRetry={() => app.refreshHost(host.id)}
+              onUnauthorized={() => {
+                onBack();
+                void app.openEditHost(host.id);
+              }}
+              onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
+              onPasswordChanged={(password) => app.replaceStoredPassword(host.id, password)}
+            />
+          )}
         />
-        <ServerSettings
-          visible={app.serverSettingsOpen}
-          host={app.serverSettingsHost}
-          client={app.serverSettingsClient}
-          health={
-            app.serverSettingsHost
-              ? (app.healthByHost[app.serverSettingsHost.id] ?? 'unknown')
-              : 'unknown'
-          }
-          onClose={app.closeServerSettings}
-          onRetry={() => app.serverSettingsHost && app.refreshHost(app.serverSettingsHost.id)}
-          onUnauthorized={() => {
-            const host = app.serverSettingsHost;
-            app.closeServerSettings();
-            if (host) void app.openEditHost(host.id);
-          }}
-          onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
-          onPasswordChanged={(password) =>
-            app.serverSettingsHost
-              ? app.replaceStoredPassword(app.serverSettingsHost.id, password)
-              : Promise.resolve()
-          }
-        />
+        {serverSettings}
       </SafeAreaView>
     );
   }
@@ -95,29 +119,7 @@ function AppInner({ onReady }: { onReady: () => void }) {
       style={[styles.appContainer, { backgroundColor: theme.colors.background }]}
     >
       <TerminalScreen app={app} />
-      <ServerSettings
-        visible={app.serverSettingsOpen}
-        host={app.serverSettingsHost}
-        client={app.serverSettingsClient}
-        health={
-          app.serverSettingsHost
-            ? (app.healthByHost[app.serverSettingsHost.id] ?? 'unknown')
-            : 'unknown'
-        }
-        onClose={app.closeServerSettings}
-        onRetry={() => app.serverSettingsHost && app.refreshHost(app.serverSettingsHost.id)}
-        onUnauthorized={() => {
-          const host = app.serverSettingsHost;
-          app.closeServerSettings();
-          if (host) void app.openEditHost(host.id);
-        }}
-        onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
-        onPasswordChanged={(password) =>
-          app.serverSettingsHost
-            ? app.replaceStoredPassword(app.serverSettingsHost.id, password)
-            : Promise.resolve()
-        }
-      />
+      {serverSettings}
     </SafeAreaView>
   );
 }

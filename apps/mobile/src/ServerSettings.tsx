@@ -42,6 +42,7 @@ type Message = { kind: 'success' | 'error'; text: string };
 
 export function ServerSettings({
   visible,
+  inline = false,
   host,
   client,
   health,
@@ -52,6 +53,9 @@ export function ServerSettings({
   onPasswordChanged,
 }: {
   visible: boolean;
+  // Rendered as a plain screen (Hosts -> host page) rather than an overlay.
+  // The Modal path stays for callers that still present it over the terminal.
+  inline?: boolean;
   host: HostProfile | null;
   client: HostClient | null;
   health: HostHealthStatus;
@@ -208,6 +212,257 @@ export function ServerSettings({
     }
   };
 
+  if (inline && !visible) return null;
+
+  const body = (
+    <View style={[styles.backdrop, (inline || !isDesktop) && styles.mobileBackdrop]}>
+      <View style={[styles.panel, inline && styles.inlinePanel]}>
+        <View style={[styles.header, { borderLeftColor: host?.color ?? theme.colors.accent }]}>
+          <View>
+            <Text style={styles.title}>Server settings</Text>
+            <Text style={styles.subTitle}>
+              {host?.name ?? 'Server'}
+              {version ? ` · ${version}` : ''}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => void close()}
+            accessibilityRole="button"
+            accessibilityLabel="Close server settings"
+          >
+            <Text style={styles.action}>Close</Text>
+          </TouchableOpacity>
+        </View>
+        {health === 'unauthorized' ? (
+          <View style={styles.state}>
+            <Text style={styles.error}>This host needs its password again.</Text>
+            <Button label="Enter password" onPress={onUnauthorized} />
+          </View>
+        ) : health === 'unreachable' ? (
+          <View style={styles.state}>
+            <Text style={styles.error}>Host unreachable. Last-known settings are read-only.</Text>
+            <Button label="Retry" onPress={onRetry} />
+          </View>
+        ) : loading && !draft ? (
+          <View style={styles.state}>
+            <ActivityIndicator color={theme.colors.accent} />
+          </View>
+        ) : draft ? (
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            <Section title="This server">
+              <Field
+                label="Name"
+                value={draft.identity.name}
+                editable={!readOnly}
+                error={validationErrors.identityName}
+                onChangeText={(name) => set('identity', { ...draft.identity, name })}
+              />
+              <Field
+                label="Color"
+                value={draft.identity.color}
+                editable={!readOnly}
+                error={validationErrors.identityColor}
+                onChangeText={(color) => set('identity', { ...draft.identity, color })}
+              />
+            </Section>
+            <Section title="Notifications">
+              <Toggle
+                label="Enabled"
+                value={draft.notify.enabled}
+                disabled={readOnly}
+                onValueChange={(enabled) => set('notify', { ...draft.notify, enabled })}
+              />
+              <Field
+                label="ntfy URL"
+                value={draft.notify.url}
+                editable={!readOnly}
+                error={validationErrors.notifyUrl}
+                onChangeText={(url) => set('notify', { ...draft.notify, url })}
+              />
+              <Field
+                label="Topic"
+                value={draft.notify.topic}
+                editable={!readOnly}
+                error={validationErrors.notifyTopic}
+                onChangeText={(topic) => set('notify', { ...draft.notify, topic })}
+              />
+              {draft.notify.token === undefined ? (
+                <Button
+                  label={draft.notify.hasToken ? 'Token set · Replace' : 'Set token'}
+                  onPress={() => set('notify', { ...draft.notify, token: '' })}
+                  disabled={readOnly}
+                />
+              ) : (
+                <Field
+                  label="New token"
+                  value={draft.notify.token}
+                  secure
+                  editable={!readOnly}
+                  error={validationErrors.notifyToken}
+                  onChangeText={(token) => set('notify', { ...draft.notify, token })}
+                />
+              )}
+              <Toggle
+                label="Agent needs input"
+                value={draft.triggers.waiting}
+                disabled={readOnly}
+                onValueChange={(waiting) => set('triggers', { ...draft.triggers, waiting })}
+              />
+              <Toggle
+                label="Alerts from programs"
+                value={draft.triggers.oscNotify}
+                disabled={readOnly}
+                onValueChange={(oscNotify) => set('triggers', { ...draft.triggers, oscNotify })}
+              />
+              <Toggle
+                label="Session ends"
+                value={draft.triggers.exit}
+                disabled={readOnly}
+                onValueChange={(exit) => set('triggers', { ...draft.triggers, exit })}
+              />
+              <Toggle
+                label="Long command finishes"
+                value={draft.triggers.longJob}
+                disabled={readOnly}
+                onValueChange={(longJob) => set('triggers', { ...draft.triggers, longJob })}
+              />
+              <Field
+                label="Count a command as long after"
+                value={draft.longJobSeconds}
+                editable={!readOnly}
+                numeric
+                error={validationErrors.longJobSeconds}
+                onChangeText={(longJobSeconds) => set('longJobSeconds', longJobSeconds)}
+              />
+              <Button
+                label="Send test notification"
+                onPress={() => void sendTest()}
+                disabled={readOnly}
+              />
+            </Section>
+            <Section title="Session defaults">
+              <Text style={styles.hint}>Changes apply to newly started sessions.</Text>
+              <Field
+                label="Default shell"
+                value={draft.session.defaultShell}
+                editable={!readOnly}
+                onChangeText={(defaultShell) => set('session', { ...draft.session, defaultShell })}
+              />
+              <Field
+                label="Default directory"
+                value={draft.session.defaultCwd}
+                editable={!readOnly}
+                onChangeText={(defaultCwd) => set('session', { ...draft.session, defaultCwd })}
+              />
+              <Field
+                label="Scrollback rows"
+                value={draft.session.scrollbackRows}
+                editable={!readOnly}
+                numeric
+                error={validationErrors.scrollbackRows}
+                onChangeText={(value) =>
+                  set('session', { ...draft.session, scrollbackRows: value })
+                }
+              />
+              <Field
+                label="Mark a session idle after"
+                value={draft.session.silenceMs}
+                editable={!readOnly}
+                numeric
+                error={validationErrors.silenceMs}
+                onChangeText={(value) => set('session', { ...draft.session, silenceMs: value })}
+              />
+            </Section>
+            <View style={styles.maintenance}>
+              <View style={styles.divider} />
+              <Section title="Maintenance" subdued>
+                <Text style={styles.hint}>
+                  Restart and update keep holder-backed sessions alive; they reconnect after the
+                  daemon returns.
+                </Text>
+                <Button
+                  label="Change password"
+                  onPress={() => setAdmin('password')}
+                  tone="danger"
+                />
+                <Button label="Check for update" onPress={() => setAdmin('update')} tone="danger" />
+                <Button label="Restart server" onPress={() => setAdmin('restart')} tone="danger" />
+              </Section>
+            </View>
+            {message && (
+              <Text
+                testID={`server-settings-message-${message.kind}`}
+                style={message.kind === 'error' ? styles.error : styles.message}
+              >
+                {message.text}
+              </Text>
+            )}
+            <Button
+              label={saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
+              onPress={() => void save()}
+              disabled={readOnly || saving || !dirty || hasValidationErrors}
+            />
+          </ScrollView>
+        ) : (
+          <View style={styles.state}>
+            <Text style={styles.error}>{message?.text ?? 'Settings are unavailable.'}</Text>
+            <Button label="Retry" onPress={onRetry} />
+          </View>
+        )}
+        <Modal
+          visible={admin !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setAdmin(null)}
+        >
+          <View style={styles.backdrop}>
+            <View style={styles.dialog}>
+              <Text style={styles.title}>
+                {admin === 'password'
+                  ? 'Change password'
+                  : admin === 'update'
+                    ? 'Update server'
+                    : 'Restart server'}
+              </Text>
+              <Field
+                label="Current password"
+                value={currentPassword}
+                secure
+                onChangeText={setCurrentPassword}
+              />
+              {admin === 'password' && (
+                <>
+                  <Field
+                    label="New password"
+                    value={nextPassword}
+                    secure
+                    onChangeText={setNextPassword}
+                  />
+                  <Field
+                    label="Confirm new password"
+                    value={confirmPassword}
+                    secure
+                    onChangeText={setConfirmPassword}
+                  />
+                </>
+              )}
+              <View style={styles.row}>
+                <Button label="Cancel" onPress={() => setAdmin(null)} />
+                <Button
+                  label={adminBusy ? 'Working…' : 'Confirm'}
+                  onPress={() => void runAdmin()}
+                  disabled={adminBusy}
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    </View>
+  );
+
+  if (inline) return body;
   return (
     <Modal
       visible={visible}
@@ -215,261 +470,7 @@ export function ServerSettings({
       transparent={isDesktop}
       onRequestClose={() => void close()}
     >
-      <View style={[styles.backdrop, !isDesktop && styles.mobileBackdrop]}>
-        <View style={styles.panel}>
-          <View style={[styles.header, { borderLeftColor: host?.color ?? theme.colors.accent }]}>
-            <View>
-              <Text style={styles.title}>Server settings</Text>
-              <Text style={styles.subTitle}>
-                {host?.name ?? 'Server'}
-                {version ? ` · ${version}` : ''}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => void close()}
-              accessibilityRole="button"
-              accessibilityLabel="Close server settings"
-            >
-              <Text style={styles.action}>Close</Text>
-            </TouchableOpacity>
-          </View>
-          {health === 'unauthorized' ? (
-            <View style={styles.state}>
-              <Text style={styles.error}>This host needs its password again.</Text>
-              <Button label="Enter password" onPress={onUnauthorized} />
-            </View>
-          ) : health === 'unreachable' ? (
-            <View style={styles.state}>
-              <Text style={styles.error}>Host unreachable. Last-known settings are read-only.</Text>
-              <Button label="Retry" onPress={onRetry} />
-            </View>
-          ) : loading && !draft ? (
-            <View style={styles.state}>
-              <ActivityIndicator color={theme.colors.accent} />
-            </View>
-          ) : draft ? (
-            <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-              <Section title="This server">
-                <Field
-                  label="Name"
-                  value={draft.identity.name}
-                  editable={!readOnly}
-                  error={validationErrors.identityName}
-                  onChangeText={(name) => set('identity', { ...draft.identity, name })}
-                />
-                <Field
-                  label="Color"
-                  value={draft.identity.color}
-                  editable={!readOnly}
-                  error={validationErrors.identityColor}
-                  onChangeText={(color) => set('identity', { ...draft.identity, color })}
-                />
-              </Section>
-              <Section title="Notifications">
-                <Toggle
-                  label="Enabled"
-                  value={draft.notify.enabled}
-                  disabled={readOnly}
-                  onValueChange={(enabled) => set('notify', { ...draft.notify, enabled })}
-                />
-                <Field
-                  label="ntfy URL"
-                  value={draft.notify.url}
-                  editable={!readOnly}
-                  error={validationErrors.notifyUrl}
-                  onChangeText={(url) => set('notify', { ...draft.notify, url })}
-                />
-                <Field
-                  label="Topic"
-                  value={draft.notify.topic}
-                  editable={!readOnly}
-                  error={validationErrors.notifyTopic}
-                  onChangeText={(topic) => set('notify', { ...draft.notify, topic })}
-                />
-                {draft.notify.token === undefined ? (
-                  <Button
-                    label={draft.notify.hasToken ? 'Token set · Replace' : 'Set token'}
-                    onPress={() => set('notify', { ...draft.notify, token: '' })}
-                    disabled={readOnly}
-                  />
-                ) : (
-                  <Field
-                    label="New token"
-                    value={draft.notify.token}
-                    secure
-                    editable={!readOnly}
-                    error={validationErrors.notifyToken}
-                    onChangeText={(token) => set('notify', { ...draft.notify, token })}
-                  />
-                )}
-                <Toggle
-                  label="Agent needs input"
-                  value={draft.triggers.waiting}
-                  disabled={readOnly}
-                  onValueChange={(waiting) => set('triggers', { ...draft.triggers, waiting })}
-                />
-                <Toggle
-                  label="Alerts from programs"
-                  value={draft.triggers.oscNotify}
-                  disabled={readOnly}
-                  onValueChange={(oscNotify) => set('triggers', { ...draft.triggers, oscNotify })}
-                />
-                <Toggle
-                  label="Session ends"
-                  value={draft.triggers.exit}
-                  disabled={readOnly}
-                  onValueChange={(exit) => set('triggers', { ...draft.triggers, exit })}
-                />
-                <Toggle
-                  label="Long command finishes"
-                  value={draft.triggers.longJob}
-                  disabled={readOnly}
-                  onValueChange={(longJob) => set('triggers', { ...draft.triggers, longJob })}
-                />
-                <Field
-                  label="Count a command as long after"
-                  value={draft.longJobSeconds}
-                  editable={!readOnly}
-                  numeric
-                  error={validationErrors.longJobSeconds}
-                  onChangeText={(longJobSeconds) => set('longJobSeconds', longJobSeconds)}
-                />
-                <Button
-                  label="Send test notification"
-                  onPress={() => void sendTest()}
-                  disabled={readOnly}
-                />
-              </Section>
-              <Section title="Session defaults">
-                <Text style={styles.hint}>Changes apply to newly started sessions.</Text>
-                <Field
-                  label="Default shell"
-                  value={draft.session.defaultShell}
-                  editable={!readOnly}
-                  onChangeText={(defaultShell) =>
-                    set('session', { ...draft.session, defaultShell })
-                  }
-                />
-                <Field
-                  label="Default directory"
-                  value={draft.session.defaultCwd}
-                  editable={!readOnly}
-                  onChangeText={(defaultCwd) => set('session', { ...draft.session, defaultCwd })}
-                />
-                <Field
-                  label="Scrollback rows"
-                  value={draft.session.scrollbackRows}
-                  editable={!readOnly}
-                  numeric
-                  error={validationErrors.scrollbackRows}
-                  onChangeText={(value) =>
-                    set('session', { ...draft.session, scrollbackRows: value })
-                  }
-                />
-                <Field
-                  label="Mark a session idle after"
-                  value={draft.session.silenceMs}
-                  editable={!readOnly}
-                  numeric
-                  error={validationErrors.silenceMs}
-                  onChangeText={(value) => set('session', { ...draft.session, silenceMs: value })}
-                />
-              </Section>
-              <View style={styles.maintenance}>
-                <View style={styles.divider} />
-                <Section title="Maintenance" subdued>
-                  <Text style={styles.hint}>
-                    Restart and update keep holder-backed sessions alive; they reconnect after the
-                    daemon returns.
-                  </Text>
-                  <Button
-                    label="Change password"
-                    onPress={() => setAdmin('password')}
-                    tone="danger"
-                  />
-                  <Button
-                    label="Check for update"
-                    onPress={() => setAdmin('update')}
-                    tone="danger"
-                  />
-                  <Button
-                    label="Restart server"
-                    onPress={() => setAdmin('restart')}
-                    tone="danger"
-                  />
-                </Section>
-              </View>
-              {message && (
-                <Text
-                  testID={`server-settings-message-${message.kind}`}
-                  style={message.kind === 'error' ? styles.error : styles.message}
-                >
-                  {message.text}
-                </Text>
-              )}
-              <Button
-                label={saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
-                onPress={() => void save()}
-                disabled={readOnly || saving || !dirty || hasValidationErrors}
-              />
-            </ScrollView>
-          ) : (
-            <View style={styles.state}>
-              <Text style={styles.error}>{message?.text ?? 'Settings are unavailable.'}</Text>
-              <Button label="Retry" onPress={onRetry} />
-            </View>
-          )}
-          <Modal
-            visible={admin !== null}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setAdmin(null)}
-          >
-            <View style={styles.backdrop}>
-              <View style={styles.dialog}>
-                <Text style={styles.title}>
-                  {admin === 'password'
-                    ? 'Change password'
-                    : admin === 'update'
-                      ? 'Update server'
-                      : 'Restart server'}
-                </Text>
-                <Field
-                  label="Current password"
-                  value={currentPassword}
-                  secure
-                  onChangeText={setCurrentPassword}
-                />
-                {admin === 'password' && (
-                  <>
-                    <Field
-                      label="New password"
-                      value={nextPassword}
-                      secure
-                      onChangeText={setNextPassword}
-                    />
-                    <Field
-                      label="Confirm new password"
-                      value={confirmPassword}
-                      secure
-                      onChangeText={setConfirmPassword}
-                    />
-                  </>
-                )}
-                <View style={styles.row}>
-                  <Button label="Cancel" onPress={() => setAdmin(null)} />
-                  <Button
-                    label={adminBusy ? 'Working…' : 'Confirm'}
-                    onPress={() => void runAdmin()}
-                    disabled={adminBusy}
-                  />
-                </View>
-              </View>
-            </View>
-          </Modal>
-        </View>
-      </View>
+      {body}
     </Modal>
   );
 }
@@ -619,6 +620,9 @@ function createStyles(c: AppColors) {
       alignItems: 'center',
     },
     mobileBackdrop: { backgroundColor: c.background },
+    // As a screen the panel owns the viewport, so it needs a real height for
+    // the scrolling body to size against.
+    inlinePanel: { width: '100%', flex: 1, maxHeight: '100%', borderRadius: 0 },
     panel: {
       width: isDesktop ? 580 : '100%',
       maxHeight: '100%',

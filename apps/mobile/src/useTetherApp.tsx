@@ -943,6 +943,7 @@ export function useTetherApp() {
     removeHost,
     updateProfile,
     reorderHosts,
+    clientFor,
     serverSettingsHost,
     serverSettingsClient,
     serverSettingsOpen: serverSettingsHostId !== null,
