@@ -13,10 +13,11 @@ Clients are a single Expo React Native codebase: iOS/Android app, plus a Tauri d
 - `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary.
   - Entry/lifecycle: `main.ts` (argv dispatch + control CLI + `holder` subcommand), `serve.ts` (`serve()` — reattach holders + `Bun.serve`), `index.ts` (dev entry), `app.ts` (Hono routes + WS gateway), `paths.ts` / `runtime.ts`, `update.ts` (self-update).
   - PTY: `pty.ts` (session registry, holder spawn/reattach, subscribe/write/resize/kill), `holder.ts` (the detached one-PTY-per-process owner), `procCwd.ts` / `procIdentity.ts` / `liveCwd.ts` (cwd + process tracking), `sessionActivity.ts` (`working`/`waiting`/`idle` inference from output), `sessionTitle.ts` (OSC title + auto-title).
-  - Data/auth: `db.ts` (bun:sqlite + versioned migrations), `auth.ts` (argon2 password + tokens).
-  - Features: `gitDiff.ts` / `gitOps.ts` / `gitRoot.ts` / `gitWatch.ts`, `workspaceFile.ts`, `upload.ts`, `presentations.ts` / `presentCli.ts`.
+  - Data/auth: `db.ts` (bun:sqlite + versioned migrations), `auth.ts` (argon2 password + tokens), `config.ts` (zod-typed settings over the `settings` table, client-editable).
+  - Features: `gitDiff.ts` / `gitOps.ts` / `gitRoot.ts` / `gitWatch.ts`, `workspaceFile.ts`, `upload.ts`, `presentations.ts` / `presentCli.ts`, `notifier.ts` (ntfy push), `admin.ts` (password/update/restart/test-notification).
 - `apps/mobile/` — Expo RN client (`tether-mobile`), also the desktop app.
-  - `App.tsx` + `src/useTetherApp.tsx` (app state/session orchestration), `src/TerminalScreen.tsx`, `src/SessionDrawer.tsx`, `src/UtilityBar.tsx`, `src/Dpad.tsx`, `src/ConfigScreen.tsx`.
+  - `App.tsx` + `src/useTetherApp.tsx` (composition facade), `src/TerminalScreen.tsx`, `src/SessionDrawer.tsx`, `src/UtilityBar.tsx`, `src/Dpad.tsx`, `src/ConfigScreen.tsx`, `src/ServerSettings.tsx`.
+  - `src/tether/` — the hook layer behind the facade: `useConnectionConfig`, `useTerminalSessions` (+ `terminalSessionLogic.ts`, pure), `useTerminalInput`, `usePresentations`, `useTerminalViewport`, `useTerminalUiState`, `useAppPreferences`, `useDesktopEffects`, `useDesktopUpdater`. Multi-host lives here too: `hostStore` (profiles + migration), `hostClient` (per-host URLs/auth/WS), `hostHealth` (reachability state machine), `hostPolling`.
   - Terminal: `src/terminalEngine.ts` (`@xterm/headless` engine), `src/TerminalView*.tsx` + `src/terminalRendererHtml.ts` + `src/terminalRenderer.generated.ts` (xterm.js inside a WebView), `src/terminalRendererProtocol.ts` (RN ↔ WebView messages), `src/ptyInput.ts` / `src/input.ts` / `src/mouseInput.ts`.
   - Features: `src/DiffView.tsx` + `src/diffModel.ts`, `src/FileTree.tsx` / `src/FileViewer.tsx`, `src/PresentationView*.tsx`, `src/CodeHighlight.tsx`, `src/sessionCache.ts` (LRU tab cache).
   - Desktop-only: `src/desktop*.ts`, `src/TitleBar.tsx`, `src/windowControls.ts`, `src-tauri/` (Rust shell, updater, notifications).
@@ -52,17 +53,21 @@ The PTY relies on `Bun.spawn(..., { terminal: {...} })` and `proc.terminal`, whi
 2. `startSession` (`pty.ts`) spawns a detached **holder** process (`tether holder <sock> <cols> <rows> <cwd> <cmd>`) that owns the PTY; the server talks to it over a unix socket in `~/.tether/holders/<id>.sock` with newline-delimited JSON frames (`i`/`r`/`k` down, `o`/`x`/`c` up, base64 payloads).
 3. Every output chunk → `addTerminalLog` (SQLite) → broadcast to subscribers, and feeds `sessionActivity`, `sessionTitle`, `liveCwd`.
 4. On WS open the server replays `getLogs(sessionId, sinceId)`, then streams live. Clients persist `sinceId` so a reconnect only replays what it missed.
-5. Client → server: `{type:'input'|'resize'}`. Server → client: `output | exit | title | activity | diff | reset | ping`.
+5. Client → server: `{type:'input'|'resize'|'focus'}`. Server → client: `output | exit | title | activity | diff | reset | ping`.
+
+**Push notifications:** the server sends to ntfy (configurable per host) when a session flips to `waiting`, emits an OSC 9/777 notify, exits, or finishes a long job. A session is suppressed only while an attached subscriber reports `focused: true` — a backgrounded phone keeps its socket, so it still gets pushed. Notification delivery is advisory and never blocks the PTY path.
 
 Because the holder is a separate detached process, **the shell survives both client disconnects and server restarts** — `reattachHolders()` re-adopts live sockets on boot. Killing is explicit (`POST /api/sessions/kill`).
 
-**Mobile multi-terminal model:** sessions are drawer tabs; `GET /api/sessions` is the source of truth. Only the active terminal holds a live WebSocket and emulator; switching detaches background sessions (PTY keeps running) and uses an LRU cache (cap 3) for instant reattach. `terminal_logs` is capped per session (~2000 rows, pruned every 200 inserts).
+**Multi-host:** the client holds N host profiles (`hostStore`, AsyncStorage; passwords in SecureStore keyed `tether_password_<hostId>`, desktop keyring keyed the same way). The drawer groups sessions by host. Cache and connection keys are `"<hostId>:<sessionId>"` — session ids are only unique per host. Every host is independently failable: `hostHealth` backs off 2s→30s on an unreachable host and stops polling entirely on 401. `tether://session/<id>?host=<identityName>` deep links resolve an ntfy tap to the right host.
+
+**Mobile multi-terminal model:** sessions are drawer tabs; `GET /api/sessions` is the source of truth. An LRU cache (`sessionCache.ts`, cap 3) holds one emulator per resident session, and **every resident session keeps its own live WebSocket and streams in the background** — only input and clipboard are gated to the active tab. Evicted sessions drop their socket; the PTY keeps running, and reattaching replays from `sinceId`. `terminal_logs` is capped per session (~2000 rows, pruned every 200 inserts).
 
 **Two emulators:** `terminalEngine.ts` (`@xterm/headless`, RN side — owns state, scrollback, selection, links) and xterm.js inside the WebView (rendering + keyboard). Keep them in sync; the WebView owns keyboard focus.
 
 ## HTTP API surface (`app.ts`)
 
-`/api/status` + `/api/setup` (TOFU pairing) · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/preview/:token/*` for serving them).
+`/api/status` + `/api/setup` (TOFU pairing) · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the notify token is redacted to `hasToken`) · `/api/admin/{password,update,restart,test-notification}` (the first three require the current password in the body, on top of the token).
 
 ## Conventions & gotchas
 
