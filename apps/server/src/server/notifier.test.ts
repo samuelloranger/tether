@@ -56,3 +56,18 @@ test('retries delivery once after a one-second delay and still lets send swallow
   expect(attempts).toHaveLength(2);
   expect(attempts[1] - attempts[0]).toBeGreaterThanOrEqual(900);
 });
+
+test('disables automatic redirects during notification delivery', async () => {
+  const requests: Array<RequestInit | undefined> = [];
+  await send(
+    { topic: 'tether-test', title: 'Test', message: 'Test', tags: [], click: 'tether://' },
+    cfg,
+    async (_url, init) => {
+      requests.push(init);
+      return new Response(null, { status: 200 });
+    },
+  );
+
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.redirect).toBe('error');
+});

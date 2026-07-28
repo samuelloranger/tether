@@ -43,10 +43,14 @@ function entry(): SessionEntry & { writes: string[]; resets: number } {
   return result as unknown as SessionEntry & { writes: string[]; resets: number };
 }
 
-function dispatch(entryForMessage = entry(), activeId = 'term-1') {
-  let rows: DrawerSession[] = [
+function dispatch(
+  entryForMessage = entry(),
+  activeId = 'term-1',
+  initialRows: DrawerSession[] = [
     { hostId: 'host-1', id: 'term-1', status: 'running', last_output_at: null },
-  ];
+  ],
+) {
+  let rows = initialRows;
   const effects = {
     git: 0,
     metadata: 0,
@@ -213,6 +217,42 @@ describe('applyWsMessage', () => {
           activity: 'waiting',
         },
       ],
+    ]);
+  });
+
+  test('scopes title and activity updates to the originating host', () => {
+    const harness = dispatch(entry(), 'term-1', [
+      { hostId: 'host-1', id: 'term-1', status: 'running', last_output_at: null },
+      {
+        hostId: 'host-2',
+        id: 'term-1',
+        status: 'running',
+        last_output_at: null,
+        auto_title: 'other',
+        activity: 'idle',
+      },
+    ]);
+
+    harness.apply({ type: 'title', title: 'build' });
+    harness.apply({ type: 'activity', activity: 'waiting' });
+
+    expect(harness.rows()).toEqual([
+      {
+        hostId: 'host-1',
+        id: 'term-1',
+        status: 'running',
+        last_output_at: null,
+        auto_title: 'build',
+        activity: 'waiting',
+      },
+      {
+        hostId: 'host-2',
+        id: 'term-1',
+        status: 'running',
+        last_output_at: null,
+        auto_title: 'other',
+        activity: 'idle',
+      },
     ]);
   });
 

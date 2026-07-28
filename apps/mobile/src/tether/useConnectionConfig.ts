@@ -126,25 +126,29 @@ export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {
     passwordRef.current = password;
   }, [password]);
 
+  const activateProfile = useCallback(async (profile: HostProfile) => {
+    const hostPassword =
+      passwordsRef.current.get(profile.id) ?? (await getPassword(profile.id)) ?? '';
+    passwordsRef.current.set(profile.id, hostPassword);
+    setActiveHostId(profile.id);
+    setEditingHostId(profile.id);
+    setServerIp(profile.host);
+    setPort(profile.port);
+    setPassword(hostPassword);
+    passwordRef.current = hostPassword;
+    lastConnectedRef.current = { ip: profile.host, port: profile.port };
+    await AsyncStorage.setItem(KEY_ACTIVE_HOST, profile.id).catch(() => {});
+    readyRef.current = true;
+    setReady(true);
+    setIsConfiguring(false);
+  }, []);
   const activateHost = useCallback(
     async (hostId: string) => {
       const profile = profiles?.find((candidate) => candidate.id === hostId);
       if (!profile) return;
-      const hostPassword = passwordsRef.current.get(hostId) ?? (await getPassword(hostId)) ?? '';
-      passwordsRef.current.set(hostId, hostPassword);
-      setActiveHostId(hostId);
-      setEditingHostId(hostId);
-      setServerIp(profile.host);
-      setPort(profile.port);
-      setPassword(hostPassword);
-      passwordRef.current = hostPassword;
-      lastConnectedRef.current = { ip: profile.host, port: profile.port };
-      await AsyncStorage.setItem(KEY_ACTIVE_HOST, hostId).catch(() => {});
-      readyRef.current = true;
-      setReady(true);
-      setIsConfiguring(false);
+      await activateProfile(profile);
     },
-    [profiles],
+    [activateProfile, profiles],
   );
 
   const openAddHost = useCallback(() => {
@@ -247,7 +251,7 @@ export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {
       const addressChanged =
         hostId === activeHostId &&
         (serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port);
-      await activateHost(hostId);
+      await activateProfile(next);
       return { addressChanged, wasReady };
     } catch {
       void notify('Error', 'Failed to save host configuration', 'error');
@@ -265,14 +269,14 @@ export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {
           .map((profile, order) => ({ ...profile, order }));
         setProfiles(next);
         if (hostId === activeHostId) {
-          if (next[0]) await activateHost(next[0].id);
+          if (next[0]) await activateProfile(next[0]);
           else openAddHost();
         }
       } catch {
         setStoreError('Host changes could not be saved. Retry from Hosts.');
       }
     },
-    [activeHostId, activateHost, openAddHost, profiles],
+    [activeHostId, activateProfile, openAddHost, profiles],
   );
 
   const updateProfile = useCallback(

@@ -169,14 +169,20 @@ export function applyWsMessage({
   if (payload.type === 'title' && typeof payload.title === 'string') {
     const title = payload.title;
     onDrawerSessions((rows) =>
-      rows.map((row) => (row.id === drawerSessionId ? { ...row, auto_title: title } : row)),
+      rows.map((row) =>
+        row.id === drawerSessionId && row.hostId === drawerHostId
+          ? { ...row, auto_title: title }
+          : row,
+      ),
     );
     return;
   }
   if (payload.type === 'activity') {
     const activity = payload.activity as SessionActivity;
     onDrawerSessions((rows) =>
-      rows.map((row) => (row.id === drawerSessionId ? { ...row, activity } : row)),
+      rows.map((row) =>
+        row.id === drawerSessionId && row.hostId === drawerHostId ? { ...row, activity } : row,
+      ),
     );
     onWaitingSessions([
       {

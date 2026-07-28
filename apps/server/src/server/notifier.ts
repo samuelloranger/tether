@@ -62,6 +62,7 @@ async function deliver(payload: NtfyPayload, cfg: Config, fetcher: Fetch = fetch
   const post = () =>
     fetcher(url, {
       method: 'POST',
+      redirect: 'error',
       signal: AbortSignal.timeout(3000),
       headers: {
         'Content-Type': 'application/json',
