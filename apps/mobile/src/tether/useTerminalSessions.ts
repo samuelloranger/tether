@@ -101,6 +101,10 @@ export function useTerminalSessions({
   const cache = useRef(createSessionCache((key) => disconnectRef.current(key))).current;
   const connections = useRef(new Map<string, TerminalConnectionState>()).current;
   const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
+  const notifyWaitingSessionsRef = useRef<(rows: DrawerSession[]) => void>(() => {});
+  const updateHealthRef = useRef<(profile: HostProfile, result: PollResult) => void>(() => {});
+  const onReachableRef = useRef(onReachable);
+  onReachableRef.current = onReachable;
   const outputBatcherRef = useRef<OutputBatcher | null>(null);
   if (!outputBatcherRef.current) {
     outputBatcherRef.current = new OutputBatcher(
@@ -162,6 +166,7 @@ export function useTerminalSessions({
     for (const row of alerts)
       void sendNativeNotification(sessionLabel(row), 'Session is waiting for your input');
   };
+  notifyWaitingSessionsRef.current = notifyWaitingSessions;
   const sendFocus = (focused: boolean) => {
     const state = connections.get(activeKeyRef.current);
     if (state?.open && state.sock) state.sock.send(JSON.stringify(focusFrame(focused)));
@@ -342,6 +347,7 @@ export function useTerminalSessions({
     healthRef.current.set(profile.id, next);
     setHealthByHost((previous) => ({ ...previous, [profile.id]: next.status }));
   };
+  updateHealthRef.current = updateHealth;
   const refreshSessionsFor = async (profile: HostProfile) => {
     const refreshClient = clientFor(profile);
     try {
@@ -486,11 +492,11 @@ export function useTerminalSessions({
           ...previous.filter((row) => row.hostId !== profile.id),
           ...rows,
         ]);
-        if (profile.id === activeHostIdRef.current) notifyWaitingSessions(rows);
+        if (profile.id === activeHostIdRef.current) notifyWaitingSessionsRef.current(rows);
       },
       onHealth: (profile, result) => {
-        updateHealth(profile, result);
-        if (result === 'success') void onReachable?.(profile);
+        updateHealthRef.current(profile, result);
+        if (result === 'success') void onReachableRef.current?.(profile);
       },
     });
     void polling.start().catch(() => {});
