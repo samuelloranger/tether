@@ -35,6 +35,11 @@
     ]
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["tether"]
+      }
+    },
     "updater": {
       "endpoints": [
         "https://github.com/samuelloranger/tether/releases/latest/download/latest.json"

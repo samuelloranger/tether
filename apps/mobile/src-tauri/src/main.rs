@@ -287,6 +287,7 @@ fn main() {
         // Open the release page in the system browser for package-managed
         // (deb/rpm) installs that can't self-update.
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(Bridge::default())
         .invoke_handler(tauri::generate_handler![
             ws_connect,

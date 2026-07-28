@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createDeepLinkHandler, parseDeepLink } from './deepLink';
+import { createDeepLinkHandler, listenForDeepLinks, parseDeepLink } from './deepLink';
 import type { HostProfile } from './tether/hostStore';
 
 const hosts: HostProfile[] = [
@@ -52,4 +52,25 @@ test('queues a link until profiles have loaded, then applies it', () => {
     sessionId: 'term-7',
   });
   expect(selected).toEqual([['host-alpha', 'term-7']]);
+});
+
+test('delivers startup and runtime URLs through the same handler', async () => {
+  let onOpenUrl: ((urls: string[]) => void) | undefined;
+  const received: string[] = [];
+  const unlisten = await listenForDeepLinks({
+    getCurrent: async () => ['tether://session/term-7?host=alpha'],
+    onOpenUrl: async (listener) => {
+      onOpenUrl = listener;
+      return () => {};
+    },
+    onUrl: (url) => received.push(url),
+  });
+
+  onOpenUrl?.(['tether://session/term-8?host=alpha']);
+  unlisten();
+
+  expect(received).toEqual([
+    'tether://session/term-7?host=alpha',
+    'tether://session/term-8?host=alpha',
+  ]);
 });

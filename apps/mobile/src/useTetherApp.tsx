@@ -8,13 +8,13 @@ import { Linking, type TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import { readClipboard, writeClipboard } from './clipboard';
-import { parseDeepLink } from './deepLink';
+import { createDeepLinkHandler, listenForDeepLinks } from './deepLink';
 import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
 import type { FileView } from './fileView';
 import type { LinkTarget } from './links';
-import { isDesktop } from './platform';
+import { isDesktop, isTauri } from './platform';
 import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
 import { type RenderRow, setTheme } from './terminal';
@@ -150,7 +150,8 @@ export function useTetherApp() {
 
   const [screen, setScreen] = useState<RenderRow[]>([]);
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | null>(null);
-  const pendingDeepLinkRef = useRef<string | null>(null);
+  const profilesRef = useRef(profiles);
+  profilesRef.current = profiles;
 
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
@@ -287,42 +288,53 @@ export function useTetherApp() {
     switchTo(hostId, id);
   };
 
-  const handleDeepLink = useCallback(
-    (url: string) => {
-      const link = parseDeepLink(url);
-      if (!link) return;
-      if (profiles === null) {
-        pendingDeepLinkRef.current = url;
-        return;
-      }
-      const host = profiles.find((profile) => profile.identityName === link.identityName);
-      if (!host) {
-        setDeepLinkNotice(`No saved host named “${link.identityName}”.`);
-        return;
-      }
-      selectTerminal(host.id, link.sessionId);
-    },
-    [profiles, selectTerminal],
-  );
+  const selectTerminalRef = useRef(selectTerminal);
+  selectTerminalRef.current = selectTerminal;
+  const deepLinkHandlerRef = useRef<ReturnType<typeof createDeepLinkHandler> | null>(null);
+  if (!deepLinkHandlerRef.current)
+    deepLinkHandlerRef.current = createDeepLinkHandler({
+      getProfiles: () => profilesRef.current,
+      onSession: (hostId, sessionId) => selectTerminalRef.current(hostId, sessionId),
+    });
+  const handleDeepLink = useCallback((url: string) => {
+    const result = deepLinkHandlerRef.current?.handle(url);
+    if (result?.kind === 'unknown-host')
+      setDeepLinkNotice(`No saved host named “${result.identityName}”.`);
+  }, []);
   const handleDeepLinkRef = useRef(handleDeepLink);
   handleDeepLinkRef.current = handleDeepLink;
   useEffect(() => {
+    let disposed = false;
+    let stopDesktopListener: (() => void) | undefined;
+    const handleUrl = (url: string) => handleDeepLinkRef.current(url);
     void Linking.getInitialURL()
       .then((url) => {
-        if (url) handleDeepLinkRef.current(url);
+        if (url) handleUrl(url);
       })
       .catch(() => {});
-    const subscription = Linking.addEventListener('url', ({ url }) =>
-      handleDeepLinkRef.current(url),
-    );
-    return () => subscription.remove();
+    const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    if (isDesktop && isTauri())
+      void import('@tauri-apps/plugin-deep-link')
+        .then(({ getCurrent, onOpenUrl }) =>
+          listenForDeepLinks({ getCurrent, onOpenUrl, onUrl: handleUrl }),
+        )
+        .then((stop) => {
+          if (disposed) stop();
+          else stopDesktopListener = stop;
+        })
+        .catch(() => {});
+    return () => {
+      disposed = true;
+      subscription.remove();
+      stopDesktopListener?.();
+    };
   }, []);
   useEffect(() => {
-    if (profiles === null || !pendingDeepLinkRef.current) return;
-    const url = pendingDeepLinkRef.current;
-    pendingDeepLinkRef.current = null;
-    handleDeepLink(url);
-  }, [handleDeepLink, profiles]);
+    if (profiles === null) return;
+    const result = deepLinkHandlerRef.current?.applyPending();
+    if (result?.kind === 'unknown-host')
+      setDeepLinkNotice(`No saved host named “${result.identityName}”.`);
+  }, [profiles]);
 
   const selectPresentation = (id: string) => {
     setFileView(null);

@@ -54,3 +54,17 @@ export function createDeepLinkHandler({
     },
   };
 }
+
+export async function listenForDeepLinks({
+  getCurrent,
+  onOpenUrl,
+  onUrl,
+}: {
+  getCurrent(): Promise<string[] | null>;
+  onOpenUrl(listener: (urls: string[]) => void): Promise<() => void>;
+  onUrl(url: string): void;
+}): Promise<() => void> {
+  const current = await getCurrent();
+  current?.forEach(onUrl);
+  return onOpenUrl((urls) => urls.forEach(onUrl));
+}
