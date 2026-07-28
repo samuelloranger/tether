@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "2.5.1",
+          "date": "2026-07-28",
+          "localizedDescription": "## What's Changed\n* fix(mobile): stop spawning a terminal on connect, and give a host one name by @samuelloranger in https://github.com/samuelloranger/tether/pull/63\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.5.0...v2.5.1",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v2.5.1/tether.ipa",
+          "size": 9398719,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "2.5.0",
           "date": "2026-07-28",
           "localizedDescription": "## What's Changed\n* feat: add multi-host client and responsive settings by @samuelloranger in https://github.com/samuelloranger/tether/pull/62\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.4.4...v2.5.0",
