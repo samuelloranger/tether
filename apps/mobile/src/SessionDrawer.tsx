@@ -22,7 +22,6 @@ import type { Presentation } from './presentations';
 import { sessionLabel } from './sessionLabel';
 import type { HostHealthStatus } from './tether/hostHealth';
 import type { HostProfile } from './tether/hostStore';
-import { typeScale } from './type';
 
 export interface DrawerSession {
   hostId: string;
@@ -52,7 +51,6 @@ interface SessionDrawerProps {
   onSelectPreview: (id: string) => void;
   onClosePreview: (id: string) => void;
   onClose: () => void;
-  onSettings: () => void;
   onHostSettings?: (hostId: string) => void;
   // Desktop: render as a permanent inline sidebar (no scrim, no slide, always
   // mounted) instead of a slide-in overlay.
@@ -90,7 +88,6 @@ export function SessionDrawer({
   onSelectPreview,
   onClosePreview,
   onClose,
-  onSettings,
   onHostSettings,
   docked = false,
 }: SessionDrawerProps) {
@@ -139,21 +136,6 @@ export function SessionDrawer({
 
   const panelBody = (
     <>
-      <View style={styles.header}>
-        <Feather name="terminal" size={14} color={theme.colors.accent} />
-        <Text style={styles.title}>Workspace</Text>
-        <TouchableOpacity
-          style={styles.settingsBtn}
-          hitSlop={HIT_SLOP}
-          activeOpacity={0.6}
-          onPress={onSettings}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-        >
-          <Feather name="settings" size={15} color={theme.colors.textMuted} />
-        </TouchableOpacity>
-      </View>
-
       <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
         {hosts.map((host) => {
           const health = healthByHost[host.id] ?? 'unknown';
@@ -367,16 +349,7 @@ const createStyles = (c: AppColors) =>
     panelContent: { flex: 1, paddingTop: 56 },
     // Docked (desktop): inline column, no absolute positioning, tighter top pad
     // (no mobile status bar to clear).
-    panelDocked: { position: 'relative', paddingTop: 12, alignSelf: 'stretch' },
-    header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-    settingsBtn: {
-      marginLeft: 'auto',
-      minWidth: MIN_TOUCH_TARGET,
-      minHeight: MIN_TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    title: { color: c.textMuted, ...typeScale.eyebrow },
+    panelDocked: { position: 'relative', paddingTop: 8, alignSelf: 'stretch' },
     list: { flex: 1 },
     hostSection: { marginBottom: 8, borderLeftWidth: 1, paddingLeft: 6 },
     hostSectionUnavailable: { opacity: 0.52 },

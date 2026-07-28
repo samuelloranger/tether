@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -8,10 +8,12 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { desktopLayout } from './desktopLayout';
 import { HostsScreen } from './HostsScreen';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop, isMacDesktop } from './platform';
@@ -45,17 +47,17 @@ export function ConfigScreen({
   setTestStatus,
   onSave,
   onTest,
+  onCloseSettings,
   hosts,
   storeError,
   onRetryHosts,
   onAddHost,
-  onEditHost,
-  onRemoveHost,
-  onUpdateHost,
   onReorderHosts,
-  onServerSettings,
   healthByHost,
+  initialHostId,
+  onHostPageClose,
   renderHostPage,
+  renderAppearancePage,
 }: {
   serverIp: string;
   setServerIp: (t: string) => void;
@@ -71,66 +73,111 @@ export function ConfigScreen({
   setTestStatus: (s: TestStatus) => void;
   onSave: () => void;
   onTest: () => void;
+  onCloseSettings: () => void;
   hosts?: HostProfile[] | null;
   storeError?: string | null;
   onRetryHosts?: () => void;
   onAddHost?: () => void;
-  onEditHost?: (hostId: string) => void;
-  onRemoveHost?: (hostId: string) => void;
-  onUpdateHost?: (hostId: string, changes: Partial<Omit<HostProfile, 'id' | 'order'>>) => void;
   onReorderHosts?: (ids: string[]) => void;
-  onServerSettings?: (hostId: string) => void;
   healthByHost?: Record<string, HostHealthStatus>;
+  initialHostId?: string | null;
+  onHostPageClose?: () => void;
   renderHostPage?: (host: HostProfile, onBack: () => void) => React.ReactNode;
+  renderAppearancePage?: (onBack: () => void) => React.ReactNode;
 }) {
   const { theme } = useAppTheme();
   const shared = createStyles(theme.colors);
   const styles = createConfigStyles(theme.colors);
+  const { width } = useWindowDimensions();
+  const desktopUi = desktopLayout(isDesktop, width) === 'desktop';
   // Settings opens on the Hosts list. The three-input connection form is for
   // adding or repairing one host, not the front door — with hosts configured,
   // landing there asked "which server?" when the answer was already stored.
   const [hostsOpen, setHostsOpen] = useState(true);
-  const [openHostId, setOpenHostId] = useState<string | null>(null);
+  const [openHostId, setOpenHostId] = useState<string | null>(initialHostId ?? null);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  useEffect(() => {
+    if (initialHostId) setOpenHostId(initialHostId);
+  }, [initialHostId]);
+  const openHost = openHostId ? hosts?.find((host) => host.id === openHostId) : null;
+  const showHosts = hostsOpen && !!hosts && !!onAddHost && !!onReorderHosts;
+  const desktopChrome = isDesktop ? (
+    <TitleBar
+      isMac={isMacDesktop}
+      title={
+        appearanceOpen
+          ? 'Appearance'
+          : openHost
+            ? `${openHost.name} settings`
+            : showHosts
+              ? 'Settings'
+              : 'Tether'
+      }
+      compact={!desktopUi}
+    />
+  ) : null;
   if (storeError) {
     return (
-      <View style={styles.configContainer}>
-        <Text style={styles.configTitle}>Hosts unavailable</Text>
-        <Text style={styles.testError}>{storeError}</Text>
-        <TouchableOpacity
-          style={styles.connectBtn}
-          onPress={onRetryHosts}
-          accessibilityRole="button"
-          accessibilityLabel="Retry loading hosts"
-        >
-          <Text style={styles.connectBtnText}>Retry</Text>
-        </TouchableOpacity>
-      </View>
+      <>
+        {desktopChrome}
+        <View style={styles.configContainer}>
+          <Text style={styles.configTitle}>Hosts unavailable</Text>
+          <Text style={styles.testError}>{storeError}</Text>
+          <TouchableOpacity
+            style={styles.connectBtn}
+            onPress={onRetryHosts}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading hosts"
+          >
+            <Text style={styles.connectBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </>
     );
   }
   // One host, one page — rendered as a screen, not an overlay.
-  const openHost = openHostId ? hosts?.find((host) => host.id === openHostId) : null;
-  if (openHost && renderHostPage) return renderHostPage(openHost, () => setOpenHostId(null));
-  if (hostsOpen && hosts && onAddHost && onReorderHosts) {
+  if (openHost && renderHostPage)
     return (
-      <HostsScreen
-        hosts={hosts}
-        health={healthByHost}
-        onBack={() => setHostsOpen(false)}
-        onAdd={() => {
-          setHostsOpen(false);
-          onAddHost();
-        }}
-        // One destination per host. The drawer gear lands here too, so the
-        // ambiguity that left this screen unreachable cannot come back.
-        onOpen={(id) => setOpenHostId(id)}
-        onReorder={onReorderHosts}
-      />
+      <>
+        {desktopChrome}
+        {renderHostPage(openHost, () => {
+          setOpenHostId(null);
+          onHostPageClose?.();
+        })}
+      </>
+    );
+  if (appearanceOpen && renderAppearancePage)
+    return (
+      <>
+        {desktopChrome}
+        {renderAppearancePage(() => setAppearanceOpen(false))}
+      </>
+    );
+  if (showHosts && hosts && onAddHost && onReorderHosts) {
+    return (
+      <>
+        {desktopChrome}
+        <HostsScreen
+          hosts={hosts}
+          health={healthByHost}
+          onBack={onCloseSettings}
+          onAppearance={() => setAppearanceOpen(true)}
+          onAdd={() => {
+            setHostsOpen(false);
+            onAddHost();
+          }}
+          // One destination per host. The drawer gear lands here too, so the
+          // ambiguity that left this screen unreachable cannot come back.
+          onOpen={(id) => setOpenHostId(id)}
+          onReorder={onReorderHosts}
+        />
+      </>
     );
   }
   return (
     <>
       {/* Desktop: frameless window still needs drag + close/min/max here too. */}
-      {isDesktop && <TitleBar isMac={isMacDesktop} title="Tether" />}
+      {desktopChrome}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.configContainer}
@@ -164,6 +211,7 @@ export function ConfigScreen({
                 setTestStatus({ kind: 'idle' });
               }}
               placeholder="e.g. 192.168.50.30"
+              accessibilityLabel="Server IP or host"
               placeholderTextColor={theme.colors.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
@@ -179,6 +227,7 @@ export function ConfigScreen({
                 setTestStatus({ kind: 'idle' });
               }}
               placeholder="e.g. 8085"
+              accessibilityLabel="Port"
               placeholderTextColor={theme.colors.textFaint}
               keyboardType="numeric"
               autoCapitalize="none"
@@ -194,6 +243,7 @@ export function ConfigScreen({
                 setTestStatus({ kind: 'idle' });
               }}
               placeholder={setupMode === 'create' ? 'Choose a password' : 'Shared server password'}
+              accessibilityLabel="Password"
               placeholderTextColor={theme.colors.textFaint}
               secureTextEntry
               autoCapitalize="none"
@@ -210,6 +260,7 @@ export function ConfigScreen({
                     setTestStatus({ kind: 'idle' });
                   }}
                   placeholder="Confirm password"
+                  accessibilityLabel="Confirm password"
                   placeholderTextColor={theme.colors.textFaint}
                   secureTextEntry
                   autoCapitalize="none"

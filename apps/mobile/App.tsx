@@ -1,6 +1,7 @@
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { AppearanceScreen } from './src/AppearanceScreen';
 import { AppThemeProvider, useAppTheme } from './src/AppThemeProvider';
 import { ConfigScreen } from './src/ConfigScreen';
 import { LaunchOverlay } from './src/LaunchOverlay';
@@ -61,6 +62,14 @@ function AppInner({ onReady }: { onReady: () => void }) {
           ? app.replaceStoredPassword(app.serverSettingsHost.id, password)
           : Promise.resolve()
       }
+      onConnectionSaved={(changes, password) =>
+        app.serverSettingsHost
+          ? app.saveHostConnection(app.serverSettingsHost.id, changes, password)
+          : Promise.resolve()
+      }
+      onRemoveHost={async () => {
+        if (app.serverSettingsHost) await app.removeHost(app.serverSettingsHost.id);
+      }}
     />
   );
   if (app.isConfiguring) {
@@ -81,16 +90,15 @@ function AppInner({ onReady }: { onReady: () => void }) {
           setTestStatus={app.setTestStatus}
           onSave={app.saveConfig}
           onTest={app.testConnection}
+          onCloseSettings={() => app.setIsConfiguring(false)}
           hosts={app.profiles}
           storeError={app.storeError}
           onRetryHosts={() => void app.loadProfiles()}
           onAddHost={app.openAddHost}
-          onEditHost={(hostId) => void app.openEditHost(hostId)}
-          onRemoveHost={(hostId) => void app.removeHost(hostId)}
-          onUpdateHost={(hostId, changes) => void app.updateProfile(hostId, changes)}
           onReorderHosts={(ids) => void app.reorderHosts(ids)}
-          onServerSettings={app.openServerSettings}
           healthByHost={app.healthByHost}
+          initialHostId={app.serverSettingsHost?.id}
+          onHostPageClose={app.closeServerSettings}
           renderHostPage={(host, onBack) => (
             <ServerSettings
               inline
@@ -104,8 +112,19 @@ function AppInner({ onReady }: { onReady: () => void }) {
                 onBack();
                 void app.openEditHost(host.id);
               }}
-              onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
+              onIdentitySaved={(identity) => void app.saveHostIdentity(host.id, identity)}
               onPasswordChanged={(password) => app.replaceStoredPassword(host.id, password)}
+              onConnectionSaved={(changes, password) =>
+                app.saveHostConnection(host.id, changes, password)
+              }
+              onRemoveHost={() => app.removeHost(host.id)}
+            />
+          )}
+          renderAppearancePage={(onBack) => (
+            <AppearanceScreen
+              fontFamily={app.fontFamily}
+              onFontChange={app.changeFontFamily}
+              onBack={onBack}
             />
           )}
         />

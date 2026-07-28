@@ -1,5 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useMemo, useRef } from 'react';
+import { Animated, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import type { HostHealthStatus } from './tether/hostHealth';
@@ -32,6 +33,7 @@ export function HostsScreen({
   health,
   onBack,
   onAdd,
+  onAppearance,
   onOpen,
   onReorder,
 }: {
@@ -39,93 +41,76 @@ export function HostsScreen({
   health?: Record<string, HostHealthStatus>;
   onBack: () => void;
   onAdd: () => void;
+  onAppearance: () => void;
   onOpen: (hostId: string) => void;
   onReorder: (ids: string[]) => void;
 }) {
   const { theme } = useAppTheme();
   const c = theme.colors;
-  const move = (index: number, delta: -1 | 1) => {
+  const move = (index: number, target: number) => {
     const next = [...hosts];
-    const target = index + delta;
-    if (!next[target]) return;
-    [next[index], next[target]] = [next[target], next[index]];
+    if (target === index || !next[target]) return;
+    const [moved] = next.splice(index, 1);
+    if (!moved) return;
+    next.splice(target, 0, moved);
     onReorder(next.map((host) => host.id));
   };
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScrollView contentContainerStyle={{ padding: 24, maxWidth: 720, width: '100%' }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 24, maxWidth: 720, width: '100%', alignSelf: 'center' }}
+      >
         <TouchableOpacity
           onPress={onBack}
           style={{ minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' }}
           accessibilityRole="button"
-          accessibilityLabel="Back to settings"
+          accessibilityLabel="Close settings"
         >
-          <Text style={[typeScale.body, { color: c.accent, marginBottom: 14 }]}>‹ Settings</Text>
+          <Text style={[typeScale.body, { color: c.accent, marginBottom: 14 }]}>‹ Terminal</Text>
         </TouchableOpacity>
-        <Text style={[typeScale.display, { color: c.text, marginBottom: 14 }]}>Hosts</Text>
+        <Text style={[typeScale.display, { color: c.text, marginBottom: 18 }]}>Settings</Text>
 
-        {hosts.map((host, index) => {
-          const status = health?.[host.id] ?? 'unknown';
-          return (
-            <TouchableOpacity
-              key={host.id}
-              onPress={() => onOpen(host.id)}
-              accessibilityRole="button"
-              accessibilityLabel={`${host.name}, ${HEALTH_LABEL[status]}. Open host settings`}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 12,
-                backgroundColor: c.surface,
-                borderColor: c.border,
-                borderWidth: 1,
-                borderLeftWidth: 3,
-                borderLeftColor: host.color,
-                borderRadius: SURFACE_RADIUS.control,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                marginBottom: 8,
-                minHeight: MIN_TOUCH_TARGET,
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>
-                  {host.name}
-                </Text>
-                <Text style={[typeScale.caption, { color: c.textFaint, marginTop: 2 }]}>
-                  {host.host}:{host.port}
-                </Text>
-              </View>
-              <Text style={[typeScale.caption, { color: healthColor(status, c) }]}>
-                {HEALTH_LABEL[status]}
-              </Text>
-              {/* Reorder sits next to the row it moves, not at the far edge. */}
-              <View style={{ flexDirection: 'row' }}>
-                <TouchableOpacity
-                  onPress={() => move(index, -1)}
-                  disabled={index === 0}
-                  hitSlop={HIT_SLOP}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Move ${host.name} up`}
-                  style={{ padding: 6, opacity: index === 0 ? 0.3 : 1 }}
-                >
-                  <Feather name="chevron-up" size={16} color={c.textMuted} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => move(index, 1)}
-                  disabled={index === hosts.length - 1}
-                  hitSlop={HIT_SLOP}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Move ${host.name} down`}
-                  style={{ padding: 6, opacity: index === hosts.length - 1 ? 0.3 : 1 }}
-                >
-                  <Feather name="chevron-down" size={16} color={c.textMuted} />
-                </TouchableOpacity>
-              </View>
-              <Feather name="chevron-right" size={18} color={c.textFaint} />
-            </TouchableOpacity>
-          );
-        })}
+        <TouchableOpacity
+          onPress={onAppearance}
+          accessibilityRole="button"
+          accessibilityLabel="Open appearance settings"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            backgroundColor: c.surface,
+            borderColor: c.border,
+            borderWidth: 1,
+            borderRadius: SURFACE_RADIUS.control,
+            paddingVertical: 12,
+            paddingHorizontal: 14,
+            marginBottom: 24,
+            minHeight: MIN_TOUCH_TARGET,
+          }}
+        >
+          <Feather name="sliders" size={18} color={c.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>Appearance</Text>
+            <Text style={[typeScale.caption, { color: c.textFaint, marginTop: 2 }]}>
+              Theme and terminal font
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={18} color={c.textFaint} />
+        </TouchableOpacity>
+
+        <Text style={[typeScale.eyebrow, { color: c.textMuted, marginBottom: 10 }]}>Hosts</Text>
+
+        {hosts.map((host, index) => (
+          <HostRow
+            key={host.id}
+            host={host}
+            status={health?.[host.id] ?? 'unknown'}
+            index={index}
+            count={hosts.length}
+            onOpen={() => onOpen(host.id)}
+            onMove={(target) => move(index, target)}
+          />
+        ))}
 
         <TouchableOpacity
           onPress={onAdd}
@@ -137,5 +122,112 @@ export function HostsScreen({
         </TouchableOpacity>
       </ScrollView>
     </View>
+  );
+}
+
+const DRAG_ROW_HEIGHT = 72;
+
+function HostRow({
+  host,
+  status,
+  index,
+  count,
+  onOpen,
+  onMove,
+}: {
+  host: HostProfile;
+  status: HostHealthStatus;
+  index: number;
+  count: number;
+  onOpen: () => void;
+  onMove: (target: number) => void;
+}) {
+  const { theme } = useAppTheme();
+  const c = theme.colors;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const moveBy = useCallback(
+    (delta: number) => onMove(Math.max(0, Math.min(count - 1, index + delta))),
+    [count, index, onMove],
+  );
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderMove: (_event, gesture) => dragY.setValue(gesture.dy),
+        onPanResponderRelease: (_event, gesture) => {
+          moveBy(Math.round(gesture.dy / DRAG_ROW_HEIGHT));
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
+        },
+        onPanResponderTerminate: () =>
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start(),
+      }),
+    [dragY, moveBy],
+  );
+  return (
+    <Animated.View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: c.surface,
+        borderColor: c.border,
+        borderWidth: 1,
+        borderLeftWidth: 3,
+        borderLeftColor: host.color,
+        borderRadius: SURFACE_RADIUS.control,
+        marginBottom: 8,
+        minHeight: MIN_TOUCH_TARGET,
+        transform: [{ translateY: dragY }],
+        zIndex: 1,
+      }}
+    >
+      <View
+        {...panResponder.panHandlers}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={`Reorder ${host.name}`}
+        accessibilityActions={[
+          { name: 'decrement', label: `Move ${host.name} up` },
+          { name: 'increment', label: `Move ${host.name} down` },
+        ]}
+        onAccessibilityAction={(event) =>
+          moveBy(event.nativeEvent.actionName === 'decrement' ? -1 : 1)
+        }
+        hitSlop={HIT_SLOP}
+        style={{
+          width: MIN_TOUCH_TARGET,
+          minHeight: MIN_TOUCH_TARGET,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Feather name="menu" size={17} color={c.textMuted} />
+      </View>
+      <TouchableOpacity
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={`${host.name}, ${HEALTH_LABEL[status]}. Open host settings`}
+        style={{
+          flex: 1,
+          minHeight: MIN_TOUCH_TARGET,
+          paddingVertical: 12,
+          paddingRight: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>{host.name}</Text>
+          <Text style={[typeScale.caption, { color: c.textFaint, marginTop: 2 }]}>
+            {host.host}:{host.port}
+          </Text>
+        </View>
+        <Text style={[typeScale.caption, { color: healthColor(status, c) }]}>
+          {HEALTH_LABEL[status]}
+        </Text>
+        <Feather name="chevron-right" size={18} color={c.textFaint} />
+      </TouchableOpacity>
+    </Animated.View>
   );
 }

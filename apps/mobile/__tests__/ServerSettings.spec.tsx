@@ -50,13 +50,17 @@ test('renders all settings sections and saves one diffed PATCH', async () => {
         onUnauthorized={jest.fn()}
         onIdentitySaved={jest.fn()}
         onPasswordChanged={async () => {}}
+        onConnectionSaved={async () => {}}
+        onRemoveHost={async () => {}}
       />
     </AppThemeProvider>,
   );
-  await waitFor(() => expect(view.getByText('This server')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Name & colour')).toBeTruthy());
+  expect(view.getByText('Connection')).toBeTruthy();
   expect(view.getByText('Notifications')).toBeTruthy();
-  expect(view.getByText('Session defaults')).toBeTruthy();
+  expect(view.getByText('Sessions')).toBeTruthy();
   expect(view.getByText('Maintenance')).toBeTruthy();
+  expect(view.getByLabelText('Remove this host')).toBeTruthy();
   expect(view.getByText('Agent needs input')).toBeTruthy();
   expect(view.getByText('Alerts from programs')).toBeTruthy();
   expect(view.getByText('Session ends')).toBeTruthy();
@@ -90,10 +94,15 @@ test('renders an unreachable host as a read-only retry state', () => {
         onUnauthorized={jest.fn()}
         onIdentitySaved={jest.fn()}
         onPasswordChanged={async () => {}}
+        onConnectionSaved={async () => {}}
+        onRemoveHost={async () => {}}
       />
     </AppThemeProvider>,
   );
   expect(view.getByText('Host unreachable. Last-known settings are read-only.')).toBeTruthy();
+  expect(view.getByText('Connection')).toBeTruthy();
+  expect(view.getByLabelText('Address')).toHaveProp('value', 'studio.local');
+  expect(view.getByLabelText('Remove this host')).toBeTruthy();
   expect(view.getByLabelText('Retry')).toBeTruthy();
 });
 
@@ -110,13 +119,15 @@ test('keeps numeric fields empty while editing and shows validation errors inlin
         onUnauthorized={jest.fn()}
         onIdentitySaved={jest.fn()}
         onPasswordChanged={async () => {}}
+        onConnectionSaved={async () => {}}
+        onRemoveHost={async () => {}}
       />
     </AppThemeProvider>,
   );
 
   await waitFor(() => expect(view.getByDisplayValue('2000')).toBeTruthy());
   fireEvent.changeText(view.getByDisplayValue('2000'), '');
-  expect(view.getByDisplayValue('')).toBeTruthy();
+  expect(view.getByLabelText('Scrollback rows')).toHaveProp('value', '');
   fireEvent.press(view.getByLabelText('Save changes'));
 
   expect(view.getByText('Scrollback must be between 100 and 100000 rows.')).toBeTruthy();
@@ -136,6 +147,8 @@ test('marks operation failures as error messages without inspecting the copy', a
         onUnauthorized={jest.fn()}
         onIdentitySaved={jest.fn()}
         onPasswordChanged={async () => {}}
+        onConnectionSaved={async () => {}}
+        onRemoveHost={async () => {}}
       />
     </AppThemeProvider>,
   );

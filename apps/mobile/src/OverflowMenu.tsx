@@ -12,7 +12,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
-import { type DesktopNavigationMode, desktopNavigationLabel } from './desktopNavigation';
 import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { availableOverlayHeight, contentRelativeScrollStyle } from './overlayLayout';
 import { isDesktop } from './platform';
@@ -37,8 +36,6 @@ export function OverflowMenu({
   onTestNotification,
   onCheckUpdates,
   onRestart,
-  desktopNavigationMode,
-  onDesktopNavigationMode,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -58,8 +55,6 @@ export function OverflowMenu({
   onTestNotification?: () => void;
   onCheckUpdates: () => void;
   onRestart: () => void;
-  desktopNavigationMode?: DesktopNavigationMode;
-  onDesktopNavigationMode?: (mode: DesktopNavigationMode) => void;
 }) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -160,38 +155,6 @@ export function OverflowMenu({
                 <Text style={styles.menuRowText}>Send test notification</Text>
               </TouchableOpacity>
             )}
-            {isDesktop && desktopNavigationMode && onDesktopNavigationMode && (
-              <View style={styles.navigationSection}>
-                <Text style={styles.navigationLabel}>Navigation</Text>
-                <View style={styles.navigationButtons}>
-                  {(['sidebar', 'hover', 'tabs'] as const).map((mode) => {
-                    const active = desktopNavigationMode === mode;
-                    return (
-                      <TouchableOpacity
-                        key={mode}
-                        style={[styles.navigationButton, active && styles.navigationButtonActive]}
-                        onPress={() => {
-                          onDesktopNavigationMode(mode);
-                          onClose();
-                        }}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: active }}
-                        accessibilityLabel={`Navigation: ${desktopNavigationLabel(mode)}`}
-                      >
-                        <Text
-                          style={[
-                            styles.navigationButtonText,
-                            active && styles.navigationButtonTextActive,
-                          ]}
-                        >
-                          {desktopNavigationLabel(mode)}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
             {isDesktop && (
               <TouchableOpacity style={styles.menuRow} onPress={onCheckUpdates}>
                 <Feather name="download" size={16} color={theme.colors.text} />
@@ -265,44 +228,6 @@ const createStyles = (c: AppColors) =>
       fontSize: 14,
       fontWeight: '700',
       color: c.text,
-    },
-    navigationSection: {
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      borderTopWidth: 1,
-      borderTopColor: c.border,
-    },
-    navigationLabel: {
-      marginBottom: 7,
-      color: c.textMuted,
-      fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 0.7,
-      textTransform: 'uppercase',
-    },
-    navigationButtons: {
-      flexDirection: 'row',
-      gap: 5,
-    },
-    navigationButton: {
-      flex: 1,
-      alignItems: 'center',
-      minHeight: MIN_TOUCH_TARGET,
-      justifyContent: 'center',
-      borderRadius: SURFACE_RADIUS.control,
-      backgroundColor: c.surfaceRaised,
-      paddingVertical: 7,
-    },
-    navigationButtonActive: {
-      backgroundColor: c.selected,
-    },
-    navigationButtonText: {
-      color: c.textMuted,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    navigationButtonTextActive: {
-      color: c.accent,
     },
     menuRowDestructive: {
       borderTopWidth: 1,

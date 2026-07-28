@@ -43,7 +43,7 @@ function renderDrawer(overrides: Partial<Parameters<typeof SessionDrawer>[0]> = 
     onSelectPreview: jest.fn(),
     onClosePreview: jest.fn(),
     onClose: jest.fn(),
-    onSettings: jest.fn(),
+    onHostSettings: jest.fn(),
     ...overrides,
   };
   return {
@@ -69,4 +69,19 @@ test('reports a selected terminal with its host id', () => {
   const { props, view } = renderDrawer();
   fireEvent.press(view.getByLabelText(/Terminal term-1 on Alpha/));
   expect(props.onSelect).toHaveBeenCalledWith('alpha', 'term-1');
+});
+
+test.each([
+  ['overlay', false],
+  ['docked', true],
+] as const)('shows the same host navigation without a workspace header when %s', (_, docked) => {
+  const { view } = renderDrawer({ docked });
+
+  expect(view.getByLabelText('Alpha host section')).toBeTruthy();
+  expect(view.getByLabelText(/Terminal term-1 on Alpha/)).toBeTruthy();
+  expect(view.getByLabelText('Server settings for Alpha')).toBeTruthy();
+  expect(view.getByLabelText('Add host')).toBeTruthy();
+  expect(view.getByLabelText('New terminal')).toBeTruthy();
+  expect(view.queryByText('Workspace')).toBeNull();
+  expect(view.queryByLabelText('Settings')).toBeNull();
 });

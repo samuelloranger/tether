@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,8 +19,8 @@ import { useAppTheme } from './AppThemeProvider';
 import { ChangeBanner } from './ChangeBanner';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ContextMenu } from './ContextMenu';
-import { DesktopSessionNavigator } from './DesktopSessionNavigator';
 import { DiffView } from './DiffView';
+import { desktopLayout } from './desktopLayout';
 import { FileViewer } from './FileViewer';
 import { OverflowMenu } from './OverflowMenu';
 import { PresentationBanner } from './PresentationBanner';
@@ -43,6 +44,8 @@ import type { useTetherApp } from './useTetherApp';
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const { width } = useWindowDimensions();
+  const desktopUi = desktopLayout(isDesktop, width) === 'desktop';
   const [rendererStatus, setRendererStatus] = useState<RendererStatus>('loading');
   useEffect(() => {
     if (isDesktop) injectTerminalScrollbarStyles();
@@ -124,8 +127,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     selectPresentation,
     closePresentation,
     refreshPresentations,
-    desktopNavigationMode,
-    selectDesktopNavigationMode,
     inputRef,
     fontSize,
     lineHeight,
@@ -278,34 +279,41 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           onMenu={() => {
             if (terminalVisible) setMenuOpen(true);
           }}
+          compact={!desktopUi}
         />
       )}
-      <View
-        style={[
-          styles.terminalBody,
-          isDesktop && desktopNavigationMode === 'sidebar' && styles.terminalRow,
-        ]}
-      >
-        {/* Desktop session navigator chooses sidebar, hover overlay, or top tabs. */}
-        {isDesktop && (
-          <DesktopSessionNavigator
-            mode={desktopNavigationMode}
-            sessions={drawerSessions.filter((session) => session.hostId === activeHostId)}
-            activeId={activeId}
-            onSelect={(id) => selectTerminal(activeHostId, id)}
-            onNew={newTerminal}
-            onKill={killActiveOr}
-            previews={presentations}
-            activePreviewId={activePresentationId}
-            onSelectPreview={selectPresentation}
-            onClosePreview={closePresentation}
-            onSettings={() => setIsConfiguring(true)}
-          />
-        )}
+      <View style={[styles.terminalBody, desktopUi && styles.terminalRow]}>
+        <SessionDrawer
+          visible={desktopUi || drawerOpen}
+          docked={desktopUi}
+          hosts={profiles ?? []}
+          healthByHost={healthByHost}
+          sessions={drawerSessions}
+          activeHostId={activeHostId}
+          activeId={activeId}
+          onSelect={selectTerminal}
+          onNew={newTerminal}
+          onKill={killActiveOr}
+          onRetryHost={refreshHost}
+          onReenterPassword={openEditHost}
+          onAddHost={openAddHost}
+          previews={presentations}
+          activePreviewId={activePresentationId}
+          onSelectPreview={(id) => {
+            selectPresentation(id);
+            if (!desktopUi) setDrawerOpen(false);
+          }}
+          onClosePreview={closePresentation}
+          onClose={() => setDrawerOpen(false)}
+          onHostSettings={(hostId) => {
+            if (!desktopUi) setDrawerOpen(false);
+            openServerSettings(hostId);
+          }}
+        />
 
         <View style={styles.terminalMain}>
           {/* Mobile header panel */}
-          {!isDesktop && (
+          {!desktopUi && (
             <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.surface }}>
               <View style={styles.header}>
                 <TouchableOpacity
@@ -416,7 +424,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             />
           ) : activePresentation ? (
             <>
-              {!isDesktop && (
+              {!desktopUi && (
                 <PresentationBanner
                   label={`Back to ${backLabel}`}
                   icon="terminal"
@@ -431,7 +439,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           ) : (
             <>
               <ChangeBanner summary={changeSummary} onPress={openDiff} />
-              {!isDesktop && sessionPreview && (
+              {!desktopUi && sessionPreview && (
                 <PresentationBanner
                   label={`Preview ready: ${sessionPreview.title}`}
                   icon="layout"
@@ -542,40 +550,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             </>
           )}
 
-          {/* Session Drawer (overlay) — mobile only; desktop uses DesktopSessionNavigator. */}
-          {!isDesktop && (
-            <SessionDrawer
-              visible={drawerOpen}
-              hosts={profiles ?? []}
-              healthByHost={healthByHost}
-              sessions={drawerSessions}
-              activeHostId={activeHostId}
-              activeId={activeId}
-              onSelect={selectTerminal}
-              onNew={newTerminal}
-              onKill={killActiveOr}
-              onRetryHost={refreshHost}
-              onReenterPassword={openEditHost}
-              onAddHost={openAddHost}
-              previews={presentations}
-              activePreviewId={activePresentationId}
-              onSelectPreview={(id) => {
-                selectPresentation(id);
-                setDrawerOpen(false);
-              }}
-              onClosePreview={closePresentation}
-              onClose={() => setDrawerOpen(false)}
-              onSettings={() => {
-                setDrawerOpen(false);
-                setIsConfiguring(true);
-              }}
-              onHostSettings={(hostId) => {
-                setDrawerOpen(false);
-                openServerSettings(hostId);
-              }}
-            />
-          )}
-
           {/* Overflow menu (header ⋯) */}
           {terminalVisible && (
             <OverflowMenu
@@ -615,8 +589,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 setMenuOpen(false);
                 hardResetSession();
               }}
-              desktopNavigationMode={desktopNavigationMode}
-              onDesktopNavigationMode={selectDesktopNavigationMode}
             />
           )}
 
@@ -670,7 +642,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           )}
 
           {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
-          {!isDesktop && terminalVisible && (
+          {!desktopUi && terminalVisible && (
             <UtilityBar
               ctrlArmed={ctrlArmed}
               setCtrlArmed={setCtrlArmed}

@@ -30,6 +30,9 @@ export interface TitleBarProps {
   onNew?: () => void;
   onSettings?: () => void;
   onMenu?: () => void;
+  // Compact desktop windows keep their window-management chrome, while the
+  // mobile header below owns terminal actions and connection state.
+  compact?: boolean;
 }
 
 const HIT = { top: 8, bottom: 8, left: 6, right: 6 };
@@ -70,6 +73,7 @@ export default function TitleBar({
   onNew,
   onSettings,
   onMenu,
+  compact = false,
 }: TitleBarProps) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
@@ -113,9 +117,9 @@ export default function TitleBar({
       </View>
 
       <View style={styles.actions}>
-        {status ? <StatusBadge status={status} colors={theme.colors} /> : null}
+        {!compact && status ? <StatusBadge status={status} colors={theme.colors} /> : null}
 
-        {onNew ? (
+        {!compact && onNew ? (
           <TouchableOpacity
             {...NO_DRAG_PROPS}
             style={styles.btn}
@@ -129,7 +133,7 @@ export default function TitleBar({
           </TouchableOpacity>
         ) : null}
 
-        {onSettings ? (
+        {!compact && onSettings ? (
           <TouchableOpacity
             {...NO_DRAG_PROPS}
             style={styles.btn}
@@ -143,7 +147,7 @@ export default function TitleBar({
           </TouchableOpacity>
         ) : null}
 
-        {onMenu ? (
+        {!compact && onMenu ? (
           <TouchableOpacity
             {...NO_DRAG_PROPS}
             style={styles.btn}

@@ -248,13 +248,7 @@ export function useTetherApp() {
   const inputRef = useRef<TextInput | null>(null);
   const { ctrlArmed, setCtrlArmed, sendTyped, sendKey, sendPaste, sendProgram, cursorSeq } =
     useTerminalInput({ send: wsSend, mouseEnabledRef, getActiveSessionId, entryFor });
-  const {
-    snippets,
-    setSnippets,
-    persistSnippets,
-    desktopNavigationMode,
-    selectDesktopNavigationMode,
-  } = useAppPreferences();
+  const { snippets, setSnippets, persistSnippets } = useAppPreferences();
   const addSnippet = () => {
     const snippet = snippetDraft.trim();
     if (!snippet) return;
@@ -277,6 +271,21 @@ export function useTetherApp() {
   const removeHost = async (hostId: string) => {
     removeHostSessions(hostId);
     await removeConfiguredHost(hostId);
+  };
+  const saveHostConnection = async (
+    hostId: string,
+    changes: { host: string; port: string },
+    replacementPassword?: string,
+  ) => {
+    const current = profiles?.find((profile) => profile.id === hostId);
+    if (!current) return;
+    const endpointChanged = current.host !== changes.host || current.port !== changes.port;
+    await updateProfile(hostId, changes);
+    if (replacementPassword) await replaceStoredPassword(hostId, replacementPassword);
+    if (endpointChanged || replacementPassword) {
+      removeHostSessions(hostId);
+      resetHostHealth(hostId);
+    }
   };
 
   const switchTo = (hostId: string, id: string) => {
@@ -941,16 +950,21 @@ export function useTetherApp() {
     openAddHost,
     openEditHost,
     removeHost,
+    saveHostConnection,
     updateProfile,
     reorderHosts,
     clientFor,
     serverSettingsHost,
     serverSettingsClient,
-    serverSettingsOpen: serverSettingsHostId !== null,
-    openServerSettings: (hostId: string) => setServerSettingsHostId(hostId),
+    serverSettingsOpen: serverSettingsHostId !== null && !isConfiguring,
+    openServerSettings: (hostId: string) => {
+      setServerSettingsHostId(hostId);
+      setIsConfiguring(true);
+    },
     closeServerSettings: () => setServerSettingsHostId(null),
     saveServerIdentity: (identity: { name: string; color: string }) =>
       serverSettingsHostId ? updateIdentity(serverSettingsHostId, identity) : Promise.resolve(),
+    saveHostIdentity: updateIdentity,
     replaceStoredPassword,
     connectionStatus,
     hasConnected,
@@ -1034,8 +1048,6 @@ export function useTetherApp() {
     closePresentation,
     refreshPresentations,
     refreshHost,
-    desktopNavigationMode,
-    selectDesktopNavigationMode,
     inputRef,
     fontSize,
     setFontSize,

@@ -8,10 +8,13 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
+import { validateAddress } from './address';
 import type { AppColors } from './appTheme';
+import { desktopLayout } from './desktopLayout';
 import { confirmAction } from './dialog';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop } from './platform';
@@ -39,6 +42,7 @@ import { typeScale } from './type';
 
 type AdminOperation = 'password' | 'update' | 'restart' | null;
 type Message = { kind: 'success' | 'error'; text: string };
+const HOST_COLORS = ['#89b4fa', '#a6e3a1', '#fab387', '#cba6f7', '#f38ba8'] as const;
 
 export function ServerSettings({
   visible,
@@ -51,6 +55,8 @@ export function ServerSettings({
   onUnauthorized,
   onIdentitySaved,
   onPasswordChanged,
+  onConnectionSaved,
+  onRemoveHost,
 }: {
   visible: boolean;
   // Rendered as a plain screen (Hosts -> host page) rather than an overlay.
@@ -64,9 +70,16 @@ export function ServerSettings({
   onUnauthorized: () => void;
   onIdentitySaved: (identity: ServerConfig['identity']) => void;
   onPasswordChanged: (password: string) => Promise<void>;
+  onConnectionSaved: (
+    changes: Pick<HostProfile, 'host' | 'port'>,
+    replacementPassword?: string,
+  ) => Promise<void>;
+  onRemoveHost: () => Promise<void>;
 }) {
   const { theme } = useAppTheme();
-  const styles = createStyles(theme.colors);
+  const { width } = useWindowDimensions();
+  const desktopUi = desktopLayout(isDesktop, width) === 'desktop';
+  const styles = createStyles(theme.colors, desktopUi);
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [draft, setDraft] = useState<ServerSettingsDraft | null>(null);
   const [loading, setLoading] = useState(false);
@@ -78,6 +91,15 @@ export function ServerSettings({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [adminBusy, setAdminBusy] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
+  const [connectionHost, setConnectionHost] = useState(host?.host ?? '');
+  const [connectionPort, setConnectionPort] = useState(host?.port ?? '8085');
+  const [replacementPassword, setReplacementPassword] = useState('');
+
+  useEffect(() => {
+    setConnectionHost(host?.host ?? '');
+    setConnectionPort(host?.port ?? '8085');
+    setReplacementPassword('');
+  }, [host]);
 
   useEffect(() => {
     if (!visible || !client || health === 'unreachable') return;
@@ -109,6 +131,12 @@ export function ServerSettings({
     [draft],
   );
   const hasValidationErrors = Object.keys(validationErrors).length > 0;
+  const connectionDirty =
+    !!host &&
+    (connectionHost !== host.host ||
+      connectionPort !== host.port ||
+      replacementPassword.length > 0);
+  const connectionValidation = validateAddress(connectionHost, connectionPort);
   const set = <K extends keyof ServerSettingsDraft>(key: K, value: ServerSettingsDraft[K]) =>
     setDraft((current) => (current ? { ...current, [key]: value } : current));
   const close = async () => {
@@ -144,6 +172,41 @@ export function ServerSettings({
     } finally {
       setSaving(false);
     }
+  };
+  const saveConnection = async () => {
+    if (!connectionDirty || !connectionValidation.ok) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await onConnectionSaved(
+        { host: connectionHost.trim(), port: connectionPort.trim() },
+        replacementPassword || undefined,
+      );
+      setReplacementPassword('');
+      setMessage({ kind: 'success', text: 'Connection saved.' });
+    } catch (error) {
+      setMessage({
+        kind: 'error',
+        text: error instanceof Error ? error.message : 'Could not save the connection.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const removeHost = async () => {
+    if (
+      !(await confirmAction(
+        'Remove this host?',
+        'Its saved password and cached sessions will be cleared.',
+        {
+          confirmLabel: 'Remove',
+          destructive: true,
+        },
+      ))
+    )
+      return;
+    await onRemoveHost();
+    onClose();
   };
   const sendTest = async () => {
     if (!config || !draft || !client) return;
@@ -214,14 +277,38 @@ export function ServerSettings({
 
   if (inline && !visible) return null;
 
+  const connectionSection = (
+    <Section title="Connection">
+      <Field label="Address" value={connectionHost} onChangeText={setConnectionHost} />
+      <Field label="Port" value={connectionPort} numeric onChangeText={setConnectionPort} />
+      <Field
+        label="Replace saved password"
+        value={replacementPassword}
+        secure
+        onChangeText={setReplacementPassword}
+      />
+      {!connectionValidation.ok && <Text style={styles.error}>{connectionValidation.reason}</Text>}
+      <Button
+        label={connectionDirty ? 'Save connection' : 'Connection saved'}
+        onPress={() => void saveConnection()}
+        disabled={!connectionDirty || !connectionValidation.ok || saving}
+      />
+    </Section>
+  );
+  const removeHostButton = (
+    <Button label="Remove this host" onPress={() => void removeHost()} tone="danger" />
+  );
+
   const body = (
-    <View style={[styles.backdrop, (inline || !isDesktop) && styles.mobileBackdrop]}>
+    <View
+      style={[styles.backdrop, inline && desktopUi ? styles.inlineBackdrop : styles.mobileBackdrop]}
+    >
       <View style={[styles.panel, inline && styles.inlinePanel]}>
         <View style={[styles.header, { borderLeftColor: host?.color ?? theme.colors.accent }]}>
           <View>
-            <Text style={styles.title}>Server settings</Text>
+            <Text style={styles.title}>{host?.name ?? 'Host settings'}</Text>
             <Text style={styles.subTitle}>
-              {host?.name ?? 'Server'}
+              {host ? `${host.host}:${host.port}` : 'Server'}
               {version ? ` · ${version}` : ''}
             </Text>
           </View>
@@ -229,28 +316,46 @@ export function ServerSettings({
             style={styles.closeButton}
             onPress={() => void close()}
             accessibilityRole="button"
-            accessibilityLabel="Close server settings"
+            accessibilityLabel={inline ? 'Back to hosts' : 'Close server settings'}
           >
             <Text style={styles.action}>Close</Text>
           </TouchableOpacity>
         </View>
         {health === 'unauthorized' ? (
-          <View style={styles.state}>
-            <Text style={styles.error}>This host needs its password again.</Text>
-            <Button label="Enter password" onPress={onUnauthorized} />
-          </View>
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            {connectionSection}
+            <View style={styles.state}>
+              <Text style={styles.error}>This host needs its password again.</Text>
+              <Button label="Enter password" onPress={onUnauthorized} />
+            </View>
+            <View style={styles.maintenance}>
+              <View style={styles.divider} />
+              {removeHostButton}
+            </View>
+          </ScrollView>
         ) : health === 'unreachable' ? (
-          <View style={styles.state}>
-            <Text style={styles.error}>Host unreachable. Last-known settings are read-only.</Text>
-            <Button label="Retry" onPress={onRetry} />
-          </View>
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            {connectionSection}
+            <View style={styles.state}>
+              <Text style={styles.error}>Host unreachable. Last-known settings are read-only.</Text>
+              <Button label="Retry" onPress={onRetry} />
+            </View>
+            <View style={styles.maintenance}>
+              <View style={styles.divider} />
+              {removeHostButton}
+            </View>
+          </ScrollView>
         ) : loading && !draft ? (
-          <View style={styles.state}>
-            <ActivityIndicator color={theme.colors.accent} />
-          </View>
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            {connectionSection}
+            <View style={styles.state}>
+              <ActivityIndicator color={theme.colors.accent} />
+            </View>
+          </ScrollView>
         ) : draft ? (
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            <Section title="This server">
+            {connectionSection}
+            <Section title="Name & colour">
               <Field
                 label="Name"
                 value={draft.identity.name}
@@ -258,12 +363,10 @@ export function ServerSettings({
                 error={validationErrors.identityName}
                 onChangeText={(name) => set('identity', { ...draft.identity, name })}
               />
-              <Field
-                label="Color"
+              <ColorSwatches
                 value={draft.identity.color}
-                editable={!readOnly}
-                error={validationErrors.identityColor}
-                onChangeText={(color) => set('identity', { ...draft.identity, color })}
+                disabled={readOnly}
+                onChange={(color) => set('identity', { ...draft.identity, color })}
               />
             </Section>
             <Section title="Notifications">
@@ -341,7 +444,7 @@ export function ServerSettings({
                 disabled={readOnly}
               />
             </Section>
-            <Section title="Session defaults">
+            <Section title="Sessions">
               <Text style={styles.hint}>Changes apply to newly started sessions.</Text>
               <Field
                 label="Default shell"
@@ -388,6 +491,7 @@ export function ServerSettings({
                 />
                 <Button label="Check for update" onPress={() => setAdmin('update')} tone="danger" />
                 <Button label="Restart server" onPress={() => setAdmin('restart')} tone="danger" />
+                {removeHostButton}
               </Section>
             </View>
             {message && (
@@ -466,8 +570,8 @@ export function ServerSettings({
   return (
     <Modal
       visible={visible}
-      animationType={isDesktop ? 'fade' : 'slide'}
-      transparent={isDesktop}
+      animationType={desktopUi ? 'fade' : 'slide'}
+      transparent={desktopUi}
       onRequestClose={() => void close()}
     >
       {body}
@@ -543,6 +647,54 @@ function Field({
     </View>
   );
 }
+function ColorSwatches({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { theme } = useAppTheme();
+  return (
+    <View>
+      <Text style={[typeScale.caption, { color: theme.colors.textMuted, marginBottom: 6 }]}>
+        Colour
+      </Text>
+      <View style={{ flexDirection: 'row', gap: 4 }}>
+        {HOST_COLORS.map((color, index) => (
+          <TouchableOpacity
+            key={color}
+            onPress={() => onChange(color)}
+            disabled={disabled}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: value === color, disabled }}
+            accessibilityLabel={`Host colour ${index + 1}`}
+            style={{
+              width: MIN_TOUCH_TARGET,
+              height: MIN_TOUCH_TARGET,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: disabled ? 0.55 : 1,
+            }}
+          >
+            <View
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: 9,
+                backgroundColor: color,
+                borderWidth: value === color ? 2 : 0,
+                borderColor: theme.colors.text,
+              }}
+            />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
 function Toggle({
   label,
   value,
@@ -611,7 +763,7 @@ function Button({
     </TouchableOpacity>
   );
 }
-function createStyles(c: AppColors) {
+function createStyles(c: AppColors, desktopUi: boolean) {
   return StyleSheet.create({
     backdrop: {
       flex: 1,
@@ -622,13 +774,28 @@ function createStyles(c: AppColors) {
     mobileBackdrop: { backgroundColor: c.background },
     // As a screen the panel owns the viewport, so it needs a real height for
     // the scrolling body to size against.
-    inlinePanel: { width: '100%', flex: 1, maxHeight: '100%', borderRadius: 0 },
+    // Desktop: a centered page at a readable measure. Mobile keeps the
+    // full-bleed screen.
+    inlinePanel: desktopUi
+      ? {
+          width: 720,
+          maxWidth: '100%',
+          flex: 1,
+          minHeight: 0,
+          maxHeight: '100%',
+          borderRadius: 0,
+        }
+      : { width: '100%', flex: 1, maxHeight: '100%', borderRadius: 0 },
+    inlineBackdrop: desktopUi
+      ? { backgroundColor: c.background, justifyContent: 'flex-start', alignItems: 'center' }
+      : {},
     panel: {
-      width: isDesktop ? 580 : '100%',
+      width: desktopUi ? 580 : '100%',
+      maxWidth: '100%',
       maxHeight: '100%',
-      flex: isDesktop ? 0 : 1,
+      flex: desktopUi ? 0 : 1,
       backgroundColor: c.background,
-      borderRadius: isDesktop ? SURFACE_RADIUS.panel : 0,
+      borderRadius: desktopUi ? SURFACE_RADIUS.panel : 0,
       overflow: 'hidden',
     },
     header: {
