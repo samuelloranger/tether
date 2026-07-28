@@ -16,6 +16,7 @@ import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop, isMacDesktop } from './platform';
 import { createStyles, MONO } from './styles';
 import TitleBar from './TitleBar';
+import type { HostHealthStatus } from './tether/hostHealth';
 import type { HostProfile } from './tether/hostStore';
 
 export type SetupMode = 'unknown' | 'create' | 'enter';
@@ -52,6 +53,7 @@ export function ConfigScreen({
   onUpdateHost,
   onReorderHosts,
   onServerSettings,
+  healthByHost,
 }: {
   serverIp: string;
   setServerIp: (t: string) => void;
@@ -76,6 +78,7 @@ export function ConfigScreen({
   onUpdateHost?: (hostId: string, changes: Partial<Omit<HostProfile, 'id' | 'order'>>) => void;
   onReorderHosts?: (ids: string[]) => void;
   onServerSettings?: (hostId: string) => void;
+  healthByHost?: Record<string, HostHealthStatus>;
 }) {
   const { theme } = useAppTheme();
   const shared = createStyles(theme.colors);
@@ -97,31 +100,23 @@ export function ConfigScreen({
       </View>
     );
   }
-  if (
-    hostsOpen &&
-    hosts &&
-    onAddHost &&
-    onEditHost &&
-    onRemoveHost &&
-    onUpdateHost &&
-    onReorderHosts
-  ) {
+  if (hostsOpen && hosts && onAddHost && onReorderHosts) {
     return (
       <HostsScreen
         hosts={hosts}
+        health={healthByHost}
         onBack={() => setHostsOpen(false)}
         onAdd={() => {
           setHostsOpen(false);
           onAddHost();
         }}
-        onEdit={(id) => {
+        // One destination per host. The drawer gear lands here too, so the
+        // ambiguity that left this screen unreachable cannot come back.
+        onOpen={(id) => {
           setHostsOpen(false);
-          onEditHost(id);
+          onServerSettings?.(id);
         }}
-        onRemove={onRemoveHost}
-        onUpdate={onUpdateHost}
         onReorder={onReorderHosts}
-        onServerSettings={onServerSettings}
       />
     );
   }
