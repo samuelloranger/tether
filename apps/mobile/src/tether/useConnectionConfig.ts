@@ -10,7 +10,7 @@ import {
   setPassword as persistPassword,
 } from '../secureConfig';
 import { createHostClient } from './hostClient';
-import { createHostStore, type HostProfile } from './hostStore';
+import { createHostStore, type HostProfile, type HostStore } from './hostStore';
 
 const KEY_ACTIVE_HOST = 'tether_active_host';
 type TestStatus =
@@ -19,7 +19,7 @@ type TestStatus =
   | { kind: 'ok' }
   | { kind: 'error'; msg: string };
 
-export function useConnectionConfig() {
+export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {}) {
   const [serverIp, setServerIp] = useState('');
   const [port, setPort] = useState('8085');
   const [password, setPassword] = useState('');
@@ -40,16 +40,17 @@ export function useConnectionConfig() {
     color: string;
   } | null>(null);
   const hostStoreRef = useRef(
-    createHostStore({
-      storage: AsyncStorage,
-      secrets: {
-        get: getPassword,
-        set: persistPassword,
-        clear: clearPassword,
-        getLegacy: getLegacyPassword,
-        clearLegacy: clearLegacyPassword,
-      },
-    }),
+    hostStore ??
+      createHostStore({
+        storage: AsyncStorage,
+        secrets: {
+          get: getPassword,
+          set: persistPassword,
+          clear: clearPassword,
+          getLegacy: getLegacyPassword,
+          clearLegacy: clearLegacyPassword,
+        },
+      }),
   );
   const lastConnectedRef = useRef({ ip: '', port: '8085' });
 
