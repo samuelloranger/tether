@@ -7,7 +7,7 @@ const attempts = new Map<string, number[]>();
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 60_000;
 
-function allowed(client: string, now = Date.now()): boolean {
+export function allowAdminRequest(client: string, now = Date.now()): boolean {
   const recent = (attempts.get(client) ?? []).filter((at) => now - at < WINDOW_MS);
   if (recent.length >= MAX_ATTEMPTS) return false;
   recent.push(now);
@@ -16,7 +16,7 @@ function allowed(client: string, now = Date.now()): boolean {
 }
 
 export async function requireCurrentPassword(current: unknown, client: string): Promise<boolean> {
-  if (!allowed(client) || typeof current !== 'string') return false;
+  if (!allowAdminRequest(client) || typeof current !== 'string') return false;
   return verifyPassword(current);
 }
 

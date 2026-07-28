@@ -20,6 +20,16 @@ export interface NtfyPayload {
   click: string;
 }
 
+export function buildTestNotification(): NtfyPayload {
+  return {
+    topic: '',
+    title: 'Tether test notification',
+    message: 'Notifications from this Tether server are working.',
+    tags: ['tether'],
+    click: 'tether://',
+  };
+}
+
 export function buildNotification(
   event: NotificationEvent,
   ctx: NotificationContext,
@@ -47,11 +57,7 @@ export function buildNotification(
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-export async function send(
-  payload: NtfyPayload,
-  cfg: Config,
-  fetcher: Fetch = fetch,
-): Promise<void> {
+async function deliver(payload: NtfyPayload, cfg: Config, fetcher: Fetch = fetch): Promise<void> {
   const url = `${cfg.notify.url.replace(/\/+$/, '')}/${encodeURIComponent(payload.topic)}`;
   const post = () =>
     fetcher(url, {
@@ -67,14 +73,25 @@ export async function send(
     const first = await post();
     if (!first.ok) throw new Error(`ntfy returned ${first.status}`);
   } catch (error) {
-    try {
-      const retry = await post();
-      if (!retry.ok) throw new Error(`ntfy returned ${retry.status}`);
-    } catch (retryError) {
-      console.warn(
-        'Notification delivery failed:',
-        retryError instanceof Error ? retryError.message : error,
-      );
-    }
+    const retry = await post();
+    if (!retry.ok) throw new Error(`ntfy returned ${retry.status}`);
   }
+}
+
+export async function send(
+  payload: NtfyPayload,
+  cfg: Config,
+  fetcher: Fetch = fetch,
+): Promise<void> {
+  try {
+    await deliver(payload, cfg, fetcher);
+  } catch (error) {
+    console.warn('Notification delivery failed:', error instanceof Error ? error.message : error);
+  }
+}
+
+export async function sendTestNotification(cfg: Config, fetcher: Fetch = fetch): Promise<void> {
+  if (!cfg.notify.topic) throw new Error('Notification topic is required');
+  const payload = { ...buildTestNotification(), topic: cfg.notify.topic };
+  await deliver(payload, cfg, fetcher);
 }

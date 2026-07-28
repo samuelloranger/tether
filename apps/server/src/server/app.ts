@@ -5,13 +5,14 @@ import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import {
+  allowAdminRequest,
   changePassword,
   requireCurrentPassword,
   scheduleAdminCommand,
   updateTargetVersion,
 } from './admin';
 import { authMiddleware } from './auth';
-import { patchConfig, redactConfig } from './config';
+import { configSchema, getConfig, patchConfig, redactConfig } from './config';
 import {
   getAuthHash,
   getLogs,
@@ -50,6 +51,7 @@ import { getActivity } from './sessionActivity';
 import { autoTitle, getOscTitle } from './sessionTitle';
 import { resolveUploadPath } from './upload';
 import { readWorkspaceFile, WorkspaceFileError } from './workspaceFile';
+import { sendTestNotification } from './notifier';
 
 const app = new Hono();
 const presentations = new PresentationRegistry();
@@ -223,6 +225,23 @@ app.post('/api/admin/restart', async (c) => {
   console.log(`Admin restart requested at ${new Date().toISOString()}`);
   scheduleAdminCommand('restart');
   return c.json({ ok: true });
+});
+
+app.post('/api/admin/test-notification', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!allowAdminRequest(clientKey(c))) {
+    return c.json({ ok: false, error: 'rate limited' }, 429);
+  }
+  const result = configSchema.pick({ notify: true }).partial().strict().safeParse(body);
+  if (!result.success) return c.json({ ok: false, error: result.error.message }, 400);
+  try {
+    const current = getConfig();
+    const config = { ...current, notify: { ...current.notify, ...result.data.notify } };
+    await sendTestNotification(config);
+    return c.json({ ok: true });
+  } catch (error) {
+    return c.json({ ok: false, error: error instanceof Error ? error.message : 'notification failed' }, 502);
+  }
 });
 
 // --- HTTP API Routes ---
