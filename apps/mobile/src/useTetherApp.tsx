@@ -4,75 +4,41 @@ import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400R
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Linking, type TextInput } from 'react-native';
+import { Linking, type TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
-import { newlyWaiting, type SessionActivity } from './activity';
-import { httpBase, validateAddress, wsUrl } from './address';
 import { readClipboard, writeClipboard } from './clipboard';
-import { shouldForwardToTerminal } from './desktopFocusGuard';
-import { COPY, keyToBytes, PASTE } from './desktopKeys';
-import {
-  DEFAULT_DESKTOP_NAVIGATION_MODE,
-  DESKTOP_NAVIGATION_STORAGE_KEY,
-  type DesktopNavigationMode,
-  parseDesktopNavigationMode,
-} from './desktopNavigation';
-import { ensureNotificationPermission, notify as sendNativeNotification } from './desktopNotify';
-import {
-  fetchUpdate,
-  installUpdate,
-  openExternalUrl,
-  openReleasesPage,
-  type PendingUpdate,
-} from './desktopUpdate';
+import { createDeepLinkHandler, listenForDeepLinks } from './deepLink';
+import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
-import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
-import { applyBackspaceStreak, applyCtrlToKey, EMPTY_STREAK } from './input';
 import type { LinkTarget } from './links';
-import { isDesktop, isMacDesktop } from './platform';
-import { type Presentation, pickAutoSelectPreview } from './presentations';
-import type { PtyInputSource } from './ptyInput';
-import { resumeAction } from './resume';
-import type { DrawerSession } from './SessionDrawer';
-import { authHeaders, getPassword, setPassword as persistPassword } from './secureConfig';
-import { nextTermId, SessionCache, type SessionEntry } from './sessionCache';
+import { isDesktop, isTauri } from './platform';
 import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
-import type { TerminalViewHandle } from './TerminalView.types';
 import { type RenderRow, setTheme } from './terminal';
-import { TerminalEngine } from './terminalEngine';
-import { OutputBatcher } from './terminalRendererProtocol';
-import { openTerminalSocket, type TerminalSocket } from './wsTransport';
+import type { HostClient } from './tether/hostClient';
+import type { GitLogEntry } from './tether/types';
+import { useAppPreferences } from './tether/useAppPreferences';
+import { useConnectionConfig } from './tether/useConnectionConfig';
+import { useDesktopEffects } from './tether/useDesktopEffects';
+import { useDesktopUpdater } from './tether/useDesktopUpdater';
+import { usePresentations } from './tether/usePresentations';
+import { useTerminalInput } from './tether/useTerminalInput';
+import { useTerminalSessions } from './tether/useTerminalSessions';
+import { useTerminalUiState } from './tether/useTerminalUiState';
+import { useTerminalViewport } from './tether/useTerminalViewport';
 
 // Constants for async storage keys
-const KEY_SERVER_IP = 'tether_server_ip';
-const KEY_PORT = 'tether_port';
-const KEY_SESSION_ID = 'tether_session_id';
-const KEY_FONT = 'tether_font_size';
-const KEY_SNIPPETS = 'tether_snippets';
-const KEY_MONO_FONT = 'tether_mono_font';
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
-const KEY_MOUSE_ENABLED = 'tether_mouse_enabled';
-const KEY_NOTIFICATIONS_ENABLED = 'tether_notifications_enabled';
 
-export interface GitLogEntry {
-  sha: string;
-  shortSha: string;
-  author: string;
-  date: string;
-  subject: string;
-}
+export type { GitLogEntry } from './tether/types';
 
 // Fetches raw image bytes with the auth header <Image> can't attach itself,
 // and hands back a data URI so the same code path works native and web.
-async function fetchDiffImageUri(
-  url: string,
-  headers: Record<string, string>,
-): Promise<string | null> {
-  const res = await fetch(url, { headers });
+async function fetchDiffImageUri(client: HostClient, path: string): Promise<string | null> {
+  const res = await client.get(path);
   if (!res.ok) return null;
   const blob = await res.blob();
   return new Promise((resolve, reject) => {
@@ -93,123 +59,109 @@ export function useTetherApp() {
   const fontsLoaded = fontsReady || !!fontError;
   const insets = useSafeAreaInsets();
   const { theme } = useAppTheme();
+  const connection = useConnectionConfig();
+  const {
+    serverIp,
+    setServerIp,
+    port,
+    setPort,
+    password,
+    setPassword,
+    passwordRef,
+    setupMode,
+    setSetupMode,
+    confirmPassword,
+    setConfirmPassword,
+    testStatus,
+    setTestStatus,
+    isConfiguring,
+    setIsConfiguring,
+    ready,
+    activeHostId: configuredActiveHostId,
+    profiles,
+    clientFor,
+    storeError,
+    loadProfiles,
+    openAddHost,
+    openEditHost,
+    activateHost,
+    removeHost: removeConfiguredHost,
+    updateProfile,
+    reorderHosts,
+    updateIdentity,
+    replaceStoredPassword,
+    refreshIdentity,
+    client: connectionClient,
+    testConnection,
+    saveConfig: saveConnectionConfig,
+  } = connection;
+  const {
+    fontSize,
+    setFontSize,
+    fontFamily,
+    changeFontFamily,
+    lineHeight,
+    changeFontSize,
+    mouseEnabled,
+    mouseEnabledRef,
+    toggleMouseEnabled,
+    notificationsEnabled,
+    notificationsEnabledRef,
+    toggleNotificationsEnabled,
+    testNotification,
+  } = useTerminalViewport();
+  const {
+    ctxMenu,
+    setCtxMenu,
+    utilityPage,
+    setUtilityPage,
+    selectionViewOpen,
+    setSelectionViewOpen,
+    menuOpen,
+    setMenuOpen,
+    renameModalOpen,
+    setRenameModalOpen,
+    renameText,
+    setRenameText,
+    appearanceModalOpen,
+    setAppearanceModalOpen,
+    searchQuery,
+    setSearchQuery,
+    searchInputRef,
+    snippetsModalOpen,
+    setSnippetsModalOpen,
+    snippetDraft,
+    setSnippetDraft,
+    drawerOpen,
+    setDrawerOpen,
+  } = useTerminalUiState();
+  const {
+    updateInfo,
+    setUpdateInfo,
+    pendingUpdate,
+    updateProgress,
+    setUpdateProgress,
+    updating,
+    setUpdating,
+    disposePending,
+    checkForUpdatesManual,
+    startUpdate,
+    downloadUpdate,
+    dismissUpdate,
+  } = useDesktopUpdater();
 
-  // Connection states
-  const [serverIp, setServerIp] = useState('192.168.50.30');
-  const [port, setPort] = useState('8085');
-  const [password, setPassword] = useState('');
-  const passwordRef = useRef('');
-  useEffect(() => {
-    passwordRef.current = password;
-  }, [password]);
-  // First-run pairing: 'unknown' until we probe /api/status; 'create' = server has
-  // no password yet (TOFU set); 'enter' = server already paired.
-  const [setupMode, setSetupMode] = useState<'unknown' | 'create' | 'enter'>('unknown');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [testStatus, setTestStatus] = useState<
-    { kind: 'idle' } | { kind: 'testing' } | { kind: 'ok' } | { kind: 'error'; msg: string }
-  >({ kind: 'idle' });
-
-  // UI states
-  const [isConfiguring, setIsConfiguring] = useState(true);
-  // Tracks whether we've ever connected — reopening Settings must not tear the
-  // socket down; only an actual address/port change (in saveConfig) reconnects it.
-  const [ready, setReady] = useState(false);
-  const readyRef = useRef(false);
-  const lastConnectedRef = useRef({ ip: serverIp, port });
-  const [connectionStatus, setConnectionStatus] = useState<
-    'connecting' | 'connected' | 'disconnected' | 'auth-failed'
-  >('disconnected');
-  // Mirror for use inside long-lived WS handlers (onClose) that would otherwise
-  // capture a stale connectionStatus and clobber an auth-failed verdict.
-  const connectionStatusRef = useRef(connectionStatus);
-  connectionStatusRef.current = connectionStatus;
-  // Distinguishes a first-ever connect ("Connecting…") from a dropped-and-retrying
-  // socket ("Reconnecting…") so the banner never overclaims on the very first try.
-  const hasConnectedRef = useRef(false);
   const [screen, setScreen] = useState<RenderRow[]>([]);
-  const backspaceStreakRef = useRef(EMPTY_STREAK);
-  // User kill switch for mouse forwarding (default on). When off, gestures behave
-  // as if the app never enabled mouse reporting even while it has.
-  const [mouseEnabled, setMouseEnabled] = useState(true);
-  const mouseEnabledRef = useRef(true); // stable mirror for gesture handlers
-  // Desktop OS notifications on/off (user preference, persisted). The ref is the
-  // stable mirror read by maybeNotify inside the ws handler.
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const notificationsEnabledRef = useRef(true);
-  // Desktop right-click menu anchor (null when closed).
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  // Desktop self-update modal: version info when an update is pending, live
-  // download progress while installing.
-  const [updateInfo, setUpdateInfo] = useState<{
-    version: string;
-    current: string;
-    canSelfInstall: boolean;
-  } | null>(null);
-  const pendingUpdate = useRef<PendingUpdate | null>(null);
-  const [updateProgress, setUpdateProgress] = useState<{ done: number; total: number } | null>(
-    null,
-  );
-  const [updating, setUpdating] = useState(false);
-  // The armed Ctrl modifier is mirrored in a ref because sendKey both reads and
-  // consumes it. Reading React state instead means two keys dispatched in the
-  // same tick (autorepeat, a burst of onData, the D-pad's 60ms repeat) both see
-  // it armed and both get rewritten — the disarm has not re-rendered yet.
-  const [ctrlArmed, setCtrlArmedState] = useState(false);
-  const ctrlArmedRef = useRef(false);
-  const setCtrlArmed = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
-    const value = typeof next === 'function' ? next(ctrlArmedRef.current) : next;
-    ctrlArmedRef.current = value;
-    setCtrlArmedState(value);
-  }, []);
-  // Utility-bar page lives here, not in UtilityBar: the bar unmounts whenever
-  // the terminal is hidden or a session switch remounts it, and a local
-  // useState would silently snap back to page 0 every time.
-  const [utilityPage, setUtilityPage] = useState(0);
-  const [selectionViewOpen, setSelectionViewOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [renameModalOpen, setRenameModalOpen] = useState(false);
-  const [renameText, setRenameText] = useState('');
-  const [appearanceModalOpen, setAppearanceModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const searchInputRef = useRef<TextInput | null>(null);
-  const [snippets, setSnippets] = useState<string[]>([]);
-  const [snippetsModalOpen, setSnippetsModalOpen] = useState(false);
-  const [snippetDraft, setSnippetDraft] = useState('');
+  const [deepLinkNotice, setDeepLinkNotice] = useState<string | null>(null);
+  const [serverSettingsHostId, setServerSettingsHostId] = useState<string | null>(null);
+  const serverSettingsHost =
+    profiles?.find((profile) => profile.id === serverSettingsHostId) ?? null;
+  const serverSettingsClient = serverSettingsHost ? clientFor(serverSettingsHost) : null;
+  const profilesRef = useRef(profiles);
+  profilesRef.current = profiles;
 
-  // Multi-session state
-  const disconnectRef = useRef<(id: string) => void>(() => {});
-  const cache = useRef(new SessionCache(3, (id) => disconnectRef.current(id))).current;
-  const [activeId, setActiveId] = useState('term-1');
-  const activeIdRef = useRef('term-1'); // for stale-closure-free access in ws handlers
-  const terminalViewRef = useRef<TerminalViewHandle | null>(null);
-  const terminalSelectionRef = useRef('');
-  const rendererResizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const outputBatcherRef = useRef<OutputBatcher | null>(null);
-  if (!outputBatcherRef.current) {
-    outputBatcherRef.current = new OutputBatcher(
-      () => activeIdRef.current,
-      (data) => terminalViewRef.current?.write(data),
-      (flush) => requestAnimationFrame(flush),
-    );
-  }
-  const outputBatcher = outputBatcherRef.current;
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
-  // Last-seen activity per session, so waiting-notifications fire only on the
-  // edge into `waiting` (not on every 4s poll while it stays waiting).
-  const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
-  // Real OS window focus (distinct from the visibilitychange listener, which
-  // only catches minimize/hide, not "visible but alt-tabbed away"). Declared
-  // here so the ws message handler can gate active-tab notifications on it.
-  const windowFocusedRef = useRef(true);
-  const [presentations, setPresentations] = useState<Presentation[]>([]);
-  const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
-  const [, setGitSummaryVersion] = useState(0);
-  const [, setTerminalMetadataVersion] = useState(0);
   const [diffSelectedPath, setDiffSelectedPath] = useState<string | null>(null);
   const [diffText, setDiffText] = useState<string | null>(null);
   const [diffTruncated, setDiffTruncated] = useState(false);
@@ -229,565 +181,180 @@ export function useTetherApp() {
   const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(
     null,
   );
-  const seenPresentationIds = useRef(new Set<string>());
-  const presentationsPrimed = useRef(false);
-  const [desktopNavigationMode, setDesktopNavigationMode] = useState<DesktopNavigationMode>(
-    DEFAULT_DESKTOP_NAVIGATION_MODE,
-  );
+
+  const {
+    activeId,
+    activeHostId,
+    activeClient,
+    connectionStatus,
+    hasConnected,
+    drawerSessions,
+    healthByHost,
+    terminalViewRef,
+    entryFor,
+    getSessionEntry,
+    getActiveSessionId,
+    getTerminalSelection,
+    wsSend,
+    hydrateRenderer,
+    onRendererResize,
+    onRendererSelection,
+    resetTerminal,
+    switchTo: switchTerminal,
+    newTerminal: createTerminal,
+    killActiveOr,
+    refreshSessions,
+    refreshHost,
+    resetHostHealth,
+    removeHost: removeHostSessions,
+    resetForEndpointChange,
+    restartActiveSession,
+    markAuthFailed,
+    refreshSocketActivity,
+    setWindowFocused,
+    isWindowFocused,
+  } = useTerminalSessions({
+    client: connectionClient,
+    profiles: profiles ?? [],
+    clientFor,
+    onReachable: refreshIdentity,
+    ready,
+    isConfiguring,
+    theme,
+    fontFamily,
+    fontSize,
+    notificationsEnabledRef,
+    onClearView: () => setFileView(null),
+    onClearPresentation: () => setActivePresentationId(null),
+    onCloseDrawer: () => setDrawerOpen(false),
+  });
+  const {
+    presentations,
+    activePresentationId,
+    setActivePresentationId,
+    refreshPresentations,
+    closePresentation,
+  } = usePresentations({
+    client: activeClient,
+    isConfiguring,
+    getActiveSessionId,
+    markAuthFailed,
+  });
 
   useEffect(() => {
     setTheme(theme.terminal);
   }, [theme]);
 
-  // References
-  // Per-session terminal sockets, abstracted over platform (RN WebSocket on
-  // mobile, Tauri Rust bridge on desktop — see wsTransport). Each cached
-  // session (cap 3, LRU) keeps its own entry so background tabs can stay live;
-  // `gen` invalidates the handlers of a superseded connection for that id,
-  // `open` gates sends to that id's socket.
-  type ConnState = {
-    sock: TerminalSocket | null;
-    gen: number;
-    open: boolean;
-    reconnectTimeout: any;
-    retry: number;
-    ping: any;
-    lastSeen: number;
-  };
-  const connections = useRef(new Map<string, ConnState>()).current;
-  const connState = (id: string): ConnState => {
-    let s = connections.get(id);
-    if (!s) {
-      s = {
-        sock: null,
-        gen: 0,
-        open: false,
-        reconnectTimeout: null,
-        retry: 0,
-        ping: null,
-        lastSeen: 0,
-      };
-      connections.set(id, s);
-    }
-    return s;
-  };
-
-  // Exponential backoff, capped, with jitter — so N tabs don't retry in lockstep
-  // and a downed server isn't hit at a steady rate per tab forever.
-  const backoffDelay = (attempt: number): number => {
-    const base = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
-    return base / 2 + Math.floor(Math.random() * (base / 2));
-  };
   const inputRef = useRef<TextInput | null>(null);
-
-  const [fontSize, setFontSize] = useState(11);
-  const [fontFamily, setFontFamily] = useState('FiraCode_400Regular');
-  const lineHeight = Math.round(fontSize * 1.3);
-  // The renderer reports exact fitted dimensions immediately after mount.
-  const dimsRef = useRef({ numCols: 80, numRows: 24 });
-
-  // Helper to get/create the cache entry for a given id, sized to the current grid.
-  const entryFor = (id: string): SessionEntry =>
-    cache.touch(id, () => {
-      const { numCols: cols, numRows: rows } = dimsRef.current;
-      const term = new TerminalEngine(cols || 80, rows || 24);
-      // The full xterm renderer owns user input and terminal-generated replies.
-      // Headless xterm remains the background metadata/serialization model.
-      term.onReply = null;
-      term.onClipboardWrite = (text) => {
-        // Guard like onReply: now that background tabs stay live, an OSC 52
-        // sequence arriving in a backgrounded tab must not silently overwrite
-        // the device clipboard while the user is looking at a different tab.
-        if (id === activeIdRef.current) void writeClipboard(text).catch(() => {});
-      };
-      return {
-        term,
-        sinceId: 0,
-        lastAppliedId: 0,
-        diffSummary: { files: [] },
-        lastBellCount: 0,
-        lastNotifyCount: 0,
-      };
-    });
-
-  // Send only when the socket is actually OPEN. `connectionStatus` (React state)
-  // lags the real socket state — e.g. mid-switch the new socket is CONNECTING —
-  // so guarding on it throws INVALID_STATE_ERR. readyState is the source of truth.
-  // OS notification on a new bell or desktop-notify escape (OSC 9/99/777), for
-  // any cache-resident tab. Background tabs always fire; the active tab only
-  // when the window is unfocused. Counters always advance so a suppressed edge
-  // isn't replayed on blur.
-  const maybeNotify = (id: string, ent: SessionEntry) => {
-    if (!isDesktop || !notificationsEnabledRef.current) return;
-    const isActive = id === activeIdRef.current;
-    const gated = isActive && windowFocusedRef.current; // suppress, but consume
-    const notifyFired = ent.term.notifyCount > ent.lastNotifyCount;
-    const bellFired = ent.term.bellCount > ent.lastBellCount;
-    ent.lastNotifyCount = ent.term.notifyCount;
-    ent.lastBellCount = ent.term.bellCount;
-    if (gated || (!notifyFired && !bellFired)) return;
-    const label = sessionLabel(drawerSessions.find((s) => s.id === id) ?? { id });
-    if (notifyFired) {
-      // Explicit notify wins over a co-arriving bell (e.g. iTerm2-with-bell).
-      const { title, body } = ent.term.lastNotify;
-      void sendNativeNotification(title || label, body || 'Needs your input');
-    } else {
-      void sendNativeNotification(label, 'Terminal bell');
-    }
-  };
-
-  const wsSend = (obj: unknown) => {
-    const st = connections.get(activeIdRef.current);
-    if (st?.open && st.sock) st.sock.send(JSON.stringify(obj));
-  };
-
-  const hydrateRenderer = (id = activeIdRef.current) => {
-    const ent = entryFor(id);
-    outputBatcher.clear();
-    terminalViewRef.current?.hydrate(
-      ent.term.serialize(),
-      ent.term.cols,
-      ent.term.rows,
-      { foreground: theme.terminal.fg, background: theme.terminal.bg },
-      fontFamily,
-      fontSize,
-    );
-  };
-
-  const onRendererResize = (cols: number, rows: number) => {
-    const current = dimsRef.current;
-    if (current.numCols === cols && current.numRows === rows) return;
-    dimsRef.current = { numCols: cols, numRows: rows };
-    cache.get(activeIdRef.current)?.term.resize(cols, rows);
-    if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
-    rendererResizeTimer.current = setTimeout(
-      () => {
-        wsSend({ type: 'resize', cols, rows });
-        rendererResizeTimer.current = null;
-      },
-      isDesktop ? 120 : 60,
-    );
-  };
-
-  const onRendererSelection = (text: string) => {
-    terminalSelectionRef.current = text;
-  };
-
-  useEffect(() => {
-    hydrateRenderer();
-  }, [activeId, theme, fontFamily, fontSize]);
-
-  const resetTerminal = () => {
-    const e = cache.get(activeIdRef.current);
-    if (e) {
-      e.term.reset();
-      e.sinceId = 0;
-      e.lastAppliedId = 0;
-      hydrateRenderer();
-    }
-  };
-
-  // Parse one server frame into the session's emulator. Shared by both transports.
-  const applyWsMessage = (id: string, data: string) => {
-    try {
-      const msg = JSON.parse(data);
-      const ent = cache.get(id);
-      if (!ent) return;
-      if (msg.type === 'diff' && Array.isArray(msg.summary?.files)) {
-        ent.diffSummary = { files: msg.summary.files };
-        if (id === activeIdRef.current) setGitSummaryVersion((version) => version + 1);
-      } else if (msg.type === 'output') {
-        // Dedup: the server replays logs with ids > sinceId on (re)connect.
-        // Every output frame carries an id; a frame without one is malformed and
-        // must be dropped, else it would re-write verbatim on every replay.
-        if (typeof msg.id !== 'number') return;
-        if (msg.id <= ent.lastAppliedId) return;
-        ent.lastAppliedId = msg.id;
-        ent.sinceId = msg.id;
-        const previousMetadata = [
-          ent.term.bellCount,
-          ent.term.promptReturnCount,
-          ent.term.title,
-          ent.term.cwd,
-        ] as const;
-        // Headless parsing feeds metadata/notifications; the active browser
-        // renderer receives the same bytes once per animation frame.
-        ent.term.write(msg.chunk, () => {
-          maybeNotify(id, ent);
-          if (
-            id === activeIdRef.current &&
-            (ent.term.bellCount !== previousMetadata[0] ||
-              ent.term.promptReturnCount !== previousMetadata[1] ||
-              ent.term.title !== previousMetadata[2] ||
-              ent.term.cwd !== previousMetadata[3])
-          ) {
-            setTerminalMetadataVersion((version) => version + 1);
-          }
-          outputBatcher.push(id, msg.chunk);
-        });
-      } else if (msg.type === 'exit') {
-        const code = typeof msg.exitCode === 'number' ? ` with code ${msg.exitCode}` : '';
-        const text = `\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`;
-        ent.term.write(text, () => outputBatcher.push(id, text));
-      } else if (msg.type === 'title' && typeof msg.title === 'string') {
-        // Server recomputed the session's auto title (OSC 0/2 set or cleared).
-        setDrawerSessions((prev) =>
-          prev.map((row) => (row.id === id ? { ...row, auto_title: msg.title } : row)),
-        );
-      } else if (msg.type === 'activity') {
-        const activity = msg.activity as SessionActivity;
-        setDrawerSessions((prev) =>
-          prev.map((row) => (row.id === id ? { ...row, activity } : row)),
-        );
-        notifyWaitingSessions([{ id, status: 'running', last_output_at: null, activity }]);
-      } else if (msg.type === 'reset') {
-        // Server pruned past our sinceId — replay would have a hole. Wipe and
-        // let the full replay that follows rebuild the screen from scratch.
-        ent.term.reset();
-        ent.sinceId = 0;
-        ent.lastAppliedId = 0;
-        // reset() zeroes the emulator's bell/notify counters, so the watermarks
-        // must drop too — otherwise the first post-reset notification (count 1)
-        // stays below the stale watermark and is silently swallowed.
-        ent.lastBellCount = 0;
-        ent.lastNotifyCount = 0;
-        if (id === activeIdRef.current) hydrateRenderer(id);
-      }
-    } catch (err) {
-      console.error('ws message error:', err);
-    }
-  };
-
-  // Each cached session (cap 3, LRU) keeps its own live socket instead of the
-  // app owning one global connection torn down on every tab switch. Only the
-  // active tab's connectionStatus surfaces in the titlebar; background tabs
-  // reconnect on their own (gated on still being cache-resident, not on being
-  // active) so they keep receiving output while backgrounded.
-  const connect = (id: string) => {
-    disconnect(id); // clean slate: tear down any stale entry for this id first
-    lastConnectedRef.current = { ip: serverIp, port };
-    const e = entryFor(id);
-    const st = connState(id);
-    if (id === activeIdRef.current) setConnectionStatus('connecting');
-    const url = wsUrl(serverIp, port, {
-      sessionId: id,
-      sinceId: e.sinceId,
-      cols: dimsRef.current.numCols,
-      rows: dimsRef.current.numRows,
-    });
-
-    // Each connect bumps this id's generation; a superseded socket's late
-    // callbacks are ignored (replaces the old `ws.current !== socket` check).
-    const myGen = ++st.gen;
-    const fresh = () => myGen === st.gen;
-
-    st.sock = openTerminalSocket(url, passwordRef.current, {
-      onOpen: () => {
-        if (!fresh()) return;
-        st.open = true;
-        st.retry = 0; // success resets backoff
-        if (id === activeIdRef.current) {
-          hasConnectedRef.current = true;
-          setConnectionStatus('connected');
-        }
-        // Keepalive: if no frame arrives for a while the socket is likely
-        // half-open — force a close so the reconnect path runs instead of
-        // silently dropping keystrokes into a dead pipe.
-        st.lastSeen = Date.now();
-        if (st.ping) clearInterval(st.ping);
-        st.ping = setInterval(() => {
-          if (Date.now() - st.lastSeen > 30_000) {
-            try {
-              st.sock?.close();
-            } catch {}
-          }
-        }, 15_000);
-      },
-      onMessage: (data) => {
-        st.lastSeen = Date.now();
-        if (fresh()) applyWsMessage(id, data);
-      },
-      onClose: () => {
-        if (!fresh()) return;
-        st.open = false;
-        if (st.ping) {
-          clearInterval(st.ping);
-          st.ping = null;
-        }
-        // The 4s HTTP poll is the auth authority. If it already declared the
-        // password wrong, don't overwrite that verdict and don't reconnect —
-        // reconnecting every few seconds would hammer the server forever and
-        // never succeed until the user changes the password.
-        if (connectionStatusRef.current === 'auth-failed') {
-          st.retry = 0;
-          return;
-        }
-        if (id === activeIdRef.current) setConnectionStatus('disconnected');
-        if (readyRef.current && cache.has(id)) {
-          st.reconnectTimeout = setTimeout(() => connect(id), backoffDelay(st.retry++));
-        }
-      },
-    });
-  };
-
-  const disconnect = (id: string) => {
-    const st = connections.get(id);
-    if (!st) return;
-    if (st.reconnectTimeout) {
-      clearTimeout(st.reconnectTimeout);
-      st.reconnectTimeout = null;
-    }
-    if (st.ping) {
-      clearInterval(st.ping);
-      st.ping = null;
-    }
-    st.gen++; // invalidate any in-flight handlers
-    st.open = false;
-    st.sock?.close();
-    connections.delete(id);
-    if (id === activeIdRef.current) setConnectionStatus('disconnected');
-  };
-
-  const disconnectAll = () => {
-    for (const id of Array.from(connections.keys())) disconnect(id);
-  };
-
-  disconnectRef.current = disconnect;
-
-  // Switch to a different session. Does NOT disconnect the tab being left —
-  // it keeps streaming in the background as long as it's cache-resident.
-  const switchTo = (id: string) => {
-    setDrawerOpen(false);
-    setFileView(null);
-    closeDiff();
-    if (id === activeIdRef.current) return;
-    activeIdRef.current = id;
-    setActiveId(id);
-    AsyncStorage.setItem(KEY_SESSION_ID, id);
-    entryFor(id);
-    hydrateRenderer(id);
-    const st = connections.get(id);
-    if (st?.open) {
-      setConnectionStatus('connected'); // already live — no reconnect flicker
-    } else {
-      connect(id);
-    }
-  };
-
-  const newTerminal = () => {
-    const existing = drawerSessions.map((s) => s.id);
-    setActivePresentationId(null);
-    switchTo(nextTermId(existing.length ? existing : cache.ids()));
-  };
-
-  const killActiveOr = async (id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try {
-      await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
-        body: JSON.stringify({ id }),
-      });
-    } catch {}
-    cache.delete(id);
-    disconnect(id);
-    const remaining = drawerSessions.filter((s) => s.id !== id).map((s) => s.id);
-    await refreshSessions();
-    if (id === activeIdRef.current) {
-      setActivePresentationId(null);
-      switchTo(remaining[0] ?? 'term-1');
-    }
-  };
-
-  // Keep activeIdRef synced when activeId changes (belt-and-suspenders)
-  useEffect(() => {
-    activeIdRef.current = activeId;
-  }, [activeId]);
-
-  const changeFontSize = (delta: number) => {
-    setFontSize((prev) => {
-      const next = Math.min(24, Math.max(8, prev + delta));
-      AsyncStorage.setItem(KEY_FONT, String(next));
-      return next;
-    });
-  };
-
-  const toggleMouseEnabled = () => {
-    setMouseEnabled((prev) => {
-      const next = !prev;
-      mouseEnabledRef.current = next;
-      AsyncStorage.setItem(KEY_MOUSE_ENABLED, String(next)).catch(() => {});
-      return next;
-    });
-  };
-
-  const toggleNotificationsEnabled = () => {
-    setNotificationsEnabled((prev) => {
-      const next = !prev;
-      notificationsEnabledRef.current = next;
-      AsyncStorage.setItem(KEY_NOTIFICATIONS_ENABLED, String(next)).catch(() => {});
-      return next;
-    });
-  };
-
-  // Fires straight through desktopNotify (no focus/preference gate) so the user
-  // can verify the OS notification chain in one tap.
-  const testNotification = () => {
-    void sendNativeNotification('Tether', 'Test notification — notifications are working ✅');
-  };
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    AsyncStorage.getItem(KEY_MONO_FONT)
-      .then((font) => {
-        if (font === 'FiraCode_400Regular' || font === 'JetBrainsMono_400Regular')
-          setFontFamily(font);
-      })
-      .catch(() => {});
-  }, []);
-
-  const changeFontFamily = (font: string) => {
-    if (font !== 'FiraCode_400Regular' && font !== 'JetBrainsMono_400Regular') return;
-    setFontFamily(font);
-    AsyncStorage.setItem(KEY_MONO_FONT, font);
-  };
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    AsyncStorage.getItem(DESKTOP_NAVIGATION_STORAGE_KEY)
-      .then((value) => setDesktopNavigationMode(parseDesktopNavigationMode(value)))
-      .catch(() => {});
-  }, []);
-
-  const selectDesktopNavigationMode = (mode: DesktopNavigationMode) => {
-    setDesktopNavigationMode(mode);
-    if (isDesktop) {
-      AsyncStorage.setItem(DESKTOP_NAVIGATION_STORAGE_KEY, mode).catch(() => {});
-    }
-  };
-
-  // Load persisted snippets once on mount.
-  useEffect(() => {
-    AsyncStorage.getItem(KEY_SNIPPETS)
-      .then((v) => {
-        if (!v) return;
-        try {
-          const parsed = JSON.parse(v);
-          if (Array.isArray(parsed)) setSnippets(parsed.filter((s) => typeof s === 'string'));
-        } catch {
-          // ignore malformed storage
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const persistSnippets = (next: string[]) => {
-    setSnippets(next);
-    AsyncStorage.setItem(KEY_SNIPPETS, JSON.stringify(next));
-  };
-
+  const { ctrlArmed, setCtrlArmed, sendTyped, sendKey, sendPaste, sendProgram, cursorSeq } =
+    useTerminalInput({ send: wsSend, mouseEnabledRef, getActiveSessionId, entryFor });
+  const { snippets, setSnippets, persistSnippets } = useAppPreferences();
   const addSnippet = () => {
-    const s = snippetDraft.trim();
-    if (!s) return;
-    persistSnippets([...snippets, s]);
+    const snippet = snippetDraft.trim();
+    if (!snippet) return;
+    persistSnippets([...snippets, snippet]);
     setSnippetDraft('');
   };
-
   const removeSnippet = (index: number) => {
-    persistSnippets(snippets.filter((_, i) => i !== index));
+    persistSnippets(snippets.filter((_, itemIndex) => itemIndex !== index));
   };
-
-  const sendSnippet = (s: string) => {
+  const sendSnippet = (snippet: string) => {
     setSnippetsModalOpen(false);
-    sendPaste(s);
+    sendPaste(snippet);
   };
 
-  const refreshSessions = async () => {
-    try {
-      const res = await fetch(`${httpBase(serverIp, port)}/api/sessions`, {
-        headers: authHeaders(passwordRef.current),
-      });
-      // The 4s poll doubles as auth surveillance: a 401 (e.g. server password
-      // changed) flips the UI to a distinct "Wrong password." state.
-      if (res.status === 401) {
-        setConnectionStatus('auth-failed');
-        return;
-      }
-      const rows = (await res.json()) as DrawerSession[];
-      setDrawerSessions(rows);
-      notifyWaitingSessions(rows);
-    } catch {}
+  const saveConfig = async () => {
+    const { addressChanged, wasReady } = await saveConnectionConfig();
+    if (addressChanged && wasReady) resetForEndpointChange();
+    if (configuredActiveHostId) resetHostHealth(configuredActiveHostId);
   };
-
-  // Desktop: native OS notification when a BACKGROUND session starts waiting
-  // for input (Claude Code permission prompt, y/n question, …). The active
-  // session is handled by the focus-aware emulator bell path further down.
-  const notifyWaitingSessions = (rows: DrawerSession[]) => {
-    const alerts = newlyWaiting(lastActivityRef.current, rows, activeIdRef.current);
-    for (const row of rows) lastActivityRef.current.set(row.id, row.activity);
-    if (!isDesktop) return;
-    for (const row of alerts) {
-      void sendNativeNotification(sessionLabel(row), 'Session is waiting for your input');
+  const removeHost = async (hostId: string) => {
+    removeHostSessions(hostId);
+    await removeConfiguredHost(hostId);
+  };
+  const saveHostConnection = async (
+    hostId: string,
+    changes: { host: string; port: string },
+    replacementPassword?: string,
+  ) => {
+    const current = profiles?.find((profile) => profile.id === hostId);
+    if (!current) return;
+    const endpointChanged = current.host !== changes.host || current.port !== changes.port;
+    await updateProfile(hostId, changes);
+    if (replacementPassword) await replaceStoredPassword(hostId, replacementPassword);
+    if (endpointChanged || replacementPassword) {
+      removeHostSessions(hostId);
+      resetHostHealth(hostId);
     }
   };
 
-  const refreshPresentations = async () => {
-    try {
-      const res = await fetch(`${httpBase(serverIp, port)}/api/presentations`, {
-        headers: authHeaders(passwordRef.current),
-      });
-      if (res.status === 401) {
-        setConnectionStatus('auth-failed');
-        return;
-      }
-      if (!res.ok) return;
-      const rows = (await res.json()) as Presentation[];
-      // The first successful poll after mount/reconnect just primes the seen
-      // set from whatever's already on the server — it must not treat every
-      // pre-existing preview as newly-created and hijack the active view.
-      if (!presentationsPrimed.current) {
-        presentationsPrimed.current = true;
-        seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
-        setPresentations(rows);
-        return;
-      }
-      const newPreview = pickAutoSelectPreview(
-        rows,
-        seenPresentationIds.current,
-        activeIdRef.current,
-      );
-      seenPresentationIds.current = new Set(rows.map((preview) => preview.id));
-      setPresentations(rows);
-      if (newPreview) setActivePresentationId(newPreview.id);
-      else {
-        setActivePresentationId((current) =>
-          current && !rows.some((preview) => preview.id === current) ? null : current,
-        );
-      }
-    } catch {}
+  const switchTo = (hostId: string, id: string) => {
+    closeDiff();
+    void activateHost(hostId);
+    switchTerminal(hostId, id);
+  };
+  const newTerminal = () => {
+    setActivePresentationId(null);
+    createTerminal();
   };
 
-  const selectTerminal = (id: string) => {
+  const selectTerminal = (hostId: string, id: string) => {
     setActivePresentationId(null);
-    switchTo(id);
+    switchTo(hostId, id);
   };
+
+  const selectTerminalRef = useRef(selectTerminal);
+  selectTerminalRef.current = selectTerminal;
+  const deepLinkHandlerRef = useRef<ReturnType<typeof createDeepLinkHandler> | null>(null);
+  if (!deepLinkHandlerRef.current)
+    deepLinkHandlerRef.current = createDeepLinkHandler({
+      getProfiles: () => profilesRef.current,
+      onSession: (hostId, sessionId) => selectTerminalRef.current(hostId, sessionId),
+    });
+  const handleDeepLink = useCallback((url: string) => {
+    const result = deepLinkHandlerRef.current?.handle(url);
+    if (result?.kind === 'unknown-host')
+      setDeepLinkNotice(`No saved host named “${result.identityName}”.`);
+  }, []);
+  const handleDeepLinkRef = useRef(handleDeepLink);
+  handleDeepLinkRef.current = handleDeepLink;
+  useEffect(() => {
+    let disposed = false;
+    let stopDesktopListener: (() => void) | undefined;
+    const handleUrl = (url: string) => handleDeepLinkRef.current(url);
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (url) handleUrl(url);
+      })
+      .catch(() => {});
+    const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    if (isDesktop && isTauri())
+      void import('@tauri-apps/plugin-deep-link')
+        .then(({ getCurrent, onOpenUrl }) =>
+          listenForDeepLinks({ getCurrent, onOpenUrl, onUrl: handleUrl }),
+        )
+        .then((stop) => {
+          if (disposed) stop();
+          else stopDesktopListener = stop;
+        })
+        .catch(() => {});
+    return () => {
+      disposed = true;
+      subscription.remove();
+      stopDesktopListener?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (profiles === null) return;
+    const result = deepLinkHandlerRef.current?.applyPending();
+    if (result?.kind === 'unknown-host')
+      setDeepLinkNotice(`No saved host named “${result.identityName}”.`);
+  }, [profiles]);
 
   const selectPresentation = (id: string) => {
     setFileView(null);
     closeDiff();
     setActivePresentationId(id);
-  };
-
-  const closePresentation = async (id: string) => {
-    try {
-      const res = await fetch(`${httpBase(serverIp, port)}/api/presentations/${id}`, {
-        method: 'DELETE',
-        headers: authHeaders(passwordRef.current),
-      });
-      if (!res.ok) return;
-      if (activePresentationId === id) setActivePresentationId(null);
-      await refreshPresentations();
-    } catch {}
   };
 
   // Poll the session list and presentation metadata every 4s. The session
@@ -800,7 +367,6 @@ export function useTetherApp() {
     let iv: ReturnType<typeof setInterval> | null = null;
     let hidden = false;
     const tick = () => {
-      refreshSessions();
       if (!hidden) refreshPresentations();
     };
     const start = () => {
@@ -832,284 +398,14 @@ export function useTetherApp() {
     };
   }, [isConfiguring, serverIp, port]);
 
-  // Desktop: get notification permission out of the way at startup (eager,
-  // not lazy on first trigger — product decision), independent of connection
-  // state.
+  // Connection configuration loads itself. This effect owns only the unrelated
+  // diff preference and terminal-renderer cleanup.
   useEffect(() => {
-    if (isDesktop) void ensureNotificationPermission();
+    AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
+      .then((value) => setDiffSideBySide(value === 'true'))
+      .catch(() => {});
+    return undefined;
   }, []);
-
-  // 1. Load saved config on mount
-  useEffect(() => {
-    async function loadConfig() {
-      try {
-        const [
-          savedIp,
-          savedPort,
-          savedSession,
-          savedPw,
-          savedFont,
-          ,
-          savedMouseEnabled,
-          savedNotificationsEnabled,
-        ] = await Promise.all([
-          AsyncStorage.getItem(KEY_SERVER_IP),
-          AsyncStorage.getItem(KEY_PORT),
-          AsyncStorage.getItem(KEY_SESSION_ID),
-          getPassword(),
-          AsyncStorage.getItem(KEY_FONT).catch(() => null),
-          AsyncStorage.getItem(KEY_DIFF_SIDE_BY_SIDE)
-            .then((v) => setDiffSideBySide(v === 'true'))
-            .catch(() => null),
-          AsyncStorage.getItem(KEY_MOUSE_ENABLED).catch(() => null),
-          AsyncStorage.getItem(KEY_NOTIFICATIONS_ENABLED).catch(() => null),
-        ]);
-
-        if (savedIp) setServerIp(savedIp);
-        if (savedPort) setPort(savedPort);
-        if (savedSession) {
-          setActiveId(savedSession);
-          activeIdRef.current = savedSession;
-        }
-        if (savedPw) {
-          setPassword(savedPw);
-          passwordRef.current = savedPw;
-        }
-        const fontSize = Number(savedFont);
-        if (Number.isFinite(fontSize) && fontSize >= 8 && fontSize <= 24) setFontSize(fontSize);
-        if (savedMouseEnabled === 'false') {
-          setMouseEnabled(false);
-          mouseEnabledRef.current = false;
-        }
-        if (savedNotificationsEnabled === 'false') {
-          setNotificationsEnabled(false);
-          notificationsEnabledRef.current = false;
-        }
-        // Auto-connect only when BOTH an address AND a password are stored. An
-        // upgrading user with an address but no password stays on setup to enter
-        // the now-required password (migration path).
-        if (savedIp && savedPw) {
-          lastConnectedRef.current = { ip: savedIp, port: savedPort || port };
-          readyRef.current = true;
-          setIsConfiguring(false);
-          setReady(true);
-        }
-      } catch (e) {
-        console.error('Failed to load configuration:', e);
-      }
-    }
-
-    loadConfig();
-    return () => {
-      disconnectAll();
-      outputBatcher.clear();
-      if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
-    };
-  }, []);
-
-  // 2. Open the initial connection once the app becomes ready. Tab switches no
-  // longer touch this effect — switchTo() connects the newly-active tab itself
-  // if it isn't already live, and leaves every other resident tab's socket
-  // alone. Only unmount or an address/port change (saveConfig) tears sockets
-  // down wholesale.
-  useEffect(() => {
-    if (!ready) return;
-    connect(activeIdRef.current);
-    return () => disconnectAll();
-  }, [ready]);
-
-  // 2b. Re-establish sockets when the app comes back to the foreground. iOS
-  // suspends the JS timers and kills sockets while backgrounded, so without this
-  // a resumed app sits on "Connecting…" until an exponential backoff (up to 30s)
-  // or the 15s keepalive sweep happens to fire. See resumeAction for the cases.
-  useEffect(() => {
-    if (!ready) return;
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') return;
-      const now = Date.now();
-      for (const [id, st] of Array.from(connections)) {
-        switch (resumeAction(st, now)) {
-          case 'reconnect':
-            st.retry = 0; // resume is new information, not another failed retry
-            connect(id);
-            break;
-          case 'close':
-            try {
-              st.sock?.close(); // onClose reconnects
-            } catch {}
-            break;
-          case 'none':
-            break;
-        }
-      }
-    });
-    return () => subscription.remove();
-  }, [ready]);
-
-  // Probe the server, then either create the first password (TOFU) or validate an
-  // existing one — driving the setup screen to a testable "Reachable ✓" state.
-  const testConnection = async () => {
-    const v = validateAddress(serverIp, port);
-    if (!v.ok) {
-      setTestStatus({ kind: 'error', msg: v.reason });
-      return;
-    }
-    setTestStatus({ kind: 'testing' });
-
-    // 1. Does this server need a first-run password?
-    let needsSetup: boolean;
-    try {
-      const res = await fetch(`${httpBase(serverIp, port)}/api/status`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res.ok) throw new Error('status');
-      needsSetup = Boolean((await res.json()).needsSetup);
-    } catch {
-      setTestStatus({ kind: 'error', msg: 'Unreachable — check the host and port.' });
-      return;
-    }
-    setSetupMode(needsSetup ? 'create' : 'enter');
-
-    if (!password) {
-      setTestStatus({
-        kind: 'error',
-        msg: needsSetup ? 'Choose a password for this server.' : 'Enter the server password.',
-      });
-      return;
-    }
-
-    if (needsSetup) {
-      // 2a. Create the password (one-time TOFU set).
-      if (password !== confirmPassword) {
-        setTestStatus({ kind: 'error', msg: 'Passwords do not match.' });
-        return;
-      }
-      try {
-        const res = await fetch(`${httpBase(serverIp, port)}/api/setup`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
-          signal: AbortSignal.timeout(5000),
-        });
-        if (res.status === 409) {
-          setSetupMode('enter');
-          setTestStatus({ kind: 'error', msg: 'Already set up. Enter the existing password.' });
-          return;
-        }
-        if (!res.ok) throw new Error('setup');
-        setTestStatus({ kind: 'ok' });
-      } catch {
-        setTestStatus({ kind: 'error', msg: 'Setup failed — try again.' });
-      }
-      return;
-    }
-
-    // 2b. Validate an existing password against the authed health probe.
-    try {
-      const res = await fetch(`${httpBase(serverIp, port)}/api/health`, {
-        headers: authHeaders(password),
-        signal: AbortSignal.timeout(5000),
-      });
-      if (res.status === 401) {
-        setTestStatus({ kind: 'error', msg: 'Wrong password.' });
-        return;
-      }
-      if (!res.ok) {
-        setTestStatus({ kind: 'error', msg: `Server error (${res.status}).` });
-        return;
-      }
-      setTestStatus({ kind: 'ok' });
-    } catch {
-      setTestStatus({ kind: 'error', msg: 'Unreachable — check the host and port.' });
-    }
-  };
-
-  // 3. Command interactions
-  const saveConfig = async () => {
-    try {
-      await AsyncStorage.multiSet([
-        [KEY_SERVER_IP, serverIp],
-        [KEY_PORT, port],
-        [KEY_SESSION_ID, activeId],
-      ]);
-      await persistPassword(password);
-      const addressChanged =
-        serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port;
-      // A different server has never been connected to — reset so its first
-      // attempt shows the honest "Connecting…" (not "Reconnecting… session kept").
-      if (addressChanged) hasConnectedRef.current = false;
-      setIsConfiguring(false);
-      if (!readyRef.current) {
-        readyRef.current = true;
-        setReady(true);
-      } else if (addressChanged) {
-        // The server address changed — every resident tab's socket points at
-        // the old host. Drop them all; only the active tab reconnects
-        // immediately, the rest reconnect lazily on next visit (switchTo's
-        // connect-if-not-open fallback).
-        disconnectAll();
-        resetTerminal();
-        connect(activeIdRef.current);
-      }
-    } catch (e) {
-      void notify('Error', 'Failed to save configuration', 'error');
-    }
-  };
-
-  // The single path from anything in the app to the PTY. Every caller declares
-  // where its bytes came from, because that — not the call site — decides what
-  // happens to them:
-  //
-  //   typed   a character the user just entered (renderer keyboard)
-  //   key     a discrete key press (utility bar, D-pad, desktop key mapper)
-  //   paste   a block of text inserted wholesale (clipboard, snippet, file path)
-  //   program bytes the app generated itself (mouse reports, control sequences)
-  //
-  // Six call sites used to each decide this for themselves and two got it wrong,
-  // which is how Ctrl+C shipped twice as a literal "c". Adding an input surface
-  // now means picking a source, not re-deriving the rules.
-  const sendToPty = (source: PtyInputSource, text: string) => {
-    if (!text) return;
-    // Mouse reports are program output no matter who hands them over — xterm
-    // emits them through the same channel as typing. Treating them as typed
-    // would let a tap consume an armed Ctrl.
-    const isMouseReport = text.startsWith('\x1b[<') || text.startsWith('\x1b[M');
-    if (isMouseReport && !mouseEnabledRef.current) return;
-
-    let bytes = text;
-    if (!isMouseReport && (source === 'typed' || source === 'key')) {
-      const ctrl = applyCtrlToKey(ctrlArmedRef.current, bytes);
-      if (ctrl.consumed) setCtrlArmed(false);
-      bytes = ctrl.bytes;
-    }
-    // Hold-backspace accelerates to word delete. Only typing can build the
-    // streak, and any other deliberate input ends it — pressing a bar key or
-    // pasting means the user stopped holding Backspace, so the next delete must
-    // start over as a single character. Program bytes (mouse reports) are not
-    // user input and leave the streak alone.
-    if (source === 'typed') {
-      const tracked = applyBackspaceStreak(backspaceStreakRef.current, bytes, Date.now());
-      backspaceStreakRef.current = tracked.streak;
-      bytes = tracked.bytes;
-    } else if (source === 'key' || source === 'paste') {
-      backspaceStreakRef.current = EMPTY_STREAK;
-    }
-    wsSend({ type: 'input', text: bytes });
-  };
-
-  const sendTyped = (text: string) => sendToPty('typed', text);
-  const sendKey = (bytes: string) => sendToPty('key', bytes);
-  // Paste deliberately leaves an armed Ctrl alone: the modifier was armed for a
-  // keystroke, and swallowing it on an unrelated paste is a surprise.
-  const sendPaste = (text: string) => sendToPty('paste', text);
-  const sendProgram = (text: string) => sendToPty('program', text);
-
-  // Cursor keys (arrows/Home/End) encode as SS3 (ESC O x) when the active app has
-  // DECCKM on, else CSI (ESC [ x). Used by the mobile key bar and shared with the
-  // desktop keyboard mapper so both honour application-cursor mode.
-  const cursorSeq = (final: string) =>
-    `\x1b${cache.get(activeIdRef.current)?.term.applicationCursor ? 'O' : '['}${final}`;
-
   // Full plain-text transcript (visible screen + scrollback) for the
   // selectable view and the Copy All fallback.
   const snapshotText = (rows: RenderRow[]) =>
@@ -1117,7 +413,7 @@ export function useTetherApp() {
       .map((r) => r.runs.map((run) => run.text).join(''))
       .join('\n')
       .replace(/\n+$/, '');
-  const getFullText = () => snapshotText(entryFor(activeIdRef.current).term.getSnapshot());
+  const getFullText = () => snapshotText(entryFor(getActiveSessionId()).term.getSnapshot());
 
   // Transcript filtered to lines matching the query — memoized: the previous
   // version re-split the whole scrollback on every keystroke and every render.
@@ -1134,7 +430,7 @@ export function useTetherApp() {
   // Scrolls xterm to the nearest prompt-start row in `dir`, using the
   // start/end of the currently-known scrollback as the search origin.
   const jumpPrompt = (dir: 1 | -1) => {
-    const term = entryFor(activeIdRef.current).term;
+    const term = entryFor(getActiveSessionId()).term;
     const snapshot = term.getSnapshot();
     const from = dir === 1 ? 0 : snapshot.length - 1;
     const target = term.jumpToPrompt(from, dir);
@@ -1147,7 +443,7 @@ export function useTetherApp() {
   const openSelectionView = async () => {
     setMenuOpen(false);
     setSearchQuery('');
-    const snapshot = await entryFor(activeIdRef.current).term.getSettledSnapshot();
+    const snapshot = await entryFor(getActiveSessionId()).term.getSettledSnapshot();
     if (!snapshotText(snapshot)) return;
     setScreen(snapshot);
     setSelectionViewOpen(true);
@@ -1155,7 +451,7 @@ export function useTetherApp() {
 
   // Desktop context-menu actions.
   const copySelection = async () => {
-    const sel = terminalSelectionRef.current;
+    const sel = getTerminalSelection();
     // Fall back to the whole displayed transcript when nothing is selected.
     const text = sel || getFullText();
     if (text) await writeClipboard(text);
@@ -1186,18 +482,15 @@ export function useTetherApp() {
     file: Blob | { uri: string; name: string; type?: string },
     filename: string,
   ) => {
-    const url = `${httpBase(serverIp, port)}/api/sessions/${activeIdRef.current}/upload`;
+    const path = `/api/sessions/${getActiveSessionId()}/upload`;
+    const url = activeClient.url(path);
     try {
       let data: { ok: boolean; path?: string; error?: string };
       if (file instanceof Blob) {
         const form = new FormData();
         form.append('file', file, filename);
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: authHeaders(passwordRef.current),
-          body: form,
-        });
-        data = await res.json();
+        const res = await activeClient.post(path, { body: form });
+        data = (await res.json()) as { ok: boolean; path?: string; error?: string };
       } else {
         const { File, Paths, UploadType } = await import('expo-file-system');
         const source = new File(file.uri);
@@ -1218,7 +511,7 @@ export function useTetherApp() {
             // above (needed to dedupe concurrent uploads) — override it back
             // to the real display name the server should save under.
             parameters: { filename },
-            headers: authHeaders(passwordRef.current),
+            headers: activeClient.authHeader,
           });
           data = JSON.parse(result.body);
         } finally {
@@ -1227,9 +520,9 @@ export function useTetherApp() {
           } catch {}
         }
       }
-      if (!data.ok) throw new Error(data.error || 'upload failed');
+      if (!data.ok || !data.path) throw new Error(data.error || 'upload failed');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      sendPaste(shellQuote(data.path!));
+      sendPaste(shellQuote(data.path));
     } catch (err) {
       void notify(
         'Upload failed',
@@ -1271,183 +564,9 @@ export function useTetherApp() {
     }
     if (!text) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const e = cache.get(activeIdRef.current);
+    const e = getSessionEntry(getActiveSessionId());
     sendPaste(e?.term.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text);
   };
-
-  // Desktop: install the window drag-region CSS once (custom title bar).
-  useEffect(() => {
-    if (isDesktop) injectDragRegionStyles();
-  }, []);
-
-  // Desktop: capture the physical keyboard globally and forward keystrokes to
-  // the PTY (replacing the mobile utility bar). Skipped while a text field is
-  // focused (config form, rename/snippet/search modals) so those still type
-  // normally. Ctrl/Cmd+C copies an active selection or sends SIGINT; Ctrl/Cmd+V
-  // pastes from the clipboard.
-  useEffect(() => {
-    if (
-      !isDesktop ||
-      isConfiguring ||
-      presentations.some((preview) => preview.id === activePresentationId)
-    )
-      return;
-    // True while an IME/dead-key composition is in progress (accented Latin
-    // chars like é/ñ/ö on many layouts, or CJK candidate windows). Composition
-    // is driven by compositionstart/end, not keydown — forwarding the raw
-    // intermediate keydowns here would leak partial composition bytes to the
-    // PTY. keydown is suppressed while composing; the final composed text is
-    // sent once, from compositionend.
-    //
-    // Composition needs an actual focused, editable DOM element to attach to —
-    // the terminal surface itself is a plain non-focusable View (see the
-    // isDesktop branch in TerminalScreen.tsx), so these window-level listeners
-    // alone would never fire for the real "click terminal, type" path. A
-    // hidden TextInput (ref: inputRef) is rendered inside #tether-terminal on
-    // desktop specifically as that composition target, focused on click
-    // (TerminalScreen.tsx). Composition events bubble to window regardless of
-    // which element they originate on, so listening here still works once that
-    // target exists and has focus.
-    let composing = false;
-
-    const focused = () =>
-      shouldForwardToTerminal(
-        document.activeElement as (HTMLElement & { isContentEditable?: boolean }) | null,
-        document.activeElement === document.body,
-        !fileView && !diffOpen,
-      );
-
-    const onCompositionStart = () => {
-      if (focused()) composing = true;
-    };
-    const onCompositionEnd = (e: CompositionEvent) => {
-      if (!composing) return;
-      composing = false;
-      if (!focused()) return;
-      if (e.data) {
-        const ent = cache.get(activeIdRef.current);
-        sendPaste(ent?.term.bracketedPaste ? `\x1b[200~${e.data}\x1b[201~` : e.data);
-      }
-      // The composed text landed in the hidden desktop composition-target
-      // input's own DOM value (composition was never preventDefault()'d so the
-      // browser could compose into it) — clear it so the next composition
-      // starts clean instead of accumulating.
-      inputRef.current?.clear();
-    };
-
-    const onKey = (e: KeyboardEvent) => {
-      // keyCode 229 is the legacy composing signal (older Safari/Firefox).
-      if (composing || e.isComposing || e.keyCode === 229) return;
-      if (!focused()) return;
-      const appCursor = cache.get(activeIdRef.current)?.term.applicationCursor ?? false;
-      const bytes = keyToBytes(e, appCursor, isMacDesktop);
-      if (bytes == null) return;
-      if (bytes === COPY) return; // let the browser copy the selection
-      e.preventDefault();
-      if (bytes === PASTE) {
-        void handlePaste();
-        return;
-      }
-      sendKey(bytes);
-    };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('compositionstart', onCompositionStart);
-    window.addEventListener('compositionend', onCompositionEnd);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('compositionstart', onCompositionStart);
-      window.removeEventListener('compositionend', onCompositionEnd);
-    };
-    // sendKey/handlePaste delegate to refs, so a stable listener is fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring, activePresentationId, presentations, fileView, diffOpen]);
-
-  // Desktop: check for a newer signed build once on launch. If one exists, open
-  // the update modal; stay silent on "up to date" or an unreachable feed.
-  useEffect(() => {
-    if (!isDesktop) return;
-    fetchUpdate()
-      .then((u) => {
-        if (u) {
-          pendingUpdate.current = u;
-          setUpdateInfo({
-            version: u.version,
-            current: u.current,
-            canSelfInstall: u.canSelfInstall,
-          });
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  // Free the native Update resource behind a pending update (Rust resource-table
-  // entries aren't GC'd, so an un-closed check leaks until exit).
-  const disposePending = () => {
-    pendingUpdate.current?.update.close().catch(() => {});
-    pendingUpdate.current = null;
-  };
-
-  // Manual "Check for updates" (overflow menu): surface every outcome.
-  const checkForUpdatesManual = async () => {
-    try {
-      disposePending(); // release any earlier pending update before replacing it
-      const u = await fetchUpdate();
-      if (u) {
-        pendingUpdate.current = u;
-        setUpdateInfo({ version: u.version, current: u.current, canSelfInstall: u.canSelfInstall });
-      } else {
-        void notify('Up to date', "You're running the latest version of Tether.");
-      }
-    } catch {
-      void notify('Update check failed', 'Could not reach the update server.', 'error');
-    }
-  };
-
-  const startUpdate = () => {
-    const pending = pendingUpdate.current;
-    if (!pending) return;
-    setUpdating(true);
-    setUpdateProgress({ done: 0, total: 0 });
-    installUpdate(pending, (done, total) => setUpdateProgress({ done, total })).catch(() => {
-      setUpdating(false);
-      setUpdateInfo(null);
-      disposePending();
-      void notify('Update failed', 'The update could not be downloaded or installed.', 'error');
-    });
-  };
-
-  // Package-managed installs (.deb/.rpm) can't self-install: open the releases
-  // page so the user downloads the new package and reinstalls.
-  const downloadUpdate = () => {
-    void openReleasesPage();
-    disposePending();
-    setUpdateInfo(null);
-  };
-
-  const dismissUpdate = () => {
-    if (updating) return; // don't let it close mid-install
-    disposePending();
-    setUpdateInfo(null);
-    setUpdateProgress(null);
-  };
-
-  // Desktop: right-click the terminal for a Copy / Paste / Select All menu.
-  useEffect(() => {
-    if (
-      !isDesktop ||
-      isConfiguring ||
-      presentations.some((preview) => preview.id === activePresentationId)
-    )
-      return;
-    const onCtx = (e: MouseEvent) => {
-      const el = document.getElementById('tether-terminal');
-      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
-      e.preventDefault();
-      setCtxMenu({ x: e.clientX, y: e.clientY });
-    };
-    document.addEventListener('contextmenu', onCtx);
-    return () => document.removeEventListener('contextmenu', onCtx);
-  }, [isConfiguring, activePresentationId, presentations]);
 
   const activeSession = drawerSessions.find((s) => s.id === activeId);
   const activeName = activeSession ? sessionLabel(activeSession) : activeId;
@@ -1467,14 +586,9 @@ export function useTetherApp() {
       }
       setFileLoading(true);
       try {
-        const sessionId = activeIdRef.current;
+        const sessionId = getActiveSessionId();
         const query = new URLSearchParams({ path: target.path });
-        const res = await fetch(
-          `${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`,
-          {
-            headers: authHeaders(passwordRef.current),
-          },
-        );
+        const res = await activeClient.get(`/api/sessions/${sessionId}/file?${query}`);
         const body = (await res.json().catch(() => ({}))) as {
           path?: string;
           content?: string;
@@ -1483,7 +597,7 @@ export function useTetherApp() {
         if (!res.ok || typeof body.path !== 'string' || typeof body.content !== 'string') {
           throw new Error(body.error || `Request failed (${res.status})`);
         }
-        if (activeIdRef.current === sessionId) {
+        if (getActiveSessionId() === sessionId) {
           setFileView({
             path: body.path,
             content: body.content,
@@ -1497,7 +611,7 @@ export function useTetherApp() {
         setFileLoading(false);
       }
     },
-    [serverIp, port],
+    [activeClient],
   );
   const closeDiff = useCallback(() => {
     setDiffOpen(false);
@@ -1530,20 +644,18 @@ export function useTetherApp() {
       setDiffImage(null);
       setDiffLoading(true);
       try {
-        const sessionId = activeIdRef.current;
+        const sessionId = getActiveSessionId();
         const file = entryFor(sessionId).diffSummary.files.find((f) => f.path === filePath);
         if (file?.binary && isImagePath(filePath)) {
-          const base = httpBase(serverIp, port);
           const query = new URLSearchParams({ path: filePath });
-          const headers = authHeaders(passwordRef.current);
           const [oldUri, newUri] = await Promise.all([
             fetchDiffImageUri(
-              `${base}/api/sessions/${sessionId}/diff/file?${query}&side=old`,
-              headers,
+              activeClient,
+              `/api/sessions/${sessionId}/diff/file?${query}&side=old`,
             ),
             fetchDiffImageUri(
-              `${base}/api/sessions/${sessionId}/diff/file?${query}&side=new`,
-              headers,
+              activeClient,
+              `/api/sessions/${sessionId}/diff/file?${query}&side=new`,
             ),
           ]);
           setDiffImage({ old: oldUri, new: newUri });
@@ -1551,12 +663,7 @@ export function useTetherApp() {
         }
         const query = new URLSearchParams({ path: filePath });
         if (mode) query.set('mode', mode);
-        const res = await fetch(
-          `${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff?${query}`,
-          {
-            headers: authHeaders(passwordRef.current),
-          },
-        );
+        const res = await activeClient.get(`/api/sessions/${sessionId}/diff?${query}`);
         const body = (await res.json().catch(() => ({}))) as {
           diff?: string;
           truncated?: boolean;
@@ -1573,7 +680,7 @@ export function useTetherApp() {
         setDiffLoading(false);
       }
     },
-    [serverIp, port],
+    [activeClient],
   );
   const openDiff = useCallback(() => {
     setDiffOpen(true);
@@ -1588,17 +695,11 @@ export function useTetherApp() {
 
   const gitFetch = useCallback(
     async (route: string, init?: RequestInit) => {
-      const sessionId = activeIdRef.current;
-      const res = await fetch(
-        `${httpBase(serverIp, port)}/api/sessions/${sessionId}/git/${route}`,
-        {
-          ...init,
-          headers: {
-            ...authHeaders(passwordRef.current),
-            'Content-Type': 'application/json',
-          },
-        },
-      );
+      const sessionId = getActiveSessionId();
+      const res = await activeClient.get(`/api/sessions/${sessionId}/git/${route}`, {
+        ...init,
+        headers: { 'Content-Type': 'application/json', ...init?.headers },
+      });
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
         throw new Error(
@@ -1607,7 +708,7 @@ export function useTetherApp() {
       }
       return body;
     },
-    [serverIp, port],
+    [activeClient],
   );
 
   const gitPost = useCallback(
@@ -1736,53 +837,31 @@ export function useTetherApp() {
   // Peek (non-touching) so render stays pure — the active entry is already
   // MRU-resident from connect/switchTo; only the very first render (before any
   // touch) falls back to entryFor, which creates it.
-  const activeEntry = cache.peek(activeId) ?? entryFor(activeId);
+  const activeEntry = getSessionEntry(activeId) ?? entryFor(activeId);
   const changeSummary = activeEntry.diffSummary;
   // Read live off the mutable emulator field — re-derives every render.
   // activeBellCount drives TerminalScreen's on-screen visual bell flash; the
   // OS notification path lives in maybeNotify (per-session, in the ws handler).
   const activeBellCount = activeEntry.term.bellCount;
   const activePromptReturnCount = activeEntry.term.promptReturnCount;
-
-  // Desktop: keep windowFocusedRef (declared up top) in sync with real OS
-  // focus so the ws handler can suppress notifications for the focused tab.
-  useEffect(() => {
-    if (!isDesktop || typeof window === 'undefined') return;
-    const onFocus = () => {
-      windowFocusedRef.current = true;
-      // If the webview was fully suspended while we were away (some Linux
-      // compositors freeze background window JS), the keepalive watchdog can
-      // fire on resume before the server's queued ping is processed and force
-      // a needless reconnect. Refresh lastSeen for every live socket so the
-      // next ping (≤20s out) lands inside the 30s window first.
-      const now = Date.now();
-      for (const st of connections.values()) {
-        if (st.open) st.lastSeen = now;
-      }
-    };
-    const onBlur = () => {
-      windowFocusedRef.current = false;
-    };
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
-  // "Command finished" (new shell prompt) stays active-tab-only + unfocused:
-  // every backgrounded tab returns to a prompt constantly, so notifying on it
-  // for background sessions would be pure spam. Bell / explicit OSC-notify are
-  // handled per-session in the ws handler instead (they fire for any tab).
-  const prevPromptReturnCountRef = useRef(0);
-  useEffect(() => {
-    if (!isDesktop) return;
-    const promptReturned = activePromptReturnCount > prevPromptReturnCountRef.current;
-    prevPromptReturnCountRef.current = activePromptReturnCount;
-    if (promptReturned && !windowFocusedRef.current) {
-      void sendNativeNotification('Tether', 'Command finished');
-    }
-  }, [activePromptReturnCount]);
+  useDesktopEffects({
+    isConfiguring,
+    presentations,
+    activePresentationId,
+    fileViewOpen: !!fileView,
+    diffOpen,
+    getSessionEntry,
+    getActiveSessionId,
+    inputRef,
+    sendKey,
+    sendPaste,
+    handlePaste,
+    setContextMenu: setCtxMenu,
+    setWindowFocused,
+    isWindowFocused,
+    refreshSocketActivity,
+    activePromptReturnCount,
+  });
 
   // Update-modal progress display.
   const upPct =
@@ -1807,9 +886,8 @@ export function useTetherApp() {
     const name = renameText.trim();
     setRenameModalOpen(false);
     try {
-      await fetch(`${httpBase(serverIp, port)}/api/sessions/rename`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...authHeaders(passwordRef.current) },
+      await activeClient.post('/api/sessions/rename', {
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id, name }),
       });
       await refreshSessions();
@@ -1827,13 +905,12 @@ export function useTetherApp() {
     if (!ok) return;
     resetTerminal();
     try {
-      await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
+      await activeClient.post('/api/sessions/kill', {
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: activeId }),
       });
-      connect(activeIdRef.current);
-    } catch (e) {
+      restartActiveSession();
+    } catch {
       void notify('Error', 'Failed to kill session on the server', 'error');
     }
   };
@@ -1851,6 +928,7 @@ export function useTetherApp() {
   return {
     fontsLoaded,
     insets,
+    client: activeClient,
     serverIp,
     setServerIp,
     port,
@@ -1866,13 +944,30 @@ export function useTetherApp() {
     setTestStatus,
     isConfiguring,
     setIsConfiguring,
-    ready,
-    setReady,
-    readyRef,
-    lastConnectedRef,
+    profiles,
+    storeError,
+    loadProfiles,
+    openAddHost,
+    openEditHost,
+    removeHost,
+    saveHostConnection,
+    updateProfile,
+    reorderHosts,
+    clientFor,
+    serverSettingsHost,
+    serverSettingsClient,
+    serverSettingsOpen: serverSettingsHostId !== null && !isConfiguring,
+    openServerSettings: (hostId: string) => {
+      setServerSettingsHostId(hostId);
+      setIsConfiguring(true);
+    },
+    closeServerSettings: () => setServerSettingsHostId(null),
+    saveServerIdentity: (identity: { name: string; color: string }) =>
+      serverSettingsHostId ? updateIdentity(serverSettingsHostId, identity) : Promise.resolve(),
+    saveHostIdentity: updateIdentity,
+    replaceStoredPassword,
     connectionStatus,
-    setConnectionStatus,
-    hasConnectedRef,
+    hasConnected,
     mouseEnabled,
     toggleMouseEnabled,
     notificationsEnabled,
@@ -1910,14 +1005,14 @@ export function useTetherApp() {
     setSnippetsModalOpen,
     snippetDraft,
     setSnippetDraft,
-    cache,
     activeId,
-    setActiveId,
-    activeIdRef,
+    activeHostId,
     drawerOpen,
     setDrawerOpen,
     drawerSessions,
-    setDrawerSessions,
+    healthByHost,
+    deepLinkNotice,
+    dismissDeepLinkNotice: () => setDeepLinkNotice(null),
     presentations,
     activePresentation,
     activePresentationId,
@@ -1952,8 +1047,7 @@ export function useTetherApp() {
     selectPresentation,
     closePresentation,
     refreshPresentations,
-    desktopNavigationMode,
-    selectDesktopNavigationMode,
+    refreshHost,
     inputRef,
     fontSize,
     setFontSize,
@@ -1965,9 +1059,6 @@ export function useTetherApp() {
     onRendererSelection,
     wsSend,
     resetTerminal,
-    applyWsMessage,
-    connect,
-    disconnect,
     switchTo,
     newTerminal,
     killActiveOr,

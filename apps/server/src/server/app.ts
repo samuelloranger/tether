@@ -4,7 +4,22 @@ import path from 'node:path';
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
+import {
+  allowAdminRequest,
+  changePassword,
+  requireCurrentPassword,
+  scheduleAdminCommand,
+  updateTargetVersion,
+} from './admin';
 import { authMiddleware } from './auth';
+import {
+  configSchema,
+  getConfig,
+  PrivateNotifyUrlError,
+  patchConfig,
+  redactConfig,
+  validateNotifyUrl,
+} from './config';
 import {
   getAuthHash,
   getLogs,
@@ -27,18 +42,20 @@ import {
 } from './gitOps';
 import { resolveGitRoot } from './gitRoot';
 import { getLiveCwd } from './liveCwd';
+import { sendTestNotification } from './notifier';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
 import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
 import {
+  type FocusSubscriber,
   getActiveSession,
-  getDefaultShell,
   killSession,
   resizeSession,
-  type Subscriber,
+  setSessionFocus,
   startSession,
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { VERSION } from './runtime';
 import { getActivity } from './sessionActivity';
 import { autoTitle, getOscTitle } from './sessionTitle';
 import { resolveUploadPath } from './upload';
@@ -174,7 +191,77 @@ app.post('/api/setup', async (c) => {
 });
 
 // Lightweight authed reachability + password probe for the client's Test connection.
-app.get('/api/health', (c) => c.json({ ok: true }));
+app.get('/api/health', (c) => c.json({ ok: true, version: VERSION }));
+
+app.get('/api/config', (c) => c.json(redactConfig()));
+app.patch('/api/config', async (c) => {
+  try {
+    return c.json(redactConfig(await patchConfig(await c.req.json())));
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'invalid config' }, 400);
+  }
+});
+
+function clientKey(c: Context): string {
+  return c.req.header('X-Forwarded-For') ?? c.req.header('X-Real-IP') ?? 'local';
+}
+
+app.post('/api/admin/password', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!(await changePassword(body.current, body.next, clientKey(c)))) {
+    return c.json({ error: 'invalid current password or rate limited' }, 403);
+  }
+  console.log(`Admin password changed at ${new Date().toISOString()}`);
+  return c.json({ ok: true });
+});
+
+app.post('/api/admin/update', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!(await requireCurrentPassword(body.current, clientKey(c)))) {
+    return c.json({ error: 'invalid current password or rate limited' }, 403);
+  }
+  console.log(`Admin update requested at ${new Date().toISOString()}`);
+  scheduleAdminCommand('update');
+  return c.json({ ok: true, targetVersion: updateTargetVersion() });
+});
+
+app.post('/api/admin/restart', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!(await requireCurrentPassword(body.current, clientKey(c)))) {
+    return c.json({ error: 'invalid current password or rate limited' }, 403);
+  }
+  console.log(`Admin restart requested at ${new Date().toISOString()}`);
+  scheduleAdminCommand('restart');
+  return c.json({ ok: true });
+});
+
+app.post('/api/admin/test-notification', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!allowAdminRequest(clientKey(c))) {
+    return c.json({ ok: false, error: 'rate limited' }, 429);
+  }
+  const result = configSchema.pick({ notify: true }).partial().strict().safeParse(body);
+  if (!result.success) return c.json({ ok: false, error: result.error.message }, 400);
+  const current = getConfig();
+  const config = { ...current, notify: { ...current.notify, ...result.data.notify } };
+  try {
+    await validateNotifyUrl(config.notify.url);
+  } catch (error) {
+    if (error instanceof PrivateNotifyUrlError)
+      return c.json({ ok: false, error: error.message, code: error.code }, 400);
+    return c.json({ ok: false, error: 'invalid notification URL' }, 400);
+  }
+  try {
+    await sendTestNotification(config);
+    return c.json({ ok: true });
+  } catch (error) {
+    console.error('Test notification delivery failed:', error);
+    return c.json(
+      { ok: false, error: 'Notification delivery failed.', code: 'notification_delivery_failed' },
+      502,
+    );
+  }
+});
 
 // --- HTTP API Routes ---
 
@@ -356,7 +443,7 @@ app.get('/api/sessions/:id/git/commit/:sha/diff', async (c) => {
 app.post('/api/sessions/start', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const sessionId = body.id || 'default';
-  const command = body.command || getDefaultShell();
+  const command = typeof body.command === 'string' ? body.command : undefined;
   const cols = Number(body.cols || 80);
   const rows = Number(body.rows || 24);
 
@@ -436,7 +523,7 @@ app.get(
     let closed = false;
     // Stable per-connection output handler. Defined synchronously in onOpen so it
     // also serves as this client's key for per-client PTY sizing (onMessage/resize).
-    let onData: Subscriber = () => {};
+    let onData: FocusSubscriber = () => {};
     // Server-driven keepalive. An idle shell emits no PTY output, so without
     // this the client's 30s "no frame → assume half-open" watchdog force-closes
     // every quiet session — the user sees a spurious "Reconnecting…" every time
@@ -480,6 +567,7 @@ app.get(
             console.warn('WebSocket send error during PTY broadcast:', wsErr);
           }
         };
+        onData.focused = true;
 
         // Yield execution to let Hono/Bun complete the protocol upgrade before writing
         setTimeout(async () => {
@@ -487,7 +575,7 @@ app.get(
             // 1. Ensure the PTY process is active (auto-start or holder reattach).
             // Everything after this await runs synchronously, so no PTY frame can
             // slip in between the replay read and the subscribe below.
-            await startSession(sessionId, getDefaultShell(), cols, rows);
+            await startSession(sessionId, undefined, cols, rows);
 
             // 1b. If the client's sinceId predates pruned rows, the replay has a
             // hole — tell the client to wipe its emulator before the replay.
@@ -540,6 +628,9 @@ app.get(
             writeToSession(sessionId, msg.text);
           } else if (msg.type === 'resize') {
             resizeSession(sessionId, onData, Number(msg.cols), Number(msg.rows));
+          } else if (msg.type === 'focus' && typeof msg.focused === 'boolean') {
+            onData.focused = msg.focused;
+            setSessionFocus(sessionId, onData, msg.focused);
           }
         } catch (e) {
           console.error('Failed to handle incoming WebSocket message:', e);

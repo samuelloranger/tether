@@ -2,6 +2,7 @@ import { StyleSheet } from 'react-native';
 import type { AppColors } from './appTheme';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop } from './platform';
+import { typeScale } from './type';
 
 export const MONO = 'FiraCode_400Regular'; // wide box-drawing/braille/powerline glyph coverage vs. Courier
 
@@ -56,11 +57,8 @@ export function createStyles(c: AppColors) {
       marginHorizontal: 8,
     },
     headerTitle: {
-      fontSize: 13,
-      fontWeight: 'bold',
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
       color: c.text,
+      ...typeScale.eyebrow,
     },
     headerSubtitle: {
       fontSize: 10,
@@ -169,9 +167,8 @@ export function createStyles(c: AppColors) {
     },
     rendererStalledText: {
       color: c.textMuted,
-      fontSize: 14,
       textAlign: 'center',
-      lineHeight: 20,
+      ...typeScale.body,
     },
     rendererStalledButton: {
       minHeight: 44,

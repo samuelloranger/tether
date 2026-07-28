@@ -9,14 +9,3 @@ export function validateAddress(
   }
   return { ok: true };
 }
-
-export function httpBase(host: string, port: string): string {
-  return `http://${host}:${port}`;
-}
-
-export function wsUrl(host: string, port: string, params: Record<string, string | number>): string {
-  const qs = Object.entries(params)
-    .map(([k, v]) => `${k}=${v}`)
-    .join('&');
-  return `ws://${host}:${port}/api/ws?${qs}`;
-}

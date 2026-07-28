@@ -14,7 +14,7 @@ import { THEME_OPTIONS } from './appTheme';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { MONO } from './styles';
 
-const THEME_LABELS = {
+export const THEME_LABELS = {
   system: 'System',
   latte: 'Latte',
   frappe: 'Frappé',
@@ -22,7 +22,7 @@ const THEME_LABELS = {
   mocha: 'Mocha',
 } as const;
 
-const FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
+export const APPEARANCE_FONTS = ['FiraCode_400Regular', 'JetBrainsMono_400Regular'] as const;
 
 // Rename the active terminal.
 export function RenameModal({
@@ -181,7 +181,7 @@ export function AppearanceModal({
           {/* Not desktop-only any more: the renderer page embeds the same fonts,
               so the pick applies to the mobile terminal too. */}
           <Text style={[styles.renameTitle, { marginTop: 12 }]}>Font</Text>
-          {FONTS.map((font) => (
+          {APPEARANCE_FONTS.map((font) => (
             <TouchableOpacity
               key={font}
               style={[

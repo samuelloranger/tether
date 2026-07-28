@@ -134,13 +134,14 @@ fn is_updatable() -> bool {
 // Credential Manager, Linux Secret Service via the `keyring` crate). Falls back
 // to localStorage on the TypeScript side (secureConfig.web.ts) if any of these
 // fail — e.g. no Secret Service daemon running on a minimal Linux desktop.
-fn secure_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new("tether-desktop", "server-password").map_err(|e| e.to_string())
+fn secure_entry(host_id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new("tether-desktop", &format!("server-password-{host_id}"))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn secure_get_password() -> Result<Option<String>, String> {
-    match secure_entry()?.get_password() {
+fn secure_get_password(host_id: String) -> Result<Option<String>, String> {
+    match secure_entry(&host_id)?.get_password() {
         Ok(pw) => Ok(Some(pw)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(e.to_string()),
@@ -148,13 +149,34 @@ fn secure_get_password() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn secure_set_password(password: String) -> Result<(), String> {
-    secure_entry()?.set_password(&password).map_err(|e| e.to_string())
+fn secure_set_password(host_id: String, password: String) -> Result<(), String> {
+    secure_entry(&host_id)?.set_password(&password).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn secure_clear_password() -> Result<(), String> {
-    match secure_entry()?.delete_credential() {
+fn secure_clear_password(host_id: String) -> Result<(), String> {
+    match secure_entry(&host_id)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn legacy_secure_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("tether-desktop", "server-password").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secure_get_legacy_password() -> Result<Option<String>, String> {
+    match legacy_secure_entry()?.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn secure_clear_legacy_password() -> Result<(), String> {
+    match legacy_secure_entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
@@ -265,6 +287,7 @@ fn main() {
         // Open the release page in the system browser for package-managed
         // (deb/rpm) installs that can't self-update.
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(Bridge::default())
         .invoke_handler(tauri::generate_handler![
             ws_connect,
@@ -274,6 +297,8 @@ fn main() {
             secure_get_password,
             secure_set_password,
             secure_clear_password,
+            secure_get_legacy_password,
+            secure_clear_legacy_password,
             open_external,
             send_os_notification
         ])

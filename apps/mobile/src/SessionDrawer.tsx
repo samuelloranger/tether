@@ -20,8 +20,11 @@ import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { motionSpec } from './motion';
 import type { Presentation } from './presentations';
 import { sessionLabel } from './sessionLabel';
+import type { HostHealthStatus } from './tether/hostHealth';
+import type { HostProfile } from './tether/hostStore';
 
 export interface DrawerSession {
+  hostId: string;
   id: string;
   status: 'running' | 'stopped';
   last_output_at: string | null;
@@ -32,17 +35,23 @@ export interface DrawerSession {
 
 interface SessionDrawerProps {
   visible: boolean;
+  hosts: HostProfile[];
+  healthByHost: Record<string, HostHealthStatus>;
   sessions: DrawerSession[];
+  activeHostId: string;
   activeId: string;
-  onSelect: (id: string) => void;
+  onSelect: (hostId: string, id: string) => void;
   onNew: () => void;
   onKill: (id: string) => void;
+  onRetryHost: (hostId: string) => void;
+  onReenterPassword: (hostId: string) => void;
+  onAddHost: () => void;
   previews: Presentation[];
   activePreviewId: string | null;
   onSelectPreview: (id: string) => void;
   onClosePreview: (id: string) => void;
   onClose: () => void;
-  onSettings: () => void;
+  onHostSettings?: (hostId: string) => void;
   // Desktop: render as a permanent inline sidebar (no scrim, no slide, always
   // mounted) instead of a slide-in overlay.
   docked?: boolean;
@@ -63,17 +72,23 @@ function confirmKill(id: string, onKill: (id: string) => void) {
 
 export function SessionDrawer({
   visible,
+  hosts,
+  healthByHost,
   sessions,
+  activeHostId,
   activeId,
   onSelect,
   onNew,
   onKill,
+  onRetryHost,
+  onReenterPassword,
+  onAddHost,
   previews,
   activePreviewId,
   onSelectPreview,
   onClosePreview,
   onClose,
-  onSettings,
+  onHostSettings,
   docked = false,
 }: SessionDrawerProps) {
   const { theme } = useAppTheme();
@@ -121,66 +136,110 @@ export function SessionDrawer({
 
   const panelBody = (
     <>
-      <View style={styles.header}>
-        <Feather name="terminal" size={14} color={theme.colors.accent} />
-        <Text style={styles.title}>Workspace</Text>
-        <TouchableOpacity
-          style={styles.settingsBtn}
-          hitSlop={HIT_SLOP}
-          activeOpacity={0.6}
-          onPress={onSettings}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-        >
-          <Feather name="settings" size={15} color={theme.colors.textMuted} />
-        </TouchableOpacity>
-      </View>
-
       <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-        {sessions.map((s) => {
-          const active = activePreviewId === null && s.id === activeId;
-          const live = active || isRecentlyActive(s.last_output_at);
-          const dotKey = activityDotKey(s.status, s.activity, live);
-          const dotColor = {
-            stopped: theme.colors.textFaint,
-            waiting: theme.colors.warning,
-            working: theme.colors.success,
-            idle: theme.colors.border,
-          }[dotKey];
+        {hosts.map((host) => {
+          const health = healthByHost[host.id] ?? 'unknown';
+          const unavailable = health === 'unreachable' || health === 'unauthorized';
+          const hostSessions = unavailable
+            ? []
+            : sessions.filter((session) => session.hostId === host.id);
           return (
-            <View key={s.id} style={[styles.row, active && styles.rowActive]}>
-              <TouchableOpacity
-                style={styles.rowMain}
-                activeOpacity={0.6}
-                onPress={() => onSelect(s.id)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={terminalAccessibilityLabel(
-                  sessionLabel(s),
-                  s.status,
-                  s.activity,
-                  live,
+            <View
+              key={host.id}
+              style={[
+                styles.hostSection,
+                { borderLeftColor: host.color },
+                unavailable && styles.hostSectionUnavailable,
+              ]}
+              accessibilityLabel={`${host.name} host section`}
+            >
+              <View style={styles.hostHeader}>
+                <Text style={styles.hostName}>{host.name}</Text>
+                {health === 'unknown' && <Text style={styles.hostStatus}>connecting…</Text>}
+                {health === 'reachable' && (
+                  <Text style={[styles.hostStatus, styles.hostReachable]}>online</Text>
                 )}
-              >
-                <View style={[styles.dot, { backgroundColor: dotColor }]} />
-                <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
-                  {sessionLabel(s)}
-                </Text>
-                {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
-                {dotKey === 'waiting' && (
-                  <Text style={[styles.stopped, { color: theme.colors.warning }]}>input?</Text>
+                {health === 'unreachable' && (
+                  <TouchableOpacity
+                    onPress={() => onRetryHost(host.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retry ${host.name}`}
+                  >
+                    <Text style={styles.hostAction}>Retry</Text>
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.kill}
-                hitSlop={HIT_SLOP}
-                activeOpacity={0.6}
-                onPress={() => confirmKill(s.id, onKill)}
-                accessibilityRole="button"
-                accessibilityLabel={`Kill terminal ${s.id}`}
-              >
-                <Feather name="x" size={16} color={theme.colors.danger} />
-              </TouchableOpacity>
+                {health === 'unauthorized' && (
+                  <TouchableOpacity
+                    onPress={() => onReenterPassword(host.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Re-enter password for ${host.name}`}
+                  >
+                    <Text style={styles.hostAction}>Re-enter password</Text>
+                  </TouchableOpacity>
+                )}
+                {onHostSettings && (
+                  <TouchableOpacity
+                    onPress={() => onHostSettings(host.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Server settings for ${host.name}`}
+                  >
+                    <Feather name="settings" size={14} color={theme.colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </View>
+              {hostSessions.map((s) => {
+                const active =
+                  activePreviewId === null && s.hostId === activeHostId && s.id === activeId;
+                const live = active || isRecentlyActive(s.last_output_at);
+                const dotKey = activityDotKey(s.status, s.activity, live);
+                const dotColor = {
+                  stopped: theme.colors.textFaint,
+                  waiting: theme.colors.warning,
+                  working: theme.colors.success,
+                  idle: theme.colors.border,
+                }[dotKey];
+                return (
+                  <View
+                    key={`${s.hostId}:${s.id}`}
+                    style={[styles.row, active && styles.rowActive]}
+                  >
+                    <TouchableOpacity
+                      style={styles.rowMain}
+                      activeOpacity={0.6}
+                      onPress={() => onSelect(s.hostId, s.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={terminalAccessibilityLabel(
+                        `${sessionLabel(s)} on ${host.name}`,
+                        s.status,
+                        s.activity,
+                        live,
+                      )}
+                    >
+                      <View style={[styles.dot, { backgroundColor: dotColor }]} />
+                      <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
+                        {sessionLabel(s)}
+                      </Text>
+                      {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
+                      {dotKey === 'waiting' && (
+                        <Text style={[styles.stopped, { color: theme.colors.warning }]}>
+                          input?
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.kill}
+                      hitSlop={HIT_SLOP}
+                      activeOpacity={0.6}
+                      onPress={() => confirmKill(s.id, onKill)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Kill terminal ${s.id}`}
+                    >
+                      <Feather name="x" size={16} color={theme.colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
             </View>
           );
         })}
@@ -219,6 +278,16 @@ export function SessionDrawer({
             </View>
           );
         })}
+        <TouchableOpacity
+          style={styles.addHostRow}
+          activeOpacity={0.7}
+          onPress={onAddHost}
+          accessibilityRole="button"
+          accessibilityLabel="Add host"
+        >
+          <Feather name="plus-circle" size={16} color={theme.colors.accent} />
+          <Text style={styles.addHostText}>Add host</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <TouchableOpacity
@@ -280,23 +349,21 @@ const createStyles = (c: AppColors) =>
     panelContent: { flex: 1, paddingTop: 56 },
     // Docked (desktop): inline column, no absolute positioning, tighter top pad
     // (no mobile status bar to clear).
-    panelDocked: { position: 'relative', paddingTop: 12, alignSelf: 'stretch' },
-    header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-    settingsBtn: {
-      marginLeft: 'auto',
-      minWidth: MIN_TOUCH_TARGET,
-      minHeight: MIN_TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    title: {
-      color: c.textMuted,
-      fontSize: 11,
-      fontWeight: '700',
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
+    panelDocked: { position: 'relative', paddingTop: 8, alignSelf: 'stretch' },
     list: { flex: 1 },
+    hostSection: { marginBottom: 8, borderLeftWidth: 1, paddingLeft: 6 },
+    hostSectionUnavailable: { opacity: 0.52 },
+    hostHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 34,
+      paddingHorizontal: 4,
+      gap: 7,
+    },
+    hostName: { color: c.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+    hostStatus: { marginLeft: 'auto', color: c.textFaint, fontSize: 11 },
+    hostReachable: { color: c.success },
+    hostAction: { marginLeft: 'auto', color: c.accent, fontSize: 11, fontWeight: '600' },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -339,4 +406,13 @@ const createStyles = (c: AppColors) =>
       backgroundColor: c.accent,
     },
     newBtnText: { color: c.accentText, fontWeight: '600', fontSize: 13 },
+    addHostRow: {
+      minHeight: MIN_TOUCH_TARGET,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 10,
+      marginBottom: 8,
+    },
+    addHostText: { color: c.accent, fontSize: 13, fontWeight: '600' },
   });

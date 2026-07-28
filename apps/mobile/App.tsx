@@ -1,9 +1,11 @@
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { AppearanceScreen } from './src/AppearanceScreen';
 import { AppThemeProvider, useAppTheme } from './src/AppThemeProvider';
 import { ConfigScreen } from './src/ConfigScreen';
 import { LaunchOverlay } from './src/LaunchOverlay';
+import { ServerSettings } from './src/ServerSettings';
 import { createStyles } from './src/styles';
 import { TerminalScreen } from './src/TerminalScreen';
 import { useTetherApp } from './src/useTetherApp';
@@ -34,6 +36,42 @@ function AppInner({ onReady }: { onReady: () => void }) {
     if (launchReady) onReady();
   }, [launchReady, onReady]);
   if (!app.fontsLoaded) return null;
+  // Rendered once, above both branches. Mounted inside a branch it unmounted
+  // mid-flight when the app flipped config <-> terminal, and react-native-web
+  // left the open Modal's backdrop behind — a permanent dim over a dead app.
+  const serverSettings = (
+    <ServerSettings
+      visible={app.serverSettingsOpen}
+      host={app.serverSettingsHost}
+      client={app.serverSettingsClient}
+      health={
+        app.serverSettingsHost
+          ? (app.healthByHost[app.serverSettingsHost.id] ?? 'unknown')
+          : 'unknown'
+      }
+      onClose={app.closeServerSettings}
+      onRetry={() => app.serverSettingsHost && app.refreshHost(app.serverSettingsHost.id)}
+      onUnauthorized={() => {
+        const host = app.serverSettingsHost;
+        app.closeServerSettings();
+        if (host) void app.openEditHost(host.id);
+      }}
+      onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
+      onPasswordChanged={(password) =>
+        app.serverSettingsHost
+          ? app.replaceStoredPassword(app.serverSettingsHost.id, password)
+          : Promise.resolve()
+      }
+      onConnectionSaved={(changes, password) =>
+        app.serverSettingsHost
+          ? app.saveHostConnection(app.serverSettingsHost.id, changes, password)
+          : Promise.resolve()
+      }
+      onRemoveHost={async () => {
+        if (app.serverSettingsHost) await app.removeHost(app.serverSettingsHost.id);
+      }}
+    />
+  );
   if (app.isConfiguring) {
     return (
       <SafeAreaView style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
@@ -52,7 +90,45 @@ function AppInner({ onReady }: { onReady: () => void }) {
           setTestStatus={app.setTestStatus}
           onSave={app.saveConfig}
           onTest={app.testConnection}
+          onCloseSettings={() => app.setIsConfiguring(false)}
+          hosts={app.profiles}
+          storeError={app.storeError}
+          onRetryHosts={() => void app.loadProfiles()}
+          onAddHost={app.openAddHost}
+          onReorderHosts={(ids) => void app.reorderHosts(ids)}
+          healthByHost={app.healthByHost}
+          initialHostId={app.serverSettingsHost?.id}
+          onHostPageClose={app.closeServerSettings}
+          renderHostPage={(host, onBack) => (
+            <ServerSettings
+              inline
+              visible
+              host={host}
+              client={app.clientFor(host)}
+              health={app.healthByHost[host.id] ?? 'unknown'}
+              onClose={onBack}
+              onRetry={() => app.refreshHost(host.id)}
+              onUnauthorized={() => {
+                onBack();
+                void app.openEditHost(host.id);
+              }}
+              onIdentitySaved={(identity) => void app.saveHostIdentity(host.id, identity)}
+              onPasswordChanged={(password) => app.replaceStoredPassword(host.id, password)}
+              onConnectionSaved={(changes, password) =>
+                app.saveHostConnection(host.id, changes, password)
+              }
+              onRemoveHost={() => app.removeHost(host.id)}
+            />
+          )}
+          renderAppearancePage={(onBack) => (
+            <AppearanceScreen
+              fontFamily={app.fontFamily}
+              onFontChange={app.changeFontFamily}
+              onBack={onBack}
+            />
+          )}
         />
+        {serverSettings}
       </SafeAreaView>
     );
   }
@@ -62,6 +138,7 @@ function AppInner({ onReady }: { onReady: () => void }) {
       style={[styles.appContainer, { backgroundColor: theme.colors.background }]}
     >
       <TerminalScreen app={app} />
+      {serverSettings}
     </SafeAreaView>
   );
 }

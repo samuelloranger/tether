@@ -1,21 +1,39 @@
 import * as SecureStore from 'expo-secure-store';
 
-const KEY_PASSWORD = 'tether_password';
+const LEGACY_PASSWORD_KEY = 'tether_password';
 
-export async function getPassword(): Promise<string | null> {
+export function passwordKey(hostId: string): string {
+  return `tether_password_${hostId}`;
+}
+
+export async function getPassword(hostId: string): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(KEY_PASSWORD);
+    return await SecureStore.getItemAsync(passwordKey(hostId));
   } catch {
     return null;
   }
 }
 
-export async function setPassword(pw: string): Promise<void> {
-  await SecureStore.setItemAsync(KEY_PASSWORD, pw);
+export async function setPassword(hostId: string, password: string): Promise<void> {
+  await SecureStore.setItemAsync(passwordKey(hostId), password);
 }
 
-export async function clearPassword(): Promise<void> {
-  await SecureStore.deleteItemAsync(KEY_PASSWORD);
+export async function clearPassword(hostId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(passwordKey(hostId));
+}
+
+// Migration-only access to the pre-multi-host SecureStore entry. New callers
+// must always use a host id through the functions above.
+export async function getLegacyPassword(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(LEGACY_PASSWORD_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function clearLegacyPassword(): Promise<void> {
+  await SecureStore.deleteItemAsync(LEGACY_PASSWORD_KEY);
 }
 
 // Attach the shared password to every request. Secret rides the header, never the URL.

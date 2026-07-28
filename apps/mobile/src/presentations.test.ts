@@ -17,10 +17,10 @@ function preview(overrides: Partial<Presentation> = {}): Presentation {
   };
 }
 
-test('builds a preview URL from the configured tether server', () => {
-  expect(previewUrl('192.168.50.30', '8085', '/preview/capability/index.html')).toBe(
-    'http://192.168.50.30:8085/preview/capability/index.html',
-  );
+test('builds a preview URL from the configured tether server client', () => {
+  expect(
+    previewUrl({ baseUrl: 'http://192.168.50.30:8085' }, '/preview/capability/index.html'),
+  ).toBe('http://192.168.50.30:8085/preview/capability/index.html');
 });
 
 test('findSessionPreview returns the most recently created preview owned by a session', () => {
