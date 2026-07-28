@@ -98,6 +98,7 @@ export function useTerminalSessions({
   const readyRef = useRef(ready);
   readyRef.current = ready;
   const disconnectRef = useRef<(key: string) => void>(() => {});
+  const connectRef = useRef<(key: string) => void>(() => {});
   const cache = useRef(createSessionCache((key) => disconnectRef.current(key))).current;
   const connections = useRef(new Map<string, TerminalConnectionState>()).current;
   const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
@@ -336,6 +337,9 @@ export function useTerminalSessions({
     }
   };
   disconnectRef.current = disconnect;
+  // Read at call time so the polling effect does not depend on a new closure
+  // every render (same pattern as disconnectRef above).
+  connectRef.current = connect;
   const updateHealth = (profile: HostProfile, result: PollResult) => {
     const current = healthRef.current.get(profile.id) ?? initialHostHealth();
     const next =
@@ -452,6 +456,11 @@ export function useTerminalSessions({
   const setWindowFocused = (focused: boolean) => {
     windowFocusedRef.current = focused;
   };
+  // A host's first connect waits for its session list. Opening a socket for a
+  // session id the server does not know *creates* it (app.ts startSession), so
+  // connecting to the default `term-1` before the list arrives spawns a stray
+  // terminal on every newly added host.
+  const adoptedHostsRef = useRef(new Set<string>());
   const isWindowFocused = () => windowFocusedRef.current;
   const activeClient = clientForKey(activeKeyRef.current);
 
@@ -493,6 +502,22 @@ export function useTerminalSessions({
           ...rows,
         ]);
         if (profile.id === activeHostIdRef.current) notifyWaitingSessionsRef.current(rows);
+        if (profile.id === activeHostIdRef.current && !adoptedHostsRef.current.has(profile.id)) {
+          adoptedHostsRef.current.add(profile.id);
+          // Adopt the most recent live session rather than creating another one.
+          // Only a host with no sessions at all gets a fresh `term-1`.
+          const running = rows.filter((row) => row.status === 'running');
+          if (running.length && !running.some((row) => row.id === activeIdRef.current)) {
+            const newest = [...running].sort((a, b) =>
+              (b.last_output_at ?? '').localeCompare(a.last_output_at ?? ''),
+            )[0];
+            activeIdRef.current = newest.id;
+            activeKeyRef.current = sessionKey(profile.id, newest.id);
+            setActiveId(newest.id);
+            void AsyncStorage.setItem(activeSessionStorageKey(profile.id), newest.id);
+          }
+          if (readyRef.current) connectRef.current(activeKeyRef.current);
+        }
       },
       onHealth: (profile, result) => {
         updateHealthRef.current(profile, result);
@@ -505,8 +530,18 @@ export function useTerminalSessions({
   // biome-ignore lint/correctness/useExhaustiveDependencies: connect reads the current client ref at call time.
   useEffect(() => {
     if (!ready) return;
-    connect(activeKeyRef.current);
-    return disconnectAll;
+    // If the host answers, the session-list handler above connects. If it never
+    // does (offline, wrong password), connect anyway so the UI shows the real
+    // connection state instead of sitting idle.
+    const fallback = setTimeout(() => {
+      if (adoptedHostsRef.current.has(activeHostIdRef.current)) return;
+      adoptedHostsRef.current.add(activeHostIdRef.current);
+      connectRef.current(activeKeyRef.current);
+    }, 3000);
+    return () => {
+      clearTimeout(fallback);
+      disconnectAll();
+    };
   }, [ready]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: resume callbacks read active transport state at event time.
   useEffect(() => {
