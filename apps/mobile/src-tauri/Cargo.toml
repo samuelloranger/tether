@@ -1,6 +1,6 @@
 [package]
 name = "tether-desktop"
-version = "2.4.3"
+version = "2.4.4"
 description = "Tether desktop client"
 edition = "2021"
 
