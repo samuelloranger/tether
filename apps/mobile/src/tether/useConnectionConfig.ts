@@ -134,10 +134,7 @@ export function useConnectionConfig() {
     isConfiguring,
     setIsConfiguring,
     ready,
-    setReady,
-    readyRef,
     lastConnectedRef,
-    request,
     testConnection,
     saveConfig,
   };
