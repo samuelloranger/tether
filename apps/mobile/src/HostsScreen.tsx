@@ -13,6 +13,7 @@ export function HostsScreen({
   onRemove,
   onUpdate,
   onReorder,
+  onServerSettings,
 }: {
   hosts: HostProfile[];
   onBack: () => void;
@@ -21,6 +22,7 @@ export function HostsScreen({
   onRemove: (hostId: string) => void;
   onUpdate: (hostId: string, changes: Partial<Omit<HostProfile, 'id' | 'order'>>) => void;
   onReorder: (ids: string[]) => void;
+  onServerSettings?: (hostId: string) => void;
 }) {
   const { theme } = useAppTheme();
   const move = (index: number, delta: -1 | 1) => {
@@ -109,6 +111,15 @@ export function HostsScreen({
             >
               <Text style={{ color: theme.colors.accent }}>Edit</Text>
             </TouchableOpacity>
+            {onServerSettings && (
+              <TouchableOpacity
+                onPress={() => onServerSettings(host.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Server settings for ${host.name}`}
+              >
+                <Text style={{ color: theme.colors.accent }}>Server settings</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={() => onRemove(host.id)}
               accessibilityRole="button"

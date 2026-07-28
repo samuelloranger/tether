@@ -295,14 +295,25 @@ export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {
       setStoreError('Host changes could not be saved. Retry from Hosts.');
     }
   }, []);
+  const replaceStoredPassword = useCallback(
+    async (hostId: string, nextPassword: string) => {
+      await persistPassword(hostId, nextPassword);
+      passwordsRef.current.set(hostId, nextPassword);
+      if (hostId === activeHostId) {
+        setPassword(nextPassword);
+        passwordRef.current = nextPassword;
+      }
+    },
+    [activeHostId],
+  );
   const updateIdentity = useCallback(
     async (hostId: string, identity: { name: string; color: string }) => {
+      const profile = profiles?.find((candidate) => candidate.id === hostId);
+      if (!profile) return;
       await updateProfile(hostId, {
         identityName: identity.name,
-        ...(profiles?.find((profile) => profile.id === hostId)?.name ===
-        profiles?.find((profile) => profile.id === hostId)?.host
-          ? { name: identity.name, color: identity.color }
-          : {}),
+        color: identity.color,
+        ...(profile.name === profile.host ? { name: identity.name } : {}),
       });
     },
     [profiles, updateProfile],
@@ -352,6 +363,7 @@ export function useConnectionConfig({ hostStore }: { hostStore?: HostStore } = {
     removeHost,
     updateProfile,
     reorderHosts,
+    replaceStoredPassword,
     updateIdentity,
     refreshIdentity,
   };

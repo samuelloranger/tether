@@ -51,6 +51,7 @@ export function ConfigScreen({
   onRemoveHost,
   onUpdateHost,
   onReorderHosts,
+  onServerSettings,
 }: {
   serverIp: string;
   setServerIp: (t: string) => void;
@@ -74,6 +75,7 @@ export function ConfigScreen({
   onRemoveHost?: (hostId: string) => void;
   onUpdateHost?: (hostId: string, changes: Partial<Omit<HostProfile, 'id' | 'order'>>) => void;
   onReorderHosts?: (ids: string[]) => void;
+  onServerSettings?: (hostId: string) => void;
 }) {
   const { theme } = useAppTheme();
   const shared = createStyles(theme.colors);
@@ -119,6 +121,7 @@ export function ConfigScreen({
         onRemove={onRemoveHost}
         onUpdate={onUpdateHost}
         onReorder={onReorderHosts}
+        onServerSettings={onServerSettings}
       />
     );
   }

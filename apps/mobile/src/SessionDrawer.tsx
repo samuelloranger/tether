@@ -52,6 +52,7 @@ interface SessionDrawerProps {
   onClosePreview: (id: string) => void;
   onClose: () => void;
   onSettings: () => void;
+  onHostSettings?: (hostId: string) => void;
   // Desktop: render as a permanent inline sidebar (no scrim, no slide, always
   // mounted) instead of a slide-in overlay.
   docked?: boolean;
@@ -89,6 +90,7 @@ export function SessionDrawer({
   onClosePreview,
   onClose,
   onSettings,
+  onHostSettings,
   docked = false,
 }: SessionDrawerProps) {
   const { theme } = useAppTheme();
@@ -164,34 +166,41 @@ export function SessionDrawer({
               style={[styles.hostSection, unavailable && styles.hostSectionUnavailable]}
               accessibilityLabel={`${host.name} host section`}
             >
-              {hosts.length > 1 && (
-                <View style={styles.hostHeader}>
-                  <View style={[styles.hostDot, { backgroundColor: host.color }]} />
-                  <Text style={styles.hostName}>{host.name}</Text>
-                  {health === 'unknown' && <Text style={styles.hostStatus}>connecting…</Text>}
-                  {health === 'reachable' && (
-                    <Text style={[styles.hostStatus, styles.hostReachable]}>online</Text>
-                  )}
-                  {health === 'unreachable' && (
-                    <TouchableOpacity
-                      onPress={() => onRetryHost(host.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Retry ${host.name}`}
-                    >
-                      <Text style={styles.hostAction}>Retry</Text>
-                    </TouchableOpacity>
-                  )}
-                  {health === 'unauthorized' && (
-                    <TouchableOpacity
-                      onPress={() => onReenterPassword(host.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Re-enter password for ${host.name}`}
-                    >
-                      <Text style={styles.hostAction}>Re-enter password</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
+              <View style={styles.hostHeader}>
+                <View style={[styles.hostDot, { backgroundColor: host.color }]} />
+                <Text style={styles.hostName}>{host.name}</Text>
+                {health === 'unknown' && <Text style={styles.hostStatus}>connecting…</Text>}
+                {health === 'reachable' && (
+                  <Text style={[styles.hostStatus, styles.hostReachable]}>online</Text>
+                )}
+                {health === 'unreachable' && (
+                  <TouchableOpacity
+                    onPress={() => onRetryHost(host.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retry ${host.name}`}
+                  >
+                    <Text style={styles.hostAction}>Retry</Text>
+                  </TouchableOpacity>
+                )}
+                {health === 'unauthorized' && (
+                  <TouchableOpacity
+                    onPress={() => onReenterPassword(host.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Re-enter password for ${host.name}`}
+                  >
+                    <Text style={styles.hostAction}>Re-enter password</Text>
+                  </TouchableOpacity>
+                )}
+                {onHostSettings && (
+                  <TouchableOpacity
+                    onPress={() => onHostSettings(host.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Server settings for ${host.name}`}
+                  >
+                    <Feather name="settings" size={14} color={theme.colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </View>
               {hostSessions.map((s) => {
                 const active =
                   activePreviewId === null && s.hostId === activeHostId && s.id === activeId;

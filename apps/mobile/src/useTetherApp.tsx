@@ -88,6 +88,8 @@ export function useTetherApp() {
     removeHost: removeConfiguredHost,
     updateProfile,
     reorderHosts,
+    updateIdentity,
+    replaceStoredPassword,
     refreshIdentity,
     client: connectionClient,
     testConnection,
@@ -150,6 +152,10 @@ export function useTetherApp() {
 
   const [screen, setScreen] = useState<RenderRow[]>([]);
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | null>(null);
+  const [serverSettingsHostId, setServerSettingsHostId] = useState<string | null>(null);
+  const serverSettingsHost =
+    profiles?.find((profile) => profile.id === serverSettingsHostId) ?? null;
+  const serverSettingsClient = serverSettingsHost ? clientFor(serverSettingsHost) : null;
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
 
@@ -937,6 +943,14 @@ export function useTetherApp() {
     removeHost,
     updateProfile,
     reorderHosts,
+    serverSettingsHost,
+    serverSettingsClient,
+    serverSettingsOpen: serverSettingsHostId !== null,
+    openServerSettings: (hostId: string) => setServerSettingsHostId(hostId),
+    closeServerSettings: () => setServerSettingsHostId(null),
+    saveServerIdentity: (identity: { name: string; color: string }) =>
+      serverSettingsHostId ? updateIdentity(serverSettingsHostId, identity) : Promise.resolve(),
+    replaceStoredPassword,
     connectionStatus,
     hasConnected,
     mouseEnabled,

@@ -35,6 +35,7 @@ import {
 } from './gitOps';
 import { resolveGitRoot } from './gitRoot';
 import { getLiveCwd } from './liveCwd';
+import { sendTestNotification } from './notifier';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
 import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
 import {
@@ -47,11 +48,11 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { VERSION } from './runtime';
 import { getActivity } from './sessionActivity';
 import { autoTitle, getOscTitle } from './sessionTitle';
 import { resolveUploadPath } from './upload';
 import { readWorkspaceFile, WorkspaceFileError } from './workspaceFile';
-import { sendTestNotification } from './notifier';
 
 const app = new Hono();
 const presentations = new PresentationRegistry();
@@ -183,7 +184,7 @@ app.post('/api/setup', async (c) => {
 });
 
 // Lightweight authed reachability + password probe for the client's Test connection.
-app.get('/api/health', (c) => c.json({ ok: true }));
+app.get('/api/health', (c) => c.json({ ok: true, version: VERSION }));
 
 app.get('/api/config', (c) => c.json(redactConfig()));
 app.patch('/api/config', async (c) => {
@@ -240,7 +241,10 @@ app.post('/api/admin/test-notification', async (c) => {
     await sendTestNotification(config);
     return c.json({ ok: true });
   } catch (error) {
-    return c.json({ ok: false, error: error instanceof Error ? error.message : 'notification failed' }, 502);
+    return c.json(
+      { ok: false, error: error instanceof Error ? error.message : 'notification failed' },
+      502,
+    );
   }
 });
 

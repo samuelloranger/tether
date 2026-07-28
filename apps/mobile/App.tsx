@@ -4,6 +4,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AppThemeProvider, useAppTheme } from './src/AppThemeProvider';
 import { ConfigScreen } from './src/ConfigScreen';
 import { LaunchOverlay } from './src/LaunchOverlay';
+import { ServerSettings } from './src/ServerSettings';
 import { createStyles } from './src/styles';
 import { TerminalScreen } from './src/TerminalScreen';
 import { useTetherApp } from './src/useTetherApp';
@@ -60,6 +61,30 @@ function AppInner({ onReady }: { onReady: () => void }) {
           onRemoveHost={(hostId) => void app.removeHost(hostId)}
           onUpdateHost={(hostId, changes) => void app.updateProfile(hostId, changes)}
           onReorderHosts={(ids) => void app.reorderHosts(ids)}
+          onServerSettings={app.openServerSettings}
+        />
+        <ServerSettings
+          visible={app.serverSettingsOpen}
+          host={app.serverSettingsHost}
+          client={app.serverSettingsClient}
+          health={
+            app.serverSettingsHost
+              ? (app.healthByHost[app.serverSettingsHost.id] ?? 'unknown')
+              : 'unknown'
+          }
+          onClose={app.closeServerSettings}
+          onRetry={() => app.serverSettingsHost && app.refreshHost(app.serverSettingsHost.id)}
+          onUnauthorized={() => {
+            const host = app.serverSettingsHost;
+            app.closeServerSettings();
+            if (host) void app.openEditHost(host.id);
+          }}
+          onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
+          onPasswordChanged={(password) =>
+            app.serverSettingsHost
+              ? app.replaceStoredPassword(app.serverSettingsHost.id, password)
+              : Promise.resolve()
+          }
         />
       </SafeAreaView>
     );
@@ -70,6 +95,29 @@ function AppInner({ onReady }: { onReady: () => void }) {
       style={[styles.appContainer, { backgroundColor: theme.colors.background }]}
     >
       <TerminalScreen app={app} />
+      <ServerSettings
+        visible={app.serverSettingsOpen}
+        host={app.serverSettingsHost}
+        client={app.serverSettingsClient}
+        health={
+          app.serverSettingsHost
+            ? (app.healthByHost[app.serverSettingsHost.id] ?? 'unknown')
+            : 'unknown'
+        }
+        onClose={app.closeServerSettings}
+        onRetry={() => app.serverSettingsHost && app.refreshHost(app.serverSettingsHost.id)}
+        onUnauthorized={() => {
+          const host = app.serverSettingsHost;
+          app.closeServerSettings();
+          if (host) void app.openEditHost(host.id);
+        }}
+        onIdentitySaved={(identity) => void app.saveServerIdentity(identity)}
+        onPasswordChanged={(password) =>
+          app.serverSettingsHost
+            ? app.replaceStoredPassword(app.serverSettingsHost.id, password)
+            : Promise.resolve()
+        }
+      />
     </SafeAreaView>
   );
 }

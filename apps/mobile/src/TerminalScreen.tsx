@@ -149,6 +149,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     refreshHost,
     openAddHost,
     openEditHost,
+    openServerSettings,
     sendTyped,
     sendKey,
     cursorSeq,
@@ -567,6 +568,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onSettings={() => {
                 setDrawerOpen(false);
                 setIsConfiguring(true);
+              }}
+              onHostSettings={(hostId) => {
+                setDrawerOpen(false);
+                openServerSettings(hostId);
               }}
             />
           )}
