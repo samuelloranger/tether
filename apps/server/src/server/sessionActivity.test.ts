@@ -25,12 +25,12 @@ describe('scanChunk', () => {
 
   test('OSC 9 notification detected', () => {
     const r = scanChunk('', '\x1b]9;build finished\x07');
-    expect(r.notify).toBe(true);
+    expect(r.notify).toEqual({ body: 'build finished' });
   });
 
   test('OSC 777;notify detected (ST-terminated)', () => {
     const r = scanChunk('', '\x1b]777;notify;title;body\x1b\\');
-    expect(r.notify).toBe(true);
+    expect(r.notify).toEqual({ title: 'title', body: 'body' });
   });
 
   test('OSC 133 prompt marks parsed', () => {

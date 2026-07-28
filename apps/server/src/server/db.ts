@@ -134,6 +134,16 @@ runMigrations();
 const LOG_CAP = 2000;
 const insertCounts = new Map<string, number>();
 
+function configuredLogCap(): number {
+  try {
+    const value = JSON.parse(getSetting('config.session') ?? '{}') as { scrollbackRows?: unknown };
+    const rows = Number(value.scrollbackRows);
+    return Number.isInteger(rows) && rows >= 100 && rows <= 100_000 ? rows : LOG_CAP;
+  } catch {
+    return LOG_CAP;
+  }
+}
+
 export function pruneLogs(sessionId: string, cap = LOG_CAP) {
   const cut = db
     .query(
@@ -194,7 +204,7 @@ export function addTerminalLog(sessionId: string, chunk: string): number {
     .run({ $sessionId: sessionId, $chunk: chunk });
   const n = (insertCounts.get(sessionId) ?? 0) + 1;
   insertCounts.set(sessionId, n);
-  if (n % 200 === 0) pruneLogs(sessionId);
+  if (n % 200 === 0) pruneLogs(sessionId, configuredLogCap());
   return Number(result.lastInsertRowid);
 }
 

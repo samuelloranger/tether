@@ -12,14 +12,16 @@ import {
 import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import type { Socket } from 'bun';
+import { getConfig } from './config';
 import { addTerminalLog, clearInsertCount, deleteSession, getSession, upsertSession } from './db';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
 import { findGitRoot } from './gitRoot';
 import { GitWatch } from './gitWatch';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
+import { buildNotification, type NotificationEvent, send } from './notifier';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { COMPILED, selfArgv } from './runtime';
-import { type Activity, clearActivity, recordInput, recordOutput } from './sessionActivity';
+import { type Activity, clearActivity, recordInput, recordOutputEvent } from './sessionActivity';
 import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './sessionTitle';
 
 // Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
@@ -144,16 +146,17 @@ export type SessionFrame =
   | { type: 'activity'; activity: Activity };
 
 export type Subscriber = (data: SessionFrame) => void;
+export type FocusSubscriber = Subscriber & { focused?: boolean };
 
 interface SessionInstance {
   sock: Socket;
-  subscribers: Set<Subscriber>;
+  subscribers: Set<FocusSubscriber>;
   diffSummary: DiffSummary;
   gitWatch: GitWatch;
   // Each attached client's requested dims. A PTY has one size, so a shared session
   // is fit to the SMALLEST attached client (tmux model): content fits everyone and
   // a larger client just gets blank margin. Recomputed on attach/resize/detach.
-  clientDims: Map<Subscriber, { cols: number; rows: number }>;
+  clientDims: Map<FocusSubscriber, { cols: number; rows: number }>;
 }
 
 const instances = new Map<string, SessionInstance>();
@@ -187,6 +190,24 @@ function broadcast(id: string, data: SessionFrame) {
   }
 }
 
+function sessionFocused(id: string): boolean {
+  return [...(instances.get(id)?.subscribers ?? [])].some((sub) => sub.focused === true);
+}
+
+function notify(id: string, event: NotificationEvent): void {
+  if (sessionFocused(id)) return;
+  const session = getSession(id);
+  const payload = buildNotification(
+    event,
+    {
+      sessionId: id,
+      sessionTitle: autoTitle(getOscTitle(id), getLiveCwd(id), session?.command ?? 'bash'),
+    },
+    getConfig(),
+  );
+  if (payload) void send(payload, getConfig());
+}
+
 // Connect to a session's holder socket and wire its frames into the existing
 // log + broadcast pipeline. Resolves once attached; rejects if nothing listens.
 function attach(id: string, sockPath: string = sockPathFor(id)): Promise<SessionInstance> {
@@ -216,8 +237,17 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       const title = autoTitle(getOscTitle(id), getLiveCwd(id), getSession(id)?.command ?? 'bash');
       broadcast(id, { type: 'title', title });
     }
-    const activity = recordOutput(id, text);
-    if (activity) broadcast(id, { type: 'activity', activity });
+    const activityEvent = recordOutputEvent(id, text);
+    if (activityEvent.activity)
+      broadcast(id, { type: 'activity', activity: activityEvent.activity });
+    if (activityEvent.notify) {
+      notify(id, { type: 'oscNotify', ...activityEvent.notify });
+    } else if (activityEvent.activity === 'waiting') {
+      notify(id, { type: 'waiting' });
+    }
+    if (activityEvent.longJob) {
+      notify(id, { type: 'longJob', seconds: getConfig().longJobSeconds });
+    }
   };
 
   const handleLine = (line: string) => {
@@ -252,6 +282,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
         upsertSession(id, sess?.command ?? 'bash', 'stopped');
       }
       broadcast(id, { type: 'exit', exitCode: msg.code });
+      notify(id, { type: 'exit', exitCode: msg.code });
       instances.get(id)?.gitWatch.dispose();
       instances.get(id)?.subscribers.clear();
       instances.delete(id);
@@ -359,7 +390,7 @@ export function getDefaultShell(): string {
 
 export async function startSession(
   id: string,
-  command: string = getDefaultShell(),
+  command?: string,
   cols: number = 80,
   rows: number = 24,
 ) {
@@ -376,7 +407,9 @@ export async function startSession(
     throw new Error(`session cap reached (${MAX_SESSIONS})`);
   }
 
-  const promise = doStartSession(id, command, cols, rows).finally(() => {
+  const cfg = getConfig();
+  const selectedCommand = command || cfg.session.defaultShell || getDefaultShell();
+  const promise = doStartSession(id, selectedCommand, cols, rows).finally(() => {
     pendingStarts.delete(id);
   });
   pendingStarts.set(id, promise);
@@ -435,7 +468,7 @@ async function doStartSession(
     sockPath,
     String(dims.cols),
     String(dims.rows),
-    homedir(),
+    getConfig().session.defaultCwd || homedir(),
     ...args,
   ]);
   const holder = spawn(holderCmd, holderArgs, {
@@ -527,14 +560,19 @@ function recomputeSize(id: string) {
 }
 
 // Record this client's requested size and re-fit the PTY to the smallest client.
-export function resizeSession(id: string, client: Subscriber, cols: number, rows: number) {
+export function resizeSession(id: string, client: FocusSubscriber, cols: number, rows: number) {
   const inst = instances.get(id);
   if (!inst) return;
   inst.clientDims.set(client, clampDims(cols, rows));
   recomputeSize(id);
 }
 
-export function subscribeToSession(id: string, callback: Subscriber, cols: number, rows: number) {
+export function subscribeToSession(
+  id: string,
+  callback: FocusSubscriber,
+  cols: number,
+  rows: number,
+) {
   const instance = instances.get(id);
   if (instance) {
     instance.subscribers.add(callback);
@@ -548,6 +586,11 @@ export function subscribeToSession(id: string, callback: Subscriber, cols: numbe
     };
   }
   return () => {};
+}
+
+export function setSessionFocus(id: string, client: FocusSubscriber, focused: boolean): void {
+  const instance = instances.get(id);
+  if (instance?.subscribers.has(client)) client.focused = focused;
 }
 
 export function killSession(id: string) {

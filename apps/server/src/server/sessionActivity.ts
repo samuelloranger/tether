@@ -1,3 +1,5 @@
+import { getConfig } from './config';
+
 // Per-session activity classification: is the foreground program busy
 // (`working`), blocked on user input (`waiting`), or sitting at a shell prompt
 // (`idle`)? Fed from the same PTY output chokepoint as liveCwd.ts and shaped
@@ -24,7 +26,7 @@ export interface ScanResult {
   // every prompt — those must not count as attention bells).
   bell: boolean;
   // OSC 9 / OSC 777;notify;… — an explicit program-sent notification.
-  notify: boolean;
+  notify: { title?: string; body?: string } | null;
   // OSC 133 semantic prompt marks: A = prompt start, C = command executing.
   promptMark: string | null;
   // Last non-empty visible line (escapes stripped), for the silence heuristics.
@@ -42,7 +44,7 @@ const MAX_TAIL = 200;
 export function scanChunk(residual: string, chunk: string): ScanResult {
   const text = residual + chunk;
   let bell = false;
-  let notify = false;
+  let notify: ScanResult['notify'] = null;
   let promptMark: string | null = null;
   let visible = '';
   let i = 0;
@@ -84,8 +86,12 @@ export function scanChunk(residual: string, chunk: string): ScanResult {
         };
       }
       const payload = text.slice(i + 2, end);
-      if (payload.startsWith('9;') || payload.startsWith('777;notify')) notify = true;
-      else if (payload.startsWith('133;')) promptMark = payload.slice(4, 5) || null;
+      if (payload.startsWith('9;')) {
+        notify = { body: payload.slice(2) };
+      } else if (payload.startsWith('777;notify;')) {
+        const [, , title = '', ...body] = payload.split(';');
+        notify = { title, body: body.join(';') };
+      } else if (payload.startsWith('133;')) promptMark = payload.slice(4, 5) || null;
       i = end + term;
       continue;
     }
@@ -167,21 +173,49 @@ function transition(st: SessionActivityState, next: Activity, now: number): Acti
 // Feed one output chunk. Returns the new activity when it changed, else null
 // (callers broadcast transitions to attached clients).
 export function recordOutput(id: string, chunk: string, now = Date.now()): Activity | null {
+  return recordOutputEvent(id, chunk, now).activity;
+}
+
+export interface ActivityOutputEvent {
+  activity: Activity | null;
+  notify: ScanResult['notify'];
+  longJob: boolean;
+}
+
+// Extended output result for server-side alerting. The compatibility wrapper
+// above keeps the client activity protocol and existing callers unchanged.
+export function recordOutputEvent(
+  id: string,
+  chunk: string,
+  now = Date.now(),
+): ActivityOutputEvent {
   const fresh = !stateBySession.has(id);
   const st = getState(id, now);
+  const previousActivity = st.activity;
+  const previousSince = st.since;
   const scan = scanChunk(st.residual, chunk);
   st.residual = scan.residual;
   st.lastOutputAt = now;
   if (scan.tail) st.tail = scan.tail;
   // Strongest signal wins; explicit attention beats prompt marks beats plain output.
-  if (scan.bell || scan.notify) return transition(st, 'waiting', now);
-  if (scan.promptMark === 'A') return transition(st, 'idle', now);
-  if (scan.promptMark === 'C') return transition(st, 'working', now);
-  if (scan.tail === null) return fresh ? st.activity : null; // pure escape chunk — no evidence
+  let activity: Activity | null;
+  if (scan.bell || scan.notify) activity = transition(st, 'waiting', now);
+  else if (scan.promptMark === 'A') activity = transition(st, 'idle', now);
+  else if (scan.promptMark === 'C') activity = transition(st, 'working', now);
+  else if (scan.tail === null)
+    activity = fresh ? st.activity : null; // pure escape chunk — no evidence
   // Plain visible output = the program is doing something. A fresh session
   // reports its first classification even without a change, so clients get an
   // initial frame.
-  return transition(st, 'working', now) ?? (fresh ? st.activity : null);
+  else activity = transition(st, 'working', now) ?? (fresh ? st.activity : null);
+  return {
+    activity,
+    notify: scan.notify,
+    longJob:
+      previousActivity === 'working' &&
+      (activity === 'idle' || activity === 'waiting') &&
+      now - previousSince >= getConfig().longJobSeconds * 1000,
+  };
 }
 
 // User keystrokes answer whatever the program was waiting on.
@@ -200,7 +234,7 @@ export function recordInput(id: string, now = Date.now()): Activity | null {
 export function getActivity(id: string, now = Date.now()): Activity | null {
   const st = stateBySession.get(id);
   if (!st) return null;
-  if (st.activity === 'working' && now - st.lastOutputAt >= SILENCE_MS) {
+  if (st.activity === 'working' && now - st.lastOutputAt >= getConfig().session.silenceMs) {
     if (WAITING_RE.test(st.tail)) transition(st, 'waiting', now);
     else if (PROMPT_RE.test(st.tail)) transition(st, 'idle', now);
   }

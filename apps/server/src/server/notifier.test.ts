@@ -1,0 +1,42 @@
+import { expect, test } from 'bun:test';
+import { DEFAULT_CONFIG } from './config';
+import { buildNotification, send } from './notifier';
+
+const cfg = {
+  ...DEFAULT_CONFIG,
+  notify: { ...DEFAULT_CONFIG.notify, enabled: true, topic: 'tether-test' },
+  identity: { ...DEFAULT_CONFIG.identity, name: 'Mac mini' },
+};
+
+test('buildNotification maps waiting to an ntfy payload and deep link', () => {
+  expect(
+    buildNotification({ type: 'waiting' }, { sessionId: 'abc', sessionTitle: 'shell' }, cfg),
+  ).toEqual({
+    topic: 'tether-test',
+    title: 'Mac mini · shell',
+    message: 'Waiting for input',
+    tags: ['waiting'],
+    priority: 4,
+    click: 'tether://session/abc?host=Mac%20mini',
+  });
+});
+
+test('disabled triggers suppress notifications and send swallows failures', async () => {
+  expect(
+    buildNotification(
+      { type: 'exit' },
+      { sessionId: 'abc', sessionTitle: 'shell' },
+      { ...cfg, triggers: { ...cfg.triggers, exit: false } },
+    ),
+  ).toBeNull();
+  const payload = buildNotification(
+    { type: 'exit' },
+    { sessionId: 'abc', sessionTitle: 'shell' },
+    cfg,
+  )!;
+  await expect(
+    send(payload, cfg, async () => {
+      throw new Error('offline');
+    }),
+  ).resolves.toBeUndefined();
+});
