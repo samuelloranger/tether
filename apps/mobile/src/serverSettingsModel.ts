@@ -6,8 +6,13 @@ export type ServerConfig = {
   session: { defaultShell: string; defaultCwd: string; scrollbackRows: number; silenceMs: number };
 };
 
-export type ServerSettingsDraft = ServerConfig & {
+export type ServerSettingsDraft = Omit<ServerConfig, 'longJobSeconds' | 'session'> & {
   notify: ServerConfig['notify'] & { token?: string };
+  longJobSeconds: string;
+  session: Omit<ServerConfig['session'], 'scrollbackRows' | 'silenceMs'> & {
+    scrollbackRows: string;
+    silenceMs: string;
+  };
 };
 export type ServerConfigPatch = Partial<{
   notify: Partial<Omit<ServerConfig['notify'], 'hasToken'>> & { token?: string };
@@ -24,7 +29,12 @@ export function createServerSettingsDraft(config: ServerConfig): ServerSettingsD
     notify: { ...config.notify },
     triggers: { ...config.triggers },
     identity: { ...config.identity },
-    session: { ...config.session },
+    longJobSeconds: String(config.longJobSeconds),
+    session: {
+      ...config.session,
+      scrollbackRows: String(config.session.scrollbackRows),
+      silenceMs: String(config.session.silenceMs),
+    },
   };
 }
 
@@ -41,10 +51,19 @@ export function patchForDraft(config: ServerConfig, draft: ServerSettingsDraft):
   const patch: ServerConfigPatch = {};
   const triggers = changedFields(config.triggers, draft.triggers);
   const identity = changedFields(config.identity, draft.identity);
-  const session = changedFields(config.session, draft.session);
+  const session: NonNullable<ServerConfigPatch['session']> = {};
+  if (config.session.defaultShell !== draft.session.defaultShell)
+    session.defaultShell = draft.session.defaultShell;
+  if (config.session.defaultCwd !== draft.session.defaultCwd)
+    session.defaultCwd = draft.session.defaultCwd;
+  const scrollbackRows = Number(draft.session.scrollbackRows);
+  if (config.session.scrollbackRows !== scrollbackRows) session.scrollbackRows = scrollbackRows;
+  const silenceMs = Number(draft.session.silenceMs);
+  if (config.session.silenceMs !== silenceMs) session.silenceMs = silenceMs;
   if (Object.keys(notify).length) patch.notify = notify;
   if (Object.keys(triggers).length) patch.triggers = triggers;
-  if (config.longJobSeconds !== draft.longJobSeconds) patch.longJobSeconds = draft.longJobSeconds;
+  const longJobSeconds = Number(draft.longJobSeconds);
+  if (config.longJobSeconds !== longJobSeconds) patch.longJobSeconds = longJobSeconds;
   if (Object.keys(identity).length) patch.identity = identity;
   if (Object.keys(session).length) patch.session = session;
   return patch;
@@ -62,30 +81,34 @@ export function validateServerSettingsDraft(draft: ServerSettingsDraft): ServerS
     errors.identityName = 'Name must be between 1 and 100 characters.';
   if (draft.identity.color.length > 32)
     errors.identityColor = 'Color must be at most 32 characters.';
-  try {
-    new URL(draft.notify.url);
-  } catch {
-    errors.notifyUrl = 'Enter a valid notification URL.';
+  if (draft.notify.enabled) {
+    try {
+      new URL(draft.notify.url);
+    } catch {
+      errors.notifyUrl = 'Enter a valid notification URL.';
+    }
+    if (draft.notify.topic.length > 256)
+      errors.notifyTopic = 'Topic must be at most 256 characters.';
   }
-  if (draft.notify.topic.length > 256) errors.notifyTopic = 'Topic must be at most 256 characters.';
   if (draft.notify.token !== undefined && (!draft.notify.token || draft.notify.token.length > 4096))
     errors.notifyToken = 'Token must be between 1 and 4096 characters.';
-  if (!Number.isInteger(draft.longJobSeconds) || draft.longJobSeconds <= 0)
+  const longJobSeconds = Number(draft.longJobSeconds);
+  if (!Number.isInteger(longJobSeconds) || longJobSeconds <= 0)
     errors.longJobSeconds = 'Long-job threshold must be a positive whole number.';
   if (!draft.session.defaultShell || draft.session.defaultShell.length > 4096)
     errors.defaultShell = 'Default shell must be between 1 and 4096 characters.';
   if (!draft.session.defaultCwd || draft.session.defaultCwd.length > 4096)
     errors.defaultCwd = 'Default directory must be between 1 and 4096 characters.';
   if (
-    !Number.isInteger(draft.session.scrollbackRows) ||
-    draft.session.scrollbackRows < 100 ||
-    draft.session.scrollbackRows > 100000
+    !Number.isInteger(Number(draft.session.scrollbackRows)) ||
+    Number(draft.session.scrollbackRows) < 100 ||
+    Number(draft.session.scrollbackRows) > 100000
   )
     errors.scrollbackRows = 'Scrollback must be between 100 and 100000 rows.';
   if (
-    !Number.isInteger(draft.session.silenceMs) ||
-    draft.session.silenceMs < 1000 ||
-    draft.session.silenceMs > 3600000
+    !Number.isInteger(Number(draft.session.silenceMs)) ||
+    Number(draft.session.silenceMs) < 1000 ||
+    Number(draft.session.silenceMs) > 3600000
   )
     errors.silenceMs = 'Silence threshold must be between 1000 and 3600000 ms.';
   return errors;

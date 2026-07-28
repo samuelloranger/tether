@@ -37,6 +37,7 @@ import type { HostHealthStatus } from './tether/hostHealth';
 import type { HostProfile } from './tether/hostStore';
 
 type AdminOperation = 'password' | 'update' | 'restart' | null;
+type Message = { kind: 'success' | 'error'; text: string };
 
 export function ServerSettings({
   visible,
@@ -65,7 +66,7 @@ export function ServerSettings({
   const [draft, setDraft] = useState<ServerSettingsDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<Message | null>(null);
   const [admin, setAdmin] = useState<AdminOperation>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
@@ -85,7 +86,10 @@ export function ServerSettings({
         setVersion(nextVersion);
       })
       .catch((error) =>
-        setMessage(error instanceof Error ? error.message : 'Could not load settings.'),
+        setMessage({
+          kind: 'error',
+          text: error instanceof Error ? error.message : 'Could not load settings.',
+        }),
       )
       .finally(() => setLoading(false));
   }, [client, health, visible]);
@@ -95,6 +99,11 @@ export function ServerSettings({
     [config, draft],
   );
   const readOnly = health === 'unreachable' || !draft;
+  const validationErrors = useMemo(
+    () => (draft ? validateServerSettingsDraft(draft) : {}),
+    [draft],
+  );
+  const hasValidationErrors = Object.keys(validationErrors).length > 0;
   const set = <K extends keyof ServerSettingsDraft>(key: K, value: ServerSettingsDraft[K]) =>
     setDraft((current) => (current ? { ...current, [key]: value } : current));
   const close = async () => {
@@ -110,9 +119,7 @@ export function ServerSettings({
   };
   const save = async () => {
     if (!config || !draft || !client) return;
-    const errors = validateServerSettingsDraft(draft);
-    if (Object.keys(errors).length)
-      return setMessage(Object.values(errors)[0] ?? 'Check your settings.');
+    if (Object.keys(validateServerSettingsDraft(draft)).length) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -120,9 +127,15 @@ export function ServerSettings({
       setConfig(next);
       setDraft(createServerSettingsDraft(next));
       onIdentitySaved(next.identity);
-      setMessage('Saved. Session defaults apply to newly started sessions.');
+      setMessage({
+        kind: 'success',
+        text: 'Saved. Session defaults apply to newly started sessions.',
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not save settings.');
+      setMessage({
+        kind: 'error',
+        text: error instanceof Error ? error.message : 'Could not save settings.',
+      });
     } finally {
       setSaving(false);
     }
@@ -132,15 +145,18 @@ export function ServerSettings({
     setMessage(null);
     try {
       await sendServerNotificationTest(client, patchForDraft(config, draft));
-      setMessage('Test notification sent.');
+      setMessage({ kind: 'success', text: 'Test notification sent.' });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Test notification failed.');
+      setMessage({
+        kind: 'error',
+        text: error instanceof Error ? error.message : 'Test notification failed.',
+      });
     }
   };
   const runAdmin = async () => {
     if (!client || !admin || !currentPassword) return;
     if (admin === 'password' && (!nextPassword || nextPassword !== confirmPassword)) {
-      setMessage('New passwords must match.');
+      setMessage({ kind: 'error', text: 'New passwords must match.' });
       return;
     }
     setAdminBusy(true);
@@ -149,9 +165,15 @@ export function ServerSettings({
       if (admin === 'password') {
         await changeServerPassword(client, currentPassword, nextPassword);
         await onPasswordChanged(nextPassword);
-        setMessage('Password changed. Existing token sessions remain connected.');
+        setMessage({
+          kind: 'success',
+          text: 'Password changed. Existing token sessions remain connected.',
+        });
       } else if (admin === 'update') {
-        setMessage('Updating… Sessions survive the restart and will reconnect.');
+        setMessage({
+          kind: 'success',
+          text: 'Updating… Sessions survive the restart and will reconnect.',
+        });
         await updateServer(client, currentPassword);
         onRetry();
         let actual: string | null = null;
@@ -160,13 +182,14 @@ export function ServerSettings({
           actual = await loadServerVersion(client).catch(() => null);
         }
         setVersion(actual);
-        setMessage(
-          actual
+        setMessage({
+          kind: 'success',
+          text: actual
             ? `Updated. Server is now ${actual}.`
             : 'Update requested; waiting for server reconnect.',
-        );
+        });
       } else {
-        setMessage('Restarting… Sessions survive and will reconnect.');
+        setMessage({ kind: 'success', text: 'Restarting… Sessions survive and will reconnect.' });
         await restartServer(client, currentPassword);
         onRetry();
       }
@@ -175,7 +198,10 @@ export function ServerSettings({
       setNextPassword('');
       setConfirmPassword('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Server operation failed.');
+      setMessage({
+        kind: 'error',
+        text: error instanceof Error ? error.message : 'Server operation failed.',
+      });
     } finally {
       setAdminBusy(false);
     }
@@ -227,12 +253,14 @@ export function ServerSettings({
                   label="Name"
                   value={draft.identity.name}
                   editable={!readOnly}
+                  error={validationErrors.identityName}
                   onChangeText={(name) => set('identity', { ...draft.identity, name })}
                 />
                 <Field
                   label="Color"
                   value={draft.identity.color}
                   editable={!readOnly}
+                  error={validationErrors.identityColor}
                   onChangeText={(color) => set('identity', { ...draft.identity, color })}
                 />
               </Section>
@@ -247,12 +275,14 @@ export function ServerSettings({
                   label="ntfy URL"
                   value={draft.notify.url}
                   editable={!readOnly}
+                  error={validationErrors.notifyUrl}
                   onChangeText={(url) => set('notify', { ...draft.notify, url })}
                 />
                 <Field
                   label="Topic"
                   value={draft.notify.topic}
                   editable={!readOnly}
+                  error={validationErrors.notifyTopic}
                   onChangeText={(topic) => set('notify', { ...draft.notify, topic })}
                 />
                 {draft.notify.token === undefined ? (
@@ -267,6 +297,7 @@ export function ServerSettings({
                     value={draft.notify.token}
                     secure
                     editable={!readOnly}
+                    error={validationErrors.notifyToken}
                     onChangeText={(token) => set('notify', { ...draft.notify, token })}
                   />
                 )}
@@ -296,10 +327,11 @@ export function ServerSettings({
                 />
                 <Field
                   label="Long job seconds"
-                  value={String(draft.longJobSeconds)}
+                  value={draft.longJobSeconds}
                   editable={!readOnly}
                   numeric
-                  onChangeText={(value) => set('longJobSeconds', Number(value))}
+                  error={validationErrors.longJobSeconds}
+                  onChangeText={(longJobSeconds) => set('longJobSeconds', longJobSeconds)}
                 />
                 <Button label="Send test" onPress={() => void sendTest()} disabled={readOnly} />
               </Section>
@@ -321,21 +353,21 @@ export function ServerSettings({
                 />
                 <Field
                   label="Scrollback rows"
-                  value={String(draft.session.scrollbackRows)}
+                  value={draft.session.scrollbackRows}
                   editable={!readOnly}
                   numeric
+                  error={validationErrors.scrollbackRows}
                   onChangeText={(value) =>
-                    set('session', { ...draft.session, scrollbackRows: Number(value) })
+                    set('session', { ...draft.session, scrollbackRows: value })
                   }
                 />
                 <Field
                   label="Silence threshold (ms)"
-                  value={String(draft.session.silenceMs)}
+                  value={draft.session.silenceMs}
                   editable={!readOnly}
                   numeric
-                  onChangeText={(value) =>
-                    set('session', { ...draft.session, silenceMs: Number(value) })
-                  }
+                  error={validationErrors.silenceMs}
+                  onChangeText={(value) => set('session', { ...draft.session, silenceMs: value })}
                 />
               </Section>
               <Section title="Server ops">
@@ -349,24 +381,21 @@ export function ServerSettings({
               </Section>
               {message && (
                 <Text
-                  style={
-                    message.includes('failed') || message.includes('Could not')
-                      ? styles.error
-                      : styles.message
-                  }
+                  testID={`server-settings-message-${message.kind}`}
+                  style={message.kind === 'error' ? styles.error : styles.message}
                 >
-                  {message}
+                  {message.text}
                 </Text>
               )}
               <Button
                 label={saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
                 onPress={() => void save()}
-                disabled={readOnly || saving || !dirty}
+                disabled={readOnly || saving || !dirty || hasValidationErrors}
               />
             </ScrollView>
           ) : (
             <View style={styles.state}>
-              <Text style={styles.error}>{message ?? 'Settings are unavailable.'}</Text>
+              <Text style={styles.error}>{message?.text ?? 'Settings are unavailable.'}</Text>
               <Button label="Retry" onPress={onRetry} />
             </View>
           )}
@@ -437,6 +466,7 @@ function Field({
   label,
   secure,
   numeric,
+  error,
   ...props
 }: {
   label: string;
@@ -444,6 +474,7 @@ function Field({
   editable?: boolean;
   secure?: boolean;
   numeric?: boolean;
+  error?: string;
   onChangeText: (value: string) => void;
 }) {
   const { theme } = useAppTheme();
@@ -466,6 +497,9 @@ function Field({
           backgroundColor: theme.colors.input,
         }}
       />
+      {error && (
+        <Text style={{ color: theme.colors.danger, fontSize: 12, marginTop: 4 }}>{error}</Text>
+      )}
     </View>
   );
 }

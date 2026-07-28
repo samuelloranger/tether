@@ -37,3 +37,29 @@ test('validates the same user-editable bounds as the server config schema', () =
     scrollbackRows: 'Scrollback must be between 100 and 100000 rows.',
   });
 });
+
+test('allows a cleared notification URL when notifications are disabled', () => {
+  const draft = createServerSettingsDraft(config);
+  draft.notify.enabled = false;
+  draft.notify.url = '';
+  draft.notify.topic = '';
+
+  expect(validateServerSettingsDraft(draft)).toEqual({});
+});
+
+test('keeps numeric drafts as strings and parses them only in the patch', () => {
+  const draft = createServerSettingsDraft(config);
+  draft.longJobSeconds = '60';
+  draft.session.scrollbackRows = '500';
+  draft.session.silenceMs = '2000';
+
+  expect(patchForDraft(config, draft)).toEqual({
+    longJobSeconds: 60,
+    session: { scrollbackRows: 500, silenceMs: 2000 },
+  });
+
+  draft.session.scrollbackRows = '';
+  expect(validateServerSettingsDraft(draft).scrollbackRows).toBe(
+    'Scrollback must be between 100 and 100000 rows.',
+  );
+});
