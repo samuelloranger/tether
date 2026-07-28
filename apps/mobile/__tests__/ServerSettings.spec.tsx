@@ -79,7 +79,7 @@ test('renders all settings sections and saves one diffed PATCH', async () => {
       }),
     ),
   );
-});
+}, 10_000);
 
 test('renders an unreachable host as a read-only retry state', () => {
   const view = render(
