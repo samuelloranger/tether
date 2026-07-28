@@ -8,6 +8,7 @@ import { Linking, type TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import { readClipboard, writeClipboard } from './clipboard';
+import { parseDeepLink } from './deepLink';
 import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
@@ -76,6 +77,18 @@ export function useTetherApp() {
     isConfiguring,
     setIsConfiguring,
     ready,
+    activeHostId: configuredActiveHostId,
+    profiles,
+    clientFor,
+    storeError,
+    loadProfiles,
+    openAddHost,
+    openEditHost,
+    activateHost,
+    removeHost: removeConfiguredHost,
+    updateProfile,
+    reorderHosts,
+    refreshIdentity,
     client: connectionClient,
     testConnection,
     saveConfig: saveConnectionConfig,
@@ -136,6 +149,8 @@ export function useTetherApp() {
   } = useDesktopUpdater();
 
   const [screen, setScreen] = useState<RenderRow[]>([]);
+  const [deepLinkNotice, setDeepLinkNotice] = useState<string | null>(null);
+  const pendingDeepLinkRef = useRef<string | null>(null);
 
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
@@ -167,6 +182,7 @@ export function useTetherApp() {
     connectionStatus,
     hasConnected,
     drawerSessions,
+    healthByHost,
     terminalViewRef,
     entryFor,
     getSessionEntry,
@@ -181,6 +197,9 @@ export function useTetherApp() {
     newTerminal: createTerminal,
     killActiveOr,
     refreshSessions,
+    refreshHost,
+    resetHostHealth,
+    removeHost: removeHostSessions,
     resetForEndpointChange,
     restartActiveSession,
     markAuthFailed,
@@ -189,6 +208,9 @@ export function useTetherApp() {
     isWindowFocused,
   } = useTerminalSessions({
     client: connectionClient,
+    profiles: profiles ?? [],
+    clientFor,
+    onReachable: refreshIdentity,
     ready,
     isConfiguring,
     theme,
@@ -243,21 +265,64 @@ export function useTetherApp() {
   const saveConfig = async () => {
     const { addressChanged, wasReady } = await saveConnectionConfig();
     if (addressChanged && wasReady) resetForEndpointChange();
+    if (configuredActiveHostId) resetHostHealth(configuredActiveHostId);
+  };
+  const removeHost = async (hostId: string) => {
+    removeHostSessions(hostId);
+    await removeConfiguredHost(hostId);
   };
 
-  const switchTo = (id: string) => {
+  const switchTo = (hostId: string, id: string) => {
     closeDiff();
-    switchTerminal(activeHostId, id);
+    void activateHost(hostId);
+    switchTerminal(hostId, id);
   };
   const newTerminal = () => {
     setActivePresentationId(null);
     createTerminal();
   };
 
-  const selectTerminal = (id: string) => {
+  const selectTerminal = (hostId: string, id: string) => {
     setActivePresentationId(null);
-    switchTo(id);
+    switchTo(hostId, id);
   };
+
+  const handleDeepLink = useCallback(
+    (url: string) => {
+      const link = parseDeepLink(url);
+      if (!link) return;
+      if (profiles === null) {
+        pendingDeepLinkRef.current = url;
+        return;
+      }
+      const host = profiles.find((profile) => profile.identityName === link.identityName);
+      if (!host) {
+        setDeepLinkNotice(`No saved host named “${link.identityName}”.`);
+        return;
+      }
+      selectTerminal(host.id, link.sessionId);
+    },
+    [profiles, selectTerminal],
+  );
+  const handleDeepLinkRef = useRef(handleDeepLink);
+  handleDeepLinkRef.current = handleDeepLink;
+  useEffect(() => {
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (url) handleDeepLinkRef.current(url);
+      })
+      .catch(() => {});
+    const subscription = Linking.addEventListener('url', ({ url }) =>
+      handleDeepLinkRef.current(url),
+    );
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    if (profiles === null || !pendingDeepLinkRef.current) return;
+    const url = pendingDeepLinkRef.current;
+    pendingDeepLinkRef.current = null;
+    handleDeepLink(url);
+  }, [handleDeepLink, profiles]);
 
   const selectPresentation = (id: string) => {
     setFileView(null);
@@ -852,6 +917,14 @@ export function useTetherApp() {
     setTestStatus,
     isConfiguring,
     setIsConfiguring,
+    profiles,
+    storeError,
+    loadProfiles,
+    openAddHost,
+    openEditHost,
+    removeHost,
+    updateProfile,
+    reorderHosts,
     connectionStatus,
     hasConnected,
     mouseEnabled,
@@ -892,9 +965,13 @@ export function useTetherApp() {
     snippetDraft,
     setSnippetDraft,
     activeId,
+    activeHostId,
     drawerOpen,
     setDrawerOpen,
     drawerSessions,
+    healthByHost,
+    deepLinkNotice,
+    dismissDeepLinkNotice: () => setDeepLinkNotice(null),
     presentations,
     activePresentation,
     activePresentationId,
@@ -929,6 +1006,7 @@ export function useTetherApp() {
     selectPresentation,
     closePresentation,
     refreshPresentations,
+    refreshHost,
     desktopNavigationMode,
     selectDesktopNavigationMode,
     inputRef,

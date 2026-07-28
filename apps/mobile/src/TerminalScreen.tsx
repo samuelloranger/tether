@@ -82,9 +82,14 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     snippetDraft,
     setSnippetDraft,
     activeId,
+    activeHostId,
     drawerOpen,
     setDrawerOpen,
     drawerSessions,
+    profiles,
+    healthByHost,
+    deepLinkNotice,
+    dismissDeepLinkNotice,
     presentations,
     activePresentation,
     activePresentationId,
@@ -141,6 +146,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     removeSnippet,
     sendSnippet,
     refreshSessions,
+    refreshHost,
+    openAddHost,
+    openEditHost,
     sendTyped,
     sendKey,
     cursorSeq,
@@ -281,9 +289,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
         {isDesktop && (
           <DesktopSessionNavigator
             mode={desktopNavigationMode}
-            sessions={drawerSessions}
+            sessions={drawerSessions.filter((session) => session.hostId === activeHostId)}
             activeId={activeId}
-            onSelect={selectTerminal}
+            onSelect={(id) => selectTerminal(activeHostId, id)}
             onNew={newTerminal}
             onKill={killActiveOr}
             previews={presentations}
@@ -411,7 +419,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 <PresentationBanner
                   label={`Back to ${backLabel}`}
                   icon="terminal"
-                  onPress={() => selectTerminal(backTarget)}
+                  onPress={() => selectTerminal(activeHostId, backTarget)}
                 />
               )}
               <PresentationView
@@ -509,6 +517,26 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     onEdit={() => setIsConfiguring(true)}
                   />
                 </View>
+                {deepLinkNotice && (
+                  <TouchableOpacity
+                    onPress={dismissDeepLinkNotice}
+                    accessibilityRole="button"
+                    accessibilityLabel="Dismiss deep link notice"
+                    style={{
+                      position: 'absolute',
+                      left: 12,
+                      right: 12,
+                      bottom: 10,
+                      padding: 10,
+                      borderRadius: 8,
+                      backgroundColor: theme.colors.surfaceRaised,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>
+                      {deepLinkNotice}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </>
           )}
@@ -517,11 +545,17 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           {!isDesktop && (
             <SessionDrawer
               visible={drawerOpen}
+              hosts={profiles ?? []}
+              healthByHost={healthByHost}
               sessions={drawerSessions}
+              activeHostId={activeHostId}
               activeId={activeId}
               onSelect={selectTerminal}
               onNew={newTerminal}
               onKill={killActiveOr}
+              onRetryHost={refreshHost}
+              onReenterPassword={openEditHost}
+              onAddHost={openAddHost}
               previews={presentations}
               activePreviewId={activePresentationId}
               onSelectPreview={(id) => {

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { validateAddress } from '../address';
 import { notify } from '../dialog';
 import {
@@ -10,24 +10,35 @@ import {
   setPassword as persistPassword,
 } from '../secureConfig';
 import { createHostClient } from './hostClient';
-import { createHostStore } from './hostStore';
+import { createHostStore, type HostProfile } from './hostStore';
 
 const KEY_ACTIVE_HOST = 'tether_active_host';
+type TestStatus =
+  | { kind: 'idle' }
+  | { kind: 'testing' }
+  | { kind: 'ok' }
+  | { kind: 'error'; msg: string };
 
 export function useConnectionConfig() {
   const [serverIp, setServerIp] = useState('');
   const [port, setPort] = useState('8085');
   const [password, setPassword] = useState('');
   const passwordRef = useRef('');
+  const passwordsRef = useRef(new Map<string, string>());
   const [setupMode, setSetupMode] = useState<'unknown' | 'create' | 'enter'>('unknown');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [testStatus, setTestStatus] = useState<
-    { kind: 'idle' } | { kind: 'testing' } | { kind: 'ok' } | { kind: 'error'; msg: string }
-  >({ kind: 'idle' });
+  const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
   const [isConfiguring, setIsConfiguring] = useState(true);
   const [ready, setReady] = useState(false);
   const readyRef = useRef(false);
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
+  const [editingHostId, setEditingHostId] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<HostProfile[] | null>(null);
+  const [storeError, setStoreError] = useState<string | null>(null);
+  const [discoveredIdentity, setDiscoveredIdentity] = useState<{
+    name: string;
+    color: string;
+  } | null>(null);
   const hostStoreRef = useRef(
     createHostStore({
       storage: AsyncStorage,
@@ -40,65 +51,136 @@ export function useConnectionConfig() {
       },
     }),
   );
-  const lastConnectedRef = useRef({ ip: serverIp, port });
-  const client = useMemo(
-    () =>
-      createHostClient(
-        {
-          id: activeHostId ?? 'pending',
+  const lastConnectedRef = useRef({ ip: '', port: '8085' });
+
+  const profileForForm = useMemo<HostProfile>(() => {
+    const existing = profiles?.find(
+      (profile) => profile.id === editingHostId || profile.id === activeHostId,
+    );
+    return existing
+      ? { ...existing, host: serverIp, port }
+      : {
+          id: editingHostId ?? activeHostId ?? 'pending',
           name: serverIp,
           color: '#89b4fa',
           host: serverIp,
           port,
           identityName: '',
-          order: 0,
-        },
-        password,
-      ),
-    [activeHostId, password, port, serverIp],
+          order: profiles?.length ?? 0,
+        };
+  }, [activeHostId, editingHostId, port, profiles, serverIp]);
+  const client = useMemo(
+    () => createHostClient(profileForForm, password),
+    [password, profileForForm],
+  );
+  const clientFor = useCallback(
+    (profile: HostProfile) => createHostClient(profile, passwordsRef.current.get(profile.id) ?? ''),
+    [],
   );
 
+  const loadProfiles = useCallback(async () => {
+    setStoreError(null);
+    try {
+      const next = await hostStoreRef.current.list();
+      const storedActive = await AsyncStorage.getItem(KEY_ACTIVE_HOST).catch(() => null);
+      const current = next.find((profile) => profile.id === storedActive) ?? next[0] ?? null;
+      const credentials = await Promise.all(
+        next.map(async (profile) => [profile.id, await getPassword(profile.id)] as const),
+      );
+      passwordsRef.current = new Map(
+        credentials.flatMap(([id, value]) => (value === null ? [] : [[id, value]])),
+      );
+      setProfiles(next);
+      if (!current) {
+        setActiveHostId(null);
+        setEditingHostId(null);
+        setReady(false);
+        setIsConfiguring(true);
+        return;
+      }
+      const currentPassword = passwordsRef.current.get(current.id) ?? '';
+      setActiveHostId(current.id);
+      setEditingHostId(current.id);
+      setServerIp(current.host);
+      setPort(current.port);
+      setPassword(currentPassword);
+      passwordRef.current = currentPassword;
+      lastConnectedRef.current = { ip: current.host, port: current.port };
+      void AsyncStorage.setItem(KEY_ACTIVE_HOST, current.id).catch(() => {});
+      readyRef.current = true;
+      setReady(true);
+      setIsConfiguring(false);
+    } catch {
+      setProfiles(null);
+      setStoreError('Hosts could not be loaded. Check device storage and retry.');
+      setReady(false);
+      setIsConfiguring(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadProfiles();
+  }, [loadProfiles]);
   useEffect(() => {
     passwordRef.current = password;
   }, [password]);
 
-  useEffect(() => {
-    void hostStoreRef.current
-      .list()
-      .then(async (profiles) => {
-        const savedHostId = await AsyncStorage.getItem(KEY_ACTIVE_HOST);
-        const current = profiles.find((profile) => profile.id === savedHostId) ?? profiles[0];
-        if (!current) return;
-        setActiveHostId(current.id);
-        void AsyncStorage.setItem(KEY_ACTIVE_HOST, current.id);
-        const savedPassword = await getPassword(current.id);
-        setServerIp(current.host);
-        setPort(current.port);
-        if (savedPassword) {
-          setPassword(savedPassword);
-          passwordRef.current = savedPassword;
-        }
-        if (current.host && savedPassword) {
-          lastConnectedRef.current = { ip: current.host, port: current.port };
-          readyRef.current = true;
-          setIsConfiguring(false);
-          setReady(true);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const activateHost = useCallback(
+    async (hostId: string) => {
+      const profile = profiles?.find((candidate) => candidate.id === hostId);
+      if (!profile) return;
+      const hostPassword = passwordsRef.current.get(hostId) ?? (await getPassword(hostId)) ?? '';
+      passwordsRef.current.set(hostId, hostPassword);
+      setActiveHostId(hostId);
+      setEditingHostId(hostId);
+      setServerIp(profile.host);
+      setPort(profile.port);
+      setPassword(hostPassword);
+      passwordRef.current = hostPassword;
+      lastConnectedRef.current = { ip: profile.host, port: profile.port };
+      await AsyncStorage.setItem(KEY_ACTIVE_HOST, hostId).catch(() => {});
+      readyRef.current = true;
+      setReady(true);
+      setIsConfiguring(false);
+    },
+    [profiles],
+  );
 
-  const request = (path: string, init: RequestInit = {}) => client.get(path, init);
+  const openAddHost = useCallback(() => {
+    setEditingHostId(null);
+    setServerIp('');
+    setPort('8085');
+    setPassword('');
+    setConfirmPassword('');
+    setSetupMode('unknown');
+    setTestStatus({ kind: 'idle' });
+    setDiscoveredIdentity(null);
+    setIsConfiguring(true);
+  }, []);
+  const openEditHost = useCallback(
+    async (hostId: string) => {
+      const profile = profiles?.find((candidate) => candidate.id === hostId);
+      if (!profile) return;
+      setEditingHostId(hostId);
+      setServerIp(profile.host);
+      setPort(profile.port);
+      const hostPassword = passwordsRef.current.get(hostId) ?? (await getPassword(hostId)) ?? '';
+      setPassword(hostPassword);
+      passwordRef.current = hostPassword;
+      setConfirmPassword('');
+      setTestStatus({ kind: 'idle' });
+      setIsConfiguring(true);
+    },
+    [profiles],
+  );
 
   const testConnection = async () => {
     const address = validateAddress(serverIp, port);
     if (!address.ok) return setTestStatus({ kind: 'error', msg: address.reason });
     setTestStatus({ kind: 'testing' });
     try {
-      const status = await client.get('/api/status', {
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!status.ok) throw new Error('status');
+      const status = await client.get('/api/status', { signal: AbortSignal.timeout(5000) });
+      if (!status.ok) throw new Error('Server is unavailable.');
       const needsSetup = Boolean(((await status.json()) as { needsSetup?: unknown }).needsSetup);
       setSetupMode(needsSetup ? 'create' : 'enter');
       if (!password)
@@ -108,7 +190,6 @@ export function useConnectionConfig() {
       if (needsSetup) {
         if (password !== confirmPassword) throw new Error('Passwords do not match.');
         const setup = await client.post('/api/setup', {
-          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password }),
           signal: AbortSignal.timeout(5000),
@@ -116,10 +197,11 @@ export function useConnectionConfig() {
         if (setup.status === 409) throw new Error('Already set up. Enter the existing password.');
         if (!setup.ok) throw new Error('Setup failed — try again.');
       } else {
-        const health = await request('/api/health', { signal: AbortSignal.timeout(5000) });
+        const health = await client.get('/api/health', { signal: AbortSignal.timeout(5000) });
         if (health.status === 401) throw new Error('Wrong password.');
         if (!health.ok) throw new Error(`Server error (${health.status}).`);
       }
+      setDiscoveredIdentity(await client.loadIdentity().catch(() => null));
       setTestStatus({ kind: 'ok' });
     } catch (error) {
       setTestStatus({
@@ -132,36 +214,110 @@ export function useConnectionConfig() {
   const saveConfig = async () => {
     try {
       const wasReady = readyRef.current;
-      let hostId = activeHostId;
+      const identity = discoveredIdentity;
+      let hostId = editingHostId;
+      let next: HostProfile;
       if (hostId) {
-        await hostStoreRef.current.update(hostId, { host: serverIp, port });
-      } else {
-        const profile = await hostStoreRef.current.create({
-          name: serverIp,
-          color: '#89b4fa',
+        next = await hostStoreRef.current.update(hostId, {
           host: serverIp,
           port,
-          identityName: '',
+          ...(identity
+            ? { name: identity.name, color: identity.color, identityName: identity.name }
+            : {}),
         });
-        hostId = profile.id;
-        setActiveHostId(hostId);
-        await AsyncStorage.setItem(KEY_ACTIVE_HOST, hostId);
+      } else {
+        next = await hostStoreRef.current.create({
+          name: identity?.name ?? serverIp,
+          color: identity?.color ?? '#89b4fa',
+          host: serverIp,
+          port,
+          identityName: identity?.name ?? '',
+        });
+        hostId = next.id;
       }
       await persistPassword(hostId, password);
+      passwordsRef.current.set(hostId, password);
+      setProfiles((previous) => {
+        const current = previous ?? [];
+        return [...current.filter((profile) => profile.id !== next.id), next].sort(
+          (left, right) => left.order - right.order,
+        );
+      });
       const addressChanged =
-        serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port;
-      lastConnectedRef.current = { ip: serverIp, port };
-      setIsConfiguring(false);
-      if (!readyRef.current) {
-        readyRef.current = true;
-        setReady(true);
-      }
+        hostId === activeHostId &&
+        (serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port);
+      await activateHost(hostId);
       return { addressChanged, wasReady };
     } catch {
-      void notify('Error', 'Failed to save configuration', 'error');
+      void notify('Error', 'Failed to save host configuration', 'error');
       return { addressChanged: false, wasReady: readyRef.current };
     }
   };
+
+  const removeHost = useCallback(
+    async (hostId: string) => {
+      try {
+        await hostStoreRef.current.remove(hostId);
+        passwordsRef.current.delete(hostId);
+        const next = (profiles ?? [])
+          .filter((profile) => profile.id !== hostId)
+          .map((profile, order) => ({ ...profile, order }));
+        setProfiles(next);
+        if (hostId === activeHostId) {
+          if (next[0]) await activateHost(next[0].id);
+          else openAddHost();
+        }
+      } catch {
+        setStoreError('Host changes could not be saved. Retry from Hosts.');
+      }
+    },
+    [activeHostId, activateHost, openAddHost, profiles],
+  );
+
+  const updateProfile = useCallback(
+    async (hostId: string, changes: Partial<Omit<HostProfile, 'id' | 'order'>>) => {
+      try {
+        const next = await hostStoreRef.current.update(hostId, changes);
+        setProfiles((previous) =>
+          (previous ?? []).map((profile) => (profile.id === hostId ? next : profile)),
+        );
+      } catch {
+        setStoreError('Host changes could not be saved. Retry from Hosts.');
+      }
+    },
+    [],
+  );
+  const reorderHosts = useCallback(async (ids: string[]) => {
+    try {
+      setProfiles(await hostStoreRef.current.reorder(ids));
+    } catch {
+      setStoreError('Host changes could not be saved. Retry from Hosts.');
+    }
+  }, []);
+  const updateIdentity = useCallback(
+    async (hostId: string, identity: { name: string; color: string }) => {
+      await updateProfile(hostId, {
+        identityName: identity.name,
+        ...(profiles?.find((profile) => profile.id === hostId)?.name ===
+        profiles?.find((profile) => profile.id === hostId)?.host
+          ? { name: identity.name, color: identity.color }
+          : {}),
+      });
+    },
+    [profiles, updateProfile],
+  );
+  const refreshIdentity = useCallback(
+    async (profile: HostProfile) => {
+      try {
+        const identity = await clientFor(profile).loadIdentity();
+        if (profile.identityName === identity.name) return;
+        await updateIdentity(profile.id, identity);
+      } catch {
+        // A dead or malformed host must not affect its neighbours' poll cycle.
+      }
+    },
+    [clientFor, updateIdentity],
+  );
 
   return {
     serverIp,
@@ -181,9 +337,21 @@ export function useConnectionConfig() {
     setIsConfiguring,
     ready,
     activeHostId,
+    profiles,
+    storeError,
     client,
+    clientFor,
     lastConnectedRef,
     testConnection,
     saveConfig,
+    loadProfiles,
+    activateHost,
+    openAddHost,
+    openEditHost,
+    removeHost,
+    updateProfile,
+    reorderHosts,
+    updateIdentity,
+    refreshIdentity,
   };
 }

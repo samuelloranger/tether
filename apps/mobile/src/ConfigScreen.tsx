@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -10,10 +11,12 @@ import {
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { HostsScreen } from './HostsScreen';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop, isMacDesktop } from './platform';
 import { createStyles, MONO } from './styles';
 import TitleBar from './TitleBar';
+import type { HostProfile } from './tether/hostStore';
 
 export type SetupMode = 'unknown' | 'create' | 'enter';
 export type TestStatus =
@@ -40,6 +43,14 @@ export function ConfigScreen({
   setTestStatus,
   onSave,
   onTest,
+  hosts,
+  storeError,
+  onRetryHosts,
+  onAddHost,
+  onEditHost,
+  onRemoveHost,
+  onUpdateHost,
+  onReorderHosts,
 }: {
   serverIp: string;
   setServerIp: (t: string) => void;
@@ -55,10 +66,62 @@ export function ConfigScreen({
   setTestStatus: (s: TestStatus) => void;
   onSave: () => void;
   onTest: () => void;
+  hosts?: HostProfile[] | null;
+  storeError?: string | null;
+  onRetryHosts?: () => void;
+  onAddHost?: () => void;
+  onEditHost?: (hostId: string) => void;
+  onRemoveHost?: (hostId: string) => void;
+  onUpdateHost?: (hostId: string, changes: Partial<Omit<HostProfile, 'id' | 'order'>>) => void;
+  onReorderHosts?: (ids: string[]) => void;
 }) {
   const { theme } = useAppTheme();
   const shared = createStyles(theme.colors);
   const styles = createConfigStyles(theme.colors);
+  const [hostsOpen, setHostsOpen] = useState(false);
+  if (storeError) {
+    return (
+      <View style={styles.configContainer}>
+        <Text style={styles.configTitle}>Hosts unavailable</Text>
+        <Text style={styles.testError}>{storeError}</Text>
+        <TouchableOpacity
+          style={styles.connectBtn}
+          onPress={onRetryHosts}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading hosts"
+        >
+          <Text style={styles.connectBtnText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (
+    hostsOpen &&
+    hosts &&
+    onAddHost &&
+    onEditHost &&
+    onRemoveHost &&
+    onUpdateHost &&
+    onReorderHosts
+  ) {
+    return (
+      <HostsScreen
+        hosts={hosts}
+        onBack={() => setHostsOpen(false)}
+        onAdd={() => {
+          setHostsOpen(false);
+          onAddHost();
+        }}
+        onEdit={(id) => {
+          setHostsOpen(false);
+          onEditHost(id);
+        }}
+        onRemove={onRemoveHost}
+        onUpdate={onUpdateHost}
+        onReorder={onReorderHosts}
+      />
+    );
+  }
   return (
     <>
       {/* Desktop: frameless window still needs drag + close/min/max here too. */}
@@ -74,6 +137,15 @@ export function ConfigScreen({
             </View>
             <Text style={styles.configTitle}>{isDesktop ? 'Tether Desktop' : 'Tether Mobile'}</Text>
             <Text style={styles.configSubtitle}>Connect to a terminal on your server</Text>
+            {hosts && hosts.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setHostsOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Manage hosts"
+              >
+                <Text style={{ color: theme.colors.accent, marginTop: 12 }}>Manage hosts</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           <View style={styles.formContainer}>

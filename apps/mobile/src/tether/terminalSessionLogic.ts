@@ -7,6 +7,7 @@ import type { ConnectionStatus, TerminalConnectionState } from './types';
 type WsMessageContext = {
   id: string;
   drawerSessionId?: string;
+  drawerHostId?: string;
   message: unknown;
   entry: SessionEntry | undefined;
   activeId: string;
@@ -112,6 +113,7 @@ export function createSessionCache(disconnect: (id: string) => void): SessionCac
 export function applyWsMessage({
   id,
   drawerSessionId = id,
+  drawerHostId = '',
   message,
   entry,
   activeId,
@@ -176,7 +178,15 @@ export function applyWsMessage({
     onDrawerSessions((rows) =>
       rows.map((row) => (row.id === drawerSessionId ? { ...row, activity } : row)),
     );
-    onWaitingSessions([{ id: drawerSessionId, status: 'running', last_output_at: null, activity }]);
+    onWaitingSessions([
+      {
+        id: drawerSessionId,
+        hostId: drawerHostId,
+        status: 'running',
+        last_output_at: null,
+        activity,
+      },
+    ]);
     return;
   }
   if (payload.type === 'reset') {

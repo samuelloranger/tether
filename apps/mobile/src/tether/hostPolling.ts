@@ -1,4 +1,6 @@
 import type { HostClientResponse } from './hostClient';
+import type { HostHealth } from './hostHealth';
+import { hostHealthAfterFailure, hostHealthAfterResponse, nextHostPollDelay } from './hostHealth';
 import type { HostProfile } from './hostStore';
 
 const ACTIVE_POLL_INTERVAL_MS = 4_000;
@@ -24,12 +26,14 @@ export async function pollHostSessions({
   clientFor(profile: HostProfile): SessionsClient;
   onSessions(profile: HostProfile, sessions: unknown[]): void | Promise<void>;
   onHealth(profile: HostProfile, result: PollResult): void | Promise<void>;
-}): Promise<void> {
+}): Promise<Map<string, PollResult>> {
+  const results = new Map<string, PollResult>();
   await Promise.all(
     profiles.map(async (profile) => {
       try {
         const response = await clientFor(profile).get('/api/sessions');
         if (response.status === 401) {
+          results.set(profile.id, 'unauthorized');
           await onHealth(profile, 'unauthorized');
           return;
         }
@@ -37,8 +41,10 @@ export async function pollHostSessions({
         const sessions = await response.json();
         if (!Array.isArray(sessions)) throw new Error('Session response was not an array');
         await onSessions(profile, sessions);
+        results.set(profile.id, 'success');
         await onHealth(profile, 'success');
       } catch {
+        results.set(profile.id, 'failure');
         // This boundary intentionally contains each profile independently.
         // One offline host must never reject the shared polling cycle.
         try {
@@ -50,11 +56,13 @@ export async function pollHostSessions({
     }),
   );
   void activeHostId;
+  return results;
 }
 
 export function createHostPolling({
   getProfiles,
   getActiveHostId,
+  getHealth,
   clientFor,
   onSessions,
   onHealth,
@@ -63,17 +71,18 @@ export function createHostPolling({
 }: {
   getProfiles(): HostProfile[];
   getActiveHostId(): string | null;
+  getHealth(profile: HostProfile): HostHealth;
   clientFor(profile: HostProfile): SessionsClient;
   onSessions(profile: HostProfile, sessions: unknown[]): void | Promise<void>;
   onHealth(profile: HostProfile, result: PollResult): void | Promise<void>;
-  schedule(run: () => void, delay: number): unknown;
-  clearScheduled(handle: unknown): void;
+  schedule?: (run: () => void, delay: number) => unknown;
+  clearScheduled?: (handle: unknown) => void;
 }) {
   let stopped = false;
   const timers = new Map<string, unknown>();
 
   const pollAndSchedule = async (profile: HostProfile): Promise<void> => {
-    await pollHostSessions({
+    const results = await pollHostSessions({
       profiles: [profile],
       activeHostId: getActiveHostId(),
       clientFor,
@@ -82,7 +91,19 @@ export function createHostPolling({
     });
     if (stopped) return;
     try {
-      const delay = sessionPollInterval(profile.id === getActiveHostId());
+      const result = results.get(profile.id);
+      const previous = getHealth(profile);
+      const health =
+        result === 'success'
+          ? hostHealthAfterResponse(previous, 200)
+          : result === 'unauthorized'
+            ? hostHealthAfterResponse(previous, 401)
+            : hostHealthAfterFailure(previous);
+      const delay = nextHostPollDelay(
+        health,
+        sessionPollInterval(profile.id === getActiveHostId()),
+      );
+      if (delay === null) return;
       timers.set(
         profile.id,
         schedule(() => {

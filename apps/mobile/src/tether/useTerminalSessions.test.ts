@@ -44,7 +44,9 @@ function entry(): SessionEntry & { writes: string[]; resets: number } {
 }
 
 function dispatch(entryForMessage = entry(), activeId = 'term-1') {
-  let rows: DrawerSession[] = [{ id: 'term-1', status: 'running', last_output_at: null }];
+  let rows: DrawerSession[] = [
+    { hostId: 'host-1', id: 'term-1', status: 'running', last_output_at: null },
+  ];
   const effects = {
     git: 0,
     metadata: 0,
@@ -56,6 +58,7 @@ function dispatch(entryForMessage = entry(), activeId = 'term-1') {
   const apply = (message: unknown) =>
     applyWsMessage({
       id: 'term-1',
+      drawerHostId: 'host-1',
       message,
       entry: entryForMessage,
       activeId,
@@ -201,7 +204,15 @@ describe('applyWsMessage', () => {
     harness.apply({ type: 'activity', activity: 'waiting' });
     expect(harness.rows()[0]?.activity).toBe('waiting');
     expect(harness.effects.waiting).toEqual([
-      [{ id: 'term-1', status: 'running', last_output_at: null, activity: 'waiting' }],
+      [
+        {
+          hostId: 'host-1',
+          id: 'term-1',
+          status: 'running',
+          last_output_at: null,
+          activity: 'waiting',
+        },
+      ],
     ]);
   });
 

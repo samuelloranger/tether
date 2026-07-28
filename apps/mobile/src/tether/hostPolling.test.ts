@@ -22,6 +22,7 @@ test('schedules each host independently using its current active/background cade
   const polling = createHostPolling({
     getProfiles: () => [host('background'), host('active')],
     getActiveHostId: () => 'active',
+    getHealth: () => ({ status: 'unknown', failures: 0 }),
     clientFor: () => ({ get: async () => ({ ok: true, status: 200, json: async () => [] }) }),
     onSessions: () => {},
     onHealth: () => {},
@@ -77,4 +78,24 @@ test('reports 401 as unauthorized without attempting to parse sessions', async (
   });
 
   expect(health).toEqual(['unauthorized']);
+});
+
+test('backs off a dead host instead of scheduling its normal polling cadence', async () => {
+  const scheduled: number[] = [];
+  const polling = createHostPolling({
+    getProfiles: () => [host('offline')],
+    getActiveHostId: () => 'offline',
+    getHealth: () => ({ status: 'unknown', failures: 0 }),
+    clientFor: () => ({ get: async () => Promise.reject(new Error('offline')) }),
+    onSessions: () => {},
+    onHealth: () => {},
+    schedule: (_run, delay) => {
+      scheduled.push(delay);
+      return scheduled.length;
+    },
+    clearScheduled: () => {},
+  });
+
+  await polling.start();
+  expect(scheduled).toEqual([2_000]);
 });

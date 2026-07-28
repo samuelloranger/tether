@@ -52,6 +52,14 @@ function AppInner({ onReady }: { onReady: () => void }) {
           setTestStatus={app.setTestStatus}
           onSave={app.saveConfig}
           onTest={app.testConnection}
+          hosts={app.profiles}
+          storeError={app.storeError}
+          onRetryHosts={() => void app.loadProfiles()}
+          onAddHost={app.openAddHost}
+          onEditHost={(hostId) => void app.openEditHost(hostId)}
+          onRemoveHost={(hostId) => void app.removeHost(hostId)}
+          onUpdateHost={(hostId, changes) => void app.updateProfile(hostId, changes)}
+          onReorderHosts={(ids) => void app.reorderHosts(ids)}
         />
       </SafeAreaView>
     );

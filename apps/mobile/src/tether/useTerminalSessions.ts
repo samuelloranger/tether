@@ -14,6 +14,15 @@ import { TerminalEngine } from '../terminalEngine';
 import { OutputBatcher } from '../terminalRendererProtocol';
 import type { HostClient } from './hostClient';
 import {
+  type HostHealth,
+  type HostHealthStatus,
+  hostHealthAfterFailure,
+  hostHealthAfterResponse,
+  initialHostHealth,
+} from './hostHealth';
+import { createHostPolling, type PollResult } from './hostPolling';
+import type { HostProfile } from './hostStore';
+import {
   applyWsMessage,
   backoffDelay,
   createSessionCache,
@@ -32,6 +41,9 @@ const activeSessionStorageKey = (hostId: string) => `tether_session_id_${hostId}
 
 type Options = {
   client: HostClient;
+  profiles: HostProfile[];
+  clientFor: (profile: HostProfile) => HostClient;
+  onReachable?: (profile: HostProfile) => void;
   ready: boolean;
   isConfiguring: boolean;
   theme: { terminal: { fg: string; bg: string } };
@@ -45,6 +57,9 @@ type Options = {
 
 export function useTerminalSessions({
   client,
+  profiles,
+  clientFor,
+  onReachable,
   ready,
   isConfiguring,
   theme,
@@ -68,6 +83,8 @@ export function useTerminalSessions({
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
   const drawerSessionsRef = useRef(drawerSessions);
   drawerSessionsRef.current = drawerSessions;
+  const [healthByHost, setHealthByHost] = useState<Record<string, HostHealthStatus>>({});
+  const healthRef = useRef(new Map<string, HostHealth>());
   const [_terminalMetadataVersion, setTerminalMetadataVersion] = useState(0);
   const [_gitSummaryVersion, setGitSummaryVersion] = useState(0);
   const terminalViewRef = useRef<TerminalViewHandle | null>(null);
@@ -97,7 +114,12 @@ export function useTerminalSessions({
   const clientForKey = (key: string): HostClient => {
     const { hostId } = parseSessionKey(key);
     if (hostId === clientRef.current.profile.id) return clientRef.current;
-    return connections.get(key)?.client ?? clientRef.current;
+    return (
+      connections.get(key)?.client ??
+      (profiles.find((profile) => profile.id === hostId)
+        ? clientFor(profiles.find((profile) => profile.id === hostId)!)
+        : clientRef.current)
+    );
   };
   const connState = (key: string): TerminalConnectionState => {
     let state = connections.get(key);
@@ -190,6 +212,7 @@ export function useTerminalSessions({
       applyWsMessage({
         id: key,
         drawerSessionId: sessionId,
+        drawerHostId: parseSessionKey(key).hostId,
         message: JSON.parse(data),
         entry: cache.get(key),
         activeId: activeKeyRef.current,
@@ -212,7 +235,9 @@ export function useTerminalSessions({
             notificationsEnabled: notificationsEnabledRef.current,
             isDesktop,
             label: sessionLabel(
-              drawerSessionsRef.current.find((row) => row.id === sessionId) ?? { id: sessionId },
+              drawerSessionsRef.current.find(
+                (row) => row.id === sessionId && row.hostId === parseSessionKey(key).hostId,
+              ) ?? { id: sessionId },
             ),
             notify: (title, body) => void sendNativeNotification(title, body),
           }),
@@ -244,77 +269,110 @@ export function useTerminalSessions({
     state.client = clientForKey(key);
     if (key === activeKeyRef.current) setConnectionStatus('connecting');
     const generation = ++state.gen;
-    state.sock = state.client.openSocket(
-      '/api/ws',
-      {
-        sessionId,
-        sinceId: entry.sinceId,
-        cols: dimsRef.current.numCols,
-        rows: dimsRef.current.numRows,
-      },
-      {
-        onOpen: () => {
-          if (state.gen !== generation) return;
-          state.open = true;
-          state.retry = 0;
-          if (key === activeKeyRef.current) {
-            setHasConnected(true);
-            setConnectionStatus('connected');
-            state.sock?.send(JSON.stringify(focusFrame(appStateRef.current === 'active')));
-          } else state.sock?.send(JSON.stringify(focusFrame(false)));
-          state.lastSeen = Date.now();
-          if (state.ping) clearInterval(state.ping);
-          state.ping = setInterval(() => {
-            if (Date.now() - state.lastSeen > 30_000)
-              try {
-                state.sock?.close();
-              } catch {}
-          }, 15_000);
+    try {
+      state.sock = state.client.openSocket(
+        '/api/ws',
+        {
+          sessionId,
+          sinceId: entry.sinceId,
+          cols: dimsRef.current.numCols,
+          rows: dimsRef.current.numRows,
         },
-        onMessage: (data) => {
-          if (state.gen !== generation) return;
-          state.lastSeen = Date.now();
-          handleWsMessage(key, data);
-        },
-        onClose: () => {
-          if (state.gen !== generation) return;
-          state.open = false;
-          if (state.ping) {
-            clearInterval(state.ping);
-            state.ping = null;
-          }
-          if (connectionStatusRef.current === 'auth-failed') {
+        {
+          onOpen: () => {
+            if (state.gen !== generation) return;
+            state.open = true;
             state.retry = 0;
-            return;
-          }
-          setConnectionStatus((current) => statusAfterClose(activeKeyRef.current, key, current));
-          if (cache.has(key))
-            state.reconnectTimeout = scheduleReconnect({
-              id: key,
-              readyRef,
-              delay: backoffDelay(state.retry++),
-              schedule: setTimeout,
-              reconnect: connect,
-            });
+            if (key === activeKeyRef.current) {
+              setHasConnected(true);
+              setConnectionStatus('connected');
+              state.sock?.send(JSON.stringify(focusFrame(appStateRef.current === 'active')));
+            } else state.sock?.send(JSON.stringify(focusFrame(false)));
+            state.lastSeen = Date.now();
+            if (state.ping) clearInterval(state.ping);
+            state.ping = setInterval(() => {
+              if (Date.now() - state.lastSeen > 30_000)
+                try {
+                  state.sock?.close();
+                } catch {}
+            }, 15_000);
+          },
+          onMessage: (data) => {
+            if (state.gen !== generation) return;
+            state.lastSeen = Date.now();
+            handleWsMessage(key, data);
+          },
+          onClose: () => {
+            if (state.gen !== generation) return;
+            state.open = false;
+            if (state.ping) {
+              clearInterval(state.ping);
+              state.ping = null;
+            }
+            if (connectionStatusRef.current === 'auth-failed') {
+              state.retry = 0;
+              return;
+            }
+            setConnectionStatus((current) => statusAfterClose(activeKeyRef.current, key, current));
+            if (cache.has(key))
+              state.reconnectTimeout = scheduleReconnect({
+                id: key,
+                readyRef,
+                delay: backoffDelay(state.retry++),
+                schedule: setTimeout,
+                reconnect: connect,
+              });
+          },
         },
-      },
-    );
+      );
+    } catch {
+      state.open = false;
+      if (key === activeKeyRef.current) setConnectionStatus('disconnected');
+    }
   };
   disconnectRef.current = disconnect;
-  const refreshSessions = async () => {
-    const refreshClient = clientRef.current;
+  const updateHealth = (profile: HostProfile, result: PollResult) => {
+    const current = healthRef.current.get(profile.id) ?? initialHostHealth();
+    const next =
+      result === 'success'
+        ? hostHealthAfterResponse(current, 200)
+        : result === 'unauthorized'
+          ? hostHealthAfterResponse(current, 401)
+          : hostHealthAfterFailure(current);
+    healthRef.current.set(profile.id, next);
+    setHealthByHost((previous) => ({ ...previous, [profile.id]: next.status }));
+  };
+  const refreshSessionsFor = async (profile: HostProfile) => {
+    const refreshClient = clientFor(profile);
     try {
       const response = await refreshClient.get('/api/sessions');
       if (response.status === 401) {
-        if (refreshClient.profile.id === activeHostIdRef.current)
-          setConnectionStatus('auth-failed');
+        updateHealth(profile, 'unauthorized');
+        if (profile.id === activeHostIdRef.current) setConnectionStatus('auth-failed');
         return;
       }
-      const rows = (await response.json()) as DrawerSession[];
-      if (refreshClient.profile.id !== activeHostIdRef.current) return;
-      setDrawerSessions(rows);
-      notifyWaitingSessions(rows);
-    } catch {}
+      if (!response.ok) throw new Error(`Session polling failed (${response.status})`);
+      const sessions = await response.json();
+      if (!Array.isArray(sessions)) throw new Error('Session response was not an array');
+      const rows = sessions.map((row) => ({
+        ...(row as Omit<DrawerSession, 'hostId'>),
+        hostId: profile.id,
+      })) as DrawerSession[];
+      setDrawerSessions((previous) => [
+        ...previous.filter((row) => row.hostId !== profile.id),
+        ...rows,
+      ]);
+      if (profile.id === activeHostIdRef.current) notifyWaitingSessions(rows);
+      updateHealth(profile, 'success');
+    } catch {
+      updateHealth(profile, 'failure');
+    }
+  };
+  const refreshSessions = async () => {
+    const profile =
+      profiles.find((candidate) => candidate.id === activeHostIdRef.current) ??
+      clientRef.current.profile;
+    await refreshSessionsFor(profile);
   };
   const switchTo = (hostId: string, id: string) => {
     const targetKey = sessionKey(hostId, id);
@@ -412,14 +470,32 @@ export function useTerminalSessions({
   useEffect(() => {
     hydrateRenderer();
   }, [activeId, activeHostId, theme, fontFamily, fontSize]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: polling reads the current HostClient at tick time.
   useEffect(() => {
-    if (isConfiguring) return;
-    const tick = () => void refreshSessions();
-    tick();
-    const interval = setInterval(tick, 4000);
-    return () => clearInterval(interval);
-  }, [isConfiguring]);
+    if (isConfiguring || profiles.length === 0) return;
+    const polling = createHostPolling({
+      getProfiles: () => profiles,
+      getActiveHostId: () => activeHostIdRef.current,
+      getHealth: (profile) => healthRef.current.get(profile.id) ?? initialHostHealth(),
+      clientFor,
+      onSessions: (profile, sessions) => {
+        const rows = (sessions as Omit<DrawerSession, 'hostId'>[]).map((row) => ({
+          ...row,
+          hostId: profile.id,
+        }));
+        setDrawerSessions((previous) => [
+          ...previous.filter((row) => row.hostId !== profile.id),
+          ...rows,
+        ]);
+        if (profile.id === activeHostIdRef.current) notifyWaitingSessions(rows);
+      },
+      onHealth: (profile, result) => {
+        updateHealth(profile, result);
+        if (result === 'success') void onReachable?.(profile);
+      },
+    });
+    void polling.start().catch(() => {});
+    return polling.stop;
+  }, [clientFor, isConfiguring, profiles]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: connect reads the current client ref at call time.
   useEffect(() => {
     if (!ready) return;
@@ -470,6 +546,7 @@ export function useTerminalSessions({
     connectionStatus,
     hasConnected,
     drawerSessions,
+    healthByHost,
     terminalViewRef,
     entryFor,
     getSessionEntry,
@@ -484,6 +561,27 @@ export function useTerminalSessions({
     newTerminal,
     killActiveOr,
     refreshSessions,
+    refreshHost: (hostId: string) => {
+      const profile = profiles.find((candidate) => candidate.id === hostId);
+      if (profile) void refreshSessionsFor(profile);
+    },
+    resetHostHealth: (hostId: string) => {
+      healthRef.current.set(hostId, initialHostHealth());
+      setHealthByHost((previous) => ({ ...previous, [hostId]: 'unknown' }));
+    },
+    removeHost: (hostId: string) => {
+      for (const key of Array.from(connections.keys())) {
+        if (parseSessionKey(key).hostId === hostId) disconnect(key);
+      }
+      for (const key of cache.ids()) {
+        if (parseSessionKey(key).hostId === hostId) cache.delete(key);
+      }
+      setDrawerSessions((previous) => previous.filter((row) => row.hostId !== hostId));
+      setHealthByHost((previous) => {
+        const { [hostId]: _removed, ...rest } = previous;
+        return rest;
+      });
+    },
     resetForEndpointChange,
     restartActiveSession,
     markAuthFailed,
