@@ -4,7 +4,11 @@ const invoke = mock((_cmd: string, _args?: unknown) => Promise.resolve(undefined
 mock.module('@tauri-apps/api/core', () => ({ invoke }));
 
 let tauriActive = true;
-mock.module('./platform', () => ({ isTauri: () => tauriActive }));
+mock.module('./platform', () => ({
+  isTauri: () => tauriActive,
+  isDesktop: true,
+  isMacDesktop: false,
+}));
 
 const localStorageStub = (() => {
   let store: Record<string, string> = {};
