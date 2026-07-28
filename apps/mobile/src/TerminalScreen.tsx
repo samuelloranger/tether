@@ -53,7 +53,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     port,
     setIsConfiguring,
     connectionStatus,
-    hasConnectedRef,
+    hasConnected,
     ctxMenu,
     setCtxMenu,
     updateInfo,
@@ -148,7 +148,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     copySelection,
     selectAllTerminal,
     handlePaste,
-    disposePending,
     checkForUpdatesManual,
     startUpdate,
     downloadUpdate,
@@ -195,7 +194,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     const onDrop = async (e: DragEvent) => {
       e.preventDefault();
       const files = e.dataTransfer?.files;
-      if (!files || !files.length) return;
+      if (!files?.length) return;
       for (const file of Array.from(files)) {
         await uploadFile(file, file.name);
       }
@@ -505,7 +504,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 <View style={styles.connectionBannerOverlay} pointerEvents="box-none">
                   <ConnectionBanner
                     status={connectionStatus}
-                    hasConnected={hasConnectedRef.current}
+                    hasConnected={hasConnected}
                     onEdit={() => setIsConfiguring(true)}
                   />
                 </View>

@@ -80,8 +80,6 @@ export function useTetherApp() {
     isConfiguring,
     setIsConfiguring,
     ready,
-    setReady,
-    readyRef,
     lastConnectedRef,
     testConnection,
     saveConfig: saveConnectionConfig,
@@ -167,33 +165,30 @@ export function useTetherApp() {
   );
 
   const {
-    cache,
     activeId,
-    setActiveId,
-    activeIdRef,
     connectionStatus,
-    setConnectionStatus,
-    hasConnectedRef,
+    hasConnected,
     drawerSessions,
-    setDrawerSessions,
     terminalViewRef,
-    terminalSelectionRef,
     entryFor,
+    getSessionEntry,
+    getActiveSessionId,
+    getTerminalSelection,
     wsSend,
     hydrateRenderer,
     onRendererResize,
     onRendererSelection,
     resetTerminal,
-    applyWsMessage,
-    connect,
-    disconnect,
     switchTo: switchTerminal,
     newTerminal: createTerminal,
     killActiveOr,
     refreshSessions,
     resetForEndpointChange,
+    restartActiveSession,
+    markAuthFailed,
     refreshSocketActivity,
-    windowFocusedRef,
+    setWindowFocused,
+    isWindowFocused,
   } = useTerminalSessions({
     serverIp,
     port,
@@ -220,8 +215,8 @@ export function useTetherApp() {
     port,
     passwordRef,
     isConfiguring,
-    activeIdRef,
-    setConnectionStatus,
+    getActiveSessionId,
+    markAuthFailed,
   });
 
   useEffect(() => {
@@ -230,7 +225,7 @@ export function useTetherApp() {
 
   const inputRef = useRef<TextInput | null>(null);
   const { ctrlArmed, setCtrlArmed, sendTyped, sendKey, sendPaste, sendProgram, cursorSeq } =
-    useTerminalInput({ send: wsSend, mouseEnabledRef, activeIdRef, entryFor });
+    useTerminalInput({ send: wsSend, mouseEnabledRef, getActiveSessionId, entryFor });
   const {
     snippets,
     setSnippets,
@@ -333,7 +328,7 @@ export function useTetherApp() {
       .map((r) => r.runs.map((run) => run.text).join(''))
       .join('\n')
       .replace(/\n+$/, '');
-  const getFullText = () => snapshotText(entryFor(activeIdRef.current).term.getSnapshot());
+  const getFullText = () => snapshotText(entryFor(getActiveSessionId()).term.getSnapshot());
 
   // Transcript filtered to lines matching the query — memoized: the previous
   // version re-split the whole scrollback on every keystroke and every render.
@@ -350,7 +345,7 @@ export function useTetherApp() {
   // Scrolls xterm to the nearest prompt-start row in `dir`, using the
   // start/end of the currently-known scrollback as the search origin.
   const jumpPrompt = (dir: 1 | -1) => {
-    const term = entryFor(activeIdRef.current).term;
+    const term = entryFor(getActiveSessionId()).term;
     const snapshot = term.getSnapshot();
     const from = dir === 1 ? 0 : snapshot.length - 1;
     const target = term.jumpToPrompt(from, dir);
@@ -363,7 +358,7 @@ export function useTetherApp() {
   const openSelectionView = async () => {
     setMenuOpen(false);
     setSearchQuery('');
-    const snapshot = await entryFor(activeIdRef.current).term.getSettledSnapshot();
+    const snapshot = await entryFor(getActiveSessionId()).term.getSettledSnapshot();
     if (!snapshotText(snapshot)) return;
     setScreen(snapshot);
     setSelectionViewOpen(true);
@@ -371,7 +366,7 @@ export function useTetherApp() {
 
   // Desktop context-menu actions.
   const copySelection = async () => {
-    const sel = terminalSelectionRef.current;
+    const sel = getTerminalSelection();
     // Fall back to the whole displayed transcript when nothing is selected.
     const text = sel || getFullText();
     if (text) await writeClipboard(text);
@@ -402,7 +397,7 @@ export function useTetherApp() {
     file: Blob | { uri: string; name: string; type?: string },
     filename: string,
   ) => {
-    const url = `${httpBase(serverIp, port)}/api/sessions/${activeIdRef.current}/upload`;
+    const url = `${httpBase(serverIp, port)}/api/sessions/${getActiveSessionId()}/upload`;
     try {
       let data: { ok: boolean; path?: string; error?: string };
       if (file instanceof Blob) {
@@ -487,7 +482,7 @@ export function useTetherApp() {
     }
     if (!text) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const e = cache.get(activeIdRef.current);
+    const e = getSessionEntry(getActiveSessionId());
     sendPaste(e?.term.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text);
   };
 
@@ -509,7 +504,7 @@ export function useTetherApp() {
       }
       setFileLoading(true);
       try {
-        const sessionId = activeIdRef.current;
+        const sessionId = getActiveSessionId();
         const query = new URLSearchParams({ path: target.path });
         const res = await fetch(
           `${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`,
@@ -525,7 +520,7 @@ export function useTetherApp() {
         if (!res.ok || typeof body.path !== 'string' || typeof body.content !== 'string') {
           throw new Error(body.error || `Request failed (${res.status})`);
         }
-        if (activeIdRef.current === sessionId) {
+        if (getActiveSessionId() === sessionId) {
           setFileView({
             path: body.path,
             content: body.content,
@@ -572,7 +567,7 @@ export function useTetherApp() {
       setDiffImage(null);
       setDiffLoading(true);
       try {
-        const sessionId = activeIdRef.current;
+        const sessionId = getActiveSessionId();
         const file = entryFor(sessionId).diffSummary.files.find((f) => f.path === filePath);
         if (file?.binary && isImagePath(filePath)) {
           const base = httpBase(serverIp, port);
@@ -630,7 +625,7 @@ export function useTetherApp() {
 
   const gitFetch = useCallback(
     async (route: string, init?: RequestInit) => {
-      const sessionId = activeIdRef.current;
+      const sessionId = getActiveSessionId();
       const res = await fetch(
         `${httpBase(serverIp, port)}/api/sessions/${sessionId}/git/${route}`,
         {
@@ -778,7 +773,7 @@ export function useTetherApp() {
   // Peek (non-touching) so render stays pure — the active entry is already
   // MRU-resident from connect/switchTo; only the very first render (before any
   // touch) falls back to entryFor, which creates it.
-  const activeEntry = cache.peek(activeId) ?? entryFor(activeId);
+  const activeEntry = getSessionEntry(activeId) ?? entryFor(activeId);
   const changeSummary = activeEntry.diffSummary;
   // Read live off the mutable emulator field — re-derives every render.
   // activeBellCount drives TerminalScreen's on-screen visual bell flash; the
@@ -791,14 +786,15 @@ export function useTetherApp() {
     activePresentationId,
     fileViewOpen: !!fileView,
     diffOpen,
-    cache,
-    activeIdRef,
+    getSessionEntry,
+    getActiveSessionId,
     inputRef,
     sendKey,
     sendPaste,
     handlePaste,
     setContextMenu: setCtxMenu,
-    windowFocusedRef,
+    setWindowFocused,
+    isWindowFocused,
     refreshSocketActivity,
     activePromptReturnCount,
   });
@@ -851,7 +847,7 @@ export function useTetherApp() {
         headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
         body: JSON.stringify({ id: activeId }),
       });
-      connect(activeIdRef.current);
+      restartActiveSession();
     } catch {
       void notify('Error', 'Failed to kill session on the server', 'error');
     }
@@ -885,13 +881,8 @@ export function useTetherApp() {
     setTestStatus,
     isConfiguring,
     setIsConfiguring,
-    ready,
-    setReady,
-    readyRef,
-    lastConnectedRef,
     connectionStatus,
-    setConnectionStatus,
-    hasConnectedRef,
+    hasConnected,
     mouseEnabled,
     toggleMouseEnabled,
     notificationsEnabled,
@@ -929,14 +920,10 @@ export function useTetherApp() {
     setSnippetsModalOpen,
     snippetDraft,
     setSnippetDraft,
-    cache,
     activeId,
-    setActiveId,
-    activeIdRef,
     drawerOpen,
     setDrawerOpen,
     drawerSessions,
-    setDrawerSessions,
     presentations,
     activePresentation,
     activePresentationId,
@@ -984,9 +971,6 @@ export function useTetherApp() {
     onRendererSelection,
     wsSend,
     resetTerminal,
-    applyWsMessage,
-    connect,
-    disconnect,
     switchTo,
     newTerminal,
     killActiveOr,

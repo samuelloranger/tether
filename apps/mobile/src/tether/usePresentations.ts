@@ -4,15 +4,14 @@ import { httpBase } from '../address';
 import type { Presentation } from '../presentations';
 import { pickAutoSelectPreview } from '../presentations';
 import { authHeaders } from '../secureConfig';
-import type { ConnectionStatus } from './types';
 
 type Options = {
   serverIp: string;
   port: string;
   passwordRef: React.MutableRefObject<string>;
   isConfiguring: boolean;
-  activeIdRef: React.MutableRefObject<string>;
-  setConnectionStatus: React.Dispatch<React.SetStateAction<ConnectionStatus>>;
+  getActiveSessionId: () => string;
+  markAuthFailed: () => void;
 };
 
 export function usePresentations({
@@ -20,8 +19,8 @@ export function usePresentations({
   port,
   passwordRef,
   isConfiguring,
-  activeIdRef,
-  setConnectionStatus,
+  getActiveSessionId,
+  markAuthFailed,
 }: Options) {
   const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [activePresentationId, setActivePresentationId] = useState<string | null>(null);
@@ -33,7 +32,7 @@ export function usePresentations({
         headers: authHeaders(passwordRef.current),
       });
       if (response.status === 401) {
-        setConnectionStatus('auth-failed');
+        markAuthFailed();
         return;
       }
       if (!response.ok) return;
@@ -44,7 +43,7 @@ export function usePresentations({
         setPresentations(rows);
         return;
       }
-      const newPreview = pickAutoSelectPreview(rows, seenIds.current, activeIdRef.current);
+      const newPreview = pickAutoSelectPreview(rows, seenIds.current, getActiveSessionId());
       seenIds.current = new Set(rows.map((preview) => preview.id));
       setPresentations(rows);
       if (newPreview) setActivePresentationId(newPreview.id);

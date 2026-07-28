@@ -6,12 +6,12 @@ import type { SessionEntry } from '../sessionCache';
 type Options = {
   send: (message: unknown) => void;
   mouseEnabledRef: React.MutableRefObject<boolean>;
-  activeIdRef: React.MutableRefObject<string>;
+  getActiveSessionId: () => string;
   entryFor: (id: string) => SessionEntry;
 };
 
 /** The only byte-input path: source-specific Ctrl and accelerated-backspace rules live here. */
-export function useTerminalInput({ send, mouseEnabledRef, activeIdRef, entryFor }: Options) {
+export function useTerminalInput({ send, mouseEnabledRef, getActiveSessionId, entryFor }: Options) {
   const [ctrlArmed, setCtrlArmedState] = useState(false);
   const ctrlArmedRef = useRef(false);
   const backspaceStreakRef = useRef(EMPTY_STREAK);
@@ -38,7 +38,7 @@ export function useTerminalInput({ send, mouseEnabledRef, activeIdRef, entryFor 
     send({ type: 'input', text: bytes });
   };
   const cursorSeq = (final: string) =>
-    `\x1b${entryFor(activeIdRef.current).term.applicationCursor ? 'O' : '['}${final}`;
+    `\x1b${entryFor(getActiveSessionId()).term.applicationCursor ? 'O' : '['}${final}`;
   return {
     ctrlArmed,
     setCtrlArmed,

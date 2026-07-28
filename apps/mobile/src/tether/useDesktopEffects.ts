@@ -7,7 +7,7 @@ import { notify as sendNativeNotification } from '../desktopNotify';
 import { injectDragRegionStyles } from '../dragRegion';
 import { isDesktop, isMacDesktop } from '../platform';
 import type { Presentation } from '../presentations';
-import type { SessionCache } from '../sessionCache';
+import type { SessionEntry } from '../sessionCache';
 
 type Options = {
   isConfiguring: boolean;
@@ -15,14 +15,15 @@ type Options = {
   activePresentationId: string | null;
   fileViewOpen: boolean;
   diffOpen: boolean;
-  cache: SessionCache;
-  activeIdRef: React.MutableRefObject<string>;
+  getSessionEntry: (id: string) => SessionEntry | undefined;
+  getActiveSessionId: () => string;
   inputRef: React.MutableRefObject<TextInput | null>;
   sendKey: (bytes: string) => void;
   sendPaste: (text: string) => void;
   handlePaste: () => Promise<void>;
   setContextMenu: (position: { x: number; y: number }) => void;
-  windowFocusedRef: React.MutableRefObject<boolean>;
+  setWindowFocused: (focused: boolean) => void;
+  isWindowFocused: () => boolean;
   refreshSocketActivity: () => void;
   activePromptReturnCount: number;
 };
@@ -33,14 +34,15 @@ export function useDesktopEffects({
   activePresentationId,
   fileViewOpen,
   diffOpen,
-  cache,
-  activeIdRef,
+  getSessionEntry,
+  getActiveSessionId,
   inputRef,
   sendKey,
   sendPaste,
   handlePaste,
   setContextMenu,
-  windowFocusedRef,
+  setWindowFocused,
+  isWindowFocused,
   refreshSocketActivity,
   activePromptReturnCount,
 }: Options) {
@@ -70,14 +72,14 @@ export function useDesktopEffects({
       composing = false;
       if (!focused()) return;
       if (event.data) {
-        const entry = cache.get(activeIdRef.current);
+        const entry = getSessionEntry(getActiveSessionId());
         sendPaste(entry?.term.bracketedPaste ? `\x1b[200~${event.data}\x1b[201~` : event.data);
       }
       inputRef.current?.clear();
     };
     const onKey = (event: KeyboardEvent) => {
       if (composing || event.isComposing || event.keyCode === 229 || !focused()) return;
-      const appCursor = cache.get(activeIdRef.current)?.term.applicationCursor ?? false;
+      const appCursor = getSessionEntry(getActiveSessionId())?.term.applicationCursor ?? false;
       const bytes = keyToBytes(event, appCursor, isMacDesktop);
       if (bytes == null || bytes === COPY) return;
       event.preventDefault();
@@ -114,11 +116,11 @@ export function useDesktopEffects({
   useEffect(() => {
     if (!isDesktop || typeof window === 'undefined') return;
     const onFocus = () => {
-      windowFocusedRef.current = true;
+      setWindowFocused(true);
       refreshSocketActivity();
     };
     const onBlur = () => {
-      windowFocusedRef.current = false;
+      setWindowFocused(false);
     };
     window.addEventListener('focus', onFocus);
     window.addEventListener('blur', onBlur);
@@ -133,7 +135,6 @@ export function useDesktopEffects({
     if (!isDesktop) return;
     const returned = activePromptReturnCount > previousPromptCount.current;
     previousPromptCount.current = activePromptReturnCount;
-    if (returned && !windowFocusedRef.current)
-      void sendNativeNotification('Tether', 'Command finished');
+    if (returned && !isWindowFocused()) void sendNativeNotification('Tether', 'Command finished');
   }, [activePromptReturnCount]);
 }

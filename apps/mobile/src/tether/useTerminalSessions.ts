@@ -1,21 +1,29 @@
-// biome-ignore-all lint/correctness/useExhaustiveDependencies: transport callbacks intentionally retain stable session refs.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { newlyWaiting, type SessionActivity } from '../activity';
-import { httpBase, wsUrl } from '../address';
+import { httpBase } from '../address';
 import { notify as sendNativeNotification } from '../desktopNotify';
 import { isDesktop } from '../platform';
 import { resumeAction } from '../resume';
 import type { DrawerSession } from '../SessionDrawer';
 import { authHeaders } from '../secureConfig';
-import { nextTermId, SessionCache, type SessionEntry } from '../sessionCache';
+import { nextTermId, type SessionEntry } from '../sessionCache';
 import { sessionLabel } from '../sessionLabel';
 import type { TerminalViewHandle } from '../TerminalView.types';
 import { TerminalEngine } from '../terminalEngine';
 import { OutputBatcher } from '../terminalRendererProtocol';
 import { openTerminalSocket } from '../wsTransport';
+import {
+  applyWsMessage,
+  backoffDelay,
+  createSessionCache,
+  maybeNotify,
+  runIfCurrentGeneration,
+  scheduleReconnect,
+  terminalSocketUrl,
+} from './terminalSessionLogic';
 import type { ConnectionStatus, TerminalConnectionState } from './types';
 
 const KEY_SESSION_ID = 'tether_session_id';
@@ -56,17 +64,23 @@ export function useTerminalSessions({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const connectionStatusRef = useRef(connectionStatus);
   connectionStatusRef.current = connectionStatus;
-  const hasConnectedRef = useRef(false);
+  const [hasConnected, setHasConnected] = useState(false);
   const [drawerSessions, setDrawerSessions] = useState<DrawerSession[]>([]);
-  const [terminalMetadataVersion, setTerminalMetadataVersion] = useState(0);
-  const [gitSummaryVersion, setGitSummaryVersion] = useState(0);
+  const drawerSessionsRef = useRef(drawerSessions);
+  drawerSessionsRef.current = drawerSessions;
+  const [_terminalMetadataVersion, setTerminalMetadataVersion] = useState(0);
+  const [_gitSummaryVersion, setGitSummaryVersion] = useState(0);
   const terminalViewRef = useRef<TerminalViewHandle | null>(null);
   const terminalSelectionRef = useRef('');
   const dimsRef = useRef({ numCols: 80, numRows: 24 });
   const rendererResizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const windowFocusedRef = useRef(true);
+  const endpointRef = useRef({ serverIp, port });
+  endpointRef.current = { serverIp, port };
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
   const disconnectRef = useRef<(id: string) => void>(() => {});
-  const cache = useRef(new SessionCache(3, (id) => disconnectRef.current(id))).current;
+  const cache = useRef(createSessionCache((id) => disconnectRef.current(id))).current;
   const connections = useRef(new Map<string, TerminalConnectionState>()).current;
   const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
   const outputBatcherRef = useRef<OutputBatcher | null>(null);
@@ -95,10 +109,6 @@ export function useTerminalSessions({
     }
     return state;
   };
-  const backoffDelay = (attempt: number) => {
-    const base = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
-    return base / 2 + Math.floor(Math.random() * (base / 2));
-  };
   const entryFor = (id: string): SessionEntry =>
     cache.touch(id, () => {
       const { numCols: cols, numRows: rows } = dimsRef.current;
@@ -120,20 +130,6 @@ export function useTerminalSessions({
     if (!isDesktop) return;
     for (const row of alerts)
       void sendNativeNotification(sessionLabel(row), 'Session is waiting for your input');
-  };
-  const maybeNotify = (id: string, entry: SessionEntry) => {
-    if (!isDesktop || !notificationsEnabledRef.current) return;
-    const gated = id === activeIdRef.current && windowFocusedRef.current;
-    const notifyFired = entry.term.notifyCount > entry.lastNotifyCount;
-    const bellFired = entry.term.bellCount > entry.lastBellCount;
-    entry.lastNotifyCount = entry.term.notifyCount;
-    entry.lastBellCount = entry.term.bellCount;
-    if (gated || (!notifyFired && !bellFired)) return;
-    const label = sessionLabel(drawerSessions.find((row) => row.id === id) ?? { id });
-    if (notifyFired) {
-      const { title, body } = entry.term.lastNotify;
-      void sendNativeNotification(title || label, body || 'Needs your input');
-    } else void sendNativeNotification(label, 'Terminal bell');
   };
   const wsSend = (object: unknown) => {
     const state = connections.get(activeIdRef.current);
@@ -175,58 +171,38 @@ export function useTerminalSessions({
     entry.lastAppliedId = 0;
     hydrateRenderer();
   };
-  const applyWsMessage = (id: string, data: string) => {
+  const handleWsMessage = (id: string, data: string) => {
     try {
-      const message = JSON.parse(data);
-      const entry = cache.get(id);
-      if (!entry) return;
-      if (message.type === 'diff' && Array.isArray(message.summary?.files)) {
-        entry.diffSummary = { files: message.summary.files };
-        if (id === activeIdRef.current) setGitSummaryVersion((version) => version + 1);
-      } else if (message.type === 'output') {
-        if (typeof message.id !== 'number' || message.id <= entry.lastAppliedId) return;
-        entry.lastAppliedId = message.id;
-        entry.sinceId = message.id;
-        const previous = [
-          entry.term.bellCount,
-          entry.term.promptReturnCount,
-          entry.term.title,
-          entry.term.cwd,
-        ] as const;
-        entry.term.write(message.chunk, () => {
-          maybeNotify(id, entry);
-          if (
-            id === activeIdRef.current &&
-            (entry.term.bellCount !== previous[0] ||
-              entry.term.promptReturnCount !== previous[1] ||
-              entry.term.title !== previous[2] ||
-              entry.term.cwd !== previous[3])
-          )
-            setTerminalMetadataVersion((version) => version + 1);
-          outputBatcher.push(id, message.chunk);
-        });
-      } else if (message.type === 'exit') {
-        const code = typeof message.exitCode === 'number' ? ` with code ${message.exitCode}` : '';
-        const text = `\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`;
-        entry.term.write(text, () => outputBatcher.push(id, text));
-      } else if (message.type === 'title' && typeof message.title === 'string') {
-        setDrawerSessions((previous) =>
-          previous.map((row) => (row.id === id ? { ...row, auto_title: message.title } : row)),
-        );
-      } else if (message.type === 'activity') {
-        const activity = message.activity as SessionActivity;
-        setDrawerSessions((previous) =>
-          previous.map((row) => (row.id === id ? { ...row, activity } : row)),
-        );
-        notifyWaitingSessions([{ id, status: 'running', last_output_at: null, activity }]);
-      } else if (message.type === 'reset') {
-        entry.term.reset();
-        entry.sinceId = 0;
-        entry.lastAppliedId = 0;
-        entry.lastBellCount = 0;
-        entry.lastNotifyCount = 0;
-        if (id === activeIdRef.current) hydrateRenderer(id);
-      }
+      applyWsMessage({
+        id,
+        message: JSON.parse(data),
+        entry: cache.get(id),
+        activeId: activeIdRef.current,
+        onGitSummaryChanged: () => setGitSummaryVersion((version) => version + 1),
+        onTerminalMetadataChanged: () => setTerminalMetadataVersion((version) => version + 1),
+        onDrawerSessions: (update) =>
+          setDrawerSessions((previous) => {
+            const next = update(previous);
+            drawerSessionsRef.current = next;
+            return next;
+          }),
+        onWaitingSessions: notifyWaitingSessions,
+        onOutput: (sessionId, chunk) => outputBatcher.push(sessionId, chunk),
+        onNotify: (sessionId, session) =>
+          maybeNotify({
+            id: sessionId,
+            entry: session,
+            activeId: activeIdRef.current,
+            windowFocused: windowFocusedRef.current,
+            notificationsEnabled: notificationsEnabledRef.current,
+            isDesktop,
+            label: sessionLabel(
+              drawerSessionsRef.current.find((row) => row.id === sessionId) ?? { id: sessionId },
+            ),
+            notify: (title, body) => void sendNativeNotification(title, body),
+          }),
+        hydrateRenderer,
+      });
     } catch (error) {
       console.error('ws message error:', error);
     }
@@ -247,14 +223,14 @@ export function useTerminalSessions({
   };
   const connect = (id: string) => {
     disconnect(id);
-    lastConnectedRef.current = { ip: serverIp, port };
+    const endpoint = endpointRef.current;
+    lastConnectedRef.current = { ip: endpoint.serverIp, port: endpoint.port };
     const entry = entryFor(id),
       state = connState(id);
     if (id === activeIdRef.current) setConnectionStatus('connecting');
     const generation = ++state.gen;
-    const fresh = () => generation === state.gen;
     state.sock = openTerminalSocket(
-      wsUrl(serverIp, port, {
+      terminalSocketUrl(endpoint, {
         sessionId: id,
         sinceId: entry.sinceId,
         cols: dimsRef.current.numCols,
@@ -263,40 +239,50 @@ export function useTerminalSessions({
       passwordRef.current,
       {
         onOpen: () => {
-          if (!fresh()) return;
-          state.open = true;
-          state.retry = 0;
-          if (id === activeIdRef.current) {
-            hasConnectedRef.current = true;
-            setConnectionStatus('connected');
-          }
-          state.lastSeen = Date.now();
-          if (state.ping) clearInterval(state.ping);
-          state.ping = setInterval(() => {
-            if (Date.now() - state.lastSeen > 30_000)
-              try {
-                state.sock?.close();
-              } catch {}
-          }, 15_000);
+          runIfCurrentGeneration(state, generation, () => {
+            state.open = true;
+            state.retry = 0;
+            if (id === activeIdRef.current) {
+              setHasConnected(true);
+              setConnectionStatus('connected');
+            }
+            state.lastSeen = Date.now();
+            if (state.ping) clearInterval(state.ping);
+            state.ping = setInterval(() => {
+              if (Date.now() - state.lastSeen > 30_000)
+                try {
+                  state.sock?.close();
+                } catch {}
+            }, 15_000);
+          });
         },
         onMessage: (data) => {
-          state.lastSeen = Date.now();
-          if (fresh()) applyWsMessage(id, data);
+          runIfCurrentGeneration(state, generation, () => {
+            state.lastSeen = Date.now();
+            handleWsMessage(id, data);
+          });
         },
         onClose: () => {
-          if (!fresh()) return;
-          state.open = false;
-          if (state.ping) {
-            clearInterval(state.ping);
-            state.ping = null;
-          }
-          if (connectionStatusRef.current === 'auth-failed') {
-            state.retry = 0;
-            return;
-          }
-          if (id === activeIdRef.current) setConnectionStatus('disconnected');
-          if (ready && cache.has(id))
-            state.reconnectTimeout = setTimeout(() => connect(id), backoffDelay(state.retry++));
+          runIfCurrentGeneration(state, generation, () => {
+            state.open = false;
+            if (state.ping) {
+              clearInterval(state.ping);
+              state.ping = null;
+            }
+            if (connectionStatusRef.current === 'auth-failed') {
+              state.retry = 0;
+              return;
+            }
+            if (id === activeIdRef.current) setConnectionStatus('disconnected');
+            if (cache.has(id))
+              state.reconnectTimeout = scheduleReconnect({
+                id,
+                readyRef,
+                delay: backoffDelay(state.retry++),
+                schedule: setTimeout,
+                reconnect: connect,
+              });
+          });
         },
       },
     );
@@ -349,7 +335,7 @@ export function useTerminalSessions({
     }
   };
   const resetForEndpointChange = () => {
-    hasConnectedRef.current = false;
+    setHasConnected(false);
     disconnectAll();
     resetTerminal();
     connect(activeIdRef.current);
@@ -358,6 +344,15 @@ export function useTerminalSessions({
     const now = Date.now();
     for (const state of connections.values()) if (state.open) state.lastSeen = now;
   };
+  const markAuthFailed = () => setConnectionStatus('auth-failed');
+  const restartActiveSession = () => connect(activeIdRef.current);
+  const getActiveSessionId = () => activeIdRef.current;
+  const getSessionEntry = (id: string) => cache.get(id);
+  const getTerminalSelection = () => terminalSelectionRef.current;
+  const setWindowFocused = (focused: boolean) => {
+    windowFocusedRef.current = focused;
+  };
+  const isWindowFocused = () => windowFocusedRef.current;
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
@@ -368,9 +363,11 @@ export function useTerminalSessions({
       setActiveId(savedId);
     });
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: repaint is intentionally keyed to terminal view inputs.
   useEffect(() => {
     hydrateRenderer();
   }, [activeId, theme, fontFamily, fontSize]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: polling restarts when its connection inputs change.
   useEffect(() => {
     if (isConfiguring) return;
     const tick = () => {
@@ -380,11 +377,13 @@ export function useTerminalSessions({
     const interval = setInterval(tick, 4000);
     return () => clearInterval(interval);
   }, [isConfiguring, serverIp, port]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: connect reads endpoint and readiness refs at call time.
   useEffect(() => {
     if (!ready) return;
     connect(activeIdRef.current);
     return disconnectAll;
   }, [ready]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resume callbacks read current transport refs at event time.
   useEffect(() => {
     if (!ready) return;
     const subscription = AppState.addEventListener('change', (state) => {
@@ -404,6 +403,7 @@ export function useTerminalSessions({
     });
     return () => subscription.remove();
   }, [ready]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: unmount cleanup owns the transport created by this hook.
   useEffect(
     () => () => {
       disconnectAll();
@@ -414,35 +414,29 @@ export function useTerminalSessions({
   );
 
   return {
-    cache,
     activeId,
-    setActiveId,
-    activeIdRef,
     connectionStatus,
-    setConnectionStatus,
-    hasConnectedRef,
+    hasConnected,
     drawerSessions,
-    setDrawerSessions,
-    terminalMetadataVersion,
-    gitSummaryVersion,
     terminalViewRef,
-    terminalSelectionRef,
     entryFor,
+    getSessionEntry,
+    getActiveSessionId,
+    getTerminalSelection,
     wsSend,
     hydrateRenderer,
     onRendererResize,
     onRendererSelection,
     resetTerminal,
-    applyWsMessage,
-    connect,
-    disconnect,
-    disconnectAll,
     switchTo,
     newTerminal,
     killActiveOr,
     refreshSessions,
     resetForEndpointChange,
+    restartActiveSession,
+    markAuthFailed,
     refreshSocketActivity,
-    windowFocusedRef,
+    setWindowFocused,
+    isWindowFocused,
   };
 }
