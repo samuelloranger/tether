@@ -9,33 +9,26 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import { httpBase } from './address';
 import { readClipboard, writeClipboard } from './clipboard';
-import { shouldForwardToTerminal } from './desktopFocusGuard';
-import { COPY, keyToBytes, PASTE } from './desktopKeys';
-import { notify as sendNativeNotification } from './desktopNotify';
 import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
-import { injectDragRegionStyles } from './dragRegion';
 import type { FileView } from './fileView';
-import { applyBackspaceStreak, applyCtrlToKey, EMPTY_STREAK } from './input';
 import type { LinkTarget } from './links';
-import { isDesktop, isMacDesktop } from './platform';
-import type { PtyInputSource } from './ptyInput';
+import { isDesktop } from './platform';
 import { authHeaders } from './secureConfig';
 import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
-import type { TerminalViewHandle } from './TerminalView.types';
 import { type RenderRow, setTheme } from './terminal';
 import type { GitLogEntry } from './tether/types';
 import { useAppPreferences } from './tether/useAppPreferences';
 import { useConnectionConfig } from './tether/useConnectionConfig';
+import { useDesktopEffects } from './tether/useDesktopEffects';
 import { useDesktopUpdater } from './tether/useDesktopUpdater';
 import { usePresentations } from './tether/usePresentations';
 import { useTerminalInput } from './tether/useTerminalInput';
 import { useTerminalSessions } from './tether/useTerminalSessions';
 import { useTerminalUiState } from './tether/useTerminalUiState';
 import { useTerminalViewport } from './tether/useTerminalViewport';
-import { openTerminalSocket } from './wsTransport';
 
 // Constants for async storage keys
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
@@ -183,8 +176,6 @@ export function useTetherApp() {
     hasConnectedRef,
     drawerSessions,
     setDrawerSessions,
-    terminalMetadataVersion,
-    gitSummaryVersion,
     terminalViewRef,
     terminalSelectionRef,
     entryFor,
@@ -196,7 +187,6 @@ export function useTetherApp() {
     applyWsMessage,
     connect,
     disconnect,
-    disconnectAll,
     switchTo: switchTerminal,
     newTerminal: createTerminal,
     killActiveOr,
@@ -453,9 +443,9 @@ export function useTetherApp() {
           } catch {}
         }
       }
-      if (!data.ok) throw new Error(data.error || 'upload failed');
+      if (!data.ok || !data.path) throw new Error(data.error || 'upload failed');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      sendPaste(shellQuote(data.path!));
+      sendPaste(shellQuote(data.path));
     } catch (err) {
       void notify(
         'Upload failed',
@@ -500,111 +490,6 @@ export function useTetherApp() {
     const e = cache.get(activeIdRef.current);
     sendPaste(e?.term.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text);
   };
-
-  // Desktop: install the window drag-region CSS once (custom title bar).
-  useEffect(() => {
-    if (isDesktop) injectDragRegionStyles();
-  }, []);
-
-  // Desktop: capture the physical keyboard globally and forward keystrokes to
-  // the PTY (replacing the mobile utility bar). Skipped while a text field is
-  // focused (config form, rename/snippet/search modals) so those still type
-  // normally. Ctrl/Cmd+C copies an active selection or sends SIGINT; Ctrl/Cmd+V
-  // pastes from the clipboard.
-  useEffect(() => {
-    if (
-      !isDesktop ||
-      isConfiguring ||
-      presentations.some((preview) => preview.id === activePresentationId)
-    )
-      return;
-    // True while an IME/dead-key composition is in progress (accented Latin
-    // chars like é/ñ/ö on many layouts, or CJK candidate windows). Composition
-    // is driven by compositionstart/end, not keydown — forwarding the raw
-    // intermediate keydowns here would leak partial composition bytes to the
-    // PTY. keydown is suppressed while composing; the final composed text is
-    // sent once, from compositionend.
-    //
-    // Composition needs an actual focused, editable DOM element to attach to —
-    // the terminal surface itself is a plain non-focusable View (see the
-    // isDesktop branch in TerminalScreen.tsx), so these window-level listeners
-    // alone would never fire for the real "click terminal, type" path. A
-    // hidden TextInput (ref: inputRef) is rendered inside #tether-terminal on
-    // desktop specifically as that composition target, focused on click
-    // (TerminalScreen.tsx). Composition events bubble to window regardless of
-    // which element they originate on, so listening here still works once that
-    // target exists and has focus.
-    let composing = false;
-
-    const focused = () =>
-      shouldForwardToTerminal(
-        document.activeElement as (HTMLElement & { isContentEditable?: boolean }) | null,
-        document.activeElement === document.body,
-        !fileView && !diffOpen,
-      );
-
-    const onCompositionStart = () => {
-      if (focused()) composing = true;
-    };
-    const onCompositionEnd = (e: CompositionEvent) => {
-      if (!composing) return;
-      composing = false;
-      if (!focused()) return;
-      if (e.data) {
-        const ent = cache.get(activeIdRef.current);
-        sendPaste(ent?.term.bracketedPaste ? `\x1b[200~${e.data}\x1b[201~` : e.data);
-      }
-      // The composed text landed in the hidden desktop composition-target
-      // input's own DOM value (composition was never preventDefault()'d so the
-      // browser could compose into it) — clear it so the next composition
-      // starts clean instead of accumulating.
-      inputRef.current?.clear();
-    };
-
-    const onKey = (e: KeyboardEvent) => {
-      // keyCode 229 is the legacy composing signal (older Safari/Firefox).
-      if (composing || e.isComposing || e.keyCode === 229) return;
-      if (!focused()) return;
-      const appCursor = cache.get(activeIdRef.current)?.term.applicationCursor ?? false;
-      const bytes = keyToBytes(e, appCursor, isMacDesktop);
-      if (bytes == null) return;
-      if (bytes === COPY) return; // let the browser copy the selection
-      e.preventDefault();
-      if (bytes === PASTE) {
-        void handlePaste();
-        return;
-      }
-      sendKey(bytes);
-    };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('compositionstart', onCompositionStart);
-    window.addEventListener('compositionend', onCompositionEnd);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('compositionstart', onCompositionStart);
-      window.removeEventListener('compositionend', onCompositionEnd);
-    };
-    // sendKey/handlePaste delegate to refs, so a stable listener is fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfiguring, activePresentationId, presentations, fileView, diffOpen]);
-
-  // Desktop: right-click the terminal for a Copy / Paste / Select All menu.
-  useEffect(() => {
-    if (
-      !isDesktop ||
-      isConfiguring ||
-      presentations.some((preview) => preview.id === activePresentationId)
-    )
-      return;
-    const onCtx = (e: MouseEvent) => {
-      const el = document.getElementById('tether-terminal');
-      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
-      e.preventDefault();
-      setCtxMenu({ x: e.clientX, y: e.clientY });
-    };
-    document.addEventListener('contextmenu', onCtx);
-    return () => document.removeEventListener('contextmenu', onCtx);
-  }, [isConfiguring, activePresentationId, presentations]);
 
   const activeSession = drawerSessions.find((s) => s.id === activeId);
   const activeName = activeSession ? sessionLabel(activeSession) : activeId;
@@ -900,43 +785,23 @@ export function useTetherApp() {
   // OS notification path lives in maybeNotify (per-session, in the ws handler).
   const activeBellCount = activeEntry.term.bellCount;
   const activePromptReturnCount = activeEntry.term.promptReturnCount;
-
-  // Desktop: keep windowFocusedRef (declared up top) in sync with real OS
-  // focus so the ws handler can suppress notifications for the focused tab.
-  useEffect(() => {
-    if (!isDesktop || typeof window === 'undefined') return;
-    const onFocus = () => {
-      windowFocusedRef.current = true;
-      // If the webview was fully suspended while we were away (some Linux
-      // compositors freeze background window JS), the keepalive watchdog can
-      // fire on resume before the server's queued ping is processed and force
-      // a needless reconnect. Refresh lastSeen for every live socket so the
-      // next ping (≤20s out) lands inside the 30s window first.
-      refreshSocketActivity();
-    };
-    const onBlur = () => {
-      windowFocusedRef.current = false;
-    };
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
-  // "Command finished" (new shell prompt) stays active-tab-only + unfocused:
-  // every backgrounded tab returns to a prompt constantly, so notifying on it
-  // for background sessions would be pure spam. Bell / explicit OSC-notify are
-  // handled per-session in the ws handler instead (they fire for any tab).
-  const prevPromptReturnCountRef = useRef(0);
-  useEffect(() => {
-    if (!isDesktop) return;
-    const promptReturned = activePromptReturnCount > prevPromptReturnCountRef.current;
-    prevPromptReturnCountRef.current = activePromptReturnCount;
-    if (promptReturned && !windowFocusedRef.current) {
-      void sendNativeNotification('Tether', 'Command finished');
-    }
-  }, [activePromptReturnCount]);
+  useDesktopEffects({
+    isConfiguring,
+    presentations,
+    activePresentationId,
+    fileViewOpen: !!fileView,
+    diffOpen,
+    cache,
+    activeIdRef,
+    inputRef,
+    sendKey,
+    sendPaste,
+    handlePaste,
+    setContextMenu: setCtxMenu,
+    windowFocusedRef,
+    refreshSocketActivity,
+    activePromptReturnCount,
+  });
 
   // Update-modal progress display.
   const upPct =
@@ -987,7 +852,7 @@ export function useTetherApp() {
         body: JSON.stringify({ id: activeId }),
       });
       connect(activeIdRef.current);
-    } catch (e) {
+    } catch {
       void notify('Error', 'Failed to kill session on the server', 'error');
     }
   };
