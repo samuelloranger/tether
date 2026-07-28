@@ -1,7 +1,9 @@
 import Feather from '@expo/vector-icons/Feather';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
+import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import type { HostProfile } from './tether/hostStore';
+import { typeScale } from './type';
 
 const COLORS = ['#89b4fa', '#a6e3a1', '#f9e2af', '#f38ba8', '#cba6f7'];
 
@@ -36,14 +38,15 @@ export function HostsScreen({
     <View style={{ flex: 1, padding: 24, backgroundColor: theme.colors.background }}>
       <TouchableOpacity
         onPress={onBack}
+        style={{ minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' }}
         accessibilityRole="button"
         accessibilityLabel="Back to connection settings"
       >
-        <Text style={{ color: theme.colors.accent, marginBottom: 18 }}>‹ Connection settings</Text>
+        <Text style={[typeScale.body, { color: theme.colors.accent, marginBottom: 18 }]}>
+          ‹ Connection settings
+        </Text>
       </TouchableOpacity>
-      <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700', marginBottom: 12 }}>
-        Hosts
-      </Text>
+      <Text style={[typeScale.display, { color: theme.colors.text, marginBottom: 12 }]}>Hosts</Text>
       {hosts.map((host, index) => (
         <View
           key={host.id}
@@ -51,20 +54,21 @@ export function HostsScreen({
             backgroundColor: theme.colors.surface,
             borderColor: theme.colors.border,
             borderWidth: 1,
-            borderRadius: 10,
+            borderLeftWidth: 1,
+            borderLeftColor: host.color,
+            borderRadius: SURFACE_RADIUS.control,
             padding: 12,
             marginBottom: 10,
           }}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: host.color }} />
             <TextInput
               value={host.name}
               onChangeText={(name) => onUpdate(host.id, { name })}
               onEndEditing={(event) =>
                 onUpdate(host.id, { name: event.nativeEvent.text.trim() || host.name })
               }
-              style={{ flex: 1, color: theme.colors.text, fontWeight: '700' }}
+              style={[typeScale.body, { flex: 1, color: theme.colors.text }]}
               accessibilityLabel={`Host name ${host.name}`}
             />
             <TouchableOpacity
@@ -72,6 +76,12 @@ export function HostsScreen({
               disabled={index === 0}
               accessibilityRole="button"
               accessibilityLabel={`Move ${host.name} up`}
+              style={{
+                minWidth: MIN_TOUCH_TARGET,
+                minHeight: MIN_TOUCH_TARGET,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
             >
               <Feather name="chevron-up" size={18} color={theme.colors.textMuted} />
             </TouchableOpacity>
@@ -80,11 +90,17 @@ export function HostsScreen({
               disabled={index === hosts.length - 1}
               accessibilityRole="button"
               accessibilityLabel={`Move ${host.name} down`}
+              style={{
+                minWidth: MIN_TOUCH_TARGET,
+                minHeight: MIN_TOUCH_TARGET,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
             >
               <Feather name="chevron-down" size={18} color={theme.colors.textMuted} />
             </TouchableOpacity>
           </View>
-          <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 5 }}>
+          <Text style={[typeScale.label, { color: theme.colors.textMuted, marginTop: 5 }]}>
             {host.host}:{host.port}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }}>
@@ -95,9 +111,9 @@ export function HostsScreen({
                 accessibilityRole="button"
                 accessibilityLabel={`Set ${host.name} color`}
                 style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 11,
+                  width: MIN_TOUCH_TARGET,
+                  height: MIN_TOUCH_TARGET,
+                  borderRadius: MIN_TOUCH_TARGET / 2,
                   backgroundColor: color,
                   borderWidth: host.color === color ? 2 : 0,
                   borderColor: theme.colors.text,
@@ -106,26 +122,43 @@ export function HostsScreen({
             ))}
             <TouchableOpacity
               onPress={() => onEdit(host.id)}
+              style={{
+                minWidth: MIN_TOUCH_TARGET,
+                minHeight: MIN_TOUCH_TARGET,
+                justifyContent: 'center',
+              }}
               accessibilityRole="button"
               accessibilityLabel={`Edit ${host.name}`}
             >
-              <Text style={{ color: theme.colors.accent }}>Edit</Text>
+              <Text style={[typeScale.body, { color: theme.colors.accent }]}>Edit</Text>
             </TouchableOpacity>
             {onServerSettings && (
               <TouchableOpacity
                 onPress={() => onServerSettings(host.id)}
+                style={{
+                  minWidth: MIN_TOUCH_TARGET,
+                  minHeight: MIN_TOUCH_TARGET,
+                  justifyContent: 'center',
+                }}
                 accessibilityRole="button"
                 accessibilityLabel={`Server settings for ${host.name}`}
               >
-                <Text style={{ color: theme.colors.accent }}>Server settings</Text>
+                <Text style={[typeScale.body, { color: theme.colors.accent }]}>
+                  Server settings
+                </Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
               onPress={() => onRemove(host.id)}
+              style={{
+                minWidth: MIN_TOUCH_TARGET,
+                minHeight: MIN_TOUCH_TARGET,
+                justifyContent: 'center',
+              }}
               accessibilityRole="button"
               accessibilityLabel={`Delete ${host.name}`}
             >
-              <Text style={{ color: theme.colors.danger }}>Delete</Text>
+              <Text style={[typeScale.body, { color: theme.colors.danger }]}>Delete</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -134,9 +167,9 @@ export function HostsScreen({
         onPress={onAdd}
         accessibilityRole="button"
         accessibilityLabel="Add host"
-        style={{ marginTop: 8 }}
+        style={{ marginTop: 8, minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' }}
       >
-        <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>+ Add host</Text>
+        <Text style={[typeScale.label, { color: theme.colors.accent }]}>+ Add host</Text>
       </TouchableOpacity>
     </View>
   );

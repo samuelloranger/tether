@@ -22,6 +22,7 @@ import type { Presentation } from './presentations';
 import { sessionLabel } from './sessionLabel';
 import type { HostHealthStatus } from './tether/hostHealth';
 import type { HostProfile } from './tether/hostStore';
+import { typeScale } from './type';
 
 export interface DrawerSession {
   hostId: string;
@@ -163,11 +164,14 @@ export function SessionDrawer({
           return (
             <View
               key={host.id}
-              style={[styles.hostSection, unavailable && styles.hostSectionUnavailable]}
+              style={[
+                styles.hostSection,
+                { borderLeftColor: host.color },
+                unavailable && styles.hostSectionUnavailable,
+              ]}
               accessibilityLabel={`${host.name} host section`}
             >
               <View style={styles.hostHeader}>
-                <View style={[styles.hostDot, { backgroundColor: host.color }]} />
                 <Text style={styles.hostName}>{host.name}</Text>
                 {health === 'unknown' && <Text style={styles.hostStatus}>connecting…</Text>}
                 {health === 'reachable' && (
@@ -372,15 +376,9 @@ const createStyles = (c: AppColors) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    title: {
-      color: c.textMuted,
-      fontSize: 11,
-      fontWeight: '700',
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
+    title: { color: c.textMuted, ...typeScale.eyebrow },
     list: { flex: 1 },
-    hostSection: { marginBottom: 8 },
+    hostSection: { marginBottom: 8, borderLeftWidth: 1, paddingLeft: 6 },
     hostSectionUnavailable: { opacity: 0.52 },
     hostHeader: {
       flexDirection: 'row',
@@ -389,7 +387,6 @@ const createStyles = (c: AppColors) =>
       paddingHorizontal: 4,
       gap: 7,
     },
-    hostDot: { width: 8, height: 8, borderRadius: 4 },
     hostName: { color: c.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
     hostStatus: { marginLeft: 'auto', color: c.textFaint, fontSize: 11 },
     hostReachable: { color: c.success },
