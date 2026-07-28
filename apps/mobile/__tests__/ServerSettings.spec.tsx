@@ -53,10 +53,17 @@ test('renders all settings sections and saves one diffed PATCH', async () => {
       />
     </AppThemeProvider>,
   );
-  await waitFor(() => expect(view.getByText('Identity')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('This server')).toBeTruthy());
   expect(view.getByText('Notifications')).toBeTruthy();
   expect(view.getByText('Session defaults')).toBeTruthy();
-  expect(view.getByText('Server ops')).toBeTruthy();
+  expect(view.getByText('Maintenance')).toBeTruthy();
+  expect(view.getByText('Agent needs input')).toBeTruthy();
+  expect(view.getByText('Alerts from programs')).toBeTruthy();
+  expect(view.getByText('Session ends')).toBeTruthy();
+  expect(view.getByText('Long command finishes')).toBeTruthy();
+  expect(view.getByText('Count a command as long after')).toBeTruthy();
+  expect(view.getByText('Mark a session idle after')).toBeTruthy();
+  expect(view.getByLabelText('Send test notification')).toBeTruthy();
   fireEvent.changeText(view.getByDisplayValue('Studio'), 'Studio Mac');
   fireEvent.press(view.getByLabelText('Save changes'));
   await waitFor(() =>
@@ -133,7 +140,7 @@ test('marks operation failures as error messages without inspecting the copy', a
     </AppThemeProvider>,
   );
 
-  await waitFor(() => expect(view.getByText('Server ops')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Maintenance')).toBeTruthy());
   fireEvent.press(view.getByLabelText('Change password'));
   const inputs = view.getAllByDisplayValue('');
   fireEvent.changeText(inputs[0], 'current-password');

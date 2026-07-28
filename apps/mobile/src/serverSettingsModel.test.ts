@@ -51,7 +51,7 @@ test('keeps numeric drafts as strings and parses them only in the patch', () => 
   const draft = createServerSettingsDraft(config);
   draft.longJobSeconds = '60';
   draft.session.scrollbackRows = '500';
-  draft.session.silenceMs = '2000';
+  draft.session.silenceMs = '2';
 
   expect(patchForDraft(config, draft)).toEqual({
     longJobSeconds: 60,
@@ -62,4 +62,16 @@ test('keeps numeric drafts as strings and parses them only in the patch', () => 
   expect(validateServerSettingsDraft(draft).scrollbackRows).toBe(
     'Scrollback must be between 100 and 100000 rows.',
   );
+});
+
+test('presents silence in seconds and preserves fractional seconds at the API boundary', () => {
+  const draft = createServerSettingsDraft({
+    ...config,
+    session: { ...config.session, silenceMs: 15500 },
+  });
+
+  expect(draft.session.silenceMs).toBe('15.5');
+
+  draft.session.silenceMs = '15.75';
+  expect(patchForDraft(config, draft)).toEqual({ session: { silenceMs: 15750 } });
 });

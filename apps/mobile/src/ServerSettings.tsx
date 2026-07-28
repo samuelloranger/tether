@@ -35,6 +35,7 @@ import {
 import type { HostClient } from './tether/hostClient';
 import type { HostHealthStatus } from './tether/hostHealth';
 import type { HostProfile } from './tether/hostStore';
+import { typeScale } from './type';
 
 type AdminOperation = 'password' | 'update' | 'restart' | null;
 type Message = { kind: 'success' | 'error'; text: string };
@@ -216,7 +217,7 @@ export function ServerSettings({
     >
       <View style={[styles.backdrop, !isDesktop && styles.mobileBackdrop]}>
         <View style={styles.panel}>
-          <View style={styles.header}>
+          <View style={[styles.header, { borderLeftColor: host?.color ?? theme.colors.accent }]}>
             <View>
               <Text style={styles.title}>Server settings</Text>
               <Text style={styles.subTitle}>
@@ -225,6 +226,7 @@ export function ServerSettings({
               </Text>
             </View>
             <TouchableOpacity
+              style={styles.closeButton}
               onPress={() => void close()}
               accessibilityRole="button"
               accessibilityLabel="Close server settings"
@@ -248,7 +250,7 @@ export function ServerSettings({
             </View>
           ) : draft ? (
             <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-              <Section title="Identity">
+              <Section title="This server">
                 <Field
                   label="Name"
                   value={draft.identity.name}
@@ -293,7 +295,7 @@ export function ServerSettings({
                   />
                 ) : (
                   <Field
-                    label="Replacement token"
+                    label="New token"
                     value={draft.notify.token}
                     secure
                     editable={!readOnly}
@@ -302,38 +304,42 @@ export function ServerSettings({
                   />
                 )}
                 <Toggle
-                  label="Waiting"
+                  label="Agent needs input"
                   value={draft.triggers.waiting}
                   disabled={readOnly}
                   onValueChange={(waiting) => set('triggers', { ...draft.triggers, waiting })}
                 />
                 <Toggle
-                  label="OSC notify"
+                  label="Alerts from programs"
                   value={draft.triggers.oscNotify}
                   disabled={readOnly}
                   onValueChange={(oscNotify) => set('triggers', { ...draft.triggers, oscNotify })}
                 />
                 <Toggle
-                  label="Exit"
+                  label="Session ends"
                   value={draft.triggers.exit}
                   disabled={readOnly}
                   onValueChange={(exit) => set('triggers', { ...draft.triggers, exit })}
                 />
                 <Toggle
-                  label="Long job"
+                  label="Long command finishes"
                   value={draft.triggers.longJob}
                   disabled={readOnly}
                   onValueChange={(longJob) => set('triggers', { ...draft.triggers, longJob })}
                 />
                 <Field
-                  label="Long job seconds"
+                  label="Count a command as long after"
                   value={draft.longJobSeconds}
                   editable={!readOnly}
                   numeric
                   error={validationErrors.longJobSeconds}
                   onChangeText={(longJobSeconds) => set('longJobSeconds', longJobSeconds)}
                 />
-                <Button label="Send test" onPress={() => void sendTest()} disabled={readOnly} />
+                <Button
+                  label="Send test notification"
+                  onPress={() => void sendTest()}
+                  disabled={readOnly}
+                />
               </Section>
               <Section title="Session defaults">
                 <Text style={styles.hint}>Changes apply to newly started sessions.</Text>
@@ -362,7 +368,7 @@ export function ServerSettings({
                   }
                 />
                 <Field
-                  label="Silence threshold (ms)"
+                  label="Mark a session idle after"
                   value={draft.session.silenceMs}
                   editable={!readOnly}
                   numeric
@@ -370,15 +376,30 @@ export function ServerSettings({
                   onChangeText={(value) => set('session', { ...draft.session, silenceMs: value })}
                 />
               </Section>
-              <Section title="Server ops">
-                <Text style={styles.hint}>
-                  Restart and update keep holder-backed sessions alive; they reconnect after the
-                  daemon returns.
-                </Text>
-                <Button label="Change password" onPress={() => setAdmin('password')} />
-                <Button label="Check for update" onPress={() => setAdmin('update')} />
-                <Button label="Restart server" onPress={() => setAdmin('restart')} />
-              </Section>
+              <View style={styles.maintenance}>
+                <View style={styles.divider} />
+                <Section title="Maintenance" subdued>
+                  <Text style={styles.hint}>
+                    Restart and update keep holder-backed sessions alive; they reconnect after the
+                    daemon returns.
+                  </Text>
+                  <Button
+                    label="Change password"
+                    onPress={() => setAdmin('password')}
+                    tone="danger"
+                  />
+                  <Button
+                    label="Check for update"
+                    onPress={() => setAdmin('update')}
+                    tone="danger"
+                  />
+                  <Button
+                    label="Restart server"
+                    onPress={() => setAdmin('restart')}
+                    tone="danger"
+                  />
+                </Section>
+              </View>
               {message && (
                 <Text
                   testID={`server-settings-message-${message.kind}`}
@@ -453,11 +474,26 @@ export function ServerSettings({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+  subdued = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  subdued?: boolean;
+}) {
   const { theme } = useAppTheme();
   return (
     <View style={{ gap: 8 }}>
-      <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '700' }}>{title}</Text>
+      <Text
+        style={[
+          typeScale.eyebrow,
+          { color: subdued ? theme.colors.textMuted : theme.colors.accent },
+        ]}
+      >
+        {title}
+      </Text>
       {children}
     </View>
   );
@@ -480,9 +516,12 @@ function Field({
   const { theme } = useAppTheme();
   return (
     <View>
-      <Text style={{ color: theme.colors.textMuted, fontSize: 11, marginBottom: 4 }}>{label}</Text>
+      <Text style={[typeScale.caption, { color: theme.colors.textMuted, marginBottom: 4 }]}>
+        {label}
+      </Text>
       <TextInput
         {...props}
+        accessibilityLabel={label}
         secureTextEntry={secure}
         keyboardType={numeric ? 'numeric' : 'default'}
         autoCapitalize="none"
@@ -498,7 +537,7 @@ function Field({
         }}
       />
       {error && (
-        <Text style={{ color: theme.colors.danger, fontSize: 12, marginTop: 4 }}>{error}</Text>
+        <Text style={[typeScale.label, { color: theme.colors.danger, marginTop: 4 }]}>{error}</Text>
       )}
     </View>
   );
@@ -522,6 +561,8 @@ function Toggle({
         value={value}
         disabled={disabled}
         onValueChange={onValueChange}
+        accessibilityRole="switch"
+        accessibilityLabel={label}
         trackColor={{ true: theme.colors.accent }}
       />
     </View>
@@ -531,10 +572,12 @@ function Button({
   label,
   onPress,
   disabled,
+  tone = 'default',
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  tone?: 'default' | 'danger';
 }) {
   const { theme } = useAppTheme();
   return (
@@ -543,17 +586,27 @@ function Button({
       accessibilityLabel={label}
       disabled={disabled}
       onPress={onPress}
-      style={{
-        minHeight: MIN_TOUCH_TARGET,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        backgroundColor: theme.colors.accent,
-        opacity: disabled ? 0.55 : 1,
-      }}
+      style={[
+        {
+          minHeight: MIN_TOUCH_TARGET,
+          justifyContent: 'center',
+          alignItems: 'center',
+          borderRadius: SURFACE_RADIUS.control,
+          paddingHorizontal: 12,
+          backgroundColor: tone === 'danger' ? theme.colors.surfaceRaised : theme.colors.accent,
+          opacity: disabled ? 0.55 : 1,
+        },
+        tone === 'danger' && { borderColor: theme.colors.danger, borderWidth: 1 },
+      ]}
     >
-      <Text style={{ color: theme.colors.accentText, fontWeight: '700' }}>{label}</Text>
+      <Text
+        style={[
+          typeScale.label,
+          { color: tone === 'danger' ? theme.colors.danger : theme.colors.accentText },
+        ]}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -580,16 +633,25 @@ function createStyles(c: AppColors) {
       alignItems: 'center',
       padding: 18,
       borderBottomWidth: 1,
+      borderLeftWidth: 2,
       borderColor: c.border,
     },
-    title: { color: c.text, fontSize: 18, fontWeight: '700' },
-    subTitle: { color: c.textMuted, fontSize: 12, marginTop: 3 },
-    action: { color: c.accent, fontWeight: '700' },
+    title: { color: c.text, ...typeScale.title },
+    subTitle: { color: c.textMuted, marginTop: 3, ...typeScale.label },
+    action: { color: c.accent, ...typeScale.label },
+    closeButton: {
+      minWidth: MIN_TOUCH_TARGET,
+      minHeight: MIN_TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     body: { padding: 18, gap: 24 },
     state: { flex: 1, padding: 24, gap: 16, justifyContent: 'center' },
-    hint: { color: c.textMuted, fontSize: 12, lineHeight: 17 },
-    message: { color: c.success, fontSize: 13 },
-    error: { color: c.danger, fontSize: 13 },
+    hint: { color: c.textMuted, ...typeScale.label },
+    message: { color: c.success, ...typeScale.body },
+    error: { color: c.danger, ...typeScale.body },
+    maintenance: { gap: 16 },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border },
     dialog: {
       width: 360,
       maxWidth: '90%',

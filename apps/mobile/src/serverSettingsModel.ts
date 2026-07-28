@@ -33,7 +33,7 @@ export function createServerSettingsDraft(config: ServerConfig): ServerSettingsD
     session: {
       ...config.session,
       scrollbackRows: String(config.session.scrollbackRows),
-      silenceMs: String(config.session.silenceMs),
+      silenceMs: String(config.session.silenceMs / 1000),
     },
   };
 }
@@ -58,7 +58,7 @@ export function patchForDraft(config: ServerConfig, draft: ServerSettingsDraft):
     session.defaultCwd = draft.session.defaultCwd;
   const scrollbackRows = Number(draft.session.scrollbackRows);
   if (config.session.scrollbackRows !== scrollbackRows) session.scrollbackRows = scrollbackRows;
-  const silenceMs = Number(draft.session.silenceMs);
+  const silenceMs = Number(draft.session.silenceMs) * 1000;
   if (config.session.silenceMs !== silenceMs) session.silenceMs = silenceMs;
   if (Object.keys(notify).length) patch.notify = notify;
   if (Object.keys(triggers).length) patch.triggers = triggers;
@@ -105,11 +105,10 @@ export function validateServerSettingsDraft(draft: ServerSettingsDraft): ServerS
     Number(draft.session.scrollbackRows) > 100000
   )
     errors.scrollbackRows = 'Scrollback must be between 100 and 100000 rows.';
-  if (
-    !Number.isInteger(Number(draft.session.silenceMs)) ||
-    Number(draft.session.silenceMs) < 1000 ||
-    Number(draft.session.silenceMs) > 3600000
-  )
-    errors.silenceMs = 'Silence threshold must be between 1000 and 3600000 ms.';
+  const silenceSeconds = Number(draft.session.silenceMs);
+  if (!Number.isFinite(silenceSeconds) || silenceSeconds < 1 || silenceSeconds > 3600)
+    errors.silenceMs = 'Enter a value from 1 to 3600 seconds.';
+  else if (!Number.isInteger(silenceSeconds * 1000))
+    errors.silenceMs = 'Enter seconds to the nearest millisecond.';
   return errors;
 }
