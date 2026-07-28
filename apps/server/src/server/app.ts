@@ -12,7 +12,14 @@ import {
   updateTargetVersion,
 } from './admin';
 import { authMiddleware } from './auth';
-import { configSchema, getConfig, patchConfig, redactConfig } from './config';
+import {
+  configSchema,
+  getConfig,
+  PrivateNotifyUrlError,
+  patchConfig,
+  redactConfig,
+  validateNotifyUrl,
+} from './config';
 import {
   getAuthHash,
   getLogs,
@@ -189,7 +196,7 @@ app.get('/api/health', (c) => c.json({ ok: true, version: VERSION }));
 app.get('/api/config', (c) => c.json(redactConfig()));
 app.patch('/api/config', async (c) => {
   try {
-    return c.json(redactConfig(patchConfig(await c.req.json())));
+    return c.json(redactConfig(await patchConfig(await c.req.json())));
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'invalid config' }, 400);
   }
@@ -235,14 +242,22 @@ app.post('/api/admin/test-notification', async (c) => {
   }
   const result = configSchema.pick({ notify: true }).partial().strict().safeParse(body);
   if (!result.success) return c.json({ ok: false, error: result.error.message }, 400);
+  const current = getConfig();
+  const config = { ...current, notify: { ...current.notify, ...result.data.notify } };
   try {
-    const current = getConfig();
-    const config = { ...current, notify: { ...current.notify, ...result.data.notify } };
+    await validateNotifyUrl(config.notify.url);
+  } catch (error) {
+    if (error instanceof PrivateNotifyUrlError)
+      return c.json({ ok: false, error: error.message, code: error.code }, 400);
+    return c.json({ ok: false, error: 'invalid notification URL' }, 400);
+  }
+  try {
     await sendTestNotification(config);
     return c.json({ ok: true });
   } catch (error) {
+    console.error('Test notification delivery failed:', error);
     return c.json(
-      { ok: false, error: error instanceof Error ? error.message : 'notification failed' },
+      { ok: false, error: 'Notification delivery failed.', code: 'notification_delivery_failed' },
       502,
     );
   }

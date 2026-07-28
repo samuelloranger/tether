@@ -73,6 +73,7 @@ async function deliver(payload: NtfyPayload, cfg: Config, fetcher: Fetch = fetch
     const first = await post();
     if (!first.ok) throw new Error(`ntfy returned ${first.status}`);
   } catch (error) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     const retry = await post();
     if (!retry.ok) throw new Error(`ntfy returned ${retry.status}`);
   }

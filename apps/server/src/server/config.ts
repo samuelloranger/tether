@@ -3,11 +3,63 @@ import { getSetting, setSetting } from './db';
 
 const nonNegativeInt = z.number().int().nonnegative();
 
+export const PRIVATE_NOTIFY_URL_ERROR =
+  'Notification URL resolves to a private address. Set TETHER_ALLOW_PRIVATE_NOTIFY_URL=1 to allow it.';
+
+export class PrivateNotifyUrlError extends Error {
+  code = 'private_notify_url';
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const octets = address.split('.').map(Number);
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  )
+    return false;
+  const [first, second] = octets;
+  return (
+    first === 127 ||
+    first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 169 && second === 254)
+  );
+}
+
+function isPrivateAddress(address: string): boolean {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
+  if (isPrivateIpv4(normalized)) return true;
+  const mappedIpv4 = normalized.match(/(?:^|:)ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mappedIpv4 && isPrivateIpv4(mappedIpv4[1])) return true;
+  return (
+    normalized === '::1' ||
+    /^fe[89ab][0-9a-f]*:/.test(normalized) ||
+    /^[fd][0-9a-f]*:/.test(normalized)
+  );
+}
+
+function hasPrivateNotifyHost(url: string): boolean {
+  try {
+    return isPrivateAddress(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+const notifyUrlSchema = z
+  .string()
+  .url()
+  .refine(
+    (url) => process.env.TETHER_ALLOW_PRIVATE_NOTIFY_URL === '1' || !hasPrivateNotifyHost(url),
+    PRIVATE_NOTIFY_URL_ERROR,
+  );
+
 export const configSchema = z
   .object({
     notify: z.object({
       enabled: z.boolean(),
-      url: z.string().url(),
+      url: notifyUrlSchema,
       topic: z.string().max(256),
       token: z.string().min(1).max(4096).optional(),
     }),
@@ -30,6 +82,23 @@ export const configSchema = z
 
 export type Config = z.infer<typeof configSchema>;
 export type ConfigPatch = { [K in keyof Config]?: Partial<Config[K]> };
+
+type NotifyUrlLookup = (hostname: string) => Promise<Array<{ address: string }>>;
+
+export async function validateNotifyUrl(
+  url: string,
+  lookup: NotifyUrlLookup = (hostname) => Bun.dns.lookup(hostname),
+): Promise<void> {
+  if (process.env.TETHER_ALLOW_PRIVATE_NOTIFY_URL === '1') return;
+  const hostname = new URL(url).hostname;
+  const addresses = hasPrivateNotifyHost(url)
+    ? [hostname]
+    : await lookup(hostname).then(
+        (records) => records.map((record) => record.address),
+        () => [],
+      );
+  if (addresses.some(isPrivateAddress)) throw new PrivateNotifyUrlError(PRIVATE_NOTIFY_URL_ERROR);
+}
 
 export const DEFAULT_CONFIG: Config = {
   notify: { enabled: false, url: 'https://ntfy.sh', topic: '' },
@@ -81,7 +150,7 @@ export function getConfig(): Config {
   return cached;
 }
 
-export function patchConfig(partial: unknown): Config {
+export async function patchConfig(partial: unknown): Promise<Config> {
   const patch = z
     .object({
       notify: configSchema.shape.notify.partial().strict().optional(),
@@ -101,6 +170,7 @@ export function patchConfig(partial: unknown): Config {
     identity: { ...current.identity, ...patch.identity },
     session: { ...current.session, ...patch.session },
   });
+  await validateNotifyUrl(next.notify.url);
   for (const key of Object.keys(patch) as (keyof Config)[]) {
     setSetting(`config.${key}`, JSON.stringify(next[key]));
   }

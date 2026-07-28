@@ -40,3 +40,19 @@ test('disabled triggers suppress notifications and send swallows failures', asyn
     }),
   ).resolves.toBeUndefined();
 });
+
+test('retries delivery once after a one-second delay and still lets send swallow failures', async () => {
+  const attempts: number[] = [];
+  await send(
+    { topic: 'tether-test', title: 'Test', message: 'Test', tags: [], click: 'tether://' },
+    cfg,
+    async () => {
+      attempts.push(Date.now());
+      if (attempts.length === 1) throw new Error('offline');
+      return new Response(null, { status: 503 });
+    },
+  );
+
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1] - attempts[0]).toBeGreaterThanOrEqual(900);
+});
