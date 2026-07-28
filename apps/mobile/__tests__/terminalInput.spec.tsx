@@ -91,6 +91,10 @@ function sentInput() {
     .map((msg) => msg.text);
 }
 
+function sendRendererInput(text: string) {
+  act(() => rendererProps?.onInput(text));
+}
+
 beforeEach(() => {
   sockets.length = 0;
   rendererProps = null;
@@ -99,22 +103,22 @@ beforeEach(() => {
 
 test('a character typed into the renderer reaches the PTY unchanged', async () => {
   await mountTerminal();
-  rendererProps?.onInput('c');
+  sendRendererInput('c');
   expect(sentInput()).toEqual(['c']);
 });
 
 test('Ctrl armed turns the next typed character into a control code', async () => {
   const view = await mountTerminal();
   fireEvent.press(view.getByLabelText('Control modifier'));
-  rendererProps?.onInput('c');
+  sendRendererInput('c');
   expect(sentInput()).toEqual(['\x03']);
 });
 
 test('Ctrl is consumed, so the character after it is literal again', async () => {
   const view = await mountTerminal();
   fireEvent.press(view.getByLabelText('Control modifier'));
-  rendererProps?.onInput('c');
-  rendererProps?.onInput('c');
+  sendRendererInput('c');
+  sendRendererInput('c');
   expect(sentInput()).toEqual(['\x03', 'c']);
 });
 
@@ -122,7 +126,7 @@ test('a utility-bar key consumes Ctrl instead of leaving it armed', async () => 
   const view = await mountTerminal();
   fireEvent.press(view.getByLabelText('Control modifier'));
   fireEvent.press(view.getByLabelText('Tab'));
-  rendererProps?.onInput('c');
+  sendRendererInput('c');
   // Tab has no Ctrl encoding, so it passes through — but it must still disarm,
   // or the next typed letter is silently rewritten.
   expect(sentInput()).toEqual(['\t', 'c']);
@@ -131,7 +135,7 @@ test('a utility-bar key consumes Ctrl instead of leaving it armed', async () => 
 test('Ctrl modifies a cursor key from the renderer into its CSI form', async () => {
   const view = await mountTerminal();
   fireEvent.press(view.getByLabelText('Control modifier'));
-  rendererProps?.onInput('\x1b[C');
+  sendRendererInput('\x1b[C');
   expect(sentInput()).toEqual(['\x1b[1;5C']);
 });
 
@@ -141,7 +145,7 @@ test('holding backspace accelerates to word delete', async () => {
   // stays a single-character delete; past it they become Ctrl+W (tty werase),
   // which is the behaviour that silently disappeared when the WebView took over
   // input from the hidden capture field.
-  for (let i = 0; i <= 16; i++) rendererProps?.onInput('\x7f');
+  for (let i = 0; i <= 16; i++) sendRendererInput('\x7f');
   const sent = sentInput();
   expect(sent.slice(0, 15)).toEqual(Array(15).fill('\x7f'));
   expect(sent.at(-1)).toBe('\x17');
@@ -149,9 +153,9 @@ test('holding backspace accelerates to word delete', async () => {
 
 test('a bar key between backspaces breaks the streak', async () => {
   const view = await mountTerminal();
-  for (let i = 0; i <= 16; i++) rendererProps?.onInput('\x7f');
+  for (let i = 0; i <= 16; i++) sendRendererInput('\x7f');
   fireEvent.press(view.getByLabelText('Esc'));
-  rendererProps?.onInput('\x7f');
+  sendRendererInput('\x7f');
   expect(sentInput().at(-1)).toBe('\x7f');
 });
 
