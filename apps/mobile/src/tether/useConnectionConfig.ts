@@ -2,13 +2,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef, useState } from 'react';
 import { validateAddress } from '../address';
 import { notify } from '../dialog';
-import { authHeaders, getPassword, setPassword as persistPassword } from '../secureConfig';
+import {
+  authHeaders,
+  clearLegacyPassword,
+  clearPassword,
+  getLegacyPassword,
+  getPassword,
+  setPassword as persistPassword,
+} from '../secureConfig';
 import { connectionRequestUrl } from './connectionUrl';
+import { createHostStore } from './hostStore';
 
-const KEY_SERVER_IP = 'tether_server_ip';
-const KEY_PORT = 'tether_port';
 export function useConnectionConfig() {
-  const [serverIp, setServerIp] = useState('192.168.50.30');
+  const [serverIp, setServerIp] = useState('');
   const [port, setPort] = useState('8085');
   const [password, setPassword] = useState('');
   const passwordRef = useRef('');
@@ -20,6 +26,19 @@ export function useConnectionConfig() {
   const [isConfiguring, setIsConfiguring] = useState(true);
   const [ready, setReady] = useState(false);
   const readyRef = useRef(false);
+  const hostIdRef = useRef<string | null>(null);
+  const hostStoreRef = useRef(
+    createHostStore({
+      storage: AsyncStorage,
+      secrets: {
+        get: getPassword,
+        set: persistPassword,
+        clear: clearPassword,
+        getLegacy: getLegacyPassword,
+        clearLegacy: clearLegacyPassword,
+      },
+    }),
+  );
   const lastConnectedRef = useRef({ ip: serverIp, port });
 
   useEffect(() => {
@@ -27,20 +46,21 @@ export function useConnectionConfig() {
   }, [password]);
 
   useEffect(() => {
-    Promise.all([
-      AsyncStorage.getItem(KEY_SERVER_IP),
-      AsyncStorage.getItem(KEY_PORT),
-      getPassword(),
-    ])
-      .then(([savedIp, savedPort, savedPassword]) => {
-        if (savedIp) setServerIp(savedIp);
-        if (savedPort) setPort(savedPort);
+    void hostStoreRef.current
+      .list()
+      .then(async (profiles) => {
+        const current = profiles[0];
+        if (!current) return;
+        hostIdRef.current = current.id;
+        const savedPassword = await getPassword(current.id);
+        setServerIp(current.host);
+        setPort(current.port);
         if (savedPassword) {
           setPassword(savedPassword);
           passwordRef.current = savedPassword;
         }
-        if (savedIp && savedPassword) {
-          lastConnectedRef.current = { ip: savedIp, port: savedPort || '8085' };
+        if (current.host && savedPassword) {
+          lastConnectedRef.current = { ip: current.host, port: current.port };
           readyRef.current = true;
           setIsConfiguring(false);
           setReady(true);
@@ -97,11 +117,21 @@ export function useConnectionConfig() {
   const saveConfig = async () => {
     try {
       const wasReady = readyRef.current;
-      await AsyncStorage.multiSet([
-        [KEY_SERVER_IP, serverIp],
-        [KEY_PORT, port],
-      ]);
-      await persistPassword(password);
+      let hostId = hostIdRef.current;
+      if (hostId) {
+        await hostStoreRef.current.update(hostId, { host: serverIp, port });
+      } else {
+        const profile = await hostStoreRef.current.create({
+          name: serverIp,
+          color: '#89b4fa',
+          host: serverIp,
+          port,
+          identityName: '',
+        });
+        hostId = profile.id;
+        hostIdRef.current = hostId;
+      }
+      await persistPassword(hostId, password);
       const addressChanged =
         serverIp !== lastConnectedRef.current.ip || port !== lastConnectedRef.current.port;
       lastConnectedRef.current = { ip: serverIp, port };

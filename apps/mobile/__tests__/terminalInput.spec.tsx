@@ -45,6 +45,9 @@ jest.mock('../src/TerminalView', () => {
 jest.mock('../src/secureConfig', () => ({
   getPassword: jest.fn(async () => 'hunter2'),
   setPassword: jest.fn(async () => undefined),
+  clearPassword: jest.fn(async () => undefined),
+  getLegacyPassword: jest.fn(async () => 'hunter2'),
+  clearLegacyPassword: jest.fn(async () => undefined),
   authHeaders: () => ({}),
 }));
 
