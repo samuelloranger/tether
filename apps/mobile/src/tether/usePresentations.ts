@@ -1,23 +1,18 @@
 // biome-ignore-all lint/correctness/useExhaustiveDependencies: polling is deliberately keyed by configuration changes.
 import { useEffect, useRef, useState } from 'react';
-import { httpBase } from '../address';
 import type { Presentation } from '../presentations';
 import { pickAutoSelectPreview } from '../presentations';
-import { authHeaders } from '../secureConfig';
+import type { HostClient } from './hostClient';
 
 type Options = {
-  serverIp: string;
-  port: string;
-  passwordRef: React.MutableRefObject<string>;
+  client: HostClient;
   isConfiguring: boolean;
   getActiveSessionId: () => string;
   markAuthFailed: () => void;
 };
 
 export function usePresentations({
-  serverIp,
-  port,
-  passwordRef,
+  client,
   isConfiguring,
   getActiveSessionId,
   markAuthFailed,
@@ -28,9 +23,7 @@ export function usePresentations({
   const primed = useRef(false);
   const refreshPresentations = async () => {
     try {
-      const response = await fetch(`${httpBase(serverIp, port)}/api/presentations`, {
-        headers: authHeaders(passwordRef.current),
-      });
+      const response = await client.get('/api/presentations');
       if (response.status === 401) {
         markAuthFailed();
         return;
@@ -55,9 +48,8 @@ export function usePresentations({
   };
   const closePresentation = async (id: string) => {
     try {
-      const response = await fetch(`${httpBase(serverIp, port)}/api/presentations/${id}`, {
+      const response = await client.get(`/api/presentations/${id}`, {
         method: 'DELETE',
-        headers: authHeaders(passwordRef.current),
       });
       if (!response.ok) return;
       if (activePresentationId === id) setActivePresentationId(null);
@@ -83,7 +75,7 @@ export function usePresentations({
       if (typeof document !== 'undefined')
         document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [isConfiguring, serverIp, port]);
+  }, [client, isConfiguring]);
   return {
     presentations,
     activePresentationId,

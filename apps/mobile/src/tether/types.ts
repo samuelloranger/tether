@@ -1,8 +1,10 @@
 import type { TerminalSocket } from '../wsTransport';
+import type { HostClient } from './hostClient';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'auth-failed';
 
 export interface TerminalConnectionState {
+  client: HostClient;
   sock: TerminalSocket | null;
   gen: number;
   open: boolean;

@@ -5,10 +5,14 @@ import {
   applyWsMessage,
   backoffDelay,
   createSessionCache,
+  focusFrame,
   maybeNotify,
+  parseSessionKey,
   runIfCurrentGeneration,
   scheduleReconnect,
-  terminalSocketUrl,
+  sessionKey,
+  sessionSwitchAction,
+  statusAfterClose,
 } from './terminalSessionLogic';
 
 function entry(): SessionEntry & { writes: string[]; resets: number } {
@@ -93,9 +97,9 @@ test('a superseded generation cannot apply a message or schedule a reconnect', (
   expect(messages).toBe(1);
 });
 
-test('a scheduled reconnect reads the endpoint that is current when it fires', () => {
+test('a scheduled reconnect reads the HostClient that is current when it fires', () => {
   const readyRef = { current: true };
-  const endpointRef = { current: { serverIp: '192.168.1.8', port: '8085' } };
+  const clientRef = { current: { socketUrl: 'ws://192.168.1.8:8085/api/ws' } };
   let scheduled: (() => void) | undefined;
   const targets: string[] = [];
   scheduleReconnect({
@@ -108,17 +112,59 @@ test('a scheduled reconnect reads the endpoint that is current when it fires', (
     },
     reconnect: () =>
       targets.push(
-        terminalSocketUrl(endpointRef.current, {
+        `${clientRef.current.socketUrl}?${new URLSearchParams({
           sessionId: 'term-1',
-          sinceId: 4,
-          cols: 80,
-          rows: 24,
-        }),
+          sinceId: '4',
+          cols: '80',
+          rows: '24',
+        })}`,
       ),
   });
-  endpointRef.current = { serverIp: '10.0.0.9', port: '9090' };
+  clientRef.current = { socketUrl: 'ws://10.0.0.9:9090/api/ws' };
   scheduled?.();
   expect(targets).toEqual(['ws://10.0.0.9:9090/api/ws?sessionId=term-1&sinceId=4&cols=80&rows=24']);
+});
+
+describe('host-qualified session state', () => {
+  test('keeps same-named sessions on two hosts distinct', () => {
+    const studio = sessionKey('studio', 'term-1');
+    const laptop = sessionKey('laptop', 'term-1');
+    expect(studio).toBe('studio:term-1');
+    expect(laptop).toBe('laptop:term-1');
+    expect(studio).not.toBe(laptop);
+    expect(parseSessionKey(laptop)).toEqual({ hostId: 'laptop', sessionId: 'term-1' });
+  });
+
+  test('evicts and disconnects the least-recent session across hosts at the global cap', () => {
+    const disconnected: string[] = [];
+    const cache = createSessionCache((id) => disconnected.push(id));
+    for (const [hostId, sessionId] of [
+      ['studio', 'term-1'],
+      ['laptop', 'term-1'],
+      ['studio', 'term-2'],
+      ['laptop', 'term-2'],
+    ])
+      cache.touch(sessionKey(hostId, sessionId), entry);
+    expect(disconnected).toEqual(['studio:term-1']);
+    expect(cache.has('laptop:term-1')).toBe(true);
+  });
+
+  test('switching hosts hydrates a resident emulator without reconnecting it', () => {
+    expect(sessionSwitchAction('studio:term-1', 'laptop:term-1', true)).toBe('hydrate');
+  });
+
+  test('a background session close leaves the active connection status unchanged', () => {
+    expect(statusAfterClose('studio:term-1', 'laptop:term-1', 'connected')).toBe('connected');
+    expect(statusAfterClose('studio:term-1', 'studio:term-1', 'connected')).toBe('disconnected');
+  });
+
+  test('focus frames reflect mount, background, and foreground for the active session only', () => {
+    expect([focusFrame(true), focusFrame(false), focusFrame(true)]).toEqual([
+      { type: 'focus', focused: true },
+      { type: 'focus', focused: false },
+      { type: 'focus', focused: true },
+    ]);
+  });
 });
 
 describe('applyWsMessage', () => {

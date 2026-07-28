@@ -1,4 +1,4 @@
-import { httpBase } from './address';
+import type { HostClient } from './tether/hostClient';
 
 export interface Presentation {
   id: string;
@@ -9,8 +9,8 @@ export interface Presentation {
   sessionId?: string;
 }
 
-export function previewUrl(serverIp: string, port: string, url: string): string {
-  return new URL(url, httpBase(serverIp, port)).toString();
+export function previewUrl(client: Pick<HostClient, 'baseUrl'>, url: string): string {
+  return new URL(url, client.baseUrl).toString();
 }
 
 // The most recently created open preview owned by a given terminal session —

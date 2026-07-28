@@ -3,36 +3,35 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { newlyWaiting, type SessionActivity } from '../activity';
-import { httpBase } from '../address';
 import { notify as sendNativeNotification } from '../desktopNotify';
 import { isDesktop } from '../platform';
 import { resumeAction } from '../resume';
 import type { DrawerSession } from '../SessionDrawer';
-import { authHeaders } from '../secureConfig';
 import { nextTermId, type SessionEntry } from '../sessionCache';
 import { sessionLabel } from '../sessionLabel';
 import type { TerminalViewHandle } from '../TerminalView.types';
 import { TerminalEngine } from '../terminalEngine';
 import { OutputBatcher } from '../terminalRendererProtocol';
-import { openTerminalSocket } from '../wsTransport';
+import type { HostClient } from './hostClient';
 import {
   applyWsMessage,
   backoffDelay,
   createSessionCache,
+  focusFrame,
   maybeNotify,
-  runIfCurrentGeneration,
+  parseSessionKey,
   scheduleReconnect,
-  terminalSocketUrl,
+  sessionKey,
+  sessionSwitchAction,
+  statusAfterClose,
 } from './terminalSessionLogic';
 import type { ConnectionStatus, TerminalConnectionState } from './types';
 
-const KEY_SESSION_ID = 'tether_session_id';
+const KEY_ACTIVE_HOST = 'tether_active_host';
+const activeSessionStorageKey = (hostId: string) => `tether_session_id_${hostId}`;
 
 type Options = {
-  serverIp: string;
-  port: string;
-  passwordRef: React.MutableRefObject<string>;
-  lastConnectedRef: React.MutableRefObject<{ ip: string; port: string }>;
+  client: HostClient;
   ready: boolean;
   isConfiguring: boolean;
   theme: { terminal: { fg: string; bg: string } };
@@ -45,10 +44,7 @@ type Options = {
 };
 
 export function useTerminalSessions({
-  serverIp,
-  port,
-  passwordRef,
-  lastConnectedRef,
+  client,
   ready,
   isConfiguring,
   theme,
@@ -59,8 +55,12 @@ export function useTerminalSessions({
   onClearPresentation,
   onCloseDrawer,
 }: Options) {
+  const initialKey = sessionKey(client.profile.id, 'term-1');
   const [activeId, setActiveId] = useState('term-1');
   const activeIdRef = useRef('term-1');
+  const [activeHostId, setActiveHostId] = useState(client.profile.id);
+  const activeHostIdRef = useRef(client.profile.id);
+  const activeKeyRef = useRef(initialKey);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const connectionStatusRef = useRef(connectionStatus);
   connectionStatusRef.current = connectionStatus;
@@ -75,28 +75,35 @@ export function useTerminalSessions({
   const dimsRef = useRef({ numCols: 80, numRows: 24 });
   const rendererResizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const windowFocusedRef = useRef(true);
-  const endpointRef = useRef({ serverIp, port });
-  endpointRef.current = { serverIp, port };
+  const appStateRef = useRef(AppState.currentState);
+  const clientRef = useRef(client);
+  clientRef.current = client;
   const readyRef = useRef(ready);
   readyRef.current = ready;
-  const disconnectRef = useRef<(id: string) => void>(() => {});
-  const cache = useRef(createSessionCache((id) => disconnectRef.current(id))).current;
+  const disconnectRef = useRef<(key: string) => void>(() => {});
+  const cache = useRef(createSessionCache((key) => disconnectRef.current(key))).current;
   const connections = useRef(new Map<string, TerminalConnectionState>()).current;
   const lastActivityRef = useRef(new Map<string, SessionActivity | null | undefined>());
   const outputBatcherRef = useRef<OutputBatcher | null>(null);
   if (!outputBatcherRef.current) {
     outputBatcherRef.current = new OutputBatcher(
-      () => activeIdRef.current,
+      () => activeKeyRef.current,
       (data) => terminalViewRef.current?.write(data),
       (flush) => requestAnimationFrame(flush),
     );
   }
   const outputBatcher = outputBatcherRef.current;
 
-  const connState = (id: string): TerminalConnectionState => {
-    let state = connections.get(id);
+  const clientForKey = (key: string): HostClient => {
+    const { hostId } = parseSessionKey(key);
+    if (hostId === clientRef.current.profile.id) return clientRef.current;
+    return connections.get(key)?.client ?? clientRef.current;
+  };
+  const connState = (key: string): TerminalConnectionState => {
+    let state = connections.get(key);
     if (!state) {
       state = {
+        client: clientForKey(key),
         sock: null,
         gen: 0,
         open: false,
@@ -105,12 +112,12 @@ export function useTerminalSessions({
         ping: null,
         lastSeen: 0,
       };
-      connections.set(id, state);
+      connections.set(key, state);
     }
     return state;
   };
-  const entryFor = (id: string): SessionEntry =>
-    cache.touch(id, () => {
+  const entryForKey = (key: string): SessionEntry =>
+    cache.touch(key, () => {
       const { numCols: cols, numRows: rows } = dimsRef.current;
       const term = new TerminalEngine(cols || 80, rows || 24);
       term.onReply = null;
@@ -124,6 +131,8 @@ export function useTerminalSessions({
         lastNotifyCount: 0,
       };
     });
+  const entryFor = (id: string): SessionEntry =>
+    entryForKey(sessionKey(activeHostIdRef.current, id));
   const notifyWaitingSessions = (rows: DrawerSession[]) => {
     const alerts = newlyWaiting(lastActivityRef.current, rows, activeIdRef.current);
     for (const row of rows) lastActivityRef.current.set(row.id, row.activity);
@@ -131,12 +140,16 @@ export function useTerminalSessions({
     for (const row of alerts)
       void sendNativeNotification(sessionLabel(row), 'Session is waiting for your input');
   };
+  const sendFocus = (focused: boolean) => {
+    const state = connections.get(activeKeyRef.current);
+    if (state?.open && state.sock) state.sock.send(JSON.stringify(focusFrame(focused)));
+  };
   const wsSend = (object: unknown) => {
-    const state = connections.get(activeIdRef.current);
+    const state = connections.get(activeKeyRef.current);
     if (state?.open && state.sock) state.sock.send(JSON.stringify(object));
   };
-  const hydrateRenderer = (id = activeIdRef.current) => {
-    const entry = entryFor(id);
+  const hydrateRenderer = (key = activeKeyRef.current) => {
+    const entry = entryForKey(key);
     outputBatcher.clear();
     terminalViewRef.current?.hydrate(
       entry.term.serialize(),
@@ -150,7 +163,7 @@ export function useTerminalSessions({
   const onRendererResize = (cols: number, rows: number) => {
     if (dimsRef.current.numCols === cols && dimsRef.current.numRows === rows) return;
     dimsRef.current = { numCols: cols, numRows: rows };
-    cache.get(activeIdRef.current)?.term.resize(cols, rows);
+    cache.get(activeKeyRef.current)?.term.resize(cols, rows);
     if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
     rendererResizeTimer.current = setTimeout(
       () => {
@@ -164,20 +177,22 @@ export function useTerminalSessions({
     terminalSelectionRef.current = text;
   };
   const resetTerminal = () => {
-    const entry = cache.get(activeIdRef.current);
+    const entry = cache.get(activeKeyRef.current);
     if (!entry) return;
     entry.term.reset();
     entry.sinceId = 0;
     entry.lastAppliedId = 0;
     hydrateRenderer();
   };
-  const handleWsMessage = (id: string, data: string) => {
+  const handleWsMessage = (key: string, data: string) => {
+    const { sessionId } = parseSessionKey(key);
     try {
       applyWsMessage({
-        id,
+        id: key,
+        drawerSessionId: sessionId,
         message: JSON.parse(data),
-        entry: cache.get(id),
-        activeId: activeIdRef.current,
+        entry: cache.get(key),
+        activeId: activeKeyRef.current,
         onGitSummaryChanged: () => setGitSummaryVersion((version) => version + 1),
         onTerminalMetadataChanged: () => setTerminalMetadataVersion((version) => version + 1),
         onDrawerSessions: (update) =>
@@ -187,12 +202,12 @@ export function useTerminalSessions({
             return next;
           }),
         onWaitingSessions: notifyWaitingSessions,
-        onOutput: (sessionId, chunk) => outputBatcher.push(sessionId, chunk),
-        onNotify: (sessionId, session) =>
+        onOutput: (sessionKey, chunk) => outputBatcher.push(sessionKey, chunk),
+        onNotify: (sessionKey, session) =>
           maybeNotify({
-            id: sessionId,
+            id: sessionKey,
             entry: session,
-            activeId: activeIdRef.current,
+            activeId: activeKeyRef.current,
             windowFocused: windowFocusedRef.current,
             notificationsEnabled: notificationsEnabledRef.current,
             isDesktop,
@@ -207,192 +222,227 @@ export function useTerminalSessions({
       console.error('ws message error:', error);
     }
   };
-  const disconnect = (id: string) => {
-    const state = connections.get(id);
+  const disconnect = (key: string) => {
+    const state = connections.get(key);
     if (!state) return;
     if (state.reconnectTimeout) clearTimeout(state.reconnectTimeout);
     if (state.ping) clearInterval(state.ping);
     state.gen++;
     state.open = false;
     state.sock?.close();
-    connections.delete(id);
-    if (id === activeIdRef.current) setConnectionStatus('disconnected');
+    connections.delete(key);
+    if (key === activeKeyRef.current) setConnectionStatus('disconnected');
   };
   const disconnectAll = () => {
-    for (const id of Array.from(connections.keys())) disconnect(id);
+    for (const key of Array.from(connections.keys())) disconnect(key);
   };
-  const connect = (id: string) => {
-    disconnect(id);
-    const endpoint = endpointRef.current;
-    lastConnectedRef.current = { ip: endpoint.serverIp, port: endpoint.port };
-    const entry = entryFor(id),
-      state = connState(id);
-    if (id === activeIdRef.current) setConnectionStatus('connecting');
+  const connect = (key: string) => {
+    disconnect(key);
+    const { sessionId } = parseSessionKey(key);
+    const entry = entryForKey(key);
+    const state = connState(key);
+    state.client = clientForKey(key);
+    if (key === activeKeyRef.current) setConnectionStatus('connecting');
     const generation = ++state.gen;
-    state.sock = openTerminalSocket(
-      terminalSocketUrl(endpoint, {
-        sessionId: id,
+    state.sock = state.client.openSocket(
+      '/api/ws',
+      {
+        sessionId,
         sinceId: entry.sinceId,
         cols: dimsRef.current.numCols,
         rows: dimsRef.current.numRows,
-      }),
-      passwordRef.current,
+      },
       {
         onOpen: () => {
-          runIfCurrentGeneration(state, generation, () => {
-            state.open = true;
-            state.retry = 0;
-            if (id === activeIdRef.current) {
-              setHasConnected(true);
-              setConnectionStatus('connected');
-            }
-            state.lastSeen = Date.now();
-            if (state.ping) clearInterval(state.ping);
-            state.ping = setInterval(() => {
-              if (Date.now() - state.lastSeen > 30_000)
-                try {
-                  state.sock?.close();
-                } catch {}
-            }, 15_000);
-          });
+          if (state.gen !== generation) return;
+          state.open = true;
+          state.retry = 0;
+          if (key === activeKeyRef.current) {
+            setHasConnected(true);
+            setConnectionStatus('connected');
+            state.sock?.send(JSON.stringify(focusFrame(appStateRef.current === 'active')));
+          } else state.sock?.send(JSON.stringify(focusFrame(false)));
+          state.lastSeen = Date.now();
+          if (state.ping) clearInterval(state.ping);
+          state.ping = setInterval(() => {
+            if (Date.now() - state.lastSeen > 30_000)
+              try {
+                state.sock?.close();
+              } catch {}
+          }, 15_000);
         },
         onMessage: (data) => {
-          runIfCurrentGeneration(state, generation, () => {
-            state.lastSeen = Date.now();
-            handleWsMessage(id, data);
-          });
+          if (state.gen !== generation) return;
+          state.lastSeen = Date.now();
+          handleWsMessage(key, data);
         },
         onClose: () => {
-          runIfCurrentGeneration(state, generation, () => {
-            state.open = false;
-            if (state.ping) {
-              clearInterval(state.ping);
-              state.ping = null;
-            }
-            if (connectionStatusRef.current === 'auth-failed') {
-              state.retry = 0;
-              return;
-            }
-            if (id === activeIdRef.current) setConnectionStatus('disconnected');
-            if (cache.has(id))
-              state.reconnectTimeout = scheduleReconnect({
-                id,
-                readyRef,
-                delay: backoffDelay(state.retry++),
-                schedule: setTimeout,
-                reconnect: connect,
-              });
-          });
+          if (state.gen !== generation) return;
+          state.open = false;
+          if (state.ping) {
+            clearInterval(state.ping);
+            state.ping = null;
+          }
+          if (connectionStatusRef.current === 'auth-failed') {
+            state.retry = 0;
+            return;
+          }
+          setConnectionStatus((current) => statusAfterClose(activeKeyRef.current, key, current));
+          if (cache.has(key))
+            state.reconnectTimeout = scheduleReconnect({
+              id: key,
+              readyRef,
+              delay: backoffDelay(state.retry++),
+              schedule: setTimeout,
+              reconnect: connect,
+            });
         },
       },
     );
   };
   disconnectRef.current = disconnect;
   const refreshSessions = async () => {
+    const refreshClient = clientRef.current;
     try {
-      const response = await fetch(`${httpBase(serverIp, port)}/api/sessions`, {
-        headers: authHeaders(passwordRef.current),
-      });
+      const response = await refreshClient.get('/api/sessions');
       if (response.status === 401) {
-        setConnectionStatus('auth-failed');
+        if (refreshClient.profile.id === activeHostIdRef.current)
+          setConnectionStatus('auth-failed');
         return;
       }
       const rows = (await response.json()) as DrawerSession[];
+      if (refreshClient.profile.id !== activeHostIdRef.current) return;
       setDrawerSessions(rows);
       notifyWaitingSessions(rows);
     } catch {}
   };
-  const switchTo = (id: string) => {
+  const switchTo = (hostId: string, id: string) => {
+    const targetKey = sessionKey(hostId, id);
+    const previousKey = activeKeyRef.current;
+    const action = sessionSwitchAction(previousKey, targetKey, cache.has(targetKey));
     onCloseDrawer();
     onClearView();
-    if (id === activeIdRef.current) return;
+    if (action === 'none') return;
+    sendFocus(false);
+    activeHostIdRef.current = hostId;
     activeIdRef.current = id;
+    activeKeyRef.current = targetKey;
+    setActiveHostId(hostId);
     setActiveId(id);
-    void AsyncStorage.setItem(KEY_SESSION_ID, id);
-    entryFor(id);
-    hydrateRenderer(id);
-    if (connections.get(id)?.open) setConnectionStatus('connected');
-    else connect(id);
+    void AsyncStorage.multiSet([
+      [KEY_ACTIVE_HOST, hostId],
+      [activeSessionStorageKey(hostId), id],
+    ]);
+    entryForKey(targetKey);
+    hydrateRenderer(targetKey);
+    if (action === 'hydrate') {
+      setConnectionStatus(connections.get(targetKey)?.open ? 'connected' : 'disconnected');
+      sendFocus(true);
+    } else connect(targetKey);
   };
-  const newTerminal = () =>
-    switchTo(nextTermId(drawerSessions.length ? drawerSessions.map((row) => row.id) : cache.ids()));
+  const newTerminal = () => {
+    const hostId = activeHostIdRef.current;
+    const existing = drawerSessions.length
+      ? drawerSessions.map((row) => row.id)
+      : cache
+          .ids()
+          .map(parseSessionKey)
+          .filter((key) => key.hostId === hostId)
+          .map((key) => key.sessionId);
+    switchTo(hostId, nextTermId(existing));
+  };
   const killActiveOr = async (id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const hostId = activeHostIdRef.current;
+    const key = sessionKey(hostId, id);
     try {
-      await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
+      await clientRef.current.post('/api/sessions/kill', {
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       });
     } catch {}
-    cache.delete(id);
-    disconnect(id);
+    cache.delete(key);
+    disconnect(key);
     const remaining = drawerSessions.filter((row) => row.id !== id).map((row) => row.id);
     await refreshSessions();
-    if (id === activeIdRef.current) {
+    if (key === activeKeyRef.current) {
       onClearPresentation();
-      switchTo(remaining[0] ?? 'term-1');
+      switchTo(hostId, remaining[0] ?? 'term-1');
     }
   };
   const resetForEndpointChange = () => {
     setHasConnected(false);
     disconnectAll();
     resetTerminal();
-    connect(activeIdRef.current);
+    connect(activeKeyRef.current);
   };
   const refreshSocketActivity = () => {
     const now = Date.now();
     for (const state of connections.values()) if (state.open) state.lastSeen = now;
   };
   const markAuthFailed = () => setConnectionStatus('auth-failed');
-  const restartActiveSession = () => connect(activeIdRef.current);
+  const restartActiveSession = () => connect(activeKeyRef.current);
   const getActiveSessionId = () => activeIdRef.current;
-  const getSessionEntry = (id: string) => cache.get(id);
+  const getSessionEntry = (id: string) => cache.get(sessionKey(activeHostIdRef.current, id));
   const getTerminalSelection = () => terminalSelectionRef.current;
   const setWindowFocused = (focused: boolean) => {
     windowFocusedRef.current = focused;
   };
   const isWindowFocused = () => windowFocusedRef.current;
+  const activeClient = clientForKey(activeKeyRef.current);
+
   useEffect(() => {
-    activeIdRef.current = activeId;
-  }, [activeId]);
-  useEffect(() => {
-    void AsyncStorage.getItem(KEY_SESSION_ID).then((savedId) => {
-      if (!savedId || savedId === activeIdRef.current) return;
+    const hostId = client.profile.id;
+    if (hostId === 'pending') return;
+    if (activeHostIdRef.current === 'pending') {
+      activeHostIdRef.current = hostId;
+      activeKeyRef.current = sessionKey(hostId, activeIdRef.current);
+      setActiveHostId(hostId);
+    }
+    void AsyncStorage.getItem(activeSessionStorageKey(hostId)).then((savedId) => {
+      if (!savedId) return;
+      activeHostIdRef.current = hostId;
       activeIdRef.current = savedId;
+      activeKeyRef.current = sessionKey(hostId, savedId);
+      setActiveHostId(hostId);
       setActiveId(savedId);
     });
-  }, []);
+  }, [client.profile.id]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: repaint is intentionally keyed to terminal view inputs.
   useEffect(() => {
     hydrateRenderer();
-  }, [activeId, theme, fontFamily, fontSize]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: polling restarts when its connection inputs change.
+  }, [activeId, activeHostId, theme, fontFamily, fontSize]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: polling reads the current HostClient at tick time.
   useEffect(() => {
     if (isConfiguring) return;
-    const tick = () => {
-      void refreshSessions();
-    };
+    const tick = () => void refreshSessions();
     tick();
     const interval = setInterval(tick, 4000);
     return () => clearInterval(interval);
-  }, [isConfiguring, serverIp, port]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: connect reads endpoint and readiness refs at call time.
+  }, [isConfiguring]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: connect reads the current client ref at call time.
   useEffect(() => {
     if (!ready) return;
-    connect(activeIdRef.current);
+    connect(activeKeyRef.current);
     return disconnectAll;
   }, [ready]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resume callbacks read current transport refs at event time.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resume callbacks read active transport state at event time.
   useEffect(() => {
     if (!ready) return;
+    sendFocus(true);
     const subscription = AppState.addEventListener('change', (state) => {
+      appStateRef.current = state;
+      if (state === 'background' || state === 'inactive') {
+        sendFocus(false);
+        return;
+      }
       if (state !== 'active') return;
-      for (const [id, connection] of Array.from(connections))
+      sendFocus(true);
+      for (const [key, connection] of Array.from(connections))
         switch (resumeAction(connection, Date.now())) {
           case 'reconnect':
             connection.retry = 0;
-            connect(id);
+            connect(key);
             break;
           case 'close':
             try {
@@ -415,6 +465,8 @@ export function useTerminalSessions({
 
   return {
     activeId,
+    activeHostId,
+    activeClient,
     connectionStatus,
     hasConnected,
     drawerSessions,

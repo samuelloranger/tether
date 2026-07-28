@@ -49,6 +49,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   }, []);
   const {
     insets,
+    client,
     serverIp,
     port,
     setIsConfiguring,
@@ -415,7 +416,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               )}
               <PresentationView
                 preview={activePresentation}
-                url={previewUrl(serverIp, port, activePresentation.url)}
+                url={previewUrl(client, activePresentation.url)}
               />
             </>
           ) : (

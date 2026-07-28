@@ -1,4 +1,3 @@
-import { httpBase, wsUrl } from '../address';
 import { openTerminalSocket, type TerminalSocket, type TransportHandlers } from '../wsTransport';
 import type { HostProfile } from './hostStore';
 
@@ -6,6 +5,7 @@ export interface HostClientResponse {
   ok: boolean;
   status: number;
   json(): Promise<unknown>;
+  blob(): Promise<Blob>;
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<HostClientResponse>;
@@ -39,7 +39,7 @@ export function createHostClient(
   password: string,
   dependencies: { fetch?: FetchLike; openSocket?: SocketFactory } = {},
 ): HostClient {
-  const baseUrl = httpBase(profile.host, profile.port);
+  const baseUrl = `http://${profile.host}:${profile.port}`;
   const request = (path: string, init: RequestInit = {}) =>
     (dependencies.fetch ?? (fetch as unknown as FetchLike))(`${baseUrl}${path}`, {
       ...init,
@@ -60,7 +60,9 @@ export function createHostClient(
       handlers = { onOpen: () => {}, onMessage: () => {}, onClose: () => {} },
     ) =>
       socket(
-        wsUrl(profile.host, profile.port, params).replace('/api/ws', path),
+        `ws://${profile.host}:${profile.port}${path}?${new URLSearchParams(
+          Object.entries(params).map(([key, value]) => [key, String(value)]),
+        )}`,
         password,
         handlers,
       ),

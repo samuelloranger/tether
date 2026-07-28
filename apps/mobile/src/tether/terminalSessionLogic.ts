@@ -1,12 +1,12 @@
 import type { SessionActivity } from '../activity';
-import { wsUrl } from '../address';
 import type { DiffFileStat } from '../diffModel';
 import type { DrawerSession } from '../SessionDrawer';
 import { SessionCache, type SessionEntry } from '../sessionCache';
-import type { TerminalConnectionState } from './types';
+import type { ConnectionStatus, TerminalConnectionState } from './types';
 
 type WsMessageContext = {
   id: string;
+  drawerSessionId?: string;
   message: unknown;
   entry: SessionEntry | undefined;
   activeId: string;
@@ -38,14 +38,39 @@ type ReconnectContext = {
   reconnect: (id: string) => void;
 };
 
-type Endpoint = { serverIp: string; port: string };
+export type SessionKeyParts = { hostId: string; sessionId: string };
 
-type SocketCursor = {
-  sessionId: string;
-  sinceId: number;
-  cols: number;
-  rows: number;
-};
+/** A session id is unique only within its host, so cache and transport state use this key. */
+export function sessionKey(hostId: string, sessionId: string): string {
+  return `${hostId}:${sessionId}`;
+}
+
+export function parseSessionKey(key: string): SessionKeyParts {
+  const separator = key.indexOf(':');
+  if (separator < 1 || separator === key.length - 1) throw new Error(`Invalid session key: ${key}`);
+  return { hostId: key.slice(0, separator), sessionId: key.slice(separator + 1) };
+}
+
+export function sessionSwitchAction(
+  activeKey: string,
+  targetKey: string,
+  targetIsResident: boolean,
+): 'none' | 'hydrate' | 'connect' {
+  if (targetKey === activeKey) return 'none';
+  return targetIsResident ? 'hydrate' : 'connect';
+}
+
+export function statusAfterClose(
+  activeKey: string,
+  closedKey: string,
+  current: ConnectionStatus,
+): ConnectionStatus {
+  return activeKey === closedKey ? 'disconnected' : current;
+}
+
+export function focusFrame(focused: boolean): { type: 'focus'; focused: boolean } {
+  return { type: 'focus', focused };
+}
 
 function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null;
@@ -83,13 +108,10 @@ export function createSessionCache(disconnect: (id: string) => void): SessionCac
   return new SessionCache(3, (id) => disconnect(id));
 }
 
-export function terminalSocketUrl(endpoint: Endpoint, cursor: SocketCursor): string {
-  return wsUrl(endpoint.serverIp, endpoint.port, cursor);
-}
-
 /** Applies one parsed wire message using explicit side effects, without React state closures. */
 export function applyWsMessage({
   id,
+  drawerSessionId = id,
   message,
   entry,
   activeId,
@@ -145,14 +167,16 @@ export function applyWsMessage({
   if (payload.type === 'title' && typeof payload.title === 'string') {
     const title = payload.title;
     onDrawerSessions((rows) =>
-      rows.map((row) => (row.id === id ? { ...row, auto_title: title } : row)),
+      rows.map((row) => (row.id === drawerSessionId ? { ...row, auto_title: title } : row)),
     );
     return;
   }
   if (payload.type === 'activity') {
     const activity = payload.activity as SessionActivity;
-    onDrawerSessions((rows) => rows.map((row) => (row.id === id ? { ...row, activity } : row)));
-    onWaitingSessions([{ id, status: 'running', last_output_at: null, activity }]);
+    onDrawerSessions((rows) =>
+      rows.map((row) => (row.id === drawerSessionId ? { ...row, activity } : row)),
+    );
+    onWaitingSessions([{ id: drawerSessionId, status: 'running', last_output_at: null, activity }]);
     return;
   }
   if (payload.type === 'reset') {

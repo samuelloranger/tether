@@ -12,6 +12,7 @@ import type { TerminalViewProps } from '../src/TerminalView.types';
 
 const sockets: { sent: string[]; handlers: Record<string, (arg?: unknown) => void> }[] = [];
 let rendererProps: TerminalViewProps | null = null;
+let mockAppStateListener: ((state: 'active' | 'background' | 'inactive') => void) | null = null;
 
 jest.mock('../src/wsTransport', () => ({
   openTerminalSocket: (
@@ -52,6 +53,7 @@ jest.mock('../src/secureConfig', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppThemeProvider } from '../src/AppThemeProvider';
 import { TerminalScreen } from '../src/TerminalScreen';
@@ -94,6 +96,14 @@ function sentInput() {
     .map((msg) => msg.text);
 }
 
+function sentFocus() {
+  return sockets
+    .flatMap((s) => s.sent)
+    .map((raw) => JSON.parse(raw))
+    .filter((msg) => msg.type === 'focus')
+    .map((msg) => msg.focused);
+}
+
 function sendRendererInput(text: string) {
   act(() => rendererProps?.onInput(text));
 }
@@ -101,6 +111,7 @@ function sendRendererInput(text: string) {
 beforeEach(() => {
   sockets.length = 0;
   rendererProps = null;
+  mockAppStateListener = null;
   jest.clearAllMocks();
 });
 
@@ -108,6 +119,17 @@ test('a character typed into the renderer reaches the PTY unchanged', async () =
   await mountTerminal();
   sendRendererInput('c');
   expect(sentInput()).toEqual(['c']);
+});
+
+test('the active terminal reports focus on mount, background, and foreground', async () => {
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    mockAppStateListener = listener as (state: 'active' | 'background' | 'inactive') => void;
+    return { remove: () => (mockAppStateListener = null) };
+  });
+  await mountTerminal();
+  act(() => mockAppStateListener?.('background'));
+  act(() => mockAppStateListener?.('active'));
+  expect(sentFocus()).toEqual([true, false, true]);
 });
 
 test('Ctrl armed turns the next typed character into a control code', async () => {

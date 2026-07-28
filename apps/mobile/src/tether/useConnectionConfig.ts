@@ -1,17 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { validateAddress } from '../address';
 import { notify } from '../dialog';
 import {
-  authHeaders,
   clearLegacyPassword,
   clearPassword,
   getLegacyPassword,
   getPassword,
   setPassword as persistPassword,
 } from '../secureConfig';
-import { connectionRequestUrl } from './connectionUrl';
+import { createHostClient } from './hostClient';
 import { createHostStore } from './hostStore';
+
+const KEY_ACTIVE_HOST = 'tether_active_host';
 
 export function useConnectionConfig() {
   const [serverIp, setServerIp] = useState('');
@@ -26,7 +27,7 @@ export function useConnectionConfig() {
   const [isConfiguring, setIsConfiguring] = useState(true);
   const [ready, setReady] = useState(false);
   const readyRef = useRef(false);
-  const hostIdRef = useRef<string | null>(null);
+  const [activeHostId, setActiveHostId] = useState<string | null>(null);
   const hostStoreRef = useRef(
     createHostStore({
       storage: AsyncStorage,
@@ -40,6 +41,22 @@ export function useConnectionConfig() {
     }),
   );
   const lastConnectedRef = useRef({ ip: serverIp, port });
+  const client = useMemo(
+    () =>
+      createHostClient(
+        {
+          id: activeHostId ?? 'pending',
+          name: serverIp,
+          color: '#89b4fa',
+          host: serverIp,
+          port,
+          identityName: '',
+          order: 0,
+        },
+        password,
+      ),
+    [activeHostId, password, port, serverIp],
+  );
 
   useEffect(() => {
     passwordRef.current = password;
@@ -49,9 +66,11 @@ export function useConnectionConfig() {
     void hostStoreRef.current
       .list()
       .then(async (profiles) => {
-        const current = profiles[0];
+        const savedHostId = await AsyncStorage.getItem(KEY_ACTIVE_HOST);
+        const current = profiles.find((profile) => profile.id === savedHostId) ?? profiles[0];
         if (!current) return;
-        hostIdRef.current = current.id;
+        setActiveHostId(current.id);
+        void AsyncStorage.setItem(KEY_ACTIVE_HOST, current.id);
         const savedPassword = await getPassword(current.id);
         setServerIp(current.host);
         setPort(current.port);
@@ -69,22 +88,18 @@ export function useConnectionConfig() {
       .catch(() => {});
   }, []);
 
-  const request = (path: string, init: RequestInit = {}) =>
-    fetch(connectionRequestUrl(serverIp, port, path), {
-      ...init,
-      headers: { ...authHeaders(passwordRef.current), ...init.headers },
-    });
+  const request = (path: string, init: RequestInit = {}) => client.get(path, init);
 
   const testConnection = async () => {
     const address = validateAddress(serverIp, port);
     if (!address.ok) return setTestStatus({ kind: 'error', msg: address.reason });
     setTestStatus({ kind: 'testing' });
     try {
-      const status = await fetch(connectionRequestUrl(serverIp, port, '/api/status'), {
+      const status = await client.get('/api/status', {
         signal: AbortSignal.timeout(5000),
       });
       if (!status.ok) throw new Error('status');
-      const needsSetup = Boolean((await status.json()).needsSetup);
+      const needsSetup = Boolean(((await status.json()) as { needsSetup?: unknown }).needsSetup);
       setSetupMode(needsSetup ? 'create' : 'enter');
       if (!password)
         throw new Error(
@@ -92,7 +107,7 @@ export function useConnectionConfig() {
         );
       if (needsSetup) {
         if (password !== confirmPassword) throw new Error('Passwords do not match.');
-        const setup = await fetch(connectionRequestUrl(serverIp, port, '/api/setup'), {
+        const setup = await client.post('/api/setup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password }),
@@ -117,7 +132,7 @@ export function useConnectionConfig() {
   const saveConfig = async () => {
     try {
       const wasReady = readyRef.current;
-      let hostId = hostIdRef.current;
+      let hostId = activeHostId;
       if (hostId) {
         await hostStoreRef.current.update(hostId, { host: serverIp, port });
       } else {
@@ -129,7 +144,8 @@ export function useConnectionConfig() {
           identityName: '',
         });
         hostId = profile.id;
-        hostIdRef.current = hostId;
+        setActiveHostId(hostId);
+        await AsyncStorage.setItem(KEY_ACTIVE_HOST, hostId);
       }
       await persistPassword(hostId, password);
       const addressChanged =
@@ -164,6 +180,8 @@ export function useConnectionConfig() {
     isConfiguring,
     setIsConfiguring,
     ready,
+    activeHostId,
+    client,
     lastConnectedRef,
     testConnection,
     saveConfig,

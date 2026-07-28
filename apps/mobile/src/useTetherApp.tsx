@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, type TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
-import { httpBase } from './address';
 import { readClipboard, writeClipboard } from './clipboard';
 import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
@@ -15,10 +14,10 @@ import { isImagePath } from './diffModel';
 import type { FileView } from './fileView';
 import type { LinkTarget } from './links';
 import { isDesktop } from './platform';
-import { authHeaders } from './secureConfig';
 import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
 import { type RenderRow, setTheme } from './terminal';
+import type { HostClient } from './tether/hostClient';
 import type { GitLogEntry } from './tether/types';
 import { useAppPreferences } from './tether/useAppPreferences';
 import { useConnectionConfig } from './tether/useConnectionConfig';
@@ -37,11 +36,8 @@ export type { GitLogEntry } from './tether/types';
 
 // Fetches raw image bytes with the auth header <Image> can't attach itself,
 // and hands back a data URI so the same code path works native and web.
-async function fetchDiffImageUri(
-  url: string,
-  headers: Record<string, string>,
-): Promise<string | null> {
-  const res = await fetch(url, { headers });
+async function fetchDiffImageUri(client: HostClient, path: string): Promise<string | null> {
+  const res = await client.get(path);
   if (!res.ok) return null;
   const blob = await res.blob();
   return new Promise((resolve, reject) => {
@@ -80,7 +76,7 @@ export function useTetherApp() {
     isConfiguring,
     setIsConfiguring,
     ready,
-    lastConnectedRef,
+    client: connectionClient,
     testConnection,
     saveConfig: saveConnectionConfig,
   } = connection;
@@ -166,6 +162,8 @@ export function useTetherApp() {
 
   const {
     activeId,
+    activeHostId,
+    activeClient,
     connectionStatus,
     hasConnected,
     drawerSessions,
@@ -190,10 +188,7 @@ export function useTetherApp() {
     setWindowFocused,
     isWindowFocused,
   } = useTerminalSessions({
-    serverIp,
-    port,
-    passwordRef,
-    lastConnectedRef,
+    client: connectionClient,
     ready,
     isConfiguring,
     theme,
@@ -211,9 +206,7 @@ export function useTetherApp() {
     refreshPresentations,
     closePresentation,
   } = usePresentations({
-    serverIp,
-    port,
-    passwordRef,
+    client: activeClient,
     isConfiguring,
     getActiveSessionId,
     markAuthFailed,
@@ -254,7 +247,7 @@ export function useTetherApp() {
 
   const switchTo = (id: string) => {
     closeDiff();
-    switchTerminal(id);
+    switchTerminal(activeHostId, id);
   };
   const newTerminal = () => {
     setActivePresentationId(null);
@@ -397,18 +390,15 @@ export function useTetherApp() {
     file: Blob | { uri: string; name: string; type?: string },
     filename: string,
   ) => {
-    const url = `${httpBase(serverIp, port)}/api/sessions/${getActiveSessionId()}/upload`;
+    const path = `/api/sessions/${getActiveSessionId()}/upload`;
+    const url = activeClient.url(path);
     try {
       let data: { ok: boolean; path?: string; error?: string };
       if (file instanceof Blob) {
         const form = new FormData();
         form.append('file', file, filename);
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: authHeaders(passwordRef.current),
-          body: form,
-        });
-        data = await res.json();
+        const res = await activeClient.post(path, { body: form });
+        data = (await res.json()) as { ok: boolean; path?: string; error?: string };
       } else {
         const { File, Paths, UploadType } = await import('expo-file-system');
         const source = new File(file.uri);
@@ -429,7 +419,7 @@ export function useTetherApp() {
             // above (needed to dedupe concurrent uploads) — override it back
             // to the real display name the server should save under.
             parameters: { filename },
-            headers: authHeaders(passwordRef.current),
+            headers: activeClient.authHeader,
           });
           data = JSON.parse(result.body);
         } finally {
@@ -506,12 +496,7 @@ export function useTetherApp() {
       try {
         const sessionId = getActiveSessionId();
         const query = new URLSearchParams({ path: target.path });
-        const res = await fetch(
-          `${httpBase(serverIp, port)}/api/sessions/${sessionId}/file?${query}`,
-          {
-            headers: authHeaders(passwordRef.current),
-          },
-        );
+        const res = await activeClient.get(`/api/sessions/${sessionId}/file?${query}`);
         const body = (await res.json().catch(() => ({}))) as {
           path?: string;
           content?: string;
@@ -534,7 +519,7 @@ export function useTetherApp() {
         setFileLoading(false);
       }
     },
-    [serverIp, port],
+    [activeClient],
   );
   const closeDiff = useCallback(() => {
     setDiffOpen(false);
@@ -570,17 +555,15 @@ export function useTetherApp() {
         const sessionId = getActiveSessionId();
         const file = entryFor(sessionId).diffSummary.files.find((f) => f.path === filePath);
         if (file?.binary && isImagePath(filePath)) {
-          const base = httpBase(serverIp, port);
           const query = new URLSearchParams({ path: filePath });
-          const headers = authHeaders(passwordRef.current);
           const [oldUri, newUri] = await Promise.all([
             fetchDiffImageUri(
-              `${base}/api/sessions/${sessionId}/diff/file?${query}&side=old`,
-              headers,
+              activeClient,
+              `/api/sessions/${sessionId}/diff/file?${query}&side=old`,
             ),
             fetchDiffImageUri(
-              `${base}/api/sessions/${sessionId}/diff/file?${query}&side=new`,
-              headers,
+              activeClient,
+              `/api/sessions/${sessionId}/diff/file?${query}&side=new`,
             ),
           ]);
           setDiffImage({ old: oldUri, new: newUri });
@@ -588,12 +571,7 @@ export function useTetherApp() {
         }
         const query = new URLSearchParams({ path: filePath });
         if (mode) query.set('mode', mode);
-        const res = await fetch(
-          `${httpBase(serverIp, port)}/api/sessions/${sessionId}/diff?${query}`,
-          {
-            headers: authHeaders(passwordRef.current),
-          },
-        );
+        const res = await activeClient.get(`/api/sessions/${sessionId}/diff?${query}`);
         const body = (await res.json().catch(() => ({}))) as {
           diff?: string;
           truncated?: boolean;
@@ -610,7 +588,7 @@ export function useTetherApp() {
         setDiffLoading(false);
       }
     },
-    [serverIp, port],
+    [activeClient],
   );
   const openDiff = useCallback(() => {
     setDiffOpen(true);
@@ -626,16 +604,10 @@ export function useTetherApp() {
   const gitFetch = useCallback(
     async (route: string, init?: RequestInit) => {
       const sessionId = getActiveSessionId();
-      const res = await fetch(
-        `${httpBase(serverIp, port)}/api/sessions/${sessionId}/git/${route}`,
-        {
-          ...init,
-          headers: {
-            ...authHeaders(passwordRef.current),
-            'Content-Type': 'application/json',
-          },
-        },
-      );
+      const res = await activeClient.get(`/api/sessions/${sessionId}/git/${route}`, {
+        ...init,
+        headers: { 'Content-Type': 'application/json', ...init?.headers },
+      });
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
         throw new Error(
@@ -644,7 +616,7 @@ export function useTetherApp() {
       }
       return body;
     },
-    [serverIp, port],
+    [activeClient],
   );
 
   const gitPost = useCallback(
@@ -822,9 +794,8 @@ export function useTetherApp() {
     const name = renameText.trim();
     setRenameModalOpen(false);
     try {
-      await fetch(`${httpBase(serverIp, port)}/api/sessions/rename`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...authHeaders(passwordRef.current) },
+      await activeClient.post('/api/sessions/rename', {
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id, name }),
       });
       await refreshSessions();
@@ -842,9 +813,8 @@ export function useTetherApp() {
     if (!ok) return;
     resetTerminal();
     try {
-      await fetch(`${httpBase(serverIp, port)}/api/sessions/kill`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(passwordRef.current) },
+      await activeClient.post('/api/sessions/kill', {
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: activeId }),
       });
       restartActiveSession();
@@ -866,6 +836,7 @@ export function useTetherApp() {
   return {
     fontsLoaded,
     insets,
+    client: activeClient,
     serverIp,
     setServerIp,
     port,

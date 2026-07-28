@@ -15,7 +15,12 @@ const profile: HostProfile = {
 test('builds HTTP and WebSocket URLs without putting the password in either URL', () => {
   const socketUrls: string[] = [];
   const client = createHostClient(profile, 'not-in-a-url', {
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+      blob: async () => new Blob(),
+    }),
     openSocket: (url) => {
       socketUrls.push(url);
       return {} as never;
@@ -36,6 +41,7 @@ test('adds the host authorization header to get, post, and identity requests', a
     ok: true,
     status: 200,
     json: async () => ({ identity: { name: 'Studio', color: '#cba6f7' } }),
+    blob: async () => new Blob(),
   };
   const client = createHostClient(profile, 'secret', {
     fetch: async (url, init) => {
