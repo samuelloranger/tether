@@ -69,9 +69,9 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - name: Verify native renderer bundle
+      - name: Build native renderer bundle
         working-directory: apps/mobile
-        run: bun run build:terminal-renderer && git diff --exit-code -- src/terminalRenderer.generated.ts
+        run: bun run build:terminal-renderer
 
   desktop:
     needs: [draft, renderer]

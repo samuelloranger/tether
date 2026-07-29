@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# generated: built by `bun run build:terminal-renderer` (postinstall)
+src/terminalRenderer.generated.ts
+src/terminalFonts.generated.ts

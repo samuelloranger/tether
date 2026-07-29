@@ -18,7 +18,7 @@ Clients are a single Expo React Native codebase: iOS/Android app, plus a Tauri d
 - `apps/mobile/` — Expo RN client (`tether-mobile`), also the desktop app.
   - `App.tsx` + `src/useTetherApp.tsx` (composition facade), `src/TerminalScreen.tsx`, `src/SessionDrawer.tsx`, `src/UtilityBar.tsx`, `src/Dpad.tsx`, `src/ConfigScreen.tsx`, `src/ServerSettings.tsx`.
   - `src/tether/` — the hook layer behind the facade: `useConnectionConfig`, `useTerminalSessions` (+ `terminalSessionLogic.ts`, pure), `useTerminalInput`, `usePresentations`, `useTerminalViewport`, `useTerminalUiState`, `useAppPreferences`, `useDesktopEffects`, `useDesktopUpdater`. Multi-host lives here too: `hostStore` (profiles + migration), `hostClient` (per-host URLs/auth/WS), `hostHealth` (reachability state machine), `hostPolling`.
-  - Terminal: `src/terminalEngine.ts` (`@xterm/headless` engine), `src/TerminalView*.tsx` + `src/terminalRendererHtml.ts` + `src/terminalRenderer.generated.ts` (xterm.js inside a WebView), `src/terminalRendererProtocol.ts` (RN ↔ WebView messages), `src/ptyInput.ts` / `src/input.ts` / `src/mouseInput.ts`.
+  - Terminal: `src/terminalEngine.ts` (`@xterm/headless` engine), `src/TerminalView*.tsx` + `src/terminalRendererHtml.ts` + `terminal-renderer/` (built to gitignored `src/terminalRenderer.generated.ts`, xterm.js inside a WebView), `src/terminalRendererProtocol.ts` (RN ↔ WebView messages), `src/ptyInput.ts` / `src/input.ts` / `src/mouseInput.ts`.
   - Features: `src/DiffView.tsx` + `src/diffModel.ts`, `src/FileTree.tsx` / `src/FileViewer.tsx`, `src/PresentationView*.tsx`, `src/CodeHighlight.tsx`, `src/sessionCache.ts` (LRU tab cache).
   - Desktop-only: `src/desktop*.ts`, `src/TitleBar.tsx`, `src/windowControls.ts`, `src-tauri/` (Rust shell, updater, notifications).
 - `docs/` — VitePress site (`architecture.md`, `data-flow.md`, `security.md`, `terminal/`, `superpowers/specs/` design docs).
@@ -37,7 +37,7 @@ Run from repo root:
 Per workspace:
 - Server tests: `bun --cwd apps/server test` (bun:test — extensive, most `.ts` files have a sibling `.test.ts`)
 - Mobile logic tests: `bun --cwd apps/mobile test`; component tests: `bun --cwd apps/mobile run test:ui` (jest + `@testing-library/react-native`)
-- Terminal WebView bundle: `bun --cwd apps/mobile run build:terminal-renderer` — **rerun after editing `terminalRendererHtml.ts`**, it regenerates the committed `terminalRenderer.generated.ts`
+- Terminal WebView bundle: auto-built by `postinstall` from `terminal-renderer/` + `terminalRendererHtml.ts` into `src/terminalRenderer.generated.ts` / `src/terminalFonts.generated.ts` (gitignored, not committed) — run `bun --cwd apps/mobile run build:terminal-renderer` manually if editing those files without reinstalling
 - iOS device build: `cd apps/mobile && npx expo run:ios --device` (Expo Go doesn't support SDK 57)
 - Desktop: `bun --cwd apps/mobile run tauri:dev` / `tauri:build`
 
