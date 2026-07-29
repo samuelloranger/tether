@@ -681,7 +681,7 @@ Expected: `v0.0.0-smoke`, `200`, `401`.
 - [ ] **Step 3: Validate the workflow YAML**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/release.yml')); print('release.yml valid')"
 ```
 Expected: `release.yml valid`.

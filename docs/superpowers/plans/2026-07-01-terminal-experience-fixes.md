@@ -166,7 +166,7 @@ Also run: `bun --cwd apps/server typecheck` — expected clean.
 - [ ] **Step 5: Format + commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun format
+cd $REPO_ROOT && bun format
 git add apps/server/src/server/db.ts apps/server/src/server/db.test.ts
 git commit -m "feat(server): track pruned-log watermark per session + boot-time orphan reset"
 ```
@@ -210,7 +210,7 @@ Run: `bun --cwd apps/server typecheck` — expected clean.
 Runtime check (server must be Bun ≥ 1.3.14):
 
 ```bash
-cd /home/samuelloranger/sites/tether/apps/server
+cd $REPO_ROOT/apps/server
 TETHER_DB_PATH=/tmp/tether-gap.db bun run src/server/index.ts &
 sleep 1
 # create a session and force a prune by writing > 2000 chunks
@@ -228,7 +228,7 @@ Expected: first printed frame is `{"type":"reset"}` *if* pruning has occurred (n
 - [ ] **Step 3: Format + commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun format
+cd $REPO_ROOT && bun format
 git add apps/server/src/server/app.ts
 git commit -m "fix(server): send reset frame when client sinceId predates pruned logs"
 ```
@@ -355,7 +355,7 @@ Also: `bun --cwd apps/server typecheck` — clean.
 - [ ] **Step 5: Format + commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun format
+cd $REPO_ROOT && bun format
 git add apps/server/src/server/pty.ts apps/server/src/server/app.ts apps/server/src/server/pty.dims.test.ts
 git commit -m "fix(server): clamp PTY dims from network; resize running session on WS attach"
 ```
@@ -421,7 +421,7 @@ Run (cwd `apps/server`): `TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/serv
 Runtime check for orphan reset:
 
 ```bash
-cd /home/samuelloranger/sites/tether/apps/server
+cd $REPO_ROOT/apps/server
 TETHER_DB_PATH=/tmp/tether-orphan.db bun run src/server/index.ts &
 sleep 1
 curl -s -XPOST localhost:8085/api/sessions/start -H 'content-type: application/json' -d '{"id":"orph"}' >/dev/null
@@ -437,7 +437,7 @@ Expected: `"status":"stopped"` for the orphaned session.
 - [ ] **Step 4: Format + commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun format
+cd $REPO_ROOT && bun format
 git add apps/server/src/server/pty.ts apps/server/src/server/index.ts
 git commit -m "fix(server): flush decoder tail on PTY exit; mark orphaned sessions stopped at boot"
 ```
@@ -481,7 +481,7 @@ Smoke: start the server (`TETHER_DB_PATH=/tmp/tether-bp.db bun run src/server/in
 - [ ] **Step 3: Format + commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun format
+cd $REPO_ROOT && bun format
 git add apps/server/src/server/app.ts
 git commit -m "fix(server): close WS clients whose send buffer exceeds 4MB"
 ```
@@ -595,7 +595,7 @@ Also: `cd apps/mobile && npx tsc --noEmit` — clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/src/terminal.ts apps/mobile/src/terminal.test.ts
 git commit -m "fix(mobile): wide CJK/emoji glyphs occupy two terminal cells"
 ```
@@ -726,7 +726,7 @@ Also: `cd apps/mobile && npx tsc --noEmit` — clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/src/terminal.ts apps/mobile/src/terminal.test.ts
 git commit -m "fix(mobile): DEC special-graphics charset so TUI box borders render"
 ```
@@ -822,7 +822,7 @@ Also: `cd apps/mobile && npx tsc --noEmit` — clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/src/terminal.ts apps/mobile/src/terminal.test.ts
 git commit -m "fix(mobile): terminal resize preserves bottom rows via scrollback"
 ```
@@ -902,7 +902,7 @@ Manual (device/simulator, server running): connect, toggle airplane mode on/off 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/App.tsx
 git commit -m "fix(mobile): handle server reset frame; guard stale-socket reconnect race"
 ```
@@ -949,7 +949,7 @@ Manual: run `yes | head -c 100000` on the shell, drag up mid-stream — the view
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/App.tsx
 git commit -m "fix(mobile): only pin terminal scroll at true bottom; any drag unpins"
 ```
@@ -1062,7 +1062,7 @@ Manual: hold ← in a shell line — cursor walks; tap Del mid-word — forward-
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/App.tsx
 git commit -m "feat(mobile): key repeat on held arrows; Del key in utility bar"
 ```
@@ -1178,7 +1178,7 @@ Manual: idle shell prompt — caret blinks ~1Hz. Run a TUI that hides the cursor
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/App.tsx
 git commit -m "feat(mobile): blinking block cursor (caret-row-only re-render)"
 ```
@@ -1263,7 +1263,7 @@ Manual: open Search from the overflow menu, type — filtering stays fluid; past
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/App.tsx
 git commit -m "fix(mobile): memoize scrollback search; paste failure alert; drop dead history code"
 ```
@@ -1273,7 +1273,7 @@ git commit -m "fix(mobile): memoize scrollback search; paste failure alert; drop
 ## Final verification (after all tasks)
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 bun --cwd apps/server typecheck
 cd apps/server && TETHER_DB_PATH=/tmp/tether-final-$$.db bun run src/server/db.test.ts && TETHER_DB_PATH=/tmp/tether-final-$$.db bun run src/server/pty.dims.test.ts
 cd ../mobile && bun run src/terminal.test.ts && npx tsc --noEmit

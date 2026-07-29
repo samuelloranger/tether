@@ -137,7 +137,7 @@ app.post('/api/sessions/rename', async (c) => {
 - [ ] **Step 8: Typecheck + format**
 
 Run: `cd apps/server && bun run typecheck` (expected: no errors — note if the pre-existing `bun-types` env issue appears, that is unrelated to this task; report it but it does not block).
-Run: `cd /home/samuelloranger/sites/tether && bun format`
+Run: `cd $REPO_ROOT && bun format`
 Expected: format exits 0.
 
 - [ ] **Step 9: Commit**
@@ -428,7 +428,7 @@ In `App.tsx`, find the `selectionViewContainer` style entry in the `StyleSheet.c
 
 - [ ] **Step 9: Format**
 
-Run: `cd /home/samuelloranger/sites/tether && bun format`
+Run: `cd $REPO_ROOT && bun format`
 Expected: exits 0. (Note: two pre-existing diagnostics — `navigateHistory` unused, `blurOnSubmit` deprecated — are out of scope; do not fix them.)
 
 - [ ] **Step 10: Manual verification**
@@ -574,7 +574,7 @@ In `App.tsx`, add these entries immediately before the `menuBackdrop` style entr
 
 - [ ] **Step 6: Format**
 
-Run: `cd /home/samuelloranger/sites/tether && bun format`
+Run: `cd $REPO_ROOT && bun format`
 Expected: exits 0.
 
 - [ ] **Step 7: Manual verification**
@@ -727,7 +727,7 @@ In `App.tsx`, find the `selectionViewText` style entry and add before it:
 
 - [ ] **Step 7: Format**
 
-Run: `cd /home/samuelloranger/sites/tether && bun format`
+Run: `cd $REPO_ROOT && bun format`
 Expected: exits 0.
 
 - [ ] **Step 8: Manual verification**
@@ -928,7 +928,7 @@ In `App.tsx`, add these entries immediately before the `menuBackdrop` style entr
 
 - [ ] **Step 7: Format**
 
-Run: `cd /home/samuelloranger/sites/tether && bun format`
+Run: `cd $REPO_ROOT && bun format`
 Expected: exits 0.
 
 - [ ] **Step 8: Manual verification**
@@ -989,7 +989,7 @@ Add immediately AFTER that `<View style={styles.utilityGroupDivider} />`:
 
 - [ ] **Step 2: Format**
 
-Run: `cd /home/samuelloranger/sites/tether && bun format`
+Run: `cd $REPO_ROOT && bun format`
 Expected: exits 0.
 
 - [ ] **Step 3: Manual verification**
