@@ -157,13 +157,13 @@ describe('private-prefixed CSI sequences (kitty keyboard protocol, XTMODKEYS)', 
 
 - [ ] **Step 2: Run tests, verify the new-behavior ones fail**
 
-Run: `cd /home/samuelloranger/sites/tether && bun test apps/mobile/src/terminal.test.ts`
+Run: `cd $REPO_ROOT && bun test apps/mobile/src/terminal.test.ts`
 Expected: `plain CSI s / CSI u` and `DECSCUSR` PASS (they guard existing behavior); FAIL: `CSI < u`, `CSI > 1 u`, `CSI ? u`, `CSI ? s`, `CSI > 4 m`, `CSI with intermediate bytes`, `tertiary DA`, `ESC D / ESC E` (the NEL half), and `claude exit tail`.
 
 - [ ] **Step 3: Commit the failing tests**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/src/terminal.test.ts
 git commit -m "test(mobile): cover private-prefixed CSI sequences in emulator"
 ```
@@ -267,13 +267,13 @@ In `esc()` (`terminal.ts:287-327`), add two cases next to `case 'M':` and update
 
 - [ ] **Step 5: Run the tests, verify all pass**
 
-Run: `cd /home/samuelloranger/sites/tether && bun test apps/mobile/src/terminal.test.ts`
+Run: `cd $REPO_ROOT && bun test apps/mobile/src/terminal.test.ts`
 Expected: 11 pass, 0 fail.
 
 - [ ] **Step 6: Typecheck + format**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 bunx tsc --noEmit -p apps/mobile 2>/dev/null || true   # Expo project; skip if no tsconfig typecheck script
 bunx biome check --write apps/mobile/src/terminal.ts apps/mobile/src/terminal.test.ts
 bun lint
@@ -314,7 +314,7 @@ Expected: in the printed final grid, the `user@host ~>` fish prompt appears on t
 - [ ] **Step 2: Rebuild the mobile app and verify on device**
 
 ```bash
-cd /home/samuelloranger/sites/tether/apps/mobile && npx expo run:ios --device
+cd $REPO_ROOT/apps/mobile && npx expo run:ios --device
 ```
 
 On the phone: open a session, run `claude`, Ctrl+C twice. Expected: shell prompt appears below Claude's output; typing works at the correct position; no `clear` needed.
@@ -330,7 +330,7 @@ Version bump + release only if the user wants it in the AltStore build (v1.0.4);
 Drives a real tether session over WS, feeds output through the real emulator, prints the final grid. Recreate at any path and run with `bun`:
 
 ```typescript
-import { TerminalEmulator } from '/home/samuelloranger/sites/tether/apps/mobile/src/terminal.ts';
+import { TerminalEmulator } from '$REPO_ROOT/apps/mobile/src/terminal.ts';
 const SESSION = `debug-ctrlc-${process.pid}`;
 const emu = new TerminalEmulator(60, 30);
 let raw = '';

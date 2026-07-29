@@ -637,7 +637,7 @@ Remove the temporary internal fallback switch so only one architecture ships.
 - [ ] **Step 5: Run the full repository gate**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 bun --cwd apps/mobile run build:terminal-renderer
 bun --cwd apps/mobile test
 bun --cwd apps/mobile run typecheck

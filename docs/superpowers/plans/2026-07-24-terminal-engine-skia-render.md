@@ -103,7 +103,7 @@ In `apps/mobile/App.tsx`, render `<SkiaProbe/>` above the app root (guard behind
 - [ ] **Step 4: Build & run on Android sim**
 
 ```bash
-export ANDROID_HOME=/home/samuelloranger/Android/Sdk QT_QPA_PLATFORM=offscreen
+export ANDROID_HOME=~/Android/Sdk QT_QPA_PLATFORM=offscreen
 $ANDROID_HOME/emulator/emulator -avd tether_test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect &
 # wait boot; then:
 cd apps/mobile && (bun x expo start --dev-client --port 8081 &) && cd android && ./gradlew :app:assembleDebug -x lint
@@ -124,7 +124,7 @@ Expected: builds clean on the pinned jsi patch; probe renders; `advance` logged.
 
 ```bash
 cd apps/mobile && git checkout App.tsx && rm src/skiaProbe.native.tsx
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/package.json bun.lock
 git commit -m "build(mobile): add @shopify/react-native-skia (Phase 0 gate passed: Android+iOS render OK)"
 ```
@@ -331,7 +331,7 @@ Expected: PASS. If the OSC 8 span end is wrong, log `startCol`/`endCol`/`cursorX
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/terminalEngine.ts apps/mobile/src/terminalGrid.test.ts
 git commit -m "feat(mobile): engine getGrid() cell snapshot + OSC 8 link tracking"
 ```
@@ -412,7 +412,7 @@ Expected: PASS. (Adjust the `visibleRange` expectation if the pad differs — th
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/canvasGeometry.ts apps/mobile/src/canvasGeometry.test.ts
 git commit -m "feat(mobile): pure cell<->pixel geometry for the Skia grid"
 ```
@@ -445,7 +445,7 @@ Expected: tsc clean, 150+ tests pass. This file resolves for web/desktop; native
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/TerminalView.tsx apps/mobile/src/TerminalScreen.tsx
 git commit -m "refactor(mobile): extract terminal render block into TerminalView (web/desktop path)"
 ```
@@ -525,7 +525,7 @@ Temporarily mount `TerminalCanvas` in `App.tsx` fed a hand-built grid (a box-dra
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/TerminalCanvas.native.tsx
 git commit -m "feat(mobile): Skia TerminalCanvas — static cell-grid paint"
 ```
@@ -576,7 +576,7 @@ Build+run; run `bash tether-engine-test.sh` in a session. Verify: block 4 (box) 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/TerminalCanvas.native.tsx apps/mobile/src/TerminalView.native.tsx apps/mobile/src/useTetherApp.tsx
 git commit -m "feat(mobile): Skia terminal — virtual scroll, blink, tap/link hit-test, wired in"
 ```
@@ -605,7 +605,7 @@ Expected: PASS (regression guard for the user's URL requirement).
 - [ ] **Step 3: Commit + finish**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add -A apps/mobile
 git commit -m "chore(mobile): Part 2 cleanup — Skia render parity pass"
 ```

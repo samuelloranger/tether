@@ -148,7 +148,7 @@ Expected: PASS — 7 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/src/input.ts apps/mobile/src/input.test.ts
 git commit -m "feat(mobile): pure computeInputDelta for diff-based terminal input"
 ```
@@ -300,7 +300,7 @@ Then in a session, confirm each:
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether
+cd $REPO_ROOT
 git add apps/mobile/App.tsx
 git commit -m "feat(mobile): diff-based capture field enables voice/swipe/autocomplete"
 ```

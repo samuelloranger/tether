@@ -54,3 +54,6 @@ apps/mobile/src-tauri/gen/
 
 # Superpowers skill session state
 .superpowers/
+
+# Codex local tooling (contains absolute local paths)
+.codex/

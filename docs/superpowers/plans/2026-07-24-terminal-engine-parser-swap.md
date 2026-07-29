@@ -135,7 +135,7 @@ Expected: PASS (import works, `t.cols === 20`). If it throws `Cannot read proper
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/xtermPolyfill.ts apps/mobile/index.ts apps/mobile/package.json apps/mobile/src/terminalEngine.test.ts bun.lock
 git commit -m "feat(mobile): add @xterm/headless + navigator shim for Hermes"
 ```
@@ -416,7 +416,7 @@ Expected: PASS for text, truecolor, bold+wide. If the wide-char test fails on `s
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/terminalEngine.ts apps/mobile/src/terminalEngine.test.ts apps/mobile/src/terminal.ts
 git commit -m "feat(mobile): TerminalEngine core — text + SGR + wide-char snapshot"
 ```
@@ -579,7 +579,7 @@ Expected: PASS (stable key, link span, promptStart + jump). If the key test stil
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/terminalEngine.ts apps/mobile/src/terminalEngine.test.ts
 git commit -m "feat(mobile): TerminalEngine stable keys, links, OSC-133 prompt jump"
 ```
@@ -687,7 +687,7 @@ Expected: PASS. If `term.modes` field names differ in 6.0.0, inspect with `conso
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/terminalEngine.ts apps/mobile/src/terminalEngine.test.ts
 git commit -m "feat(mobile): TerminalEngine modes — cursor keys, bracketed paste, mouse, DECSCUSR"
 ```
@@ -825,7 +825,7 @@ Expected: PASS. For any assertion that fails because xterm's (correct) behavior 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun --cwd apps/mobile run format
 git add apps/mobile/src/terminalEngine.ts apps/mobile/src/terminalEngine.test.ts
 git commit -m "feat(mobile): TerminalEngine OSC — title, cwd, notify, clipboard, bell + full conformance suite"
 ```
@@ -860,7 +860,7 @@ Expected: the assignment `term.onReply = (data) => wsSend(...)` (or similar) is 
 - [ ] **Step 3: Typecheck**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun --cwd apps/mobile exec tsc --noEmit
+cd $REPO_ROOT && bun --cwd apps/mobile exec tsc --noEmit
 ```
 Expected: no errors. Fix any field/method mismatches against the drop-in contract.
 
@@ -874,7 +874,7 @@ Expected: PASS (all files, including the ported conformance suite).
 - [ ] **Step 5: On-device smoke on the Android sim**
 
 ```bash
-export ANDROID_HOME=/home/samuelloranger/Android/Sdk QT_QPA_PLATFORM=offscreen
+export ANDROID_HOME=~/Android/Sdk QT_QPA_PLATFORM=offscreen
 $ANDROID_HOME/emulator/emulator -avd tether_test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect &
 # wait for boot: adb wait-for-device; adb shell getprop sys.boot_completed == 1
 cd apps/mobile && bun x expo run:android
@@ -893,7 +893,7 @@ Expected: PASS (nothing imports the removed class).
 - [ ] **Step 7: Lint + commit**
 
 ```bash
-cd /home/samuelloranger/sites/tether && bun lint && bun --cwd apps/mobile run format
+cd $REPO_ROOT && bun lint && bun --cwd apps/mobile run format
 git add apps/mobile/src/useTetherApp.tsx apps/mobile/src/terminal.ts
 git rm apps/mobile/src/terminal.parser.test.ts
 git commit -m "feat(mobile): swap TerminalEmulator -> TerminalEngine (@xterm/headless), drop old parser"
