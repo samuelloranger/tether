@@ -46,7 +46,7 @@ type Options = {
   onReachable?: (profile: HostProfile) => void;
   ready: boolean;
   isConfiguring: boolean;
-  theme: { terminal: { fg: string; bg: string } };
+  theme: { terminal: { fg: string; bg: string }; keyboardAppearance: 'light' | 'dark' };
   fontFamily: string;
   fontSize: number;
   notificationsEnabledRef: React.MutableRefObject<boolean>;
@@ -183,7 +183,11 @@ export function useTerminalSessions({
       entry.term.serialize(),
       entry.term.cols,
       entry.term.rows,
-      { foreground: theme.terminal.fg, background: theme.terminal.bg },
+      {
+        foreground: theme.terminal.fg,
+        background: theme.terminal.bg,
+        keyboardAppearance: theme.keyboardAppearance,
+      },
       fontFamily,
       fontSize,
     );

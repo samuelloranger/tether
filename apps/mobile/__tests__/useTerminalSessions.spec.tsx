@@ -42,7 +42,7 @@ const profile: HostProfile = {
   order: 0,
 };
 const profiles = [profile];
-const theme = { terminal: { fg: '#cdd6f4', bg: '#1e1e2e' } };
+const theme = { terminal: { fg: '#cdd6f4', bg: '#1e1e2e' }, keyboardAppearance: 'dark' as const };
 
 const client = {
   profile,

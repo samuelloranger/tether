@@ -97,6 +97,7 @@ window.__tetherDispatch = (command) => {
     case 'hydrate':
       terminal.reset();
       terminal.options.theme = command.theme;
+      document.documentElement.style.colorScheme = command.theme.keyboardAppearance;
       terminal.options.fontFamily = command.fontFamily;
       terminal.options.fontSize = command.fontSize;
       terminal.resize(command.cols, command.rows);
