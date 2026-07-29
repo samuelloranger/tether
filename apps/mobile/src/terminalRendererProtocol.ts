@@ -1,6 +1,10 @@
 import type { LinkTarget } from './links';
 
-export type RendererTheme = { foreground: string; background: string };
+export type RendererTheme = {
+  foreground: string;
+  background: string;
+  keyboardAppearance: 'light' | 'dark';
+};
 
 export type RendererCommand =
   | {
