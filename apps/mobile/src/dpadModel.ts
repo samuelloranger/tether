@@ -13,9 +13,12 @@ export const D_PAD_REPEAT_DELAY_MS = 350;
 export const D_PAD_REPEAT_MS = 60;
 export const D_PAD_MAX_REPEATS = 120;
 
-const SWITCH_RATIO = 1.25;
 const THUMB_LIMIT = 11;
 
+// Direction is locked for the whole gesture once picked — a diagonal drag
+// must not flip between axes mid-hold, else two arrow keys fire in quick
+// succession and reads as diagonal movement in the terminal. Re-resolving
+// only happens once the finger returns inside the center threshold.
 export function resolveDPadDirection(
   dx: number,
   dy: number,
@@ -24,15 +27,9 @@ export function resolveDPadDirection(
   const horizontal = Math.abs(dx);
   const vertical = Math.abs(dy);
   if (Math.max(horizontal, vertical) < D_PAD_THRESHOLD) return null;
+  if (active) return active;
 
-  const candidate: DPadDirection =
-    horizontal >= vertical ? (dx >= 0 ? 'C' : 'D') : dy >= 0 ? 'B' : 'A';
-  if (!active || candidate === active) return candidate;
-
-  const activeIsHorizontal = active === 'C' || active === 'D';
-  const dominant = activeIsHorizontal ? horizontal : vertical;
-  const opposing = activeIsHorizontal ? vertical : horizontal;
-  return opposing < dominant * SWITCH_RATIO ? active : candidate;
+  return horizontal >= vertical ? (dx >= 0 ? 'C' : 'D') : dy >= 0 ? 'B' : 'A';
 }
 
 // Where the touch landed inside the puck, as an offset from its center. A tap

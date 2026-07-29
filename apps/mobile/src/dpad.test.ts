@@ -25,9 +25,10 @@ test('D-pad maps cardinals and diagonals to terminal finals', () => {
   expect(resolveDPadDirection(-12, 20, null)).toBe('B');
 });
 
-test('D-pad keeps its active direction near an axis boundary', () => {
+test('D-pad locks its active direction for the whole gesture', () => {
   expect(resolveDPadDirection(15, 16, 'C')).toBe('C');
-  expect(resolveDPadDirection(10, 20, 'C')).toBe('B');
+  expect(resolveDPadDirection(10, 20, 'C')).toBe('C');
+  expect(resolveDPadDirection(2, 2, 'C')).toBeNull();
 });
 
 test('D-pad tap on a chevron resolves to that direction', () => {

@@ -128,7 +128,16 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     }, [queue]);
 
     return (
-      <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          overflow: 'hidden',
+          boxSizing: 'border-box',
+          paddingLeft: 4,
+          paddingRight: 4,
+        }}
+      >
         <style>{TERMINAL_RENDERER_CSS}</style>
         <div ref={container} style={{ width: '100%', height: '100%' }} />
       </div>

@@ -450,8 +450,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               own helper textarea inside the page, which is what raises the soft
               keyboard, so typed characters arrive as renderer `input` events and
               NOT through the hidden RN capture field below. That is why onInput
-              is sendTyped: that is where the armed Ctrl modifier is applied,
-              and typing is the main thing Ctrl modifies.
+              is sendTyped (sendKey on desktop, to skip the hold-backspace
+              word-delete acceleration meant for mobile's soft keyboard):
+              both apply the armed Ctrl modifier, and typing is the main
+              thing Ctrl modifies.
               Wrapped in a relative container so the connection banner can overlay
               the top without consuming flex height: a height change would recompute
               rows and fire a spurious PTY resize (visible rewrap) on every
@@ -486,7 +488,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   ) : (
                     <TerminalView
                       ref={terminalViewRef}
-                      onInput={sendTyped}
+                      onInput={isDesktop ? sendKey : sendTyped}
                       onResize={onRendererResize}
                       onOpenLink={openFile}
                       onSelection={onRendererSelection}
