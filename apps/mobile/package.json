@@ -54,6 +54,7 @@
     "react-test-renderer": "19.2.3"
   },
   "scripts": {
+    "postinstall": "bun run build:terminal-renderer",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
