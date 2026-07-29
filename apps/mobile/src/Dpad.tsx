@@ -1,4 +1,4 @@
-import Feather from '@expo/vector-icons/Feather';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Animated, PanResponder, StyleSheet, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
@@ -131,24 +131,27 @@ export const ArrowCluster = React.memo(function ArrowCluster({
     >
       <Animated.View pointerEvents="none" style={{ transform: thumb.getTranslateTransform() }}>
         <View style={styles.axisGlyph}>
-          <View style={[styles.axisLine, styles.axisHorizontal]} />
-          <View style={[styles.axisLine, styles.axisVertical]} />
-          <Feather
-            name="chevron-left"
-            size={11}
+          <MaterialIcons
+            name="arrow-drop-up"
+            size={22}
             color={theme.colors.text}
-            style={styles.chevronLeft}
+            style={styles.chevronUp}
           />
-          <Feather name="chevron-up" size={11} color={theme.colors.text} style={styles.chevronUp} />
-          <Feather
-            name="chevron-down"
-            size={11}
+          <MaterialIcons
+            name="arrow-drop-down"
+            size={22}
             color={theme.colors.text}
             style={styles.chevronDown}
           />
-          <Feather
-            name="chevron-right"
-            size={11}
+          <MaterialIcons
+            name="arrow-left"
+            size={22}
+            color={theme.colors.text}
+            style={styles.chevronLeft}
+          />
+          <MaterialIcons
+            name="arrow-right"
+            size={22}
             color={theme.colors.text}
             style={styles.chevronRight}
           />
@@ -169,44 +172,28 @@ const createStyles = (c: AppColors) =>
       justifyContent: 'center',
     },
     axisGlyph: {
-      width: 22,
-      height: 22,
+      width: 30,
+      height: 30,
       position: 'relative',
-    },
-    axisLine: {
-      position: 'absolute',
-      backgroundColor: c.textMuted,
-    },
-    axisHorizontal: {
-      top: 10.5,
-      left: 4,
-      right: 4,
-      height: 1,
-    },
-    axisVertical: {
-      top: 4,
-      bottom: 4,
-      left: 10.5,
-      width: 1,
     },
     chevronLeft: {
       position: 'absolute',
-      left: 0,
-      top: 5.5,
+      left: -6,
+      top: 4,
     },
     chevronUp: {
       position: 'absolute',
-      top: 0,
-      left: 5.5,
+      top: -6,
+      left: 4,
     },
     chevronDown: {
       position: 'absolute',
-      bottom: 0,
-      left: 5.5,
+      bottom: -6,
+      left: 4,
     },
     chevronRight: {
       position: 'absolute',
-      right: 0,
-      top: 5.5,
+      right: -6,
+      top: 4,
     },
   });

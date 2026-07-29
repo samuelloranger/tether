@@ -99,6 +99,7 @@ export function UtilityBar({
         sendKey('\x1b[Z');
       }),
     esc: () => textBtn('Esc', key('\x1b')),
+    slash: () => textBtn('/', key('/')),
     del: () => textBtn('Del', key('\x1b[3~')),
     home: () => textBtn('Home', () => sendKey(cursorSeq('H'))),
     end: () => textBtn('End', () => sendKey(cursorSeq('F'))),
@@ -199,18 +200,19 @@ const createStyles = (c: AppColors) =>
       flexGrow: 1,
     },
     utilityBtn: {
-      minHeight: MIN_TOUCH_TARGET,
+      width: MIN_TOUCH_TARGET,
+      height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
-      paddingHorizontal: 7,
+      alignItems: 'center',
       borderRadius: SURFACE_RADIUS.control,
       backgroundColor: c.surfaceRaised,
-      flexShrink: 1,
     },
     utilityBtnText: {
-      fontSize: 13,
+      fontSize: 11,
       fontWeight: '700',
       fontFamily: MONO,
       color: c.text,
+      textAlign: 'center',
     },
     utilityBtnActive: {
       backgroundColor: c.accent,
