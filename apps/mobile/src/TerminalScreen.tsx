@@ -476,7 +476,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                     >
                       <TerminalView
                         ref={terminalViewRef}
-                        onInput={isDesktop ? sendKey : sendTyped}
+                        onInput={sendTyped}
                         onResize={onRendererResize}
                         onOpenLink={openFile}
                         onSelection={onRendererSelection}
@@ -488,7 +488,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   ) : (
                     <TerminalView
                       ref={terminalViewRef}
-                      onInput={sendTyped}
+                      onInput={isDesktop ? sendKey : sendTyped}
                       onResize={onRendererResize}
                       onOpenLink={openFile}
                       onSelection={onRendererSelection}

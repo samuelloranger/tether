@@ -4,9 +4,10 @@
 //
 // Item counts are balanced (7 + 6) on purpose. The bar is a single fixed-height
 // row with no wrapping and no scrolling, and each page spends one more slot on
-// its inline pager arrow, so a page wider than the screen clips instead of
-// reflowing. Keep each page around 6-7 keys, and prefer short labels — on a
-// narrow phone the widest ones ellipsize.
+// its inline pager arrow. Buttons shrink down to a minimum width to keep the
+// pager on-screen on narrow phones, but a page much wider than 7 keys will
+// still squeeze past comfortable touch targets. Keep each page around 6-7
+// keys, and prefer short labels — on a narrow phone the widest ones ellipsize.
 export const UTILITY_BAR_PAGES = [
   ['ctrl', 'tab', 'esc', 'slash', 'dpad', 'paste', 'hide'],
   ['del', 'home', 'end', 'pgup', 'pgdn', 'image'],

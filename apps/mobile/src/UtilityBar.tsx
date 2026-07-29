@@ -200,7 +200,9 @@ const createStyles = (c: AppColors) =>
       flexGrow: 1,
     },
     utilityBtn: {
-      width: MIN_TOUCH_TARGET,
+      flexBasis: MIN_TOUCH_TARGET,
+      flexShrink: 1,
+      minWidth: 36,
       height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       alignItems: 'center',
@@ -221,7 +223,9 @@ const createStyles = (c: AppColors) =>
       color: c.accentText,
     },
     utilityIconBtn: {
-      width: MIN_TOUCH_TARGET,
+      flexBasis: MIN_TOUCH_TARGET,
+      flexShrink: 1,
+      minWidth: 36,
       height: MIN_TOUCH_TARGET,
       borderRadius: SURFACE_RADIUS.control,
       backgroundColor: c.surfaceRaised,
