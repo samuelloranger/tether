@@ -149,6 +149,14 @@ export function createStyles(c: AppColors) {
       right: 0,
       zIndex: 10,
     },
+    fileOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 60,
+    },
     // Covers the terminal when the renderer page is gone. Opaque on purpose:
     // what is underneath is the WebView's own blank white, which is exactly the
     // "is it loading forever?" state this replaces.

@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
+import { changeBannerLabel, type DiffSummary } from './diffModel';
 import { DRAG_PROPS, NO_DRAG_PROPS } from './dragRegion';
 import { titlebarChrome } from './titlebarChrome';
 import {
@@ -18,7 +19,6 @@ import {
   onMaximizeChange,
   toggleMaximizeWindow,
 } from './windowControls';
-
 export interface TitleBarProps {
   isMac: boolean;
   title: string;
@@ -28,6 +28,8 @@ export interface TitleBarProps {
   subtitle?: string;
   status?: 'connected' | 'connecting' | 'auth-failed' | 'offline';
   onNew?: () => void;
+  onChanges?: () => void;
+  changeSummary?: DiffSummary;
   onSettings?: () => void;
   onMenu?: () => void;
   // Compact desktop windows keep their window-management chrome, while the
@@ -71,6 +73,8 @@ export default function TitleBar({
   subtitle,
   status,
   onNew,
+  onChanges,
+  changeSummary,
   onSettings,
   onMenu,
   compact = false,
@@ -80,6 +84,7 @@ export default function TitleBar({
   const [maximized, setMaximized] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const { showControls, leftInset } = titlebarChrome(isMac, fullscreen);
+  const changesLabel = changeSummary ? changeBannerLabel(changeSummary) : null;
 
   useEffect(() => {
     if (!showControls) return;
@@ -130,6 +135,20 @@ export default function TitleBar({
             accessibilityLabel="New terminal"
           >
             <Feather name="plus" size={19} color={theme.colors.text} />
+          </TouchableOpacity>
+        ) : null}
+
+        {!compact && onChanges && changesLabel ? (
+          <TouchableOpacity
+            {...NO_DRAG_PROPS}
+            style={styles.btn}
+            activeOpacity={0.6}
+            hitSlop={HIT}
+            onPress={onChanges}
+            accessibilityRole="button"
+            accessibilityLabel={changesLabel}
+          >
+            <Feather name="git-pull-request" size={18} color={theme.colors.accent} />
           </TouchableOpacity>
         ) : null}
 

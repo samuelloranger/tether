@@ -28,6 +28,12 @@ export interface TerminalViewProps {
   onResize(cols: number, rows: number): void;
   onOpenLink(target: LinkTarget): void;
   onSelection?(text: string): void;
+  /** Desktop: Ctrl/Cmd+V / Shift+Insert from the xterm key handler. */
+  onPaste?(): void | Promise<void>;
+  /** Desktop: Ctrl/Cmd+T. */
+  onNewTerminal?(): void;
+  /** Desktop: Ctrl/Cmd+= or Ctrl/Cmd+-. */
+  onFontZoom?(delta: number): void;
   onFallback(reason: string): void;
   onRecover(): void;
   /** Renderer readiness, so a dead page can be shown instead of a blank one. */

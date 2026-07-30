@@ -52,11 +52,18 @@ test('pushes git summaries to every subscriber and primes later subscribers', as
     await waitFor(() =>
       frames.some((frame) => frame.type === 'diff' && frame.summary.files.length === 1),
     );
-    expect(frames).toContainEqual({ type: 'diff', summary: changed });
+    const changedFrame = frames.find(
+      (frame) => frame.type === 'diff' && frame.summary.files.length === 1,
+    );
+    expect(changedFrame).toMatchObject({ type: 'diff', summary: changed });
+    expect(
+      changedFrame && changedFrame.type === 'diff' && changedFrame.status?.branch,
+    ).toBeTruthy();
 
     const later: Parameters<Subscriber>[0][] = [];
     const unsubscribeLater = subscribeToSession(id, (frame) => later.push(frame), 80, 24);
-    expect(later).toEqual([{ type: 'diff', summary: changed }]);
+    expect(later).toHaveLength(1);
+    expect(later[0]).toMatchObject({ type: 'diff', summary: changed });
     unsubscribeLater();
   } finally {
     unsubscribe();
@@ -138,7 +145,9 @@ test('starts watching when a repository is initialized without changing cwd', as
     await waitFor(() =>
       frames.some((frame) => frame.type === 'diff' && frame.summary.files.length === 1),
     );
-    expect(frames).toContainEqual({
+    expect(
+      frames.find((frame) => frame.type === 'diff' && frame.summary.files.length === 1),
+    ).toMatchObject({
       type: 'diff',
       summary: {
         files: [{ path: 'main.txt', insertions: 1, deletions: 1, binary: false, staged: false }],

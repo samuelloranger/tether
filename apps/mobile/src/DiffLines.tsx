@@ -18,6 +18,7 @@ export function DiffLines({
   path,
   onHunkPress,
   hunkActionLabel,
+  onOpenLine,
 }: {
   diffText: string;
   path: string;
@@ -26,6 +27,8 @@ export function DiffLines({
   // consume (its splitHunks counts identically).
   onHunkPress?: (hunkIndex: number) => void;
   hunkActionLabel?: string;
+  /** Open the working-tree file at this 1-based line (new side preferred). */
+  onOpenLine?: (line: number) => void;
 }) {
   const { theme } = useAppTheme();
   const language = languageForPath(path);
@@ -92,8 +95,9 @@ export function DiffLines({
               ? theme.colors.danger
               : theme.colors.textFaint;
         const tokens = tokenizeLine(line.content, grammar);
-        return (
-          <View key={index} style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}>
+        const openLine = line.newLine ?? line.oldLine;
+        const content = (
+          <>
             <Text
               style={[
                 styles.gutterNum,
@@ -115,7 +119,10 @@ export function DiffLines({
             <Text style={[styles.marker, TEXT_METRICS, { color: markerColor }]}>
               {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}
             </Text>
-            <Text selectable style={[styles.content, TEXT_METRICS, { color: theme.terminal.fg }]}>
+            <Text
+              selectable={!onOpenLine}
+              style={[styles.content, TEXT_METRICS, { color: theme.terminal.fg }]}
+            >
               {tokens
                 ? tokens.map((token, tokenIndex) => (
                     <Text
@@ -127,6 +134,24 @@ export function DiffLines({
                   ))
                 : line.content}
             </Text>
+          </>
+        );
+        if (onOpenLine && openLine != null) {
+          return (
+            <TouchableOpacity
+              key={index}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${path} at line ${openLine}`}
+              onPress={() => onOpenLine(openLine)}
+              style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}
+            >
+              {content}
+            </TouchableOpacity>
+          );
+        }
+        return (
+          <View key={index} style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}>
+            {content}
           </View>
         );
       })}

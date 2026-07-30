@@ -16,6 +16,7 @@ import { getConfig } from './config';
 import { addTerminalLog, clearInsertCount, deleteSession, getSession, upsertSession } from './db';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
 import { findGitRoot } from './gitRoot';
+import { EMPTY_REPO_STATUS, type RepoStatus } from './gitStatus';
 import { GitWatch } from './gitWatch';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import { buildNotification, type NotificationEvent, send } from './notifier';
@@ -141,7 +142,7 @@ export function sessionEnv(
 export type SessionFrame =
   | { type: 'output'; chunk: string; id: number }
   | { type: 'exit'; exitCode?: number }
-  | { type: 'diff'; summary: DiffSummary }
+  | { type: 'diff'; summary: DiffSummary; status?: RepoStatus }
   | { type: 'title'; title: string }
   | { type: 'activity'; activity: Activity };
 
@@ -152,6 +153,7 @@ interface SessionInstance {
   sock: Socket;
   subscribers: Set<FocusSubscriber>;
   diffSummary: DiffSummary;
+  repoStatus: RepoStatus;
   gitWatch: GitWatch;
   // Each attached client's requested dims. A PTY has one size, so a shared session
   // is fit to the SMALLEST attached client (tmux model): content fits everyone and
@@ -300,16 +302,18 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
       socket: {
         open(sock) {
           settled = true;
-          const gitWatch = new GitWatch((summary) => {
+          const gitWatch = new GitWatch((summary, status) => {
             const active = instances.get(id);
             if (!active) return;
             active.diffSummary = summary;
-            broadcast(id, { type: 'diff', summary });
+            active.repoStatus = status;
+            broadcast(id, { type: 'diff', summary, status });
           });
           const instance: SessionInstance = {
             sock,
             subscribers: new Set(),
             diffSummary: EMPTY_DIFF_SUMMARY,
+            repoStatus: EMPTY_REPO_STATUS,
             gitWatch,
             clientDims: new Map(),
           };
@@ -578,7 +582,7 @@ export function subscribeToSession(
     instance.subscribers.add(callback);
     instance.clientDims.set(callback, clampDims(cols, rows));
     recomputeSize(id);
-    callback({ type: 'diff', summary: instance.diffSummary });
+    callback({ type: 'diff', summary: instance.diffSummary, status: instance.repoStatus });
     return () => {
       instance.subscribers.delete(callback);
       instance.clientDims.delete(callback);
@@ -591,6 +595,11 @@ export function subscribeToSession(
 export function setSessionFocus(id: string, client: FocusSubscriber, focused: boolean): void {
   const instance = instances.get(id);
   if (instance?.subscribers.has(client)) client.focused = focused;
+}
+
+/** After HTTP git write ops, push a fresh diff summary without waiting on inotify. */
+export function kickSessionGitWatch(id: string): void {
+  instances.get(id)?.gitWatch.kick();
 }
 
 export function killSession(id: string) {

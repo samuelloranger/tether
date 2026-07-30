@@ -4,7 +4,20 @@ import { SessionCache, type SessionEntry } from './sessionCache';
 const mk =
   (tag: string): (() => SessionEntry) =>
   () =>
-    ({ term: { tag } as any, sinceId: 0, lastAppliedId: 0, diffSummary: { files: [] } }) as any;
+    ({
+      term: { tag } as any,
+      sinceId: 0,
+      lastAppliedId: 0,
+      diffSummary: { files: [] },
+      repoStatus: {
+        branch: '',
+        shortSha: '',
+        detached: false,
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+      },
+    }) as any;
 
 test('peek does not reorder the LRU or evict', () => {
   const evicted: string[] = [];

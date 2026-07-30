@@ -4,21 +4,28 @@ import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400R
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, type TextInput } from 'react-native';
+import { Linking, type TextInput, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import { readClipboard, writeClipboard } from './clipboard';
 import { createDeepLinkHandler, listenForDeepLinks } from './deepLink';
+import { desktopLayout } from './desktopLayout';
 import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
+import { fetchDiffImageUri, fetchOneReviewDiff, type ReviewDiffSlot } from './fetchReviewDiff';
 import type { FileView } from './fileView';
+import {
+  mapWithConcurrency,
+  reviewDiffKey,
+  reviewFileEntries,
+  summaryFingerprint,
+} from './gitReviewModel';
 import type { LinkTarget } from './links';
 import { isDesktop, isTauri } from './platform';
 import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
 import { type RenderRow, setTheme } from './terminal';
-import type { HostClient } from './tether/hostClient';
 import type { GitLogEntry } from './tether/types';
 import { useAppPreferences } from './tether/useAppPreferences';
 import { useConnectionConfig } from './tether/useConnectionConfig';
@@ -32,22 +39,10 @@ import { useTerminalViewport } from './tether/useTerminalViewport';
 
 // Constants for async storage keys
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
+const KEY_GIT_DRAWER_LEFT_WIDTH = 'tether_git_drawer_left_width';
 
+export type { ReviewDiffSlot } from './fetchReviewDiff';
 export type { GitLogEntry } from './tether/types';
-
-// Fetches raw image bytes with the auth header <Image> can't attach itself,
-// and hands back a data URI so the same code path works native and web.
-async function fetchDiffImageUri(client: HostClient, path: string): Promise<string | null> {
-  const res = await client.get(path);
-  if (!res.ok) return null;
-  const blob = await res.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('failed to read image'));
-    reader.onload = () => resolve(reader.result as string);
-    reader.readAsDataURL(blob);
-  });
-}
 
 export function useTetherApp() {
   // Proceed once fonts settle OR fail — never gate the whole app on a font fetch.
@@ -181,6 +176,8 @@ export function useTetherApp() {
   const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(
     null,
   );
+  const [reviewDiffs, setReviewDiffs] = useState<Record<string, ReviewDiffSlot>>({});
+  const reviewLoadGenRef = useRef(0);
 
   const {
     activeId,
@@ -614,6 +611,7 @@ export function useTetherApp() {
     [activeClient],
   );
   const closeDiff = useCallback(() => {
+    reviewLoadGenRef.current += 1;
     setDiffOpen(false);
     setDiffSelectedPath(null);
     diffSelectedPathRef.current = null;
@@ -623,6 +621,7 @@ export function useTetherApp() {
     setDiffTruncated(false);
     setDiffImage(null);
     setHistoryCommit(null);
+    setReviewDiffs({});
   }, []);
   const deselectDiffFile = useCallback(() => {
     setDiffSelectedPath(null);
@@ -682,9 +681,60 @@ export function useTetherApp() {
     },
     [activeClient],
   );
+  const loadReviewDiffs = useCallback(() => {
+    const sessionId = getActiveSessionId();
+    const entries = reviewFileEntries(entryFor(sessionId).diffSummary);
+    const gen = ++reviewLoadGenRef.current;
+    // Replace the cache to match the live summary — drop paths that left, and
+    // force a reload so staged/unstaged moves after a WS push aren't sticky.
+    setReviewDiffs(() => {
+      const next: Record<string, ReviewDiffSlot> = {};
+      for (const e of entries) next[reviewDiffKey(e.mode, e.path)] = { status: 'loading' };
+      return next;
+    });
+    void mapWithConcurrency(entries, 5, async (e) => {
+      const key = reviewDiffKey(e.mode, e.path);
+      const slot = await fetchOneReviewDiff({
+        client: activeClient,
+        sessionId,
+        path: e.path,
+        mode: e.mode,
+        file: e.file,
+      });
+      if (reviewLoadGenRef.current !== gen) return slot;
+      setReviewDiffs((prev) => ({ ...prev, [key]: slot }));
+      return slot;
+    });
+  }, [activeClient, entryFor, getActiveSessionId]);
+
+  const retryReviewDiff = useCallback(
+    (mode: 'staged' | 'unstaged', path: string) => {
+      const sessionId = getActiveSessionId();
+      const file = entryFor(sessionId).diffSummary.files.find((f) => f.path === path);
+      if (!file) return;
+      const key = reviewDiffKey(mode, path);
+      const gen = reviewLoadGenRef.current;
+      setReviewDiffs((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      void fetchOneReviewDiff({
+        client: activeClient,
+        sessionId,
+        path,
+        mode,
+        file: { ...file, staged: mode === 'staged' },
+      }).then((slot) => {
+        if (reviewLoadGenRef.current !== gen) return;
+        setReviewDiffs((prev) => ({ ...prev, [key]: slot }));
+      });
+    },
+    [activeClient, entryFor, getActiveSessionId],
+  );
+
   const openDiff = useCallback(() => {
     setDiffOpen(true);
     setDiffSelectedPath(null);
+    diffSelectedPathRef.current = null;
+    setDiffMode(null);
+    diffModeRef.current = null;
     setDiffText(null);
     setDiffTruncated(false);
     setDiffImage(null);
@@ -729,24 +779,23 @@ export function useTetherApp() {
     async (path: string) => {
       try {
         await gitPost('stage', { path });
-        refreshOpenDiff();
+        // Summary + review cache refresh via the live WS `diff` effect.
       } catch (error) {
         void notify('Stage failed', String(error), 'error');
       }
     },
-    [gitPost, refreshOpenDiff],
+    [gitPost],
   );
 
   const unstageFile = useCallback(
     async (path: string) => {
       try {
         await gitPost('unstage', { path });
-        refreshOpenDiff();
       } catch (error) {
         void notify('Unstage failed', String(error), 'error');
       }
     },
-    [gitPost, refreshOpenDiff],
+    [gitPost],
   );
 
   const discardFile = useCallback(
@@ -767,6 +816,37 @@ export function useTetherApp() {
     [gitPost, deselectDiffFile],
   );
 
+  const stageAllFiles = useCallback(async () => {
+    try {
+      await gitPost('stage-all', {});
+    } catch (error) {
+      void notify('Stage all failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const unstageAllFiles = useCallback(async () => {
+    try {
+      await gitPost('unstage-all', {});
+    } catch (error) {
+      void notify('Unstage all failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const discardAllFiles = useCallback(async () => {
+    const ok = await confirmAction(
+      'Discard all unstaged changes?',
+      "Every unstaged file will be restored or deleted. This can't be undone.",
+      { confirmLabel: 'Discard all', destructive: true },
+    );
+    if (!ok) return;
+    try {
+      await gitPost('discard-all', {});
+      deselectDiffFile();
+    } catch (error) {
+      void notify('Discard all failed', String(error), 'error');
+    }
+  }, [gitPost, deselectDiffFile]);
+
   const toggleHunk = useCallback(
     async (path: string, hunkIndex: number, staged: boolean) => {
       try {
@@ -774,23 +854,52 @@ export function useTetherApp() {
       } catch (error) {
         void notify(staged ? 'Unstage hunk failed' : 'Stage hunk failed', String(error), 'error');
       }
-      // Success or 409-stale, the right move is the same: re-read the diff.
-      refreshOpenDiff();
+      // 409-stale or success: wait for the WS summary so we don't rebuild from
+      // a pre-op staged/unstaged split.
     },
-    [gitPost, refreshOpenDiff],
+    [gitPost],
   );
 
   const commitStagedChanges = useCallback(
-    async (message: string) => {
+    async (message: string, amend = false) => {
       try {
-        await gitPost('commit', { message });
+        await gitPost('commit', { message, ...(amend ? { amend: true } : {}) });
         return true;
       } catch (error) {
-        void notify('Commit failed', String(error), 'error');
+        void notify(amend ? 'Amend failed' : 'Commit failed', String(error), 'error');
         return false;
       }
     },
     [gitPost],
+  );
+
+  const undoLastCommit = useCallback(async () => {
+    const ok = await confirmAction(
+      'Undo last commit?',
+      'HEAD will move back one commit. Changes stay staged.',
+      { confirmLabel: 'Undo commit' },
+    );
+    if (!ok) return;
+    try {
+      await gitPost('undo-commit', {});
+    } catch (error) {
+      void notify('Undo commit failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const pushChanges = useCallback(async () => {
+    try {
+      await gitPost('push', {});
+    } catch (error) {
+      void notify('Push failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const openDiffFileLine = useCallback(
+    (path: string, line: number) => {
+      void openFile({ kind: 'file', path, line });
+    },
+    [openFile],
   );
 
   const loadGitLog = useCallback(async () => {
@@ -839,23 +948,62 @@ export function useTetherApp() {
   // touch) falls back to entryFor, which creates it.
   const activeEntry = getSessionEntry(activeId) ?? entryFor(activeId);
   const changeSummary = activeEntry.diffSummary;
+  const repoStatus = activeEntry.repoStatus;
+  const changeSummaryFp = summaryFingerprint(changeSummary);
+  const loadReviewDiffsRef = useRef(loadReviewDiffs);
+  loadReviewDiffsRef.current = loadReviewDiffs;
+  const refreshOpenDiffRef = useRef(refreshOpenDiff);
+  refreshOpenDiffRef.current = refreshOpenDiff;
+  const selectDiffFileRef = useRef(selectDiffFile);
+  selectDiffFileRef.current = selectDiffFile;
+  const deselectDiffFileRef = useRef(deselectDiffFile);
+  deselectDiffFileRef.current = deselectDiffFile;
+  // Only re-run when the drawer opens or the live summary fingerprint changes —
+  // not when loadReviewDiffs' identity churns (entryFor is recreated each render).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loaders via refs; summary via fingerprint
+  useEffect(() => {
+    if (!diffOpen) return;
+    loadReviewDiffsRef.current();
+    const path = diffSelectedPathRef.current;
+    const mode = diffModeRef.current;
+    if (!path) return;
+    const entries = reviewFileEntries(changeSummary);
+    if (entries.some((e) => e.path === path && e.mode === mode)) {
+      refreshOpenDiffRef.current();
+      return;
+    }
+    const moved = entries.find((e) => e.path === path);
+    if (moved) {
+      void selectDiffFileRef.current(moved.path, moved.mode);
+      return;
+    }
+    deselectDiffFileRef.current();
+  }, [diffOpen, changeSummaryFp]);
   // Read live off the mutable emulator field — re-derives every render.
   // activeBellCount drives TerminalScreen's on-screen visual bell flash; the
   // OS notification path lives in maybeNotify (per-session, in the ws handler).
   const activeBellCount = activeEntry.term.bellCount;
   const activePromptReturnCount = activeEntry.term.promptReturnCount;
+  const { width: windowWidth } = useWindowDimensions();
+  // Match TerminalScreen: only the wide desktop GitDrawer leaves the terminal live.
+  // Compact desktop + mobile use full-screen GitReview, so block body key forwarding.
+  const desktopGitDrawer = desktopLayout(isDesktop, windowWidth) === 'desktop';
   useDesktopEffects({
     isConfiguring,
     presentations,
     activePresentationId,
     fileViewOpen: !!fileView,
-    diffOpen,
+    diffOpen: diffOpen && !desktopGitDrawer,
     getSessionEntry,
     getActiveSessionId,
+    getTerminalSelection,
     inputRef,
     sendKey,
     sendPaste,
     handlePaste,
+    selectAllTerminal,
+    newTerminal,
+    changeFontSize,
     setContextMenu: setCtxMenu,
     setWindowFocused,
     isWindowFocused,
@@ -1020,8 +1168,10 @@ export function useTetherApp() {
     fileLoading,
     openFile,
     closeFile,
+    openDiffFileLine,
     diffOpen,
     changeSummary,
+    repoStatus,
     diffSelectedPath,
     diffText,
     diffTruncated,
@@ -1035,14 +1185,23 @@ export function useTetherApp() {
     stageFile,
     unstageFile,
     discardFile,
+    stageAllFiles,
+    unstageAllFiles,
+    discardAllFiles,
     toggleHunk,
     commitStagedChanges,
+    undoLastCommit,
+    pushChanges,
     historyEntries,
     historyCommit,
     loadGitLog,
     selectCommit,
     diffSideBySide,
     toggleDiffSideBySide,
+    gitDrawerLeftWidthKey: KEY_GIT_DRAWER_LEFT_WIDTH,
+    reviewDiffs,
+    loadReviewDiffs,
+    retryReviewDiff,
     selectTerminal,
     selectPresentation,
     closePresentation,

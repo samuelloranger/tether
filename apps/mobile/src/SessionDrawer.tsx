@@ -45,7 +45,6 @@ interface SessionDrawerProps {
   onKill: (id: string) => void;
   onRetryHost: (hostId: string) => void;
   onReenterPassword: (hostId: string) => void;
-  onAddHost: () => void;
   previews: Presentation[];
   activePreviewId: string | null;
   onSelectPreview: (id: string) => void;
@@ -82,7 +81,6 @@ export function SessionDrawer({
   onKill,
   onRetryHost,
   onReenterPassword,
-  onAddHost,
   previews,
   activePreviewId,
   onSelectPreview,
@@ -278,16 +276,6 @@ export function SessionDrawer({
             </View>
           );
         })}
-        <TouchableOpacity
-          style={styles.addHostRow}
-          activeOpacity={0.7}
-          onPress={onAddHost}
-          accessibilityRole="button"
-          accessibilityLabel="Add host"
-        >
-          <Feather name="plus-circle" size={16} color={theme.colors.accent} />
-          <Text style={styles.addHostText}>Add host</Text>
-        </TouchableOpacity>
       </ScrollView>
 
       <TouchableOpacity
@@ -406,13 +394,4 @@ const createStyles = (c: AppColors) =>
       backgroundColor: c.accent,
     },
     newBtnText: { color: c.accentText, fontWeight: '600', fontSize: 13 },
-    addHostRow: {
-      minHeight: MIN_TOUCH_TARGET,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 10,
-      marginBottom: 8,
-    },
-    addHostText: { color: c.accent, fontSize: 13, fontWeight: '600' },
   });

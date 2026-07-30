@@ -3,6 +3,7 @@ import { existsSync, type FSWatcher, readdirSync, statSync, watch } from 'node:f
 import path from 'node:path';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY, GitDiffError, readDiffSummary } from './gitDiff';
 import { resolveGitDir } from './gitRoot';
+import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatus } from './gitStatus';
 
 // Directories git itself never has to look inside of when diffing/statusing —
 // the working-tree half of the watch skips these instead of handing the bare
@@ -60,6 +61,7 @@ export class GitWatch {
   private ignoredDirs = new Set<string>();
   private timer?: ReturnType<typeof setTimeout>;
   private lastSummary: DiffSummary | null = null;
+  private lastStatus: RepoStatus | null = null;
   private disposed = false;
   private truncated = false;
   // Directories still to visit, and a generation stamp so a scan still in
@@ -74,7 +76,7 @@ export class GitWatch {
   private settle: () => void = () => {};
 
   constructor(
-    private readonly onChange: (summary: DiffSummary) => void,
+    private readonly onChange: (summary: DiffSummary, status: RepoStatus) => void,
     private readonly debounceMs = 150,
     private readonly maxWatchedDirs = MAX_WATCHED_DIRS,
   ) {}
@@ -91,6 +93,7 @@ export class GitWatch {
     this.closeHandles();
     this.root = root;
     this.lastSummary = null;
+    this.lastStatus = null;
     this.truncated = false;
 
     if (!root) {
@@ -240,20 +243,34 @@ export class GitWatch {
     this.timer = setTimeout(this.refresh, this.debounceMs);
   };
 
+  /** Force a debounced re-read (e.g. after HTTP stage/commit). */
+  kick() {
+    this.schedule();
+  }
+
   private refresh = () => {
     this.timer = undefined;
     if (this.disposed) return;
     let summary = EMPTY_DIFF_SUMMARY;
+    let status = EMPTY_REPO_STATUS;
     if (this.root) {
       try {
         summary = readDiffSummary(this.root);
       } catch (error) {
         if (!(error instanceof GitDiffError)) return;
       }
+      try {
+        status = readRepoStatus(this.root);
+      } catch {
+        status = EMPTY_REPO_STATUS;
+      }
     }
-    if (JSON.stringify(summary.files) === JSON.stringify(this.lastSummary?.files)) return;
+    const sameSummary = JSON.stringify(summary.files) === JSON.stringify(this.lastSummary?.files);
+    const sameStatus = JSON.stringify(status) === JSON.stringify(this.lastStatus);
+    if (sameSummary && sameStatus) return;
     this.lastSummary = summary;
-    this.onChange(summary);
+    this.lastStatus = status;
+    this.onChange(summary, status);
   };
 
   private closeHandles() {
@@ -270,6 +287,7 @@ export class GitWatch {
       this.closeHandles();
       this.root = null;
       this.lastSummary = null;
+      this.lastStatus = null;
       this.refresh();
     });
   }

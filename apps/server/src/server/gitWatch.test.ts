@@ -55,6 +55,26 @@ test('debounces native worktree events and suppresses an identical summary', asy
   });
 });
 
+test('kick schedules a refresh after an out-of-band index change', async () => {
+  await withRepo(async (root) => {
+    const seen: DiffSummary[] = [];
+    const watch = new GitWatch((summary) => seen.push(summary), 50);
+    watch.setRoot(root);
+    await watch.whenScanned();
+    expect(seen).toEqual([{ files: [] }]);
+
+    writeFileSync(path.join(root, 'main.ts'), 'export const answer = 99;\n');
+    execSync('git add main.ts', { cwd: root });
+    // Bypass inotify: HTTP stage/commit path calls kick() after the write.
+    watch.kick();
+    await waitFor(() => seen.length === 2);
+    expect(seen[1]).toEqual({
+      files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: true }],
+    });
+    watch.dispose();
+  });
+});
+
 test('retargets to a new repository and stops publishing the old root', async () => {
   await withRepo(async (first) => {
     await withRepo(async (second) => {

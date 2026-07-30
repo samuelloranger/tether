@@ -7,7 +7,15 @@ import { MIN_TOUCH_TARGET } from './interaction';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 
-export function FileViewer({ file, onBack }: { file: FileView; onBack: () => void }) {
+export function FileViewer({
+  file,
+  onBack,
+  backLabel = 'Back to terminal',
+}: {
+  file: FileView;
+  onBack: () => void;
+  backLabel?: string;
+}) {
   const { theme } = useAppTheme();
   const scrollRef = useRef<ScrollView>(null);
   const rowOffsets = useRef(new Map<number, number>());
@@ -39,7 +47,7 @@ export function FileViewer({ file, onBack }: { file: FileView; onBack: () => voi
       <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="Back to terminal"
+          accessibilityLabel={backLabel}
           onPress={onBack}
           style={styles.back}
         >

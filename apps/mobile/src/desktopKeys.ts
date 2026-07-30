@@ -5,11 +5,27 @@
 // for pure modifier presses.
 //
 // Two sentinels are returned for the cases the caller must handle specially:
-//   COPY  — Ctrl/Cmd+C with an active text selection (let the browser copy).
-//   PASTE — Ctrl/Cmd+V (read the clipboard and send a bracketed paste).
+//   COPY         — Ctrl/Cmd+C with an active text selection (caller writes the clipboard).
+//   PASTE        — Ctrl/Cmd+V or Shift+Insert (read the clipboard and send a bracketed paste).
+//   SELECT_ALL   — Ctrl+A on Windows/Linux, Cmd+A on macOS (Ctrl+A stays BOL on Mac).
+//   NEW_TERMINAL — Ctrl/Cmd+T (open a new session).
+//   FONT_LARGER  — Ctrl/Cmd+= or + (increase terminal font).
+//   FONT_SMALLER — Ctrl/Cmd+- (decrease terminal font).
+//
+// `hasSelection` must come from the xterm selection (terminal.getSelection() /
+// onSelection), not window.getSelection() — xterm paints selection on canvas/
+// WebGL, so the DOM Selection API is always empty for terminal text.
+//
+// Desktop app shortcuts are primarily handled in TerminalView's
+// attachCustomKeyEventHandler (xterm's textarea owns focus). The window-level
+// handler is only a fallback when focus is on body.
 
 export const COPY = '__TETHER_COPY__';
 export const PASTE = '__TETHER_PASTE__';
+export const SELECT_ALL = '__TETHER_SELECT_ALL__';
+export const NEW_TERMINAL = '__TETHER_NEW_TERMINAL__';
+export const FONT_LARGER = '__TETHER_FONT_LARGER__';
+export const FONT_SMALLER = '__TETHER_FONT_SMALLER__';
 
 // Cursor keys (arrows, Home, End) switch between CSI (ESC [ x) and SS3 (ESC O x)
 // depending on the app's DECCKM mode. `final` is the last byte (A/B/C/D/H/F).
@@ -55,7 +71,12 @@ export interface KeyLike {
   shiftKey: boolean;
 }
 
-export function keyToBytes(e: KeyLike, appCursor = false, isMac = false): string | null {
+export function keyToBytes(
+  e: KeyLike,
+  appCursor = false,
+  isMac = false,
+  hasSelection = false,
+): string | null {
   const { key } = e;
 
   // Pure modifier presses produce nothing.
@@ -74,15 +95,27 @@ export function keyToBytes(e: KeyLike, appCursor = false, isMac = false): string
   // double duty via the copy-vs-SIGINT heuristic below.
   const clip = isMac ? e.metaKey : e.ctrlKey || e.metaKey;
 
-  // Copy only when there's a selection.
+  // Copy only when there's a selection (from xterm, passed by the caller).
+  // Ctrl+Shift+C is the explicit copy chord on Win/Linux terminals — never SIGINT.
   if (clip && (key === 'c' || key === 'C')) {
-    const sel = typeof window !== 'undefined' ? window.getSelection()?.toString() : '';
-    if (sel) return COPY;
+    if (hasSelection) return COPY;
+    if (e.shiftKey) return null;
     // Windows/Linux: Ctrl+C with no selection is SIGINT. macOS: Cmd+C with no
     // selection is a no-op (Ctrl+C is the SIGINT path, handled as a control byte).
     return isMac ? null : '\x03';
   }
   if (clip && (key === 'v' || key === 'V')) return PASTE;
+  // Select all: Ctrl+A on Windows/Linux, Cmd+A on macOS. On macOS Ctrl+A must
+  // stay beginning-of-line (\x01), so only Meta maps to SELECT_ALL there.
+  if (isMac ? e.metaKey : e.ctrlKey) {
+    if (key === 'a' || key === 'A') return SELECT_ALL;
+  }
+  // Shift+Insert pastes on Linux/Windows terminals.
+  if (e.shiftKey && key === 'Insert') return PASTE;
+  // App chrome shortcuts (same clip modifier as copy/paste).
+  if (clip && (key === 't' || key === 'T')) return NEW_TERMINAL;
+  if (clip && (key === '=' || key === '+' || key === 'Add')) return FONT_LARGER;
+  if (clip && (key === '-' || key === '_' || key === 'Subtract')) return FONT_SMALLER;
 
   // Ctrl+letter → control byte (Ctrl+A = 0x01 … Ctrl+Z = 0x1a). On macOS this is
   // also how Ctrl+C→SIGINT and Ctrl+V→0x16 (verbatim) happen; Cmd is above.

@@ -3,6 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { newlyWaiting, type SessionActivity } from '../activity';
+import { writeClipboard } from '../clipboard';
 import { notify as sendNativeNotification } from '../desktopNotify';
 import { isDesktop } from '../platform';
 import { resumeAction } from '../resume';
@@ -147,13 +148,27 @@ export function useTerminalSessions({
     cache.touch(key, () => {
       const { numCols: cols, numRows: rows } = dimsRef.current;
       const term = new TerminalEngine(cols || 80, rows || 24);
+      // The full xterm renderer owns user input and terminal-generated replies.
+      // Headless xterm remains the background metadata/serialization model.
       term.onReply = null;
-      term.onClipboardWrite = null;
+      term.onClipboardWrite = (text) => {
+        // Background tabs stay live — an OSC 52 from a hidden session must not
+        // silently overwrite the device clipboard while the user is elsewhere.
+        if (key === activeKeyRef.current) void writeClipboard(text).catch(() => {});
+      };
       return {
         term,
         sinceId: 0,
         lastAppliedId: 0,
         diffSummary: { files: [] },
+        repoStatus: {
+          branch: '',
+          shortSha: '',
+          detached: false,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+        },
         lastBellCount: 0,
         lastNotifyCount: 0,
       };

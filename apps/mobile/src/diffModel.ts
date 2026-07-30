@@ -72,7 +72,21 @@ export function diffLineKind(line: string): DiffLineKind {
     line.startsWith('index ') ||
     line.startsWith('---') ||
     line.startsWith('+++') ||
-    line.startsWith('@@')
+    line.startsWith('@@') ||
+    // Extended git headers — must be meta before the +/-/context classifier,
+    // otherwise "new file mode …" is treated as context and the leading "n"
+    // is stripped into "ew file mode …".
+    line.startsWith('new file mode') ||
+    line.startsWith('deleted file mode') ||
+    line.startsWith('old mode') ||
+    line.startsWith('new mode') ||
+    line.startsWith('similarity index') ||
+    line.startsWith('dissimilarity index') ||
+    line.startsWith('rename from') ||
+    line.startsWith('rename to') ||
+    line.startsWith('copy from') ||
+    line.startsWith('copy to') ||
+    line.startsWith('Binary files ')
   )
     return 'meta';
   if (line.startsWith('+')) return 'add';
