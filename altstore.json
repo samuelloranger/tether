@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "2.6.0",
+          "date": "2026-07-30",
+          "localizedDescription": "## Git Changes: desktop drawer + mobile review\n\nReview and commit without leaving the session — VS Code–style on desktop, PR-style on the phone.\n\n### Desktop (`GitDrawer`)\n- Full-size Changes panel over the terminal column (sidebar stays).\n- Working tree + History, resizable file list, stage/unstage/discard (file, hunk, and bulk).\n- Commit with a chevron menu for **Amend**, **Undo last commit**, and **Push**.\n- Branch / ahead–behind status; open a diff line in the file viewer stacked above Changes.\n\n### Mobile (`GitReview`)\n- Full-screen continuous review: staged then unstaged, sticky commit bar, same git actions.\n\n### Also in this release\n- Keyboard appearance follows the **app** theme, not the system theme.\n- D-pad direction lock, desktop backspace routing, and action-bar tweaks.\n- Terminal renderer bundle builds at install time (no longer committed).",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v2.6.0/tether.ipa",
+          "size": 9416881,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "2.5.1",
           "date": "2026-07-28",
           "localizedDescription": "## What's Changed\n* fix(mobile): stop spawning a terminal on connect, and give a host one name by @samuelloranger in https://github.com/samuelloranger/tether/pull/63\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.5.0...v2.5.1",
