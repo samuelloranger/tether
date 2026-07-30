@@ -43,7 +43,8 @@
         "apps/mobile/src/CodeHighlight.tsx",
         "apps/mobile/src/DiffLines.tsx",
         "apps/mobile/src/SideBySideDiff.tsx",
-        "apps/mobile/src/DiffView.tsx",
+        "apps/mobile/src/GitDrawer.tsx",
+        "apps/mobile/src/GitReview.tsx",
         "apps/mobile/src/SelectionView.tsx",
         "apps/mobile/src/TermRow.tsx",
         "apps/mobile/src/SessionModals.tsx"
