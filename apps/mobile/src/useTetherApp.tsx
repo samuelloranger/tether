@@ -34,8 +34,8 @@ import { useTerminalViewport } from './tether/useTerminalViewport';
 // Constants for async storage keys
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
 
-export type { GitLogEntry } from './tether/types';
 export type { ReviewDiffSlot } from './fetchReviewDiff';
+export type { GitLogEntry } from './tether/types';
 
 export function useTetherApp() {
   // Proceed once fonts settle OR fail — never gate the whole app on a font fetch.

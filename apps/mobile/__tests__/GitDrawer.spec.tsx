@@ -1,7 +1,7 @@
 import { fireEvent, render } from '@testing-library/react-native';
 import { AppThemeProvider } from '../src/AppThemeProvider';
-import { GitDrawer } from '../src/GitDrawer';
 import type { DiffSummary } from '../src/diffModel';
+import { GitDrawer } from '../src/GitDrawer';
 
 const summary: DiffSummary = {
   files: [

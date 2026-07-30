@@ -1,3 +1,4 @@
+import type { StyleProp, ViewStyle } from 'react-native';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -6,7 +7,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { StyleProp, ViewStyle } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { canCommit } from './gitReviewModel';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';

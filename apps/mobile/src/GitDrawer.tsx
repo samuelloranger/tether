@@ -1,5 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
 import { useEffect, useRef, useState } from 'react';
+import type { View as RNView } from 'react-native';
 import {
   ScrollView,
   StyleSheet,
@@ -8,16 +9,15 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import type { View as RNView } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { CommitBox } from './CommitBox';
 import { DiffFileBody } from './DiffFileBody';
 import { buildFileTree, type DiffSummary, groupSummary, isImagePath } from './diffModel';
 import { FileTree } from './FileTree';
 import { GitTabBar } from './GitTabBar';
+import { toggleSetMember } from './gitReviewModel';
 import { HistoryList } from './HistoryList';
 import { MIN_TOUCH_TARGET } from './interaction';
-import { toggleSetMember } from './gitReviewModel';
 import type { GitLogEntry } from './useTetherApp';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;

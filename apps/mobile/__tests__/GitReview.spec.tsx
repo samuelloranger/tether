@@ -1,8 +1,8 @@
 import { fireEvent, render } from '@testing-library/react-native';
 import { AppThemeProvider } from '../src/AppThemeProvider';
-import { GitReview } from '../src/GitReview';
 import type { DiffSummary } from '../src/diffModel';
 import type { ReviewDiffSlot } from '../src/fetchReviewDiff';
+import { GitReview } from '../src/GitReview';
 
 const summary: DiffSummary = {
   files: [

@@ -19,7 +19,7 @@ Clients are a single Expo React Native codebase: iOS/Android app, plus a Tauri d
   - `App.tsx` + `src/useTetherApp.tsx` (composition facade), `src/TerminalScreen.tsx`, `src/SessionDrawer.tsx`, `src/UtilityBar.tsx`, `src/Dpad.tsx`, `src/ConfigScreen.tsx`, `src/ServerSettings.tsx`.
   - `src/tether/` — the hook layer behind the facade: `useConnectionConfig`, `useTerminalSessions` (+ `terminalSessionLogic.ts`, pure), `useTerminalInput`, `usePresentations`, `useTerminalViewport`, `useTerminalUiState`, `useAppPreferences`, `useDesktopEffects`, `useDesktopUpdater`. Multi-host lives here too: `hostStore` (profiles + migration), `hostClient` (per-host URLs/auth/WS), `hostHealth` (reachability state machine), `hostPolling`.
   - Terminal: `src/terminalEngine.ts` (`@xterm/headless` engine), `src/TerminalView*.tsx` + `src/terminalRendererHtml.ts` + `terminal-renderer/` (built to gitignored `src/terminalRenderer.generated.ts`, xterm.js inside a WebView), `src/terminalRendererProtocol.ts` (RN ↔ WebView messages), `src/ptyInput.ts` / `src/input.ts` / `src/mouseInput.ts`.
-  - Features: `src/DiffView.tsx` + `src/diffModel.ts`, `src/FileTree.tsx` / `src/FileViewer.tsx`, `src/PresentationView*.tsx`, `src/CodeHighlight.tsx`, `src/sessionCache.ts` (LRU tab cache).
+  - Features: `src/GitDrawer.tsx` / `src/GitReview.tsx` + `src/diffModel.ts`, `src/FileTree.tsx` / `src/FileViewer.tsx`, `src/PresentationView*.tsx`, `src/CodeHighlight.tsx`, `src/sessionCache.ts` (LRU tab cache).
   - Desktop-only: `src/desktop*.ts`, `src/TitleBar.tsx`, `src/windowControls.ts`, `src-tauri/` (Rust shell, updater, notifications).
 - `docs/` — VitePress site (`architecture.md`, `data-flow.md`, `security.md`, `terminal/`, `superpowers/specs/` design docs).
 
