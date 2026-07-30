@@ -19,9 +19,10 @@ import { useAppTheme } from './AppThemeProvider';
 import { ChangeBanner } from './ChangeBanner';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ContextMenu } from './ContextMenu';
-import { DiffView } from './DiffView';
 import { desktopLayout } from './desktopLayout';
 import { FileViewer } from './FileViewer';
+import { GitDrawer } from './GitDrawer';
+import { GitReview } from './GitReview';
 import { OverflowMenu } from './OverflowMenu';
 import { PresentationBanner } from './PresentationBanner';
 import { PresentationView } from './PresentationView';
@@ -123,6 +124,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     selectCommit,
     diffSideBySide,
     toggleDiffSideBySide,
+    reviewDiffs,
+    loadReviewDiffs,
+    retryReviewDiff,
     selectTerminal,
     selectPresentation,
     closePresentation,
@@ -148,7 +152,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     sendSnippet,
     refreshSessions,
     refreshHost,
-    openAddHost,
     openEditHost,
     openServerSettings,
     sendTyped,
@@ -237,7 +240,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   const backTarget = activePresentation?.sessionId ?? activeId;
   const backSession = drawerSessions.find((s) => s.id === backTarget);
   const backLabel = backSession ? sessionLabel(backSession) : backTarget;
-  const terminalVisible = !fileView && !diffOpen && !activePresentation;
+  // Desktop GitDrawer keeps the terminal mounted; only mobile GitReview takes over.
+  const gitTakeover = diffOpen && !desktopUi;
+  const terminalVisible = !fileView && !gitTakeover && !activePresentation;
   useEffect(() => {
     if (terminalVisible) hydrateRenderer();
   }, [terminalVisible]);
@@ -296,7 +301,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           onKill={killActiveOr}
           onRetryHost={refreshHost}
           onReenterPassword={openEditHost}
-          onAddHost={openAddHost}
           previews={presentations}
           activePreviewId={activePresentationId}
           onSelectPreview={(id) => {
@@ -311,7 +315,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           }}
         />
 
-        <View style={styles.terminalMain}>
+        <View style={[styles.terminalMain, { position: 'relative' }]}>
           {/* Mobile header panel */}
           {!desktopUi && (
             <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.surface }}>
@@ -398,17 +402,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           )}
           {fileView ? (
             <FileViewer file={fileView} onBack={closeFile} />
-          ) : diffOpen ? (
-            <DiffView
+          ) : gitTakeover ? (
+            <GitReview
               summary={changeSummary}
-              selectedPath={diffSelectedPath}
-              diffMode={diffMode}
-              diffText={diffText}
-              diffTruncated={diffTruncated}
-              diffLoading={diffLoading}
-              diffImage={diffImage}
-              onSelectFile={selectDiffFile}
-              onDeselectFile={deselectDiffFile}
               onBack={closeDiff}
               onStageFile={stageFile}
               onUnstageFile={unstageFile}
@@ -419,8 +415,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               historyCommit={historyCommit}
               onLoadHistory={loadGitLog}
               onSelectCommit={selectCommit}
-              sideBySide={diffSideBySide}
-              onToggleSideBySide={toggleDiffSideBySide}
+              reviewDiffs={reviewDiffs}
+              onRetryReviewDiff={retryReviewDiff}
+              loadReviewDiffs={loadReviewDiffs}
             />
           ) : activePresentation ? (
             <>
@@ -438,7 +435,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             </>
           ) : (
             <>
-              <ChangeBanner summary={changeSummary} onPress={openDiff} />
+              {!diffOpen && <ChangeBanner summary={changeSummary} onPress={openDiff} />}
               {!desktopUi && sessionPreview && (
                 <PresentationBanner
                   label={`Preview ready: ${sessionPreview.title}`}
@@ -480,6 +477,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                         onResize={onRendererResize}
                         onOpenLink={openFile}
                         onSelection={onRendererSelection}
+                        onPaste={handlePaste}
+                        onNewTerminal={newTerminal}
+                        onFontZoom={changeFontSize}
                         onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
                         onRecover={hydrateRenderer}
                         onStatus={setRendererStatus}
@@ -492,6 +492,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                       onResize={onRendererResize}
                       onOpenLink={openFile}
                       onSelection={onRendererSelection}
+                      onPaste={handlePaste}
+                      onNewTerminal={newTerminal}
+                      onFontZoom={changeFontSize}
                       onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
                       onRecover={hydrateRenderer}
                       onStatus={setRendererStatus}
@@ -551,6 +554,32 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               </View>
             </>
           )}
+
+          {diffOpen && desktopUi ? (
+            <GitDrawer
+              summary={changeSummary}
+              selectedPath={diffSelectedPath}
+              diffMode={diffMode}
+              diffText={diffText}
+              diffTruncated={diffTruncated}
+              diffLoading={diffLoading}
+              diffImage={diffImage}
+              onSelectFile={selectDiffFile}
+              onDeselectFile={deselectDiffFile}
+              onBack={closeDiff}
+              onStageFile={stageFile}
+              onUnstageFile={unstageFile}
+              onDiscardFile={discardFile}
+              onToggleHunk={toggleHunk}
+              onCommit={commitStagedChanges}
+              historyEntries={historyEntries}
+              historyCommit={historyCommit}
+              onLoadHistory={loadGitLog}
+              onSelectCommit={selectCommit}
+              sideBySide={diffSideBySide}
+              onToggleSideBySide={toggleDiffSideBySide}
+            />
+          ) : null}
 
           {/* Overflow menu (header ⋯) */}
           {terminalVisible && (

@@ -896,7 +896,8 @@ export function useTetherApp() {
     presentations,
     activePresentationId,
     fileViewOpen: !!fileView,
-    diffOpen,
+    // Desktop GitDrawer keeps the terminal live; only mobile GitReview is a takeover.
+    diffOpen: diffOpen && !isDesktop,
     getSessionEntry,
     getActiveSessionId,
     getTerminalSelection,
