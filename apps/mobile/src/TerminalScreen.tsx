@@ -101,8 +101,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     fileLoading,
     openFile,
     closeFile,
+    openDiffFileLine,
     diffOpen,
     changeSummary,
+    repoStatus,
     diffSelectedPath,
     diffText,
     diffTruncated,
@@ -116,14 +118,20 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     stageFile,
     unstageFile,
     discardFile,
+    stageAllFiles,
+    unstageAllFiles,
+    discardAllFiles,
     toggleHunk,
     commitStagedChanges,
+    undoLastCommit,
+    pushChanges,
     historyEntries,
     historyCommit,
     loadGitLog,
     selectCommit,
     diffSideBySide,
     toggleDiffSideBySide,
+    gitDrawerLeftWidthKey,
     reviewDiffs,
     loadReviewDiffs,
     retryReviewDiff,
@@ -280,6 +288,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           }
           status={titleBarStatus}
           onNew={newTerminal}
+          onChanges={openDiff}
+          changeSummary={changeSummary}
           onSettings={() => setIsConfiguring(true)}
           onMenu={() => {
             if (terminalVisible) setMenuOpen(true);
@@ -394,15 +404,13 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 inset: 0,
                 alignItems: 'center',
                 justifyContent: 'center',
-                zIndex: 1,
+                zIndex: 61,
               }}
             >
               <ActivityIndicator color={theme.colors.accent} />
             </View>
           )}
-          {fileView ? (
-            <FileViewer file={fileView} onBack={closeFile} />
-          ) : gitTakeover ? (
+          {gitTakeover ? (
             <GitReview
               summary={changeSummary}
               onBack={closeDiff}
@@ -411,6 +419,14 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onDiscardFile={discardFile}
               onToggleHunk={toggleHunk}
               onCommit={commitStagedChanges}
+              onAmend={(message) => commitStagedChanges(message, true)}
+              onUndoCommit={() => void undoLastCommit()}
+              onPush={() => void pushChanges()}
+              onStageAll={() => void stageAllFiles()}
+              onUnstageAll={() => void unstageAllFiles()}
+              onDiscardAll={() => void discardAllFiles()}
+              onOpenLine={openDiffFileLine}
+              repoStatus={repoStatus}
               historyEntries={historyEntries}
               historyCommit={historyCommit}
               onLoadHistory={loadGitLog}
@@ -435,7 +451,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             </>
           ) : (
             <>
-              {!diffOpen && <ChangeBanner summary={changeSummary} onPress={openDiff} />}
+              {!desktopUi && !diffOpen && (
+                <ChangeBanner summary={changeSummary} onPress={openDiff} />
+              )}
               {!desktopUi && sessionPreview && (
                 <PresentationBanner
                   label={`Preview ready: ${sessionPreview.title}`}
@@ -572,6 +590,15 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               onDiscardFile={discardFile}
               onToggleHunk={toggleHunk}
               onCommit={commitStagedChanges}
+              onAmend={(message) => commitStagedChanges(message, true)}
+              onUndoCommit={() => void undoLastCommit()}
+              onPush={() => void pushChanges()}
+              onStageAll={() => void stageAllFiles()}
+              onUnstageAll={() => void unstageAllFiles()}
+              onDiscardAll={() => void discardAllFiles()}
+              onOpenLine={openDiffFileLine}
+              repoStatus={repoStatus}
+              leftWidthStorageKey={gitDrawerLeftWidthKey}
               historyEntries={historyEntries}
               historyCommit={historyCommit}
               onLoadHistory={loadGitLog}
@@ -579,6 +606,16 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               sideBySide={diffSideBySide}
               onToggleSideBySide={toggleDiffSideBySide}
             />
+          ) : null}
+
+          {fileView ? (
+            <View style={styles.fileOverlay} pointerEvents="box-none">
+              <FileViewer
+                file={fileView}
+                onBack={closeFile}
+                backLabel={diffOpen ? 'Back to changes' : 'Back to terminal'}
+              />
+            </View>
           ) : null}
 
           {/* Overflow menu (header ⋯) */}

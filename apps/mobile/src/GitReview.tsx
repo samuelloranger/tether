@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { CommitBox } from './CommitBox';
@@ -8,6 +8,12 @@ import { type DiffSummary, groupSummary, isImagePath } from './diffModel';
 import type { ReviewDiffSlot } from './fetchReviewDiff';
 import { GitTabBar } from './GitTabBar';
 import { reviewDiffKey, reviewFileEntries, toggleSetMember } from './gitReviewModel';
+import {
+  canPushHead,
+  canRewriteHead,
+  formatRepoStatusLabel,
+  type RepoStatus,
+} from './gitStatusModel';
 import { HistoryList } from './HistoryList';
 import { MIN_TOUCH_TARGET } from './interaction';
 import type { GitLogEntry } from './useTetherApp';
@@ -22,6 +28,14 @@ export function GitReview({
   onDiscardFile,
   onToggleHunk,
   onCommit,
+  onAmend,
+  onUndoCommit,
+  onPush,
+  onStageAll,
+  onUnstageAll,
+  onDiscardAll,
+  onOpenLine,
+  repoStatus,
   historyEntries,
   historyCommit,
   onLoadHistory,
@@ -37,6 +51,14 @@ export function GitReview({
   onDiscardFile: (path: string) => void;
   onToggleHunk: (path: string, hunkIndex: number, staged: boolean) => void;
   onCommit: (message: string) => Promise<boolean>;
+  onAmend: (message: string) => Promise<boolean>;
+  onUndoCommit: () => void;
+  onPush: () => void;
+  onStageAll: () => void;
+  onUnstageAll: () => void;
+  onDiscardAll: () => void;
+  onOpenLine: (path: string, line: number) => void;
+  repoStatus: RepoStatus;
   historyEntries: GitLogEntry[] | null;
   historyCommit: { entry: GitLogEntry; diff: string | null; truncated: boolean } | null;
   onLoadHistory: () => void;
@@ -54,11 +76,22 @@ export function GitReview({
   const groups = groupSummary(summary);
   const entries = reviewFileEntries(summary);
   const viewingCommit = tab === 'history' && historyCommit !== null;
+  const statusLabel = formatRepoStatusLabel(repoStatus);
+  const canAmend = canRewriteHead(repoStatus);
+  const canPush = canPushHead(repoStatus);
 
   const submitCommit = async () => {
     if (!commitMessage.trim() || committing) return;
     setCommitting(true);
     const ok = await onCommit(commitMessage.trim());
+    setCommitting(false);
+    if (ok) setCommitMessage('');
+  };
+
+  const submitAmend = async () => {
+    if (!commitMessage.trim() || committing) return;
+    setCommitting(true);
+    const ok = await onAmend(commitMessage.trim());
     setCommitting(false);
     if (ok) setCommitMessage('');
   };
@@ -70,10 +103,13 @@ export function GitReview({
   const backTarget = viewingCommit ? () => onSelectCommit(null) : onBack;
   const backLabel = viewingCommit ? 'Back to history' : 'Back to terminal';
 
-  const sectionHeader = (label: string, count: number) => (
-    <Text style={[styles.sectionHeader, { color: theme.colors.textMuted }]}>
-      {label} ({count})
-    </Text>
+  const sectionHeader = (label: string, count: number, actions?: ReactNode) => (
+    <View style={styles.sectionHeaderRow}>
+      <Text style={[styles.sectionHeader, { color: theme.colors.textMuted }]}>
+        {label} ({count})
+      </Text>
+      {actions}
+    </View>
   );
 
   const renderFileBlock = (
@@ -165,6 +201,7 @@ export function GitReview({
               onHunkPress={(hunkIndex) => onToggleHunk(path, hunkIndex, mode === 'staged')}
               hunkActionLabel={mode === 'staged' ? 'Unstage' : 'Stage'}
               onRetry={() => onRetryReviewDiff(mode, path)}
+              onOpenLine={(line) => onOpenLine(path, line)}
             />
           </View>
         ) : null}
@@ -187,6 +224,17 @@ export function GitReview({
           {headerLabel}
         </Text>
       </View>
+      {statusLabel && !viewingCommit ? (
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.statusLine,
+            { color: theme.colors.textMuted, borderBottomColor: theme.colors.border },
+          ]}
+        >
+          {statusLabel}
+        </Text>
+      ) : null}
 
       {!viewingCommit ? (
         <GitTabBar
@@ -220,6 +268,11 @@ export function GitReview({
             message={commitMessage}
             onChangeMessage={setCommitMessage}
             onCommit={() => void submitCommit()}
+            onAmend={() => void submitAmend()}
+            onUndoCommit={onUndoCommit}
+            onPush={onPush}
+            canAmend={canAmend}
+            canPush={canPush}
             stagedCount={groups.staged.length}
             committing={committing}
             style={{ borderTopWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth }}
@@ -231,12 +284,58 @@ export function GitReview({
               </View>
             ) : (
               <>
-                {groups.staged.length > 0 ? sectionHeader('Staged', groups.staged.length) : null}
+                {groups.staged.length > 0
+                  ? sectionHeader(
+                      'Staged',
+                      groups.staged.length,
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="Unstage all"
+                        onPress={onUnstageAll}
+                        style={styles.sectionAction}
+                      >
+                        <Text
+                          style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}
+                        >
+                          Unstage all
+                        </Text>
+                      </TouchableOpacity>,
+                    )
+                  : null}
                 {entries
                   .filter((e) => e.mode === 'staged')
                   .map((e) => renderFileBlock(e.mode, e.path, e.file))}
                 {groups.unstaged.length > 0
-                  ? sectionHeader('Changes', groups.unstaged.length)
+                  ? sectionHeader(
+                      'Changes',
+                      groups.unstaged.length,
+                      <View style={styles.sectionActions}>
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel="Stage all"
+                          onPress={onStageAll}
+                          style={styles.sectionAction}
+                        >
+                          <Text
+                            style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}
+                          >
+                            Stage all
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel="Discard all"
+                          onPress={onDiscardAll}
+                          style={styles.sectionAction}
+                        >
+                          <Text
+                            style={{ color: theme.colors.danger, fontSize: 12, fontWeight: '600' }}
+                          >
+                            Discard all
+                          </Text>
+                        </TouchableOpacity>
+                      </View>,
+                    )
                   : null}
                 {entries
                   .filter((e) => e.mode === 'unstaged')
@@ -266,16 +365,31 @@ const styles = StyleSheet.create({
   },
   backText: { ...TEXT_METRICS },
   path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
+  statusLine: {
+    fontFamily: 'monospace',
+    fontSize: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   scrollContent: { paddingBottom: 24, alignItems: 'stretch' },
   center: { padding: 24, alignItems: 'center' },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 16,
+  },
+  sectionActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sectionAction: { minHeight: 28, justifyContent: 'center' },
   sectionHeader: {
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginTop: 12,
-    marginBottom: 4,
-    paddingHorizontal: 16,
   },
   fileBlock: {
     borderBottomWidth: StyleSheet.hairlineWidth,

@@ -14,7 +14,12 @@ import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
 import { fetchDiffImageUri, fetchOneReviewDiff, type ReviewDiffSlot } from './fetchReviewDiff';
 import type { FileView } from './fileView';
-import { mapWithConcurrency, reviewDiffKey, reviewFileEntries } from './gitReviewModel';
+import {
+  mapWithConcurrency,
+  reviewDiffKey,
+  reviewFileEntries,
+  summaryFingerprint,
+} from './gitReviewModel';
 import type { LinkTarget } from './links';
 import { isDesktop, isTauri } from './platform';
 import { sessionLabel } from './sessionLabel';
@@ -33,6 +38,7 @@ import { useTerminalViewport } from './tether/useTerminalViewport';
 
 // Constants for async storage keys
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
+const KEY_GIT_DRAWER_LEFT_WIDTH = 'tether_git_drawer_left_width';
 
 export type { ReviewDiffSlot } from './fetchReviewDiff';
 export type { GitLogEntry } from './tether/types';
@@ -678,12 +684,11 @@ export function useTetherApp() {
     const sessionId = getActiveSessionId();
     const entries = reviewFileEntries(entryFor(sessionId).diffSummary);
     const gen = ++reviewLoadGenRef.current;
-    setReviewDiffs((prev) => {
-      const next = { ...prev };
-      for (const e of entries) {
-        const key = reviewDiffKey(e.mode, e.path);
-        if (!next[key] || next[key].status === 'error') next[key] = { status: 'loading' };
-      }
+    // Replace the cache to match the live summary — drop paths that left, and
+    // force a reload so staged/unstaged moves after a WS push aren't sticky.
+    setReviewDiffs(() => {
+      const next: Record<string, ReviewDiffSlot> = {};
+      for (const e of entries) next[reviewDiffKey(e.mode, e.path)] = { status: 'loading' };
       return next;
     });
     void mapWithConcurrency(entries, 5, async (e) => {
@@ -726,12 +731,14 @@ export function useTetherApp() {
   const openDiff = useCallback(() => {
     setDiffOpen(true);
     setDiffSelectedPath(null);
+    diffSelectedPathRef.current = null;
+    setDiffMode(null);
+    diffModeRef.current = null;
     setDiffText(null);
     setDiffTruncated(false);
     setDiffImage(null);
     setHistoryCommit(null);
-    loadReviewDiffs();
-  }, [loadReviewDiffs]);
+  }, []);
 
   // --- Git write ops + history (diff view v2) ---
 
@@ -771,26 +778,23 @@ export function useTetherApp() {
     async (path: string) => {
       try {
         await gitPost('stage', { path });
-        refreshOpenDiff();
-        loadReviewDiffs();
+        // Summary + review cache refresh via the live WS `diff` effect.
       } catch (error) {
         void notify('Stage failed', String(error), 'error');
       }
     },
-    [gitPost, refreshOpenDiff, loadReviewDiffs],
+    [gitPost],
   );
 
   const unstageFile = useCallback(
     async (path: string) => {
       try {
         await gitPost('unstage', { path });
-        refreshOpenDiff();
-        loadReviewDiffs();
       } catch (error) {
         void notify('Unstage failed', String(error), 'error');
       }
     },
-    [gitPost, refreshOpenDiff, loadReviewDiffs],
+    [gitPost],
   );
 
   const discardFile = useCallback(
@@ -804,13 +808,43 @@ export function useTetherApp() {
       try {
         await gitPost('discard', { path });
         if (diffSelectedPathRef.current === path) deselectDiffFile();
-        loadReviewDiffs();
       } catch (error) {
         void notify('Discard failed', String(error), 'error');
       }
     },
-    [gitPost, deselectDiffFile, loadReviewDiffs],
+    [gitPost, deselectDiffFile],
   );
+
+  const stageAllFiles = useCallback(async () => {
+    try {
+      await gitPost('stage-all', {});
+    } catch (error) {
+      void notify('Stage all failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const unstageAllFiles = useCallback(async () => {
+    try {
+      await gitPost('unstage-all', {});
+    } catch (error) {
+      void notify('Unstage all failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const discardAllFiles = useCallback(async () => {
+    const ok = await confirmAction(
+      'Discard all unstaged changes?',
+      "Every unstaged file will be restored or deleted. This can't be undone.",
+      { confirmLabel: 'Discard all', destructive: true },
+    );
+    if (!ok) return;
+    try {
+      await gitPost('discard-all', {});
+      deselectDiffFile();
+    } catch (error) {
+      void notify('Discard all failed', String(error), 'error');
+    }
+  }, [gitPost, deselectDiffFile]);
 
   const toggleHunk = useCallback(
     async (path: string, hunkIndex: number, staged: boolean) => {
@@ -819,25 +853,52 @@ export function useTetherApp() {
       } catch (error) {
         void notify(staged ? 'Unstage hunk failed' : 'Stage hunk failed', String(error), 'error');
       }
-      // Success or 409-stale, the right move is the same: re-read the diff.
-      refreshOpenDiff();
-      loadReviewDiffs();
+      // 409-stale or success: wait for the WS summary so we don't rebuild from
+      // a pre-op staged/unstaged split.
     },
-    [gitPost, refreshOpenDiff, loadReviewDiffs],
+    [gitPost],
   );
 
   const commitStagedChanges = useCallback(
-    async (message: string) => {
+    async (message: string, amend = false) => {
       try {
-        await gitPost('commit', { message });
-        loadReviewDiffs();
+        await gitPost('commit', { message, ...(amend ? { amend: true } : {}) });
         return true;
       } catch (error) {
-        void notify('Commit failed', String(error), 'error');
+        void notify(amend ? 'Amend failed' : 'Commit failed', String(error), 'error');
         return false;
       }
     },
-    [gitPost, loadReviewDiffs],
+    [gitPost],
+  );
+
+  const undoLastCommit = useCallback(async () => {
+    const ok = await confirmAction(
+      'Undo last commit?',
+      'HEAD will move back one commit. Changes stay staged.',
+      { confirmLabel: 'Undo commit' },
+    );
+    if (!ok) return;
+    try {
+      await gitPost('undo-commit', {});
+    } catch (error) {
+      void notify('Undo commit failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const pushChanges = useCallback(async () => {
+    try {
+      await gitPost('push', {});
+    } catch (error) {
+      void notify('Push failed', String(error), 'error');
+    }
+  }, [gitPost]);
+
+  const openDiffFileLine = useCallback(
+    (path: string, line: number) => {
+      void openFile({ kind: 'file', path, line });
+    },
+    [openFile],
   );
 
   const loadGitLog = useCallback(async () => {
@@ -886,6 +947,37 @@ export function useTetherApp() {
   // touch) falls back to entryFor, which creates it.
   const activeEntry = getSessionEntry(activeId) ?? entryFor(activeId);
   const changeSummary = activeEntry.diffSummary;
+  const repoStatus = activeEntry.repoStatus;
+  const changeSummaryFp = summaryFingerprint(changeSummary);
+  const loadReviewDiffsRef = useRef(loadReviewDiffs);
+  loadReviewDiffsRef.current = loadReviewDiffs;
+  const refreshOpenDiffRef = useRef(refreshOpenDiff);
+  refreshOpenDiffRef.current = refreshOpenDiff;
+  const selectDiffFileRef = useRef(selectDiffFile);
+  selectDiffFileRef.current = selectDiffFile;
+  const deselectDiffFileRef = useRef(deselectDiffFile);
+  deselectDiffFileRef.current = deselectDiffFile;
+  // Only re-run when the drawer opens or the live summary fingerprint changes —
+  // not when loadReviewDiffs' identity churns (entryFor is recreated each render).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loaders via refs; summary via fingerprint
+  useEffect(() => {
+    if (!diffOpen) return;
+    loadReviewDiffsRef.current();
+    const path = diffSelectedPathRef.current;
+    const mode = diffModeRef.current;
+    if (!path) return;
+    const entries = reviewFileEntries(changeSummary);
+    if (entries.some((e) => e.path === path && e.mode === mode)) {
+      refreshOpenDiffRef.current();
+      return;
+    }
+    const moved = entries.find((e) => e.path === path);
+    if (moved) {
+      void selectDiffFileRef.current(moved.path, moved.mode);
+      return;
+    }
+    deselectDiffFileRef.current();
+  }, [diffOpen, changeSummaryFp]);
   // Read live off the mutable emulator field — re-derives every render.
   // activeBellCount drives TerminalScreen's on-screen visual bell flash; the
   // OS notification path lives in maybeNotify (per-session, in the ws handler).
@@ -1072,8 +1164,10 @@ export function useTetherApp() {
     fileLoading,
     openFile,
     closeFile,
+    openDiffFileLine,
     diffOpen,
     changeSummary,
+    repoStatus,
     diffSelectedPath,
     diffText,
     diffTruncated,
@@ -1087,14 +1181,20 @@ export function useTetherApp() {
     stageFile,
     unstageFile,
     discardFile,
+    stageAllFiles,
+    unstageAllFiles,
+    discardAllFiles,
     toggleHunk,
     commitStagedChanges,
+    undoLastCommit,
+    pushChanges,
     historyEntries,
     historyCommit,
     loadGitLog,
     selectCommit,
     diffSideBySide,
     toggleDiffSideBySide,
+    gitDrawerLeftWidthKey: KEY_GIT_DRAWER_LEFT_WIDTH,
     reviewDiffs,
     loadReviewDiffs,
     retryReviewDiff,

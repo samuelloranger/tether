@@ -2,16 +2,60 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { writeClipboard } from './clipboard';
+import {
+  COPY,
+  FONT_LARGER,
+  FONT_SMALLER,
+  keyToBytes,
+  NEW_TERMINAL,
+  PASTE,
+  SELECT_ALL,
+} from './desktopKeys';
+import { isMacDesktop } from './platform';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 import { TERMINAL_RENDERER_CSS } from './terminalRenderer.generated';
 import { registerTetherLinks } from './terminalRendererLinks';
 import { type RendererCommand, RendererQueue } from './terminalRendererProtocol';
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ onInput, onResize, onOpenLink, onSelection, onFallback, onStatus }, ref) => {
+  (
+    {
+      onInput,
+      onResize,
+      onOpenLink,
+      onSelection,
+      onPaste,
+      onNewTerminal,
+      onFontZoom,
+      onFallback,
+      onStatus,
+    },
+    ref,
+  ) => {
     const container = useRef<HTMLDivElement>(null);
-    const callbacks = useRef({ onInput, onResize, onOpenLink, onSelection, onFallback, onStatus });
-    callbacks.current = { onInput, onResize, onOpenLink, onSelection, onFallback, onStatus };
+    const callbacks = useRef({
+      onInput,
+      onResize,
+      onOpenLink,
+      onSelection,
+      onPaste,
+      onNewTerminal,
+      onFontZoom,
+      onFallback,
+      onStatus,
+    });
+    callbacks.current = {
+      onInput,
+      onResize,
+      onOpenLink,
+      onSelection,
+      onPaste,
+      onNewTerminal,
+      onFontZoom,
+      onFallback,
+      onStatus,
+    };
     const dispatch = useRef<(command: RendererCommand) => void>(() => {});
     const queue = useMemo(() => new RendererQueue((command) => dispatch.current(command)), []);
 
@@ -60,11 +104,48 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       // Same DOM, same JS context — it is ready the moment it is constructed.
       callbacks.current.onStatus?.('ready');
-      const links = registerTetherLinks(terminal, (target) => callbacks.current.onOpenLink(target));
+      const links = registerTetherLinks(
+        terminal,
+        (target) => callbacks.current.onOpenLink(target),
+        { requireModifierClick: true },
+      );
       const input = terminal.onData((data) => callbacks.current.onInput(data));
       const selection = terminal.onSelectionChange(() =>
         callbacks.current.onSelection?.(terminal.getSelection()),
       );
+      // xterm's hidden textarea owns focus while the terminal is active, so the
+      // window-level desktop key handler intentionally skips it. App shortcuts
+      // (clipboard, select-all, new terminal, font zoom) must live here.
+      terminal.attachCustomKeyEventHandler((event) => {
+        if (event.type !== 'keydown') return true;
+        const action = keyToBytes(event, false, isMacDesktop, !!terminal.getSelection());
+        if (action === COPY) {
+          const text = terminal.getSelection();
+          if (text) void writeClipboard(text);
+          return false;
+        }
+        if (action === PASTE) {
+          void callbacks.current.onPaste?.();
+          return false;
+        }
+        if (action === SELECT_ALL) {
+          terminal.selectAll();
+          return false;
+        }
+        if (action === NEW_TERMINAL) {
+          callbacks.current.onNewTerminal?.();
+          return false;
+        }
+        if (action === FONT_LARGER) {
+          callbacks.current.onFontZoom?.(1);
+          return false;
+        }
+        if (action === FONT_SMALLER) {
+          callbacks.current.onFontZoom?.(-1);
+          return false;
+        }
+        return true;
+      });
       let lastCols = 0;
       let lastRows = 0;
       const fitAndReport = () => {

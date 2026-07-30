@@ -31,16 +31,22 @@ import {
 import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from './gitDiff';
 import {
   commitStaged,
+  discardAll,
   discardPath,
   GitOpsError,
+  pushBranch,
   readCommitDiff,
   readLog,
+  stageAll,
   stageHunk,
   stagePath,
+  undoLastCommit,
+  unstageAll,
   unstageHunk,
   unstagePath,
 } from './gitOps';
 import { resolveGitRoot } from './gitRoot';
+import { readRepoStatus } from './gitStatus';
 import { getLiveCwd } from './liveCwd';
 import { sendTestNotification } from './notifier';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
@@ -48,6 +54,7 @@ import { createControlToken, PresentationRegistry, resolvePresentationFile } fro
 import {
   type FocusSubscriber,
   getActiveSession,
+  kickSessionGitWatch,
   killSession,
   resizeSession,
   setSessionFocus,
@@ -370,16 +377,70 @@ function handleGitError(c: Context, error: unknown): Response {
   throw error;
 }
 
+app.post('/api/sessions/:id/git/push', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
+    if ('response' in resolved) return resolved.response;
+    pushBranch(resolved.root);
+    kickSessionGitWatch(id);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.post('/api/sessions/:id/git/stage-all', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
+    if ('response' in resolved) return resolved.response;
+    stageAll(resolved.root);
+    kickSessionGitWatch(id);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.post('/api/sessions/:id/git/unstage-all', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
+    if ('response' in resolved) return resolved.response;
+    unstageAll(resolved.root);
+    kickSessionGitWatch(id);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.post('/api/sessions/:id/git/discard-all', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
+    if ('response' in resolved) return resolved.response;
+    discardAll(resolved.root);
+    kickSessionGitWatch(id);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
 app.post('/api/sessions/:id/git/:op{stage-hunk|unstage-hunk}', async (c) => {
   const reverse = c.req.param('op') === 'unstage-hunk';
   try {
-    const resolved = gitRootFor(c, c.req.param('id'));
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
     if ('response' in resolved) return resolved.response;
     const body = (await c.req.json().catch(() => ({}))) as { path?: string; hunkIndex?: number };
     if (typeof body.path !== 'string' || !body.path || typeof body.hunkIndex !== 'number') {
       return c.json({ error: 'path and hunkIndex required' }, 400);
     }
     (reverse ? unstageHunk : stageHunk)(resolved.root, body.path, body.hunkIndex);
+    kickSessionGitWatch(id);
     return c.json({ ok: true });
   } catch (error) {
     return handleGitError(c, error);
@@ -389,7 +450,8 @@ app.post('/api/sessions/:id/git/:op{stage-hunk|unstage-hunk}', async (c) => {
 app.post('/api/sessions/:id/git/:op{stage|unstage|discard}', async (c) => {
   const op = c.req.param('op') as 'stage' | 'unstage' | 'discard';
   try {
-    const resolved = gitRootFor(c, c.req.param('id'));
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
     if ('response' in resolved) return resolved.response;
     const body = (await c.req.json().catch(() => ({}))) as { path?: string };
     if (typeof body.path !== 'string' || !body.path) {
@@ -397,6 +459,7 @@ app.post('/api/sessions/:id/git/:op{stage|unstage|discard}', async (c) => {
     }
     const fn = op === 'stage' ? stagePath : op === 'unstage' ? unstagePath : discardPath;
     fn(resolved.root, body.path);
+    kickSessionGitWatch(id);
     return c.json({ ok: true });
   } catch (error) {
     return handleGitError(c, error);
@@ -405,14 +468,39 @@ app.post('/api/sessions/:id/git/:op{stage|unstage|discard}', async (c) => {
 
 app.post('/api/sessions/:id/git/commit', async (c) => {
   try {
-    const resolved = gitRootFor(c, c.req.param('id'));
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
     if ('response' in resolved) return resolved.response;
-    const body = (await c.req.json().catch(() => ({}))) as { message?: string };
+    const body = (await c.req.json().catch(() => ({}))) as { message?: string; amend?: boolean };
     if (typeof body.message !== 'string' || !body.message.trim()) {
       return c.json({ error: 'message required' }, 400);
     }
-    commitStaged(resolved.root, body.message);
+    commitStaged(resolved.root, body.message, body.amend === true);
+    kickSessionGitWatch(id);
     return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.post('/api/sessions/:id/git/undo-commit', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const resolved = gitRootFor(c, id);
+    if ('response' in resolved) return resolved.response;
+    undoLastCommit(resolved.root);
+    kickSessionGitWatch(id);
+    return c.json({ ok: true });
+  } catch (error) {
+    return handleGitError(c, error);
+  }
+});
+
+app.get('/api/sessions/:id/git/status', (c) => {
+  try {
+    const resolved = gitRootFor(c, c.req.param('id'));
+    if ('response' in resolved) return resolved.response;
+    return c.json(readRepoStatus(resolved.root));
   } catch (error) {
     return handleGitError(c, error);
   }
@@ -558,7 +646,7 @@ app.get(
             } else if (data.type === 'exit') {
               ws.send(JSON.stringify({ type: 'exit', exitCode: data.exitCode }));
             } else if (data.type === 'diff') {
-              ws.send(JSON.stringify({ type: 'diff', summary: data.summary }));
+              ws.send(JSON.stringify({ type: 'diff', summary: data.summary, status: data.status }));
             } else if (data.type === 'activity') {
               ws.send(JSON.stringify({ type: 'activity', activity: data.activity }));
             }

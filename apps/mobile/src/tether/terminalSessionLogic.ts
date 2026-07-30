@@ -1,5 +1,6 @@
 import type { SessionActivity } from '../activity';
 import type { DiffFileStat } from '../diffModel';
+import { parseRepoStatus } from '../gitStatusModel';
 import type { DrawerSession } from '../SessionDrawer';
 import { SessionCache, type SessionEntry } from '../sessionCache';
 import type { ConnectionStatus, TerminalConnectionState } from './types';
@@ -131,6 +132,8 @@ export function applyWsMessage({
     const summary = object(payload.summary);
     if (!Array.isArray(summary?.files)) return;
     entry.diffSummary = { files: summary.files as DiffFileStat[] };
+    const status = parseRepoStatus(payload.status);
+    if (status) entry.repoStatus = status;
     if (id === activeId) onGitSummaryChanged();
     return;
   }

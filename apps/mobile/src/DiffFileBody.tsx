@@ -25,6 +25,7 @@ export function DiffFileBody({
   onHunkPress,
   hunkActionLabel,
   onRetry,
+  onOpenLine,
 }: {
   loading: boolean;
   error?: string | null;
@@ -37,6 +38,7 @@ export function DiffFileBody({
   onHunkPress?: (hunkIndex: number) => void;
   hunkActionLabel?: string;
   onRetry?: () => void;
+  onOpenLine?: (line: number) => void;
 }) {
   const { theme } = useAppTheme();
 
@@ -86,6 +88,7 @@ export function DiffFileBody({
         path={path}
         onHunkPress={onHunkPress}
         hunkActionLabel={hunkActionLabel}
+        onOpenLine={onOpenLine}
       />
     </ScrollView>
   );

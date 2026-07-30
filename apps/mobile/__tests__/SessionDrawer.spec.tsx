@@ -37,7 +37,6 @@ function renderDrawer(overrides: Partial<Parameters<typeof SessionDrawer>[0]> = 
     onKill: jest.fn(),
     onRetryHost: jest.fn(),
     onReenterPassword: jest.fn(),
-    onAddHost: jest.fn(),
     previews: [],
     activePreviewId: null,
     onSelectPreview: jest.fn(),
@@ -56,13 +55,13 @@ function renderDrawer(overrides: Partial<Parameters<typeof SessionDrawer>[0]> = 
   };
 }
 
-test('renders one host section, collapses an unreachable host, and offers add host', () => {
+test('renders one host section and collapses an unreachable host', () => {
   const { view } = renderDrawer();
   expect(view.getByText('Alpha')).toBeTruthy();
   expect(view.getByText('Beta')).toBeTruthy();
   expect(view.getByLabelText('Retry Beta')).toBeTruthy();
   expect(view.queryByLabelText('Terminal term-1 on Beta')).toBeNull();
-  expect(view.getByLabelText('Add host')).toBeTruthy();
+  expect(view.queryByLabelText('Add host')).toBeNull();
 });
 
 test('reports a selected terminal with its host id', () => {
@@ -80,7 +79,7 @@ test.each([
   expect(view.getByLabelText('Alpha host section')).toBeTruthy();
   expect(view.getByLabelText(/Terminal term-1 on Alpha/)).toBeTruthy();
   expect(view.getByLabelText('Server settings for Alpha')).toBeTruthy();
-  expect(view.getByLabelText('Add host')).toBeTruthy();
+  expect(view.queryByLabelText('Add host')).toBeNull();
   expect(view.getByLabelText('New terminal')).toBeTruthy();
   expect(view.queryByText('Workspace')).toBeNull();
   expect(view.queryByLabelText('Settings')).toBeNull();

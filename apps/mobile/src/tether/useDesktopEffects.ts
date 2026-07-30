@@ -1,8 +1,17 @@
 // biome-ignore-all lint/correctness/useExhaustiveDependencies: event subscriptions intentionally use stable transport refs.
 import { useEffect, useRef } from 'react';
 import type { TextInput } from 'react-native';
+import { writeClipboard } from '../clipboard';
 import { shouldForwardToTerminal } from '../desktopFocusGuard';
-import { COPY, keyToBytes, PASTE } from '../desktopKeys';
+import {
+  COPY,
+  FONT_LARGER,
+  FONT_SMALLER,
+  keyToBytes,
+  NEW_TERMINAL,
+  PASTE,
+  SELECT_ALL,
+} from '../desktopKeys';
 import { notify as sendNativeNotification } from '../desktopNotify';
 import { injectDragRegionStyles } from '../dragRegion';
 import { isDesktop, isMacDesktop } from '../platform';
@@ -17,10 +26,14 @@ type Options = {
   diffOpen: boolean;
   getSessionEntry: (id: string) => SessionEntry | undefined;
   getActiveSessionId: () => string;
+  getTerminalSelection: () => string;
   inputRef: React.MutableRefObject<TextInput | null>;
   sendKey: (bytes: string) => void;
   sendPaste: (text: string) => void;
   handlePaste: () => Promise<void>;
+  selectAllTerminal: () => void;
+  newTerminal: () => void;
+  changeFontSize: (delta: number) => void;
   setContextMenu: (position: { x: number; y: number }) => void;
   setWindowFocused: (focused: boolean) => void;
   isWindowFocused: () => boolean;
@@ -36,10 +49,14 @@ export function useDesktopEffects({
   diffOpen,
   getSessionEntry,
   getActiveSessionId,
+  getTerminalSelection,
   inputRef,
   sendKey,
   sendPaste,
   handlePaste,
+  selectAllTerminal,
+  newTerminal,
+  changeFontSize,
   setContextMenu,
   setWindowFocused,
   isWindowFocused,
@@ -80,11 +97,38 @@ export function useDesktopEffects({
     const onKey = (event: KeyboardEvent) => {
       if (composing || event.isComposing || event.keyCode === 229 || !focused()) return;
       const appCursor = getSessionEntry(getActiveSessionId())?.term.applicationCursor ?? false;
-      const bytes = keyToBytes(event, appCursor, isMacDesktop);
-      if (bytes == null || bytes === COPY) return;
+      const hasSelection = !!getTerminalSelection();
+      const bytes = keyToBytes(event, appCursor, isMacDesktop, hasSelection);
+      if (bytes == null) return;
       event.preventDefault();
-      if (bytes === PASTE) void handlePaste();
-      else sendKey(bytes);
+      // App shortcuts are primarily handled by TerminalView's xterm key handler
+      // (textarea owns focus). This path is the body-focus fallback.
+      if (bytes === COPY) {
+        const text = getTerminalSelection();
+        if (text) void writeClipboard(text);
+        return;
+      }
+      if (bytes === PASTE) {
+        void handlePaste();
+        return;
+      }
+      if (bytes === SELECT_ALL) {
+        selectAllTerminal();
+        return;
+      }
+      if (bytes === NEW_TERMINAL) {
+        newTerminal();
+        return;
+      }
+      if (bytes === FONT_LARGER) {
+        changeFontSize(1);
+        return;
+      }
+      if (bytes === FONT_SMALLER) {
+        changeFontSize(-1);
+        return;
+      }
+      sendKey(bytes);
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('compositionstart', onCompositionStart);

@@ -1,5 +1,14 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { COPY, type KeyLike, keyToBytes, PASTE } from './desktopKeys';
+import { describe, expect, it } from 'bun:test';
+import {
+  COPY,
+  FONT_LARGER,
+  FONT_SMALLER,
+  type KeyLike,
+  keyToBytes,
+  NEW_TERMINAL,
+  PASTE,
+  SELECT_ALL,
+} from './desktopKeys';
 
 function k(key: string, mods: Partial<Omit<KeyLike, 'key'>> = {}): KeyLike {
   return {
@@ -10,27 +19,6 @@ function k(key: string, mods: Partial<Omit<KeyLike, 'key'>> = {}): KeyLike {
     shiftKey: mods.shiftKey ?? false,
   };
 }
-
-// Stub window.getSelection for the copy-vs-SIGINT branch.
-function withSelection(text: string, fn: () => void) {
-  const g = globalThis as { window?: unknown };
-  const prev = g.window;
-  g.window = { getSelection: () => ({ toString: () => text }) };
-  try {
-    fn();
-  } finally {
-    if (prev === undefined) delete g.window;
-    else g.window = prev;
-  }
-}
-
-afterEach(() => {
-  // Ensure no window leaks between tests (some tests set it).
-  const g = globalThis as { window?: unknown };
-  if (g.window && typeof (g.window as { getSelection?: unknown }).getSelection === 'function') {
-    delete g.window;
-  }
-});
 
 describe('keyToBytes — printable', () => {
   it('passes single letters through verbatim', () => {
@@ -95,12 +83,13 @@ describe('keyToBytes — named keys', () => {
 
 describe('keyToBytes — Ctrl combos', () => {
   it('maps Ctrl+letter to control bytes', () => {
-    expect(keyToBytes(k('a', { ctrlKey: true }))).toBe('\x01');
+    // Ctrl+A is Select All on Windows/Linux — use other letters here.
+    expect(keyToBytes(k('b', { ctrlKey: true }))).toBe('\x02');
     expect(keyToBytes(k('d', { ctrlKey: true }))).toBe('\x04');
     expect(keyToBytes(k('z', { ctrlKey: true }))).toBe('\x1a');
   });
   it('is case-insensitive for Ctrl+letter', () => {
-    expect(keyToBytes(k('A', { ctrlKey: true }))).toBe('\x01');
+    expect(keyToBytes(k('B', { ctrlKey: true }))).toBe('\x02');
   });
   it('maps a few Ctrl+symbol combos', () => {
     expect(keyToBytes(k('[', { ctrlKey: true }))).toBe('\x1b');
@@ -111,46 +100,73 @@ describe('keyToBytes — Ctrl combos', () => {
 });
 
 describe('keyToBytes — clipboard', () => {
-  it('Ctrl+C with a selection returns COPY (browser handles copy)', () => {
-    withSelection('some selected text', () => {
-      expect(keyToBytes(k('c', { ctrlKey: true }))).toBe(COPY);
-    });
+  // xterm owns selection in a canvas/WebGL surface — callers must pass hasSelection
+  // from terminal.getSelection() / onSelection, not window.getSelection().
+  it('Ctrl+C with a selection returns COPY', () => {
+    expect(keyToBytes(k('c', { ctrlKey: true }), false, false, true)).toBe(COPY);
   });
   it('Ctrl+C with no selection sends SIGINT', () => {
-    withSelection('', () => {
-      expect(keyToBytes(k('c', { ctrlKey: true }))).toBe('\x03');
-    });
+    expect(keyToBytes(k('c', { ctrlKey: true }), false, false, false)).toBe('\x03');
   });
-  it('Cmd+C (macOS) with a selection returns COPY', () => {
-    withSelection('x', () => {
-      expect(keyToBytes(k('c', { metaKey: true }))).toBe(COPY);
-    });
+  it('Cmd+C (non-mac) with a selection returns COPY', () => {
+    expect(keyToBytes(k('c', { metaKey: true }), false, false, true)).toBe(COPY);
   });
   it('Ctrl+V / Cmd+V return PASTE', () => {
     expect(keyToBytes(k('v', { ctrlKey: true }))).toBe(PASTE);
     expect(keyToBytes(k('v', { metaKey: true }))).toBe(PASTE);
   });
+  it('Shift+Insert returns PASTE (Linux terminal habit)', () => {
+    expect(keyToBytes(k('Insert', { shiftKey: true }))).toBe(PASTE);
+  });
+  it('plain Insert still sends the insert key sequence', () => {
+    expect(keyToBytes(k('Insert'))).toBe('\x1b[2~');
+  });
+  it('Ctrl+A returns SELECT_ALL on Windows/Linux', () => {
+    expect(keyToBytes(k('a', { ctrlKey: true }))).toBe(SELECT_ALL);
+    expect(keyToBytes(k('A', { ctrlKey: true }))).toBe(SELECT_ALL);
+  });
+  it('Ctrl+Shift+C copies when there is a selection and never sends SIGINT', () => {
+    expect(keyToBytes(k('c', { ctrlKey: true, shiftKey: true }), false, false, true)).toBe(COPY);
+    expect(keyToBytes(k('c', { ctrlKey: true, shiftKey: true }), false, false, false)).toBeNull();
+  });
+  it('Ctrl+Shift+V pastes', () => {
+    expect(keyToBytes(k('v', { ctrlKey: true, shiftKey: true }))).toBe(PASTE);
+  });
+  it('Ctrl+T opens a new terminal on Windows/Linux', () => {
+    expect(keyToBytes(k('t', { ctrlKey: true }))).toBe(NEW_TERMINAL);
+  });
+  it('Ctrl+= / Ctrl+- zoom font on Windows/Linux', () => {
+    expect(keyToBytes(k('=', { ctrlKey: true }))).toBe(FONT_LARGER);
+    expect(keyToBytes(k('+', { ctrlKey: true, shiftKey: true }))).toBe(FONT_LARGER);
+    expect(keyToBytes(k('-', { ctrlKey: true }))).toBe(FONT_SMALLER);
+  });
 
   // macOS: Cmd is the clipboard modifier; Ctrl stays a pure control modifier.
   describe('macOS (isMac = true)', () => {
     it('Ctrl+C is always SIGINT, even with a selection (Cmd handles copy)', () => {
-      withSelection('some selected text', () => {
-        expect(keyToBytes(k('c', { ctrlKey: true }), false, true)).toBe('\x03');
-      });
+      expect(keyToBytes(k('c', { ctrlKey: true }), false, true, true)).toBe('\x03');
     });
     it('Cmd+C with a selection returns COPY', () => {
-      withSelection('some selected text', () => {
-        expect(keyToBytes(k('c', { metaKey: true }), false, true)).toBe(COPY);
-      });
+      expect(keyToBytes(k('c', { metaKey: true }), false, true, true)).toBe(COPY);
     });
     it('Cmd+C with no selection is a no-op (not SIGINT)', () => {
-      withSelection('', () => {
-        expect(keyToBytes(k('c', { metaKey: true }), false, true)).toBeNull();
-      });
+      expect(keyToBytes(k('c', { metaKey: true }), false, true, false)).toBeNull();
     });
     it('Ctrl+V sends 0x16 (verbatim insert), Cmd+V pastes', () => {
       expect(keyToBytes(k('v', { ctrlKey: true }), false, true)).toBe('\x16');
       expect(keyToBytes(k('v', { metaKey: true }), false, true)).toBe(PASTE);
+    });
+    it('Cmd+A returns SELECT_ALL; Ctrl+A stays beginning-of-line', () => {
+      expect(keyToBytes(k('a', { metaKey: true }), false, true)).toBe(SELECT_ALL);
+      expect(keyToBytes(k('a', { ctrlKey: true }), false, true)).toBe('\x01');
+    });
+    it('Cmd+T opens a new terminal; Ctrl+T stays the control byte', () => {
+      expect(keyToBytes(k('t', { metaKey: true }), false, true)).toBe(NEW_TERMINAL);
+      expect(keyToBytes(k('t', { ctrlKey: true }), false, true)).toBe('\x14');
+    });
+    it('Cmd+= / Cmd+- zoom font', () => {
+      expect(keyToBytes(k('=', { metaKey: true }), false, true)).toBe(FONT_LARGER);
+      expect(keyToBytes(k('-', { metaKey: true }), false, true)).toBe(FONT_SMALLER);
     });
   });
 });
@@ -203,8 +219,9 @@ describe('keyToBytes — ignored keys', () => {
     expect(keyToBytes(k('CapsLock'))).toBeNull();
     expect(keyToBytes(k('Dead'))).toBeNull();
   });
-  it('does not send bare Cmd+letter (left to the OS)', () => {
-    // Cmd+A/S/etc. are not control bytes and not printable-with-no-mod.
+  it('does not send bare Cmd+letter on non-mac (left to the OS)', () => {
+    // Cmd+A/S/etc. are not control bytes and not printable-with-no-mod when isMac=false.
     expect(keyToBytes(k('a', { metaKey: true }))).toBeNull();
+    expect(keyToBytes(k('s', { metaKey: true }))).toBeNull();
   });
 });

@@ -15,10 +15,11 @@ Today’s git UI is one shared `DiffView`: Changes/History tabs, staged + unstag
 
 ### Desktop — `GitDrawer`
 
-- Drawer covering ~¾ of the window; remaining ~¼ keeps the **live terminal** (visible and usable).
+- Drawer covering the full terminal column; session sidebar stays visible. Terminal remains mounted underneath while the drawer is open.
 - **Left:** file list (Staged, then Changes) + sticky commit box in that column; folder collapse as today.
 - **Right:** selected file’s modifications (unified / side-by-side when wide enough, hunk stage/unstage, image diffs).
 - **History** retained: left commit list, right commit diff (no hunk actions).
+- Entry: title-bar **Changes** button (beside Settings), not a banner.
 
 ### Mobile — `GitReview`
 

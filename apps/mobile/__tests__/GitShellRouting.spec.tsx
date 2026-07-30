@@ -161,6 +161,7 @@ test('desktop keeps the terminal mounted under GitDrawer', () => {
   expect(view.getByTestId('terminal-renderer')).toBeTruthy();
   expect(view.getByLabelText('Close git drawer')).toBeTruthy();
   expect(view.queryByLabelText('Back to terminal')).toBeNull();
+  expect(view.queryByLabelText(/View changes/)).toBeNull();
 });
 
 test('compact shell uses full-screen GitReview without GitDrawer', () => {

@@ -1,4 +1,6 @@
 import type { DiffSummary } from './diffModel';
+import type { RepoStatus } from './gitStatusModel';
+import { EMPTY_REPO_STATUS } from './gitStatusModel';
 import type { TerminalEngine } from './terminalEngine';
 
 export interface SessionEntry {
@@ -6,6 +8,7 @@ export interface SessionEntry {
   sinceId: number;
   lastAppliedId: number;
   diffSummary: DiffSummary;
+  repoStatus: RepoStatus;
   // Last emulator bell/notify counts we already turned into an OS
   // notification, so a desktop notification fires once per new bell / OSC
   // notify edge (not on every output frame). Tracked per session because
@@ -13,6 +16,8 @@ export interface SessionEntry {
   lastBellCount: number;
   lastNotifyCount: number;
 }
+
+export { EMPTY_REPO_STATUS };
 
 // LRU cache of terminal emulators. Every cache-resident session keeps its own
 // live WS and streams in the background; only input/clipboard are gated to the

@@ -2,6 +2,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { FileTreeNode } from './diffModel';
+import { reviewDiffKey } from './gitReviewModel';
 
 const INDENT = 16;
 
@@ -17,6 +18,7 @@ export interface FileAction {
 export function FileTree({
   nodes,
   depth = 0,
+  collapseScope,
   collapsedDirs,
   onToggleDir,
   onSelectFile,
@@ -24,8 +26,10 @@ export function FileTree({
 }: {
   nodes: FileTreeNode[];
   depth?: number;
+  /** When set (e.g. staged/unstaged), folder open/closed state is scoped so twin trees stay independent. */
+  collapseScope?: 'staged' | 'unstaged';
   collapsedDirs: Set<string>;
-  onToggleDir: (path: string) => void;
+  onToggleDir: (key: string) => void;
   onSelectFile: (path: string) => void;
   // Inline per-file actions (stage/unstage/discard) shown after the stats.
   fileActions?: FileAction[];
@@ -35,13 +39,16 @@ export function FileTree({
     <>
       {nodes.map((node) => {
         if (node.type === 'dir') {
-          const collapsed = collapsedDirs.has(node.path);
+          const collapseKey = collapseScope ? reviewDiffKey(collapseScope, node.path) : node.path;
+          const collapsed = collapsedDirs.has(collapseKey);
+          const scopeLabel = collapseScope ? `${collapseScope} ` : '';
           return (
-            <View key={node.path}>
+            <View key={collapseKey}>
               <TouchableOpacity
                 accessibilityRole="button"
+                accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${scopeLabel}folder ${node.path}`}
                 style={[styles.dirRow, { paddingLeft: depth * INDENT }]}
-                onPress={() => onToggleDir(node.path)}
+                onPress={() => onToggleDir(collapseKey)}
               >
                 <Feather
                   name={collapsed ? 'chevron-right' : 'chevron-down'}
@@ -60,6 +67,7 @@ export function FileTree({
                 <FileTree
                   nodes={node.children}
                   depth={depth + 1}
+                  collapseScope={collapseScope}
                   collapsedDirs={collapsedDirs}
                   onToggleDir={onToggleDir}
                   onSelectFile={onSelectFile}

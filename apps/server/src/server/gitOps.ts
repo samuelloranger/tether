@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { MAX_DIFF_BYTES } from './gitDiff';
+import { MAX_DIFF_BYTES, readDiffSummary } from './gitDiff';
+import { canRewriteHead, readRepoStatus } from './gitStatus';
 
 // Write-side git operations for the diff view: staging, discarding, committing,
 // and history. Same trust anchor as the read side — the session's live cwd
@@ -134,9 +135,60 @@ export function discardPath(root: string, requestedPath: string): void {
 
 // Commit identity comes from the repo/global git config — when unset, git's
 // own error surfaces as the 409 message; the app does not manage identity.
-export function commitStaged(root: string, message: string): void {
+export function commitStaged(root: string, message: string, amend = false): void {
   if (!message.trim()) throw new GitOpsError(400, 'commit message required');
+  if (amend) {
+    const status = readRepoStatus(root);
+    if (!canRewriteHead(status)) {
+      throw new GitOpsError(409, 'cannot amend: HEAD is already on the remote tip');
+    }
+    runGit(root, ['commit', '--amend', '-m', message]);
+    return;
+  }
   runGit(root, ['commit', '-m', message]);
+}
+
+export function stageAll(root: string): void {
+  runGit(root, ['add', '-A']);
+}
+
+export function unstageAll(root: string): void {
+  runGit(root, ['reset', '-q', 'HEAD']);
+}
+
+/** Discard every unstaged path from the current summary. Client must confirm. */
+export function discardAll(root: string): void {
+  const { files } = readDiffSummary(root);
+  for (const file of files) {
+    if (file.staged === true) continue;
+    discardPath(root, file.path);
+  }
+}
+
+/** Soft-reset HEAD~1 when rewriting is allowed. Changes stay staged. */
+export function undoLastCommit(root: string): void {
+  const status = readRepoStatus(root);
+  if (!canRewriteHead(status)) {
+    throw new GitOpsError(409, 'cannot undo: HEAD is already on the remote tip');
+  }
+  // Need a parent — root commit cannot soft-reset.
+  const parents = spawnSync('git', ['-C', root, 'rev-list', '--count', 'HEAD'], {
+    encoding: 'utf8',
+  });
+  if (parents.status !== 0 || Number(parents.stdout.trim()) < 2) {
+    throw new GitOpsError(409, 'cannot undo: no parent commit');
+  }
+  runGit(root, ['reset', '--soft', 'HEAD~1']);
+}
+
+/** Push current branch. Sets upstream to origin/HEAD when none exists. */
+export function pushBranch(root: string): void {
+  const status = readRepoStatus(root);
+  if (status.upstream) {
+    runGit(root, ['push']);
+    return;
+  }
+  runGit(root, ['push', '-u', 'origin', 'HEAD']);
 }
 
 export interface LogEntry {

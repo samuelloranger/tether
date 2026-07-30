@@ -25,7 +25,7 @@ const reviewDiffs: Record<string, ReviewDiffSlot> = {
 };
 
 function renderReview(overrides: Partial<Parameters<typeof GitReview>[0]> = {}) {
-  const props = {
+  const props: Parameters<typeof GitReview>[0] = {
     summary,
     onBack: jest.fn(),
     onStageFile: jest.fn(),
@@ -33,6 +33,21 @@ function renderReview(overrides: Partial<Parameters<typeof GitReview>[0]> = {}) 
     onDiscardFile: jest.fn(),
     onToggleHunk: jest.fn(),
     onCommit: jest.fn(async () => true),
+    onAmend: jest.fn(async () => true),
+    onUndoCommit: jest.fn(),
+    onPush: jest.fn(),
+    onStageAll: jest.fn(),
+    onUnstageAll: jest.fn(),
+    onDiscardAll: jest.fn(),
+    onOpenLine: jest.fn(),
+    repoStatus: {
+      branch: 'main',
+      shortSha: 'abc1234',
+      detached: false,
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+    },
     historyEntries: null,
     historyCommit: null,
     onLoadHistory: jest.fn(),

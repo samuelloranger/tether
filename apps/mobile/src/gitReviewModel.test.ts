@@ -5,6 +5,7 @@ import {
   mapWithConcurrency,
   reviewDiffKey,
   reviewFileEntries,
+  summaryFingerprint,
   toggleSetMember,
 } from './gitReviewModel';
 
@@ -39,6 +40,21 @@ test('canCommit requires staged files, non-empty message, and idle commit', () =
   expect(canCommit(0, 'msg', false)).toBe(false);
   expect(canCommit(1, '  ', false)).toBe(false);
   expect(canCommit(1, 'msg', true)).toBe(false);
+});
+
+test('summaryFingerprint changes when staged split or counts change', () => {
+  const a: DiffSummary = {
+    files: [{ path: 'a.ts', insertions: 1, deletions: 0, binary: false, staged: false }],
+  };
+  const b: DiffSummary = {
+    files: [{ path: 'a.ts', insertions: 1, deletions: 0, binary: false, staged: true }],
+  };
+  const c: DiffSummary = {
+    files: [{ path: 'a.ts', insertions: 2, deletions: 0, binary: false, staged: false }],
+  };
+  expect(summaryFingerprint(a)).not.toBe(summaryFingerprint(b));
+  expect(summaryFingerprint(a)).not.toBe(summaryFingerprint(c));
+  expect(summaryFingerprint(a)).toBe(summaryFingerprint({ files: [...a.files] }));
 });
 
 test('mapWithConcurrency respects the limit and preserves order', async () => {

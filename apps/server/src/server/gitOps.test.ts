@@ -6,14 +6,19 @@ import path from 'node:path';
 import { readDiffSummary } from './gitDiff';
 import {
   commitStaged,
+  discardAll,
   discardPath,
   GitOpsError,
   readCommitDiff,
   readLog,
+  stageAll,
   stageHunk,
   stagePath,
+  undoLastCommit,
+  unstageAll,
   unstageHunk,
   unstagePath,
+  pushBranch,
 } from './gitOps';
 
 let root: string;
@@ -153,6 +158,59 @@ describe('commitStaged', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(GitOpsError);
       expect((e as GitOpsError).status).toBe(409);
+    }
+  });
+
+  test('amend rewrites HEAD when there is no upstream', () => {
+    writeFileSync(path.join(root, 'a.txt'), 'amended\n');
+    stagePath(root, 'a.txt');
+    commitStaged(root, 'second');
+    writeFileSync(path.join(root, 'a.txt'), 'amended again\n');
+    stagePath(root, 'a.txt');
+    commitStaged(root, 'second fixed', true);
+    expect(git('log -1 --format=%s')).toBe('second fixed\n');
+    expect(git('rev-list --count HEAD').trim()).toBe('2');
+  });
+});
+
+describe('bulk ops and undo', () => {
+  test('stageAll / unstageAll / discardAll round-trip', () => {
+    writeFileSync(path.join(root, 'a.txt'), 'changed\n');
+    writeFileSync(path.join(root, 'new.txt'), 'new\n');
+    stageAll(root);
+    expect(statusPorcelain()).toContain('M  a.txt');
+    expect(statusPorcelain()).toContain('A  new.txt');
+    unstageAll(root);
+    expect(statusPorcelain()).toMatch(/ M a\.txt|M  a\.txt/);
+    discardAll(root);
+    expect(statusPorcelain()).toBe('');
+    expect(existsSync(path.join(root, 'new.txt'))).toBe(false);
+  });
+
+  test('undoLastCommit soft-resets and keeps changes staged', () => {
+    writeFileSync(path.join(root, 'a.txt'), 'next\n');
+    stagePath(root, 'a.txt');
+    commitStaged(root, 'next');
+    undoLastCommit(root);
+    expect(git('log -1 --format=%s')).toBe('initial\n');
+    expect(statusPorcelain()).toContain('M  a.txt');
+  });
+
+  test('pushBranch sets upstream on first push to origin', () => {
+    const bare = mkdtempSync(path.join(tmpdir(), 'tether-gitops-bare-'));
+    try {
+      execSync('git init -q --bare', { cwd: bare, encoding: 'utf8' });
+      git(`remote add origin ${bare}`);
+      writeFileSync(path.join(root, 'a.txt'), 'pushed\n');
+      stagePath(root, 'a.txt');
+      commitStaged(root, 'to push');
+      pushBranch(root);
+      expect(git('rev-parse --abbrev-ref --symbolic-full-name @{u}').trim()).toMatch(/^origin\//);
+      expect(execSync('git rev-parse HEAD', { cwd: bare, encoding: 'utf8' }).trim()).toBe(
+        git('rev-parse HEAD').trim(),
+      );
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
     }
   });
 });

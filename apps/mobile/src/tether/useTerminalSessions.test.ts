@@ -37,6 +37,9 @@ function entry(): SessionEntry & { writes: string[]; resets: number } {
     sinceId: 0,
     lastAppliedId: 0,
     diffSummary: { files: [] },
+    repoStatus: { branch: '', shortSha: '', detached: false, upstream: null, ahead: 0, behind: 0 },
+    lastBellCount: 0,
+    lastNotifyCount: 0,
     lastBellCount: 0,
     lastNotifyCount: 0,
   };

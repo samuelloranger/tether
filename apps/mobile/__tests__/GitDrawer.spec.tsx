@@ -27,6 +27,22 @@ function renderDrawer(overrides: Partial<Parameters<typeof GitDrawer>[0]> = {}) 
     onDiscardFile: jest.fn(),
     onToggleHunk: jest.fn(),
     onCommit: jest.fn(async () => true),
+    onAmend: jest.fn(async () => true),
+    onUndoCommit: jest.fn(),
+    onPush: jest.fn(),
+    onStageAll: jest.fn(),
+    onUnstageAll: jest.fn(),
+    onDiscardAll: jest.fn(),
+    onOpenLine: jest.fn(),
+    repoStatus: {
+      branch: 'main',
+      shortSha: 'abc1234',
+      detached: false,
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+    },
+    leftWidthStorageKey: 'test_git_drawer_left',
     historyEntries: null,
     historyCommit: null,
     onLoadHistory: jest.fn(),
@@ -48,8 +64,12 @@ function renderDrawer(overrides: Partial<Parameters<typeof GitDrawer>[0]> = {}) 
 test('renders staged and changes columns with empty right pane', () => {
   const { view } = renderDrawer();
   expect(view.getByLabelText('Close git drawer')).toBeTruthy();
+  expect(view.getByLabelText('Resize file list')).toBeTruthy();
+  expect(view.getByText('main')).toBeTruthy();
   expect(view.getByText('Staged (1)')).toBeTruthy();
   expect(view.getByText('Changes (1)')).toBeTruthy();
+  expect(view.getByText('Unstage all')).toBeTruthy();
+  expect(view.getByText('Stage all')).toBeTruthy();
   expect(view.getByPlaceholderText('Commit message')).toBeTruthy();
   expect(view.getByText('Select a file')).toBeTruthy();
 });

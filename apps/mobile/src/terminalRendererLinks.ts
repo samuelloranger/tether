@@ -24,12 +24,26 @@ export function rendererLinksForRow(
   }));
 }
 
+/** Mobile tap opens. Desktop requires Ctrl/Cmd+click so selection isn't hijacked. */
+export function shouldActivateLink(
+  event: { ctrlKey?: boolean; metaKey?: boolean } | undefined,
+  requireModifierClick: boolean,
+): boolean {
+  if (!requireModifierClick) return true;
+  return !!(event?.ctrlKey || event?.metaKey);
+}
+
 export function registerTetherLinks(
   terminal: Terminal,
   activate: (target: LinkTarget) => void,
+  opts?: { requireModifierClick?: boolean },
 ): IDisposable {
+  const requireModifierClick = opts?.requireModifierClick ?? false;
   terminal.options.linkHandler = {
-    activate: (_event, url) => activate({ kind: 'external', url }),
+    activate: (event, url) => {
+      if (!shouldActivateLink(event, requireModifierClick)) return;
+      activate({ kind: 'external', url });
+    },
   };
   return terminal.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
@@ -44,7 +58,10 @@ export function registerTetherLinks(
         (link) => ({
           range: link.range,
           text: link.text,
-          activate: () => activate(link.target),
+          activate: (event) => {
+            if (!shouldActivateLink(event, requireModifierClick)) return;
+            activate(link.target);
+          },
         }),
       );
       callback(links.length ? links : undefined);

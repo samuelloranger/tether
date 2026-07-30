@@ -29,6 +29,16 @@ export function canCommit(stagedCount: number, message: string, committing: bool
   return stagedCount > 0 && message.trim().length > 0 && !committing;
 }
 
+/** Stable fingerprint of a summary for effect deps / change detection. */
+export function summaryFingerprint(summary: DiffSummary): string {
+  return summary.files
+    .map(
+      (f) =>
+        `${f.staged === true ? 'S' : 'U'}:${f.path}:${f.insertions}:${f.deletions}:${f.binary ? 1 : 0}`,
+    )
+    .join('|');
+}
+
 export async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,

@@ -45,3 +45,38 @@ test('stays disabled with a message when nothing is staged', () => {
   const { view } = renderBox({ message: 'fix bugs', stagedCount: 0 });
   expect(view.getByLabelText('Commit staged changes')).toBeDisabled();
 });
+
+test('chevron menu exposes Amend, Undo, and Push', () => {
+  const onAmend = jest.fn();
+  const onUndoCommit = jest.fn();
+  const onPush = jest.fn();
+  const { view } = renderBox({
+    message: 'fix bugs',
+    onAmend,
+    onUndoCommit,
+    onPush,
+    canAmend: true,
+    canPush: true,
+  });
+  expect(view.queryByLabelText('Amend last commit')).toBeNull();
+  fireEvent.press(view.getByLabelText('More git actions'));
+  fireEvent.press(view.getByLabelText('Amend last commit'));
+  expect(onAmend).toHaveBeenCalled();
+
+  const { view: again } = renderBox({
+    message: 'fix bugs',
+    onAmend,
+    onUndoCommit,
+    onPush,
+    canAmend: true,
+    canPush: true,
+  });
+  fireEvent.press(again.getByLabelText('More git actions'));
+  fireEvent.press(again.getByLabelText('Push to remote'));
+  expect(onPush).toHaveBeenCalled();
+});
+
+test('hides chevron when no menu actions are provided', () => {
+  const { view } = renderBox({ message: 'fix bugs' });
+  expect(view.queryByLabelText('More git actions')).toBeNull();
+});
