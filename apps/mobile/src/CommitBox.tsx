@@ -1,10 +1,8 @@
 import Feather from '@expo/vector-icons/Feather';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import {
   ActivityIndicator,
-  Modal,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
+import { MENU_WIDTH } from './commitBoxLayout';
 import { canCommit } from './gitReviewModel';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 
@@ -41,14 +40,30 @@ export function CommitBox({
   style?: StyleProp<ViewStyle>;
 }) {
   const { theme } = useAppTheme();
+  const menuRootRef = useRef<View>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const enabled = canCommit(stagedCount, message, committing);
   const amendEnabled = Boolean(canAmend) && message.trim().length > 0 && !committing;
   const undoEnabled = Boolean(canAmend) && !committing;
   const pushEnabled = Boolean(canPush) && !committing;
-  const hasMenu =
-    Boolean(onAmend || onUndoCommit || onPush) &&
-    (Boolean(canAmend) || Boolean(canPush) || Boolean(onPush));
+  const hasMenu = Boolean(onAmend || onUndoCommit || onPush);
+
+  useEffect(() => {
+    if (!menuOpen || typeof document === 'undefined') return;
+    const onDoc = (event: MouseEvent) => {
+      const root = menuRootRef.current as unknown as { contains?: (n: Node) => boolean } | null;
+      const target = event.target as Node | null;
+      // Let the chevron toggle handle its own click (close when already open).
+      if (root?.contains && target && root.contains(target)) return;
+      setMenuOpen(false);
+    };
+    // Defer so the opening click does not immediately dismiss.
+    const timer = setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', onDoc);
+    };
+  }, [menuOpen]);
 
   const runAndClose = (action?: () => void) => {
     setMenuOpen(false);
@@ -73,7 +88,7 @@ export function CommitBox({
         editable={!committing}
         multiline
       />
-      <View style={styles.commitGroup}>
+      <View style={[styles.commitGroup, menuOpen ? styles.commitGroupRaised : null]}>
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="Commit staged changes"
@@ -81,7 +96,7 @@ export function CommitBox({
           onPress={onCommit}
           style={[
             styles.commitButton,
-            hasMenu ? styles.commitButtonMain : null,
+            hasMenu ? styles.commitButtonMain : styles.commitButtonSolo,
             {
               backgroundColor: theme.colors.accent,
               opacity: enabled ? 1 : 0.5,
@@ -97,82 +112,81 @@ export function CommitBox({
           )}
         </TouchableOpacity>
         {hasMenu ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="More git actions"
-            disabled={committing}
-            onPress={() => setMenuOpen(true)}
-            style={[
-              styles.chevronButton,
-              {
-                backgroundColor: theme.colors.accent,
-                borderLeftColor: theme.colors.accentText,
-                opacity: committing ? 0.5 : 1,
-              },
-            ]}
-          >
-            <Feather name="chevron-down" size={16} color={theme.colors.accentText} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      <Modal
-        visible={menuOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuOpen(false)}
-      >
-        <Pressable style={styles.backdrop} onPress={() => setMenuOpen(false)}>
-          <View
-            style={[
-              styles.menu,
-              {
-                backgroundColor: theme.colors.surface,
-                borderColor: theme.colors.border,
-              },
-            ]}
-          >
-            {onAmend && canAmend ? (
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Amend last commit"
-                disabled={!amendEnabled}
-                onPress={() => runAndClose(onAmend)}
-                style={[styles.menuRow, { opacity: amendEnabled ? 1 : 0.45 }]}
+          <View ref={menuRootRef} collapsable={false} style={styles.chevronWrap}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="More git actions"
+              disabled={committing}
+              onPress={() => setMenuOpen((open) => !open)}
+              style={[
+                styles.chevronButton,
+                {
+                  backgroundColor: theme.colors.accent,
+                  borderLeftColor: theme.colors.accentText,
+                  opacity: committing ? 0.5 : 1,
+                },
+              ]}
+            >
+              <Feather
+                name={menuOpen ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color={theme.colors.accentText}
+              />
+            </TouchableOpacity>
+            {menuOpen ? (
+              <View
+                accessibilityRole="menu"
+                style={[
+                  styles.menu,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                  },
+                ]}
               >
-                <Feather name="edit-2" size={15} color={theme.colors.text} />
-                <Text style={[styles.menuText, { color: theme.colors.text }]}>Amend</Text>
-              </TouchableOpacity>
-            ) : null}
-            {onUndoCommit && canAmend ? (
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Undo last commit"
-                disabled={!undoEnabled}
-                onPress={() => runAndClose(onUndoCommit)}
-                style={[styles.menuRow, { opacity: undoEnabled ? 1 : 0.45 }]}
-              >
-                <Feather name="rotate-ccw" size={15} color={theme.colors.text} />
-                <Text style={[styles.menuText, { color: theme.colors.text }]}>
-                  Undo last commit
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {onPush ? (
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Push to remote"
-                disabled={!pushEnabled}
-                onPress={() => runAndClose(onPush)}
-                style={[styles.menuRow, { opacity: pushEnabled ? 1 : 0.45 }]}
-              >
-                <Feather name="upload-cloud" size={15} color={theme.colors.text} />
-                <Text style={[styles.menuText, { color: theme.colors.text }]}>Push</Text>
-              </TouchableOpacity>
+                {onAmend ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Amend last commit"
+                    disabled={!amendEnabled}
+                    onPress={() => runAndClose(onAmend)}
+                    style={[styles.menuRow, { opacity: amendEnabled ? 1 : 0.45 }]}
+                  >
+                    <Feather name="edit-2" size={15} color={theme.colors.text} />
+                    <Text style={[styles.menuText, { color: theme.colors.text }]}>Amend</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {onUndoCommit ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Undo last commit"
+                    disabled={!undoEnabled}
+                    onPress={() => runAndClose(onUndoCommit)}
+                    style={[styles.menuRow, { opacity: undoEnabled ? 1 : 0.45 }]}
+                  >
+                    <Feather name="rotate-ccw" size={15} color={theme.colors.text} />
+                    <Text style={[styles.menuText, { color: theme.colors.text }]}>
+                      Undo last commit
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {onPush ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Push to remote"
+                    disabled={!pushEnabled}
+                    onPress={() => runAndClose(onPush)}
+                    style={[styles.menuRow, { opacity: pushEnabled ? 1 : 0.45 }]}
+                  >
+                    <Feather name="upload-cloud" size={15} color={theme.colors.text} />
+                    <Text style={[styles.menuText, { color: theme.colors.text }]}>Push</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             ) : null}
           </View>
-        </Pressable>
-      </Modal>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -184,6 +198,8 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
+    overflow: 'visible',
+    zIndex: 2,
   },
   commitInput: {
     flex: 1,
@@ -197,8 +213,9 @@ const styles = StyleSheet.create({
   commitGroup: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    borderRadius: SURFACE_RADIUS.control,
-    overflow: 'hidden',
+  },
+  commitGroupRaised: {
+    zIndex: 20,
   },
   commitButton: {
     minHeight: MIN_TOUCH_TARGET,
@@ -207,9 +224,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  commitButtonSolo: {
+    borderRadius: SURFACE_RADIUS.control,
+  },
   commitButtonMain: {
-    borderTopRightRadius: 0,
-    borderBottomRightRadius: 0,
+    borderTopLeftRadius: SURFACE_RADIUS.control,
+    borderBottomLeftRadius: SURFACE_RADIUS.control,
+  },
+  chevronWrap: {
+    position: 'relative',
+    zIndex: 21,
   },
   chevronButton: {
     minHeight: MIN_TOUCH_TARGET,
@@ -218,21 +242,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderLeftWidth: StyleSheet.hairlineWidth,
+    borderTopRightRadius: SURFACE_RADIUS.control,
+    borderBottomRightRadius: SURFACE_RADIUS.control,
   },
   commitButtonText: { fontWeight: '600' },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    justifyContent: 'flex-end',
-    padding: 16,
-  },
   menu: {
+    position: 'absolute',
+    right: 0,
+    bottom: '100%',
+    marginBottom: 6,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: SURFACE_RADIUS.panel,
     paddingVertical: 4,
-    alignSelf: 'flex-end',
-    minWidth: 200,
-    marginBottom: 64,
+    minWidth: MENU_WIDTH,
+    zIndex: 30,
   },
   menuRow: {
     flexDirection: 'row',

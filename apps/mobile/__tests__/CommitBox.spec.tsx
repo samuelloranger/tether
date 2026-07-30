@@ -76,6 +76,36 @@ test('chevron menu exposes Amend, Undo, and Push', () => {
   expect(onPush).toHaveBeenCalled();
 });
 
+test('shows Amend disabled when rewrite is not allowed', () => {
+  const { view } = renderBox({
+    message: 'fix bugs',
+    onAmend: jest.fn(),
+    onUndoCommit: jest.fn(),
+    onPush: jest.fn(),
+    canAmend: false,
+    canPush: false,
+  });
+  fireEvent.press(view.getByLabelText('More git actions'));
+  expect(view.getByLabelText('Amend last commit')).toBeDisabled();
+  expect(view.getByLabelText('Undo last commit')).toBeDisabled();
+  expect(view.getByLabelText('Push to remote')).toBeDisabled();
+});
+
+test('pressing the chevron again closes the menu', () => {
+  const { view } = renderBox({
+    message: 'fix bugs',
+    onAmend: jest.fn(),
+    onUndoCommit: jest.fn(),
+    onPush: jest.fn(),
+    canAmend: true,
+    canPush: true,
+  });
+  fireEvent.press(view.getByLabelText('More git actions'));
+  expect(view.getByLabelText('Amend last commit')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('More git actions'));
+  expect(view.queryByLabelText('Amend last commit')).toBeNull();
+});
+
 test('hides chevron when no menu actions are provided', () => {
   const { view } = renderBox({ message: 'fix bugs' });
   expect(view.queryByLabelText('More git actions')).toBeNull();

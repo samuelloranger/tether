@@ -513,6 +513,8 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
     flexDirection: 'column',
+    overflow: 'visible',
+    zIndex: 3,
   },
   leftFallback: { flex: 1 },
   splitterHit: {
