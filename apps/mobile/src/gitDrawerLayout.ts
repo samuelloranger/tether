@@ -17,3 +17,17 @@ export function clampGitDrawerLeftWidth(requested: number, total: number): numbe
 export function defaultGitDrawerLeftWidth(total: number): number {
   return clampGitDrawerLeftWidth(total * GIT_DRAWER_DEFAULT_LEFT_RATIO, total);
 }
+
+/**
+ * Escape handling for the desktop git drawer.
+ * After blurring the commit field, focus often lands on document.body — still dismiss.
+ */
+export function drawerEscapeAction(opts: {
+  inDrawer: boolean;
+  isTextField: boolean;
+  isDocumentRoot: boolean;
+}): 'blur-field' | 'dismiss' | 'ignore' {
+  if (opts.inDrawer && opts.isTextField) return 'blur-field';
+  if (opts.inDrawer || opts.isDocumentRoot) return 'dismiss';
+  return 'ignore';
+}

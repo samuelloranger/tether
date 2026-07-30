@@ -4,11 +4,12 @@ import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400R
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, type TextInput } from 'react-native';
+import { Linking, type TextInput, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import { readClipboard, writeClipboard } from './clipboard';
 import { createDeepLinkHandler, listenForDeepLinks } from './deepLink';
+import { desktopLayout } from './desktopLayout';
 import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
@@ -983,13 +984,16 @@ export function useTetherApp() {
   // OS notification path lives in maybeNotify (per-session, in the ws handler).
   const activeBellCount = activeEntry.term.bellCount;
   const activePromptReturnCount = activeEntry.term.promptReturnCount;
+  const { width: windowWidth } = useWindowDimensions();
+  // Match TerminalScreen: only the wide desktop GitDrawer leaves the terminal live.
+  // Compact desktop + mobile use full-screen GitReview, so block body key forwarding.
+  const desktopGitDrawer = desktopLayout(isDesktop, windowWidth) === 'desktop';
   useDesktopEffects({
     isConfiguring,
     presentations,
     activePresentationId,
     fileViewOpen: !!fileView,
-    // Desktop GitDrawer keeps the terminal live; only mobile GitReview is a takeover.
-    diffOpen: diffOpen && !isDesktop,
+    diffOpen: diffOpen && !desktopGitDrawer,
     getSessionEntry,
     getActiveSessionId,
     getTerminalSelection,

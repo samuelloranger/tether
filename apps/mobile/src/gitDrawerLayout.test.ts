@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   clampGitDrawerLeftWidth,
   defaultGitDrawerLeftWidth,
+  drawerEscapeAction,
   GIT_DRAWER_DEFAULT_LEFT_RATIO,
   GIT_DRAWER_MIN_LEFT,
   GIT_DRAWER_MIN_RIGHT,
@@ -23,5 +24,20 @@ test('defaultGitDrawerLeftWidth uses the one-third ratio', () => {
   const total = 900;
   expect(defaultGitDrawerLeftWidth(total)).toBe(
     clampGitDrawerLeftWidth(total * GIT_DRAWER_DEFAULT_LEFT_RATIO, total),
+  );
+});
+
+test('drawerEscapeAction blurs text fields, then dismisses from body', () => {
+  expect(drawerEscapeAction({ inDrawer: true, isTextField: true, isDocumentRoot: false })).toBe(
+    'blur-field',
+  );
+  expect(drawerEscapeAction({ inDrawer: true, isTextField: false, isDocumentRoot: false })).toBe(
+    'dismiss',
+  );
+  expect(drawerEscapeAction({ inDrawer: false, isTextField: false, isDocumentRoot: true })).toBe(
+    'dismiss',
+  );
+  expect(drawerEscapeAction({ inDrawer: false, isTextField: false, isDocumentRoot: false })).toBe(
+    'ignore',
   );
 });

@@ -16,7 +16,11 @@ import { DiffFileBody } from './DiffFileBody';
 import { buildFileTree, type DiffSummary, groupSummary, isImagePath } from './diffModel';
 import { FileTree } from './FileTree';
 import { GitTabBar } from './GitTabBar';
-import { clampGitDrawerLeftWidth, defaultGitDrawerLeftWidth } from './gitDrawerLayout';
+import {
+  clampGitDrawerLeftWidth,
+  defaultGitDrawerLeftWidth,
+  drawerEscapeAction,
+} from './gitDrawerLayout';
 import { toggleSetMember } from './gitReviewModel';
 import {
   canPushHead,
@@ -139,16 +143,18 @@ export function GitDrawer({
       if (event.key !== 'Escape') return;
       const root = drawerRef.current as unknown as { contains?: (n: Node) => boolean } | null;
       const target = event.target as Node | null;
-      if (root?.contains && target && !root.contains(target)) return;
       const el = event.target as HTMLElement | null;
-      if (el?.tagName === 'TEXTAREA' || el?.tagName === 'INPUT') {
-        el.blur();
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
+      const inDrawer = Boolean(root?.contains && target && root.contains(target));
+      const isTextField = el?.tagName === 'TEXTAREA' || el?.tagName === 'INPUT';
+      const isDocumentRoot = target === document.body || target === document.documentElement;
+      const action = drawerEscapeAction({ inDrawer, isTextField, isDocumentRoot });
+      if (action === 'ignore') return;
       event.preventDefault();
       event.stopPropagation();
+      if (action === 'blur-field') {
+        el?.blur();
+        return;
+      }
       if (viewingCommit) onSelectCommit(null);
       else if (selectedPath) onDeselectFile();
       else onBack();
