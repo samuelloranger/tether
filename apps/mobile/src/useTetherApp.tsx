@@ -12,13 +12,14 @@ import { createDeepLinkHandler, listenForDeepLinks } from './deepLink';
 import { openExternalUrl } from './desktopUpdate';
 import { confirmAction, notify } from './dialog';
 import { isImagePath } from './diffModel';
+import { fetchDiffImageUri, fetchOneReviewDiff, type ReviewDiffSlot } from './fetchReviewDiff';
 import type { FileView } from './fileView';
+import { mapWithConcurrency, reviewDiffKey, reviewFileEntries } from './gitReviewModel';
 import type { LinkTarget } from './links';
 import { isDesktop, isTauri } from './platform';
 import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
 import { type RenderRow, setTheme } from './terminal';
-import type { HostClient } from './tether/hostClient';
 import type { GitLogEntry } from './tether/types';
 import { useAppPreferences } from './tether/useAppPreferences';
 import { useConnectionConfig } from './tether/useConnectionConfig';
@@ -34,20 +35,7 @@ import { useTerminalViewport } from './tether/useTerminalViewport';
 const KEY_DIFF_SIDE_BY_SIDE = 'tether_diff_side_by_side';
 
 export type { GitLogEntry } from './tether/types';
-
-// Fetches raw image bytes with the auth header <Image> can't attach itself,
-// and hands back a data URI so the same code path works native and web.
-async function fetchDiffImageUri(client: HostClient, path: string): Promise<string | null> {
-  const res = await client.get(path);
-  if (!res.ok) return null;
-  const blob = await res.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('failed to read image'));
-    reader.onload = () => resolve(reader.result as string);
-    reader.readAsDataURL(blob);
-  });
-}
+export type { ReviewDiffSlot } from './fetchReviewDiff';
 
 export function useTetherApp() {
   // Proceed once fonts settle OR fail — never gate the whole app on a font fetch.
@@ -181,6 +169,8 @@ export function useTetherApp() {
   const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(
     null,
   );
+  const [reviewDiffs, setReviewDiffs] = useState<Record<string, ReviewDiffSlot>>({});
+  const reviewLoadGenRef = useRef(0);
 
   const {
     activeId,
@@ -614,6 +604,7 @@ export function useTetherApp() {
     [activeClient],
   );
   const closeDiff = useCallback(() => {
+    reviewLoadGenRef.current += 1;
     setDiffOpen(false);
     setDiffSelectedPath(null);
     diffSelectedPathRef.current = null;
@@ -623,6 +614,7 @@ export function useTetherApp() {
     setDiffTruncated(false);
     setDiffImage(null);
     setHistoryCommit(null);
+    setReviewDiffs({});
   }, []);
   const deselectDiffFile = useCallback(() => {
     setDiffSelectedPath(null);
@@ -682,6 +674,55 @@ export function useTetherApp() {
     },
     [activeClient],
   );
+  const loadReviewDiffs = useCallback(() => {
+    const sessionId = getActiveSessionId();
+    const entries = reviewFileEntries(entryFor(sessionId).diffSummary);
+    const gen = ++reviewLoadGenRef.current;
+    setReviewDiffs((prev) => {
+      const next = { ...prev };
+      for (const e of entries) {
+        const key = reviewDiffKey(e.mode, e.path);
+        if (!next[key] || next[key].status === 'error') next[key] = { status: 'loading' };
+      }
+      return next;
+    });
+    void mapWithConcurrency(entries, 5, async (e) => {
+      const key = reviewDiffKey(e.mode, e.path);
+      const slot = await fetchOneReviewDiff({
+        client: activeClient,
+        sessionId,
+        path: e.path,
+        mode: e.mode,
+        file: e.file,
+      });
+      if (reviewLoadGenRef.current !== gen) return slot;
+      setReviewDiffs((prev) => ({ ...prev, [key]: slot }));
+      return slot;
+    });
+  }, [activeClient, entryFor, getActiveSessionId]);
+
+  const retryReviewDiff = useCallback(
+    (mode: 'staged' | 'unstaged', path: string) => {
+      const sessionId = getActiveSessionId();
+      const file = entryFor(sessionId).diffSummary.files.find((f) => f.path === path);
+      if (!file) return;
+      const key = reviewDiffKey(mode, path);
+      const gen = reviewLoadGenRef.current;
+      setReviewDiffs((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      void fetchOneReviewDiff({
+        client: activeClient,
+        sessionId,
+        path,
+        mode,
+        file: { ...file, staged: mode === 'staged' },
+      }).then((slot) => {
+        if (reviewLoadGenRef.current !== gen) return;
+        setReviewDiffs((prev) => ({ ...prev, [key]: slot }));
+      });
+    },
+    [activeClient, entryFor, getActiveSessionId],
+  );
+
   const openDiff = useCallback(() => {
     setDiffOpen(true);
     setDiffSelectedPath(null);
@@ -689,7 +730,8 @@ export function useTetherApp() {
     setDiffTruncated(false);
     setDiffImage(null);
     setHistoryCommit(null);
-  }, []);
+    loadReviewDiffs();
+  }, [loadReviewDiffs]);
 
   // --- Git write ops + history (diff view v2) ---
 
@@ -730,11 +772,12 @@ export function useTetherApp() {
       try {
         await gitPost('stage', { path });
         refreshOpenDiff();
+        loadReviewDiffs();
       } catch (error) {
         void notify('Stage failed', String(error), 'error');
       }
     },
-    [gitPost, refreshOpenDiff],
+    [gitPost, refreshOpenDiff, loadReviewDiffs],
   );
 
   const unstageFile = useCallback(
@@ -742,11 +785,12 @@ export function useTetherApp() {
       try {
         await gitPost('unstage', { path });
         refreshOpenDiff();
+        loadReviewDiffs();
       } catch (error) {
         void notify('Unstage failed', String(error), 'error');
       }
     },
-    [gitPost, refreshOpenDiff],
+    [gitPost, refreshOpenDiff, loadReviewDiffs],
   );
 
   const discardFile = useCallback(
@@ -760,11 +804,12 @@ export function useTetherApp() {
       try {
         await gitPost('discard', { path });
         if (diffSelectedPathRef.current === path) deselectDiffFile();
+        loadReviewDiffs();
       } catch (error) {
         void notify('Discard failed', String(error), 'error');
       }
     },
-    [gitPost, deselectDiffFile],
+    [gitPost, deselectDiffFile, loadReviewDiffs],
   );
 
   const toggleHunk = useCallback(
@@ -776,21 +821,23 @@ export function useTetherApp() {
       }
       // Success or 409-stale, the right move is the same: re-read the diff.
       refreshOpenDiff();
+      loadReviewDiffs();
     },
-    [gitPost, refreshOpenDiff],
+    [gitPost, refreshOpenDiff, loadReviewDiffs],
   );
 
   const commitStagedChanges = useCallback(
     async (message: string) => {
       try {
         await gitPost('commit', { message });
+        loadReviewDiffs();
         return true;
       } catch (error) {
         void notify('Commit failed', String(error), 'error');
         return false;
       }
     },
-    [gitPost],
+    [gitPost, loadReviewDiffs],
   );
 
   const loadGitLog = useCallback(async () => {
@@ -852,10 +899,14 @@ export function useTetherApp() {
     diffOpen,
     getSessionEntry,
     getActiveSessionId,
+    getTerminalSelection,
     inputRef,
     sendKey,
     sendPaste,
     handlePaste,
+    selectAllTerminal,
+    newTerminal,
+    changeFontSize,
     setContextMenu: setCtxMenu,
     setWindowFocused,
     isWindowFocused,
@@ -1043,6 +1094,9 @@ export function useTetherApp() {
     selectCommit,
     diffSideBySide,
     toggleDiffSideBySide,
+    reviewDiffs,
+    loadReviewDiffs,
+    retryReviewDiff,
     selectTerminal,
     selectPresentation,
     closePresentation,
