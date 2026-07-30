@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather';
-import { useState, type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { CommitBox } from './CommitBox';

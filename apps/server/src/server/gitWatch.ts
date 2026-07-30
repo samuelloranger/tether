@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, type FSWatcher, readdirSync, statSync, watch } from 'node:fs';
 import path from 'node:path';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY, GitDiffError, readDiffSummary } from './gitDiff';
-import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatus } from './gitStatus';
 import { resolveGitDir } from './gitRoot';
+import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatus } from './gitStatus';
 
 // Directories git itself never has to look inside of when diffing/statusing —
 // the working-tree half of the watch skips these instead of handing the bare

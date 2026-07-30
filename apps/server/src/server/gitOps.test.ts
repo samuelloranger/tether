@@ -9,6 +9,7 @@ import {
   discardAll,
   discardPath,
   GitOpsError,
+  pushBranch,
   readCommitDiff,
   readLog,
   stageAll,
@@ -18,7 +19,6 @@ import {
   unstageAll,
   unstageHunk,
   unstagePath,
-  pushBranch,
 } from './gitOps';
 
 let root: string;
@@ -181,7 +181,7 @@ describe('bulk ops and undo', () => {
     expect(statusPorcelain()).toContain('M  a.txt');
     expect(statusPorcelain()).toContain('A  new.txt');
     unstageAll(root);
-    expect(statusPorcelain()).toMatch(/ M a\.txt|M  a\.txt/);
+    expect(statusPorcelain()).toMatch(/ M a\.txt|M {2}a\.txt/);
     discardAll(root);
     expect(statusPorcelain()).toBe('');
     expect(existsSync(path.join(root, 'new.txt'))).toBe(false);

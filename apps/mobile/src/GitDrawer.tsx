@@ -1,6 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Feather from '@expo/vector-icons/Feather';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { GestureResponderEvent, LayoutChangeEvent, View as RNView } from 'react-native';
 import {
   ScrollView,
@@ -15,8 +15,8 @@ import { CommitBox } from './CommitBox';
 import { DiffFileBody } from './DiffFileBody';
 import { buildFileTree, type DiffSummary, groupSummary, isImagePath } from './diffModel';
 import { FileTree } from './FileTree';
-import { clampGitDrawerLeftWidth, defaultGitDrawerLeftWidth } from './gitDrawerLayout';
 import { GitTabBar } from './GitTabBar';
+import { clampGitDrawerLeftWidth, defaultGitDrawerLeftWidth } from './gitDrawerLayout';
 import { toggleSetMember } from './gitReviewModel';
 import {
   canPushHead,
