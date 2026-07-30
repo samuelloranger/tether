@@ -68,6 +68,14 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
+      # Cache the bun package download store only — never node_modules (bun's
+      # link layout is absolute-path sensitive and breaks across runners).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - name: Build native renderer bundle
         working-directory: apps/mobile
@@ -83,17 +91,21 @@ jobs:
           - os: macos-latest
             rust-target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
+            cache-key: macos-aarch64
           - os: macos-latest
             rust-target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
+            cache-key: macos-x86_64
           - os: windows-latest
             args: ""
+            cache-key: windows-x64
           # Native packages depend on the system webkit, so build them on the
           # older LTS for the widest glibc range (works on 24.04, Debian 12,
           # Fedora, etc.). They don't bundle an engine, so the runner's webkit
           # version is irrelevant here.
           - os: ubuntu-24.04
             args: --bundles deb,rpm
+            cache-key: linux-deb-rpm
           # The AppImage bundles its OWN webkit (via linuxdeploy). The 24.04
           # engine (webkit2gtk 2.44) can't create an EGL display on some
           # GPU/compositor combos (e.g. hybrid Intel+NVIDIA on Wayland) and
@@ -102,6 +114,7 @@ jobs:
           # AppImage; native-package users are unaffected.
           - os: ubuntu-26.04
             args: --bundles appimage
+            cache-key: linux-appimage
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -110,10 +123,25 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
         with:
           toolchain: stable
           targets: ${{ matrix.rust-target }}
+
+      # Cache cargo registry + dependency artifacts. Explicit cache-key so the
+      # two macOS targets (same runner.os) don't collide; rust-cache still
+      # hashes Cargo.lock / toolchain into the rest of the key.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/mobile/src-tauri
+          key: ${{ matrix.cache-key }}
 
       # webkit/gtk to build; `rpm` so the .rpm bundle is produced (AppImage
       # tooling is fetched by tauri). The Linux build is split across two runners
@@ -179,6 +207,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
       # Expo SDK 57 SPM deps need Swift 6.2+; the image default Xcode is older.
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
@@ -236,6 +270,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
@@ -257,6 +297,15 @@ jobs:
         env:
           CI: 'true'
 
+      # After prebuild so the wrapper under android/ exists. `basic` = GitHub
+      # Actions cache only (no commercial provider). Force write on tag builds —
+      # the action defaults to read-only off the default branch, which would
+      # never populate a cache from release runs.
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: false
+
       # TODO(secrets): the release APK is currently signed with the PUBLIC React
       # Native template debug keystore — this provides NO authenticity and blocks
       # trusted in-place updates. It is a known gap, kept only because a real
@@ -266,9 +315,12 @@ jobs:
       # build, and point the release signingConfig at it (in app/build.gradle,
       # which `expo prebuild --clean` regenerates each run). Do NOT distribute
       # this APK as release-signed until then.
+      # arm64-v8a only: phone APKs don't need armeabi-v7a/x86/x86_64, and
+      # building all four ABIs was ~4 min of CMake alone. Daemon allowed —
+      # setup-gradle manages it; --no-daemon was slowing cold CI starts.
       - name: Build APK
         working-directory: apps/mobile/android
-        run: ./gradlew --no-daemon assembleRelease
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
 
       - name: Attach APK to release
         if: github.event_name == 'push'
@@ -306,6 +358,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
       - name: Install workspace deps
         run: bun install --frozen-lockfile
       # The asset name embeds the tag. macOS ships a .tar.gz wrapping a stable
