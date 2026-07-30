@@ -44,6 +44,22 @@ test('diffLineKinds preserves prefixes while classifying unified diff rows', () 
   expect(diff.split('\n').slice(0, 2)).toEqual(['+const answer = 43;', '-old']);
 });
 
+test('diffLineKinds keeps new/deleted file mode headers as meta', () => {
+  const diff = [
+    'diff --git a/fresh.ts b/fresh.ts',
+    'new file mode 100644',
+    'index 0000000..abc1234',
+    '--- /dev/null',
+    '+++ b/fresh.ts',
+    '@@ -0,0 +1 @@',
+    '+hello',
+  ].join('\n');
+  expect(diffLineKinds(diff)).toEqual(['meta', 'meta', 'meta', 'meta', 'meta', 'meta', 'add']);
+  const lines = parseDiffLines(diff);
+  expect(lines.find((l) => l.text.startsWith('new file'))?.content).toBe('new file mode 100644');
+  expect(lines.every((l) => !l.content.startsWith('ew file'))).toBe(true);
+});
+
 test('isImagePath recognizes common image extensions case-insensitively', () => {
   expect(isImagePath('logo.PNG')).toBe(true);
   expect(isImagePath('assets/icon.svg')).toBe(true);

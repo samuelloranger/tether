@@ -23,14 +23,15 @@ function validatePath(requestedPath: string) {
 
 // Runs git, surfacing failures as 409 with git's own stderr — the client
 // shows it verbatim (hooks, conflicts, nothing-staged all self-explain).
-function runGit(root: string, args: string[], input?: string): string {
+// `okStatuses` lets callers accept `git diff --no-index`'s exit-1-on-diff.
+function runGit(root: string, args: string[], input?: string, okStatuses: number[] = [0]): string {
   const result = spawnSync('git', ['-C', root, ...args], {
     encoding: 'utf8',
     input,
     maxBuffer: MAX_DIFF_BYTES + 65_536,
   });
   if (result.status === null) throw new GitOpsError(404, 'not a git repository');
-  if (result.status !== 0) {
+  if (!okStatuses.includes(result.status)) {
     throw new GitOpsError(409, (result.stderr || result.stdout || 'git command failed').trim());
   }
   return result.stdout;
@@ -71,12 +72,25 @@ function splitHunks(diff: string): { header: string; hunks: string[] } {
 // patch to the index. The client never sends patch content — only an index
 // into the server's own view. If the file changed since the client rendered
 // (index out of range), 409 tells it to refresh.
+//
+// Untracked files must use `git diff --no-index` against /dev/null — plain
+// `git diff -- path` is empty for them, which is exactly what readDiff shows
+// the client. Without this, Stage hunk always 409s on new files.
 function applyHunk(root: string, requestedPath: string, hunkIndex: number, reverse: boolean): void {
   validatePath(requestedPath);
-  const diffArgs = reverse
-    ? ['diff', '--cached', '--', requestedPath]
-    : ['diff', '--', requestedPath];
-  const diff = runGit(root, diffArgs);
+  let diff: string;
+  if (reverse) {
+    diff = runGit(root, ['diff', '--cached', '--', requestedPath]);
+  } else if (isTracked(root, requestedPath)) {
+    diff = runGit(root, ['diff', '--', requestedPath]);
+  } else {
+    diff = runGit(
+      root,
+      ['diff', '--no-index', '--', '/dev/null', requestedPath],
+      undefined,
+      [0, 1],
+    );
+  }
   const { header, hunks } = splitHunks(diff);
   if (!Number.isInteger(hunkIndex) || hunkIndex < 0 || hunkIndex >= hunks.length) {
     throw new GitOpsError(409, 'stale diff — refresh');

@@ -106,6 +106,15 @@ describe('hunk staging', () => {
       expect((e as GitOpsError).status).toBe(409);
     }
   });
+
+  test('stageHunk stages a hunk from an untracked new file', () => {
+    writeFileSync(path.join(root, 'fresh.txt'), 'hello\nworld\n');
+    stageHunk(root, 'fresh.txt', 0);
+    const staged = git('diff --cached -- fresh.txt');
+    expect(staged).toContain('+hello');
+    expect(staged).toContain('+world');
+    expect(git('ls-files -- fresh.txt').trim()).toBe('fresh.txt');
+  });
 });
 
 describe('discardPath', () => {
