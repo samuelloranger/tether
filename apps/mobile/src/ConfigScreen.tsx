@@ -17,7 +17,7 @@ import { desktopLayout } from './desktopLayout';
 import { HostsScreen } from './HostsScreen';
 import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
 import { isDesktop, isMacDesktop } from './platform';
-import { createStyles, MONO } from './styles';
+import { createStyles } from './styles';
 import TitleBar from './TitleBar';
 import type { HostHealthStatus } from './tether/hostHealth';
 import type { HostProfile } from './tether/hostStore';
@@ -183,25 +183,25 @@ export function ConfigScreen({
         style={styles.configContainer}
       >
         <View style={styles.configInner}>
-          <View style={styles.configLogoContainer}>
-            <View style={styles.configIconBox}>
-              <Text style={styles.configLogoIcon}>{'>_'}</Text>
-            </View>
-            <Text style={styles.configTitle}>{isDesktop ? 'Tether Desktop' : 'Tether Mobile'}</Text>
-            <Text style={styles.configSubtitle}>Connect to a terminal on your server</Text>
-            {hosts && hosts.length > 0 && (
-              <TouchableOpacity
-                onPress={() => setHostsOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Manage hosts"
-              >
-                <Text style={{ color: theme.colors.accent, marginTop: 12 }}>Manage hosts</Text>
-              </TouchableOpacity>
-            )}
+          <View style={styles.configBrandRow}>
+            <Text style={styles.configTitle}>Tether</Text>
+            <Text style={styles.configModeTag}>{isDesktop ? 'Desktop' : 'Client'}</Text>
           </View>
+          <View style={styles.configRule} />
+          <Text style={styles.configSubtitle}>Connect to a terminal on your server</Text>
+          {hosts && hosts.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setHostsOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Manage hosts"
+              style={styles.manageHosts}
+            >
+              <Text style={{ color: theme.colors.accent }}>Manage hosts</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.formContainer}>
-            <Text style={styles.inputLabel}>Server IP / Host</Text>
+            <Text style={styles.inputLabel}>Server</Text>
             <TextInput
               style={styles.configInput}
               value={serverIp}
@@ -332,7 +332,7 @@ const createConfigStyles = (c: AppColors) =>
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
-      paddingHorizontal: 24,
+      paddingHorizontal: 28,
       backgroundColor: c.background,
     },
     // Caps the login form width so it doesn't stretch across a wide desktop window.
@@ -340,78 +340,76 @@ const createConfigStyles = (c: AppColors) =>
       width: '100%',
       maxWidth: 400,
     },
-    configLogoContainer: {
-      alignItems: 'center',
-      marginBottom: 32,
-    },
-    configIconBox: {
-      padding: 16,
-      borderRadius: SURFACE_RADIUS.hero,
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.accent,
-      marginBottom: 16,
-    },
-    configLogoIcon: {
-      fontSize: 32,
-      fontFamily: MONO,
-      fontWeight: 'bold',
-      color: c.accent,
-    },
-    configTitle: {
-      fontSize: 24,
-      fontWeight: 'bold',
-      color: c.text,
+    configBrandRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
       marginBottom: 8,
     },
-    configSubtitle: {
-      fontSize: 12,
-      color: c.textMuted,
-      textAlign: 'center',
+    configTitle: {
+      fontSize: 34,
+      fontWeight: '700',
+      letterSpacing: -0.6,
+      color: c.text,
     },
+    configModeTag: {
+      fontSize: 10,
+      fontWeight: '600',
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      color: c.textFaint,
+    },
+    configRule: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: c.border,
+      marginBottom: 10,
+    },
+    configSubtitle: {
+      fontSize: 13,
+      color: c.textMuted,
+      marginBottom: 8,
+      maxWidth: 280,
+    },
+    manageHosts: { marginBottom: 20, alignSelf: 'flex-start' },
     formContainer: {
-      backgroundColor: c.surface,
-      borderRadius: SURFACE_RADIUS.hero,
-      borderWidth: 1,
-      borderColor: c.border,
-      padding: 20,
+      backgroundColor: 'transparent',
+      paddingTop: 8,
     },
     inputLabel: {
-      fontSize: 11,
-      fontWeight: '700',
-      textTransform: 'uppercase',
+      fontSize: 12,
+      fontWeight: '500',
       color: c.textMuted,
       marginBottom: 6,
-      letterSpacing: 0.5,
     },
     configInput: {
-      backgroundColor: c.input,
-      borderWidth: 1,
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      borderBottomWidth: 1,
       borderColor: c.border,
-      borderRadius: SURFACE_RADIUS.control,
+      borderRadius: 0,
       color: c.text,
-      fontSize: 14,
+      fontSize: 15,
       paddingVertical: 10,
-      paddingHorizontal: 12,
-      marginBottom: 16,
-      fontFamily: MONO,
+      paddingHorizontal: 0,
+      marginBottom: 18,
     },
     connectBtn: {
       backgroundColor: c.accent,
       minHeight: MIN_TOUCH_TARGET,
-      paddingHorizontal: 16,
-      borderRadius: SURFACE_RADIUS.control,
+      paddingHorizontal: 18,
+      borderRadius: SURFACE_RADIUS.hero,
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'row',
       gap: 8,
       marginTop: 10,
+      alignSelf: 'flex-start',
     },
     connectBtnDisabled: { opacity: 0.65 },
     connectBtnText: {
       color: c.accentText,
       fontSize: 14,
-      fontWeight: '600',
+      fontWeight: '700',
     },
     configHint: {
       color: c.textFaint,

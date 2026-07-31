@@ -10,7 +10,7 @@ test('compact desktop chrome pins the affected text metrics', async () => {
     source('./GitReview.tsx'),
   ]);
 
-  for (const name of ['title', 'subtitle', 'badgeTextOk', 'badgeTextWarn', 'badgeTextOff']) {
+  for (const name of ['title', 'subtitle', 'statusWordOk', 'statusWordWarn', 'statusWordOff']) {
     expect(titleBar).toMatch(new RegExp(`${name}: \\{[^}]*lineHeight: \\d+[^}]*COMPACT_TEXT`));
   }
   for (const viewer of [fileViewer, gitDrawer, gitReview]) {

@@ -39,13 +39,13 @@ export interface RenderRow {
   promptStart: boolean;
 }
 
-export let DEFAULT_FG = APP_THEMES.mocha.terminal.fg;
-export let DEFAULT_BG = APP_THEMES.mocha.terminal.bg;
+export let DEFAULT_FG = APP_THEMES['default-dark'].terminal.fg;
+export let DEFAULT_BG = APP_THEMES['default-dark'].terminal.bg;
 
 // The default Catppuccin Mocha ANSI palette, extended to xterm-256. Mutable:
 // setTheme() below replaces BASE_16/PALETTE/DEFAULT_FG/DEFAULT_BG at runtime so
 // an active session re-colors on its next repaint without a fresh engine.
-let BASE_16 = [...APP_THEMES.mocha.terminal.base16];
+let BASE_16 = [...APP_THEMES['default-dark'].terminal.base16];
 
 function buildPalette(): string[] {
   const pal = [...BASE_16];

@@ -44,25 +44,23 @@ function StatusBadge({ status, colors }: { status: TitleBarProps['status']; colo
   const styles = createStyles(colors);
   if (status === 'connected') {
     return (
-      <View style={[styles.badge, styles.badgeOk]}>
-        <View style={[styles.dot, styles.dotOk]} />
-        <Text style={styles.badgeTextOk}>Connected</Text>
+      <View style={styles.statusWord}>
+        <Text style={styles.statusWordOk}>online</Text>
       </View>
     );
   }
   if (status === 'connecting') {
     return (
-      <View style={[styles.badge, styles.badgeWarn]}>
+      <View style={styles.statusWord}>
         <ActivityIndicator size={8} color={colors.warning} style={{ marginRight: 5 }} />
-        <Text style={styles.badgeTextWarn}>Connecting…</Text>
+        <Text style={styles.statusWordWarn}>connecting</Text>
       </View>
     );
   }
-  const label = status === 'auth-failed' ? 'Auth' : 'Offline';
+  const label = status === 'auth-failed' ? 'auth' : 'offline';
   return (
-    <View style={[styles.badge, styles.badgeOff]}>
-      <View style={[styles.dot, styles.dotOff]} />
-      <Text style={styles.badgeTextOff}>{label}</Text>
+    <View style={styles.statusWord}>
+      <Text style={styles.statusWordOff}>{label}</Text>
     </View>
   );
 }
@@ -227,7 +225,7 @@ const createStyles = (c: AppColors) =>
       height: 40,
       paddingLeft: 12,
       backgroundColor: c.surface,
-      borderBottomWidth: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: c.border,
     },
     info: { flex: 1, minWidth: 0 },
@@ -235,39 +233,36 @@ const createStyles = (c: AppColors) =>
     subtitle: { color: c.textFaint, fontSize: 11, lineHeight: 13, ...COMPACT_TEXT },
     actions: { flexDirection: 'row', alignItems: 'center' },
     btn: { paddingHorizontal: 8, paddingVertical: 6 },
-    badge: {
+    statusWord: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 999,
-      marginRight: 4,
+      marginRight: 6,
+      paddingLeft: 10,
+      borderLeftWidth: StyleSheet.hairlineWidth,
+      borderLeftColor: c.border,
     },
-    badgeOk: { backgroundColor: c.surfaceRaised },
-    badgeWarn: { backgroundColor: c.surfaceRaised },
-    badgeOff: { backgroundColor: c.surfaceRaised },
-    dot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
-    dotOk: { backgroundColor: c.success },
-    dotOff: { backgroundColor: c.textMuted },
-    badgeTextOk: {
+    statusWordOk: {
       color: c.success,
       fontSize: 11,
       lineHeight: 13,
       fontWeight: '600',
+      fontVariant: ['tabular-nums'],
       ...COMPACT_TEXT,
     },
-    badgeTextWarn: {
+    statusWordWarn: {
       color: c.warning,
       fontSize: 11,
       lineHeight: 13,
       fontWeight: '600',
+      fontVariant: ['tabular-nums'],
       ...COMPACT_TEXT,
     },
-    badgeTextOff: {
+    statusWordOff: {
       color: c.textMuted,
       fontSize: 11,
       lineHeight: 13,
       fontWeight: '600',
+      fontVariant: ['tabular-nums'],
       ...COMPACT_TEXT,
     },
     winControls: { flexDirection: 'row', alignItems: 'center', marginLeft: 6 },

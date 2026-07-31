@@ -16,6 +16,8 @@ import { MONO } from './styles';
 
 export const THEME_LABELS = {
   system: 'System',
+  'default-dark': 'Default dark',
+  'default-light': 'Default light',
   latte: 'Latte',
   frappe: 'Frappé',
   macchiato: 'Macchiato',
