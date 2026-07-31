@@ -11,9 +11,9 @@ import { DiffLines } from './DiffLines';
 import { displayDiff } from './diffModel';
 import { ImageDiff } from './ImageDiff';
 import { minTouchTarget } from './interaction';
+import { SideBySideDiff } from './SideBySideDiff';
 
 const TOUCH_TARGET = minTouchTarget();
-import { SideBySideDiff } from './SideBySideDiff';
 
 export function DiffFileBody({
   loading,

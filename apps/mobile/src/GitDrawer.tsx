@@ -30,10 +30,9 @@ import {
 } from './gitStatusModel';
 import { HistoryList } from './HistoryList';
 import { minTouchTarget } from './interaction';
-
-const TOUCH_TARGET = minTouchTarget();
 import type { GitLogEntry } from './useTetherApp';
 
+const TOUCH_TARGET = minTouchTarget();
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 const SIDE_BY_SIDE_MIN_WIDTH = 900;
 

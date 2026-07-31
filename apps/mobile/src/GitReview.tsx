@@ -17,10 +17,9 @@ import {
 } from './gitStatusModel';
 import { HistoryList } from './HistoryList';
 import { minTouchTarget } from './interaction';
-
-const TOUCH_TARGET = minTouchTarget();
 import type { GitLogEntry } from './useTetherApp';
 
+const TOUCH_TARGET = minTouchTarget();
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 
 export function GitReview({
@@ -290,7 +289,6 @@ export function GitReview({
           <ScrollView
             contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
           >
-            {' '}
             {summary.files.length === 0 ? (
               <View style={styles.center}>
                 <Text style={{ color: theme.colors.text }}>No uncommitted changes</Text>

@@ -8,9 +8,9 @@ import {
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { minTouchTarget } from './interaction';
+import type { GitLogEntry } from './useTetherApp';
 
 const TOUCH_TARGET = minTouchTarget();
-import type { GitLogEntry } from './useTetherApp';
 
 export function HistoryList({
   entries,
