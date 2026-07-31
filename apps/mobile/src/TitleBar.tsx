@@ -32,6 +32,9 @@ export interface TitleBarProps {
   changeSummary?: DiffSummary;
   onSettings?: () => void;
   onMenu?: () => void;
+  // When set, shows a left hamburger that opens the session drawer (unpinned
+  // wide desktop). Same accessibility label as the mobile header control.
+  onOpenDrawer?: () => void;
   // Compact desktop windows keep their window-management chrome, while the
   // mobile header below owns terminal actions and connection state.
   compact?: boolean;
@@ -75,6 +78,7 @@ export default function TitleBar({
   changeSummary,
   onSettings,
   onMenu,
+  onOpenDrawer,
   compact = false,
 }: TitleBarProps) {
   const { theme } = useAppTheme();
@@ -107,6 +111,20 @@ export default function TitleBar({
   return (
     <View style={styles.bar} {...DRAG_PROPS}>
       {leftInset > 0 && <View style={{ width: leftInset }} />}
+
+      {onOpenDrawer ? (
+        <TouchableOpacity
+          {...NO_DRAG_PROPS}
+          style={styles.btn}
+          activeOpacity={0.6}
+          hitSlop={HIT}
+          onPress={onOpenDrawer}
+          accessibilityRole="button"
+          accessibilityLabel="Open terminal list"
+        >
+          <Feather name="menu" size={18} color={theme.colors.text} />
+        </TouchableOpacity>
+      ) : null}
 
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={1}>
