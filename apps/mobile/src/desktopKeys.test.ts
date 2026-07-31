@@ -3,10 +3,12 @@ import {
   COPY,
   FONT_LARGER,
   FONT_SMALLER,
+  isTerminalNavKey,
   type KeyLike,
   keyToBytes,
   NEW_TERMINAL,
   PASTE,
+  resolveKeyboardKey,
   SELECT_ALL,
 } from './desktopKeys';
 
@@ -223,5 +225,69 @@ describe('keyToBytes — ignored keys', () => {
     // Cmd+A/S/etc. are not control bytes and not printable-with-no-mod when isMac=false.
     expect(keyToBytes(k('a', { metaKey: true }))).toBeNull();
     expect(keyToBytes(k('s', { metaKey: true }))).toBeNull();
+  });
+});
+
+// Keys that must be forwarded from attachCustomKeyEventHandler when xterm's
+// textarea owns focus — the window-level handler skips TEXTAREA, and xterm's
+// own mapping is keyCode-based (unreliable on some webviews).
+describe('isTerminalNavKey', () => {
+  it('marks arrows, Home/End, Page/Insert/Delete, and F-keys', () => {
+    for (const key of [
+      'ArrowUp',
+      'ArrowDown',
+      'ArrowLeft',
+      'ArrowRight',
+      'Home',
+      'End',
+      'PageUp',
+      'PageDown',
+      'Insert',
+      'Delete',
+      'F1',
+      'F12',
+      // legacy key names some webviews still emit
+      'Left',
+      'Right',
+      'Up',
+      'Down',
+    ]) {
+      expect(isTerminalNavKey(key)).toBe(true);
+    }
+  });
+  it('does not mark printable or modifier keys', () => {
+    expect(isTerminalNavKey('a')).toBe(false);
+    expect(isTerminalNavKey('Enter')).toBe(false);
+    expect(isTerminalNavKey('Backspace')).toBe(false);
+    expect(isTerminalNavKey('Tab')).toBe(false);
+    expect(isTerminalNavKey('Escape')).toBe(false);
+    expect(isTerminalNavKey('Shift')).toBe(false);
+  });
+});
+
+describe('resolveKeyboardKey', () => {
+  it('prefers a normal event.key', () => {
+    expect(resolveKeyboardKey({ key: 'ArrowLeft' })).toBe('ArrowLeft');
+    expect(resolveKeyboardKey({ key: 'Left' })).toBe('ArrowLeft');
+  });
+  it('falls back to event.code when key is Unidentified', () => {
+    expect(resolveKeyboardKey({ key: 'Unidentified', code: 'ArrowLeft' })).toBe('ArrowLeft');
+    expect(resolveKeyboardKey({ key: 'Unidentified', code: 'Home' })).toBe('Home');
+  });
+  it('falls back to keyCode when key/code are unusable', () => {
+    expect(resolveKeyboardKey({ key: 'Unidentified', keyCode: 37 })).toBe('ArrowLeft');
+    expect(resolveKeyboardKey({ key: 'Unidentified', keyCode: 40 })).toBe('ArrowDown');
+  });
+  it('maps Unidentified arrows through keyToBytes via code', () => {
+    expect(
+      keyToBytes({
+        key: 'Unidentified',
+        code: 'ArrowLeft',
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe('\x1b[D');
   });
 });
