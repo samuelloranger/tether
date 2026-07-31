@@ -1,4 +1,5 @@
 import { fireEvent, render } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 import { AppThemeProvider } from '../src/AppThemeProvider';
 import { CommitBox } from '../src/CommitBox';
 
@@ -23,9 +24,9 @@ function renderBox(overrides: Partial<Parameters<typeof CommitBox>[0]> = {}) {
 
 test('enables Commit after a message and calls onCommit', () => {
   const { props, view } = renderBox();
-  expect(view.getByPlaceholderText('Commit message')).toBeTruthy();
+  expect(view.getByLabelText('Commit message')).toBeTruthy();
   expect(view.getByLabelText('Commit staged changes')).toBeDisabled();
-  fireEvent.changeText(view.getByPlaceholderText('Commit message'), 'fix bugs');
+  fireEvent.changeText(view.getByLabelText('Commit message'), 'fix bugs');
   expect(props.onChangeMessage).toHaveBeenCalledWith('fix bugs');
 
   const { view: withMessage } = renderBox({ message: 'fix bugs' });
@@ -46,10 +47,14 @@ test('stays disabled with a message when nothing is staged', () => {
   expect(view.getByLabelText('Commit staged changes')).toBeDisabled();
 });
 
-test('chevron menu exposes Amend, Undo, and Push', () => {
+test('native more-menu uses a system alert with enabled actions', () => {
   const onAmend = jest.fn();
   const onUndoCommit = jest.fn();
   const onPush = jest.fn();
+  const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+    const amend = buttons?.find((b) => 'text' in b && b.text === 'Amend');
+    if (amend && 'onPress' in amend) amend.onPress?.();
+  });
   const { view } = renderBox({
     message: 'fix bugs',
     onAmend,
@@ -58,25 +63,14 @@ test('chevron menu exposes Amend, Undo, and Push', () => {
     canAmend: true,
     canPush: true,
   });
-  expect(view.queryByLabelText('Amend last commit')).toBeNull();
   fireEvent.press(view.getByLabelText('More git actions'));
-  fireEvent.press(view.getByLabelText('Amend last commit'));
+  expect(alertSpy).toHaveBeenCalled();
   expect(onAmend).toHaveBeenCalled();
-
-  const { view: again } = renderBox({
-    message: 'fix bugs',
-    onAmend,
-    onUndoCommit,
-    onPush,
-    canAmend: true,
-    canPush: true,
-  });
-  fireEvent.press(again.getByLabelText('More git actions'));
-  fireEvent.press(again.getByLabelText('Push to remote'));
-  expect(onPush).toHaveBeenCalled();
+  alertSpy.mockRestore();
 });
 
-test('shows Amend disabled when rewrite is not allowed', () => {
+test('native more-menu omits rewrite actions when not allowed', () => {
+  const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   const { view } = renderBox({
     message: 'fix bugs',
     onAmend: jest.fn(),
@@ -86,24 +80,9 @@ test('shows Amend disabled when rewrite is not allowed', () => {
     canPush: false,
   });
   fireEvent.press(view.getByLabelText('More git actions'));
-  expect(view.getByLabelText('Amend last commit')).toBeDisabled();
-  expect(view.getByLabelText('Undo last commit')).toBeDisabled();
-  expect(view.getByLabelText('Push to remote')).toBeDisabled();
-});
-
-test('pressing the chevron again closes the menu', () => {
-  const { view } = renderBox({
-    message: 'fix bugs',
-    onAmend: jest.fn(),
-    onUndoCommit: jest.fn(),
-    onPush: jest.fn(),
-    canAmend: true,
-    canPush: true,
-  });
-  fireEvent.press(view.getByLabelText('More git actions'));
-  expect(view.getByLabelText('Amend last commit')).toBeTruthy();
-  fireEvent.press(view.getByLabelText('More git actions'));
-  expect(view.queryByLabelText('Amend last commit')).toBeNull();
+  const buttons = alertSpy.mock.calls[0]?.[2] as Array<{ text: string }> | undefined;
+  expect(buttons?.map((b) => b.text)).toEqual(['Cancel']);
+  alertSpy.mockRestore();
 });
 
 test('hides chevron when no menu actions are provided', () => {

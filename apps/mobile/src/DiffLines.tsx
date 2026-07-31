@@ -4,6 +4,9 @@ import { useAppTheme } from './AppThemeProvider';
 import { colorForTokenTypes } from './CodeHighlight';
 import { languageForPath, tokenizeLine } from './codeLanguage';
 import { parseDiffLines } from './diffModel';
+import { minTouchTarget } from './interaction';
+
+const TOUCH_TARGET = minTouchTarget();
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$/;
@@ -73,6 +76,7 @@ export function DiffLines({
                   accessibilityLabel={`${hunkActionLabel ?? 'Stage'} hunk ${thisHunk + 1}`}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   onPress={() => onHunkPress(thisHunk)}
+                  style={styles.hunkActionHit}
                 >
                   <Text style={[styles.hunkAction, { color: theme.colors.accent }]}>
                     {hunkActionLabel ?? 'Stage'}
@@ -171,6 +175,12 @@ const styles = StyleSheet.create({
   },
   hunkLabel: { fontFamily: 'monospace', fontSize: 12 },
   hunkContext: { fontFamily: 'monospace', fontSize: 12, flexShrink: 1 },
+  hunkActionHit: {
+    minHeight: TOUCH_TARGET,
+    minWidth: TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   hunkAction: { fontSize: 12, fontWeight: '600', paddingHorizontal: 8 },
   row: { flexDirection: 'row', alignItems: 'flex-start' },
   gutterNum: { fontFamily: 'monospace', fontSize: 14, textAlign: 'right', marginRight: 8 },

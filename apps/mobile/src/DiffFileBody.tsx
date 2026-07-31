@@ -10,8 +10,10 @@ import { useAppTheme } from './AppThemeProvider';
 import { DiffLines } from './DiffLines';
 import { displayDiff } from './diffModel';
 import { ImageDiff } from './ImageDiff';
-import { MIN_TOUCH_TARGET } from './interaction';
+import { minTouchTarget } from './interaction';
 import { SideBySideDiff } from './SideBySideDiff';
+
+const TOUCH_TARGET = minTouchTarget();
 
 export function DiffFileBody({
   loading,
@@ -26,6 +28,8 @@ export function DiffFileBody({
   hunkActionLabel,
   onRetry,
   onOpenLine,
+  /** When false, render inline without a ScrollView (parent already scrolls). */
+  scrollable = true,
 }: {
   loading: boolean;
   error?: string | null;
@@ -39,12 +43,13 @@ export function DiffFileBody({
   hunkActionLabel?: string;
   onRetry?: () => void;
   onOpenLine?: (line: number) => void;
+  scrollable?: boolean;
 }) {
   const { theme } = useAppTheme();
 
   if (loading) {
     return (
-      <View style={styles.center} accessibilityRole="progressbar">
+      <View style={styles.center} accessibilityRole="progressbar" accessibilityLabel="Loading diff">
         <ActivityIndicator color={theme.colors.accent} testID="diff-file-loading" />
       </View>
     );
@@ -73,16 +78,10 @@ export function DiffFileBody({
   }
 
   const text = displayDiff(diffText ?? '', truncated);
-  if (sideBySide && wideEnough) {
-    return (
-      <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
-        <SideBySideDiff diffText={text} path={path} />
-      </ScrollView>
-    );
-  }
-
-  return (
-    <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
+  const body =
+    sideBySide && wideEnough ? (
+      <SideBySideDiff diffText={text} path={path} />
+    ) : (
       <DiffLines
         diffText={text}
         path={path}
@@ -90,6 +89,15 @@ export function DiffFileBody({
         hunkActionLabel={hunkActionLabel}
         onOpenLine={onOpenLine}
       />
+    );
+
+  if (!scrollable) {
+    return <View style={styles.content}>{body}</View>;
+  }
+
+  return (
+    <ScrollView style={styles.vertical} contentContainerStyle={styles.content}>
+      {body}
     </ScrollView>
   );
 }
@@ -99,7 +107,7 @@ const styles = StyleSheet.create({
   vertical: { flex: 1 },
   content: { padding: 16, alignItems: 'stretch' },
   retry: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',

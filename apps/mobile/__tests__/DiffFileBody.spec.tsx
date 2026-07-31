@@ -34,3 +34,13 @@ test('shows an error and retries', () => {
   fireEvent.press(view.getByLabelText('Retry loading diff'));
   expect(onRetry).toHaveBeenCalled();
 });
+
+test('embedded mode still renders hunk actions without nesting a scroll view', () => {
+  const { view } = renderBody({
+    scrollable: false,
+    diffText: '@@ -1,1 +1,2 @@ fn\n context\n+added\n',
+    onHunkPress: jest.fn(),
+    hunkActionLabel: 'Stage',
+  });
+  expect(view.getByLabelText('Stage hunk 1')).toBeTruthy();
+});
