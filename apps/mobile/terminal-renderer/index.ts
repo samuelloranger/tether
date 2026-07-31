@@ -122,7 +122,7 @@ window.__tetherDispatch = (command) => {
   if (!command || command.v !== 1) return;
   if (page.handleRpc(command)) return;
   switch (command.type) {
-    case 'hydrate':
+    case 'hydrate': {
       page.resetPrompts();
       terminal.reset();
       themeColors.foreground = command.theme.foreground;
@@ -143,6 +143,7 @@ window.__tetherDispatch = (command) => {
         post({ type: 'hydrated' });
       });
       break;
+    }
     case 'write':
       terminal.write(command.data, () => page.afterWrite());
       break;

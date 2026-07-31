@@ -25,6 +25,6 @@ test('terminal safe-area padding is inside the well, not wrapping App', async ()
   // 4px gutter is on .xterm (FitAddon-aware), not a wrapper around #terminal.
   expect(html).toContain('.xterm{box-sizing:border-box;padding:0 4px}');
   expect(html).not.toContain('#terminal{box-sizing:border-box;padding:0 4px}');
-  expect(desktopView).toContain("terminal.element!.style.paddingLeft = '4px'");
+  expect(desktopView).toContain("xtermEl.style.paddingLeft = '4px'");
   expect(desktopView).not.toContain('paddingLeft: 4');
 });
