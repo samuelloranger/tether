@@ -29,7 +29,9 @@ import {
   type RepoStatus,
 } from './gitStatusModel';
 import { HistoryList } from './HistoryList';
-import { MIN_TOUCH_TARGET } from './interaction';
+import { minTouchTarget } from './interaction';
+
+const TOUCH_TARGET = minTouchTarget();
 import type { GitLogEntry } from './useTetherApp';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
@@ -128,7 +130,7 @@ export function GitDrawer({
 
   const headerLabel = viewingCommit
     ? `${historyCommit.entry.shortSha} ${historyCommit.entry.subject}`
-    : (selectedPath ?? 'Changes');
+    : (selectedPath ?? 'Working tree');
 
   useEffect(() => {
     void AsyncStorage.getItem(leftWidthStorageKey).then((raw) => {
@@ -261,7 +263,7 @@ export function GitDrawer({
     if (!selectedPath) {
       return (
         <View style={styles.center}>
-          <Text style={{ color: theme.colors.textMuted }}>Select a file</Text>
+          <Text style={{ color: theme.colors.textMuted }}>Select a file to review</Text>
         </View>
       );
     }
@@ -306,11 +308,19 @@ export function GitDrawer({
           <Text style={[styles.backText, { color: theme.colors.accent }]}>Close</Text>
         </TouchableOpacity>
         <View style={styles.headerTitles}>
-          <Text numberOfLines={1} style={[styles.path, { color: theme.colors.text }]}>
+          <Text
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.35}
+            style={[styles.path, { color: theme.colors.text }]}
+          >
             {headerLabel}
           </Text>
           {statusLabel && !viewingCommit ? (
-            <Text numberOfLines={1} style={[styles.status, { color: theme.colors.textMuted }]}>
+            <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.35}
+              style={[styles.status, { color: theme.colors.textMuted }]}
+            >
               {statusLabel}
             </Text>
           ) : null}
@@ -354,7 +364,7 @@ export function GitDrawer({
             <HistoryList entries={historyEntries} onSelect={onSelectCommit} />
           ) : summary.files.length === 0 ? (
             <View style={styles.center}>
-              <Text style={{ color: theme.colors.text }}>No changes</Text>
+              <Text style={{ color: theme.colors.text }}>No uncommitted changes</Text>
             </View>
           ) : (
             <>
@@ -456,6 +466,30 @@ export function GitDrawer({
         <View
           accessibilityRole="adjustable"
           accessibilityLabel="Resize file list"
+          accessibilityValue={{
+            min: 0,
+            max: Math.max(0, bodyWidth),
+            now: resolvedLeft ?? 0,
+          }}
+          accessibilityActions={[
+            { name: 'increment', label: 'Widen file list' },
+            { name: 'decrement', label: 'Narrow file list' },
+          ]}
+          onAccessibilityAction={(event) => {
+            if (bodyWidth <= 0) return;
+            const step = 24;
+            const current = resolvedLeft ?? defaultGitDrawerLeftWidth(bodyWidth);
+            let next = current;
+            if (event.nativeEvent.actionName === 'increment') {
+              next = clampGitDrawerLeftWidth(current + step, bodyWidth);
+            } else if (event.nativeEvent.actionName === 'decrement') {
+              next = clampGitDrawerLeftWidth(current - step, bodyWidth);
+            } else {
+              return;
+            }
+            setLeftWidth(next);
+            void AsyncStorage.setItem(leftWidthStorageKey, String(next));
+          }}
           hitSlop={{ left: 4, right: 4, top: 0, bottom: 0 }}
           onStartShouldSetResponder={() => true}
           onResponderGrant={onSplitterGrant}
@@ -489,7 +523,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   back: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -507,7 +541,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sectionActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sectionAction: { minHeight: 28, justifyContent: 'center' },
+  sectionAction: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
   sectionHeader: {
     fontSize: 12,
     fontWeight: '700',

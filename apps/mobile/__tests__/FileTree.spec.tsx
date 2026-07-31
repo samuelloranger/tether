@@ -43,14 +43,14 @@ test('collapsing a folder in Staged does not collapse the same folder in Changes
     </AppThemeProvider>,
   );
 
-  expect(view.getByText('a.ts')).toBeTruthy();
-  expect(view.getByText('b.ts')).toBeTruthy();
+  expect(view.getByLabelText('Select src/a.ts')).toBeTruthy();
+  expect(view.getByLabelText('Select src/b.ts')).toBeTruthy();
 
   fireEvent.press(view.getByLabelText('Collapse staged folder src'));
-  expect(view.queryByText('a.ts')).toBeNull();
-  expect(view.getByText('b.ts')).toBeTruthy();
+  expect(view.queryByLabelText('Select src/a.ts')).toBeNull();
+  expect(view.getByLabelText('Select src/b.ts')).toBeTruthy();
 
   fireEvent.press(view.getByLabelText('Collapse unstaged folder src'));
-  expect(view.queryByText('a.ts')).toBeNull();
-  expect(view.queryByText('b.ts')).toBeNull();
+  expect(view.queryByLabelText('Select src/a.ts')).toBeNull();
+  expect(view.queryByLabelText('Select src/b.ts')).toBeNull();
 });

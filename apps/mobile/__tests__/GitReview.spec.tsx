@@ -1,4 +1,5 @@
 import { fireEvent, render } from '@testing-library/react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppThemeProvider } from '../src/AppThemeProvider';
 import type { DiffSummary } from '../src/diffModel';
 import type { ReviewDiffSlot } from '../src/fetchReviewDiff';
@@ -59,9 +60,16 @@ function renderReview(overrides: Partial<Parameters<typeof GitReview>[0]> = {}) 
   return {
     props,
     view: render(
-      <AppThemeProvider>
-        <GitReview {...props} />
-      </AppThemeProvider>,
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 47, left: 0, right: 0, bottom: 34 },
+        }}
+      >
+        <AppThemeProvider>
+          <GitReview {...props} />
+        </AppThemeProvider>
+      </SafeAreaProvider>,
     ),
   };
 }
@@ -69,17 +77,19 @@ function renderReview(overrides: Partial<Parameters<typeof GitReview>[0]> = {}) 
 test('renders continuous staged then changes with top commit box', () => {
   const { view } = renderReview();
   expect(view.getByLabelText('Back to terminal')).toBeTruthy();
-  expect(view.getByPlaceholderText('Commit message')).toBeTruthy();
+  expect(view.getByLabelText('Commit message')).toBeTruthy();
   expect(view.getByText('Staged (1)')).toBeTruthy();
   expect(view.getByText('Changes (1)')).toBeTruthy();
-  expect(view.getByLabelText('Stage hunk 1')).toBeTruthy();
+  // Files start collapsed — diffs mount only after expand.
+  expect(view.queryByLabelText('Stage hunk 1')).toBeNull();
+  expect(view.getByLabelText('Expand file b.ts')).toBeTruthy();
 });
 
-test('collapses and expands a file from its header', () => {
+test('expands and collapses a file from its header', () => {
   const { view } = renderReview();
-  expect(view.getByLabelText('Unstage hunk 1')).toBeTruthy();
-  fireEvent.press(view.getByLabelText('Collapse file a.ts'));
   expect(view.queryByLabelText('Unstage hunk 1')).toBeNull();
   fireEvent.press(view.getByLabelText('Expand file a.ts'));
   expect(view.getByLabelText('Unstage hunk 1')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('Collapse file a.ts'));
+  expect(view.queryByLabelText('Unstage hunk 1')).toBeNull();
 });

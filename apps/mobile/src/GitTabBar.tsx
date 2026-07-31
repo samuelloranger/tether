@@ -1,6 +1,8 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
-import { MIN_TOUCH_TARGET } from './interaction';
+import { minTouchTarget } from './interaction';
+
+const TOUCH_TARGET = minTouchTarget();
 
 export function GitTabBar({
   tab,
@@ -14,7 +16,10 @@ export function GitTabBar({
   const { theme } = useAppTheme();
 
   return (
-    <View style={[styles.tabs, { borderBottomColor: theme.colors.border }]}>
+    <View
+      accessibilityRole="tablist"
+      style={[styles.tabs, { borderBottomColor: theme.colors.border }]}
+    >
       {(
         [
           { key: 'changes' as const, label: 'Working tree', onPress: onChanges },
@@ -23,7 +28,8 @@ export function GitTabBar({
       ).map((t) => (
         <TouchableOpacity
           key={t.key}
-          accessibilityRole="button"
+          accessibilityRole="tab"
+          accessibilityLabel={t.label}
           accessibilityState={{ selected: tab === t.key }}
           onPress={t.onPress}
           style={[
@@ -48,7 +54,7 @@ export function GitTabBar({
 const styles = StyleSheet.create({
   tabs: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
   tab: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',

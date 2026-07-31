@@ -1,6 +1,7 @@
 import Feather from '@expo/vector-icons/Feather';
 import { type ReactNode, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import { CommitBox } from './CommitBox';
 import { DiffFileBody } from './DiffFileBody';
@@ -15,7 +16,9 @@ import {
   type RepoStatus,
 } from './gitStatusModel';
 import { HistoryList } from './HistoryList';
-import { MIN_TOUCH_TARGET } from './interaction';
+import { minTouchTarget } from './interaction';
+
+const TOUCH_TARGET = minTouchTarget();
 import type { GitLogEntry } from './useTetherApp';
 
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
@@ -68,8 +71,11 @@ export function GitReview({
   loadReviewDiffs?: () => void;
 }) {
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<'changes' | 'history'>('changes');
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Empty = all collapsed. Expanding mounts DiffLines; keep closed by default so
+  // opening review with many files does not paint every unified diff at once.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [commitMessage, setCommitMessage] = useState('');
   const [committing, setCommitting] = useState(false);
 
@@ -98,7 +104,7 @@ export function GitReview({
 
   const headerLabel = viewingCommit
     ? `${historyCommit.entry.shortSha} ${historyCommit.entry.subject}`
-    : 'Changes';
+    : 'Working tree';
 
   const backTarget = viewingCommit ? () => onSelectCommit(null) : onBack;
   const backLabel = viewingCommit ? 'Back to history' : 'Back to terminal';
@@ -118,7 +124,7 @@ export function GitReview({
     file: (typeof entries)[number]['file'],
   ) => {
     const key = reviewDiffKey(mode, path);
-    const isCollapsed = collapsed.has(key);
+    const isExpanded = expanded.has(key);
     const slot = reviewDiffs[key];
     const stats = file.binary ? (
       <Text style={[styles.fileStat, { color: theme.colors.textMuted }]}>binary</Text>
@@ -134,12 +140,12 @@ export function GitReview({
         <View style={styles.fileHeader}>
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel={`${isCollapsed ? 'Expand' : 'Collapse'} file ${path}`}
+            accessibilityLabel={`${isExpanded ? 'Collapse' : 'Expand'} file ${path}`}
             style={styles.fileHeaderMain}
-            onPress={() => setCollapsed((prev) => toggleSetMember(prev, key))}
+            onPress={() => setExpanded((prev) => toggleSetMember(prev, key))}
           >
             <Feather
-              name={isCollapsed ? 'chevron-right' : 'chevron-down'}
+              name={isExpanded ? 'chevron-down' : 'chevron-right'}
               size={16}
               color={theme.colors.textMuted}
             />
@@ -152,7 +158,6 @@ export function GitReview({
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel={`Unstage ${path}`}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               style={styles.actionButton}
               onPress={() => onUnstageFile(path)}
             >
@@ -163,7 +168,6 @@ export function GitReview({
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel={`Stage ${path}`}
-                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                 style={styles.actionButton}
                 onPress={() => onStageFile(path)}
               >
@@ -172,7 +176,6 @@ export function GitReview({
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel={`Discard ${path}`}
-                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                 style={styles.actionButton}
                 onPress={() => onDiscardFile(path)}
               >
@@ -181,7 +184,7 @@ export function GitReview({
             </>
           )}
         </View>
-        {!isCollapsed ? (
+        {isExpanded ? (
           <View style={styles.fileBody}>
             <DiffFileBody
               loading={!slot || slot.status === 'loading'}
@@ -198,6 +201,7 @@ export function GitReview({
               }
               sideBySide={false}
               wideEnough={false}
+              scrollable={false}
               onHunkPress={(hunkIndex) => onToggleHunk(path, hunkIndex, mode === 'staged')}
               hunkActionLabel={mode === 'staged' ? 'Unstage' : 'Stage'}
               onRetry={() => onRetryReviewDiff(mode, path)}
@@ -220,13 +224,18 @@ export function GitReview({
         >
           <Text style={[styles.backText, { color: theme.colors.accent }]}>Back</Text>
         </TouchableOpacity>
-        <Text numberOfLines={1} style={[styles.path, { color: theme.colors.text }]}>
+        <Text
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.35}
+          style={[styles.path, { color: theme.colors.text }]}
+        >
           {headerLabel}
         </Text>
       </View>
       {statusLabel && !viewingCommit ? (
         <Text
           numberOfLines={1}
+          maxFontSizeMultiplier={1.35}
           style={[
             styles.statusLine,
             { color: theme.colors.textMuted, borderBottomColor: theme.colors.border },
@@ -275,12 +284,16 @@ export function GitReview({
             canPush={canPush}
             stagedCount={groups.staged.length}
             committing={committing}
+            menuPlacement="down"
             style={{ borderTopWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth }}
           />
-          <ScrollView contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
+          >
+            {' '}
             {summary.files.length === 0 ? (
               <View style={styles.center}>
-                <Text style={{ color: theme.colors.text }}>No changes</Text>
+                <Text style={{ color: theme.colors.text }}>No uncommitted changes</Text>
               </View>
             ) : (
               <>
@@ -358,7 +371,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   back: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -372,7 +385,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  scrollContent: { paddingBottom: 24, alignItems: 'stretch' },
+  scrollContent: { alignItems: 'stretch' },
   center: { padding: 24, alignItems: 'center' },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -384,7 +397,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   sectionActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sectionAction: { minHeight: 28, justifyContent: 'center' },
+  sectionAction: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
   sectionHeader: {
     fontSize: 12,
     fontWeight: '700',
@@ -397,7 +414,7 @@ const styles = StyleSheet.create({
   fileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 8,
   },
   fileHeaderMain: {
@@ -405,14 +422,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 8,
   },
   filePath: { flex: 1, fontFamily: 'monospace', fontSize: 13 },
   fileStat: { fontFamily: 'monospace', fontSize: 12, marginLeft: 8 },
   actionButton: {
-    minWidth: 36,
-    minHeight: MIN_TOUCH_TARGET,
+    minWidth: TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

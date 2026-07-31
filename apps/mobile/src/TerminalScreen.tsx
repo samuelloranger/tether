@@ -258,7 +258,7 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   return (
     /* Terminal Client Screen */
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.terminalContainer}
     >
       {bellFlash && (

@@ -71,7 +71,7 @@ test('renders staged and changes columns with empty right pane', () => {
   expect(view.getByText('Unstage all')).toBeTruthy();
   expect(view.getByText('Stage all')).toBeTruthy();
   expect(view.getByPlaceholderText('Commit message')).toBeTruthy();
-  expect(view.getByText('Select a file')).toBeTruthy();
+  expect(view.getByText('Select a file to review')).toBeTruthy();
 });
 
 test('selecting a file reports path and mode', () => {

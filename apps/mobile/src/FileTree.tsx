@@ -3,6 +3,9 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import type { FileTreeNode } from './diffModel';
 import { reviewDiffKey } from './gitReviewModel';
+import { minTouchTarget } from './interaction';
+
+const TOUCH_TARGET = minTouchTarget();
 
 const INDENT = 16;
 
@@ -79,28 +82,30 @@ export function FileTree({
         }
         const { file } = node;
         return (
-          <TouchableOpacity
-            key={node.path}
-            style={[styles.fileRow, { paddingLeft: depth * INDENT + 20 }]}
-            onPress={() => onSelectFile(node.path)}
-          >
-            <Text numberOfLines={1} style={[styles.filePath, { color: theme.colors.text }]}>
-              {node.name}
-            </Text>
-            {file.binary ? (
-              <Text style={[styles.fileStat, { color: theme.colors.textMuted }]}>binary</Text>
-            ) : (
-              <Text style={styles.fileStat}>
-                <Text style={{ color: theme.colors.success }}>+{file.insertions}</Text>{' '}
-                <Text style={{ color: theme.colors.danger }}>-{file.deletions}</Text>
+          <View key={node.path} style={[styles.fileRow, { paddingLeft: depth * INDENT + 20 }]}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Select ${node.path}`}
+              style={styles.fileSelect}
+              onPress={() => onSelectFile(node.path)}
+            >
+              <Text numberOfLines={1} style={[styles.filePath, { color: theme.colors.text }]}>
+                {node.name}
               </Text>
-            )}
+              {file.binary ? (
+                <Text style={[styles.fileStat, { color: theme.colors.textMuted }]}>binary</Text>
+              ) : (
+                <Text style={styles.fileStat}>
+                  <Text style={{ color: theme.colors.success }}>+{file.insertions}</Text>{' '}
+                  <Text style={{ color: theme.colors.danger }}>-{file.deletions}</Text>
+                </Text>
+              )}
+            </TouchableOpacity>
             {fileActions?.map((action) => (
               <TouchableOpacity
                 key={action.label}
                 accessibilityRole="button"
                 accessibilityLabel={`${action.label} ${node.path}`}
-                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                 style={styles.actionButton}
                 onPress={() => action.onPress(node.path)}
               >
@@ -111,7 +116,7 @@ export function FileTree({
                 />
               </TouchableOpacity>
             ))}
-          </TouchableOpacity>
+          </View>
         );
       })}
     </>
@@ -123,17 +128,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    minHeight: TOUCH_TARGET,
     paddingVertical: 8,
     paddingRight: 8,
   },
   dirLabel: { fontFamily: 'monospace', fontSize: 13 },
   fileRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    minHeight: TOUCH_TARGET,
     paddingVertical: 10,
     paddingRight: 8,
   },
+  fileSelect: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: TOUCH_TARGET,
+    marginRight: 4,
+  },
   filePath: { fontFamily: 'monospace', flex: 1, marginRight: 12 },
   fileStat: { fontFamily: 'monospace' },
-  actionButton: { paddingHorizontal: 6 },
+  actionButton: {
+    minWidth: TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

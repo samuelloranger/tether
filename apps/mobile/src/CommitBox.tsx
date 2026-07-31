@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import {
   ActivityIndicator,
+  Alert,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -12,7 +14,9 @@ import {
 import { useAppTheme } from './AppThemeProvider';
 import { MENU_WIDTH } from './commitBoxLayout';
 import { canCommit } from './gitReviewModel';
-import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
+import { minTouchTarget, SURFACE_RADIUS } from './interaction';
+
+const TOUCH_TARGET = minTouchTarget();
 
 export function CommitBox({
   message,
@@ -26,6 +30,8 @@ export function CommitBox({
   stagedCount,
   committing,
   style,
+  /** GitReview pins the bar at the top — open the menu downward so it stays on-screen. */
+  menuPlacement = 'up',
 }: {
   message: string;
   onChangeMessage: (value: string) => void;
@@ -38,6 +44,7 @@ export function CommitBox({
   stagedCount: number;
   committing: boolean;
   style?: StyleProp<ViewStyle>;
+  menuPlacement?: 'up' | 'down';
 }) {
   const { theme } = useAppTheme();
   const menuRootRef = useRef<View>(null);
@@ -47,9 +54,12 @@ export function CommitBox({
   const undoEnabled = Boolean(canAmend) && !committing;
   const pushEnabled = Boolean(canPush) && !committing;
   const hasMenu = Boolean(onAmend || onUndoCommit || onPush);
+  // Desktop/web keeps the anchored dropdown; native uses a system alert so
+  // outside-tap dismiss and on-screen placement are handled by the OS.
+  const useDropdownMenu = Platform.OS === 'web';
 
   useEffect(() => {
-    if (!menuOpen || typeof document === 'undefined') return;
+    if (!menuOpen || !useDropdownMenu || typeof document === 'undefined') return;
     const onDoc = (event: MouseEvent) => {
       const root = menuRootRef.current as unknown as { contains?: (n: Node) => boolean } | null;
       const target = event.target as Node | null;
@@ -63,16 +73,36 @@ export function CommitBox({
       clearTimeout(timer);
       document.removeEventListener('mousedown', onDoc);
     };
-  }, [menuOpen]);
+  }, [menuOpen, useDropdownMenu]);
 
   const runAndClose = (action?: () => void) => {
     setMenuOpen(false);
     action?.();
   };
 
+  const openMoreMenu = () => {
+    if (useDropdownMenu) {
+      setMenuOpen((open) => !open);
+      return;
+    }
+    const buttons: {
+      text: string;
+      onPress?: () => void;
+      style?: 'cancel' | 'destructive' | 'default';
+    }[] = [];
+    if (onAmend && amendEnabled) buttons.push({ text: 'Amend', onPress: onAmend });
+    if (onUndoCommit && undoEnabled) {
+      buttons.push({ text: 'Undo last commit', onPress: onUndoCommit, style: 'destructive' });
+    }
+    if (onPush && pushEnabled) buttons.push({ text: 'Push', onPress: onPush });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('More git actions', undefined, buttons);
+  };
+
   return (
     <View style={[styles.commitBar, { borderTopColor: theme.colors.border }, style]}>
       <TextInput
+        accessibilityLabel="Commit message"
         style={[
           styles.commitInput,
           {
@@ -117,7 +147,7 @@ export function CommitBox({
               accessibilityRole="button"
               accessibilityLabel="More git actions"
               disabled={committing}
-              onPress={() => setMenuOpen((open) => !open)}
+              onPress={openMoreMenu}
               style={[
                 styles.chevronButton,
                 {
@@ -133,11 +163,12 @@ export function CommitBox({
                 color={theme.colors.accentText}
               />
             </TouchableOpacity>
-            {menuOpen ? (
+            {useDropdownMenu && menuOpen ? (
               <View
                 accessibilityRole="menu"
                 style={[
                   styles.menu,
+                  menuPlacement === 'down' ? styles.menuDown : styles.menuUp,
                   {
                     backgroundColor: theme.colors.surface,
                     borderColor: theme.colors.border,
@@ -218,7 +249,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   commitButton: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 16,
     paddingVertical: 10,
     alignItems: 'center',
@@ -236,8 +267,8 @@ const styles = StyleSheet.create({
     zIndex: 21,
   },
   chevronButton: {
-    minHeight: MIN_TOUCH_TARGET,
-    minWidth: 36,
+    minHeight: TOUCH_TARGET,
+    minWidth: TOUCH_TARGET,
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -249,19 +280,25 @@ const styles = StyleSheet.create({
   menu: {
     position: 'absolute',
     right: 0,
-    bottom: '100%',
-    marginBottom: 6,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: SURFACE_RADIUS.panel,
     paddingVertical: 4,
     minWidth: MENU_WIDTH,
     zIndex: 30,
   },
+  menuUp: {
+    bottom: '100%',
+    marginBottom: 6,
+  },
+  menuDown: {
+    top: '100%',
+    marginTop: 6,
+  },
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: TOUCH_TARGET,
     paddingHorizontal: 14,
   },
   menuText: { fontSize: 14, fontWeight: '500' },
