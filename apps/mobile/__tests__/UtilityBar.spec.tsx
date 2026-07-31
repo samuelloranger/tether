@@ -1,4 +1,5 @@
 import { fireEvent, render } from '@testing-library/react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppThemeProvider } from '../src/AppThemeProvider';
 import { UtilityBar } from '../src/UtilityBar';
 
@@ -20,9 +21,16 @@ function renderBar(overrides: Partial<Parameters<typeof UtilityBar>[0]> = {}) {
     ...overrides,
   };
   const view = render(
-    <AppThemeProvider>
-      <UtilityBar {...props} />
-    </AppThemeProvider>,
+    <SafeAreaProvider
+      initialMetrics={{
+        frame: { x: 0, y: 0, width: 390, height: 844 },
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      }}
+    >
+      <AppThemeProvider>
+        <UtilityBar {...props} />
+      </AppThemeProvider>
+    </SafeAreaProvider>,
   );
   return { ...props, view };
 }
