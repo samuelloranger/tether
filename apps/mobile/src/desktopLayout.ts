@@ -7,3 +7,15 @@ export const MIN_DESKTOP_LAYOUT_WIDTH = 720;
 export function desktopLayout(isDesktopClient: boolean, width: number): 'desktop' | 'compact' {
   return isDesktopClient && width >= MIN_DESKTOP_LAYOUT_WIDTH ? 'desktop' : 'compact';
 }
+
+export function sidebarDocked(desktopUi: boolean, sidebarPinned: boolean): boolean {
+  return desktopUi && sidebarPinned;
+}
+
+export function sidebarVisible(docked: boolean, drawerOpen: boolean): boolean {
+  return docked || drawerOpen;
+}
+
+export function showTitleBarDrawerMenu(desktopUi: boolean, sidebarPinned: boolean): boolean {
+  return desktopUi && !sidebarPinned;
+}

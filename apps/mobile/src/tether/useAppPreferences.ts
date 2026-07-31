@@ -15,6 +15,10 @@ export function parseSnippets(value: string | null): string[] {
   }
 }
 
+export function parseSidebarPinned(value: string | null): boolean {
+  return value === 'true';
+}
+
 export function useAppPreferences() {
   const [snippets, setSnippets] = useState<string[]>([]);
 

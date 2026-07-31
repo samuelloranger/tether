@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { desktopLayout } from './desktopLayout';
+import {
+  desktopLayout,
+  showTitleBarDrawerMenu,
+  sidebarDocked,
+  sidebarVisible,
+} from './desktopLayout';
 
 describe('desktopLayout', () => {
   it('uses the compact shell when a desktop window cannot fit the sidebar and a usable terminal', () => {
@@ -23,5 +28,25 @@ describe('desktopLayout', () => {
     expect(blockKeys(true, 700, true)).toBe(true); // compact desktop GitReview
     expect(blockKeys(false, 400, true)).toBe(true); // mobile GitReview
     expect(blockKeys(true, 700, false)).toBe(false);
+  });
+});
+
+describe('sidebar pin gating', () => {
+  it('docks only on wide desktop when pinned', () => {
+    expect(sidebarDocked(true, true)).toBe(true);
+    expect(sidebarDocked(true, false)).toBe(false);
+    expect(sidebarDocked(false, true)).toBe(false);
+  });
+
+  it('is visible when docked or when the overlay is open', () => {
+    expect(sidebarVisible(true, false)).toBe(true);
+    expect(sidebarVisible(false, true)).toBe(true);
+    expect(sidebarVisible(false, false)).toBe(false);
+  });
+
+  it('shows the title-bar drawer menu only on wide desktop when unpinned', () => {
+    expect(showTitleBarDrawerMenu(true, false)).toBe(true);
+    expect(showTitleBarDrawerMenu(true, true)).toBe(false);
+    expect(showTitleBarDrawerMenu(false, false)).toBe(false);
   });
 });
