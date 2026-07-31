@@ -15,6 +15,11 @@ name: Release builds
 # gate on. So CI cannot be triggered BY a draft; it has to CREATE the draft. A
 # bare tag is safe to publish early because install.sh and `tether update` both
 # resolve the releases API, which never sees a tag that has no published release.
+#
+# Caches: tag runs can restore from the default branch only — not from sibling
+# tags. CI on main (cache-warm*) writes bun/rust/gradle into that scope; release
+# jobs restore them. rust-cache uses shared-key (stable across job names) and
+# cache-on-failure so a flaky asset upload does not discard a finished compile.
 on:
   push:
     tags: ['v*.*.*']
@@ -135,13 +140,15 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.rust-target }}
 
-      # Cache cargo registry + dependency artifacts. Explicit cache-key so the
-      # two macOS targets (same runner.os) don't collide; rust-cache still
-      # hashes Cargo.lock / toolchain into the rest of the key.
+      # Cargo registry + target artifacts. shared-key (not key) so CI on main can
+      # warm the same entries tag releases restore — tag scopes can't read sibling
+      # tags, only the default branch. cache-on-failure: flaky release-asset uploads
+      # must not throw away a successful compile.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/mobile/src-tauri
-          key: ${{ matrix.cache-key }}
+          shared-key: tether-${{ matrix.cache-key }}
+          cache-on-failure: true
 
       # webkit/gtk to build; `rpm` so the .rpm bundle is produced (AppImage
       # tooling is fetched by tauri). The Linux build is split across two runners
