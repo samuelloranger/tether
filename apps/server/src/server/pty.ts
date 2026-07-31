@@ -116,6 +116,12 @@ export function scrubAgentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   for (const k of Object.keys(out)) {
     if (k.startsWith('CLAUDE')) delete out[k];
   }
+  // A coding agent's own sandboxed Bash tool may set these to keep its tool
+  // output parseable. If the daemon was (re)started from inside one, tether
+  // shells would inherit color-disabling even though withTermEnv advertises
+  // full color support.
+  delete out.NO_COLOR;
+  if (out.FORCE_COLOR === '0') delete out.FORCE_COLOR;
   return out;
 }
 
