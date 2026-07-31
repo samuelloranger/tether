@@ -323,9 +323,16 @@ export function SessionDrawer({
       </Animated.View>
 
       <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
-        <SafeAreaView edges={['top']} style={styles.panelContent}>
-          {panelBody}
-        </SafeAreaView>
+        {/* Wide desktop overlay sits under the title bar — no mobile header to clear.
+            Mobile/compact keep SafeArea + paddingTop so content clears the status bar
+            and in-body header. */}
+        {showPin ? (
+          <View style={[styles.panelContent, styles.panelContentDesktop]}>{panelBody}</View>
+        ) : (
+          <SafeAreaView edges={['top']} style={styles.panelContent}>
+            {panelBody}
+          </SafeAreaView>
+        )}
       </Animated.View>
     </View>
   );
@@ -347,6 +354,8 @@ const createStyles = (c: AppColors) =>
       bottom: 0,
     },
     panelContent: { flex: 1, paddingTop: 56 },
+    // Wide-desktop overlay: under the title bar, same tight inset as docked.
+    panelContentDesktop: { paddingTop: 8 },
     // Docked (desktop): inline column, no absolute positioning, tighter top pad
     // (no mobile status bar to clear).
     panelDocked: { position: 'relative', paddingTop: 8, alignSelf: 'stretch' },
