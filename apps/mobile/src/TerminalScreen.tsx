@@ -54,8 +54,14 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   const desktopUi = desktopLayout(isDesktop, width) === 'desktop';
   const [rendererStatus, setRendererStatus] = useState<RendererStatus>('loading');
   useEffect(() => {
-    if (isDesktop) injectTerminalScrollbarStyles();
-  }, []);
+    if (isDesktop) {
+      injectTerminalScrollbarStyles({
+        thumb: theme.colors.border,
+        thumbHover: theme.colors.textMuted,
+        track: theme.terminal.bg,
+      });
+    }
+  }, [theme]);
   const {
     insets,
     client,

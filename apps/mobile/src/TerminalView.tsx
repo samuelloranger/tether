@@ -296,6 +296,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     return (
       <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
         <style>{TERMINAL_RENDERER_CSS}</style>
+        {/* xterm.css hardcodes .xterm-viewport to #000; that default paints over
+            the 4px gutter set on .xterm below instead of the well's theme
+            background. Let it through. */}
+        <style>{'.xterm .xterm-viewport{background-color:transparent}'}</style>
         <div ref={container} style={{ width: '100%', height: '100%' }} />
       </div>
     );

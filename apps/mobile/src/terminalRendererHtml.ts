@@ -13,6 +13,9 @@ html,body,#terminal{width:100%;height:100%;margin:0;overflow:hidden;background:#
 /* Gutter inside .xterm so FitAddon shrinks the grid and the viewport bg fills it. */
 .xterm{box-sizing:border-box;padding:0 4px}
 ${TERMINAL_RENDERER_CSS}
+/* xterm.css hardcodes .xterm-viewport to #000; that default paints over the
+   4px gutter above instead of #terminal's theme background. Let it through. */
+.xterm .xterm-viewport{background-color:transparent}
 </style>
 </head>
 <body>

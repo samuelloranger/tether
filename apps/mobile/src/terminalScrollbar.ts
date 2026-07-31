@@ -20,8 +20,20 @@ export const TERMINAL_SCROLLBAR_CSS = `
 
 const STYLE_ID = 'tether-terminal-scrollbar-styles';
 
-export function injectTerminalScrollbarStyles(): void {
-  if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return;
+export function injectTerminalScrollbarStyles(colors: {
+  thumb: string;
+  thumbHover: string;
+  track: string;
+}): void {
+  if (typeof document === 'undefined') return;
+  // The custom properties above have no other definition site: without this,
+  // scrollbar-color/-webkit-scrollbar-thumb stay unset and WebKitGTK falls
+  // back to its default light scrollbar, which reads as a white bar once the
+  // terminal has enough output to scroll.
+  document.documentElement.style.setProperty('--tether-scrollbar-thumb', colors.thumb);
+  document.documentElement.style.setProperty('--tether-scrollbar-thumb-hover', colors.thumbHover);
+  document.documentElement.style.setProperty('--tether-scrollbar-track', colors.track);
+  if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = TERMINAL_SCROLLBAR_CSS;
