@@ -190,12 +190,6 @@ export function SessionDrawer({
                   activePreviewId === null && s.hostId === activeHostId && s.id === activeId;
                 const live = active || isRecentlyActive(s.last_output_at);
                 const dotKey = activityDotKey(s.status, s.activity, live);
-                const dotColor = {
-                  stopped: theme.colors.textFaint,
-                  waiting: theme.colors.warning,
-                  working: theme.colors.success,
-                  idle: theme.colors.border,
-                }[dotKey];
                 return (
                   <View
                     key={`${s.hostId}:${s.id}`}
@@ -214,14 +208,13 @@ export function SessionDrawer({
                         live,
                       )}
                     >
-                      <View style={[styles.dot, { backgroundColor: dotColor }]} />
                       <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
                         {sessionLabel(s)}
                       </Text>
                       {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
                       {dotKey === 'waiting' && (
                         <Text style={[styles.stopped, { color: theme.colors.warning }]}>
-                          input?
+                          waiting
                         </Text>
                       )}
                     </TouchableOpacity>
@@ -285,7 +278,7 @@ export function SessionDrawer({
         accessibilityRole="button"
         accessibilityLabel="New terminal"
       >
-        <Feather name="plus" size={16} color={theme.colors.accentText} />
+        <Feather name="plus" size={16} color={theme.colors.text} />
         <Text style={styles.newBtnText}>New terminal</Text>
       </TouchableOpacity>
     </>
@@ -339,7 +332,7 @@ const createStyles = (c: AppColors) =>
     // (no mobile status bar to clear).
     panelDocked: { position: 'relative', paddingTop: 8, alignSelf: 'stretch' },
     list: { flex: 1 },
-    hostSection: { marginBottom: 8, borderLeftWidth: 1, paddingLeft: 6 },
+    hostSection: { marginBottom: 8, borderLeftWidth: 2, paddingLeft: 8 },
     hostSectionUnavailable: { opacity: 0.52 },
     hostHeader: {
       flexDirection: 'row',
@@ -348,17 +341,26 @@ const createStyles = (c: AppColors) =>
       paddingHorizontal: 4,
       gap: 7,
     },
-    hostName: { color: c.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-    hostStatus: { marginLeft: 'auto', color: c.textFaint, fontSize: 11 },
+    hostName: { color: c.text, fontSize: 11, fontWeight: '600' },
+    hostStatus: {
+      marginLeft: 'auto',
+      color: c.textFaint,
+      fontSize: 11,
+      fontVariant: ['tabular-nums'],
+    },
     hostReachable: { color: c.success },
     hostAction: { marginLeft: 'auto', color: c.accent, fontSize: 11, fontWeight: '600' },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderRadius: SURFACE_RADIUS.control,
-      marginBottom: 4,
+      borderRadius: 0,
+      marginBottom: 0,
       minHeight: MIN_TOUCH_TARGET,
-      backgroundColor: c.surfaceRaised,
+      backgroundColor: 'transparent',
+      borderLeftWidth: 2,
+      borderLeftColor: 'transparent',
+      marginLeft: -10,
+      paddingLeft: 8,
     },
     rowActive: { backgroundColor: c.selected },
     rowMain: {
@@ -369,11 +371,10 @@ const createStyles = (c: AppColors) =>
       paddingHorizontal: 10,
       paddingVertical: 11,
     },
-    dot: { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
     previewIcon: { marginRight: 10 },
-    name: { color: c.text, fontFamily: 'Courier', fontSize: 13 },
-    nameActive: { color: c.accent, fontWeight: '700' },
-    stopped: { color: c.textFaint, fontSize: 10, marginLeft: 8 },
+    name: { color: c.text, fontSize: 13 },
+    nameActive: { color: c.text, fontWeight: '700' },
+    stopped: { color: c.textFaint, fontSize: 10, marginLeft: 8, fontVariant: ['tabular-nums'] },
     kill: {
       minWidth: MIN_TOUCH_TARGET,
       minHeight: MIN_TOUCH_TARGET,
@@ -389,9 +390,11 @@ const createStyles = (c: AppColors) =>
       gap: 6,
       marginVertical: 12,
       paddingVertical: 13,
-      borderRadius: SURFACE_RADIUS.control,
+      borderRadius: SURFACE_RADIUS.hero,
       minHeight: MIN_TOUCH_TARGET,
-      backgroundColor: c.accent,
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: c.border,
     },
-    newBtnText: { color: c.accentText, fontWeight: '600', fontSize: 13 },
+    newBtnText: { color: c.text, fontWeight: '600', fontSize: 13 },
   });

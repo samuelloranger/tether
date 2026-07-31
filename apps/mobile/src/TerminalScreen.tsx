@@ -356,13 +356,11 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                 <View style={styles.headerControls}>
                   {connectionStatus === 'connected' ? (
                     <View style={[styles.statusBadge, styles.badgeConnected]}>
-                      <View style={[styles.badgeDot, styles.dotConnected]} />
-                      <Text style={styles.badgeTextConnected}>Connected</Text>
+                      <Text style={styles.badgeTextConnected}>online</Text>
                     </View>
                   ) : connectionStatus === 'auth-failed' ? (
                     <View style={[styles.statusBadge, styles.badgeOffline]}>
-                      <View style={[styles.badgeDot, styles.dotOffline]} />
-                      <Text style={styles.badgeTextOffline}>Auth</Text>
+                      <Text style={styles.badgeTextOffline}>auth</Text>
                     </View>
                   ) : connectionStatus === 'connecting' ? (
                     <View style={[styles.statusBadge, styles.badgeConnecting]}>
@@ -371,12 +369,11 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                         color={theme.colors.warning}
                         style={styles.spinIcon}
                       />
-                      <Text style={styles.badgeTextConnecting}>Connecting…</Text>
+                      <Text style={styles.badgeTextConnecting}>connecting</Text>
                     </View>
                   ) : (
                     <View style={[styles.statusBadge, styles.badgeOffline]}>
-                      <View style={[styles.badgeDot, styles.dotOffline]} />
-                      <Text style={styles.badgeTextOffline}>Offline</Text>
+                      <Text style={styles.badgeTextOffline}>offline</Text>
                     </View>
                   )}
 

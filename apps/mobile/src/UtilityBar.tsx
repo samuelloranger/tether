@@ -5,8 +5,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { ArrowCluster } from './Dpad';
-import { MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
-import { MONO } from './styles';
+import { MIN_TOUCH_TARGET } from './interaction';
 import { UTILITY_BAR_PAGES, type UtilityBarKey } from './utilityBarModel';
 
 export { UTILITY_BAR_PAGES } from './utilityBarModel';
@@ -178,9 +177,9 @@ const createStyles = (c: AppColors) =>
   StyleSheet.create({
     utilityBar: {
       backgroundColor: c.surface,
-      borderTopWidth: 1,
+      borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: c.border,
-      paddingVertical: 8,
+      paddingVertical: 0,
     },
     utilityPageOuter: {
       // Fixed, not minHeight: the bar must never change height between pages,
@@ -190,11 +189,11 @@ const createStyles = (c: AppColors) =>
     },
     utilityPage: {
       height: MIN_TOUCH_TARGET,
-      paddingHorizontal: 10,
+      paddingHorizontal: 0,
       alignItems: 'center',
       justifyContent: 'space-between',
       flexDirection: 'row',
-      gap: 5,
+      gap: 0,
       // The row never wraps, so on a narrow phone the widest labels give up
       // padding first and ellipsize last rather than pushing a control off-screen.
       flexGrow: 1,
@@ -206,13 +205,14 @@ const createStyles = (c: AppColors) =>
       height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: SURFACE_RADIUS.control,
-      backgroundColor: c.surfaceRaised,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: c.border,
     },
     utilityBtnText: {
       fontSize: 11,
-      fontWeight: '700',
-      fontFamily: MONO,
+      fontWeight: '600',
       color: c.text,
       textAlign: 'center',
     },
@@ -227,8 +227,10 @@ const createStyles = (c: AppColors) =>
       flexShrink: 1,
       minWidth: 36,
       height: MIN_TOUCH_TARGET,
-      borderRadius: SURFACE_RADIUS.control,
-      backgroundColor: c.surfaceRaised,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: c.border,
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -238,6 +240,8 @@ const createStyles = (c: AppColors) =>
       height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: SURFACE_RADIUS.control,
+      borderRadius: 0,
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: c.border,
     },
   });

@@ -2,14 +2,23 @@ import type { Theme as TerminalTheme } from './terminal';
 
 export const THEME_STORAGE_KEY = 'tether_theme';
 export const SYSTEM_DARK_THEME_STORAGE_KEY = 'tether_system_dark_theme';
-export const THEME_OPTIONS = ['system', 'latte', 'frappe', 'macchiato', 'mocha'] as const;
+export const THEME_OPTIONS = [
+  'system',
+  'default-dark',
+  'default-light',
+  'latte',
+  'frappe',
+  'macchiato',
+  'mocha',
+] as const;
 
 export type ThemePreference = (typeof THEME_OPTIONS)[number];
 export type ResolvedFlavor = Exclude<ThemePreference, 'system'>;
-export type DarkFlavor = Exclude<ResolvedFlavor, 'latte'>;
+export type DarkFlavor = Exclude<ResolvedFlavor, 'latte' | 'default-light'>;
+export type CatppuccinFlavor = 'latte' | 'frappe' | 'macchiato' | 'mocha';
 
 export const DEFAULT_THEME_PREFERENCE: ThemePreference = 'system';
-export const DEFAULT_SYSTEM_DARK_FLAVOR: DarkFlavor = 'mocha';
+export const DEFAULT_SYSTEM_DARK_FLAVOR: DarkFlavor = 'default-dark';
 
 export function parseThemePreference(value: string | null): ThemePreference {
   return THEME_OPTIONS.includes(value as ThemePreference)
@@ -18,17 +27,22 @@ export function parseThemePreference(value: string | null): ThemePreference {
 }
 
 export function parseDarkFlavor(value: string | null): DarkFlavor {
-  return value === 'frappe' || value === 'macchiato' || value === 'mocha'
+  return value === 'default-dark' ||
+    value === 'frappe' ||
+    value === 'macchiato' ||
+    value === 'mocha'
     ? value
     : DEFAULT_SYSTEM_DARK_FLAVOR;
 }
 
+/** System follows the OS into Default light / Default dark. Explicit picks win. */
 export function resolveFlavor(
   preference: ThemePreference,
   scheme: 'light' | 'dark' | 'unspecified' | null | undefined,
-  systemDarkFlavor: DarkFlavor = DEFAULT_SYSTEM_DARK_FLAVOR,
+  _systemDarkFlavor: DarkFlavor = DEFAULT_SYSTEM_DARK_FLAVOR,
 ): ResolvedFlavor {
-  return preference === 'system' ? (scheme === 'light' ? 'latte' : systemDarkFlavor) : preference;
+  if (preference !== 'system') return preference;
+  return scheme === 'light' ? 'default-light' : 'default-dark';
 }
 
 export function selectThemePreference(
@@ -39,7 +53,9 @@ export function selectThemePreference(
   return {
     preference: next,
     systemDarkFlavor:
-      next === 'frappe' || next === 'macchiato' || next === 'mocha' ? next : systemDarkFlavor,
+      next === 'default-dark' || next === 'frappe' || next === 'macchiato' || next === 'mocha'
+        ? next
+        : systemDarkFlavor,
   };
 }
 
@@ -69,7 +85,7 @@ export interface AppTheme {
   keyboardAppearance: 'light' | 'dark';
 }
 
-const PALETTES = {
+const CATPPUCCIN = {
   latte: {
     crust: '#dce0e8',
     mantle: '#e6e9ef',
@@ -144,8 +160,33 @@ const PALETTES = {
   },
 } as const;
 
-function createTheme(flavor: ResolvedFlavor): AppTheme {
-  const p = PALETTES[flavor];
+function terminalFromCatppuccin(p: (typeof CATPPUCCIN)[CatppuccinFlavor]): TerminalTheme {
+  return {
+    base16: [
+      p.crust,
+      p.red,
+      p.green,
+      p.yellow,
+      p.blue,
+      p.mauve,
+      p.teal,
+      p.text,
+      p.surface1,
+      p.red,
+      p.green,
+      p.yellow,
+      p.blue,
+      p.pink,
+      p.sky,
+      p.text,
+    ],
+    fg: p.text,
+    bg: p.base,
+  };
+}
+
+function createCatppuccinTheme(flavor: CatppuccinFlavor): AppTheme {
+  const p = CATPPUCCIN[flavor];
   return {
     flavor,
     colors: {
@@ -166,35 +207,68 @@ function createTheme(flavor: ResolvedFlavor): AppTheme {
       danger: p.red,
       info: p.blue,
     },
-    terminal: {
-      base16: [
-        p.crust,
-        p.red,
-        p.green,
-        p.yellow,
-        p.blue,
-        p.mauve,
-        p.teal,
-        p.text,
-        p.surface1,
-        p.red,
-        p.green,
-        p.yellow,
-        p.blue,
-        p.pink,
-        p.sky,
-        p.text,
-      ],
-      fg: p.text,
-      bg: p.base,
-    },
+    terminal: terminalFromCatppuccin(p),
     keyboardAppearance: flavor === 'latte' ? 'light' : 'dark',
   };
 }
 
+/** Instrument bezel chrome; terminal well stays Catppuccin Mocha / Latte. */
+function createDefaultTheme(flavor: 'default-dark' | 'default-light'): AppTheme {
+  if (flavor === 'default-dark') {
+    return {
+      flavor,
+      colors: {
+        background: '#0b0c0f',
+        surface: '#12141a',
+        surfaceRaised: '#1a1d24',
+        input: '#08090c',
+        text: '#e8eaef',
+        textMuted: '#9aa0ad',
+        textFaint: '#6b7280',
+        border: '#2a2e38',
+        overlay: '#08090c99',
+        selected: '#1a1d24',
+        accent: '#3ddc97',
+        accentText: '#0b0c0f',
+        success: '#3ddc97',
+        warning: '#e6b84d',
+        danger: '#ff5c6a',
+        info: '#4d8dff',
+      },
+      terminal: terminalFromCatppuccin(CATPPUCCIN.mocha),
+      keyboardAppearance: 'dark',
+    };
+  }
+  return {
+    flavor,
+    colors: {
+      background: '#f4f5f7',
+      surface: '#ffffff',
+      surfaceRaised: '#eceef2',
+      input: '#ffffff',
+      text: '#0a0a0b',
+      textMuted: '#5c5c66',
+      textFaint: '#8b8b96',
+      border: '#d5d7de',
+      overlay: '#0a0a0b66',
+      selected: '#eceef2',
+      accent: '#0b7a4b',
+      accentText: '#ffffff',
+      success: '#0b7a4b',
+      warning: '#9a6b00',
+      danger: '#c41e3a',
+      info: '#002fa7',
+    },
+    terminal: terminalFromCatppuccin(CATPPUCCIN.latte),
+    keyboardAppearance: 'light',
+  };
+}
+
 export const APP_THEMES: Record<ResolvedFlavor, AppTheme> = {
-  latte: createTheme('latte'),
-  frappe: createTheme('frappe'),
-  macchiato: createTheme('macchiato'),
-  mocha: createTheme('mocha'),
+  'default-dark': createDefaultTheme('default-dark'),
+  'default-light': createDefaultTheme('default-light'),
+  latte: createCatppuccinTheme('latte'),
+  frappe: createCatppuccinTheme('frappe'),
+  macchiato: createCatppuccinTheme('macchiato'),
+  mocha: createCatppuccinTheme('mocha'),
 };

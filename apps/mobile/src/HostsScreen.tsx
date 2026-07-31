@@ -11,7 +11,7 @@ import { typeScale } from './type';
 // retrying, or a dead host reads as a dead app.
 const HEALTH_LABEL: Record<HostHealthStatus, string> = {
   unknown: 'Checking…',
-  reachable: 'Connected',
+  reachable: 'online',
   unreachable: 'Unreachable · retrying',
   unauthorized: 'Needs password',
 };
