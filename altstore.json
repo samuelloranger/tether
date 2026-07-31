@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "2.7.1",
+          "date": "2026-07-31",
+          "localizedDescription": "## What's Changed\n* ci: warm release caches from main so tag builds can hit by @samuelloranger in https://github.com/samuelloranger/tether/pull/70\n* ci: build web frontend before cache-warm cargo by @samuelloranger in https://github.com/samuelloranger/tether/pull/71\n* perf(mobile): harden git review for phone and desktop by @samuelloranger in https://github.com/samuelloranger/tether/pull/72\n* fix(mobile): center utility bar keys above keyboard by @samuelloranger in https://github.com/samuelloranger/tether/pull/73\n* fix(server): strip NO_COLOR/FORCE_COLOR from session env by @samuelloranger in https://github.com/samuelloranger/tether/pull/75\n* perf(mobile): stop double-parsing active session's PTY output by @samuelloranger in https://github.com/samuelloranger/tether/pull/74\n* fix(mobile): forward arrow/nav keys dropped by desktop webview by @samuelloranger in https://github.com/samuelloranger/tether/pull/76\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.7.0...v2.7.1",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v2.7.1/tether.ipa",
+          "size": 9436055,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "2.7.0",
           "date": "2026-07-31",
           "localizedDescription": "## What's Changed\n* feat(mobile): Default dark/light themes and bezel chrome by @samuelloranger in https://github.com/samuelloranger/tether/pull/69\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.6.1...v2.7.0",
