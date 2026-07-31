@@ -143,22 +143,14 @@ export function applyWsMessage({
     if (typeof chunk !== 'string') return;
     entry.lastAppliedId = payload.id;
     entry.sinceId = payload.id;
-    const previous = [
-      entry.term.bellCount,
-      entry.term.promptReturnCount,
-      entry.term.title,
-      entry.term.cwd,
-    ] as const;
+    // Active session: the page (WebView / desktop xterm) is the sole parser.
+    // Feeding the headless shadow too doubles Hermes work for every byte.
+    if (id === activeId) {
+      onOutput(id, chunk);
+      return;
+    }
     entry.term.write(chunk, () => {
       onNotify(id, entry);
-      if (
-        id === activeId &&
-        (entry.term.bellCount !== previous[0] ||
-          entry.term.promptReturnCount !== previous[1] ||
-          entry.term.title !== previous[2] ||
-          entry.term.cwd !== previous[3])
-      )
-        onTerminalMetadataChanged();
       onOutput(id, chunk);
     });
     return;
@@ -166,6 +158,10 @@ export function applyWsMessage({
   if (payload.type === 'exit') {
     const code = typeof payload.exitCode === 'number' ? ` with code ${payload.exitCode}` : '';
     const text = `\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`;
+    if (id === activeId) {
+      onOutput(id, text);
+      return;
+    }
     entry.term.write(text, () => onOutput(id, text));
     return;
   }

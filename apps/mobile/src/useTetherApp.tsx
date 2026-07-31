@@ -196,6 +196,9 @@ export function useTetherApp() {
     hydrateRenderer,
     onRendererResize,
     onRendererSelection,
+    onPageControl,
+    onPageReply,
+    onPageClipboardWrite,
     resetTerminal,
     switchTo: switchTerminal,
     newTerminal: createTerminal,
@@ -404,18 +407,25 @@ export function useTetherApp() {
     return undefined;
   }, []);
   // Full plain-text transcript (visible screen + scrollback) for the
-  // selectable view and the Copy All fallback.
-  const snapshotText = (rows: RenderRow[]) =>
-    rows
-      .map((r) => r.runs.map((run) => run.text).join(''))
-      .join('\n')
-      .replace(/\n+$/, '');
-  const getFullText = () => snapshotText(entryFor(getActiveSessionId()).term.getSnapshot());
+  // selectable view and the Copy All fallback — sourced from the live page,
+  // which owns parsing for the active session.
+  const rowsFromPlainText = (text: string): RenderRow[] =>
+    text.split('\n').map((line, i) => ({
+      key: i,
+      runs: [{ text: line, style: {} }],
+      wrapped: false,
+      links: [],
+      promptStart: false,
+    }));
+  const getFullText = async () => (await terminalViewRef.current?.snapshotText()) ?? '';
 
   // Transcript filtered to lines matching the query — memoized: the previous
   // version re-split the whole scrollback on every keystroke and every render.
   const searchText = useMemo(() => {
-    const full = snapshotText(screen);
+    const full = screen
+      .map((r) => r.runs.map((run) => run.text).join(''))
+      .join('\n')
+      .replace(/\n+$/, '');
     const q = searchQuery.trim().toLowerCase();
     if (!q) return full;
     return full
@@ -424,25 +434,19 @@ export function useTetherApp() {
       .join('\n');
   }, [screen, searchQuery]);
 
-  // Scrolls xterm to the nearest prompt-start row in `dir`, using the
-  // start/end of the currently-known scrollback as the search origin.
+  // Scrolls the live page to the nearest OSC 133 prompt mark in `dir`.
   const jumpPrompt = (dir: 1 | -1) => {
-    const term = entryFor(getActiveSessionId()).term;
-    const snapshot = term.getSnapshot();
-    const from = dir === 1 ? 0 : snapshot.length - 1;
-    const target = term.jumpToPrompt(from, dir);
-    if (target === null) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    terminalViewRef.current?.scrollToLine(target);
+    terminalViewRef.current?.jumpPrompt(dir);
   };
 
   // Open a frozen, natively selectable snapshot of the current transcript.
   const openSelectionView = async () => {
     setMenuOpen(false);
     setSearchQuery('');
-    const snapshot = await entryFor(getActiveSessionId()).term.getSettledSnapshot();
-    if (!snapshotText(snapshot)) return;
-    setScreen(snapshot);
+    const text = await getFullText();
+    if (!text) return;
+    setScreen(rowsFromPlainText(text));
     setSelectionViewOpen(true);
   };
 
@@ -450,7 +454,7 @@ export function useTetherApp() {
   const copySelection = async () => {
     const sel = getTerminalSelection();
     // Fall back to the whole displayed transcript when nothing is selected.
-    const text = sel || getFullText();
+    const text = sel || (await getFullText());
     if (text) await writeClipboard(text);
   };
 
@@ -1216,6 +1220,9 @@ export function useTetherApp() {
     hydrateRenderer,
     onRendererResize,
     onRendererSelection,
+    onPageControl,
+    onPageReply,
+    onPageClipboardWrite,
     wsSend,
     resetTerminal,
     switchTo,

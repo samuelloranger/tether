@@ -147,6 +147,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     hydrateRenderer,
     onRendererResize,
     onRendererSelection,
+    onPageControl,
+    onPageReply,
+    onPageClipboardWrite,
     newTerminal,
     killActiveOr,
     changeFontSize,
@@ -492,6 +495,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                         onResize={onRendererResize}
                         onOpenLink={openFile}
                         onSelection={onRendererSelection}
+                        onControl={onPageControl}
+                        onReply={onPageReply}
+                        onClipboardWrite={onPageClipboardWrite}
                         onPaste={handlePaste}
                         onNewTerminal={newTerminal}
                         onFontZoom={changeFontSize}
@@ -507,6 +513,9 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                       onResize={onRendererResize}
                       onOpenLink={openFile}
                       onSelection={onRendererSelection}
+                      onControl={onPageControl}
+                      onReply={onPageReply}
+                      onClipboardWrite={onPageClipboardWrite}
                       onPaste={handlePaste}
                       onNewTerminal={newTerminal}
                       onFontZoom={changeFontSize}

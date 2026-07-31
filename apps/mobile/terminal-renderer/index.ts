@@ -1,6 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import { bindPageTerminal } from '../src/pageTerminalHost';
 import { registerTetherLinks } from '../src/terminalRendererLinks';
 import type { RendererCommand, RendererEvent } from '../src/terminalRendererProtocol';
 import { touchScrollLines } from '../src/terminalTouchScroll';
@@ -30,6 +31,9 @@ const terminal = new Terminal({
 const fit = new FitAddon();
 terminal.loadAddon(fit);
 terminal.open(document.getElementById('terminal')!);
+
+const themeColors = { foreground: '#cccccc', background: '#1e1e2e' };
+const page = bindPageTerminal(terminal, (event) => post(event), themeColors);
 
 let lastTouchY: number | null = null;
 let touchRemainder = 0;
@@ -93,18 +97,27 @@ new ResizeObserver(fitAndReport).observe(document.getElementById('terminal')!);
 
 window.__tetherDispatch = (command) => {
   if (!command || command.v !== 1) return;
+  if (page.handleRpc(command)) return;
   switch (command.type) {
     case 'hydrate':
+      page.resetPrompts();
       terminal.reset();
+      themeColors.foreground = command.theme.foreground;
+      themeColors.background = command.theme.background;
       terminal.options.theme = command.theme;
       document.documentElement.style.colorScheme = command.theme.keyboardAppearance;
       terminal.options.fontFamily = command.fontFamily;
       terminal.options.fontSize = command.fontSize;
       terminal.resize(command.cols, command.rows);
-      terminal.write(command.data, fitAndReport);
+      terminal.write(command.data, () => {
+        page.restorePromptLines(command.promptLines ?? []);
+        page.afterWrite();
+        fitAndReport();
+        post({ type: 'hydrated' });
+      });
       break;
     case 'write':
-      terminal.write(command.data);
+      terminal.write(command.data, () => page.afterWrite());
       break;
     case 'resize':
       if (command.cols !== terminal.cols || command.rows !== terminal.rows) {
