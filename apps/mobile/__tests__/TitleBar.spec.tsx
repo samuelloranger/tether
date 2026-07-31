@@ -51,3 +51,23 @@ test('hides the changes button when there are no changes', () => {
   expect(view.queryByLabelText(/View changes/)).toBeNull();
   expect(view.getByLabelText('Settings')).toBeTruthy();
 });
+
+test('renders a left drawer button when onOpenDrawer is provided', () => {
+  const onOpenDrawer = jest.fn();
+  const view = render(
+    <AppThemeProvider>
+      <TitleBar isMac={false} title="term-1" onOpenDrawer={onOpenDrawer} />
+    </AppThemeProvider>,
+  );
+  fireEvent.press(view.getByLabelText('Open terminal list'));
+  expect(onOpenDrawer).toHaveBeenCalled();
+});
+
+test('hides the drawer button when onOpenDrawer is omitted', () => {
+  const view = render(
+    <AppThemeProvider>
+      <TitleBar isMac={false} title="term-1" />
+    </AppThemeProvider>,
+  );
+  expect(view.queryByLabelText('Open terminal list')).toBeNull();
+});

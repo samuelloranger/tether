@@ -248,7 +248,8 @@ export function useTetherApp() {
   const inputRef = useRef<TextInput | null>(null);
   const { ctrlArmed, setCtrlArmed, sendTyped, sendKey, sendPaste, sendProgram, cursorSeq } =
     useTerminalInput({ send: wsSend, mouseEnabledRef, getActiveSessionId, entryFor });
-  const { snippets, setSnippets, persistSnippets } = useAppPreferences();
+  const { snippets, setSnippets, persistSnippets, sidebarPinned, persistSidebarPinned } =
+    useAppPreferences();
   const addSnippet = () => {
     const snippet = snippetDraft.trim();
     if (!snippet) return;
@@ -1161,6 +1162,8 @@ export function useTetherApp() {
     activeHostId,
     drawerOpen,
     setDrawerOpen,
+    sidebarPinned,
+    persistSidebarPinned,
     drawerSessions,
     healthByHost,
     deepLinkNotice,

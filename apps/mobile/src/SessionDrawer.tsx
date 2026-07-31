@@ -54,6 +54,9 @@ interface SessionDrawerProps {
   // Desktop: render as a permanent inline sidebar (no scrim, no slide, always
   // mounted) instead of a slide-in overlay.
   docked?: boolean;
+  // Wide desktop only: show a pin/unpin control in the drawer header.
+  showPin?: boolean;
+  onTogglePin?: () => void;
 }
 
 // Kill needs a confirm. confirmAction shows a native OS dialog on desktop (the
@@ -88,6 +91,8 @@ export function SessionDrawer({
   onClose,
   onHostSettings,
   docked = false,
+  showPin = false,
+  onTogglePin,
 }: SessionDrawerProps) {
   const { theme } = useAppTheme();
   const styles = createStyles(theme.colors);
@@ -134,6 +139,20 @@ export function SessionDrawer({
 
   const panelBody = (
     <>
+      {showPin && onTogglePin ? (
+        <View style={styles.pinRow}>
+          <TouchableOpacity
+            onPress={onTogglePin}
+            hitSlop={HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel={docked ? 'Unpin sidebar' : 'Pin sidebar'}
+            style={styles.pinBtn}
+          >
+            <Feather name="sidebar" size={16} color={theme.colors.textMuted} />
+            <Text style={styles.pinLabel}>{docked ? 'Unpin' : 'Pin'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
         {hosts.map((host) => {
           const health = healthByHost[host.id] ?? 'unknown';
@@ -331,6 +350,20 @@ const createStyles = (c: AppColors) =>
     // Docked (desktop): inline column, no absolute positioning, tighter top pad
     // (no mobile status bar to clear).
     panelDocked: { position: 'relative', paddingTop: 8, alignSelf: 'stretch' },
+    pinRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      paddingHorizontal: 4,
+      paddingBottom: 4,
+    },
+    pinBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minHeight: MIN_TOUCH_TARGET,
+      paddingHorizontal: 8,
+    },
+    pinLabel: { color: c.textMuted, fontSize: 12, fontWeight: '600' },
     list: { flex: 1 },
     hostSection: { marginBottom: 8, borderLeftWidth: 2, paddingLeft: 8 },
     hostSectionUnavailable: { opacity: 0.52 },
