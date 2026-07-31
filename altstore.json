@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "2.7.5",
+          "date": "2026-07-31",
+          "localizedDescription": "**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.7.4...v2.7.5",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v2.7.5/tether.ipa",
+          "size": 9437389,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "2.7.4",
           "date": "2026-07-31",
           "localizedDescription": "## What's Changed\n* fix(mobile): keep terminal padding inside the well by @samuelloranger in https://github.com/samuelloranger/tether/pull/79\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.7.3...v2.7.4",
