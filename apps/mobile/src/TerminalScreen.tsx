@@ -364,7 +364,10 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
         <View style={[styles.terminalMain, { position: 'relative' }]}>
           {/* Mobile header panel */}
           {!desktopUi && (
-            <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.surface }}>
+            <SafeAreaView
+              edges={['top', 'left', 'right']}
+              style={{ backgroundColor: theme.colors.surface }}
+            >
               <View style={styles.header}>
                 <TouchableOpacity
                   style={styles.headerBtn}
@@ -477,10 +480,19 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
                   onPress={() => selectTerminal(activeHostId, backTarget)}
                 />
               )}
-              <PresentationView
-                preview={activePresentation}
-                url={previewUrl(client, activePresentation.url)}
-              />
+              <View
+                style={{
+                  flex: 1,
+                  paddingBottom: insets.bottom,
+                  paddingLeft: insets.left,
+                  paddingRight: insets.right,
+                }}
+              >
+                <PresentationView
+                  preview={activePresentation}
+                  url={previewUrl(client, activePresentation.url)}
+                />
+              </View>
             </>
           ) : (
             <>
@@ -507,7 +519,19 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
               rows and fire a spurious PTY resize (visible rewrap) on every
               reconnect. */}
               <View style={styles.terminalArea}>
-                <View nativeID="tether-terminal" style={styles.terminalScroll}>
+                <View
+                  nativeID="tether-terminal"
+                  style={[
+                    styles.terminalScroll,
+                    {
+                      // Well color (not bezel): leftover fit pixels + safe-area gutters
+                      // stay inside the terminal, not wrapping it.
+                      backgroundColor: theme.terminal.bg,
+                      paddingLeft: insets.left,
+                      paddingRight: insets.right,
+                    },
+                  ]}
+                >
                   {Platform.OS === 'ios' ? (
                     <DragDropContentView
                       style={{ flex: 1 }}
@@ -648,7 +672,17 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           ) : null}
 
           {fileView ? (
-            <View style={styles.fileOverlay} pointerEvents="box-none">
+            <View
+              style={[
+                styles.fileOverlay,
+                {
+                  paddingBottom: insets.bottom,
+                  paddingLeft: insets.left,
+                  paddingRight: insets.right,
+                },
+              ]}
+              pointerEvents="box-none"
+            >
               <FileViewer
                 file={fileView}
                 onBack={closeFile}

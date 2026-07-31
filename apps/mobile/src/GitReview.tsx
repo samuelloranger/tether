@@ -213,7 +213,16 @@ export function GitReview({
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+    <View
+      style={[
+        styles.root,
+        {
+          backgroundColor: theme.colors.background,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}
+    >
       <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
         <TouchableOpacity
           accessibilityRole="button"

@@ -185,7 +185,8 @@ export function createStyles(c: AppColors) {
     },
     terminalScroll: {
       flex: 1,
-      backgroundColor: c.background,
+      // Background is set at the call site to theme.terminal.bg so leftover fit
+      // pixels and safe-area gutters stay inside the terminal well, not the bezel.
       // Desktop: allow native mouse selection of terminal text (RN-web maps these
       // through; no-ops on native).
       ...(isDesktop ? ({ userSelect: 'text', cursor: 'text' } as object) : null),

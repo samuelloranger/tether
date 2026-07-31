@@ -129,6 +129,10 @@ window.__tetherDispatch = (command) => {
       themeColors.background = command.theme.background;
       terminal.options.theme = command.theme;
       document.documentElement.style.colorScheme = command.theme.keyboardAppearance;
+      document.documentElement.style.background = command.theme.background;
+      document.body.style.background = command.theme.background;
+      const host = document.getElementById('terminal');
+      if (host) host.style.background = command.theme.background;
       terminal.options.fontFamily = command.fontFamily;
       terminal.options.fontSize = command.fontSize;
       terminal.resize(command.cols, command.rows);

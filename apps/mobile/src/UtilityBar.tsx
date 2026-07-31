@@ -2,6 +2,7 @@ import Feather from '@expo/vector-icons/Feather';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as Haptics from 'expo-haptics';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { ArrowCluster } from './Dpad';
@@ -36,6 +37,7 @@ export function UtilityBar({
   onHideKeyboard: () => void;
 }) {
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const styles = createStyles(theme.colors);
   const lastPage = UTILITY_BAR_PAGES.length - 1;
   const clamped = Math.min(Math.max(page, 0), lastPage);
@@ -154,7 +156,7 @@ export function UtilityBar({
   );
 
   return (
-    <View style={styles.utilityBar}>
+    <View style={[styles.utilityBar, { paddingBottom: insets.bottom }]}>
       {/* Only the current page is mounted and the ScrollView cannot be dragged:
           it is here purely for keyboardShouldPersistTaps, without which a tap on
           a bar key while the soft keyboard is up is eaten by the dismiss
@@ -162,7 +164,10 @@ export function UtilityBar({
       <ScrollView
         scrollEnabled={false}
         keyboardShouldPersistTaps="always"
-        contentContainerStyle={styles.utilityPage}
+        contentContainerStyle={[
+          styles.utilityPage,
+          { paddingLeft: insets.left, paddingRight: insets.right },
+        ]}
         style={styles.utilityPageOuter}
       >
         {clamped > 0 && pagerBtn('prev')}
