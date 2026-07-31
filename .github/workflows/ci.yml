@@ -120,6 +120,11 @@ jobs:
       - name: Install workspace deps
         run: bun install --frozen-lockfile
 
+      # tauri::generate_context! requires frontendDist (apps/mobile/dist).
+      - name: Build web frontend for Tauri context
+        working-directory: apps/mobile
+        run: bun run build:web
+
       # Release-profile compile fills the target dir rust-cache persists. No
       # bundling — that stays in Release builds.
       - name: Warm Rust release artifacts
