@@ -84,3 +84,23 @@ test.each([
   expect(view.queryByText('Workspace')).toBeNull();
   expect(view.queryByLabelText('Settings')).toBeNull();
 });
+
+test('hides the pin control unless showPin is set', () => {
+  const { view } = renderDrawer();
+  expect(view.queryByLabelText('Pin sidebar')).toBeNull();
+  expect(view.queryByLabelText('Unpin sidebar')).toBeNull();
+});
+
+test('shows Pin sidebar when showPin and not docked', () => {
+  const onTogglePin = jest.fn();
+  const { view } = renderDrawer({ showPin: true, docked: false, onTogglePin });
+  fireEvent.press(view.getByLabelText('Pin sidebar'));
+  expect(onTogglePin).toHaveBeenCalled();
+});
+
+test('shows Unpin sidebar when showPin and docked', () => {
+  const onTogglePin = jest.fn();
+  const { view } = renderDrawer({ showPin: true, docked: true, onTogglePin });
+  fireEvent.press(view.getByLabelText('Unpin sidebar'));
+  expect(onTogglePin).toHaveBeenCalled();
+});
