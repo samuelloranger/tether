@@ -121,7 +121,7 @@ export function scrubAgentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // shells would inherit color-disabling even though withTermEnv advertises
   // full color support.
   delete out.NO_COLOR;
-  delete out.FORCE_COLOR;
+  if (out.FORCE_COLOR === '0') delete out.FORCE_COLOR;
   return out;
 }
 

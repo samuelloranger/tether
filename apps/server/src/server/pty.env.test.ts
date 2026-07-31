@@ -52,7 +52,12 @@ eq(
 eq(
   scrubAgentEnv({ FORCE_COLOR: '0' }).FORCE_COLOR,
   undefined,
-  'strips FORCE_COLOR inherited from a coding-agent Bash tool',
+  'strips color-disabling FORCE_COLOR=0 inherited from a coding-agent Bash tool',
+);
+eq(
+  scrubAgentEnv({ FORCE_COLOR: '1' }).FORCE_COLOR,
+  '1',
+  'preserves an explicit FORCE_COLOR opt-in rather than treating all values as agent leakage',
 );
 eq(
   sessionEnv('term-1', { NO_COLOR: '1' }, undefined).NO_COLOR,
