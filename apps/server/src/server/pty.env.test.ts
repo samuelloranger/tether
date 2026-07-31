@@ -1,6 +1,6 @@
 // Run: bun run src/server/pty.env.test.ts
 // Pure-function test only — does not spawn a PTY.
-import { sessionEnv, withTermEnv } from './pty';
+import { scrubAgentEnv, sessionEnv, withTermEnv } from './pty';
 
 let pass = 0;
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -42,6 +42,22 @@ eq(
   sessionEnv('term-1', {}, undefined).TERM,
   'xterm-256color',
   'still applies withTermEnv (TERM/COLORTERM overrides)',
+);
+
+eq(
+  scrubAgentEnv({ NO_COLOR: '1' }).NO_COLOR,
+  undefined,
+  'strips NO_COLOR inherited from a coding-agent Bash tool',
+);
+eq(
+  scrubAgentEnv({ FORCE_COLOR: '0' }).FORCE_COLOR,
+  undefined,
+  'strips FORCE_COLOR inherited from a coding-agent Bash tool',
+);
+eq(
+  sessionEnv('term-1', { NO_COLOR: '1' }, undefined).NO_COLOR,
+  undefined,
+  'sessionEnv also strips NO_COLOR via scrubAgentEnv',
 );
 
 console.log(`\n  ${pass} assertions passed\n`);
