@@ -189,13 +189,13 @@ const createStyles = (c: AppColors) =>
     },
     utilityPage: {
       height: MIN_TOUCH_TARGET,
+      width: '100%',
       paddingHorizontal: 0,
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'center',
       flexDirection: 'row',
       gap: 0,
-      // The row never wraps, so on a narrow phone the widest labels give up
-      // padding first and ellipsize last rather than pushing a control off-screen.
+      // Fill the bar width so `center` is the screen mid, not the content box.
       flexGrow: 1,
     },
     utilityBtn: {
