@@ -8,6 +8,7 @@ import {
   FONT_LARGER,
   FONT_SMALLER,
   isTerminalNavKey,
+  keyNeedsFallback,
   keyToBytes,
   NEW_TERMINAL,
   PASTE,
@@ -148,6 +149,7 @@ export function useDesktopEffects({
     // without this, arrows never reach the PTY (printable still works via input).
     const onNavCapture = (event: KeyboardEvent) => {
       if (composing || event.isComposing || event.keyCode === 229) return;
+      if (!keyNeedsFallback(event)) return;
       const key = resolveKeyboardKey(event);
       if (!isTerminalNavKey(key) || !navFocused()) return;
       const appCursor = getSessionEntry(getActiveSessionId())?.term.applicationCursor ?? false;
@@ -157,8 +159,9 @@ export function useDesktopEffects({
     };
     const onKey = (event: KeyboardEvent) => {
       if (composing || event.isComposing || event.keyCode === 229 || !focused()) return;
-      // Nav keys already handled in capture (including when xterm textarea focused).
-      if (isTerminalNavKey(resolveKeyboardKey(event))) return;
+      // Broken-key nav events already handled in capture. Resolvable nav keys
+      // fall through here (this handler's own keyToBytes call below covers them).
+      if (keyNeedsFallback(event) && isTerminalNavKey(resolveKeyboardKey(event))) return;
       const appCursor = getSessionEntry(getActiveSessionId())?.term.applicationCursor ?? false;
       const hasSelection = !!getTerminalSelection();
       const bytes = keyToBytes(event, appCursor, isMacDesktop, hasSelection);

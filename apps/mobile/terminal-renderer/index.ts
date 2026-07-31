@@ -1,7 +1,13 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { isTerminalNavKey, keyToBytes, resolveKeyboardKey } from '../src/desktopKeys';
+import {
+  isTerminalNavKey,
+  keyNeedsFallback,
+  keyToBytes,
+  PASTE,
+  resolveKeyboardKey,
+} from '../src/desktopKeys';
 import { bindPageTerminal } from '../src/pageTerminalHost';
 import { registerTetherLinks } from '../src/terminalRendererLinks';
 import type { RendererCommand, RendererEvent } from '../src/terminalRendererProtocol';
@@ -83,7 +89,12 @@ terminal.onSelectionChange(() => post({ type: 'selection', text: terminal.getSel
 terminal.attachCustomKeyEventHandler((event) => {
   if (event.type !== 'keydown') return true;
   const action = keyToBytes(event, terminal.modes.applicationCursorKeysMode, false, false);
-  if (action != null && isTerminalNavKey(resolveKeyboardKey(event))) {
+  if (
+    action != null &&
+    action !== PASTE &&
+    keyNeedsFallback(event) &&
+    isTerminalNavKey(resolveKeyboardKey(event))
+  ) {
     post({ type: 'input', text: action });
     return false;
   }

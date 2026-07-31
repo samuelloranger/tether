@@ -128,6 +128,14 @@ export function normalizeKeyName(key: string): string {
   return LEGACY_ARROW[key] ?? key;
 }
 
+// `keyToBytes` doesn't encode modifier params (Ctrl+Right → `\x1b[1;5C`) for nav
+// keys — xterm's own keyCode-based handling already does that correctly. Only
+// bypass xterm when its handling is the thing that's actually broken (raw
+// `key` unusable), so modified nav keys keep working through xterm otherwise.
+export function keyNeedsFallback(e: { key: string }): boolean {
+  return !e.key || normalizeKeyName(e.key) === 'Unidentified';
+}
+
 /**
  * Resolve a usable key name from a keyboard event. Prefer `key`, then `code`,
  * then legacy `keyCode` — Tauri/WebKit sometimes leaves key/keyCode unusable

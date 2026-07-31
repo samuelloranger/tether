@@ -5,6 +5,7 @@ import {
   FONT_SMALLER,
   isTerminalNavKey,
   type KeyLike,
+  keyNeedsFallback,
   keyToBytes,
   NEW_TERMINAL,
   PASTE,
@@ -262,6 +263,17 @@ describe('isTerminalNavKey', () => {
     expect(isTerminalNavKey('Tab')).toBe(false);
     expect(isTerminalNavKey('Escape')).toBe(false);
     expect(isTerminalNavKey('Shift')).toBe(false);
+  });
+});
+
+describe('keyNeedsFallback', () => {
+  it('is false for a normal, resolvable key', () => {
+    expect(keyNeedsFallback({ key: 'ArrowLeft' })).toBe(false);
+    expect(keyNeedsFallback({ key: 'a' })).toBe(false);
+  });
+  it('is true when key is Unidentified or empty', () => {
+    expect(keyNeedsFallback({ key: 'Unidentified' })).toBe(true);
+    expect(keyNeedsFallback({ key: '' })).toBe(true);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   FONT_LARGER,
   FONT_SMALLER,
   isTerminalNavKey,
+  keyNeedsFallback,
   keyToBytes,
   NEW_TERMINAL,
   PASTE,
@@ -199,7 +200,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           callbacks.current.onFontZoom?.(-1);
           return false;
         }
-        if (action != null && isTerminalNavKey(resolveKeyboardKey(event))) {
+        if (
+          action != null &&
+          keyNeedsFallback(event) &&
+          isTerminalNavKey(resolveKeyboardKey(event))
+        ) {
           callbacks.current.onInput(action);
           return false;
         }
