@@ -16,6 +16,15 @@ jobs:
         with:
           bun-version: latest
 
+      # Write bun's download cache into the default-branch scope so tag release
+      # jobs can restore it (tag→tag cache restore is forbidden by Actions).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+
       - name: Install
         run: bun install --frozen-lockfile
 
@@ -47,3 +56,106 @@ jobs:
         # to compile on Xcode 26.3. Never hard-fail the build on this drift.
         run: npx expo install --check || echo "::warning::expo install --check reported drift (expected — expo pinned to 57.0.7 for iOS build)"
         working-directory: apps/mobile
+
+  # Warm release caches on main only. Tag-triggered Release builds can restore
+  # from the default branch, but cannot see caches saved under other tags —
+  # so every release was a cold Rust compile until this job populates main.
+  cache-warm:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            rust-target: aarch64-apple-darwin
+            cargo-args: --target aarch64-apple-darwin
+            cache-key: macos-aarch64
+          - os: macos-latest
+            rust-target: x86_64-apple-darwin
+            cargo-args: --target x86_64-apple-darwin
+            cache-key: macos-x86_64
+          - os: windows-latest
+            cargo-args: ''
+            cache-key: windows-x64
+          - os: ubuntu-24.04
+            cargo-args: ''
+            cache-key: linux-deb-rpm
+          - os: ubuntu-26.04
+            cargo-args: ''
+            cache-key: linux-appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-target }}
+
+      # Must match release.yml shared-key exactly or tag restores miss.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/mobile/src-tauri
+          shared-key: tether-${{ matrix.cache-key }}
+          cache-on-failure: true
+
+      - name: Linux Tauri deps
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev
+
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+
+      # Release-profile compile fills the target dir rust-cache persists. No
+      # bundling — that stays in Release builds.
+      - name: Warm Rust release artifacts
+        working-directory: apps/mobile/src-tauri
+        run: cargo build --release ${{ matrix.cargo-args }}
+
+  # Gradle wrapper + dependency cache for Android release APKs. Prebuild once
+  # so android/ exists, then setup-gradle writes into main's cache scope.
+  cache-warm-android:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bun install --frozen-lockfile
+      - name: Prebuild Android project
+        working-directory: apps/mobile
+        run: npx expo prebuild -p android --clean
+        env:
+          CI: 'true'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: false
+      - name: Warm Gradle release deps
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
