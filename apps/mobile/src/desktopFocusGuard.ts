@@ -40,3 +40,21 @@ export function shouldForwardToTerminal(
   }
   return true;
 }
+
+/** Nav keys for the PTY — includes focus inside the terminal surface (xterm
+ *  helper textarea + hidden IME input), which shouldForward skips as TEXTAREA/INPUT. */
+export function terminalAcceptsNavKeys(
+  el: FocusEl | null,
+  isBody: boolean,
+  terminalVisible: boolean,
+  isXtermHelperTextarea: boolean,
+): boolean {
+  if (!terminalVisible) return false;
+  if (isXtermHelperTextarea) return true;
+  // Hidden IME TextInput and xterm live under #tether-terminal; arrows must
+  // reach the PTY even though shouldForward leaves those fields alone.
+  if (el && (el.id === 'tether-terminal' || !!el.closest?.('#tether-terminal'))) {
+    return true;
+  }
+  return shouldForwardToTerminal(el, isBody, terminalVisible);
+}

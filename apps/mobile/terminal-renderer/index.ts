@@ -1,6 +1,13 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import {
+  isTerminalNavKey,
+  keyNeedsFallback,
+  keyToBytes,
+  PASTE,
+  resolveKeyboardKey,
+} from '../src/desktopKeys';
 import { bindPageTerminal } from '../src/pageTerminalHost';
 import { registerTetherLinks } from '../src/terminalRendererLinks';
 import type { RendererCommand, RendererEvent } from '../src/terminalRendererProtocol';
@@ -77,6 +84,22 @@ terminal.element!.addEventListener('touchend', () => {
 registerTetherLinks(terminal, (target) => post({ type: 'openLink', target }));
 terminal.onData((text) => post({ type: 'input', text }));
 terminal.onSelectionChange(() => post({ type: 'selection', text: terminal.getSelection() }));
+// Hardware keyboards on mobile: same nav-key path as desktop TerminalView —
+// xterm's keyCode mapping is unreliable, so forward arrows via event.key.
+terminal.attachCustomKeyEventHandler((event) => {
+  if (event.type !== 'keydown') return true;
+  const action = keyToBytes(event, terminal.modes.applicationCursorKeysMode, false, false);
+  if (
+    action != null &&
+    action !== PASTE &&
+    keyNeedsFallback(event) &&
+    isTerminalNavKey(resolveKeyboardKey(event))
+  ) {
+    post({ type: 'input', text: action });
+    return false;
+  }
+  return true;
+});
 
 let lastCols = 0;
 let lastRows = 0;

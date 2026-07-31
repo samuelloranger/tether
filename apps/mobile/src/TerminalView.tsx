@@ -7,9 +7,12 @@ import {
   COPY,
   FONT_LARGER,
   FONT_SMALLER,
+  isTerminalNavKey,
+  keyNeedsFallback,
   keyToBytes,
   NEW_TERMINAL,
   PASTE,
+  resolveKeyboardKey,
   SELECT_ALL,
 } from './desktopKeys';
 import { bindPageTerminal, type PageHostEmit } from './pageTerminalHost';
@@ -165,10 +168,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       );
       // xterm's hidden textarea owns focus while the terminal is active, so the
       // window-level desktop key handler intentionally skips it. App shortcuts
-      // (clipboard, select-all, new terminal, font zoom) must live here.
+      // (clipboard, select-all, new terminal, font zoom) and nav keys (arrows —
+      // xterm maps those via deprecated keyCode, which some webviews leave at 0)
+      // must live here and use event.key via keyToBytes.
       terminal.attachCustomKeyEventHandler((event) => {
         if (event.type !== 'keydown') return true;
-        const action = keyToBytes(event, false, isMacDesktop, !!terminal.getSelection());
+        const appCursor = terminal.modes.applicationCursorKeysMode;
+        const action = keyToBytes(event, appCursor, isMacDesktop, !!terminal.getSelection());
         if (action === COPY) {
           const text = terminal.getSelection();
           if (text) void writeClipboard(text);
@@ -192,6 +198,14 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         }
         if (action === FONT_SMALLER) {
           callbacks.current.onFontZoom?.(-1);
+          return false;
+        }
+        if (
+          action != null &&
+          keyNeedsFallback(event) &&
+          isTerminalNavKey(resolveKeyboardKey(event))
+        ) {
+          callbacks.current.onInput(action);
           return false;
         }
         return true;

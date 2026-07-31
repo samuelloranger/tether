@@ -16,9 +16,10 @@
 // onSelection), not window.getSelection() — xterm paints selection on canvas/
 // WebGL, so the DOM Selection API is always empty for terminal text.
 //
-// Desktop app shortcuts are primarily handled in TerminalView's
+// Desktop app shortcuts AND navigation keys are handled in TerminalView's
 // attachCustomKeyEventHandler (xterm's textarea owns focus). The window-level
-// handler is only a fallback when focus is on body.
+// handler is only a fallback when focus is on body. Nav keys must use event.key
+// there — xterm's own mapping is keyCode-based and can silently drop arrows.
 
 export const COPY = '__TETHER_COPY__';
 export const PASTE = '__TETHER_PASTE__';
@@ -63,8 +64,109 @@ const FKEYS: Record<string, string> = {
   F12: '\x1b[24~',
 };
 
+const LEGACY_ARROW: Record<string, string> = {
+  Left: 'ArrowLeft',
+  Right: 'ArrowRight',
+  Up: 'ArrowUp',
+  Down: 'ArrowDown',
+};
+
+// Some webviews (WKWebView / WebKitGTK) report arrows as key="Unidentified"
+// with keyCode=0. event.code (and a keyCode fallback) still identify them.
+const CODE_TO_KEY: Record<string, string> = {
+  ArrowUp: 'ArrowUp',
+  ArrowDown: 'ArrowDown',
+  ArrowLeft: 'ArrowLeft',
+  ArrowRight: 'ArrowRight',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  Insert: 'Insert',
+  Delete: 'Delete',
+  F1: 'F1',
+  F2: 'F2',
+  F3: 'F3',
+  F4: 'F4',
+  F5: 'F5',
+  F6: 'F6',
+  F7: 'F7',
+  F8: 'F8',
+  F9: 'F9',
+  F10: 'F10',
+  F11: 'F11',
+  F12: 'F12',
+};
+
+const KEYCODE_TO_KEY: Record<number, string> = {
+  33: 'PageUp',
+  34: 'PageDown',
+  35: 'End',
+  36: 'Home',
+  37: 'ArrowLeft',
+  38: 'ArrowUp',
+  39: 'ArrowRight',
+  40: 'ArrowDown',
+  45: 'Insert',
+  46: 'Delete',
+  112: 'F1',
+  113: 'F2',
+  114: 'F3',
+  115: 'F4',
+  116: 'F5',
+  117: 'F6',
+  118: 'F7',
+  119: 'F8',
+  120: 'F9',
+  121: 'F10',
+  122: 'F11',
+  123: 'F12',
+};
+
+/** Normalize legacy webview key names (Left) to ArrowLeft before mapping. */
+export function normalizeKeyName(key: string): string {
+  return LEGACY_ARROW[key] ?? key;
+}
+
+// `keyToBytes` doesn't encode modifier params (Ctrl+Right → `\x1b[1;5C`) for nav
+// keys — xterm's own keyCode-based handling already does that correctly. Only
+// bypass xterm when its handling is the thing that's actually broken (raw
+// `key` unusable), so modified nav keys keep working through xterm otherwise.
+export function keyNeedsFallback(e: { key: string }): boolean {
+  return !e.key || normalizeKeyName(e.key) === 'Unidentified';
+}
+
+/**
+ * Resolve a usable key name from a keyboard event. Prefer `key`, then `code`,
+ * then legacy `keyCode` — Tauri/WebKit sometimes leaves key/keyCode unusable
+ * for arrows while still setting `code`.
+ */
+export function resolveKeyboardKey(e: { key: string; code?: string; keyCode?: number }): string {
+  const fromKey = normalizeKeyName(e.key);
+  if (fromKey && fromKey !== 'Unidentified') return fromKey;
+  if (e.code && CODE_TO_KEY[e.code]) return CODE_TO_KEY[e.code];
+  if (e.keyCode && KEYCODE_TO_KEY[e.keyCode]) return KEYCODE_TO_KEY[e.keyCode];
+  return fromKey;
+}
+
+// Navigation keys xterm maps via deprecated keyCode. When its helper textarea
+// owns focus, the window-level desktop handler skips TEXTAREA — so these must
+// be captured (capture-phase) using resolveKeyboardKey and forwarded to the PTY.
+export function isTerminalNavKey(key: string): boolean {
+  const normalized = normalizeKeyName(key);
+  return (
+    normalized in ARROW_FINAL ||
+    normalized === 'Home' ||
+    normalized === 'End' ||
+    normalized in NAV ||
+    normalized in FKEYS
+  );
+}
+
 export interface KeyLike {
   key: string;
+  code?: string;
+  keyCode?: number;
   ctrlKey: boolean;
   metaKey: boolean;
   altKey: boolean;
@@ -77,7 +179,7 @@ export function keyToBytes(
   isMac = false,
   hasSelection = false,
 ): string | null {
-  const { key } = e;
+  const key = resolveKeyboardKey(e);
 
   // Pure modifier presses produce nothing.
   if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') {
