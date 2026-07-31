@@ -1,4 +1,5 @@
 import type { LinkTarget } from './links';
+import type { CursorStyle, MouseMode, PageControlEvent } from './tether/pageControlState';
 
 export type RendererTheme = {
   foreground: string;
@@ -22,7 +23,12 @@ export type RendererCommand =
   | { v: 1; type: 'scroll'; line: number }
   | { v: 1; type: 'selectAll' }
   | { v: 1; type: 'focus' }
-  | { v: 1; type: 'blur' };
+  | { v: 1; type: 'blur' }
+  | { v: 1; type: 'serialize'; requestId: string }
+  | { v: 1; type: 'snapshotText'; requestId: string }
+  | { v: 1; type: 'jumpPrompt'; dir: 1 | -1 };
+
+export type RendererControlEvent = { v: 1 } & PageControlEvent;
 
 export type RendererEvent =
   | { v: 1; type: 'ready' }
@@ -34,7 +40,15 @@ export type RendererEvent =
   | { v: 1; type: 'resize'; cols: number; rows: number }
   | { v: 1; type: 'openLink'; target: LinkTarget }
   | { v: 1; type: 'selection'; text: string }
-  | { v: 1; type: 'rendererFallback'; reason: string };
+  | { v: 1; type: 'rendererFallback'; reason: string }
+  | RendererControlEvent
+  | { v: 1; type: 'reply'; data: string }
+  | { v: 1; type: 'clipboardWrite'; text: string }
+  | { v: 1; type: 'serialized'; requestId: string; data: string }
+  | { v: 1; type: 'snapshotText'; requestId: string; text: string };
+
+const MOUSE_MODES = new Set<MouseMode>(['off', 'x10', 'normal', 'button', 'any']);
+const CURSOR_STYLES = new Set<CursorStyle>(['block', 'bar', 'underline']);
 
 const positiveInt = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) > 0;
@@ -78,8 +92,105 @@ export function parseRendererEvent(data: string): RendererEvent | null {
       return typeof value.reason === 'string'
         ? { v: 1, type: 'rendererFallback', reason: value.reason }
         : null;
+    case 'title':
+      return typeof value.title === 'string' ? { v: 1, type: 'title', title: value.title } : null;
+    case 'cwd':
+      return typeof value.path === 'string' ? { v: 1, type: 'cwd', path: value.path } : null;
+    case 'bell':
+      return { v: 1, type: 'bell' };
+    case 'notify':
+      return typeof value.title === 'string' && typeof value.body === 'string'
+        ? { v: 1, type: 'notify', title: value.title, body: value.body }
+        : null;
+    case 'promptReturn':
+      return { v: 1, type: 'promptReturn' };
+    case 'modes': {
+      const mouseMode = value.mouseMode;
+      const cursorStyle = value.cursorStyle;
+      if (
+        typeof value.applicationCursor !== 'boolean' ||
+        typeof value.bracketedPaste !== 'boolean' ||
+        typeof value.mouseSgr !== 'boolean' ||
+        typeof value.cursorVisible !== 'boolean' ||
+        typeof mouseMode !== 'string' ||
+        !MOUSE_MODES.has(mouseMode as MouseMode) ||
+        typeof cursorStyle !== 'string' ||
+        !CURSOR_STYLES.has(cursorStyle as CursorStyle)
+      )
+        return null;
+      return {
+        v: 1,
+        type: 'modes',
+        applicationCursor: value.applicationCursor,
+        bracketedPaste: value.bracketedPaste,
+        mouseMode: mouseMode as MouseMode,
+        mouseSgr: value.mouseSgr,
+        cursorStyle: cursorStyle as CursorStyle,
+        cursorVisible: value.cursorVisible,
+      };
+    }
+    case 'reply':
+      return typeof value.data === 'string' ? { v: 1, type: 'reply', data: value.data } : null;
+    case 'clipboardWrite':
+      return typeof value.text === 'string'
+        ? { v: 1, type: 'clipboardWrite', text: value.text }
+        : null;
+    case 'serialized':
+      return typeof value.requestId === 'string' && typeof value.data === 'string'
+        ? { v: 1, type: 'serialized', requestId: value.requestId, data: value.data }
+        : null;
+    case 'snapshotText':
+      return typeof value.requestId === 'string' && typeof value.text === 'string'
+        ? { v: 1, type: 'snapshotText', requestId: value.requestId, text: value.text }
+        : null;
     default:
       return null;
+  }
+}
+
+/** Correlate serialize / snapshotText requests with page responses. */
+export class RendererRpc {
+  private pending = new Map<
+    string,
+    {
+      resolve: (value: string) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  private nextId = 0;
+
+  constructor(
+    private send: (command: RendererCommand) => void,
+    private timeoutMs = 3000,
+  ) {}
+
+  request(type: 'serialize' | 'snapshotText'): Promise<string> {
+    const requestId = String(++this.nextId);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new Error(`${type} timed out`));
+      }, this.timeoutMs);
+      this.pending.set(requestId, { resolve, reject, timer });
+      this.send({ v: 1, type, requestId });
+    });
+  }
+
+  settle(requestId: string, data: string): void {
+    const pending = this.pending.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pending.delete(requestId);
+    pending.resolve(data);
+  }
+
+  clear(reason = 'cleared'): void {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    this.pending.clear();
   }
 }
 
@@ -142,6 +253,18 @@ export class RendererQueue {
 
   blur(): void {
     if (this.isReady && this.hydrated) this.send({ v: 1, type: 'blur' });
+  }
+
+  serialize(requestId: string): void {
+    if (this.isReady && this.hydrated) this.send({ v: 1, type: 'serialize', requestId });
+  }
+
+  snapshotText(requestId: string): void {
+    if (this.isReady && this.hydrated) this.send({ v: 1, type: 'snapshotText', requestId });
+  }
+
+  jumpPrompt(dir: 1 | -1): void {
+    if (this.isReady && this.hydrated) this.send({ v: 1, type: 'jumpPrompt', dir });
   }
 
   ready(): void {

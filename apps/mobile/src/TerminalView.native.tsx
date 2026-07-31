@@ -4,14 +4,28 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { RendererLifecycle } from './rendererLifecycle';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 import { terminalRendererHtml } from './terminalRendererHtml';
-import { parseRendererEvent, RendererQueue } from './terminalRendererProtocol';
+import { parseRendererEvent, RendererQueue, RendererRpc } from './terminalRendererProtocol';
 
 // Liveness probe. Gated on the renderer's own global so a bare about:blank page
 // (which still has the ReactNativeWebView bridge) cannot answer for it.
 const PROBE_JS = `window.__tetherDispatch && window.ReactNativeWebView.postMessage(JSON.stringify({v:1,type:'pong'}));true;`;
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ onInput, onResize, onOpenLink, onSelection, onFallback, onRecover, onStatus }, ref) => {
+  (
+    {
+      onInput,
+      onResize,
+      onOpenLink,
+      onSelection,
+      onControl,
+      onReply,
+      onClipboardWrite,
+      onFallback,
+      onRecover,
+      onStatus,
+    },
+    ref,
+  ) => {
     const webView = useRef<WebView>(null);
     // Bumping this remounts the WebView. Recovery must remount rather than
     // reload(): once iOS has reclaimed the content process there is nothing left
@@ -26,23 +40,54 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         }),
       [],
     );
+    const rpc = useMemo(
+      () =>
+        new RendererRpc((command) => {
+          const json = JSON.stringify(command);
+          webView.current?.injectJavaScript(`window.__tetherDispatch(${json});true;`);
+        }),
+      [],
+    );
 
     // Callbacks are read through refs so the lifecycle can be built once; it owns
     // timers, and rebuilding it on every render would rearm them.
-    const callbacks = useRef({ onRecover, onStatus });
-    callbacks.current = { onRecover, onStatus };
+    const callbacks = useRef({
+      onRecover,
+      onStatus,
+      onControl,
+      onReply,
+      onClipboardWrite,
+      onInput,
+      onResize,
+      onOpenLink,
+      onSelection,
+      onFallback,
+    });
+    callbacks.current = {
+      onRecover,
+      onStatus,
+      onControl,
+      onReply,
+      onClipboardWrite,
+      onInput,
+      onResize,
+      onOpenLink,
+      onSelection,
+      onFallback,
+    };
 
     const lifecycle = useMemo(
       () =>
         new RendererLifecycle({
           probe: () => webView.current?.injectJavaScript(PROBE_JS),
           remount: () => {
+            rpc.clear('remount');
             queue.recover(() => callbacks.current.onRecover());
             setInstance((n) => n + 1);
           },
           onStatus: (status) => callbacks.current.onStatus?.(status),
         }),
-      [queue],
+      [queue, rpc],
     );
 
     useImperativeHandle(
@@ -56,8 +101,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         focus: () => queue.focus(),
         blur: () => queue.blur(),
         retry: () => lifecycle.retry(),
+        serialize: () => rpc.request('serialize'),
+        snapshotText: () => rpc.request('snapshotText'),
+        jumpPrompt: (dir) => queue.jumpPrompt(dir),
       }),
-      [queue, lifecycle],
+      [queue, rpc, lifecycle],
     );
 
     // Foregrounding is when a reclaimed content process shows up, so that is when
@@ -68,9 +116,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       });
       return () => {
         subscription.remove();
+        rpc.clear('disposed');
         lifecycle.dispose();
       };
-    }, [lifecycle]);
+    }, [lifecycle, rpc]);
 
     const onMessage = (event: WebViewMessageEvent) => {
       const message = parseRendererEvent(event.nativeEvent.data);
@@ -85,19 +134,39 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         case 'pong':
           break;
         case 'input':
-          onInput(message.text);
+          callbacks.current.onInput(message.text);
           break;
         case 'resize':
-          onResize(message.cols, message.rows);
+          callbacks.current.onResize(message.cols, message.rows);
           break;
         case 'openLink':
-          onOpenLink(message.target);
+          callbacks.current.onOpenLink(message.target);
           break;
         case 'rendererFallback':
-          onFallback(message.reason);
+          callbacks.current.onFallback(message.reason);
           break;
         case 'selection':
-          onSelection?.(message.text);
+          callbacks.current.onSelection?.(message.text);
+          break;
+        case 'serialized':
+          rpc.settle(message.requestId, message.data);
+          break;
+        case 'snapshotText':
+          rpc.settle(message.requestId, message.text);
+          break;
+        case 'reply':
+          callbacks.current.onReply?.(message.data);
+          break;
+        case 'clipboardWrite':
+          callbacks.current.onClipboardWrite?.(message.text);
+          break;
+        case 'title':
+        case 'cwd':
+        case 'bell':
+        case 'notify':
+        case 'promptReturn':
+        case 'modes':
+          callbacks.current.onControl?.(message);
           break;
       }
     };
@@ -115,6 +184,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         overScrollMode="never"
         style={styles.view}
         onLoadStart={() => {
+          rpc.clear('reload');
           queue.notReady();
           lifecycle.loadStarted();
         }}

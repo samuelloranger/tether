@@ -6,6 +6,7 @@ import {
   parseRendererEvent,
   type RendererCommand,
   RendererQueue,
+  RendererRpc,
 } from './terminalRendererProtocol';
 
 describe('parseRendererEvent', () => {
@@ -20,8 +21,37 @@ describe('parseRendererEvent', () => {
     expect(parseRendererEvent('{"v":1,"type":"resize","cols":0,"rows":24}')).toBeNull();
     expect(parseRendererEvent('not json')).toBeNull();
   });
+
+  test('accepts control and rpc response events', () => {
+    expect(parseRendererEvent('{"v":1,"type":"title","title":"vim"}')).toEqual({
+      v: 1,
+      type: 'title',
+      title: 'vim',
+    });
+    expect(parseRendererEvent('{"v":1,"type":"bell"}')).toEqual({ v: 1, type: 'bell' });
+    expect(
+      parseRendererEvent(
+        '{"v":1,"type":"modes","applicationCursor":true,"bracketedPaste":false,"mouseMode":"normal","mouseSgr":true,"cursorStyle":"bar","cursorVisible":true}',
+      ),
+    ).toMatchObject({ type: 'modes', applicationCursor: true, mouseMode: 'normal' });
+    expect(parseRendererEvent('{"v":1,"type":"serialized","requestId":"1","data":"abc"}')).toEqual({
+      v: 1,
+      type: 'serialized',
+      requestId: '1',
+      data: 'abc',
+    });
+    expect(parseRendererEvent('{"v":1,"type":"modes","applicationCursor":true}')).toBeNull();
+  });
 });
 
+test('RendererRpc settles serialize requests', async () => {
+  const sent: RendererCommand[] = [];
+  const rpc = new RendererRpc((command) => sent.push(command), 1000);
+  const pending = rpc.request('serialize');
+  expect(sent).toEqual([{ v: 1, type: 'serialize', requestId: '1' }]);
+  rpc.settle('1', 'STATE');
+  await expect(pending).resolves.toBe('STATE');
+});
 test('RendererQueue hydrates before writes and survives a remount', () => {
   const sent: RendererCommand[] = [];
   const queue = new RendererQueue((command) => sent.push(command));

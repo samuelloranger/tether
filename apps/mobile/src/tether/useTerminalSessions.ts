@@ -23,6 +23,7 @@ import {
 } from './hostHealth';
 import { createHostPolling, type PollResult } from './hostPolling';
 import type { HostProfile } from './hostStore';
+import { applyPageControl, completeShadowHandoff, type PageControlEvent } from './pageControlState';
 import {
   applyWsMessage,
   backoffDelay,
@@ -116,6 +117,8 @@ export function useTerminalSessions({
     );
   }
   const outputBatcher = outputBatcherRef.current;
+  const handoffRef = useRef<{ key: string; chunks: string[] } | null>(null);
+  const switchGenRef = useRef(0);
 
   const clientForKey = (key: string): HostClient => {
     const { hostId } = parseSessionKey(key);
@@ -207,6 +210,35 @@ export function useTerminalSessions({
       fontSize,
     );
   };
+  /** Theme/font change while the page owns the buffer — re-seed from the live page. */
+  const repaintActiveFromPage = () => {
+    void (async () => {
+      const key = activeKeyRef.current;
+      const entry = cache.get(key);
+      if (!entry) return;
+      outputBatcher.clear();
+      let data = entry.term.serialize();
+      try {
+        const live = await terminalViewRef.current?.serialize();
+        if (typeof live === 'string') data = live;
+      } catch {
+        // page unavailable — fall back to shadow
+      }
+      if (key !== activeKeyRef.current) return;
+      terminalViewRef.current?.hydrate(
+        data,
+        entry.term.cols,
+        entry.term.rows,
+        {
+          foreground: theme.terminal.fg,
+          background: theme.terminal.bg,
+          keyboardAppearance: theme.keyboardAppearance,
+        },
+        fontFamily,
+        fontSize,
+      );
+    })();
+  };
   const onRendererResize = (cols: number, rows: number) => {
     if (dimsRef.current.numCols === cols && dimsRef.current.numRows === rows) return;
     dimsRef.current = { numCols: cols, numRows: rows };
@@ -222,6 +254,38 @@ export function useTerminalSessions({
   };
   const onRendererSelection = (text: string) => {
     terminalSelectionRef.current = text;
+  };
+  const onPageControl = (event: PageControlEvent) => {
+    const key = activeKeyRef.current;
+    const entry = cache.get(key);
+    if (!entry) return;
+    const effect = applyPageControl(entry, event);
+    if (effect === 'metadata') setTerminalMetadataVersion((version) => version + 1);
+    if (effect === 'notify') {
+      const { sessionId, hostId } = parseSessionKey(key);
+      maybeNotify({
+        id: key,
+        entry,
+        activeId: activeKeyRef.current,
+        windowFocused: windowFocusedRef.current,
+        notificationsEnabled: notificationsEnabledRef.current,
+        isDesktop,
+        label: sessionLabel(
+          drawerSessionsRef.current.find(
+            (row) => row.id === sessionId && row.hostId === hostId,
+          ) ?? {
+            id: sessionId,
+          },
+        ),
+        notify: (title, body) => void sendNativeNotification(title, body),
+      });
+    }
+  };
+  const onPageReply = (data: string) => {
+    wsSend({ type: 'input', text: data });
+  };
+  const onPageClipboardWrite = (text: string) => {
+    void writeClipboard(text).catch(() => {});
   };
   const resetTerminal = () => {
     const entry = cache.get(activeKeyRef.current);
@@ -250,7 +314,11 @@ export function useTerminalSessions({
             return next;
           }),
         onWaitingSessions: notifyWaitingSessions,
-        onOutput: (sessionKey, chunk) => outputBatcher.push(sessionKey, chunk),
+        onOutput: (sessionKey, chunk) => {
+          const handoff = handoffRef.current;
+          if (handoff && sessionKey === handoff.key) handoff.chunks.push(chunk);
+          outputBatcher.push(sessionKey, chunk);
+        },
         onNotify: (sessionKey, session) =>
           maybeNotify({
             id: sessionKey,
@@ -423,26 +491,57 @@ export function useTerminalSessions({
     onCloseDrawer();
     onClearView();
     if (action === 'none') return;
-    sendFocus(false);
-    // The user picked this session explicitly, so the host is adopted. Without
-    // this, the host's next poll would run the adoption branch and reconnect —
-    // disconnecting the socket that was just opened.
-    adoptedHostsRef.current.add(hostId);
-    activeHostIdRef.current = hostId;
-    activeIdRef.current = id;
-    activeKeyRef.current = targetKey;
-    setActiveHostId(hostId);
-    setActiveId(id);
-    void AsyncStorage.multiSet([
-      [KEY_ACTIVE_HOST, hostId],
-      [activeSessionStorageKey(hostId), id],
-    ]);
-    entryForKey(targetKey);
-    hydrateRenderer(targetKey);
-    if (action === 'hydrate') {
-      setConnectionStatus(connections.get(targetKey)?.open ? 'connected' : 'disconnected');
-      sendFocus(true);
-    } else connect(targetKey);
+    const gen = ++switchGenRef.current;
+    void (async () => {
+      // Serialize the leaving page into its shadow before hydrating the next
+      // session — the page is the only live parser while a tab is active.
+      if (previousKey !== targetKey && cache.has(previousKey)) {
+        const handoff = { key: previousKey, chunks: [] as string[] };
+        handoffRef.current = handoff;
+        try {
+          const previous = cache.get(previousKey);
+          if (previous) {
+            await completeShadowHandoff({
+              term: previous.term,
+              handoff,
+              serialize: () => {
+                const view = terminalViewRef.current;
+                if (!view) return Promise.reject(new Error('terminal view unavailable'));
+                return view.serialize();
+              },
+              isAvailable: () => terminalViewRef.current != null,
+            });
+          }
+        } catch (error) {
+          console.warn('shadow handoff: unexpected failure', error);
+        } finally {
+          // Keep handoff live through seed so mid-seed WS chunks stay captured;
+          // only drop it once the shadow is fully seeded (or we gave up).
+          if (handoffRef.current === handoff) handoffRef.current = null;
+        }
+      }
+      if (gen !== switchGenRef.current) return;
+      sendFocus(false);
+      // The user picked this session explicitly, so the host is adopted. Without
+      // this, the host's next poll would run the adoption branch and reconnect —
+      // disconnecting the socket that was just opened.
+      adoptedHostsRef.current.add(hostId);
+      activeHostIdRef.current = hostId;
+      activeIdRef.current = id;
+      activeKeyRef.current = targetKey;
+      setActiveHostId(hostId);
+      setActiveId(id);
+      void AsyncStorage.multiSet([
+        [KEY_ACTIVE_HOST, hostId],
+        [activeSessionStorageKey(hostId), id],
+      ]);
+      entryForKey(targetKey);
+      hydrateRenderer(targetKey);
+      if (action === 'hydrate') {
+        setConnectionStatus(connections.get(targetKey)?.open ? 'connected' : 'disconnected');
+        sendFocus(true);
+      } else connect(targetKey);
+    })();
   };
   const newTerminal = () => {
     const hostId = activeHostIdRef.current;
@@ -519,10 +618,21 @@ export function useTerminalSessions({
       setActiveId(savedId);
     });
   }, [client.profile.id]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: repaint is intentionally keyed to terminal view inputs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: session switches hydrate from the shadow.
   useEffect(() => {
     hydrateRenderer();
-  }, [activeId, activeHostId, theme, fontFamily, fontSize]);
+  }, [activeId, activeHostId]);
+  const themePaintReadyRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: theme/font repaint from the live page buffer.
+  useEffect(() => {
+    // Skip the initial mount — activeId effect hydrates from the shadow. Later
+    // theme/font changes must read the live page (shadow is stale while active).
+    if (!themePaintReadyRef.current) {
+      themePaintReadyRef.current = true;
+      return;
+    }
+    repaintActiveFromPage();
+  }, [theme, fontFamily, fontSize]);
   useEffect(() => {
     if (isConfiguring || profiles.length === 0) return;
     const polling = createHostPolling({
@@ -640,6 +750,9 @@ export function useTerminalSessions({
     hydrateRenderer,
     onRendererResize,
     onRendererSelection,
+    onPageControl,
+    onPageReply,
+    onPageClipboardWrite,
     resetTerminal,
     switchTo,
     newTerminal,

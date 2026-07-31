@@ -185,6 +185,20 @@ describe('applyWsMessage', () => {
     expect(harness.effects.output).toEqual(['hello']);
   });
 
+  test('active session output goes to the page only — shadow is not fed', () => {
+    const harness = dispatch();
+    harness.apply({ type: 'output', id: 1, chunk: 'live' });
+    expect(harness.effects.output).toEqual(['live']);
+    expect(harness.entry.writes).toEqual([]);
+  });
+
+  test('background session output still feeds the shadow engine', () => {
+    const harness = dispatch(entry(), 'term-2');
+    harness.apply({ type: 'output', id: 1, chunk: 'bg' });
+    expect(harness.entry.writes).toEqual(['bg']);
+    expect(harness.effects.output).toEqual(['bg']);
+  });
+
   test('updates the active diff summary', () => {
     const harness = dispatch();
     harness.apply({ type: 'diff', summary: { files: [{ path: 'src/app.ts' }] } });
@@ -195,7 +209,17 @@ describe('applyWsMessage', () => {
   test('writes an exit marker', () => {
     const harness = dispatch();
     harness.apply({ type: 'exit', exitCode: 17 });
-    expect(harness.entry.writes).toEqual(['\r\n\x1b[31m[Process exited with code 17]\x1b[0m\r\n']);
+    // Active session: exit text goes to the page only.
+    expect(harness.entry.writes).toEqual([]);
+    expect(harness.effects.output).toEqual([
+      '\r\n\x1b[31m[Process exited with code 17]\x1b[0m\r\n',
+    ]);
+  });
+
+  test('background exit still seeds the shadow engine', () => {
+    const harness = dispatch(entry(), 'term-2');
+    harness.apply({ type: 'exit', exitCode: 1 });
+    expect(harness.entry.writes).toEqual(['\r\n\x1b[31m[Process exited with code 1]\x1b[0m\r\n']);
   });
 
   test('updates a title message in the drawer row', () => {
