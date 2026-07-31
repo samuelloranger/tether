@@ -324,12 +324,12 @@ export function SessionDrawer({
 
       <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
         {/* Wide desktop overlay sits under the title bar — no mobile header to clear.
-            Mobile/compact keep SafeArea + paddingTop so content clears the status bar
-            and in-body header. */}
+            Mobile/compact keep SafeArea so content clears the status bar, home
+            indicator, and landscape notch (App no longer wraps the shell). */}
         {showPin ? (
           <View style={[styles.panelContent, styles.panelContentDesktop]}>{panelBody}</View>
         ) : (
-          <SafeAreaView edges={['top']} style={styles.panelContent}>
+          <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.panelContent}>
             {panelBody}
           </SafeAreaView>
         )}

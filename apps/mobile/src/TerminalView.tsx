@@ -110,6 +110,14 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(container.current);
+      // Gutter inside .xterm (not a wrapper): FitAddon subtracts this padding and
+      // the viewport background fills it, so it reads as padding inside the well.
+      const xtermEl = terminal.element;
+      if (xtermEl) {
+        xtermEl.style.boxSizing = 'border-box';
+        xtermEl.style.paddingLeft = '4px';
+        xtermEl.style.paddingRight = '4px';
+      }
 
       const themeColors = { foreground: '#cccccc', background: '#1e1e2e' };
       const onEmit = (event: PageHostEmit) => {
@@ -235,6 +243,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             themeColors.foreground = command.theme.foreground;
             themeColors.background = command.theme.background;
             terminal.options.theme = command.theme;
+            if (container.current)
+              container.current.style.backgroundColor = command.theme.background;
             terminal.options.fontFamily = command.fontFamily;
             terminal.options.fontSize = command.fontSize;
             terminal.resize(command.cols, command.rows);
@@ -284,16 +294,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     }, [queue, rpc]);
 
     return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          overflow: 'hidden',
-          boxSizing: 'border-box',
-          paddingLeft: 4,
-          paddingRight: 4,
-        }}
-      >
+      <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
         <style>{TERMINAL_RENDERER_CSS}</style>
         <div ref={container} style={{ width: '100%', height: '100%' }} />
       </div>

@@ -213,7 +213,19 @@ export function GitReview({
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+    <View
+      style={[
+        styles.root,
+        {
+          backgroundColor: theme.colors.background,
+          // App no longer applies bottom/side SafeArea around TerminalScreen —
+          // every Git Review tab (Changes, History, commit diff) inherits these.
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}
+    >
       <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
         <TouchableOpacity
           accessibilityRole="button"
@@ -286,9 +298,7 @@ export function GitReview({
             menuPlacement="down"
             style={{ borderTopWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth }}
           />
-          <ScrollView
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
-          >
+          <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 }]}>
             {summary.files.length === 0 ? (
               <View style={styles.center}>
                 <Text style={{ color: theme.colors.text }}>No uncommitted changes</Text>

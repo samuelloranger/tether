@@ -1,5 +1,6 @@
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AppearanceScreen } from './src/AppearanceScreen';
 import { AppThemeProvider, useAppTheme } from './src/AppThemeProvider';
@@ -132,13 +133,13 @@ function AppInner({ onReady }: { onReady: () => void }) {
       </SafeAreaView>
     );
   }
+  // No SafeAreaView padding here: that wrapped the terminal in bezel-colored
+  // gaps. Insets are applied inside the terminal well / utility bar / takeovers
+  // so the PTY background goes edge-to-edge.
   return (
-    <SafeAreaView
-      edges={['bottom', 'left', 'right']}
-      style={[styles.appContainer, { backgroundColor: theme.colors.background }]}
-    >
+    <View style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
       <TerminalScreen app={app} />
       {serverSettings}
-    </SafeAreaView>
+    </View>
   );
 }

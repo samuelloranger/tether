@@ -122,13 +122,17 @@ window.__tetherDispatch = (command) => {
   if (!command || command.v !== 1) return;
   if (page.handleRpc(command)) return;
   switch (command.type) {
-    case 'hydrate':
+    case 'hydrate': {
       page.resetPrompts();
       terminal.reset();
       themeColors.foreground = command.theme.foreground;
       themeColors.background = command.theme.background;
       terminal.options.theme = command.theme;
       document.documentElement.style.colorScheme = command.theme.keyboardAppearance;
+      document.documentElement.style.background = command.theme.background;
+      document.body.style.background = command.theme.background;
+      const host = document.getElementById('terminal');
+      if (host) host.style.background = command.theme.background;
       terminal.options.fontFamily = command.fontFamily;
       terminal.options.fontSize = command.fontSize;
       terminal.resize(command.cols, command.rows);
@@ -139,6 +143,7 @@ window.__tetherDispatch = (command) => {
         post({ type: 'hydrated' });
       });
       break;
+    }
     case 'write':
       terminal.write(command.data, () => page.afterWrite());
       break;
