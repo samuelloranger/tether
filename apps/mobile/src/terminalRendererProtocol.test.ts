@@ -39,7 +39,20 @@ describe('parseRendererEvent', () => {
       type: 'serialized',
       requestId: '1',
       data: 'abc',
+      promptLines: [],
     });
+    expect(
+      parseRendererEvent(
+        '{"v":1,"type":"serialized","requestId":"1","data":"abc","promptLines":[2]}',
+      ),
+    ).toEqual({
+      v: 1,
+      type: 'serialized',
+      requestId: '1',
+      data: 'abc',
+      promptLines: [2],
+    });
+    expect(parseRendererEvent('{"v":1,"type":"hydrated"}')).toEqual({ v: 1, type: 'hydrated' });
     expect(parseRendererEvent('{"v":1,"type":"modes","applicationCursor":true}')).toBeNull();
   });
 });
@@ -47,10 +60,10 @@ describe('parseRendererEvent', () => {
 test('RendererRpc settles serialize requests', async () => {
   const sent: RendererCommand[] = [];
   const rpc = new RendererRpc((command) => sent.push(command), 1000);
-  const pending = rpc.request('serialize');
+  const pending = rpc.requestSerialize();
   expect(sent).toEqual([{ v: 1, type: 'serialize', requestId: '1' }]);
-  rpc.settle('1', 'STATE');
-  await expect(pending).resolves.toBe('STATE');
+  rpc.settle('1', { data: 'STATE', promptLines: [3] });
+  await expect(pending).resolves.toEqual({ data: 'STATE', promptLines: [3] });
 });
 test('RendererQueue hydrates before writes and survives a remount', () => {
   const sent: RendererCommand[] = [];
@@ -69,6 +82,7 @@ test('RendererQueue hydrates before writes and survives a remount', () => {
     theme: { foreground: '#fff', background: '#000' },
     fontFamily: '"Fira Code", ui-monospace, "SFMono-Regular", Menlo, monospace',
     fontSize: 13,
+    promptLines: [],
   });
   queue.notReady();
   queue.write('remount');
@@ -130,6 +144,7 @@ test('RendererQueue drops writes belonging to a superseded hydration', () => {
       theme,
       fontFamily: font,
       fontSize: 12,
+      promptLines: [],
     },
     { v: 1, type: 'write', data: 'fresh' },
   ]);

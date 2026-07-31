@@ -69,13 +69,18 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onStatus,
     };
     const dispatch = useRef<(command: RendererCommand) => void>(() => {});
+    const hydrateWait = useRef<(() => void) | null>(null);
     const queue = useMemo(() => new RendererQueue((command) => dispatch.current(command)), []);
     const rpc = useMemo(() => new RendererRpc((command) => dispatch.current(command)), []);
 
     useImperativeHandle(
       ref,
       () => ({
-        hydrate: (...args) => queue.hydrate(...args),
+        hydrate: (...args) =>
+          new Promise<void>((resolve) => {
+            hydrateWait.current = resolve;
+            queue.hydrate(...args);
+          }),
         write: (data) => queue.write(data),
         resize: (cols, rows) => queue.resize(cols, rows),
         scrollToLine: (line) => queue.scrollToLine(line),
@@ -85,8 +90,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         // Desktop renders xterm straight into the DOM: there is no separate page
         // to lose, so there is nothing to recover from and nothing to retry.
         retry: () => {},
-        serialize: () => rpc.request('serialize'),
-        snapshotText: () => rpc.request('snapshotText'),
+        serialize: () => rpc.requestSerialize(),
+        snapshotText: () => rpc.requestSnapshotText(),
         jumpPrompt: (dir) => queue.jumpPrompt(dir),
       }),
       [queue, rpc],
@@ -105,8 +110,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       const themeColors = { foreground: '#cccccc', background: '#1e1e2e' };
       const onEmit = (event: PageHostEmit) => {
-        if (event.type === 'serialized' || event.type === 'snapshotText') {
-          rpc.settle(event.requestId, event.type === 'serialized' ? event.data : event.text);
+        if (event.type === 'serialized') {
+          rpc.settle(event.requestId, { data: event.data, promptLines: event.promptLines });
+          return;
+        }
+        if (event.type === 'snapshotText') {
+          rpc.settle(event.requestId, event.text);
+          return;
+        }
+        if (event.type === 'hydrated') {
+          hydrateWait.current?.();
+          hydrateWait.current = null;
           return;
         }
         if (event.type === 'reply') {
@@ -211,8 +225,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             terminal.options.fontSize = command.fontSize;
             terminal.resize(command.cols, command.rows);
             terminal.write(command.data, () => {
+              page.restorePromptLines(command.promptLines ?? []);
               page.afterWrite();
               fitAndReport();
+              onEmit({ type: 'hydrated' });
             });
             break;
           case 'write':

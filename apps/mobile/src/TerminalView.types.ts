@@ -12,7 +12,8 @@ export interface TerminalViewHandle {
     theme: RendererTheme,
     fontFamily: string,
     fontSize: number,
-  ): void;
+    promptLines?: number[],
+  ): Promise<void>;
   write(data: string): void;
   resize(cols: number, rows: number): void;
   scrollToLine(line: number): void;
@@ -22,7 +23,7 @@ export interface TerminalViewHandle {
   /** Manual recovery from the stalled UI: throw the page away and start over. */
   retry(): void;
   /** Serialize the live page buffer for shadow handoff. */
-  serialize(): Promise<string>;
+  serialize(): Promise<import('./tether/pageControlState').PageSerialize>;
   /** Plain-text transcript of the live page (search / selection / copy-all). */
   snapshotText(): Promise<string>;
   /** Scroll to the next/previous OSC 133 prompt mark on the page. */

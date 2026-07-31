@@ -17,6 +17,7 @@ export type RendererCommand =
       theme: RendererTheme;
       fontFamily: string;
       fontSize: number;
+      promptLines?: number[];
     }
   | { v: 1; type: 'write'; data: string }
   | { v: 1; type: 'resize'; cols: number; rows: number }
@@ -44,8 +45,9 @@ export type RendererEvent =
   | RendererControlEvent
   | { v: 1; type: 'reply'; data: string }
   | { v: 1; type: 'clipboardWrite'; text: string }
-  | { v: 1; type: 'serialized'; requestId: string; data: string }
-  | { v: 1; type: 'snapshotText'; requestId: string; text: string };
+  | { v: 1; type: 'serialized'; requestId: string; data: string; promptLines: number[] }
+  | { v: 1; type: 'snapshotText'; requestId: string; text: string }
+  | { v: 1; type: 'hydrated' };
 
 const MOUSE_MODES = new Set<MouseMode>(['off', 'x10', 'normal', 'button', 'any']);
 const CURSOR_STYLES = new Set<CursorStyle>(['block', 'bar', 'underline']);
@@ -135,14 +137,27 @@ export function parseRendererEvent(data: string): RendererEvent | null {
       return typeof value.text === 'string'
         ? { v: 1, type: 'clipboardWrite', text: value.text }
         : null;
-    case 'serialized':
-      return typeof value.requestId === 'string' && typeof value.data === 'string'
-        ? { v: 1, type: 'serialized', requestId: value.requestId, data: value.data }
-        : null;
+    case 'serialized': {
+      if (typeof value.requestId !== 'string' || typeof value.data !== 'string') return null;
+      const promptLines = Array.isArray(value.promptLines)
+        ? value.promptLines.filter(
+            (n): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0,
+          )
+        : [];
+      return {
+        v: 1,
+        type: 'serialized',
+        requestId: value.requestId,
+        data: value.data,
+        promptLines,
+      };
+    }
     case 'snapshotText':
       return typeof value.requestId === 'string' && typeof value.text === 'string'
         ? { v: 1, type: 'snapshotText', requestId: value.requestId, text: value.text }
         : null;
+    case 'hydrated':
+      return { v: 1, type: 'hydrated' };
     default:
       return null;
   }
@@ -153,7 +168,7 @@ export class RendererRpc {
   private pending = new Map<
     string,
     {
-      resolve: (value: string) => void;
+      resolve: (value: unknown) => void;
       reject: (error: Error) => void;
       timer: ReturnType<typeof setTimeout>;
     }
@@ -165,7 +180,16 @@ export class RendererRpc {
     private timeoutMs = 3000,
   ) {}
 
-  request(type: 'serialize' | 'snapshotText'): Promise<string> {
+  requestSerialize(): Promise<import('./tether/pageControlState').PageSerialize> {
+    return this.request('serialize') as Promise<import('./tether/pageControlState').PageSerialize>;
+  }
+
+  requestSnapshotText(): Promise<string> {
+    return this.request('snapshotText') as Promise<string>;
+  }
+
+  /** @deprecated prefer requestSerialize / requestSnapshotText */
+  request(type: 'serialize' | 'snapshotText'): Promise<unknown> {
     const requestId = String(++this.nextId);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -177,7 +201,7 @@ export class RendererRpc {
     });
   }
 
-  settle(requestId: string, data: string): void {
+  settle(requestId: string, data: unknown): void {
     const pending = this.pending.get(requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
@@ -209,6 +233,7 @@ export class RendererQueue {
     theme: RendererTheme,
     fontFamily: string,
     fontSize: number,
+    promptLines: number[] = [],
   ): void {
     if (this.latestHydrate) this.pendingWrites = [];
     this.latestHydrate = {
@@ -224,6 +249,7 @@ export class RendererQueue {
       // URI font decodes.
       fontFamily: `"${fontFamily}", ui-monospace, "SFMono-Regular", Menlo, monospace`,
       fontSize,
+      promptLines,
     };
     this.hydrated = false;
     this.flush();

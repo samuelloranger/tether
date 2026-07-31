@@ -110,8 +110,10 @@ window.__tetherDispatch = (command) => {
       terminal.options.fontSize = command.fontSize;
       terminal.resize(command.cols, command.rows);
       terminal.write(command.data, () => {
+        page.restorePromptLines(command.promptLines ?? []);
         page.afterWrite();
         fitAndReport();
+        post({ type: 'hydrated' });
       });
       break;
     case 'write':

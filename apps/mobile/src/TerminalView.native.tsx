@@ -90,10 +90,16 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       [queue, rpc],
     );
 
+    const hydrateWait = useRef<(() => void) | null>(null);
+
     useImperativeHandle(
       ref,
       () => ({
-        hydrate: (...args) => queue.hydrate(...args),
+        hydrate: (...args) =>
+          new Promise<void>((resolve) => {
+            hydrateWait.current = resolve;
+            queue.hydrate(...args);
+          }),
         write: (data) => queue.write(data),
         resize: (cols, rows) => queue.resize(cols, rows),
         scrollToLine: (line) => queue.scrollToLine(line),
@@ -101,8 +107,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         focus: () => queue.focus(),
         blur: () => queue.blur(),
         retry: () => lifecycle.retry(),
-        serialize: () => rpc.request('serialize'),
-        snapshotText: () => rpc.request('snapshotText'),
+        serialize: () => rpc.requestSerialize(),
+        snapshotText: () => rpc.requestSnapshotText(),
         jumpPrompt: (dir) => queue.jumpPrompt(dir),
       }),
       [queue, rpc, lifecycle],
@@ -149,10 +155,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           callbacks.current.onSelection?.(message.text);
           break;
         case 'serialized':
-          rpc.settle(message.requestId, message.data);
+          rpc.settle(message.requestId, {
+            data: message.data,
+            promptLines: message.promptLines,
+          });
           break;
         case 'snapshotText':
           rpc.settle(message.requestId, message.text);
+          break;
+        case 'hydrated':
+          hydrateWait.current?.();
+          hydrateWait.current = null;
           break;
         case 'reply':
           callbacks.current.onReply?.(message.data);

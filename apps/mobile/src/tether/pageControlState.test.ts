@@ -5,6 +5,7 @@ import {
   completeShadowHandoff,
   type PageControlEvent,
   seedShadowFromSerialize,
+  syncNotifyCursors,
 } from './pageControlState';
 
 function fakeEntry(): SessionEntry & { writes: string[] } {
@@ -23,12 +24,20 @@ function fakeEntry(): SessionEntry & { writes: string[] } {
       mouseSgr: false,
       cursorStyle: 'block' as const,
       cursorVisible: true,
+      restoredPrompts: [] as number[],
       write(data: string, done?: () => void) {
         result.writes.push(data);
         done?.();
       },
       reset() {
         result.writes.push('__reset__');
+        result.term.bellCount = 0;
+        result.term.notifyCount = 0;
+        result.term.title = '';
+        result.term.cwd = '';
+      },
+      restorePromptLines(lines: number[]) {
+        result.term.restoredPrompts = [...lines];
       },
     },
     sinceId: 0,
@@ -73,8 +82,35 @@ test('applyPageControl mirrors title cwd bell notify and modes onto the entry', 
 
 test('seedShadowFromSerialize resets then writes serialize plus trailing chunks', async () => {
   const entry = fakeEntry();
-  await seedShadowFromSerialize(entry.term, 'BASE', ['a', 'b']);
+  await seedShadowFromSerialize(entry.term, 'BASE', ['a', 'b'], [2, 5]);
   expect(entry.writes).toEqual(['__reset__', 'BASEab']);
+  expect((entry.term as { restoredPrompts: number[] }).restoredPrompts).toEqual([2, 5]);
+});
+
+test('seedShadowFromSerialize preserves metadata across reset', async () => {
+  const entry = fakeEntry();
+  entry.term.title = 'vim';
+  entry.term.cwd = '/tmp';
+  entry.term.bellCount = 3;
+  entry.term.notifyCount = 2;
+  entry.term.applicationCursor = true;
+  await seedShadowFromSerialize(entry.term, 'X', []);
+  expect(entry.term.title).toBe('vim');
+  expect(entry.term.cwd).toBe('/tmp');
+  expect(entry.term.bellCount).toBe(3);
+  expect(entry.term.notifyCount).toBe(2);
+  expect(entry.term.applicationCursor).toBe(true);
+});
+
+test('syncNotifyCursors aligns entry cursors with engine counts', () => {
+  const entry = fakeEntry();
+  entry.term.bellCount = 2;
+  entry.term.notifyCount = 1;
+  entry.lastBellCount = 9;
+  entry.lastNotifyCount = 9;
+  syncNotifyCursors(entry);
+  expect(entry.lastBellCount).toBe(2);
+  expect(entry.lastNotifyCount).toBe(1);
 });
 
 test('completeShadowHandoff seeds snapshot then appends mid-seed trailing in order', async () => {
@@ -92,11 +128,37 @@ test('completeShadowHandoff seeds snapshot then appends mid-seed trailing in ord
   await completeShadowHandoff({
     term: entry.term,
     handoff,
-    serialize: async () => 'BASE',
+    serialize: async () => ({ data: 'BASE', promptLines: [1] }),
     sleep: async () => {},
   });
   expect(entry.writes).toEqual(['__reset__', 'BASEpre', 'mid']);
   expect(handoff.chunks).toEqual([]);
+  expect((entry.term as { restoredPrompts: number[] }).restoredPrompts).toEqual([1]);
+});
+
+test('completeShadowHandoff drains chunks that arrive during the trailing write', async () => {
+  const entry = fakeEntry();
+  const handoff = { chunks: [] as string[] };
+  let writes = 0;
+  entry.term.write = (data: string, done?: () => void) => {
+    entry.writes.push(data);
+    writes++;
+    // First write is the seed; second is the mid-seed drain — inject another
+    // chunk while that drain write runs so the loop must iterate again.
+    if (writes === 1) handoff.chunks.push('mid');
+    if (writes === 2) handoff.chunks.push('late');
+    done?.();
+  };
+  await completeShadowHandoff({
+    term: entry.term,
+    handoff,
+    serialize: async () => 'BASE',
+    sleep: async () => {},
+    entry,
+  });
+  expect(entry.writes).toEqual(['__reset__', 'BASE', 'mid', 'late']);
+  expect(handoff.chunks).toEqual([]);
+  expect(entry.lastBellCount).toBe(entry.term.bellCount);
 });
 
 test('completeShadowHandoff retries serialize once then falls back to trailing', async () => {

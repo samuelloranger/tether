@@ -12,8 +12,9 @@ export type PageHostEmit =
   | PageControlEvent
   | { type: 'reply'; data: string }
   | { type: 'clipboardWrite'; text: string }
-  | { type: 'serialized'; requestId: string; data: string }
-  | { type: 'snapshotText'; requestId: string; text: string };
+  | { type: 'serialized'; requestId: string; data: string; promptLines: number[] }
+  | { type: 'snapshotText'; requestId: string; text: string }
+  | { type: 'hydrated' };
 
 function mouseModeOf(mode: string): MouseMode {
   switch (mode) {
@@ -49,6 +50,7 @@ export function bindPageTerminal(
   handleRpc: (command: { type: string; requestId?: string; dir?: 1 | -1 }) => boolean;
   afterWrite: () => void;
   resetPrompts: () => void;
+  restorePromptLines: (lines: number[]) => void;
   dispose: () => void;
 } {
   const serializeAddon = new SerializeAddon();
@@ -139,7 +141,13 @@ export function bindPageTerminal(
 
   const handleRpc = (command: { type: string; requestId?: string; dir?: 1 | -1 }): boolean => {
     if (command.type === 'serialize' && typeof command.requestId === 'string') {
-      emit({ type: 'serialized', requestId: command.requestId, data: serializeAddon.serialize() });
+      pruneMarkers();
+      emit({
+        type: 'serialized',
+        requestId: command.requestId,
+        data: serializeAddon.serialize(),
+        promptLines: promptMarkers.map((m) => m.line).filter((line) => line >= 0),
+      });
       return true;
     }
     if (command.type === 'snapshotText' && typeof command.requestId === 'string') {
@@ -155,6 +163,24 @@ export function bindPageTerminal(
       return true;
     }
     return false;
+  };
+
+  const restorePromptLines = (lines: number[]) => {
+    for (const marker of promptMarkers) {
+      try {
+        marker.dispose();
+      } catch {
+        // already disposed
+      }
+    }
+    promptMarkers.length = 0;
+    const buf = terminal.buffer.active;
+    const origin = buf.baseY + buf.cursorY;
+    for (const line of lines) {
+      if (!Number.isInteger(line) || line < 0) continue;
+      const marker = terminal.registerMarker(line - origin);
+      if (marker) promptMarkers.push(marker);
+    }
   };
 
   const resetPrompts = () => {
@@ -176,6 +202,7 @@ export function bindPageTerminal(
     handleRpc,
     afterWrite: emitModes,
     resetPrompts,
+    restorePromptLines,
     dispose: () => {
       resetPrompts();
       serializeAddon.dispose();

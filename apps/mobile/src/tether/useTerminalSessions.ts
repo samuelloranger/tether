@@ -117,7 +117,12 @@ export function useTerminalSessions({
     );
   }
   const outputBatcher = outputBatcherRef.current;
-  const handoffRef = useRef<{ key: string; chunks: string[] } | null>(null);
+  const handoffRef = useRef<{
+    key: string;
+    chunks: string[];
+    /** When true, hold chunks off the page until hydrate finishes (theme repaint). */
+    bufferOnly?: boolean;
+  } | null>(null);
   const switchGenRef = useRef(0);
 
   const clientForKey = (key: string): HostClient => {
@@ -197,7 +202,7 @@ export function useTerminalSessions({
   const hydrateRenderer = (key = activeKeyRef.current) => {
     const entry = entryForKey(key);
     outputBatcher.clear();
-    terminalViewRef.current?.hydrate(
+    void terminalViewRef.current?.hydrate(
       entry.term.serialize(),
       entry.term.cols,
       entry.term.rows,
@@ -208,6 +213,7 @@ export function useTerminalSessions({
       },
       fontFamily,
       fontSize,
+      entry.term.getPromptLines(),
     );
   };
   /** Theme/font change while the page owns the buffer — re-seed from the live page. */
@@ -216,27 +222,49 @@ export function useTerminalSessions({
       const key = activeKeyRef.current;
       const entry = cache.get(key);
       if (!entry) return;
-      outputBatcher.clear();
-      let data = entry.term.serialize();
+      // Don't nest under an in-flight session-switch handoff.
+      if (handoffRef.current) return;
+      // Flush pending paints into the page so serialize includes them.
+      outputBatcher.flushNow();
+      const handoff = { key, chunks: [] as string[], bufferOnly: true };
+      handoffRef.current = handoff;
       try {
-        const live = await terminalViewRef.current?.serialize();
-        if (typeof live === 'string') data = live;
-      } catch {
-        // page unavailable — fall back to shadow
+        let data = entry.term.serialize();
+        let promptLines = entry.term.getPromptLines();
+        try {
+          const live = await terminalViewRef.current?.serialize();
+          if (live) {
+            data = live.data;
+            promptLines = live.promptLines;
+          }
+        } catch {
+          // page unavailable — fall back to shadow
+        }
+        // Fold chunks that arrived during serialize into the hydrate payload.
+        const trailing = handoff.chunks.splice(0, handoff.chunks.length);
+        if (trailing.length) data += trailing.join('');
+        if (key !== activeKeyRef.current) return;
+        await terminalViewRef.current?.hydrate(
+          data,
+          entry.term.cols,
+          entry.term.rows,
+          {
+            foreground: theme.terminal.fg,
+            background: theme.terminal.bg,
+            keyboardAppearance: theme.keyboardAppearance,
+          },
+          fontFamily,
+          fontSize,
+          promptLines,
+        );
+        // Drain anything that landed while hydrate was writing.
+        while (handoff.chunks.length > 0) {
+          const more = handoff.chunks.splice(0, handoff.chunks.length);
+          terminalViewRef.current?.write(more.join(''));
+        }
+      } finally {
+        if (handoffRef.current === handoff) handoffRef.current = null;
       }
-      if (key !== activeKeyRef.current) return;
-      terminalViewRef.current?.hydrate(
-        data,
-        entry.term.cols,
-        entry.term.rows,
-        {
-          foreground: theme.terminal.fg,
-          background: theme.terminal.bg,
-          keyboardAppearance: theme.keyboardAppearance,
-        },
-        fontFamily,
-        fontSize,
-      );
     })();
   };
   const onRendererResize = (cols: number, rows: number) => {
@@ -316,7 +344,11 @@ export function useTerminalSessions({
         onWaitingSessions: notifyWaitingSessions,
         onOutput: (sessionKey, chunk) => {
           const handoff = handoffRef.current;
-          if (handoff && sessionKey === handoff.key) handoff.chunks.push(chunk);
+          if (handoff && sessionKey === handoff.key) {
+            handoff.chunks.push(chunk);
+            // Theme repaint holds bytes off the page until hydrate finishes.
+            if (handoff.bufferOnly) return;
+          }
           outputBatcher.push(sessionKey, chunk);
         },
         onNotify: (sessionKey, session) =>
@@ -510,6 +542,7 @@ export function useTerminalSessions({
                 return view.serialize();
               },
               isAvailable: () => terminalViewRef.current != null,
+              entry: previous,
             });
           }
         } catch (error) {

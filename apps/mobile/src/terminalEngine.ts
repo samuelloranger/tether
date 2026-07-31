@@ -333,6 +333,26 @@ export class TerminalEngine {
     return this.serializeAddon.serialize();
   }
 
+  /** Buffer-local y indices of OSC 133 prompt marks (for page hydrate handoff). */
+  getPromptLines(): number[] {
+    const trimmed = this.trimmedCount();
+    const lines: number[] = [];
+    for (const id of this.promptIds) {
+      const y = id - trimmed;
+      if (y >= 0) lines.push(y);
+    }
+    return lines.sort((a, b) => a - b);
+  }
+
+  /** Restore prompt marks after a serialize seed (ids relative to current trim). */
+  restorePromptLines(lines: number[]): void {
+    this.promptIds.clear();
+    const trimmed = this.trimmedCount();
+    for (const y of lines) {
+      if (Number.isInteger(y) && y >= 0) this.promptIds.add(trimmed + y);
+    }
+  }
+
   resize(cols: number, rows: number): void {
     if (cols === this.term.cols && rows === this.term.rows) return;
     this.term.resize(Math.max(1, cols), Math.max(1, rows));
