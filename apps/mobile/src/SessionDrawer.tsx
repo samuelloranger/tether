@@ -148,7 +148,7 @@ export function SessionDrawer({
             accessibilityLabel={docked ? 'Unpin sidebar' : 'Pin sidebar'}
             style={styles.pinBtn}
           >
-            <Feather name="pin" size={16} color={theme.colors.textMuted} />
+            <Feather name="sidebar" size={16} color={theme.colors.textMuted} />
             <Text style={styles.pinLabel}>{docked ? 'Unpin' : 'Pin'}</Text>
           </TouchableOpacity>
         </View>

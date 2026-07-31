@@ -19,7 +19,12 @@ import { useAppTheme } from './AppThemeProvider';
 import { ChangeBanner } from './ChangeBanner';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ContextMenu } from './ContextMenu';
-import { desktopLayout } from './desktopLayout';
+import {
+  desktopLayout,
+  showTitleBarDrawerMenu,
+  sidebarDocked,
+  sidebarVisible,
+} from './desktopLayout';
 import { FileViewer } from './FileViewer';
 import { GitDrawer } from './GitDrawer';
 import { GitReview } from './GitReview';
@@ -89,6 +94,8 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     activeHostId,
     drawerOpen,
     setDrawerOpen,
+    sidebarPinned,
+    persistSidebarPinned,
     drawerSessions,
     profiles,
     healthByHost,
@@ -191,6 +198,18 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     fontFamily,
     changeFontFamily,
   } = app;
+
+  const docked = sidebarDocked(desktopUi, sidebarPinned);
+  const drawerVisible = sidebarVisible(docked, drawerOpen);
+  const titleBarDrawerMenu = showTitleBarDrawerMenu(desktopUi, sidebarPinned);
+  const toggleSidebarPin = () => {
+    if (sidebarPinned) {
+      persistSidebarPinned(false);
+      setDrawerOpen(false);
+    } else {
+      persistSidebarPinned(true);
+    }
+  };
 
   // Bell (BEL): brief red flash + haptic tick whenever the active session's
   // bellCount advances, so a background/completed job is noticeable without
@@ -297,19 +316,33 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           onMenu={() => {
             if (terminalVisible) setMenuOpen(true);
           }}
+          onOpenDrawer={
+            titleBarDrawerMenu
+              ? () => {
+                  refreshSessions();
+                  refreshPresentations();
+                  setDrawerOpen(true);
+                }
+              : undefined
+          }
           compact={!desktopUi}
         />
       )}
-      <View style={[styles.terminalBody, desktopUi && styles.terminalRow]}>
+      <View style={[styles.terminalBody, docked && styles.terminalRow]}>
         <SessionDrawer
-          visible={desktopUi || drawerOpen}
-          docked={desktopUi}
+          visible={drawerVisible}
+          docked={docked}
+          showPin={desktopUi}
+          onTogglePin={toggleSidebarPin}
           hosts={profiles ?? []}
           healthByHost={healthByHost}
           sessions={drawerSessions}
           activeHostId={activeHostId}
           activeId={activeId}
-          onSelect={selectTerminal}
+          onSelect={(hostId, id) => {
+            selectTerminal(hostId, id);
+            if (!docked) setDrawerOpen(false);
+          }}
           onNew={newTerminal}
           onKill={killActiveOr}
           onRetryHost={refreshHost}
@@ -318,12 +351,12 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           activePreviewId={activePresentationId}
           onSelectPreview={(id) => {
             selectPresentation(id);
-            if (!desktopUi) setDrawerOpen(false);
+            if (!docked) setDrawerOpen(false);
           }}
           onClosePreview={closePresentation}
           onClose={() => setDrawerOpen(false)}
           onHostSettings={(hostId) => {
-            if (!desktopUi) setDrawerOpen(false);
+            if (!docked) setDrawerOpen(false);
             openServerSettings(hostId);
           }}
         />

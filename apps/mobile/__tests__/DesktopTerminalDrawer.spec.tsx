@@ -20,7 +20,18 @@ jest.mock('../src/TerminalView', () => {
   };
 });
 
-jest.mock('../src/TitleBar', () => ({ __esModule: true, default: () => null }));
+jest.mock('../src/TitleBar', () => {
+  const { TouchableOpacity, Text } = require('react-native');
+  return {
+    __esModule: true,
+    default: ({ onOpenDrawer }: { onOpenDrawer?: () => void }) =>
+      onOpenDrawer ? (
+        <TouchableOpacity accessibilityLabel="Open terminal list" onPress={onOpenDrawer}>
+          <Text>menu</Text>
+        </TouchableOpacity>
+      ) : null,
+  };
+});
 jest.mock('../src/UtilityBar', () => ({ UtilityBar: () => null }));
 jest.mock('../src/ContextMenu', () => ({ ContextMenu: () => null }));
 jest.mock('../src/UpdateModal', () => ({ UpdateModal: () => null }));
@@ -37,7 +48,12 @@ const host = {
   order: 0,
 };
 
-function appFixture(drawerOpen: boolean, setDrawerOpen: (open: boolean) => void) {
+function appFixture(
+  drawerOpen: boolean,
+  setDrawerOpen: (open: boolean) => void,
+  sidebarPinned = false,
+  persistSidebarPinned: (next: boolean) => void = jest.fn(),
+) {
   const noop = jest.fn();
   const known = {
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -65,6 +81,8 @@ function appFixture(drawerOpen: boolean, setDrawerOpen: (open: boolean) => void)
     activeHostId: host.id,
     drawerOpen,
     setDrawerOpen,
+    sidebarPinned,
+    persistSidebarPinned,
     drawerSessions: [
       {
         hostId: host.id,
@@ -113,9 +131,12 @@ function appFixture(drawerOpen: boolean, setDrawerOpen: (open: boolean) => void)
   }) as unknown as ReturnType<typeof useTetherApp>;
 }
 
-function Harness() {
+function Harness({ initialPinned = false }: { initialPinned?: boolean }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  return <TerminalScreen app={appFixture(drawerOpen, setDrawerOpen)} />;
+  const [sidebarPinned, setSidebarPinned] = useState(initialPinned);
+  return (
+    <TerminalScreen app={appFixture(drawerOpen, setDrawerOpen, sidebarPinned, setSidebarPinned)} />
+  );
 }
 
 function setWindowWidth(width: number) {
@@ -125,7 +146,7 @@ function setWindowWidth(width: number) {
   });
 }
 
-function renderTerminal(width: number) {
+function renderHarness(width: number, initialPinned = false) {
   setWindowWidth(width);
   return render(
     <SafeAreaProvider
@@ -135,10 +156,14 @@ function renderTerminal(width: number) {
       }}
     >
       <AppThemeProvider>
-        <Harness />
+        <Harness initialPinned={initialPinned} />
       </AppThemeProvider>
     </SafeAreaProvider>,
   );
+}
+
+function renderTerminal(width: number) {
+  return renderHarness(width, false);
 }
 
 beforeAll(() => {
@@ -148,12 +173,22 @@ beforeAll(() => {
   });
 });
 
-test('keeps the host drawer docked at wide desktop widths', () => {
+test('keeps the host drawer collapsed by default at wide desktop widths', () => {
   const view = renderTerminal(1024);
 
+  expect(view.queryByLabelText('Studio host section')).toBeNull();
+  expect(view.getByLabelText('Open terminal list')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('Open terminal list'));
   expect(view.getByLabelText('Studio host section')).toBeTruthy();
-  expect(view.queryByText('Workspace')).toBeNull();
+  expect(view.getByLabelText('Pin sidebar')).toBeTruthy();
+});
+
+test('docks the host drawer when sidebarPinned is true', () => {
+  const view = renderHarness(1024, true);
+
+  expect(view.getByLabelText('Studio host section')).toBeTruthy();
   expect(view.queryByLabelText('Open terminal list')).toBeNull();
+  expect(view.getByLabelText('Unpin sidebar')).toBeTruthy();
 });
 
 test('switches the same host drawer to an overlay below the desktop breakpoint', () => {
@@ -162,4 +197,5 @@ test('switches the same host drawer to an overlay below the desktop breakpoint',
   expect(view.queryByLabelText('Studio host section')).toBeNull();
   fireEvent.press(view.getByLabelText('Open terminal list'));
   expect(view.getByLabelText('Studio host section')).toBeTruthy();
+  expect(view.queryByLabelText('Pin sidebar')).toBeNull();
 });
