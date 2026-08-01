@@ -230,7 +230,7 @@ const createStyles = (c: AppColors) =>
     utilityBtn: {
       flexBasis: MIN_TOUCH_TARGET,
       flexShrink: 1,
-      minWidth: 36,
+      minWidth: 30,
       height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       alignItems: 'center',
@@ -254,7 +254,7 @@ const createStyles = (c: AppColors) =>
     utilityIconBtn: {
       flexBasis: MIN_TOUCH_TARGET,
       flexShrink: 1,
-      minWidth: 36,
+      minWidth: 30,
       height: MIN_TOUCH_TARGET,
       borderRadius: 8,
       backgroundColor: c.surfaceRaised,

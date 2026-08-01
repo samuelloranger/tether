@@ -105,6 +105,16 @@ export function HoldPopupKey({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityHint={`Hold and slide up for ${altLabel}`}
+      // A plain View + PanResponder never fires a touch, so VoiceOver/TalkBack
+      // need an explicit activation path for both values, not just the hint.
+      accessibilityActions={[
+        { name: 'activate', label: `Send ${label}` },
+        { name: 'sendAlt', label: `Send ${altLabel}` },
+      ]}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'sendAlt') onSelect(altLabel);
+        else onSelect(label);
+      }}
     >
       <Text style={textStyle} numberOfLines={1}>
         {label}
