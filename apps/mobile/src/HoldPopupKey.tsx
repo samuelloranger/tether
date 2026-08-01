@@ -1,7 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
-  Modal,
   PanResponder,
   type StyleProp,
   StyleSheet,
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { HOLD_POPUP_DELAY_MS, resolveHoldPopupSelection } from './holdPopupKeyModel';
+import { usePopupOverlay } from './PopupOverlay';
 
 const POPUP_SIZE = 44;
 const POPUP_GAP = 8;
@@ -37,6 +37,8 @@ export function HoldPopupKey({
 }) {
   const { theme } = useAppTheme();
   const c = theme.colors;
+  const id = useId();
+  const { setContent } = usePopupOverlay();
   const [pressed, setPressed] = useState(false);
   const [popup, setPopup] = useState<{ x: number; y: number; alt: boolean } | null>(null);
   const originRef = useRef({ x: 0, y: 0 });
@@ -98,6 +100,33 @@ export function HoldPopupKey({
     [clearTimer, finish],
   );
 
+  // Portal into the app-root overlay instead of a <Modal> — a Modal opens a
+  // second native window on iOS, which steals first-responder status from
+  // whatever TextInput currently holds the keyboard and dismisses it.
+  useEffect(() => {
+    if (!popup) {
+      setContent(id, null);
+      return;
+    }
+    setContent(
+      id,
+      <View
+        style={[
+          styles.bubble,
+          {
+            left: popup.x - POPUP_SIZE / 2,
+            top: popup.y - POPUP_SIZE - POPUP_GAP,
+            backgroundColor: popup.alt ? c.accent : c.surfaceRaised,
+            borderColor: c.border,
+          },
+        ]}
+      >
+        <Text style={[styles.text, { color: popup.alt ? c.accentText : c.text }]}>{altLabel}</Text>
+      </View>,
+    );
+  }, [popup, id, setContent, altLabel, c.accent, c.accentText, c.border, c.surfaceRaised, c.text]);
+  useEffect(() => () => setContent(id, null), [id, setContent]);
+
   return (
     <View
       {...panResponder.panHandlers}
@@ -119,27 +148,6 @@ export function HoldPopupKey({
       <Text style={textStyle} numberOfLines={1}>
         {label}
       </Text>
-      {popup && (
-        <Modal transparent visible animationType="none" statusBarTranslucent>
-          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-            <View
-              style={[
-                styles.bubble,
-                {
-                  left: popup.x - POPUP_SIZE / 2,
-                  top: popup.y - POPUP_SIZE - POPUP_GAP,
-                  backgroundColor: popup.alt ? c.accent : c.surfaceRaised,
-                  borderColor: c.border,
-                },
-              ]}
-            >
-              <Text style={[styles.text, { color: popup.alt ? c.accentText : c.text }]}>
-                {altLabel}
-              </Text>
-            </View>
-          </View>
-        </Modal>
-      )}
     </View>
   );
 }

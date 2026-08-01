@@ -166,7 +166,9 @@ const createStyles = (c: AppColors) =>
     arrowCluster: {
       width: D_PAD_BUTTON_SIZE,
       height: D_PAD_BUTTON_SIZE,
-      borderRadius: 8,
+      // Square like every other key in the utility bar — a rounded puck in a
+      // row of square keys read as a different kind of control.
+      borderRadius: 0,
       backgroundColor: c.surfaceRaised,
       alignItems: 'center',
       justifyContent: 'center',

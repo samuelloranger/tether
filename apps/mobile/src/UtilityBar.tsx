@@ -13,6 +13,12 @@ import { UTILITY_BAR_PAGES, type UtilityBarKey } from './utilityBarModel';
 
 export { UTILITY_BAR_PAGES } from './utilityBarModel';
 
+// Gutter around the key row, and the breathing room above/below it. The row is
+// MIN_TOUCH_TARGET tall on purpose — the padding grows the bar rather than
+// shrinking the keys under the 44pt minimum touch target.
+const BAR_GUTTER = 8;
+const BAR_PAD_V = 2;
+
 // Mobile terminal-shortcuts utility bar — desktop uses the real keyboard.
 export function UtilityBar({
   ctrlArmed,
@@ -118,7 +124,7 @@ export function UtilityBar({
       <HoldPopupKey
         key="slash"
         label="/"
-        altLabel="\\"
+        altLabel={'\\'}
         onSelect={sendKey}
         style={styles.utilityBtn}
         textStyle={styles.utilityBtnText}
@@ -187,9 +193,12 @@ export function UtilityBar({
       <ScrollView
         scrollEnabled={false}
         keyboardShouldPersistTaps="always"
+        // Insets are added to the gutter, not assigned over it — a bare
+        // paddingLeft/Right here overrides utilityPage's own and flushes the
+        // first and last key against the screen edge.
         contentContainerStyle={[
           styles.utilityPage,
-          { paddingLeft: insets.left, paddingRight: insets.right },
+          { paddingLeft: BAR_GUTTER + insets.left, paddingRight: BAR_GUTTER + insets.right },
         ]}
         style={styles.utilityPageOuter}
       >
@@ -212,13 +221,13 @@ const createStyles = (c: AppColors) =>
     utilityPageOuter: {
       // Fixed, not minHeight: the bar must never change height between pages,
       // or switching pages shifts the terminal underneath it.
-      height: MIN_TOUCH_TARGET,
+      height: MIN_TOUCH_TARGET + BAR_PAD_V * 2,
       flexGrow: 0,
     },
     utilityPage: {
-      height: MIN_TOUCH_TARGET,
+      height: MIN_TOUCH_TARGET + BAR_PAD_V * 2,
       width: '100%',
-      paddingHorizontal: 8,
+      paddingVertical: BAR_PAD_V,
       alignItems: 'center',
       // Spread across the full width instead of bunching in the middle —
       // center only kicks in once a page's buttons stop filling the row.
@@ -234,7 +243,7 @@ const createStyles = (c: AppColors) =>
       height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 8,
+      borderRadius: 0,
       // Filled, not transparent-on-transparent: the hitbox needs to read as a
       // key, not just a label floating on the bar background.
       backgroundColor: c.surfaceRaised,
@@ -256,19 +265,19 @@ const createStyles = (c: AppColors) =>
       flexShrink: 1,
       minWidth: 30,
       height: MIN_TOUCH_TARGET,
-      borderRadius: 8,
+      borderRadius: 0,
       backgroundColor: c.surfaceRaised,
       justifyContent: 'center',
       alignItems: 'center',
     },
     // Flat, no fill: the pager is chrome, not another key to hit by accident.
+    // The separator border it used to carry is gone with the bordered-key
+    // design — the gap between filled keys is the separator now.
     pagerBtn: {
       width: 30,
       height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       alignItems: 'center',
       borderRadius: 0,
-      borderRightWidth: StyleSheet.hairlineWidth,
-      borderRightColor: c.border,
     },
   });

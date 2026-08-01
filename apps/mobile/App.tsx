@@ -6,6 +6,7 @@ import { AppearanceScreen } from './src/AppearanceScreen';
 import { AppThemeProvider, useAppTheme } from './src/AppThemeProvider';
 import { ConfigScreen } from './src/ConfigScreen';
 import { LaunchOverlay } from './src/LaunchOverlay';
+import { PopupOverlayProvider } from './src/PopupOverlay';
 import { ServerSettings } from './src/ServerSettings';
 import { createStyles } from './src/styles';
 import { TerminalScreen } from './src/TerminalScreen';
@@ -21,8 +22,10 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppThemeProvider>
-        <AppInner onReady={() => setReady(true)} />
-        <LaunchOverlay ready={ready} />
+        <PopupOverlayProvider>
+          <AppInner onReady={() => setReady(true)} />
+          <LaunchOverlay ready={ready} />
+        </PopupOverlayProvider>
       </AppThemeProvider>
     </SafeAreaProvider>
   );
