@@ -37,8 +37,11 @@ export function PopupOverlayProvider({ children }: { children: ReactNode }) {
   );
 }
 
+const NO_OVERLAY = { setContent: () => {} };
+
+// Degrades instead of throwing: a key is a leaf that has to keep working
+// wherever it is mounted (including tests). Without a provider the popup bubble
+// simply isn't drawn — the gesture and the value it sends are unaffected.
 export function usePopupOverlay() {
-  const ctx = useContext(PopupOverlayContext);
-  if (!ctx) throw new Error('usePopupOverlay must be used within a PopupOverlayProvider');
-  return ctx;
+  return useContext(PopupOverlayContext) ?? NO_OVERLAY;
 }
