@@ -1,11 +1,13 @@
 import Feather from '@expo/vector-icons/Feather';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as Haptics from 'expo-haptics';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Keyboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { ArrowCluster } from './Dpad';
+import { HoldPopupKey } from './HoldPopupKey';
 import { MIN_TOUCH_TARGET } from './interaction';
 import { UTILITY_BAR_PAGES, type UtilityBarKey } from './utilityBarModel';
 
@@ -39,6 +41,18 @@ export function UtilityBar({
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const styles = createStyles(theme.colors);
+  // KeyboardAvoidingView's "padding" behavior already lifts this bar clear of
+  // the home indicator once the keyboard is up; stacking insets.bottom on top
+  // of that opened a dead gap between the buttons and the keyboard.
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const lastPage = UTILITY_BAR_PAGES.length - 1;
   const clamped = Math.min(Math.max(page, 0), lastPage);
 
@@ -100,7 +114,16 @@ export function UtilityBar({
         sendKey('\x1b[Z');
       }),
     esc: () => textBtn('Esc', key('\x1b')),
-    slash: () => textBtn('/', key('/')),
+    slash: () => (
+      <HoldPopupKey
+        key="slash"
+        label="/"
+        altLabel="\\"
+        onSelect={sendKey}
+        style={styles.utilityBtn}
+        textStyle={styles.utilityBtnText}
+      />
+    ),
     del: () => textBtn('Del', key('\x1b[3~')),
     home: () => textBtn('Home', () => sendKey(cursorSeq('H'))),
     end: () => textBtn('End', () => sendKey(cursorSeq('F'))),
@@ -156,7 +179,7 @@ export function UtilityBar({
   );
 
   return (
-    <View style={[styles.utilityBar, { paddingBottom: insets.bottom }]}>
+    <View style={[styles.utilityBar, { paddingBottom: keyboardVisible ? 0 : insets.bottom }]}>
       {/* Only the current page is mounted and the ScrollView cannot be dragged:
           it is here purely for keyboardShouldPersistTaps, without which a tap on
           a bar key while the soft keyboard is up is eaten by the dismiss
@@ -195,12 +218,13 @@ const createStyles = (c: AppColors) =>
     utilityPage: {
       height: MIN_TOUCH_TARGET,
       width: '100%',
-      paddingHorizontal: 0,
+      paddingHorizontal: 8,
       alignItems: 'center',
-      justifyContent: 'center',
+      // Spread across the full width instead of bunching in the middle —
+      // center only kicks in once a page's buttons stop filling the row.
+      justifyContent: 'space-between',
       flexDirection: 'row',
-      gap: 0,
-      // Fill the bar width so `center` is the screen mid, not the content box.
+      gap: 4,
       flexGrow: 1,
     },
     utilityBtn: {
@@ -210,10 +234,10 @@ const createStyles = (c: AppColors) =>
       height: MIN_TOUCH_TARGET,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 0,
-      backgroundColor: 'transparent',
-      borderRightWidth: StyleSheet.hairlineWidth,
-      borderRightColor: c.border,
+      borderRadius: 8,
+      // Filled, not transparent-on-transparent: the hitbox needs to read as a
+      // key, not just a label floating on the bar background.
+      backgroundColor: c.surfaceRaised,
     },
     utilityBtnText: {
       fontSize: 11,
@@ -232,10 +256,8 @@ const createStyles = (c: AppColors) =>
       flexShrink: 1,
       minWidth: 36,
       height: MIN_TOUCH_TARGET,
-      borderRadius: 0,
-      backgroundColor: 'transparent',
-      borderRightWidth: StyleSheet.hairlineWidth,
-      borderRightColor: c.border,
+      borderRadius: 8,
+      backgroundColor: c.surfaceRaised,
       justifyContent: 'center',
       alignItems: 'center',
     },
