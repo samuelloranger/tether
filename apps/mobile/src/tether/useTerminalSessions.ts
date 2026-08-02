@@ -31,6 +31,7 @@ import {
   focusFrame,
   maybeNotify,
   parseSessionKey,
+  retryAfterClose,
   scheduleReconnect,
   sessionKey,
   sessionSwitchAction,
@@ -147,6 +148,7 @@ export function useTerminalSessions({
         retry: 0,
         ping: null,
         lastSeen: 0,
+        openedAt: 0,
       };
       connections.set(key, state);
     }
@@ -387,10 +389,15 @@ export function useTerminalSessions({
     for (const key of Array.from(connections.keys())) disconnect(key);
   };
   const connect = (key: string) => {
+    // disconnect() drops the state object, so the escalating retry count has to
+    // be carried across explicitly — otherwise every reconnect starts from 0
+    // and backoff never engages.
+    const carriedRetry = connections.get(key)?.retry ?? 0;
     disconnect(key);
     const { sessionId } = parseSessionKey(key);
     const entry = entryForKey(key);
     const state = connState(key);
+    state.retry = carriedRetry;
     state.client = clientForKey(key);
     if (key === activeKeyRef.current) setConnectionStatus('connecting');
     const generation = ++state.gen;
@@ -414,7 +421,10 @@ export function useTerminalSessions({
           onOpen: () => {
             if (state.gen !== generation) return;
             state.open = true;
-            state.retry = 0;
+            // Opening is not proof of health — a socket killed mid-replay opens
+            // too. retryAfterClose() clears the counter only once the connection
+            // has stayed up, so a flapping socket keeps backing off.
+            state.openedAt = Date.now();
             if (key === activeKeyRef.current) {
               setHasConnected(true);
               setConnectionStatus('connected');
@@ -452,6 +462,7 @@ export function useTerminalSessions({
               return;
             }
             setConnectionStatus((current) => statusAfterClose(activeKeyRef.current, key, current));
+            state.retry = retryAfterClose(state, Date.now());
             if (cache.has(key))
               state.reconnectTimeout = scheduleReconnect({
                 id: key,

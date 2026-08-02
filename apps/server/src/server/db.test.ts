@@ -69,6 +69,29 @@ function ok(cond: boolean, msg: string) {
   ok(getSession('term-wm')!.pruned_before === sess!.pruned_before, 'watermark stable when no-op');
 }
 
+// pruneLogs enforces a byte cap even when the row cap is not reached
+{
+  upsertSession('term-bytes', 'bash', 'running');
+  for (let i = 0; i < 10; i++) addTerminalLog('term-bytes', 'x'.repeat(1000));
+  pruneLogs('term-bytes', 1000, 3500);
+  const logs = getLogs('term-bytes', 0);
+  const bytes = logs.reduce((sum, row) => sum + row.chunk.length, 0);
+  ok(logs.length === 3, `byte cap keeps 3 rows, got ${logs.length}`);
+  ok(bytes <= 3500, `retained bytes ${bytes} within cap`);
+  ok(getSession('term-bytes')!.pruned_before > 0, 'byte prune records the watermark');
+}
+
+// pruneLogs never drops the newest row, even if it alone exceeds the byte cap
+{
+  upsertSession('term-huge', 'bash', 'running');
+  addTerminalLog('term-huge', 'old');
+  addTerminalLog('term-huge', 'y'.repeat(5000));
+  pruneLogs('term-huge', 1000, 100);
+  const logs = getLogs('term-huge', 0);
+  ok(logs.length === 1, `oversized newest row retained alone, got ${logs.length}`);
+  ok(logs[0].chunk.length === 5000, 'the retained row is the newest one');
+}
+
 // resetRunningSessions marks every running session stopped
 {
   upsertSession('term-orphan', 'bash', 'running');

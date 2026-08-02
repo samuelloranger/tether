@@ -8,6 +8,7 @@ import {
   focusFrame,
   maybeNotify,
   parseSessionKey,
+  retryAfterClose,
   runIfCurrentGeneration,
   scheduleReconnect,
   sessionKey,
@@ -90,6 +91,35 @@ describe('backoffDelay', () => {
     expect(backoffDelay(5, () => 0)).toBe(15000);
     expect(backoffDelay(5, () => 0.999999)).toBe(29999);
     expect(backoffDelay(99, () => 0.999999)).toBe(29999);
+  });
+});
+
+describe('retryAfterClose', () => {
+  test('keeps escalating when the socket died shortly after opening', () => {
+    const now = 100_000;
+    expect(retryAfterClose({ retry: 4, openedAt: now - 200 }, now)).toBe(4);
+  });
+
+  test('resets once the connection stayed up past the healthy threshold', () => {
+    const now = 100_000;
+    expect(retryAfterClose({ retry: 4, openedAt: now - 10_000 }, now)).toBe(0);
+    expect(retryAfterClose({ retry: 4, openedAt: now - 60_000 }, now)).toBe(0);
+  });
+
+  test('a socket that never opened keeps its retry count', () => {
+    expect(retryAfterClose({ retry: 3, openedAt: 0 }, 100_000)).toBe(3);
+  });
+
+  test('a flapping socket reaches the backoff cap instead of hot-looping', () => {
+    let state = { retry: 0, openedAt: 0 };
+    const delays: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      // Each attempt opens, then dies 200ms later mid-replay.
+      state = { retry: retryAfterClose({ ...state, openedAt: 1000 }, 1200), openedAt: 1000 };
+      delays.push(backoffDelay(state.retry, () => 0));
+      state.retry++;
+    }
+    expect(delays).toEqual([500, 1000, 2000, 4000, 8000, 15000, 15000, 15000]);
   });
 });
 
