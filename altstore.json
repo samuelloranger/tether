@@ -17,6 +17,14 @@
       "category": "developer",
       "versions": [
         {
+          "version": "2.7.8",
+          "date": "2026-08-02",
+          "localizedDescription": "## What's Changed\n* fix(ws): bound replay by bytes and repair reconnect backoff by @samuelloranger in https://github.com/samuelloranger/tether/pull/83\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.7.7...v2.7.8",
+          "downloadURL": "https://github.com/samuelloranger/tether/releases/download/v2.7.8/tether.ipa",
+          "size": 9440627,
+          "minOSVersion": "15.1"
+        },
+        {
           "version": "2.7.7",
           "date": "2026-08-01",
           "localizedDescription": "## What's Changed\n* fix(mobile): utility bar spacing/shape pass, keyboard-safe hold popup by @samuelloranger in https://github.com/samuelloranger/tether/pull/82\n\n\n**Full Changelog**: https://github.com/samuelloranger/tether/compare/v2.7.6...v2.7.7",
