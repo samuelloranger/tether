@@ -1,3 +1,6 @@
+// Client-side model for the server's RepoStatus payload
+// (see apps/server/src/server/gitStatus.ts). Pure helpers stay mirrored across
+// the mobile/server boundary intentionally — no shared package yet.
 export interface RepoStatus {
   branch: string;
   shortSha: string;

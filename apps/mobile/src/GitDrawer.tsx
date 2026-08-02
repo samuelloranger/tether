@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GestureResponderEvent, LayoutChangeEvent, View as RNView } from 'react-native';
 import {
   ScrollView,
@@ -13,27 +13,24 @@ import {
 import { useAppTheme } from './AppThemeProvider';
 import { CommitBox } from './CommitBox';
 import { DiffFileBody } from './DiffFileBody';
-import { buildFileTree, type DiffSummary, groupSummary, isImagePath } from './diffModel';
+import { buildFileTree, groupSummary, isImagePath } from './diffModel';
 import { FileTree } from './FileTree';
+import { GitSectionAction, GitSectionActions, GitSectionHeader } from './GitSectionHeader';
 import { GitTabBar } from './GitTabBar';
 import {
   clampGitDrawerLeftWidth,
   defaultGitDrawerLeftWidth,
   drawerEscapeAction,
 } from './gitDrawerLayout';
+import type { GitPanelSharedProps } from './gitPanelProps';
 import { toggleSetMember } from './gitReviewModel';
-import {
-  canPushHead,
-  canRewriteHead,
-  formatRepoStatusLabel,
-  type RepoStatus,
-} from './gitStatusModel';
+import { canPushHead, canRewriteHead, formatRepoStatusLabel } from './gitStatusModel';
 import { HistoryList } from './HistoryList';
 import { minTouchTarget } from './interaction';
-import type { GitLogEntry } from './useTetherApp';
+import { PanelHeader } from './PanelHeader';
+import { useGitCommitForm } from './useGitCommitForm';
 
 const TOUCH_TARGET = minTouchTarget();
-const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 const SIDE_BY_SIDE_MIN_WIDTH = 900;
 
 export function GitDrawer({
@@ -67,8 +64,7 @@ export function GitDrawer({
   onSelectCommit,
   sideBySide,
   onToggleSideBySide,
-}: {
-  summary: DiffSummary;
+}: GitPanelSharedProps & {
   selectedPath: string | null;
   diffMode: 'staged' | 'unstaged' | null;
   diffText: string | null;
@@ -77,25 +73,7 @@ export function GitDrawer({
   diffImage: { old: string | null; new: string | null } | null;
   onSelectFile: (path: string, mode?: 'staged' | 'unstaged') => void;
   onDeselectFile: () => void;
-  onBack: () => void;
-  onStageFile: (path: string) => void;
-  onUnstageFile: (path: string) => void;
-  onDiscardFile: (path: string) => void;
-  onToggleHunk: (path: string, hunkIndex: number, staged: boolean) => void;
-  onCommit: (message: string) => Promise<boolean>;
-  onAmend: (message: string) => Promise<boolean>;
-  onUndoCommit: () => void;
-  onPush: () => void;
-  onStageAll: () => void;
-  onUnstageAll: () => void;
-  onDiscardAll: () => void;
-  onOpenLine: (path: string, line: number) => void;
-  repoStatus: RepoStatus;
   leftWidthStorageKey: string;
-  historyEntries: GitLogEntry[] | null;
-  historyCommit: { entry: GitLogEntry; diff: string | null; truncated: boolean } | null;
-  onLoadHistory: () => void;
-  onSelectCommit: (entry: GitLogEntry | null) => void;
   sideBySide: boolean;
   onToggleSideBySide: () => void;
 }) {
@@ -104,8 +82,8 @@ export function GitDrawer({
   const drawerRef = useRef<RNView | null>(null);
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'changes' | 'history'>('changes');
-  const [commitMessage, setCommitMessage] = useState('');
-  const [committing, setCommitting] = useState(false);
+  const { commitMessage, setCommitMessage, committing, submitCommit, submitAmend } =
+    useGitCommitForm(onCommit, onAmend);
   const [bodyWidth, setBodyWidth] = useState(0);
   const [leftWidth, setLeftWidth] = useState<number | null>(null);
   const leftWidthRef = useRef<number | null>(null);
@@ -221,31 +199,6 @@ export function GitDrawer({
     if (typeof clientX === 'number') startResize(clientX);
   };
 
-  const submitCommit = async () => {
-    if (!commitMessage.trim() || committing) return;
-    setCommitting(true);
-    const ok = await onCommit(commitMessage.trim());
-    setCommitting(false);
-    if (ok) setCommitMessage('');
-  };
-
-  const submitAmend = async () => {
-    if (!commitMessage.trim() || committing) return;
-    setCommitting(true);
-    const ok = await onAmend(commitMessage.trim());
-    setCommitting(false);
-    if (ok) setCommitMessage('');
-  };
-
-  const sectionHeader = (label: string, count: number, actions?: ReactNode) => (
-    <View style={styles.sectionHeaderRow}>
-      <Text style={[styles.sectionHeader, { color: theme.colors.textMuted }]}>
-        {label} ({count})
-      </Text>
-      {actions}
-    </View>
-  );
-
   const rightPane = () => {
     if (viewingCommit) {
       return (
@@ -297,48 +250,29 @@ export function GitDrawer({
         },
       ]}
     >
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Close git drawer"
-          onPress={onBack}
-          style={styles.back}
-        >
-          <Text style={[styles.backText, { color: theme.colors.accent }]}>Close</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTitles}>
-          <Text
-            numberOfLines={1}
-            maxFontSizeMultiplier={1.35}
-            style={[styles.path, { color: theme.colors.text }]}
-          >
-            {headerLabel}
-          </Text>
-          {statusLabel && !viewingCommit ? (
-            <Text
-              numberOfLines={1}
-              maxFontSizeMultiplier={1.35}
-              style={[styles.status, { color: theme.colors.textMuted }]}
+      <PanelHeader
+        onBack={onBack}
+        backAccessibilityLabel="Close git drawer"
+        backText="Close"
+        title={headerLabel}
+        subtitle={statusLabel && !viewingCommit ? statusLabel : null}
+        right={
+          (selectedPath || viewingCommit) && !isImage && wideEnough ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={sideBySide ? 'Unified view' : 'Side-by-side view'}
+              onPress={onToggleSideBySide}
+              style={styles.iconButton}
             >
-              {statusLabel}
-            </Text>
-          ) : null}
-        </View>
-        {(selectedPath || viewingCommit) && !isImage && wideEnough ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={sideBySide ? 'Unified view' : 'Side-by-side view'}
-            onPress={onToggleSideBySide}
-            style={styles.back}
-          >
-            <Feather
-              name={sideBySide ? 'square' : 'columns'}
-              size={16}
-              color={theme.colors.accent}
-            />
-          </TouchableOpacity>
-        ) : null}
-      </View>
+              <Feather
+                name={sideBySide ? 'square' : 'columns'}
+                size={16}
+                color={theme.colors.accent}
+              />
+            </TouchableOpacity>
+          ) : null
+        }
+      />
 
       <GitTabBar
         tab={tab}
@@ -370,22 +304,11 @@ export function GitDrawer({
               <ScrollView contentContainerStyle={styles.listContent}>
                 {groups.staged.length > 0 ? (
                   <>
-                    {sectionHeader(
-                      'Staged',
-                      groups.staged.length,
-                      <TouchableOpacity
-                        accessibilityRole="button"
-                        accessibilityLabel="Unstage all"
-                        onPress={onUnstageAll}
-                        style={styles.sectionAction}
-                      >
-                        <Text
-                          style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}
-                        >
-                          Unstage all
-                        </Text>
-                      </TouchableOpacity>,
-                    )}
+                    <GitSectionHeader
+                      label="Staged"
+                      count={groups.staged.length}
+                      actions={<GitSectionAction label="Unstage all" onPress={onUnstageAll} />}
+                    />
                     <FileTree
                       nodes={buildFileTree(groups.staged)}
                       collapseScope="staged"
@@ -398,36 +321,16 @@ export function GitDrawer({
                 ) : null}
                 {groups.unstaged.length > 0 ? (
                   <>
-                    {sectionHeader(
-                      'Changes',
-                      groups.unstaged.length,
-                      <View style={styles.sectionActions}>
-                        <TouchableOpacity
-                          accessibilityRole="button"
-                          accessibilityLabel="Stage all"
-                          onPress={onStageAll}
-                          style={styles.sectionAction}
-                        >
-                          <Text
-                            style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}
-                          >
-                            Stage all
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          accessibilityRole="button"
-                          accessibilityLabel="Discard all"
-                          onPress={onDiscardAll}
-                          style={styles.sectionAction}
-                        >
-                          <Text
-                            style={{ color: theme.colors.danger, fontSize: 12, fontWeight: '600' }}
-                          >
-                            Discard all
-                          </Text>
-                        </TouchableOpacity>
-                      </View>,
-                    )}
+                    <GitSectionHeader
+                      label="Changes"
+                      count={groups.unstaged.length}
+                      actions={
+                        <GitSectionActions>
+                          <GitSectionAction label="Stage all" onPress={onStageAll} />
+                          <GitSectionAction label="Discard all" onPress={onDiscardAll} danger />
+                        </GitSectionActions>
+                      }
+                    />
                     <FileTree
                       nodes={buildFileTree(groups.unstaged)}
                       collapseScope="unstaged"
@@ -515,41 +418,11 @@ const styles = StyleSheet.create({
     zIndex: 50,
     borderLeftWidth: StyleSheet.hairlineWidth,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    minHeight: 48,
-  },
-  back: {
+  iconButton: {
     minHeight: TOUCH_TARGET,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  backText: { ...TEXT_METRICS },
-  path: { flex: 1, fontFamily: 'monospace', ...TEXT_METRICS },
-  headerTitles: { flex: 1, marginRight: 16, minWidth: 0 },
-  status: { fontFamily: 'monospace', fontSize: 12, marginTop: 2 },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  sectionActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sectionAction: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   body: { flex: 1, flexDirection: 'row' },
   left: {

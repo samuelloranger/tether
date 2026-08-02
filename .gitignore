@@ -56,6 +56,9 @@ apps/mobile/dist/
 apps/mobile/src-tauri/target/
 apps/mobile/src-tauri/gen/
 
+# jscpd duplication reports (local audit output)
+.jscpd-report/
+
 # Superpowers skill session state
 .superpowers/
 
