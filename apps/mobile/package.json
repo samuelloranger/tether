@@ -1,6 +1,6 @@
 {
   "name": "tether-mobile",
-  "version": "2.7.8",
+  "version": "2.7.9",
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/fira-code": "^0.4.1",
