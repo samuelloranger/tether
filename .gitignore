@@ -44,6 +44,10 @@ apps/server/config/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 
+# Generated AltStore source (built from altstore.base.json + GitHub Releases;
+# published to https://samlo.cloud/tether/altstore.json — never commit)
+/altstore.json
+
 # generated: canonical install.sh copied in at docs build
 docs/public/install.sh
 apps/mobile/dist/

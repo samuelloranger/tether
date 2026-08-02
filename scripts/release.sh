@@ -52,11 +52,38 @@ if [ "$FORCE" = false ] && [ "$DRY_RUN" = false ]; then
   fi
 fi
 
+BRANCH=$(git branch --show-current)
+if [ -z "$BRANCH" ]; then
+  echo "Error: detached HEAD — check out a branch before releasing." >&2
+  exit 1
+fi
+
+# Sync with origin BEFORE the version-bump commit. Anything that landed on the
+# remote since our last pull (historically the altstore bot committing to main;
+# now any other push) would make a bare `git push` get rejected as diverged.
+# Rebasing after the bump is riskier (conflict in the version files), so do it
+# while the tree is still clean.
+if [ "$DRY_RUN" = true ]; then
+  echo "[dry-run] Would run: git fetch origin $BRANCH && git rebase origin/$BRANCH"
+else
+  echo "Syncing with origin/$BRANCH before release..."
+  git fetch origin "$BRANCH"
+  if ! git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+    echo "Error: origin/$BRANCH not found after fetch." >&2
+    exit 1
+  fi
+  if ! git rebase "origin/$BRANCH"; then
+    echo "Error: rebase onto origin/$BRANCH failed. Resolve and re-run." >&2
+    exit 1
+  fi
+fi
+
 # Require CI to be green on the exact commit we are about to release. release.sh
 # used to validate less than CI did (lint+format here vs. lint + server tests +
 # mobile tests + build:web there) — and build:web is what broke every desktop
 # bundle in v2.0.0. Gating on CI keeps one definition of "good" instead of two
-# that drift.
+# that drift. Runs after the pre-flight rebase so we gate on the commit we will
+# actually tag.
 if [ "$DRY_RUN" = false ]; then
   HEAD_SHA=$(git rev-parse HEAD)
   echo "Checking CI status for $HEAD_SHA..."
@@ -195,7 +222,6 @@ else
 fi
 
 # Git Ops
-BRANCH=$(git branch --show-current)
 echo "Preparing Git commit on branch '$BRANCH'..."
 
 if [ "$DRY_RUN" = true ]; then
