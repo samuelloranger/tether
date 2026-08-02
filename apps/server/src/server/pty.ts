@@ -21,6 +21,7 @@ import { GitWatch } from './gitWatch';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import { buildNotification, type NotificationEvent, send } from './notifier';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
+import { clampDims, type Dims, planPtyResize } from './ptyResize';
 import { COMPILED, selfArgv } from './runtime';
 import { type Activity, clearActivity, recordInput, recordOutputEvent } from './sessionActivity';
 import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './sessionTitle';
@@ -165,6 +166,10 @@ interface SessionInstance {
   // is fit to the SMALLEST attached client (tmux model): content fits everyone and
   // a larger client just gets blank margin. Recomputed on attach/resize/detach.
   clientDims: Map<FocusSubscriber, { cols: number; rows: number }>;
+  // The size the holder was last told to use. Null until we have set one (a
+  // reattached holder's size is unknown, so the first recompute always sends).
+  // Kept so a recompute that lands on the current size can send nothing at all.
+  ptyDims: Dims | null;
 }
 
 const instances = new Map<string, SessionInstance>();
@@ -175,16 +180,7 @@ const instances = new Map<string, SessionInstance>();
 // and only a second kill (no live instance left, so no 'x' frame) stuck.
 const killed = new Set<string>();
 
-// PTY dims from the network are untrusted: NaN/0/huge values wedge or crash the
-// terminal. Clamp to a sane envelope.
-export function clampDims(cols: unknown, rows: unknown): { cols: number; rows: number } {
-  const c = Math.floor(Number(cols));
-  const r = Math.floor(Number(rows));
-  return {
-    cols: Number.isFinite(c) ? Math.min(500, Math.max(2, c)) : 80,
-    rows: Number.isFinite(r) ? Math.min(200, Math.max(2, r)) : 24,
-  };
-}
+export { clampDims } from './ptyResize';
 
 function broadcast(id: string, data: SessionFrame) {
   const inst = instances.get(id);
@@ -322,6 +318,7 @@ function attach(id: string, sockPath: string = sockPathFor(id)): Promise<Session
             repoStatus: EMPTY_REPO_STATUS,
             gitWatch,
             clientDims: new Map(),
+            ptyDims: null,
           };
           instances.set(id, instance);
           resolve(instance);
@@ -493,7 +490,12 @@ async function doStartSession(
   for (let i = 0; i < 25; i++) {
     await Bun.sleep(80);
     try {
-      return await attach(id);
+      const instance = await attach(id);
+      // We spawned this holder ourselves, so its PTY size is known: record it so
+      // the first client attaching at the same dims does not raise a pointless
+      // SIGWINCH. (The reattach path above cannot know, and leaves it null.)
+      instance.ptyDims = dims;
+      return instance;
     } catch (err) {
       lastErr = err;
     }
@@ -558,14 +560,10 @@ export function writeToSession(id: string, text: string) {
 // when no clients are attached (keeps the last size for reconnect replay).
 function recomputeSize(id: string) {
   const inst = instances.get(id);
-  if (!inst || inst.clientDims.size === 0) return;
-  let cols = Number.POSITIVE_INFINITY;
-  let rows = Number.POSITIVE_INFINITY;
-  for (const d of inst.clientDims.values()) {
-    cols = Math.min(cols, d.cols);
-    rows = Math.min(rows, d.rows);
-  }
-  const dims = clampDims(cols, rows);
+  if (!inst) return;
+  const dims = planPtyResize(inst.ptyDims, inst.clientDims.values());
+  if (!dims) return;
+  inst.ptyDims = dims;
   sendFrame(id, { t: 'r', c: dims.cols, r: dims.rows });
 }
 
