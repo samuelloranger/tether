@@ -93,7 +93,6 @@ export function useTerminalSessions({
   const terminalViewRef = useRef<TerminalViewHandle | null>(null);
   const terminalSelectionRef = useRef('');
   const dimsRef = useRef({ numCols: 80, numRows: 24 });
-  const rendererResizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const windowFocusedRef = useRef(true);
   const appStateRef = useRef(AppState.currentState);
   const clientRef = useRef(client);
@@ -269,18 +268,16 @@ export function useTerminalSessions({
       }
     })();
   };
+  // The renderer already coalesces its re-fit (see terminalFitCoalescer), so by
+  // the time a resize reaches us the geometry has settled. Debouncing the PTY
+  // half again would only re-open the window this event exists to close: the
+  // local grid at the new size while the agent still patches the old one. Local
+  // emulator and PTY move together, in this tick.
   const onRendererResize = (cols: number, rows: number) => {
     if (dimsRef.current.numCols === cols && dimsRef.current.numRows === rows) return;
     dimsRef.current = { numCols: cols, numRows: rows };
     cache.get(activeKeyRef.current)?.term.resize(cols, rows);
-    if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
-    rendererResizeTimer.current = setTimeout(
-      () => {
-        wsSend({ type: 'resize', cols, rows });
-        rendererResizeTimer.current = null;
-      },
-      isDesktop ? 120 : 60,
-    );
+    wsSend({ type: 'resize', cols, rows });
   };
   const onRendererSelection = (text: string) => {
     terminalSelectionRef.current = text;
@@ -772,7 +769,6 @@ export function useTerminalSessions({
     () => () => {
       disconnectAll();
       outputBatcher.clear();
-      if (rendererResizeTimer.current) clearTimeout(rendererResizeTimer.current);
     },
     [],
   );

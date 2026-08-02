@@ -18,6 +18,7 @@ import {
 import { bindPageTerminal, type PageHostEmit } from './pageTerminalHost';
 import { isMacDesktop } from './platform';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
+import { FitCoalescer } from './terminalFitCoalescer';
 import { TERMINAL_RENDERER_CSS } from './terminalRenderer.generated';
 import { registerTetherLinks } from './terminalRendererLinks';
 import { type RendererCommand, RendererQueue, RendererRpc } from './terminalRendererProtocol';
@@ -231,7 +232,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         lastRows = terminal.rows;
         callbacks.current.onResize(lastCols, lastRows);
       };
-      const observer = new ResizeObserver(fitAndReport);
+      // Coalesced for the same reason as the native renderer: a window drag
+      // fires ResizeObserver continuously, and resizing the grid ahead of the
+      // PTY lets the agent's differential repaint patch rows that have moved.
+      const fitSoon = new FitCoalescer(fitAndReport);
+      const observer = new ResizeObserver(() => fitSoon.request());
       observer.observe(container.current);
 
       dispatch.current = (command) => {
@@ -251,7 +256,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             terminal.write(command.data, () => {
               page.restorePromptLines(command.promptLines ?? []);
               page.afterWrite();
-              fitAndReport();
+              fitSoon.flush();
               onEmit({ type: 'hydrated' });
             });
             break;
@@ -278,12 +283,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         }
       };
       queue.ready();
-      fitAndReport();
+      fitSoon.flush();
 
       return () => {
         rpc.clear('disposed');
         queue.notReady();
         observer.disconnect();
+        fitSoon.dispose();
         input.dispose();
         selection.dispose();
         links.dispose();

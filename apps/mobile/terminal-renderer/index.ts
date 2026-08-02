@@ -9,6 +9,7 @@ import {
   resolveKeyboardKey,
 } from '../src/desktopKeys';
 import { bindPageTerminal } from '../src/pageTerminalHost';
+import { FitCoalescer } from '../src/terminalFitCoalescer';
 import { registerTetherLinks } from '../src/terminalRendererLinks';
 import type { RendererCommand, RendererEvent } from '../src/terminalRendererProtocol';
 import { touchScrollLines } from '../src/terminalTouchScroll';
@@ -116,7 +117,12 @@ const fitAndReport = () => {
   post({ type: 'resize', cols: lastCols, rows: lastRows });
 };
 
-new ResizeObserver(fitAndReport).observe(document.getElementById('terminal')!);
+// The observer only asks; the coalescer decides when. Resizing the grid on every
+// tick of the keyboard's slide animation is what let the agent's differential
+// repaint patch rows that had already moved — see terminalFitCoalescer.
+const fitSoon = new FitCoalescer(fitAndReport);
+
+new ResizeObserver(() => fitSoon.request()).observe(document.getElementById('terminal')!);
 
 window.__tetherDispatch = (command) => {
   if (!command || command.v !== 1) return;
@@ -139,7 +145,9 @@ window.__tetherDispatch = (command) => {
       terminal.write(command.data, () => {
         page.restorePromptLines(command.promptLines ?? []);
         page.afterWrite();
-        fitAndReport();
+        // Hydrate already set an explicit size and there is no animation to wait
+        // out, so settle the geometry now rather than 120ms into the session.
+        fitSoon.flush();
         post({ type: 'hydrated' });
       });
       break;
@@ -167,5 +175,5 @@ window.__tetherDispatch = (command) => {
   }
 };
 
-fitAndReport();
+fitSoon.flush();
 post({ type: 'ready' });
