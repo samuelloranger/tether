@@ -1,48 +1,75 @@
 #!/usr/bin/env bash
-# Sync altstore.json with a published GitHub release.
+# Build altstore.json from altstore.base.json + published GitHub Releases.
 #
-#   scripts/altstore-release.sh              # latest release, changelog = release notes
-#   scripts/altstore-release.sh v1.2.0       # specific tag, changelog = release notes
-#   scripts/altstore-release.sh v1.2.0 "..."  # specific tag, changelog override
+#   scripts/altstore-release.sh                 # write ./altstore.json
+#   scripts/altstore-release.sh -o /path/out.json
 #
-# Run AFTER publishing a release with a tether-vX.Y.Z.ipa asset: fills in the real
-# IPA size/URL and prepends the version entry, then commit + push altstore.json.
+# Versions are generated from every non-draft, non-prerelease release that has
+# an .ipa asset — nothing is committed back to the tether repo. CI publishes the
+# result to https://samlo.cloud/tether/altstore.json after each release.
 set -euo pipefail
 
-REPO="samuelloranger/tether"
-TAG="${1:-}"
+REPO="${TETHER_REPO_SLUG:-samuelloranger/tether}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BASE="$ROOT/altstore.base.json"
+OUT="$ROOT/altstore.json"
 
-if [ -n "$TAG" ]; then
-  REL_JSON="$(gh api "repos/$REPO/releases/tags/$TAG")"
-else
-  REL_JSON="$(gh api "repos/$REPO/releases/latest")"
-  TAG="$(jq -r .tag_name <<<"$REL_JSON")"
-  echo "latest release: $TAG"
-fi
-VERSION="${TAG#v}"
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -o|--output)
+      OUT="$2"
+      shift 2
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      echo "Unexpected argument: $1 (tag args removed — versions come from the API)" >&2
+      exit 1
+      ;;
+  esac
+done
 
-NOTES="${2:-$(jq -r '.body // ""' <<<"$REL_JSON")}"
-[ -n "${NOTES// /}" ] || NOTES="See the release notes on GitHub."
-
-# Asset is named tether-vX.Y.Z.ipa; fall back to any .ipa on the release.
-ASSET_JSON="$(jq --arg name "tether-$TAG.ipa" '
-  (.assets[] | select(.name == $name)) // (.assets[] | select(.name | endswith(".ipa")))
-  | {size, url: .browser_download_url}' <<<"$REL_JSON")"
-[ -n "$ASSET_JSON" ] || {
-  echo "no .ipa asset on release $TAG" >&2
+[ -f "$BASE" ] || {
+  echo "missing base manifest: $BASE" >&2
   exit 1
 }
-SIZE="$(jq -r .size <<<"$ASSET_JSON")"
-URL="$(jq -r .url <<<"$ASSET_JSON")"
-DATE="$(jq -r '.published_at[:10]' <<<"$REL_JSON")"
 
-jq --arg v "$VERSION" --arg d "$DATE" --arg url "$URL" \
-  --argjson size "$SIZE" --arg notes "$NOTES" '
-  .apps[0].versions |= ([{
-    version: $v, date: $d, localizedDescription: $notes,
-    downloadURL: $url, size: $size, minOSVersion: "15.1"
-  }] + map(select(.version != $v)))
-' altstore.json >altstore.json.tmp && mv altstore.json.tmp altstore.json
+# One merged array across pages. Public repo; GH_TOKEN optional but preferred in CI.
+# Write releases to a temp file so we never blow ARG_MAX with --argjson.
+RELEASES_FILE="$(mktemp)"
+trap 'rm -f "$RELEASES_FILE"' EXIT
+gh api "repos/$REPO/releases" --paginate >"$RELEASES_FILE"
 
-echo "altstore.json updated: $VERSION ($SIZE bytes) -> $URL"
-echo "now: git add altstore.json && git commit -m 'altstore: $TAG' && git push"
+mkdir -p "$(dirname "$OUT")"
+jq --slurpfile releases "$RELEASES_FILE" '
+  ($releases[0]
+    | map(select(.draft == false and .prerelease == false))
+    | map(. as $rel
+      | ($rel.assets | map(select(.name | endswith(".ipa")))) as $ipas
+      | select(($ipas | length) > 0)
+      | (
+          ($ipas | map(select(.name == "tether.ipa")) | .[0])
+          // ($ipas | map(select(.name == ("tether-" + $rel.tag_name + ".ipa"))) | .[0])
+          // $ipas[0]
+        ) as $asset
+      | {
+          version: ($rel.tag_name | ltrimstr("v")),
+          date: $rel.published_at[0:10],
+          localizedDescription: (
+            (($rel.body // "") | gsub("^\\s+|\\s+$"; "")) as $notes
+            | if $notes == "" then "See the release notes on GitHub." else $notes end
+          ),
+          downloadURL: $asset.browser_download_url,
+          size: $asset.size,
+          minOSVersion: "15.1"
+        }
+    )
+  ) as $versions
+  | .apps[0].versions = $versions
+' "$BASE" >"$OUT"
+
+COUNT="$(jq '.apps[0].versions | length' "$OUT")"
+LATEST="$(jq -r '.apps[0].versions[0].version // "none"' "$OUT")"
+echo "wrote $OUT ($COUNT versions, latest $LATEST)"

@@ -14,12 +14,11 @@ One command cuts a release: `scripts/release.sh --patch|--minor|--major`. It bum
 ## The Procedure
 
 ```bash
-git pull --rebase            # bot commits altstore.json to main after each release
 ./scripts/release.sh --patch # or --minor / --major
 gh run watch $(gh run list --workflow 'Release builds' --limit 1 --json databaseId -q '.[0].databaseId')
 ```
 
-Publication is automatic once `desktop`, `ios`, `android`, and `server` all pass. Do nothing else.
+`release.sh` fetches and rebases onto `origin/$BRANCH` before the bump commit, so a divergent remote does not reject the push. Publication is automatic once `desktop`, `ios`, `android`, and `server` all pass. Do nothing else.
 
 ## Quick Reference
 
@@ -58,7 +57,7 @@ Do not hand-upload the missing asset and publish manually. That reintroduces the
 
 | Symptom | Cause |
 |---|---|
-| Push rejected, "remote has diverged" | The `altstore` job commits `altstore.json` to `main` after every release. `git pull --rebase` before releasing. |
+| Push rejected, "remote has diverged" | Something landed on origin since your last pull. `release.sh` rebases onto `origin/$BRANCH` before the bump; if you still see this, fetch/rebase manually and re-run. (The old altstore-bot-to-main race is gone — the manifest now publishes to samlo.cloud.) |
 | Interactive prompt errors out | No TTY (agent shell, CI). Pass `--patch`/`--minor`/`--major` or an explicit version — the script refuses rather than hanging. |
 | Release aborts on formatting | `bun format` touched real source. Commit that separately; a release commit may only contain the 7 version files. |
 | iOS build fails on Xcode | Expo is pinned to 57.0.7 with an `expo-modules-jsi@57.0.3` patch. Never bump Expo as part of a release. |

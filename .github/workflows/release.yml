@@ -6,8 +6,10 @@ name: Release builds
 # `publish` take it out of draft. A failed build therefore can never become the
 # public `releases/latest` that install.sh and `tether update` resolve stable
 # asset names from (how v2.0.0 shipped with every desktop bundle broken).
-# altstore.json syncs after publish. Manual runs are build-only: they upload
-# workflow artifacts without touching a release.
+# altstore.json is rebuilt from the Releases API after publish and pushed to
+# samlo.cloud (not committed to main — that race made every follow-up release
+# push diverge). Manual runs are build-only: they upload workflow artifacts
+# without touching a release.
 #
 # Why a tag push and not a `release` event: GitHub does not run workflows for
 # draft releases at all — the `created`, `edited`, and `deleted` activity types
@@ -434,24 +436,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # Rebuild the AltStore source from the Releases API and publish it to
+  # https://samlo.cloud/tether/altstore.json. Do NOT commit it to main — a bot
+  # push to the default branch after every release was racing release.sh's bare
+  # `git push` and rejecting the next release as diverged.
   altstore:
     if: github.event_name == 'push'
     needs: publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: main # release event checks out the tag; the manifest lives on main
 
-      - name: Sync altstore.json from the release
-        run: scripts/altstore-release.sh "$TAG"
+      - name: Build altstore.json from releases
+        run: scripts/altstore-release.sh -o altstore.json
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Commit manifest
+      - name: Publish altstore.json to samlo.cloud
+        env:
+          TOKEN: ${{ secrets.SAMLO_CLOUD_DOCS_TOKEN }}
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add altstore.json
-          git diff --cached --quiet || git commit -m "altstore: $TAG"
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/samuelloranger/samlo-cloud.git" out
+          mkdir -p out/docs/tether
+          cp altstore.json out/docs/tether/altstore.json
+          cd out
+          git config user.name  "docs-bot"
+          git config user.email "docs-bot@samlo.cloud"
+          git add docs/tether/altstore.json
+          git diff --cached --quiet || git commit -m "docs(tether): altstore $TAG"
           git push

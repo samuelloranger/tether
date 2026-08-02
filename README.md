@@ -68,7 +68,7 @@ Install via [AltStore](https://altstore.io) (one-time setup: install AltServer o
 1. In AltStore: **Sources → + →** add this source:
 
    ```
-   https://raw.githubusercontent.com/samuelloranger/tether/main/altstore.json
+   https://samlo.cloud/tether/altstore.json
    ```
 
 2. Tether appears in **Browse** — install it from there. Updates show up in AltStore automatically when a new release is published.

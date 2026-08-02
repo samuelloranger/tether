@@ -32,7 +32,7 @@ Pick the app for your device — both connect to the same server the same way. E
 | **Android** | [Obtainium](https://github.com/ImranR98/Obtainium) (auto-updates) — or [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) |
 | **Desktop** (Linux / Windows / macOS) | see [Desktop app](/desktop) for the per-OS installer |
 
-- **iOS via AltStore** — set up AltServer on your Mac/PC, add the Tether source, and install the app. New releases show up in AltStore automatically.
+- **iOS via AltStore** — set up AltServer on your Mac/PC, add the Tether source (`https://samlo.cloud/tether/altstore.json`), and install the app. New releases show up in AltStore automatically.
 - **Desktop** — download the installer for your platform; see [Desktop app](/desktop) for the per-OS files and how it differs from mobile.
 
 ## 4. Connect
