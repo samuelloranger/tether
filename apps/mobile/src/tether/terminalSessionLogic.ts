@@ -83,6 +83,25 @@ export function backoffDelay(attempt: number, random = Math.random): number {
   return base / 2 + Math.floor(random() * (base / 2));
 }
 
+/**
+ * A connection only counts as healthy once it has *stayed* open. Resetting the
+ * retry counter in onOpen made backoff unreachable for a socket that opens and
+ * dies immediately (e.g. killed by an oversized replay), turning reconnect into
+ * a hot loop that hammered the server. Anything shorter than this threshold is
+ * treated as a failed attempt and keeps escalating the delay.
+ */
+export const HEALTHY_CONNECTION_MS = 10_000;
+
+/** Retry count to use for the next reconnect after a socket closed. */
+export function retryAfterClose(
+  state: Pick<TerminalConnectionState, 'retry' | 'openedAt'>,
+  now: number,
+  healthyMs = HEALTHY_CONNECTION_MS,
+): number {
+  const lived = state.openedAt > 0 ? now - state.openedAt : 0;
+  return state.openedAt > 0 && lived >= healthyMs ? 0 : state.retry;
+}
+
 export function runIfCurrentGeneration(
   state: Pick<TerminalConnectionState, 'gen'>,
   generation: number,

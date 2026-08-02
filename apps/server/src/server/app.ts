@@ -62,6 +62,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { planReplay } from './replayPlan';
 import { VERSION } from './runtime';
 import { getActivity } from './sessionActivity';
 import { autoTitle, getOscTitle } from './sessionTitle';
@@ -665,16 +666,26 @@ app.get(
             // slip in between the replay read and the subscribe below.
             await startSession(sessionId, undefined, cols, rows);
 
-            // 1b. If the client's sinceId predates pruned rows, the replay has a
-            // hole — tell the client to wipe its emulator before the replay.
+            // 1b. Bound the catch-up by bytes. A row-capped scrollback is not a
+            // size cap (one TUI repaint frame can be >100 KB), and an unbounded
+            // replay kills the client mid-stream — it reconnects with a barely
+            // advanced sinceId and the next replay is bigger still.
+            const plan = planReplay(getLogs(sessionId, sinceId));
+            const missedLogs = plan.logs;
+
+            // 1c. Either a prune or a trimmed replay leaves a hole in the
+            // client's history — tell it to wipe its emulator before the replay.
             const sess = getSession(sessionId);
-            if (sinceId > 0 && sess && sinceId < sess.pruned_before) {
+            const pruned = sinceId > 0 && sess !== null && sinceId < sess.pruned_before;
+            if (pruned || plan.reset) {
               ws.send(JSON.stringify({ type: 'reset' }));
             }
 
-            // 2. Catch up the client: stream any logs missed since the provided log ID
-            const missedLogs = getLogs(sessionId, sinceId);
-            console.log(`Streaming ${missedLogs.length} missed logs to client...`);
+            // 2. Catch up the client: stream the (possibly trimmed) missed logs.
+            console.log(
+              `Streaming ${missedLogs.length} missed logs (${plan.bytes} bytes) to client...` +
+                (plan.reset ? ' [trimmed to byte budget, sent reset]' : ''),
+            );
             for (const log of missedLogs) {
               try {
                 ws.send(

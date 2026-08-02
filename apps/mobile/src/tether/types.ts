@@ -12,6 +12,8 @@ export interface TerminalConnectionState {
   retry: number;
   ping: ReturnType<typeof setInterval> | null;
   lastSeen: number;
+  /** Timestamp of the last onOpen; 0 when never opened. Gates the retry reset. */
+  openedAt: number;
 }
 
 export interface GitLogEntry {

@@ -132,6 +132,8 @@ runMigrations();
 // --- DB Helper Functions ---
 
 const LOG_CAP = 2000;
+/** Hard ceiling on retained scrollback bytes per session (see pruneLogs). */
+const LOG_BYTE_CAP = 8_000_000;
 const insertCounts = new Map<string, number>();
 
 function configuredLogCap(): number {
@@ -144,23 +146,44 @@ function configuredLogCap(): number {
   }
 }
 
-export function pruneLogs(sessionId: string, cap = LOG_CAP) {
-  const cut = db
+export function pruneLogs(sessionId: string, cap = LOG_CAP, byteCap = LOG_BYTE_CAP) {
+  // Row cap: keep the newest `cap` rows.
+  const rowCut = db
     .query(
       `SELECT id FROM terminal_logs WHERE session_id = $id
        ORDER BY id DESC LIMIT 1 OFFSET $cap`,
     )
     .get({ $id: sessionId, $cap: cap }) as { id: number } | null;
-  if (!cut) return;
+  if (rowCut) deleteLogsThrough(sessionId, rowCut.id);
+
+  // Byte cap: a row cap is not a size cap. One full-screen TUI repaint frame
+  // can exceed 100 KB, so 2000 rows has reached 91 MB in practice — enough to
+  // kill any client that tries to replay it. Drop the oldest rows until the
+  // retained tail fits. The newest row is never dropped.
+  const byteCut = db
+    .query(
+      `SELECT id FROM (
+         SELECT id, SUM(LENGTH(chunk)) OVER (ORDER BY id DESC) AS running
+         FROM terminal_logs WHERE session_id = $id
+       )
+       WHERE running > $cap
+         AND id < (SELECT MAX(id) FROM terminal_logs WHERE session_id = $id)
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get({ $id: sessionId, $cap: byteCap }) as { id: number } | null;
+  if (byteCut) deleteLogsThrough(sessionId, byteCut.id);
+}
+
+function deleteLogsThrough(sessionId: string, cut: number) {
   db.query('DELETE FROM terminal_logs WHERE session_id = $id AND id <= $cut').run({
     $id: sessionId,
-    $cut: cut.id,
+    $cut: cut,
   });
   // Watermark lets the WS gateway detect a client whose sinceId predates the
   // prune (gap in replay) and tell it to reset instead of rendering a hole.
   db.query('UPDATE sessions SET pruned_before = $cut WHERE id = $id AND pruned_before < $cut').run({
     $id: sessionId,
-    $cut: cut.id,
+    $cut: cut,
   });
 }
 
