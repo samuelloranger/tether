@@ -77,8 +77,10 @@ export const ArrowCluster = React.memo(function ArrowCluster({
     (dx: number, dy: number) => {
       const x = originRef.current.x + dx;
       const y = originRef.current.y + dy;
-      thumb.setValue(thumbOffset(x, y));
-      activate(resolveDPadDirection(x, y, activeRef.current));
+      const next = resolveDPadDirection(x, y, activeRef.current);
+      // Snap the glyph to the resolved axis only — no free 2D slide.
+      thumb.setValue(thumbOffset(x, y, next));
+      activate(next);
     },
     [activate, thumb],
   );

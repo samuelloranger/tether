@@ -42,8 +42,25 @@ export function grantOffset(locationX: number, locationY: number): { x: number; 
   return { x: locationX - center, y: locationY - center };
 }
 
-export function thumbOffset(dx: number, dy: number): { x: number; y: number } {
-  const distance = Math.max(Math.hypot(dx, dy), 1);
-  const scale = Math.min(THUMB_LIMIT / distance, 1);
-  return { x: Math.round(dx * scale), y: Math.round(dy * scale) };
+// Icon rides the locked cardinal only — never free-slides diagonally.
+// Travel uses hypot so an opposite/reverse-axis drift while locked still
+// keeps the glyph engaged on that cardinal (matching auto-repeat) instead
+// of collapsing to center when the axis component crosses zero.
+export function thumbOffset(
+  dx: number,
+  dy: number,
+  direction: DPadDirection | null,
+): { x: number; y: number } {
+  if (!direction) return { x: 0, y: 0 };
+  const travel = Math.min(THUMB_LIMIT, Math.round(Math.hypot(dx, dy)));
+  switch (direction) {
+    case 'C':
+      return { x: travel, y: 0 };
+    case 'D':
+      return { x: -travel, y: 0 };
+    case 'B':
+      return { x: 0, y: travel };
+    case 'A':
+      return { x: 0, y: -travel };
+  }
 }
