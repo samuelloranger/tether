@@ -48,6 +48,15 @@ test('D-pad auto-repeat is capped', () => {
   expect(D_PAD_MAX_REPEATS).toBeLessThanOrEqual(200);
 });
 
-test('D-pad thumb stays bounded inside its control', () => {
-  expect(thumbOffset(100, -100)).toEqual({ x: 8, y: -8 });
+test('D-pad thumb slides only on the active cardinal axis', () => {
+  // Neutral / under threshold — stay centered (no free slide).
+  expect(thumbOffset(5, -3, null)).toEqual({ x: 0, y: 0 });
+  // Diagonal finger → icon rides the locked axis only, never free 2D.
+  expect(thumbOffset(100, -100, 'C')).toEqual({ x: 11, y: 0 });
+  expect(thumbOffset(100, -100, 'A')).toEqual({ x: 0, y: -11 });
+  expect(thumbOffset(-40, 20, 'D')).toEqual({ x: -11, y: 0 });
+  expect(thumbOffset(10, 40, 'B')).toEqual({ x: 0, y: 11 });
+  // Opposite-axis drag while locked does not push the icon off-axis.
+  expect(thumbOffset(-20, 0, 'C')).toEqual({ x: 0, y: 0 });
+  expect(thumbOffset(0, 20, 'A')).toEqual({ x: 0, y: 0 });
 });

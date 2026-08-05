@@ -42,8 +42,23 @@ export function grantOffset(locationX: number, locationY: number): { x: number; 
   return { x: locationX - center, y: locationY - center };
 }
 
-export function thumbOffset(dx: number, dy: number): { x: number; y: number } {
-  const distance = Math.max(Math.hypot(dx, dy), 1);
-  const scale = Math.min(THUMB_LIMIT / distance, 1);
-  return { x: Math.round(dx * scale), y: Math.round(dy * scale) };
+// Icon rides the locked cardinal only — never free-slides diagonally.
+// That keeps the visual aligned with the arrow key we fire, and makes the
+// dominant-axis pick feel intentional instead of a joystick wander.
+export function thumbOffset(
+  dx: number,
+  dy: number,
+  direction: DPadDirection | null,
+): { x: number; y: number } {
+  if (!direction) return { x: 0, y: 0 };
+  switch (direction) {
+    case 'C':
+      return { x: Math.min(THUMB_LIMIT, Math.max(0, Math.round(dx))), y: 0 };
+    case 'D':
+      return { x: Math.max(-THUMB_LIMIT, Math.min(0, Math.round(dx))), y: 0 };
+    case 'B':
+      return { x: 0, y: Math.min(THUMB_LIMIT, Math.max(0, Math.round(dy))) };
+    case 'A':
+      return { x: 0, y: Math.max(-THUMB_LIMIT, Math.min(0, Math.round(dy))) };
+  }
 }
