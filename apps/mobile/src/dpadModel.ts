@@ -43,22 +43,24 @@ export function grantOffset(locationX: number, locationY: number): { x: number; 
 }
 
 // Icon rides the locked cardinal only — never free-slides diagonally.
-// That keeps the visual aligned with the arrow key we fire, and makes the
-// dominant-axis pick feel intentional instead of a joystick wander.
+// Travel uses hypot so an opposite/reverse-axis drift while locked still
+// keeps the glyph engaged on that cardinal (matching auto-repeat) instead
+// of collapsing to center when the axis component crosses zero.
 export function thumbOffset(
   dx: number,
   dy: number,
   direction: DPadDirection | null,
 ): { x: number; y: number } {
   if (!direction) return { x: 0, y: 0 };
+  const travel = Math.min(THUMB_LIMIT, Math.round(Math.hypot(dx, dy)));
   switch (direction) {
     case 'C':
-      return { x: Math.min(THUMB_LIMIT, Math.max(0, Math.round(dx))), y: 0 };
+      return { x: travel, y: 0 };
     case 'D':
-      return { x: Math.max(-THUMB_LIMIT, Math.min(0, Math.round(dx))), y: 0 };
+      return { x: -travel, y: 0 };
     case 'B':
-      return { x: 0, y: Math.min(THUMB_LIMIT, Math.max(0, Math.round(dy))) };
+      return { x: 0, y: travel };
     case 'A':
-      return { x: 0, y: Math.max(-THUMB_LIMIT, Math.min(0, Math.round(dy))) };
+      return { x: 0, y: -travel };
   }
 }

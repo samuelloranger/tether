@@ -56,7 +56,9 @@ test('D-pad thumb slides only on the active cardinal axis', () => {
   expect(thumbOffset(100, -100, 'A')).toEqual({ x: 0, y: -11 });
   expect(thumbOffset(-40, 20, 'D')).toEqual({ x: -11, y: 0 });
   expect(thumbOffset(10, 40, 'B')).toEqual({ x: 0, y: 11 });
-  // Opposite-axis drag while locked does not push the icon off-axis.
-  expect(thumbOffset(-20, 0, 'C')).toEqual({ x: 0, y: 0 });
-  expect(thumbOffset(0, 20, 'A')).toEqual({ x: 0, y: 0 });
+  // Opposite-axis / reverse-axis drift while locked stays on that cardinal
+  // (glyph must not collapse to center while auto-repeat still fires).
+  expect(thumbOffset(-20, 0, 'C')).toEqual({ x: 11, y: 0 });
+  expect(thumbOffset(0, 20, 'A')).toEqual({ x: 0, y: -11 });
+  expect(thumbOffset(-10, 20, 'C')).toEqual({ x: 11, y: 0 });
 });
