@@ -1,26 +1,23 @@
 import Feather from '@expo/vector-icons/Feather';
-import { type ReactNode, useState } from 'react';
+import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import { CommitBox } from './CommitBox';
 import { DiffFileBody } from './DiffFileBody';
-import { type DiffSummary, groupSummary, isImagePath } from './diffModel';
+import { groupSummary, isImagePath } from './diffModel';
 import type { ReviewDiffSlot } from './fetchReviewDiff';
+import { GitSectionAction, GitSectionActions, GitSectionHeader } from './GitSectionHeader';
 import { GitTabBar } from './GitTabBar';
+import type { GitPanelSharedProps } from './gitPanelProps';
 import { reviewDiffKey, reviewFileEntries, toggleSetMember } from './gitReviewModel';
-import {
-  canPushHead,
-  canRewriteHead,
-  formatRepoStatusLabel,
-  type RepoStatus,
-} from './gitStatusModel';
+import { canPushHead, canRewriteHead, formatRepoStatusLabel } from './gitStatusModel';
 import { HistoryList } from './HistoryList';
 import { minTouchTarget } from './interaction';
-import type { GitLogEntry } from './useTetherApp';
+import { PanelHeader } from './PanelHeader';
+import { useGitCommitForm } from './useGitCommitForm';
 
 const TOUCH_TARGET = minTouchTarget();
-const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 
 export function GitReview({
   summary,
@@ -45,26 +42,7 @@ export function GitReview({
   reviewDiffs,
   onRetryReviewDiff,
   loadReviewDiffs,
-}: {
-  summary: DiffSummary;
-  onBack: () => void;
-  onStageFile: (path: string) => void;
-  onUnstageFile: (path: string) => void;
-  onDiscardFile: (path: string) => void;
-  onToggleHunk: (path: string, hunkIndex: number, staged: boolean) => void;
-  onCommit: (message: string) => Promise<boolean>;
-  onAmend: (message: string) => Promise<boolean>;
-  onUndoCommit: () => void;
-  onPush: () => void;
-  onStageAll: () => void;
-  onUnstageAll: () => void;
-  onDiscardAll: () => void;
-  onOpenLine: (path: string, line: number) => void;
-  repoStatus: RepoStatus;
-  historyEntries: GitLogEntry[] | null;
-  historyCommit: { entry: GitLogEntry; diff: string | null; truncated: boolean } | null;
-  onLoadHistory: () => void;
-  onSelectCommit: (entry: GitLogEntry | null) => void;
+}: GitPanelSharedProps & {
   reviewDiffs: Record<string, ReviewDiffSlot>;
   onRetryReviewDiff: (mode: 'staged' | 'unstaged', path: string) => void;
   loadReviewDiffs?: () => void;
@@ -75,8 +53,8 @@ export function GitReview({
   // Empty = all collapsed. Expanding mounts DiffLines; keep closed by default so
   // opening review with many files does not paint every unified diff at once.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [commitMessage, setCommitMessage] = useState('');
-  const [committing, setCommitting] = useState(false);
+  const { commitMessage, setCommitMessage, committing, submitCommit, submitAmend } =
+    useGitCommitForm(onCommit, onAmend);
 
   const groups = groupSummary(summary);
   const entries = reviewFileEntries(summary);
@@ -85,37 +63,12 @@ export function GitReview({
   const canAmend = canRewriteHead(repoStatus);
   const canPush = canPushHead(repoStatus);
 
-  const submitCommit = async () => {
-    if (!commitMessage.trim() || committing) return;
-    setCommitting(true);
-    const ok = await onCommit(commitMessage.trim());
-    setCommitting(false);
-    if (ok) setCommitMessage('');
-  };
-
-  const submitAmend = async () => {
-    if (!commitMessage.trim() || committing) return;
-    setCommitting(true);
-    const ok = await onAmend(commitMessage.trim());
-    setCommitting(false);
-    if (ok) setCommitMessage('');
-  };
-
   const headerLabel = viewingCommit
     ? `${historyCommit.entry.shortSha} ${historyCommit.entry.subject}`
     : 'Working tree';
 
   const backTarget = viewingCommit ? () => onSelectCommit(null) : onBack;
   const backLabel = viewingCommit ? 'Back to history' : 'Back to terminal';
-
-  const sectionHeader = (label: string, count: number, actions?: ReactNode) => (
-    <View style={styles.sectionHeaderRow}>
-      <Text style={[styles.sectionHeader, { color: theme.colors.textMuted }]}>
-        {label} ({count})
-      </Text>
-      {actions}
-    </View>
-  );
 
   const renderFileBlock = (
     mode: 'staged' | 'unstaged',
@@ -226,23 +179,7 @@ export function GitReview({
         },
       ]}
     >
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={backLabel}
-          onPress={backTarget}
-          style={styles.back}
-        >
-          <Text style={[styles.backText, { color: theme.colors.accent }]}>Back</Text>
-        </TouchableOpacity>
-        <Text
-          numberOfLines={1}
-          maxFontSizeMultiplier={1.35}
-          style={[styles.path, { color: theme.colors.text }]}
-        >
-          {headerLabel}
-        </Text>
-      </View>
+      <PanelHeader onBack={backTarget} backAccessibilityLabel={backLabel} title={headerLabel} />
       {statusLabel && !viewingCommit ? (
         <Text
           numberOfLines={1}
@@ -305,59 +242,30 @@ export function GitReview({
               </View>
             ) : (
               <>
-                {groups.staged.length > 0
-                  ? sectionHeader(
-                      'Staged',
-                      groups.staged.length,
-                      <TouchableOpacity
-                        accessibilityRole="button"
-                        accessibilityLabel="Unstage all"
-                        onPress={onUnstageAll}
-                        style={styles.sectionAction}
-                      >
-                        <Text
-                          style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}
-                        >
-                          Unstage all
-                        </Text>
-                      </TouchableOpacity>,
-                    )
-                  : null}
+                {groups.staged.length > 0 ? (
+                  <GitSectionHeader
+                    label="Staged"
+                    count={groups.staged.length}
+                    padded
+                    actions={<GitSectionAction label="Unstage all" onPress={onUnstageAll} />}
+                  />
+                ) : null}
                 {entries
                   .filter((e) => e.mode === 'staged')
                   .map((e) => renderFileBlock(e.mode, e.path, e.file))}
-                {groups.unstaged.length > 0
-                  ? sectionHeader(
-                      'Changes',
-                      groups.unstaged.length,
-                      <View style={styles.sectionActions}>
-                        <TouchableOpacity
-                          accessibilityRole="button"
-                          accessibilityLabel="Stage all"
-                          onPress={onStageAll}
-                          style={styles.sectionAction}
-                        >
-                          <Text
-                            style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}
-                          >
-                            Stage all
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          accessibilityRole="button"
-                          accessibilityLabel="Discard all"
-                          onPress={onDiscardAll}
-                          style={styles.sectionAction}
-                        >
-                          <Text
-                            style={{ color: theme.colors.danger, fontSize: 12, fontWeight: '600' }}
-                          >
-                            Discard all
-                          </Text>
-                        </TouchableOpacity>
-                      </View>,
-                    )
-                  : null}
+                {groups.unstaged.length > 0 ? (
+                  <GitSectionHeader
+                    label="Changes"
+                    count={groups.unstaged.length}
+                    padded
+                    actions={
+                      <GitSectionActions>
+                        <GitSectionAction label="Stage all" onPress={onStageAll} />
+                        <GitSectionAction label="Discard all" onPress={onDiscardAll} danger />
+                      </GitSectionActions>
+                    }
+                  />
+                ) : null}
                 {entries
                   .filter((e) => e.mode === 'unstaged')
                   .map((e) => renderFileBlock(e.mode, e.path, e.file))}
@@ -372,20 +280,6 @@ export function GitReview({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    minHeight: 48,
-  },
-  back: {
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backText: { ...TEXT_METRICS },
-  path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
   statusLine: {
     fontFamily: 'monospace',
     fontSize: 12,
@@ -395,27 +289,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: { alignItems: 'stretch' },
   center: { padding: 24, alignItems: 'center' },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 12,
-    marginBottom: 4,
-    paddingHorizontal: 16,
-  },
-  sectionActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sectionAction: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
   fileBlock: {
     borderBottomWidth: StyleSheet.hairlineWidth,
   },

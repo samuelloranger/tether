@@ -1,11 +1,9 @@
 import { useLayoutEffect, useRef } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { CodeHighlight } from './CodeHighlight';
 import { type FileView, lineOffset } from './fileView';
-import { MIN_TOUCH_TARGET } from './interaction';
-
-const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
+import { PanelHeader } from './PanelHeader';
 
 export function FileViewer({
   file,
@@ -44,19 +42,7 @@ export function FileViewer({
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={backLabel}
-          onPress={onBack}
-          style={styles.back}
-        >
-          <Text style={[styles.backText, { color: theme.colors.accent }]}>Back</Text>
-        </TouchableOpacity>
-        <Text numberOfLines={1} style={[styles.path, { color: theme.colors.text }]}>
-          {file.path}
-        </Text>
-      </View>
+      <PanelHeader onBack={onBack} backAccessibilityLabel={backLabel} title={file.path} />
       <ScrollView ref={scrollRef} style={styles.vertical} contentContainerStyle={styles.content}>
         {/* ponytail: the server caps files at 1 MiB; use a virtualized measured list only if profiling shows row rendering jank. */}
         <CodeHighlight path={file.path} code={file.content} onLineLayout={onLineLayout} />
@@ -67,20 +53,6 @@ export function FileViewer({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    minHeight: 48,
-  },
-  back: {
-    minHeight: MIN_TOUCH_TARGET,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backText: { ...TEXT_METRICS },
-  path: { flex: 1, fontFamily: 'monospace', marginRight: 16, ...TEXT_METRICS },
   vertical: { flex: 1 },
   content: { padding: 16, alignItems: 'stretch' },
 });
