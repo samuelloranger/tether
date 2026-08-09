@@ -1,5 +1,6 @@
 import {
   D_PAD_BUTTON_SIZE,
+  D_PAD_DOMINANCE,
   D_PAD_MAX_REPEATS,
   grantOffset,
   resolveDPadDirection,
@@ -16,13 +17,24 @@ test('D-pad remains neutral inside the center threshold', () => {
   expect(resolveDPadDirection(0, 0, 'B')).toBeNull();
 });
 
-test('D-pad maps cardinals and diagonals to terminal finals', () => {
+test('D-pad maps clear cardinals to terminal finals', () => {
   expect(resolveDPadDirection(16, 0, null)).toBe('C');
   expect(resolveDPadDirection(-16, 0, null)).toBe('D');
   expect(resolveDPadDirection(0, -16, null)).toBe('A');
   expect(resolveDPadDirection(0, 16, null)).toBe('B');
+  // Dominant axis still wins when the trailing component is clearly smaller.
   expect(resolveDPadDirection(20, 12, null)).toBe('C');
   expect(resolveDPadDirection(-12, 20, null)).toBe('B');
+});
+
+test('D-pad stays neutral until one axis dominates', () => {
+  // Past threshold, but near-45° — do not guess (old code locked Left/Down here).
+  expect(resolveDPadDirection(-8, 6, null)).toBeNull();
+  expect(resolveDPadDirection(-9, 8, null)).toBeNull();
+  expect(resolveDPadDirection(10, 10, null)).toBeNull();
+  // Same leftward swipe a few pixels later: horizontal dominates → Left.
+  expect(resolveDPadDirection(-12, 6, null)).toBe('D');
+  expect(D_PAD_DOMINANCE).toBe(1.5);
 });
 
 test('D-pad locks its active direction for the whole gesture', () => {

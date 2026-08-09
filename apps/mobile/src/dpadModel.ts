@@ -6,6 +6,11 @@ export type DPadDirection = 'A' | 'B' | 'C' | 'D';
 
 export const D_PAD_THRESHOLD = 8;
 
+// Leading axis must clearly beat the trailing one before we lock a cardinal.
+// 1.5× ≈ within ±34° of an axis — stops a left swipe with early vertical
+// finger-roll from locking Down at the 8px threshold and sticking there.
+export const D_PAD_DOMINANCE = 1.5;
+
 // Auto-repeat: first key on activation, then one every D_PAD_REPEAT_MS after a
 // D_PAD_REPEAT_DELAY_MS hold. Capped — an accidentally pinned finger would
 // otherwise stream ~16 arrow keys/second into the PTY forever.
@@ -29,7 +34,14 @@ export function resolveDPadDirection(
   if (Math.max(horizontal, vertical) < D_PAD_THRESHOLD) return null;
   if (active) return active;
 
-  return horizontal >= vertical ? (dx >= 0 ? 'C' : 'D') : dy >= 0 ? 'B' : 'A';
+  // Stay neutral in the diagonal band until one axis dominates — otherwise the
+  // first noisy sample past threshold locks the wrong cardinal for the gesture.
+  if (horizontal >= vertical) {
+    if (horizontal < D_PAD_DOMINANCE * vertical) return null;
+    return dx >= 0 ? 'C' : 'D';
+  }
+  if (vertical < D_PAD_DOMINANCE * horizontal) return null;
+  return dy >= 0 ? 'B' : 'A';
 }
 
 // Where the touch landed inside the puck, as an offset from its center. A tap
