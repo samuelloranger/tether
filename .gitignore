@@ -64,3 +64,6 @@ apps/mobile/src-tauri/gen/
 
 # Codex local tooling (contains absolute local paths)
 .codex/
+
+# Playwright MCP scratch output
+.playwright-mcp/

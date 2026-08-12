@@ -33,6 +33,7 @@ on:
         options:
           - desktop
           - ios
+          - testflight
           - all
         default: desktop
 
@@ -207,9 +208,28 @@ jobs:
             apps/mobile/src-tauri/target/*/release/bundle/**
           if-no-files-found: error
 
+  # ONE archive, TWO outputs. The archive is built with real App Store
+  # distribution signing; from it we export the App Store IPA that goes to
+  # TestFlight, and separately zip the .app into the Payload-style IPA that the
+  # AltStore feed serves. Archiving is by far the slowest step and both consumers
+  # want the same bits, so building it twice only burned macOS runner minutes.
+  #
+  # The AltStore IPA is NOT "a signed build for sideloading" — no such thing
+  # exists. App Store profiles embed no device UDIDs, so that IPA can never be
+  # installed directly. AltStore/SideStore strip the signature and re-sign with
+  # the user's own certificate, which is why the previously-unsigned IPA worked
+  # and why a distribution-signed one works equally well as its input.
+  #
+  # Signing assets are created on demand by -allowProvisioningUpdates, which
+  # authenticates with the App Store Connect API key rather than a checked-in
+  # cert — so there is no .p12 to rotate. The key needs Admin access for that.
+  #
+  # `publish` needs this job, so the TestFlight upload is continue-on-error: a
+  # rejected or flaky Apple upload must never hold back the GitHub release that
+  # install.sh and the AltStore feed resolve from.
   ios:
     needs: [draft, renderer]
-    if: github.event_name == 'push' || inputs.scope == 'ios' || inputs.scope == 'all'
+    if: github.event_name == 'push' || inputs.scope == 'ios' || inputs.scope == 'testflight' || inputs.scope == 'all'
     runs-on: macos-15
     env:
       IPA_NAME: ${{ github.event_name == 'push' && 'tether.ipa' || 'tether-manual.ipa' }}
@@ -230,12 +250,35 @@ jobs:
       - name: Install workspace deps
         run: bun install --frozen-lockfile
 
-      - name: Pin app version to the release tag
-        if: github.event_name == 'push'
+      # altool discovers the key by ID under ~/.appstoreconnect/private_keys;
+      # xcodebuild wants an explicit path. Write it once, satisfy both.
+      - name: Install App Store Connect API key
+        env:
+          KEY_B64: ${{ secrets.APP_STORE_CONNECT_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$KEY_B64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+
+      # App Store Connect rejects a build whose (version, build) pair already
+      # exists, and every upload is permanent — so the build number can never
+      # repeat. github.run_number is monotonic per workflow and survives re-runs
+      # of the same tag, which a commit count or timestamp would not.
+      - name: Pin version and build number
         working-directory: apps/mobile
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           V="${TAG#v}"
-          jq --arg v "$V" '.expo.version = $v' app.json > app.json.tmp && mv app.json.tmp app.json
+          # Manual runs sit on a branch name, not a tag; keep app.json's version.
+          if [ "${{ github.event_name }}" != "push" ]; then
+            V="$(jq -r '.expo.version' app.json)"
+          fi
+          jq --arg v "$V" --arg b "$RUN_NUMBER" \
+            '.expo.version = $v | .expo.ios.buildNumber = $b' app.json > app.json.tmp
+          mv app.json.tmp app.json
+          echo "Building $V ($RUN_NUMBER)"
 
       - name: Prebuild iOS project
         working-directory: apps/mobile
@@ -243,34 +286,106 @@ jobs:
         env:
           CI: 'true'
 
-      - name: Build unsigned archive
+      - name: Build signed archive
         working-directory: apps/mobile
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           xcodebuild -workspace ios/Tether.xcworkspace -scheme Tether \
             -configuration Release -sdk iphoneos \
             -archivePath build/Tether.xcarchive archive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic
 
-      - name: Package IPA
+      - name: Export IPA
+        working-directory: apps/mobile
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath build/Tether.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+
+      # The AltStore IPA, cut from the SAME archive rather than a second build.
+      # Payload/ + zip is the sideload-loader convention (not xcodebuild's export
+      # layout), and the name must stay tether.ipa — altstore.json is rebuilt
+      # from the Releases API and resolves that exact stable asset name.
+      - name: Package AltStore IPA
         working-directory: apps/mobile
         run: |
           mkdir -p Payload
           cp -R "build/Tether.xcarchive/Products/Applications/Tether.app" Payload/
           zip -qry "$IPA_NAME" Payload
 
-      - name: Attach IPA to release
+      - name: Attach AltStore IPA to release
         if: github.event_name == 'push'
         working-directory: apps/mobile
         run: gh release upload "$TAG" "$IPA_NAME" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Upload IPA workflow artifact
+      - name: Validate build
+        working-directory: apps/mobile
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          IPA="$(find build/export -name '*.ipa' | head -1)"
+          xcrun altool --validate-app -f "$IPA" -t ios \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      # continue-on-error: `publish` gates on this job, and a rejected upload
+      # (duplicate build number, Apple outage, ITMS review rule) must not strand
+      # the release in draft with every other artifact already attached.
+      # scope=testflight uploads too, so the path can be proven without cutting
+      # a version; that consumes a build number, which is why plain scope=ios
+      # and scope=all do not.
+      - name: Upload to TestFlight
+        if: github.event_name == 'push' || inputs.scope == 'testflight'
+        continue-on-error: true
+        working-directory: apps/mobile
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          IPA="$(find build/export -name '*.ipa' | head -1)"
+          xcrun altool --upload-app -f "$IPA" -t ios \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      - name: Upload IPA workflow artifacts (manual runs)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: tether-ios-${{ github.sha }}
-          path: apps/mobile/${{ env.IPA_NAME }}
+          path: |
+            apps/mobile/${{ env.IPA_NAME }}
+            apps/mobile/build/export/*.ipa
 
   android:
     needs: [draft, renderer]
