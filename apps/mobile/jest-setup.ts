@@ -40,6 +40,17 @@ jest.mock('expo-image-picker', () => ({
   MediaTypeOptions: { Images: 'Images' },
 }));
 jest.mock('expo-file-system', () => ({}));
+// Push registration is iOS-only and no-ops under the test platform, but both
+// modules touch native code at import time, so they need stubs for any suite
+// that pulls in useTetherApp.
+jest.mock('expo-notifications', () => ({
+  getPermissionsAsync: jest.fn(async () => ({ granted: false })),
+  requestPermissionsAsync: jest.fn(async () => ({ granted: false })),
+  getDevicePushTokenAsync: jest.fn(async () => ({ type: 'ios', data: '' })),
+}));
+jest.mock('expo-crypto', () => ({
+  getRandomBytes: jest.fn((size: number) => new Uint8Array(size)),
+}));
 
 // react-native-webview asserts its native module exists at import time. The
 // terminal renderer is faked per-suite where it matters; this keeps merely

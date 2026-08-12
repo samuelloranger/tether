@@ -32,6 +32,7 @@ import { useConnectionConfig } from './tether/useConnectionConfig';
 import { useDesktopEffects } from './tether/useDesktopEffects';
 import { useDesktopUpdater } from './tether/useDesktopUpdater';
 import { usePresentations } from './tether/usePresentations';
+import { usePushRegistration } from './tether/usePushRegistration';
 import { useTerminalInput } from './tether/useTerminalInput';
 import { useTerminalSessions } from './tether/useTerminalSessions';
 import { useTerminalUiState } from './tether/useTerminalUiState';
@@ -250,6 +251,15 @@ export function useTetherApp() {
     useTerminalInput({ send: wsSend, mouseEnabledRef, getActiveSessionId, entryFor });
   const { snippets, setSnippets, persistSnippets, sidebarPinned, persistSidebarPinned } =
     useAppPreferences();
+
+  // Register this device for native push with every configured host. Runs once
+  // the host profiles have loaded; a no-op on Android and on hosts too old to
+  // know the route.
+  const pushClients = useMemo(
+    () => (ready ? (profiles ?? []).map((profile) => clientFor(profile)) : []),
+    [ready, profiles, clientFor],
+  );
+  usePushRegistration(pushClients, ready);
   const addSnippet = () => {
     const snippet = snippetDraft.trim();
     if (!snippet) return;

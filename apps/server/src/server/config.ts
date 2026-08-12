@@ -63,6 +63,17 @@ export const configSchema = z
       topic: z.string().max(256),
       token: z.string().min(1).max(4096).optional(),
     }),
+    // Native APNs push, delivered through a relay. Independent of `notify`
+    // (ntfy) on purpose — both can run, and a server that wants nothing to do
+    // with a relay simply leaves this disabled.
+    //
+    // relayUrl has no baked-in default: the relay is separate infrastructure,
+    // and hardcoding one operator's hostname here would both advertise their
+    // deployment and make every server point at it by accident.
+    push: z.object({
+      enabled: z.boolean(),
+      relayUrl: z.string().url().max(500).or(z.literal('')),
+    }),
     triggers: z.object({
       waiting: z.boolean(),
       oscNotify: z.boolean(),
@@ -102,6 +113,7 @@ export async function validateNotifyUrl(
 
 export const DEFAULT_CONFIG: Config = {
   notify: { enabled: false, url: 'https://ntfy.sh', topic: '' },
+  push: { enabled: false, relayUrl: process.env.TETHER_PUSH_RELAY_URL ?? '' },
   triggers: { waiting: true, oscNotify: true, exit: true, longJob: true },
   longJobSeconds: 300,
   identity: { name: process.env.HOSTNAME || 'Tether', color: '#89b4fa' },
@@ -141,6 +153,10 @@ export function getConfig(): Config {
   if (!cached) {
     cached = configSchema.parse({
       notify: readTopLevel('notify'),
+      // Servers upgrading from before push existed have no stored row here;
+      // readTopLevel falls back to the default rather than failing the parse
+      // and taking getConfig — and therefore the server — down.
+      push: readTopLevel('push'),
       triggers: readTopLevel('triggers'),
       longJobSeconds: readScalar('longJobSeconds'),
       identity: readTopLevel('identity'),
@@ -154,6 +170,7 @@ export async function patchConfig(partial: unknown): Promise<Config> {
   const patch = z
     .object({
       notify: configSchema.shape.notify.partial().strict().optional(),
+      push: configSchema.shape.push.partial().strict().optional(),
       triggers: configSchema.shape.triggers.partial().strict().optional(),
       longJobSeconds: configSchema.shape.longJobSeconds.optional(),
       identity: configSchema.shape.identity.partial().strict().optional(),

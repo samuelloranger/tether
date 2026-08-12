@@ -42,6 +42,12 @@
       ],
       "expo-font",
       [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      [
         "expo-secure-store",
         {
           "faceIDPermission": false
