@@ -96,6 +96,23 @@ const migrations = [
     // per-keystroke insert path.
     up: `DROP INDEX IF EXISTS idx_terminal_logs_session;`,
   },
+  {
+    version: 8,
+    name: 'push_devices',
+    // One row per iOS device registered for APNs push against this server.
+    // secret_key is the AES-GCM key that device generated for us; it never
+    // leaves this table and the relay never sees it. Device tokens rotate, so
+    // the token is the primary key and re-registration is an upsert.
+    up: `
+      CREATE TABLE IF NOT EXISTS push_devices (
+        device_token TEXT PRIMARY KEY,
+        secret_key TEXT NOT NULL,
+        label TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_used_at DATETIME
+      );
+    `,
+  },
 ];
 
 export function runMigrations() {

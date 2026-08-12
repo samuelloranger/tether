@@ -62,6 +62,8 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { isValidSecretKey } from './pushCrypto';
+import { registerPushDevice, removePushDevice } from './pushDevices';
 import { planReplay } from './replayPlan';
 import { VERSION } from './runtime';
 import { getActivity } from './sessionActivity';
@@ -548,6 +550,33 @@ app.post('/api/sessions/kill', async (c) => {
 
   const killed = killSession(sessionId);
   return c.json({ ok: killed });
+});
+
+// The device generates its own AES key and hands it over here. This rides the
+// normal token-authed API, so its confidentiality is bounded by the transport —
+// the same channel already streams the terminal itself, so this adds no new
+// exposure, but it is another reason to run Tether behind a tunnel.
+app.post('/api/push/register', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const deviceToken = typeof body.deviceToken === 'string' ? body.deviceToken.trim() : '';
+  const secretKey = typeof body.secretKey === 'string' ? body.secretKey : '';
+  if (!/^[0-9a-fA-F]{64}$/.test(deviceToken)) {
+    return c.json({ ok: false, error: 'invalid deviceToken' }, 400);
+  }
+  if (!isValidSecretKey(secretKey)) {
+    return c.json({ ok: false, error: 'secretKey must be 32 bytes, base64' }, 400);
+  }
+  const label = typeof body.label === 'string' ? body.label.slice(0, 100) : undefined;
+  registerPushDevice(deviceToken, secretKey, label);
+  return c.json({ ok: true });
+});
+
+app.post('/api/push/unregister', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const deviceToken = typeof body.deviceToken === 'string' ? body.deviceToken.trim() : '';
+  if (!deviceToken) return c.json({ ok: false, error: 'missing deviceToken' }, 400);
+  removePushDevice(deviceToken);
+  return c.json({ ok: true });
 });
 
 app.post('/api/sessions/rename', async (c) => {

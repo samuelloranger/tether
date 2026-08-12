@@ -22,6 +22,7 @@ import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import { buildNotification, type NotificationEvent, send } from './notifier';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { clampDims, type Dims, planPtyResize } from './ptyResize';
+import { buildPushContent, sendPush } from './push';
 import { COMPILED, selfArgv } from './runtime';
 import { type Activity, clearActivity, recordInput, recordOutputEvent } from './sessionActivity';
 import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './sessionTitle';
@@ -201,15 +202,17 @@ function sessionFocused(id: string): boolean {
 function notify(id: string, event: NotificationEvent): void {
   if (sessionFocused(id)) return;
   const session = getSession(id);
-  const payload = buildNotification(
-    event,
-    {
-      sessionId: id,
-      sessionTitle: autoTitle(getOscTitle(id), getLiveCwd(id), session?.command ?? 'bash'),
-    },
-    getConfig(),
-  );
-  if (payload) void send(payload, getConfig());
+  const ctx = {
+    sessionId: id,
+    sessionTitle: autoTitle(getOscTitle(id), getLiveCwd(id), session?.command ?? 'bash'),
+  };
+  const cfg = getConfig();
+  const payload = buildNotification(event, ctx, cfg);
+  if (payload) void send(payload, cfg);
+  // ntfy and native push are independent channels — a server may run either,
+  // both, or neither, and one being disabled must not suppress the other.
+  const pushContent = buildPushContent(event, ctx, cfg);
+  if (pushContent) void sendPush(pushContent, ctx, cfg);
 }
 
 // Connect to a session's holder socket and wire its frames into the existing
