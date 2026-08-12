@@ -28,12 +28,17 @@ Pick the app for your device — both connect to the same server the same way. E
 
 | Device | Get the latest |
 | --- | --- |
-| **iOS** | [AltStore](https://altstore.io) source (auto-updates) — or [`tether.ipa`](https://github.com/samuelloranger/tether/releases/latest/download/tether.ipa) |
+| **iOS** | [TestFlight](https://testflight.apple.com/join/j7rPkfhq) (no Mac needed) — or [AltStore](https://altstore.io) source, or [`tether.ipa`](https://github.com/samuelloranger/tether/releases/latest/download/tether.ipa) |
 | **Android** | [Obtainium](https://github.com/ImranR98/Obtainium) (auto-updates) — or [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) |
 | **Desktop** (Linux / Windows / macOS) | see [Desktop app](/desktop) for the per-OS installer |
 
-- **iOS via AltStore** — set up AltServer on your Mac/PC, add the Tether source (`https://samlo.cloud/tether/altstore.json`), and install the app. New releases show up in AltStore automatically.
+- **iOS via TestFlight** — install [TestFlight](https://apps.apple.com/app/testflight/id899247664), then open the [public link](https://testflight.apple.com/join/j7rPkfhq). Signed by Apple, so there is no AltServer to run and nothing to re-sign every week. Each build is testable for 90 days.
+- **iOS via AltStore** — set up AltServer on your Mac/PC, add the Tether source (`https://samlo.cloud/tether/altstore.json`), and install the app. New releases show up in AltStore automatically. Use this if you'd rather not go through Apple, or if the TestFlight beta is full.
 - **Desktop** — download the installer for your platform; see [Desktop app](/desktop) for the per-OS files and how it differs from mobile.
+
+::: warning TestFlight beta is not open yet
+The public link above is live but closed — it currently answers *"This beta isn't accepting any new testers right now."* External TestFlight testing requires the build to clear Apple's Beta App Review, which hasn't been submitted. The URL is permanent, so it starts working the moment review passes; until then, use AltStore.
+:::
 
 ## 4. Connect
 
