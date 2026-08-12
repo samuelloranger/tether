@@ -60,10 +60,14 @@ class NotificationService: UNNotificationServiceExtension {
   /// access group. The extension has its own bundle id, so without the shared
   /// group this lookup returns nothing and every push shows the fallback.
   private static func loadSecretKey() -> SymmetricKey? {
+    // kSecAttrAccessGroup is deliberately omitted: a query without it searches
+    // every group this binary is entitled to, which includes the shared group
+    // the app wrote the key into. Naming the group explicitly would mean
+    // hardcoding the team-id prefix, which the entitlement only resolves at
+    // signing time anyway.
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrAccount as String: "tether_push_secret",
-      kSecAttrAccessGroup as String: Self.accessGroup,
       kSecReturnData as String: true,
       kSecMatchLimit as String: kSecMatchLimitOne,
     ]
@@ -78,12 +82,6 @@ class NotificationService: UNNotificationServiceExtension {
       return nil
     }
     return SymmetricKey(data: raw)
-  }
-
-  private static var accessGroup: String {
-    let teamId =
-      Bundle.main.object(forInfoDictionaryKey: "TetherKeychainAccessGroup") as? String ?? ""
-    return teamId
   }
 
   private static func decrypt(base64: String, key: SymmetricKey) -> Data? {
