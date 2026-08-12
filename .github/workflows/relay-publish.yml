@@ -4,9 +4,14 @@ name: Build and Push Relay Image
 # only internet-facing piece, it holds the APNs key, and it must never ship
 # inside the `tether` binary. So it gets its own image, its own registry entry,
 # and its own deploy trigger — the release workflow does not touch it.
+#
+# Triggered by the TAG push, not `release: published`. The release workflow
+# publishes with GITHUB_TOKEN, and GitHub does not trigger workflows from
+# events that token creates — so a `release` trigger here silently never fires.
+# The tag is pushed with real credentials, which is why release.yml uses it too.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*.*.*']
   # Lets the relay be rebuilt and redeployed without cutting a Tether release,
   # since its lifecycle is genuinely independent of the app's.
   workflow_dispatch:
