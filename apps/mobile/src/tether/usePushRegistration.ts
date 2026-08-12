@@ -1,10 +1,15 @@
 import * as Crypto from 'expo-crypto';
 import * as Notifications from 'expo-notifications';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { getPushSecret, setPushSecret } from '../secureConfig';
 import type { HostClient } from './hostClient';
-import { needsRegistration, normalizeDeviceToken, registerWithHosts } from './pushRegistration';
+import {
+  needsRegistration,
+  normalizeDeviceToken,
+  registerWithHosts,
+  unregisterFromHost,
+} from './pushRegistration';
 
 const KEY_BYTES = 32;
 
@@ -30,7 +35,10 @@ async function loadOrCreateSecret(): Promise<string> {
  * iOS only: Android already has its own delivery story via ntfy, and adding
  * FCM would mean a second relay credential for no current benefit.
  */
-export function usePushRegistration(clients: HostClient[], enabled: boolean): void {
+export function usePushRegistration(
+  clients: HostClient[],
+  enabled: boolean,
+): { unregisterPushFromHost: (hostId: string) => Promise<void> } {
   // Registration is idempotent but not free — remember what we last sent so a
   // cold start does not re-POST to every host.
   const lastSent = useRef<{ deviceToken: string; secretKey: string } | null>(null);
@@ -79,4 +87,28 @@ export function usePushRegistration(clients: HostClient[], enabled: boolean): vo
       cancelled = true;
     };
   }, [clients, enabled]);
+
+  // Revoking must happen while the host's credentials still exist, so this is
+  // exposed for the removal path to await before the profile is deleted.
+  const unregisterPushFromHost = useCallback(
+    async (hostId: string) => {
+      const client = clients.find((candidate) => candidate.profile.id === hostId);
+      const deviceToken = lastSent.current?.deviceToken;
+      if (!client || !deviceToken) return;
+      await unregisterFromHost(
+        {
+          hostId,
+          post: (path, init) =>
+            client.post(path, init as RequestInit) as unknown as Promise<{
+              ok: boolean;
+              status: number;
+            }>,
+        },
+        deviceToken,
+      );
+    },
+    [clients],
+  );
+
+  return { unregisterPushFromHost };
 }

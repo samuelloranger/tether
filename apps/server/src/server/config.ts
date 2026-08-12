@@ -183,6 +183,7 @@ export async function patchConfig(partial: unknown): Promise<Config> {
     ...current,
     ...patch,
     notify: { ...current.notify, ...patch.notify },
+    push: { ...current.push, ...patch.push },
     triggers: { ...current.triggers, ...patch.triggers },
     identity: { ...current.identity, ...patch.identity },
     session: { ...current.session, ...patch.session },

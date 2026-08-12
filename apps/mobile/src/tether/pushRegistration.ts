@@ -43,6 +43,28 @@ export function needsRegistration(
   return previous.deviceToken !== next.deviceToken || previous.secretKey !== next.secretKey;
 }
 
+/**
+ * Tell a host to forget this device. Must be called BEFORE the host profile is
+ * removed locally: once its credentials are gone the app can no longer reach
+ * it, and the server would keep the encryption key and keep pushing forever
+ * with no way for the user to revoke it from the app.
+ */
+export async function unregisterFromHost(
+  target: PushRegistrationTarget,
+  deviceToken: string,
+): Promise<boolean> {
+  try {
+    const response = await target.post('/api/push/unregister', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceToken }),
+    });
+    return response.ok;
+  } catch {
+    // Best effort — an unreachable host must not block removing it locally.
+    return false;
+  }
+}
+
 export async function registerWithHosts(
   targets: PushRegistrationTarget[],
   payload: { deviceToken: string; secretKey: string; label?: string },

@@ -3,6 +3,7 @@ import { useFonts } from '@expo-google-fonts/fira-code/useFonts';
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, type TextInput, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +27,7 @@ import { isDesktop, isTauri } from './platform';
 import { sessionLabel } from './sessionLabel';
 import { shellQuote } from './shell';
 import { type RenderRow, setTheme } from './terminal';
+import { linkFromNotificationResponse } from './tether/pushDeepLink';
 import type { GitLogEntry } from './tether/types';
 import { useAppPreferences } from './tether/useAppPreferences';
 import { useConnectionConfig } from './tether/useConnectionConfig';
@@ -259,7 +261,7 @@ export function useTetherApp() {
     () => (ready ? (profiles ?? []).map((profile) => clientFor(profile)) : []),
     [ready, profiles, clientFor],
   );
-  usePushRegistration(pushClients, ready);
+  const { unregisterPushFromHost } = usePushRegistration(pushClients, ready);
   const addSnippet = () => {
     const snippet = snippetDraft.trim();
     if (!snippet) return;
@@ -280,6 +282,10 @@ export function useTetherApp() {
     if (configuredActiveHostId) resetHostHealth(configuredActiveHostId);
   };
   const removeHost = async (hostId: string) => {
+    // Revoke push BEFORE the profile goes away. Afterwards its credentials are
+    // gone, so the app can never reach that server again — it would keep the
+    // encryption key and keep pushing, with no way to stop it from the app.
+    await unregisterPushFromHost(hostId);
     removeHostSessions(hostId);
     await removeConfiguredHost(hostId);
   };
@@ -329,6 +335,15 @@ export function useTetherApp() {
   }, []);
   const handleDeepLinkRef = useRef(handleDeepLink);
   handleDeepLinkRef.current = handleDeepLink;
+  // Cold start: the tap that launched the app has no Linking URL and no live
+  // listener to catch it. The supported replacement for the deprecated
+  // getLastNotificationResponseAsync.
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  useEffect(() => {
+    const link = linkFromNotificationResponse(lastNotificationResponse);
+    if (link) handleDeepLinkRef.current(link);
+  }, [lastNotificationResponse]);
+
   useEffect(() => {
     let disposed = false;
     let stopDesktopListener: (() => void) | undefined;
@@ -339,6 +354,17 @@ export function useTetherApp() {
       })
       .catch(() => {});
     const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+
+    // A tapped native push does not produce a Linking URL — iOS delivers a
+    // notification response instead, so without this the session link in the
+    // payload is silently ignored and the tap opens whatever tab was last
+    // active. getLastNotificationResponseAsync covers the cold-start case where
+    // the tap is what launched the app.
+    const notificationSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const link = linkFromNotificationResponse(response);
+      if (link) handleUrl(link);
+    });
+
     if (isDesktop && isTauri())
       void import('@tauri-apps/plugin-deep-link')
         .then(({ getCurrent, onOpenUrl }) =>
@@ -352,6 +378,7 @@ export function useTetherApp() {
     return () => {
       disposed = true;
       subscription.remove();
+      notificationSub.remove();
       stopDesktopListener?.();
     };
   }, []);
