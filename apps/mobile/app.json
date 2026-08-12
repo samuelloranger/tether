@@ -47,6 +47,7 @@
           "enableBackgroundRemoteNotifications": true
         }
       ],
+      "./plugins/withNotificationServiceExtension",
       [
         "expo-secure-store",
         {
