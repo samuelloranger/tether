@@ -64,8 +64,13 @@ type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 /**
  * Deliver one push. A 410 means the app was uninstalled: the relay holds no
  * state, so this server is the only place that can forget the token.
+ *
+ * Reports whether anything actually arrived. Pruning a dead token is a
+ * successful bit of housekeeping but a failed delivery, and the test path has
+ * to tell those apart — otherwise a server whose every token is stale answers
+ * "Test notification sent." having sent nothing.
  */
-async function deliverToDevice(request: RelayRequest, fetcher: Fetch): Promise<void> {
+async function deliverToDevice(request: RelayRequest, fetcher: Fetch): Promise<'sent' | 'gone'> {
   const response = await fetcher(`${PUSH_RELAY_URL.replace(/\/+$/, '')}/push`, {
     method: 'POST',
     redirect: 'error',
@@ -75,10 +80,11 @@ async function deliverToDevice(request: RelayRequest, fetcher: Fetch): Promise<v
   });
   if (response.status === 410) {
     removePushDevice(request.token);
-    return;
+    return 'gone';
   }
   if (!response.ok) throw new Error(`relay returned ${response.status}`);
   markPushDeviceUsed(request.token);
+  return 'sent';
 }
 
 async function requestFor(
@@ -133,11 +139,17 @@ export async function sendTestPush(cfg: Config, fetcher: Fetch = fetch): Promise
       deliverToDevice(await requestFor(device, content, 'tether-test'), fetcher),
     ),
   );
-  // One phone out of several failing still proves the path works, so only a
-  // clean sweep of failures is reported as an error.
+  // One phone out of several failing still proves the path works, so success is
+  // "at least one device actually received it" — not "nothing threw". A pruned
+  // 410 resolves, so counting fulfilled promises would call an all-stale server
+  // a success.
+  if (results.some((result) => result.status === 'fulfilled' && result.value === 'sent')) return;
   const failure = results.find((result) => result.status === 'rejected');
-  if (failure && results.every((result) => result.status === 'rejected'))
+  if (failure)
     throw new Error(
       failure.reason instanceof Error ? failure.reason.message : 'Push delivery failed.',
     );
+  throw new Error(
+    'Every registered device was rejected by Apple and has been removed. Reopen Tether on your phone to register it again.',
+  );
 }

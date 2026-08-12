@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { resetAdminRateLimit } from './admin';
 import { app } from './app';
 import { getAuthHash, setAuthHash } from './db';
-import { registerPushDevice, removePushDevice } from './pushDevices';
+import { countPushDevices, registerPushDevice, removePushDevice } from './pushDevices';
 import { PUSH_RELAY_URL } from './pushRelay';
 
 const PASSWORD = 'admin-api-password';
@@ -61,6 +61,33 @@ test('a test notification reaches every registered device without a password pro
     setAuthHash(hash);
     globalThis.fetch = previous;
     removePushDevice('device-a');
+  }
+});
+
+test('a test notification whose devices are all stale reports failure, not success', async () => {
+  const hash = getAuthHash();
+  const previous = globalThis.fetch;
+  const error = spyOn(console, 'error').mockImplementation(() => {});
+  // 410 prunes the token and resolves. Counting settled promises would call
+  // this a success and the settings screen would claim it sent something.
+  globalThis.fetch = (async () => new Response(null, { status: 410 })) as unknown as typeof fetch;
+  registerPushDevice('device-stale', SECRET);
+  try {
+    setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
+    const res = await app.request('/api/admin/test-notification', {
+      method: 'POST',
+      headers: AUTH,
+    });
+
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toContain('removed');
+    // The pruning itself must still have happened.
+    expect(countPushDevices()).toBe(0);
+  } finally {
+    setAuthHash(hash);
+    globalThis.fetch = previous;
+    error.mockRestore();
+    removePushDevice('device-stale');
   }
 });
 
