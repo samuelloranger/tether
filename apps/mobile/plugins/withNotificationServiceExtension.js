@@ -110,6 +110,14 @@ const withExtensionTarget = (config) =>
     for (const key of Object.keys(configurations)) {
       const buildSettings = configurations[key].buildSettings;
       if (!buildSettings || buildSettings.PRODUCT_NAME !== `"${TARGET_NAME}"`) continue;
+      // Expo writes MARKETING_VERSION / CURRENT_PROJECT_VERSION onto the APP
+      // target only; a sibling extension target inherits neither. The
+      // extension's Info.plist references both, so without these they expand to
+      // empty and App Store validation rejects the upload for missing or
+      // mismatched bundle versions. CI rewrites app.json before prebuild, so
+      // these read the same values the app itself is built with.
+      buildSettings.MARKETING_VERSION = `"${cfg.version}"`;
+      buildSettings.CURRENT_PROJECT_VERSION = `"${cfg.ios?.buildNumber ?? '1'}"`;
       buildSettings.SWIFT_VERSION = '5.0';
       buildSettings.TARGETED_DEVICE_FAMILY = '"1,2"';
       buildSettings.IPHONEOS_DEPLOYMENT_TARGET = '"16.0"';
