@@ -2,7 +2,7 @@ import * as Crypto from 'expo-crypto';
 import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
-import { getPushSecret, setPushSecret } from '../secureConfig';
+import { getPushSecret, migratePushSecretAccessibility, setPushSecret } from '../secureConfig';
 import type { HostClient } from './hostClient';
 import {
   needsRegistration,
@@ -20,7 +20,12 @@ const KEY_BYTES = 32;
  */
 async function loadOrCreateSecret(): Promise<string> {
   const existing = await getPushSecret();
-  if (existing) return existing;
+  if (existing) {
+    // A key written before the extension existed is stuck at WHEN_UNLOCKED and
+    // would be unreadable on a locked phone.
+    await migratePushSecretAccessibility(existing);
+    return existing;
+  }
   const bytes = Crypto.getRandomBytes(KEY_BYTES);
   // btoa over a binary string: React Native has no Buffer, and base64 is what
   // the server's `isValidSecretKey` expects.
