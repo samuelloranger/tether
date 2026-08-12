@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -31,6 +32,7 @@ import {
   createServerSettingsDraft,
   isServerSettingsDirty,
   patchForDraft,
+  pushStatusHint,
   type ServerConfig,
   type ServerSettingsDraft,
   validateServerSettingsDraft,
@@ -218,7 +220,7 @@ export function ServerSettings({
     if (!config || !draft || !client) return;
     setMessage(null);
     try {
-      await sendServerNotificationTest(client, patchForDraft(config, draft));
+      await sendServerNotificationTest(client);
       setMessage({ kind: 'success', text: 'Test notification sent.' });
     } catch (error) {
       setMessage({
@@ -378,41 +380,18 @@ export function ServerSettings({
             </Section>
             <Section title="Notifications">
               <Toggle
-                label="Enabled"
-                value={draft.notify.enabled}
+                label="Push to my devices"
+                value={draft.push.enabled}
                 disabled={readOnly}
-                onValueChange={(enabled) => set('notify', { ...draft.notify, enabled })}
+                onValueChange={(enabled) => set('push', { ...draft.push, enabled })}
               />
-              <Field
-                label="ntfy URL"
-                value={draft.notify.url}
-                editable={!readOnly}
-                error={validationErrors.notifyUrl}
-                onChangeText={(url) => set('notify', { ...draft.notify, url })}
-              />
-              <Field
-                label="Topic"
-                value={draft.notify.topic}
-                editable={!readOnly}
-                error={validationErrors.notifyTopic}
-                onChangeText={(topic) => set('notify', { ...draft.notify, topic })}
-              />
-              {draft.notify.token === undefined ? (
-                <Button
-                  label={draft.notify.hasToken ? 'Token set · Replace' : 'Set token'}
-                  onPress={() => set('notify', { ...draft.notify, token: '' })}
-                  disabled={readOnly}
-                />
-              ) : (
-                <Field
-                  label="New token"
-                  value={draft.notify.token}
-                  secure
-                  editable={!readOnly}
-                  error={validationErrors.notifyToken}
-                  onChangeText={(token) => set('notify', { ...draft.notify, token })}
-                />
-              )}
+              <Text style={styles.hint}>
+                {pushStatusHint(
+                  draft.push.enabled,
+                  config?.pushDevices ?? 0,
+                  Platform.OS === 'ios',
+                )}
+              </Text>
               <Toggle
                 label="Agent needs input"
                 value={draft.triggers.waiting}
@@ -448,7 +427,7 @@ export function ServerSettings({
               <Button
                 label="Send test notification"
                 onPress={() => void sendTest()}
-                disabled={readOnly}
+                disabled={readOnly || !config?.pushDevices}
               />
             </Section>
             <Section title="Sessions">

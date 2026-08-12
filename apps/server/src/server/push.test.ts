@@ -6,14 +6,14 @@ const CTX = { sessionId: 'term-7', sessionTitle: 'vim README.md' };
 
 const cfg = (overrides: Partial<Config> = {}): Config => ({
   ...DEFAULT_CONFIG,
-  push: { enabled: true, relayUrl: 'https://relay.test' },
+  push: { enabled: true },
   identity: { name: 'alpha', color: '#fff' },
   ...overrides,
 });
 
 describe('buildPushContent', () => {
-  test('returns null when push is disabled, so ntfy-only servers send nothing', () => {
-    const config = cfg({ push: { enabled: false, relayUrl: 'https://relay.test' } });
+  test('returns null when push is disabled', () => {
+    const config = cfg({ push: { enabled: false } });
     expect(buildPushContent({ type: 'waiting' }, CTX, config)).toBeNull();
   });
 
@@ -43,7 +43,7 @@ describe('buildPushContent', () => {
   });
 
   test('deep link carries session and host so a tap opens the right tab', () => {
-    // Mirrors the ntfy click URL; hostStore resolves `host` to a profile.
+    // hostStore resolves `host` back to a profile when the notification is tapped.
     expect(buildPushContent({ type: 'waiting' }, CTX, cfg())?.link).toBe(
       'tether://session/term-7?host=alpha',
     );
@@ -79,12 +79,6 @@ describe('buildPushContent', () => {
     // base64 of (12-byte nonce + plaintext + 16-byte tag), 4/3 expansion.
     const plaintext = Buffer.byteLength(JSON.stringify(content));
     expect(Math.ceil((plaintext + 28) / 3) * 4).toBeLessThan(3000);
-  });
-
-  test('returns null when no relay is configured, since there is nowhere to send', () => {
-    expect(
-      buildPushContent({ type: 'waiting' }, CTX, cfg({ push: { enabled: true, relayUrl: '' } })),
-    ).toBeNull();
   });
 
   test('session ids and host names with URL-hostile characters are encoded', () => {

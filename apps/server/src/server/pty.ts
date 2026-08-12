@@ -19,7 +19,7 @@ import { findGitRoot } from './gitRoot';
 import { EMPTY_REPO_STATUS, type RepoStatus } from './gitStatus';
 import { GitWatch } from './gitWatch';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
-import { buildNotification, type NotificationEvent, send } from './notifier';
+import type { NotificationEvent } from './notifications';
 import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import { clampDims, type Dims, planPtyResize } from './ptyResize';
 import { buildPushContent, sendPush } from './push';
@@ -207,12 +207,8 @@ function notify(id: string, event: NotificationEvent): void {
     sessionTitle: autoTitle(getOscTitle(id), getLiveCwd(id), session?.command ?? 'bash'),
   };
   const cfg = getConfig();
-  const payload = buildNotification(event, ctx, cfg);
-  if (payload) void send(payload, cfg);
-  // ntfy and native push are independent channels — a server may run either,
-  // both, or neither, and one being disabled must not suppress the other.
   const pushContent = buildPushContent(event, ctx, cfg);
-  if (pushContent) void sendPush(pushContent, ctx, cfg);
+  if (pushContent) void sendPush(pushContent, ctx);
 }
 
 // Connect to a session's holder socket and wire its frames into the existing

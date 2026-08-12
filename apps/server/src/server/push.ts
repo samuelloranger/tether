@@ -1,7 +1,8 @@
 import type { Config } from './config';
-import type { NotificationContext, NotificationEvent } from './notifier';
+import type { NotificationContext, NotificationEvent } from './notifications';
 import { encryptPushContent, type PushContent } from './pushCrypto';
 import { listPushDevices, markPushDeviceUsed, removePushDevice } from './pushDevices';
+import { PUSH_RELAY_URL } from './pushRelay';
 
 export interface RelayRequest {
   token: string;
@@ -22,17 +23,14 @@ function truncate(value: string, limit: number): string {
 
 /**
  * The human-readable half of a push, before encryption. Kept pure and separate
- * from delivery so the wording is testable without a device, a relay, or Apple
- * — the same split `notifier.ts` uses for ntfy.
+ * from delivery so the wording is testable without a device, a relay, or Apple.
  */
 export function buildPushContent(
   event: NotificationEvent,
   ctx: NotificationContext,
   cfg: Config,
 ): PushContent | null {
-  // No relay configured means no delivery path — bail before building content
-  // rather than failing per-device later.
-  if (!cfg.push.enabled || !cfg.push.relayUrl || !cfg.triggers[event.type]) return null;
+  if (!cfg.push.enabled || !cfg.triggers[event.type]) return null;
   const title = `${cfg.identity.name} · ${
     event.type === 'oscNotify' && event.title ? event.title : ctx.sessionTitle
   }`;
@@ -53,18 +51,22 @@ export function buildPushContent(
   };
 }
 
+export function buildTestPushContent(cfg: Config): PushContent {
+  return {
+    title: `${cfg.identity.name} · Test`,
+    body: 'Notifications from this Tether server are working.',
+    link: 'tether://',
+  };
+}
+
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 /**
  * Deliver one push. A 410 means the app was uninstalled: the relay holds no
  * state, so this server is the only place that can forget the token.
  */
-async function deliverToDevice(
-  relayUrl: string,
-  request: RelayRequest,
-  fetcher: Fetch,
-): Promise<void> {
-  const response = await fetcher(`${relayUrl.replace(/\/+$/, '')}/push`, {
+async function deliverToDevice(request: RelayRequest, fetcher: Fetch): Promise<void> {
+  const response = await fetcher(`${PUSH_RELAY_URL.replace(/\/+$/, '')}/push`, {
     method: 'POST',
     redirect: 'error',
     signal: AbortSignal.timeout(5000),
@@ -79,6 +81,18 @@ async function deliverToDevice(
   markPushDeviceUsed(request.token);
 }
 
+async function requestFor(
+  device: { deviceToken: string; secretKey: string },
+  content: PushContent,
+  collapseId: string,
+): Promise<RelayRequest> {
+  return {
+    token: device.deviceToken,
+    ciphertext: await encryptPushContent(device.secretKey, content),
+    collapseId,
+  };
+}
+
 /**
  * Fan a notification out to every registered device. Failures are logged and
  * swallowed: notification delivery is advisory and must never block the PTY.
@@ -86,7 +100,6 @@ async function deliverToDevice(
 export async function sendPush(
   content: PushContent,
   ctx: NotificationContext,
-  cfg: Config,
   fetcher: Fetch = fetch,
 ): Promise<void> {
   const devices = listPushDevices();
@@ -95,12 +108,7 @@ export async function sendPush(
     devices.map(async (device) => {
       try {
         await deliverToDevice(
-          cfg.push.relayUrl,
-          {
-            token: device.deviceToken,
-            ciphertext: await encryptPushContent(device.secretKey, content),
-            collapseId: ctx.sessionId.slice(0, 64),
-          },
+          await requestFor(device, content, ctx.sessionId.slice(0, 64)),
           fetcher,
         );
       } catch (error) {
@@ -108,4 +116,28 @@ export async function sendPush(
       }
     }),
   );
+}
+
+/**
+ * Deliver a test push, reporting failures instead of swallowing them — this is
+ * the one path where the user is watching for an answer, so "no devices" and
+ * "the relay refused" have to reach the UI rather than the server log.
+ */
+export async function sendTestPush(cfg: Config, fetcher: Fetch = fetch): Promise<void> {
+  const devices = listPushDevices();
+  if (devices.length === 0)
+    throw new Error('No devices are registered for push on this server yet.');
+  const content = buildTestPushContent(cfg);
+  const results = await Promise.allSettled(
+    devices.map(async (device) =>
+      deliverToDevice(await requestFor(device, content, 'tether-test'), fetcher),
+    ),
+  );
+  // One phone out of several failing still proves the path works, so only a
+  // clean sweep of failures is reported as an error.
+  const failure = results.find((result) => result.status === 'rejected');
+  if (failure && results.every((result) => result.status === 'rejected'))
+    throw new Error(
+      failure.reason instanceof Error ? failure.reason.message : 'Push delivery failed.',
+    );
 }

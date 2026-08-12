@@ -1,11 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import {
-  getConfig,
-  patchConfig,
-  redactConfig,
-  resetConfigCache,
-  validateNotifyUrl,
-} from './config';
+import { getConfig, patchConfig, resetConfigCache } from './config';
 import { db } from './db';
 
 afterEach(() => {
@@ -14,20 +8,15 @@ afterEach(() => {
 });
 
 test('config defaults and partial patches preserve sibling values', async () => {
-  expect(getConfig().notify.enabled).toBe(false);
-  await patchConfig({ notify: { enabled: true, topic: 'alerts', token: 'secret' } });
-  const next = await patchConfig({ notify: { topic: 'updated' } });
-  expect(next.notify).toEqual({
-    enabled: true,
-    url: 'https://ntfy.sh',
-    topic: 'updated',
-    token: 'secret',
-  });
-  expect(redactConfig(next).notify).toEqual({
-    enabled: true,
-    url: 'https://ntfy.sh',
-    topic: 'updated',
-    hasToken: true,
+  expect(getConfig().push.enabled).toBe(false);
+  await patchConfig({ push: { enabled: true }, triggers: { waiting: false } });
+  const next = await patchConfig({ triggers: { exit: false } });
+  expect(next.push.enabled).toBe(true);
+  expect(next.triggers).toEqual({
+    waiting: false,
+    oscNotify: true,
+    exit: false,
+    longJob: true,
   });
 });
 
@@ -35,8 +24,15 @@ test('config rejects unknown keys', async () => {
   await expect(patchConfig({ unknown: true })).rejects.toThrow();
 });
 
-test('config rejects a public hostname that resolves to a private notification address', async () => {
-  await expect(
-    validateNotifyUrl('https://ntfy.example', async () => [{ address: '10.0.0.1' }]),
-  ).rejects.toThrow('TETHER_ALLOW_PRIVATE_NOTIFY_URL=1');
+test('a settings row left by a removed section does not break config reads', () => {
+  // Servers upgrading from before native push still have `config.notify`
+  // stored. getConfig reads only the keys it knows, so the leftover row must
+  // be inert rather than a strict-parse failure that takes the server down.
+  db.query('INSERT OR REPLACE INTO settings (key, value) VALUES ($key, $value)').run({
+    $key: 'config.notify',
+    $value: JSON.stringify({ enabled: true, url: 'https://ntfy.sh', topic: 'old' }),
+  });
+  resetConfigCache();
+  expect(() => getConfig()).not.toThrow();
+  expect(getConfig().push.enabled).toBe(false);
 });

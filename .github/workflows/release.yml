@@ -470,9 +470,16 @@ jobs:
       - name: Compile ${{ matrix.asset }}
         working-directory: apps/server
         run: |
+          # The relay URL is stamped in here rather than configured per server:
+          # only the relay holding the APNs key for this app's signing identity
+          # can deliver to the released build. Override with the
+          # TETHER_PUSH_RELAY_URL repo variable to cut binaries for a fork with
+          # its own Apple team; TETHER_PUSH_RELAY_URL in the server's env still
+          # wins at runtime.
           bun build --compile --minify \
             --target=${{ matrix.target }} \
             --define 'process.env.TETHER_VERSION="'"${TAG}"'"' \
+            --define 'process.env.TETHER_DEFAULT_PUSH_RELAY_URL="'"${RELAY_URL}"'"' \
             --outfile tether \
             src/server/main.ts
           # Stable (un-versioned) name — makes
@@ -488,6 +495,8 @@ jobs:
               mv tether "$out" ;;
           esac
           echo "ASSET=$out" >> "$GITHUB_ENV"
+        env:
+          RELAY_URL: ${{ vars.TETHER_PUSH_RELAY_URL || 'https://tether-relay.samlo.cloud' }}
       - name: Checksum ${{ matrix.asset }}
         working-directory: apps/server
         run: sha256sum "$ASSET" > "$ASSET.sha256"

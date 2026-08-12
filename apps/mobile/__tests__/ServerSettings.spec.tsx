@@ -12,7 +12,8 @@ const host = {
   order: 0,
 };
 const config = {
-  notify: { enabled: true, url: 'https://ntfy.sh', topic: 'tether', hasToken: true },
+  push: { enabled: true },
+  pushDevices: 1,
   triggers: { waiting: true, oscNotify: true, exit: true, longJob: true },
   longJobSeconds: 300,
   identity: { name: 'Studio', color: '#89b4fa' },

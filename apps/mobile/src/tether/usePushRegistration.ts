@@ -37,8 +37,9 @@ async function loadOrCreateSecret(): Promise<string> {
 /**
  * Registers this device for native push with every configured host.
  *
- * iOS only: Android already has its own delivery story via ntfy, and adding
- * FCM would mean a second relay credential for no current benefit.
+ * iOS only: FCM would mean a second credential in the relay and a second
+ * decryption path in the client, and the Android build is not distributed
+ * through a store that would issue one.
  */
 export function usePushRegistration(
   clients: HostClient[],
