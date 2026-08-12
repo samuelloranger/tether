@@ -12,14 +12,7 @@ import {
   updateTargetVersion,
 } from './admin';
 import { authMiddleware } from './auth';
-import {
-  configSchema,
-  getConfig,
-  PrivateNotifyUrlError,
-  patchConfig,
-  redactConfig,
-  validateNotifyUrl,
-} from './config';
+import { type Config, getConfig, patchConfig } from './config';
 import {
   getAuthHash,
   getLogs,
@@ -48,7 +41,6 @@ import {
 import { resolveGitRoot } from './gitRoot';
 import { readRepoStatus } from './gitStatus';
 import { getLiveCwd } from './liveCwd';
-import { sendTestNotification } from './notifier';
 import { PRESENT_CONTROL_TOKEN_FILE, UPLOADS_DIR } from './paths';
 import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
 import {
@@ -62,8 +54,9 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { sendTestPush } from './push';
 import { isValidSecretKey } from './pushCrypto';
-import { registerPushDevice, removePushDevice } from './pushDevices';
+import { countPushDevices, registerPushDevice, removePushDevice } from './pushDevices';
 import { planReplay } from './replayPlan';
 import { VERSION } from './runtime';
 import { getActivity } from './sessionActivity';
@@ -203,10 +196,15 @@ app.post('/api/setup', async (c) => {
 // Lightweight authed reachability + password probe for the client's Test connection.
 app.get('/api/health', (c) => c.json({ ok: true, version: VERSION }));
 
-app.get('/api/config', (c) => c.json(redactConfig()));
+// `pushDevices` is reported alongside the config but is not part of it: the
+// client needs it to explain why notifications are silent (nothing registered
+// yet), and it is derived state, not a setting anyone can PATCH.
+const withPushDevices = (config: Config) => ({ ...config, pushDevices: countPushDevices() });
+
+app.get('/api/config', (c) => c.json(withPushDevices(getConfig())));
 app.patch('/api/config', async (c) => {
   try {
-    return c.json(redactConfig(await patchConfig(await c.req.json())));
+    return c.json(withPushDevices(await patchConfig(await c.req.json())));
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'invalid config' }, 400);
   }
@@ -246,28 +244,24 @@ app.post('/api/admin/restart', async (c) => {
 });
 
 app.post('/api/admin/test-notification', async (c) => {
-  const body = await c.req.json().catch(() => ({}));
   if (!allowAdminRequest(clientKey(c))) {
     return c.json({ ok: false, error: 'rate limited' }, 429);
   }
-  const result = configSchema.pick({ notify: true }).partial().strict().safeParse(body);
-  if (!result.success) return c.json({ ok: false, error: result.error.message }, 400);
-  const current = getConfig();
-  const config = { ...current, notify: { ...current.notify, ...result.data.notify } };
+  // Deliberately not gated on `push.enabled`: sending a test is how you check
+  // the path works before turning it on.
   try {
-    await validateNotifyUrl(config.notify.url);
-  } catch (error) {
-    if (error instanceof PrivateNotifyUrlError)
-      return c.json({ ok: false, error: error.message, code: error.code }, 400);
-    return c.json({ ok: false, error: 'invalid notification URL' }, 400);
-  }
-  try {
-    await sendTestNotification(config);
+    await sendTestPush(getConfig());
     return c.json({ ok: true });
   } catch (error) {
     console.error('Test notification delivery failed:', error);
     return c.json(
-      { ok: false, error: 'Notification delivery failed.', code: 'notification_delivery_failed' },
+      {
+        ok: false,
+        // The message names the actual cause ("no devices registered" vs. the
+        // relay's status) — a generic string here reads as a broken feature.
+        error: error instanceof Error ? error.message : 'Notification delivery failed.',
+        code: 'notification_delivery_failed',
+      },
       502,
     );
   }

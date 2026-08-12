@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { app } from './app';
 import { resetConfigCache } from './config';
 import { db, getAuthHash, setAuthHash } from './db';
+import { registerPushDevice, removePushDevice } from './pushDevices';
 
 const PASSWORD = 'config-api-password';
 const AUTH = { Authorization: `Bearer ${PASSWORD}`, 'Content-Type': 'application/json' };
@@ -11,7 +12,7 @@ afterEach(() => {
   resetConfigCache();
 });
 
-test('GET and PATCH /api/config are authenticated, merged, and redact tokens', async () => {
+test('GET and PATCH /api/config are authenticated and merged', async () => {
   const previous = getAuthHash();
   setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
   try {
@@ -19,55 +20,36 @@ test('GET and PATCH /api/config are authenticated, merged, and redact tokens', a
     const patched = await app.request('/api/config', {
       method: 'PATCH',
       headers: AUTH,
-      body: JSON.stringify({ notify: { enabled: true, topic: 'tether-test', token: 'secret' } }),
+      body: JSON.stringify({ push: { enabled: true }, triggers: { exit: false } }),
     });
     expect(patched.status).toBe(200);
-    expect((await patched.json()).notify).toEqual({
-      enabled: true,
-      url: 'https://ntfy.sh',
-      topic: 'tether-test',
-      hasToken: true,
-    });
+    const body = await patched.json();
+    expect(body.push).toEqual({ enabled: true });
+    expect(body.triggers).toEqual({ waiting: true, oscNotify: true, exit: false, longJob: true });
     const fetched = await app.request('/api/config', { headers: AUTH });
-    expect((await fetched.json()).notify.hasToken).toBe(true);
+    expect((await fetched.json()).push.enabled).toBe(true);
   } finally {
     setAuthHash(previous);
   }
 });
 
-test('PATCH /api/config rejects private notification addresses unless explicitly allowed', async () => {
+test('/api/config reports how many devices are registered for push', async () => {
   const previous = getAuthHash();
-  const previousAllowPrivate = process.env.TETHER_ALLOW_PRIVATE_NOTIFY_URL;
   setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
+  registerPushDevice('config-api-device', Buffer.alloc(32, 3).toString('base64'));
   try {
-    for (const url of [
-      'http://127.0.0.1',
-      'http://169.254.169.254',
-      'http://10.0.0.1',
-      'http://172.16.0.1',
-      'http://192.168.1.1',
-      'http://[fe80::1]',
-      'http://[fc00::1]',
-    ]) {
-      const res = await app.request('/api/config', {
-        method: 'PATCH',
-        headers: AUTH,
-        body: JSON.stringify({ notify: { url } }),
-      });
-      expect(res.status).toBe(400);
-      expect((await res.json()).error).toContain('TETHER_ALLOW_PRIVATE_NOTIFY_URL=1');
-    }
-
-    process.env.TETHER_ALLOW_PRIVATE_NOTIFY_URL = '1';
-    const allowed = await app.request('/api/config', {
+    const res = await app.request('/api/config', { headers: AUTH });
+    // The client needs this to explain silent notifications; it is derived
+    // state and must not be patchable.
+    expect((await res.json()).pushDevices).toBeGreaterThan(0);
+    const rejected = await app.request('/api/config', {
       method: 'PATCH',
       headers: AUTH,
-      body: JSON.stringify({ notify: { url: 'http://192.168.1.1' } }),
+      body: JSON.stringify({ pushDevices: 5 }),
     });
-    expect(allowed.status).toBe(200);
+    expect(rejected.status).toBe(400);
   } finally {
     setAuthHash(previous);
-    if (previousAllowPrivate === undefined) delete process.env.TETHER_ALLOW_PRIVATE_NOTIFY_URL;
-    else process.env.TETHER_ALLOW_PRIVATE_NOTIFY_URL = previousAllowPrivate;
+    removePushDevice('config-api-device');
   }
 });

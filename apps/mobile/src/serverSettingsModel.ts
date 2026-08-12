@@ -1,5 +1,9 @@
 export type ServerConfig = {
-  notify: { enabled: boolean; url: string; topic: string; hasToken: boolean };
+  push: { enabled: boolean };
+  // Derived, read-only: how many devices this server can push to. The UI needs
+  // it to explain silence ("nothing registered yet") rather than leaving an
+  // enabled toggle that quietly does nothing.
+  pushDevices: number;
   triggers: { waiting: boolean; oscNotify: boolean; exit: boolean; longJob: boolean };
   longJobSeconds: number;
   identity: { name: string; color: string };
@@ -7,7 +11,6 @@ export type ServerConfig = {
 };
 
 export type ServerSettingsDraft = Omit<ServerConfig, 'longJobSeconds' | 'session'> & {
-  notify: ServerConfig['notify'] & { token?: string };
   longJobSeconds: string;
   session: Omit<ServerConfig['session'], 'scrollbackRows' | 'silenceMs'> & {
     scrollbackRows: string;
@@ -15,18 +18,17 @@ export type ServerSettingsDraft = Omit<ServerConfig, 'longJobSeconds' | 'session
   };
 };
 export type ServerConfigPatch = Partial<{
-  notify: Partial<Omit<ServerConfig['notify'], 'hasToken'>> & { token?: string };
+  push: Partial<ServerConfig['push']>;
   triggers: Partial<ServerConfig['triggers']>;
   longJobSeconds: number;
   identity: Partial<ServerConfig['identity']>;
   session: Partial<ServerConfig['session']>;
 }>;
-type NotifyPatch = NonNullable<ServerConfigPatch['notify']>;
 
 export function createServerSettingsDraft(config: ServerConfig): ServerSettingsDraft {
   return {
     ...config,
-    notify: { ...config.notify },
+    push: { ...config.push },
     triggers: { ...config.triggers },
     identity: { ...config.identity },
     longJobSeconds: String(config.longJobSeconds),
@@ -46,9 +48,8 @@ function changedFields<T extends object>(before: T, after: T, omit: readonly (ke
 }
 
 export function patchForDraft(config: ServerConfig, draft: ServerSettingsDraft): ServerConfigPatch {
-  const notify = changedFields(config.notify, draft.notify, ['hasToken']) as NotifyPatch;
-  if (draft.notify.token !== undefined) notify.token = draft.notify.token;
   const patch: ServerConfigPatch = {};
+  const push = changedFields(config.push, draft.push);
   const triggers = changedFields(config.triggers, draft.triggers);
   const identity = changedFields(config.identity, draft.identity);
   const session: NonNullable<ServerConfigPatch['session']> = {};
@@ -60,7 +61,7 @@ export function patchForDraft(config: ServerConfig, draft: ServerSettingsDraft):
   if (config.session.scrollbackRows !== scrollbackRows) session.scrollbackRows = scrollbackRows;
   const silenceMs = Number(draft.session.silenceMs) * 1000;
   if (config.session.silenceMs !== silenceMs) session.silenceMs = silenceMs;
-  if (Object.keys(notify).length) patch.notify = notify;
+  if (Object.keys(push).length) patch.push = push;
   if (Object.keys(triggers).length) patch.triggers = triggers;
   const longJobSeconds = Number(draft.longJobSeconds);
   if (config.longJobSeconds !== longJobSeconds) patch.longJobSeconds = longJobSeconds;
@@ -73,6 +74,24 @@ export function isServerSettingsDirty(config: ServerConfig, draft: ServerSetting
   return Object.keys(patchForDraft(config, draft)).length > 0;
 }
 
+/**
+ * One line under the push toggle explaining what will actually happen. Push is
+ * silent for several legitimate reasons — no device has registered yet, or this
+ * client can't receive it at all — and an unexplained toggle that does nothing
+ * reads as a broken feature.
+ */
+export function pushStatusHint(enabled: boolean, deviceCount: number, canReceive: boolean): string {
+  if (!enabled) return 'Off. Nothing is sent to Apple, and no notification leaves this server.';
+  if (deviceCount === 0)
+    return canReceive
+      ? 'On, but no device has registered yet. Allow notifications when the app asks, then reopen this screen.'
+      : 'On, but no device has registered yet. Only the iOS app can receive push.';
+  const devices = `${deviceCount} device${deviceCount === 1 ? '' : 's'}`;
+  return canReceive
+    ? `On. Notifications go to ${devices}, encrypted so the relay cannot read them.`
+    : `On. Notifications go to ${devices} — not this one; only the iOS app can receive push.`;
+}
+
 export type ServerSettingsErrors = Partial<Record<string, string>>;
 
 export function validateServerSettingsDraft(draft: ServerSettingsDraft): ServerSettingsErrors {
@@ -81,17 +100,6 @@ export function validateServerSettingsDraft(draft: ServerSettingsDraft): ServerS
     errors.identityName = 'Name must be between 1 and 100 characters.';
   if (draft.identity.color.length > 32)
     errors.identityColor = 'Color must be at most 32 characters.';
-  if (draft.notify.enabled) {
-    try {
-      new URL(draft.notify.url);
-    } catch {
-      errors.notifyUrl = 'Enter a valid notification URL.';
-    }
-    if (draft.notify.topic.length > 256)
-      errors.notifyTopic = 'Topic must be at most 256 characters.';
-  }
-  if (draft.notify.token !== undefined && (!draft.notify.token || draft.notify.token.length > 4096))
-    errors.notifyToken = 'Token must be between 1 and 4096 characters.';
   const longJobSeconds = Number(draft.longJobSeconds);
   if (!Number.isInteger(longJobSeconds) || longJobSeconds <= 0)
     errors.longJobSeconds = 'Long-job threshold must be a positive whole number.';

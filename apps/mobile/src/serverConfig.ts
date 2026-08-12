@@ -29,11 +29,8 @@ export async function patchServerConfig(
   );
 }
 
-export async function sendServerNotificationTest(
-  client: HostClient,
-  patch: Pick<ServerConfigPatch, 'notify'>,
-): Promise<void> {
-  await readBody<{ ok: true }>(await client.post('/api/admin/test-notification', json(patch)));
+export async function sendServerNotificationTest(client: HostClient): Promise<void> {
+  await readBody<{ ok: true }>(await client.post('/api/admin/test-notification', json({})));
 }
 
 export async function changeServerPassword(

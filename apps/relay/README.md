@@ -65,10 +65,21 @@ so the schema rejects it.
 
 ## Pointing a Tether server at it
 
-Relay URL has no default; a server opts in explicitly.
+Release binaries have the official relay stamped in at build time (see
+`apps/server/src/server/pushRelay.ts`) — it is not a user-facing setting,
+because only the relay holding the APNs key for the app's signing identity can
+deliver to that build. Turning on **Push to my devices** in the host's settings
+is all a user does.
+
+Running your own relay therefore means your own Apple team and your own client
+build. Point a server at it either at build time:
 
 ```sh
-TETHER_PUSH_RELAY_URL=https://relay.example.com
+TETHER_PUSH_RELAY_URL=https://relay.example.com bun --cwd apps/server run build:binary
 ```
 
-then enable `push` in the server's config.
+or at runtime, which wins over whatever was baked in:
+
+```sh
+TETHER_PUSH_RELAY_URL=https://relay.example.com tether start
+```

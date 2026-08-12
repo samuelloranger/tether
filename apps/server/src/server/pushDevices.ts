@@ -37,6 +37,10 @@ export function listPushDevices(): PushDevice[] {
   );
 }
 
+export function countPushDevices(): number {
+  return (db.query('SELECT COUNT(*) AS n FROM push_devices').get() as { n: number }).n;
+}
+
 /**
  * Forget a device. Called both when a user unregisters and when the relay
  * reports HTTP 410 — the relay is stateless, so pruning is our job.

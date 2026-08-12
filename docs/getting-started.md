@@ -35,10 +35,6 @@ Pick the app for your device — both connect to the same server the same way. E
 - **iOS** — install [TestFlight](https://apps.apple.com/app/testflight/id899247664), then open the [public beta link](https://testflight.apple.com/join/j7rPkfhq). No Mac, no AltServer, and nothing to re-sign every week. New builds arrive automatically; each is testable for 90 days.
 - **Desktop** — download the installer for your platform; see [Desktop app](/desktop) for the per-OS files and how it differs from mobile.
 
-::: tip Push notifications need TestFlight
-Native notifications — the ones that arrive in Tether itself rather than a separate app — only work on the TestFlight build. Apple only issues push entitlements to properly signed apps, which is why sideloading was dropped.
-:::
-
 ## 4. Connect
 
 In the app's setup screen, enter your server's **host/IP**, **port** (default `8085`), and **password**, then **Test connection**. You'll get one of:
@@ -52,6 +48,16 @@ The password controls *access*, not encryption. For encrypted transport, run Tet
 :::
 
 Once connected, see [Terminal basics](/terminal/basics).
+
+## 5. Turn on notifications (optional)
+
+Tether can notify you when a session needs input, a program raises an alert, a session exits, or a long command finishes. Open the host's settings, turn on **Push to my devices**, and pick which of those four you want. The line under the toggle tells you how many devices the server can reach — if it says none, allow notifications when the app asks and reopen the screen.
+
+Your phone generates an encryption key and shares it only with your own servers, so the relay that forwards the push to Apple receives a blob it cannot read. See [Privacy](/privacy) for what that relay does and does not see.
+
+::: tip Notifications need the TestFlight build
+Apple only issues push entitlements to properly signed apps, so notifications arrive on the TestFlight build only — one of the reasons sideloading was dropped. iOS only for now; the desktop app raises its own local notifications instead.
+:::
 
 ## Show an agent preview
 
