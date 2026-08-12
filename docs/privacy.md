@@ -27,6 +27,7 @@ Tether only connects where you point it:
 
 - **Your Tether server(s)** — every host you add yourself. All terminal, file, and git traffic goes here and nowhere else.
 - **A notification server, if you configure one** — Tether can send push notifications through an [ntfy](https://ntfy.sh)-compatible server when a session needs attention. There is no default endpoint; this is off until you set a URL, and the server you name receives the notification text. Point it at your own ntfy instance if you'd rather it stay in-house.
+- **The push relay, if you enable native notifications** — Apple only accepts a push signed by the credential belonging to the app's publisher, so your server cannot talk to Apple directly. It instead sends to a relay, which forwards to Apple. **The relay cannot read your notifications:** your phone generates an encryption key, shares it only with your own servers, and the relay receives a device token and an encrypted blob it has no key for. The notification is decrypted on your phone. The relay stores nothing — no database, no accounts, no logging of payloads. Like everything else here, it is off until you configure a relay URL, and there is no default.
 - **GitHub, for update checks** — the server and desktop app query the public GitHub releases API to see whether a newer version exists. This is an anonymous request for a public file.
 
 ## Transport security
@@ -35,7 +36,7 @@ Tether's own transport is **unencrypted** by default. The password controls acce
 
 ## What Apple collects
 
-If you installed via TestFlight or the App Store, Apple collects installation and crash data under [Apple's privacy policy](https://www.apple.com/legal/privacy/), independent of anything Tether does. Crash reports are shared with the developer only if you opt in on your device; they contain diagnostic stack traces, not terminal contents. Installing via AltStore or a direct `.ipa` avoids this entirely.
+The iOS app is distributed through TestFlight, so Apple collects installation and crash data under [Apple's privacy policy](https://www.apple.com/legal/privacy/), independent of anything Tether does. Crash reports reach the developer only if you opt in on your device, and they contain diagnostic stack traces — never terminal contents.
 
 ## Children
 
