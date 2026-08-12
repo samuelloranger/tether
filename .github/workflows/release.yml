@@ -6,10 +6,8 @@ name: Release builds
 # `publish` take it out of draft. A failed build therefore can never become the
 # public `releases/latest` that install.sh and `tether update` resolve stable
 # asset names from (how v2.0.0 shipped with every desktop bundle broken).
-# altstore.json is rebuilt from the Releases API after publish and pushed to
-# samlo.cloud (not committed to main — that race made every follow-up release
-# push diverge). Manual runs are build-only: they upload workflow artifacts
-# without touching a release.
+# Manual runs are build-only: they upload workflow artifacts without touching a
+# release.
 #
 # Why a tag push and not a `release` event: GitHub does not run workflows for
 # draft releases at all — the `created`, `edited`, and `deleted` activity types
@@ -208,17 +206,10 @@ jobs:
             apps/mobile/src-tauri/target/*/release/bundle/**
           if-no-files-found: error
 
-  # ONE archive, TWO outputs. The archive is built with real App Store
-  # distribution signing; from it we export the App Store IPA that goes to
-  # TestFlight, and separately zip the .app into the Payload-style IPA that the
-  # AltStore feed serves. Archiving is by far the slowest step and both consumers
-  # want the same bits, so building it twice only burned macOS runner minutes.
-  #
-  # The AltStore IPA is NOT "a signed build for sideloading" — no such thing
-  # exists. App Store profiles embed no device UDIDs, so that IPA can never be
-  # installed directly. AltStore/SideStore strip the signature and re-sign with
-  # the user's own certificate, which is why the previously-unsigned IPA worked
-  # and why a distribution-signed one works equally well as its input.
+  # iOS ships through TestFlight only. Sideloading was dropped once the public
+  # TestFlight beta opened: an App Store-signed IPA cannot be installed directly
+  # (App Store profiles embed no device UDIDs), so serving one meant shipping an
+  # artifact whose only purpose was to be stripped and re-signed by AltStore.
   #
   # Signing assets are created on demand by -allowProvisioningUpdates, which
   # authenticates with the App Store Connect API key rather than a checked-in
@@ -226,13 +217,11 @@ jobs:
   #
   # `publish` needs this job, so the TestFlight upload is continue-on-error: a
   # rejected or flaky Apple upload must never hold back the GitHub release that
-  # install.sh and the AltStore feed resolve from.
+  # install.sh resolves the server binaries from.
   ios:
     needs: [draft, renderer]
     if: github.event_name == 'push' || inputs.scope == 'ios' || inputs.scope == 'testflight' || inputs.scope == 'all'
     runs-on: macos-15
-    env:
-      IPA_NAME: ${{ github.event_name == 'push' && 'tether.ipa' || 'tether-manual.ipa' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -332,24 +321,6 @@ jobs:
             -authenticationKeyID "$KEY_ID" \
             -authenticationKeyIssuerID "$ISSUER_ID"
 
-      # The AltStore IPA, cut from the SAME archive rather than a second build.
-      # Payload/ + zip is the sideload-loader convention (not xcodebuild's export
-      # layout), and the name must stay tether.ipa — altstore.json is rebuilt
-      # from the Releases API and resolves that exact stable asset name.
-      - name: Package AltStore IPA
-        working-directory: apps/mobile
-        run: |
-          mkdir -p Payload
-          cp -R "build/Tether.xcarchive/Products/Applications/Tether.app" Payload/
-          zip -qry "$IPA_NAME" Payload
-
-      - name: Attach AltStore IPA to release
-        if: github.event_name == 'push'
-        working-directory: apps/mobile
-        run: gh release upload "$TAG" "$IPA_NAME" --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       - name: Validate build
         working-directory: apps/mobile
         env:
@@ -383,9 +354,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: tether-ios-${{ github.sha }}
-          path: |
-            apps/mobile/${{ env.IPA_NAME }}
-            apps/mobile/build/export/*.ipa
+          path: apps/mobile/build/export/*.ipa
 
   android:
     needs: [draft, renderer]
@@ -550,33 +519,3 @@ jobs:
         run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
-
-  # Rebuild the AltStore source from the Releases API and publish it to
-  # https://samlo.cloud/tether/altstore.json. Do NOT commit it to main — a bot
-  # push to the default branch after every release was racing release.sh's bare
-  # `git push` and rejecting the next release as diverged.
-  altstore:
-    if: github.event_name == 'push'
-    needs: publish
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Build altstore.json from releases
-        run: scripts/altstore-release.sh -o altstore.json
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Publish altstore.json to samlo.cloud
-        env:
-          TOKEN: ${{ secrets.SAMLO_CLOUD_DOCS_TOKEN }}
-        run: |
-          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/samuelloranger/samlo-cloud.git" out
-          mkdir -p out/docs/tether
-          cp altstore.json out/docs/tether/altstore.json
-          cd out
-          git config user.name  "docs-bot"
-          git config user.email "docs-bot@samlo.cloud"
-          git add docs/tether/altstore.json
-          git diff --cached --quiet || git commit -m "docs(tether): altstore $TAG"
-          git push

@@ -26,7 +26,7 @@ Every link below always resolves to the **newest release** — no need to hunt t
 | Server binary | Linux arm64 | [`tether-linux-arm64`](https://github.com/samuelloranger/tether/releases/latest/download/tether-linux-arm64) |
 | Server binary | macOS Apple Silicon | [`tether-darwin-arm64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-arm64.tar.gz) |
 | Server binary | macOS Intel | [`tether-darwin-x64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-x64.tar.gz) |
-| **Mobile** | iOS | [AltStore source](#mobile-app-ios) (auto-updates) · or [`tether.ipa`](https://github.com/samuelloranger/tether/releases/latest/download/tether.ipa) |
+| **Mobile** | iOS | [TestFlight beta](https://testflight.apple.com/join/j7rPkfhq) (auto-updates) |
 | **Mobile** | Android | [Obtainium](#mobile-app-android) (auto-updates) · or [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) |
 | **Desktop** | Linux / Windows / macOS | see [Desktop app](#desktop-app-linux--windows--macos) below |
 
@@ -63,18 +63,15 @@ tether serve | start | stop | restart | status | logs | present | set-password |
 
 ## Mobile app (iOS)
 
-Install via [AltStore](https://altstore.io) (one-time setup: install AltServer on your Mac/PC and use it to put AltStore on your iPhone — it signs apps with your own Apple ID):
+Install [TestFlight](https://apps.apple.com/app/testflight/id899247664) from the App Store, then open the public beta link on your iPhone:
 
-1. In AltStore: **Sources → + →** add this source:
+```
+https://testflight.apple.com/join/j7rPkfhq
+```
 
-   ```
-   https://samlo.cloud/tether/altstore.json
-   ```
+New builds arrive automatically; each is testable for 90 days. No Mac, no AltServer, and nothing to re-sign every week.
 
-2. Tether appears in **Browse** — install it from there. Updates show up in AltStore automatically when a new release is published.
-3. Free Apple IDs sign apps for 7 days — AltStore auto-refreshes whenever it can reach AltServer on your network.
-
-(Manual alternative: download [`tether.ipa`](https://github.com/samuelloranger/tether/releases/latest/download/tether.ipa) and open it via **My Apps → +** in AltStore.)
+Native push notifications — the ones that arrive in Tether itself — require this build. Apple only issues push entitlements to properly signed apps, which is why sideloading is no longer offered.
 
 Point the app at your server's IP and port on first launch.
 

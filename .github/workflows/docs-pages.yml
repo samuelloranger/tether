@@ -6,8 +6,6 @@ on:
     paths:
       - "docs/**"
       - "install.sh"
-      - "altstore.base.json"
-      - "scripts/altstore-release.sh"
       - ".github/workflows/docs-pages.yml"
   workflow_dispatch:
 
@@ -31,12 +29,6 @@ jobs:
         env:
           GITHUB_ACTIONS: "true"   # config sets base=/tether/ under Actions
         run: bun run docs:build
-      # Include the AltStore source in the docs tree so a docs redeploy does not
-      # wipe the file the release workflow published to the same path.
-      - name: Build altstore.json into docs dist
-        run: scripts/altstore-release.sh -o docs/.vitepress/dist/altstore.json
-        env:
-          GH_TOKEN: ${{ github.token }}
       - name: Push built docs to samlo-cloud
         env:
           TOKEN: ${{ secrets.SAMLO_CLOUD_DOCS_TOKEN }}
