@@ -49,6 +49,44 @@ describe('buildPushContent', () => {
     );
   });
 
+  test('bounds long OSC bodies so the relay does not reject them', () => {
+    // The relay caps ciphertext at 3000 chars and base64 inflates by ~4/3, so
+    // an unbounded body would 400 and the notification would vanish silently.
+    const content = buildPushContent({ type: 'oscNotify', body: 'x'.repeat(5000) }, CTX, cfg());
+    expect(content?.body.length).toBeLessThanOrEqual(800);
+    expect(content?.body.endsWith('…')).toBe(true);
+  });
+
+  test('bounds a very long session title too', () => {
+    const content = buildPushContent(
+      { type: 'waiting' },
+      { ...CTX, sessionTitle: 'y'.repeat(900) },
+      cfg(),
+    );
+    expect(content?.title.length).toBeLessThanOrEqual(200);
+  });
+
+  test('leaves short content untouched', () => {
+    expect(buildPushContent({ type: 'waiting' }, CTX, cfg())?.body).toBe('Waiting for input');
+  });
+
+  test('a maximum-size payload still fits the relay ciphertext limit', () => {
+    const content = buildPushContent(
+      { type: 'oscNotify', title: 'z'.repeat(500), body: 'x'.repeat(5000) },
+      { sessionId: 'a'.repeat(200), sessionTitle: 'y'.repeat(500) },
+      cfg(),
+    );
+    // base64 of (12-byte nonce + plaintext + 16-byte tag), 4/3 expansion.
+    const plaintext = Buffer.byteLength(JSON.stringify(content));
+    expect(Math.ceil((plaintext + 28) / 3) * 4).toBeLessThan(3000);
+  });
+
+  test('returns null when no relay is configured, since there is nowhere to send', () => {
+    expect(
+      buildPushContent({ type: 'waiting' }, CTX, cfg({ push: { enabled: true, relayUrl: '' } })),
+    ).toBeNull();
+  });
+
   test('session ids and host names with URL-hostile characters are encoded', () => {
     const content = buildPushContent(
       { type: 'waiting' },

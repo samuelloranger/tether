@@ -47,6 +47,8 @@ jest.mock('expo-notifications', () => ({
   getPermissionsAsync: jest.fn(async () => ({ granted: false })),
   requestPermissionsAsync: jest.fn(async () => ({ granted: false })),
   getDevicePushTokenAsync: jest.fn(async () => ({ type: 'ios', data: '' })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  useLastNotificationResponse: jest.fn(() => null),
 }));
 jest.mock('expo-crypto', () => ({
   getRandomBytes: jest.fn((size: number) => new Uint8Array(size)),

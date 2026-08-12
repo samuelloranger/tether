@@ -9,6 +9,17 @@ export interface RelayRequest {
   collapseId: string;
 }
 
+// The relay caps ciphertext at 3000 chars, and base64 of (nonce + plaintext +
+// GCM tag) inflates by ~4/3, so plaintext must stay well under that or an
+// otherwise valid long OSC notification is rejected and silently dropped.
+// These budgets leave ample headroom for the JSON envelope and the link.
+const MAX_TITLE_CHARS = 200;
+const MAX_BODY_CHARS = 800;
+
+function truncate(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
 /**
  * The human-readable half of a push, before encryption. Kept pure and separate
  * from delivery so the wording is testable without a device, a relay, or Apple
@@ -34,8 +45,8 @@ export function buildPushContent(
           ? `Session exited${event.exitCode === undefined ? '' : ` with code ${event.exitCode}`}`
           : `Job ran for ${event.seconds} seconds`;
   return {
-    title,
-    body,
+    title: truncate(title, MAX_TITLE_CHARS),
+    body: truncate(body, MAX_BODY_CHARS),
     link: `tether://session/${encodeURIComponent(ctx.sessionId)}?host=${encodeURIComponent(
       cfg.identity.name,
     )}`,
