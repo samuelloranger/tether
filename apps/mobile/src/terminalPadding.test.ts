@@ -3,9 +3,9 @@ import { expect, test } from 'bun:test';
 const source = (name: string) => Bun.file(new URL(name, import.meta.url)).text();
 
 test('terminal safe-area padding is inside the well, not wrapping App', async () => {
-  const [app, screen, html, desktopView] = await Promise.all([
+  const [app, canvas, html, desktopView] = await Promise.all([
     Bun.file(new URL('../App.tsx', import.meta.url)).text(),
-    source('./TerminalScreen.tsx'),
+    source('./TerminalCanvas.tsx'),
     source('./terminalRendererHtml.ts'),
     source('./TerminalView.tsx'),
   ]);
@@ -18,9 +18,9 @@ test('terminal safe-area padding is inside the well, not wrapping App', async ()
   );
 
   // Well uses terminal.bg; horizontal safe-area gutters live on the terminal host.
-  expect(screen).toContain('backgroundColor: theme.terminal.bg');
-  expect(screen).toContain('paddingLeft: insets.left');
-  expect(screen).toContain('paddingRight: insets.right');
+  expect(canvas).toContain('backgroundColor: theme.terminal.bg');
+  expect(canvas).toContain('paddingLeft: insets.left');
+  expect(canvas).toContain('paddingRight: insets.right');
 
   // 4px gutter is on .xterm (FitAddon-aware), not a wrapper around #terminal.
   expect(html).toContain('.xterm{box-sizing:border-box;padding:0 4px}');
