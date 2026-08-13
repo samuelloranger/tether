@@ -67,6 +67,48 @@ function linkTarget(value: unknown): value is LinkTarget {
   );
 }
 
+function parseModesEvent(value: Record<string, unknown>): RendererEvent | null {
+  const mouseMode = value.mouseMode;
+  const cursorStyle = value.cursorStyle;
+  if (
+    typeof value.applicationCursor !== 'boolean' ||
+    typeof value.bracketedPaste !== 'boolean' ||
+    typeof value.mouseSgr !== 'boolean' ||
+    typeof value.cursorVisible !== 'boolean' ||
+    typeof mouseMode !== 'string' ||
+    !MOUSE_MODES.has(mouseMode as MouseMode) ||
+    typeof cursorStyle !== 'string' ||
+    !CURSOR_STYLES.has(cursorStyle as CursorStyle)
+  )
+    return null;
+  return {
+    v: 1,
+    type: 'modes',
+    applicationCursor: value.applicationCursor,
+    bracketedPaste: value.bracketedPaste,
+    mouseMode: mouseMode as MouseMode,
+    mouseSgr: value.mouseSgr,
+    cursorStyle: cursorStyle as CursorStyle,
+    cursorVisible: value.cursorVisible,
+  };
+}
+
+function parseSerializedEvent(value: Record<string, unknown>): RendererEvent | null {
+  if (typeof value.requestId !== 'string' || typeof value.data !== 'string') return null;
+  const promptLines = Array.isArray(value.promptLines)
+    ? value.promptLines.filter(
+        (n): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0,
+      )
+    : [];
+  return {
+    v: 1,
+    type: 'serialized',
+    requestId: value.requestId,
+    data: value.data,
+    promptLines,
+  };
+}
+
 export function parseRendererEvent(data: string): RendererEvent | null {
   let value: Record<string, unknown>;
   try {
@@ -106,52 +148,16 @@ export function parseRendererEvent(data: string): RendererEvent | null {
         : null;
     case 'promptReturn':
       return { v: 1, type: 'promptReturn' };
-    case 'modes': {
-      const mouseMode = value.mouseMode;
-      const cursorStyle = value.cursorStyle;
-      if (
-        typeof value.applicationCursor !== 'boolean' ||
-        typeof value.bracketedPaste !== 'boolean' ||
-        typeof value.mouseSgr !== 'boolean' ||
-        typeof value.cursorVisible !== 'boolean' ||
-        typeof mouseMode !== 'string' ||
-        !MOUSE_MODES.has(mouseMode as MouseMode) ||
-        typeof cursorStyle !== 'string' ||
-        !CURSOR_STYLES.has(cursorStyle as CursorStyle)
-      )
-        return null;
-      return {
-        v: 1,
-        type: 'modes',
-        applicationCursor: value.applicationCursor,
-        bracketedPaste: value.bracketedPaste,
-        mouseMode: mouseMode as MouseMode,
-        mouseSgr: value.mouseSgr,
-        cursorStyle: cursorStyle as CursorStyle,
-        cursorVisible: value.cursorVisible,
-      };
-    }
+    case 'modes':
+      return parseModesEvent(value);
     case 'reply':
       return typeof value.data === 'string' ? { v: 1, type: 'reply', data: value.data } : null;
     case 'clipboardWrite':
       return typeof value.text === 'string'
         ? { v: 1, type: 'clipboardWrite', text: value.text }
         : null;
-    case 'serialized': {
-      if (typeof value.requestId !== 'string' || typeof value.data !== 'string') return null;
-      const promptLines = Array.isArray(value.promptLines)
-        ? value.promptLines.filter(
-            (n): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0,
-          )
-        : [];
-      return {
-        v: 1,
-        type: 'serialized',
-        requestId: value.requestId,
-        data: value.data,
-        promptLines,
-      };
-    }
+    case 'serialized':
+      return parseSerializedEvent(value);
     case 'snapshotText':
       return typeof value.requestId === 'string' && typeof value.text === 'string'
         ? { v: 1, type: 'snapshotText', requestId: value.requestId, text: value.text }
