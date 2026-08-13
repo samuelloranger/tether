@@ -2,106 +2,17 @@ import './xtermPolyfill';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { type IBufferCell, type IBufferLine, Terminal } from '@xterm/headless';
 import type { Terminal as BrowserTerminal } from '@xterm/xterm';
-import { computeLinkSpans, type LinkSpan } from './links';
-import { type CellStyle, DEFAULT_BG, DEFAULT_FG, PALETTE, type RenderRow } from './terminal';
+import type { LinkSpan } from './links';
+import { type CellStyle, DEFAULT_BG, DEFAULT_FG, type RenderRow } from './terminal';
 import {
   type ControlHost,
   registerTerminalControls,
   type TerminalControls,
 } from './terminalControls';
+import { buildEngineSnapshot } from './terminalEngineSnapshot';
+import { bgOf, lastContentCol, styleEq, styleOf } from './terminalEngineStyle';
 
 const MAX_SCROLLBACK = 1000;
-
-function hex6(n: number): string {
-  return `#${(n & 0xffffff).toString(16).padStart(6, '0')}`;
-}
-
-function fgOf(cell: IBufferCell): string | undefined {
-  if (cell.isFgDefault()) return undefined; // renderer falls back to DEFAULT_FG
-  if (cell.isFgRGB()) return hex6(cell.getFgColor());
-  if (cell.isFgPalette()) return PALETTE[cell.getFgColor()] ?? undefined;
-  return undefined;
-}
-
-function bgOf(cell: IBufferCell): string | undefined {
-  if (cell.isBgDefault()) return undefined;
-  if (cell.isBgRGB()) return hex6(cell.getBgColor());
-  if (cell.isBgPalette()) return PALETTE[cell.getBgColor()] ?? undefined;
-  return undefined;
-}
-
-// Exclusive column after the last non-blank cell on a line (for clamping an
-// OSC 8 span that closed on a later row).
-function lastContentCol(line: IBufferLine): number {
-  let last = 0;
-  for (let x = 0; x < line.length; x++) {
-    const c = line.getCell(x);
-    if (c && (c.getChars() || '').trim() !== '') last = x + c.getWidth();
-  }
-  return last;
-}
-
-function styleOf(cell: IBufferCell, caret: boolean): CellStyle {
-  const s: CellStyle = {};
-  let fg = fgOf(cell);
-  let bg = bgOf(cell);
-  // Resolve SGR 7 reverse video by swapping fg/bg here — TermRow renders only
-  // resolved fg/bg and never consumes an `inverse` flag (matches legacy).
-  if (cell.isInverse()) {
-    const nfg = bg ?? DEFAULT_BG;
-    const nbg = fg ?? DEFAULT_FG;
-    fg = nfg;
-    bg = nbg;
-  }
-  if (fg) s.fg = fg;
-  if (bg) s.bg = bg;
-  if (cell.isBold()) s.bold = true;
-  if (cell.isDim()) s.dim = true;
-  if (cell.isItalic()) s.italic = true;
-  if (cell.isUnderline()) s.underline = true;
-  if (cell.isStrikethrough()) s.strike = true;
-  if (caret) s.caret = true;
-  return s;
-}
-
-function styleEq(a: CellStyle, b: CellStyle): boolean {
-  return (
-    a.fg === b.fg &&
-    a.bg === b.bg &&
-    !!a.bold === !!b.bold &&
-    !!a.dim === !!b.dim &&
-    !!a.italic === !!b.italic &&
-    !!a.underline === !!b.underline &&
-    !!a.strike === !!b.strike &&
-    !!a.inverse === !!b.inverse &&
-    !!a.caret === !!b.caret
-  );
-}
-
-function runsEqual(a: RenderRow['runs'], b: RenderRow['runs']): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].text !== b[i].text || !styleEq(a[i].style, b[i].style)) return false;
-  }
-  return true;
-}
-
-function targetEq(a: LinkSpan['target'], b: LinkSpan['target']): boolean {
-  if (a.kind !== b.kind) return false;
-  if (a.kind === 'external' && b.kind === 'external') return a.url === b.url;
-  if (a.kind === 'file' && b.kind === 'file')
-    return a.path === b.path && a.line === b.line && a.column === b.column;
-  return false;
-}
-
-function linksEqual(a: RenderRow['links'], b: RenderRow['links']): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].start !== b[i].start || a[i].end !== b[i].end || !targetEq(a[i].target, b[i].target))
-      return false;
-  }
-  return true;
-}
 
 // Adapter wrapping @xterm/headless with the TerminalEmulator public surface, so
 // it is a drop-in replacement. Reads term.buffer.active to emit RenderRow[].
@@ -157,6 +68,10 @@ export class TerminalEngine {
       // wrongly prune promptIds/OSC 8 spans after the app exits full-screen.
       if (this.term.buffer.active.type === 'normal') this.fed++;
     });
+    this.controls = this.attachParserAndControls();
+  }
+
+  private attachParserAndControls(): TerminalControls {
     // OSC 133;A marks a prompt start; ;D reports command-return. Record the
     // prompt at the cursor's current monotonic logical id.
     this.term.parser.registerOscHandler(133, (data) => {
@@ -184,10 +99,9 @@ export class TerminalEngine {
       }
       return true;
     });
-    // Everything below is buffer-independent control state, shared with the
-    // renderer page so whichever host is parsing can report it — see
-    // terminalControls.ts.
-    this.controls = registerTerminalControls(
+    // Buffer-independent control state, shared with the renderer page so
+    // whichever host is parsing can report it — see terminalControls.ts.
+    return registerTerminalControls(
       this.term as unknown as ControlHost,
       {
         title: (t2) => {
@@ -381,62 +295,17 @@ export class TerminalEngine {
   }
 
   getSnapshot(): RenderRow[] {
-    const buf = this.term.buffer.active;
-    const total = buf.length;
-    const cursorAbs = buf.baseY + buf.cursorY;
-    const trimmed = this.trimmedCount();
-
-    // Prune prompt ids / OSC 8 spans that scrolled off the top (bounded Sets/Maps).
-    if (this.promptIds.size) {
-      for (const id of this.promptIds) if (id < trimmed) this.promptIds.delete(id);
-    }
-    if (this.osc8Spans.size) {
-      for (const id of this.osc8Spans.keys()) if (id < trimmed) this.osc8Spans.delete(id);
-    }
-
-    // First pass: per-row runs + text, so links can be resolved across soft wraps.
-    const rowRuns: RenderRow['runs'][] = new Array(total);
-    const wrappedFlags: boolean[] = new Array(total);
-    const texts: string[] = new Array(total);
-    for (let y = 0; y < total; y++) {
-      const line = buf.getLine(y);
-      if (!line) {
-        rowRuns[y] = [{ text: '', style: {} }];
-        wrappedFlags[y] = false;
-        texts[y] = '';
-        continue;
-      }
-      const caretCol = this.cursorVisible && y === cursorAbs ? buf.cursorX : -1;
-      rowRuns[y] = this.runsFor(line, caretCol);
-      // xterm's `isWrapped` means "this row is a CONTINUATION of the previous
-      // one"; computeLinkSpans wants "this row wraps INTO the next", so read the
-      // flag off the following line.
-      wrappedFlags[y] = buf.getLine(y + 1)?.isWrapped ?? false;
-      texts[y] = rowRuns[y].map((r) => r.text).join('');
-    }
-    const linkSpans = computeLinkSpans(texts, wrappedFlags);
-
-    const out: RenderRow[] = new Array(total);
-    for (let y = 0; y < total; y++) {
-      const key = trimmed + y;
-      const runs = rowRuns[y];
-      const wrapped = wrappedFlags[y];
-      // OSC 8 explicit hyperlinks (validated against current row content) take
-      // precedence over regex-detected URLs.
-      const osc8 = this.osc8Spans.has(key) ? this.freshOsc8(key) : [];
-      const links = osc8.length ? osc8 : (linkSpans[y] ?? []);
-      const promptStart = this.promptIds.has(key);
-      const prev = this.prevRows[y];
-      out[y] =
-        prev &&
-        prev.key === key &&
-        prev.wrapped === wrapped &&
-        prev.promptStart === promptStart &&
-        runsEqual(prev.runs, runs) &&
-        linksEqual(prev.links, links)
-          ? prev
-          : { key, runs, wrapped, links, promptStart };
-    }
+    const out = buildEngineSnapshot({
+      buf: this.term.buffer.active,
+      cursorVisible: this.cursorVisible,
+      trimmed: this.trimmedCount(),
+      promptIds: this.promptIds,
+      osc8Spans: this.osc8Spans,
+      osc8Has: (id) => this.osc8Spans.has(id),
+      freshOsc8: (id) => this.freshOsc8(id),
+      prevRows: this.prevRows,
+      runsFor: (line, caretCol) => this.runsFor(line, caretCol),
+    });
     this.prevRows = out;
     return out;
   }
