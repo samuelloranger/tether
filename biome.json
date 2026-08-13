@@ -37,7 +37,7 @@
       },
       "complexity": {
         "noExcessiveLinesPerFunction": {
-          "level": "warn",
+          "level": "error",
           "options": {
             "maxLines": 60,
             "skipBlankLines": true
@@ -46,7 +46,7 @@
       },
       "style": {
         "noExcessiveLinesPerFile": {
-          "level": "warn",
+          "level": "error",
           "options": {
             "maxLines": 400
           }
@@ -105,7 +105,7 @@
         "rules": {
           "style": {
             "noExcessiveLinesPerFile": {
-              "level": "warn",
+              "level": "error",
               "options": {
                 "maxLines": 500
               }
@@ -120,24 +120,9 @@
         "rules": {
           "style": {
             "noExcessiveLinesPerFile": {
-              "level": "warn",
+              "level": "error",
               "options": {
                 "maxLines": 150
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "includes": ["apps/mobile/src/tether/useTerminalSessions.ts"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noExcessiveLinesPerFile": {
-              "level": "warn",
-              "options": {
-                "maxLines": 400
               }
             }
           }
