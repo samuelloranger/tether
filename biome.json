@@ -131,6 +131,21 @@
       }
     },
     {
+      "includes": ["apps/mobile/src/tether/useTerminalSessions.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noExcessiveLinesPerFile": {
+              "level": "warn",
+              "options": {
+                "maxLines": 400
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": [
         "**/*.test.ts",
         "**/*.test.tsx",
