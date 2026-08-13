@@ -162,17 +162,15 @@ function applyExitMessage(ctx: WsMessageContext, payload: Record<string, unknown
 
 function applyActivityMessage(ctx: WsMessageContext, payload: Record<string, unknown>): void {
   const activity = payload.activity as SessionActivity;
+  const sessionId = ctx.drawerSessionId ?? ctx.id;
+  const hostId = ctx.drawerHostId ?? '';
   ctx.onDrawerSessions((rows) =>
-    rows.map((row) =>
-      row.id === ctx.drawerSessionId && row.hostId === ctx.drawerHostId
-        ? { ...row, activity }
-        : row,
-    ),
+    rows.map((row) => (row.id === sessionId && row.hostId === hostId ? { ...row, activity } : row)),
   );
   ctx.onWaitingSessions([
     {
-      id: ctx.drawerSessionId,
-      hostId: ctx.drawerHostId,
+      id: sessionId,
+      hostId,
       status: 'running',
       last_output_at: null,
       activity,
