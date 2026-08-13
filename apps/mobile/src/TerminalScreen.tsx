@@ -1,50 +1,35 @@
-import Feather from '@expo/vector-icons/Feather';
-import { DragDropContentView } from 'expo-drag-drop-content-view';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { AlertModal } from './AlertModal';
+import { KeyboardAvoidingView, Platform, useWindowDimensions, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
-import { ChangeBanner } from './ChangeBanner';
-import { ConnectionBanner } from './ConnectionBanner';
-import { ContextMenu } from './ContextMenu';
 import {
   desktopLayout,
   showTitleBarDrawerMenu,
   sidebarDocked,
   sidebarVisible,
 } from './desktopLayout';
-import { FileViewer } from './FileViewer';
-import { GitDrawer } from './GitDrawer';
-import { GitReview } from './GitReview';
-import { OverflowMenu } from './OverflowMenu';
-import { PresentationBanner } from './PresentationBanner';
-import { PresentationView } from './PresentationView';
 import { isDesktop, isMacDesktop } from './platform';
-import { findSessionPreview, previewUrl } from './presentations';
 import type { RendererStatus } from './rendererLifecycle';
-import { SelectionView } from './SelectionView';
 import { SessionDrawer } from './SessionDrawer';
-import { AppearanceModal, RenameModal, SnippetsModal } from './SessionModals';
-import { sessionLabel } from './sessionLabel';
 import { createStyles } from './styles';
-import { TerminalView } from './TerminalView';
+import { TerminalCanvas } from './TerminalCanvas';
+import { TerminalMobileHeader } from './TerminalMobileHeader';
+import {
+  TerminalDesktopChrome,
+  TerminalOverflowMenu,
+  TerminalSelectionAndKeys,
+  TerminalSessionModals,
+} from './TerminalScreenOverlays';
+import {
+  FileLoadingCover,
+  FileOverlay,
+  GitDrawerPane,
+  GitReviewPane,
+  PresentationPane,
+  TerminalBanners,
+} from './TerminalScreenPanes';
 import TitleBar from './TitleBar';
 import { injectTerminalScrollbarStyles } from './terminalScrollbar';
-import { UpdateModal } from './UpdateModal';
-import { UtilityBar } from './UtilityBar';
-
 import type { useTetherApp } from './useTetherApp';
 
 export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }) {
@@ -62,40 +47,13 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
       });
     }
   }, [theme]);
+
   const {
-    insets,
-    client,
     serverIp,
     port,
     setIsConfiguring,
-    connectionStatus,
-    hasConnected,
-    ctxMenu,
-    setCtxMenu,
-    updateInfo,
-    updating,
-    ctrlArmed,
-    setCtrlArmed,
-    utilityPage,
-    setUtilityPage,
-    selectionViewOpen,
-    setSelectionViewOpen,
-    menuOpen,
     setMenuOpen,
-    renameModalOpen,
-    setRenameModalOpen,
-    renameText,
-    setRenameText,
-    appearanceModalOpen,
-    setAppearanceModalOpen,
-    searchQuery,
-    setSearchQuery,
-    searchInputRef,
-    snippets,
-    snippetsModalOpen,
-    setSnippetsModalOpen,
-    snippetDraft,
-    setSnippetDraft,
+    setSelectionViewOpen,
     activeId,
     activeHostId,
     drawerOpen,
@@ -105,104 +63,30 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     drawerSessions,
     profiles,
     healthByHost,
-    deepLinkNotice,
-    dismissDeepLinkNotice,
     presentations,
     activePresentation,
     activePresentationId,
     fileView,
     fileLoading,
-    openFile,
-    closeFile,
-    openDiffFileLine,
     diffOpen,
     changeSummary,
-    repoStatus,
-    diffSelectedPath,
-    diffText,
-    diffTruncated,
-    diffLoading,
-    diffImage,
-    openDiff,
-    closeDiff,
-    selectDiffFile,
-    deselectDiffFile,
-    diffMode,
-    stageFile,
-    unstageFile,
-    discardFile,
-    stageAllFiles,
-    unstageAllFiles,
-    discardAllFiles,
-    toggleHunk,
-    commitStagedChanges,
-    undoLastCommit,
-    pushChanges,
-    historyEntries,
-    historyCommit,
-    loadGitLog,
-    selectCommit,
-    diffSideBySide,
-    toggleDiffSideBySide,
-    gitDrawerLeftWidthKey,
-    reviewDiffs,
-    loadReviewDiffs,
-    retryReviewDiff,
     selectTerminal,
     selectPresentation,
     closePresentation,
     refreshPresentations,
-    inputRef,
-    fontSize,
-    lineHeight,
     entryFor,
-    terminalViewRef,
     hydrateRenderer,
-    onRendererResize,
-    onRendererSelection,
-    onPageControl,
-    onPageReply,
-    onPageClipboardWrite,
     newTerminal,
     killActiveOr,
-    changeFontSize,
-    mouseEnabled,
-    toggleMouseEnabled,
-    notificationsEnabled,
-    toggleNotificationsEnabled,
-    testNotification,
-    addSnippet,
-    removeSnippet,
-    sendSnippet,
     refreshSessions,
     refreshHost,
     openEditHost,
     openServerSettings,
-    sendTyped,
-    sendKey,
-    cursorSeq,
-    searchText,
-    openSelectionView,
-    copySelection,
-    selectAllTerminal,
-    handlePaste,
-    checkForUpdatesManual,
-    startUpdate,
-    downloadUpdate,
-    dismissUpdate,
     activeName,
     activeBellCount,
-    upPct,
-    upLabel,
-    openRename,
-    submitRename,
-    hardResetSession,
     titleBarStatus,
-    jumpPrompt,
     uploadFile,
-    pickAndUploadImage,
-    fontFamily,
-    changeFontFamily,
+    openDiff,
   } = app;
 
   const docked = sidebarDocked(desktopUi, sidebarPinned);
@@ -272,10 +156,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
     }
   }, [activePresentation, fileView, diffOpen, setMenuOpen, setSelectionViewOpen]);
 
-  const sessionPreview = findSessionPreview(presentations, activeId);
-  const backTarget = activePresentation?.sessionId ?? activeId;
-  const backSession = drawerSessions.find((s) => s.id === backTarget);
-  const backLabel = backSession ? sessionLabel(backSession) : backTarget;
   // Desktop GitDrawer keeps the terminal mounted; only mobile GitReview takes over.
   const gitTakeover = diffOpen && !desktopUi;
   const terminalVisible = !fileView && !gitTakeover && !activePresentation;
@@ -284,7 +164,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
   }, [terminalVisible]);
 
   return (
-    /* Terminal Client Screen */
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.terminalContainer}
@@ -304,9 +183,6 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
           }}
         />
       )}
-      {/* Desktop: full-width custom title bar spanning above the sidebar + terminal,
-              so macOS traffic lights sit over the bar (not the sidebar) and the whole
-              top edge is a drag region. */}
       {isDesktop && (
         <TitleBar
           isMac={isMacDesktop}
@@ -366,496 +242,36 @@ export function TerminalScreen({ app }: { app: ReturnType<typeof useTetherApp> }
             openServerSettings(hostId);
           }}
         />
-
         <View style={[styles.terminalMain, { position: 'relative' }]}>
-          {/* Mobile header panel */}
           {!desktopUi && (
-            <SafeAreaView
-              edges={['top', 'left', 'right']}
-              style={{ backgroundColor: theme.colors.surface }}
-            >
-              <View style={styles.header}>
-                <TouchableOpacity
-                  style={styles.headerBtn}
-                  activeOpacity={0.6}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    refreshSessions();
-                    refreshPresentations();
-                    setDrawerOpen(true);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Open terminal list"
-                >
-                  <Feather name="menu" size={20} color={theme.colors.text} />
-                </TouchableOpacity>
-
-                <View style={styles.headerInfo}>
-                  <Text style={styles.headerTitle}>{activePresentation?.title || activeName}</Text>
-                  <Text style={styles.headerSubtitle}>
-                    {serverIp}:{port}
-                  </Text>
-                </View>
-
-                <View style={styles.headerControls}>
-                  {connectionStatus === 'connected' ? (
-                    <View style={[styles.statusBadge, styles.badgeConnected]}>
-                      <Text style={styles.badgeTextConnected}>online</Text>
-                    </View>
-                  ) : connectionStatus === 'auth-failed' ? (
-                    <View style={[styles.statusBadge, styles.badgeOffline]}>
-                      <Text style={styles.badgeTextOffline}>auth</Text>
-                    </View>
-                  ) : connectionStatus === 'connecting' ? (
-                    <View style={[styles.statusBadge, styles.badgeConnecting]}>
-                      <ActivityIndicator
-                        size={8}
-                        color={theme.colors.warning}
-                        style={styles.spinIcon}
-                      />
-                      <Text style={styles.badgeTextConnecting}>connecting</Text>
-                    </View>
-                  ) : (
-                    <View style={[styles.statusBadge, styles.badgeOffline]}>
-                      <Text style={styles.badgeTextOffline}>offline</Text>
-                    </View>
-                  )}
-
-                  {terminalVisible && (
-                    <TouchableOpacity
-                      style={styles.headerBtn}
-                      activeOpacity={0.6}
-                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                      onPress={() => setMenuOpen(true)}
-                      accessibilityRole="button"
-                      accessibilityLabel="Terminal menu"
-                    >
-                      <Feather name="more-vertical" size={19} color={theme.colors.text} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            </SafeAreaView>
+            <TerminalMobileHeader app={app} styles={styles} terminalVisible={terminalVisible} />
           )}
-
-          {fileLoading && (
-            <View
-              style={{
-                position: 'absolute',
-                inset: 0,
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 61,
-              }}
-            >
-              <ActivityIndicator color={theme.colors.accent} />
-            </View>
-          )}
+          <FileLoadingCover loading={fileLoading} />
           {gitTakeover ? (
-            <GitReview
-              summary={changeSummary}
-              onBack={closeDiff}
-              onStageFile={stageFile}
-              onUnstageFile={unstageFile}
-              onDiscardFile={discardFile}
-              onToggleHunk={toggleHunk}
-              onCommit={commitStagedChanges}
-              onAmend={(message) => commitStagedChanges(message, true)}
-              onUndoCommit={() => void undoLastCommit()}
-              onPush={() => void pushChanges()}
-              onStageAll={() => void stageAllFiles()}
-              onUnstageAll={() => void unstageAllFiles()}
-              onDiscardAll={() => void discardAllFiles()}
-              onOpenLine={openDiffFileLine}
-              repoStatus={repoStatus}
-              historyEntries={historyEntries}
-              historyCommit={historyCommit}
-              onLoadHistory={loadGitLog}
-              onSelectCommit={selectCommit}
-              reviewDiffs={reviewDiffs}
-              onRetryReviewDiff={retryReviewDiff}
-              loadReviewDiffs={loadReviewDiffs}
-            />
+            <GitReviewPane app={app} />
           ) : activePresentation ? (
-            <>
-              {!desktopUi && (
-                <PresentationBanner
-                  label={`Back to ${backLabel}`}
-                  icon="terminal"
-                  onPress={() => selectTerminal(activeHostId, backTarget)}
-                />
-              )}
-              <View
-                style={{
-                  flex: 1,
-                  paddingBottom: insets.bottom,
-                  paddingLeft: insets.left,
-                  paddingRight: insets.right,
-                }}
-              >
-                <PresentationView
-                  preview={activePresentation}
-                  url={previewUrl(client, activePresentation.url)}
-                />
-              </View>
-            </>
+            <PresentationPane app={app} desktopUi={desktopUi} />
           ) : (
             <>
-              {!desktopUi && !diffOpen && (
-                <ChangeBanner summary={changeSummary} onPress={openDiff} />
-              )}
-              {!desktopUi && sessionPreview && (
-                <PresentationBanner
-                  label={`Preview ready: ${sessionPreview.title}`}
-                  icon="layout"
-                  onPress={() => selectPresentation(sessionPreview.id)}
-                />
-              )}
-              {/* Terminal grid — the renderer WebView. Tapping it focuses xterm's
-              own helper textarea inside the page, which is what raises the soft
-              keyboard, so typed characters arrive as renderer `input` events and
-              NOT through the hidden RN capture field below. That is why onInput
-              is sendTyped (sendKey on desktop, to skip the hold-backspace
-              word-delete acceleration meant for mobile's soft keyboard):
-              both apply the armed Ctrl modifier, and typing is the main
-              thing Ctrl modifies.
-              Wrapped in a relative container so the connection banner can overlay
-              the top without consuming flex height: a height change would recompute
-              rows and fire a spurious PTY resize (visible rewrap) on every
-              reconnect. */}
-              <View style={styles.terminalArea}>
-                <View
-                  nativeID="tether-terminal"
-                  style={[
-                    styles.terminalScroll,
-                    {
-                      // Well color (not bezel): leftover fit pixels + safe-area gutters
-                      // stay inside the terminal, not wrapping it.
-                      backgroundColor: theme.terminal.bg,
-                      paddingLeft: insets.left,
-                      paddingRight: insets.right,
-                    },
-                  ]}
-                >
-                  {Platform.OS === 'ios' ? (
-                    <DragDropContentView
-                      style={{ flex: 1 }}
-                      onDrop={(event) => {
-                        for (const asset of event.assets) {
-                          if (!asset.uri) continue;
-                          const filename = asset.fileName || `drop-${Date.now()}`;
-                          uploadFile(
-                            { uri: asset.uri, name: filename, type: asset.type },
-                            filename,
-                          );
-                        }
-                      }}
-                    >
-                      <TerminalView
-                        ref={terminalViewRef}
-                        onInput={sendTyped}
-                        onResize={onRendererResize}
-                        onOpenLink={openFile}
-                        onSelection={onRendererSelection}
-                        onControl={onPageControl}
-                        onReply={onPageReply}
-                        onClipboardWrite={onPageClipboardWrite}
-                        onPaste={handlePaste}
-                        onNewTerminal={newTerminal}
-                        onFontZoom={changeFontSize}
-                        onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
-                        onRecover={hydrateRenderer}
-                        onStatus={setRendererStatus}
-                      />
-                    </DragDropContentView>
-                  ) : (
-                    <TerminalView
-                      ref={terminalViewRef}
-                      onInput={isDesktop ? sendKey : sendTyped}
-                      onResize={onRendererResize}
-                      onOpenLink={openFile}
-                      onSelection={onRendererSelection}
-                      onControl={onPageControl}
-                      onReply={onPageReply}
-                      onClipboardWrite={onPageClipboardWrite}
-                      onPaste={handlePaste}
-                      onNewTerminal={newTerminal}
-                      onFontZoom={changeFontSize}
-                      onFallback={(reason) => console.warn('Terminal renderer fallback:', reason)}
-                      onRecover={hydrateRenderer}
-                      onStatus={setRendererStatus}
-                    />
-                  )}
-                </View>
-                {/* Renderer died and could not be brought back automatically. Say
-              so, rather than leaving the WebView's blank white rectangle looking
-              like a load that never finishes. */}
-                {rendererStatus === 'stalled' && (
-                  <View style={styles.rendererStalled}>
-                    <Text style={styles.rendererStalledText}>
-                      The terminal display stopped responding. Your session is still running on the
-                      server — reloading only redraws it.
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.rendererStalledButton}
-                      onPress={() => terminalViewRef.current?.retry()}
-                      accessibilityRole="button"
-                      accessibilityLabel="Reload terminal display"
-                    >
-                      <Text style={styles.rendererStalledButtonText}>Reload display</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Connection banner — names the real state; no safety overclaim.
-              Absolute overlay (box-none) so its mount/unmount never resizes the
-              terminal grid. */}
-                <View style={styles.connectionBannerOverlay} pointerEvents="box-none">
-                  <ConnectionBanner
-                    status={connectionStatus}
-                    hasConnected={hasConnected}
-                    onEdit={() => setIsConfiguring(true)}
-                  />
-                </View>
-                {deepLinkNotice && (
-                  <TouchableOpacity
-                    onPress={dismissDeepLinkNotice}
-                    accessibilityRole="button"
-                    accessibilityLabel="Dismiss deep link notice"
-                    style={{
-                      position: 'absolute',
-                      left: 12,
-                      right: 12,
-                      bottom: 10,
-                      padding: 10,
-                      borderRadius: 8,
-                      backgroundColor: theme.colors.surfaceRaised,
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>
-                      {deepLinkNotice}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              {!desktopUi && <TerminalBanners app={app} />}
+              <TerminalCanvas
+                app={app}
+                styles={styles}
+                rendererStatus={rendererStatus}
+                onStatus={setRendererStatus}
+              />
             </>
           )}
-
-          {diffOpen && desktopUi ? (
-            <GitDrawer
-              summary={changeSummary}
-              selectedPath={diffSelectedPath}
-              diffMode={diffMode}
-              diffText={diffText}
-              diffTruncated={diffTruncated}
-              diffLoading={diffLoading}
-              diffImage={diffImage}
-              onSelectFile={selectDiffFile}
-              onDeselectFile={deselectDiffFile}
-              onBack={closeDiff}
-              onStageFile={stageFile}
-              onUnstageFile={unstageFile}
-              onDiscardFile={discardFile}
-              onToggleHunk={toggleHunk}
-              onCommit={commitStagedChanges}
-              onAmend={(message) => commitStagedChanges(message, true)}
-              onUndoCommit={() => void undoLastCommit()}
-              onPush={() => void pushChanges()}
-              onStageAll={() => void stageAllFiles()}
-              onUnstageAll={() => void unstageAllFiles()}
-              onDiscardAll={() => void discardAllFiles()}
-              onOpenLine={openDiffFileLine}
-              repoStatus={repoStatus}
-              leftWidthStorageKey={gitDrawerLeftWidthKey}
-              historyEntries={historyEntries}
-              historyCommit={historyCommit}
-              onLoadHistory={loadGitLog}
-              onSelectCommit={selectCommit}
-              sideBySide={diffSideBySide}
-              onToggleSideBySide={toggleDiffSideBySide}
-            />
-          ) : null}
-
-          {fileView ? (
-            <View
-              style={[
-                styles.fileOverlay,
-                {
-                  paddingBottom: insets.bottom,
-                  paddingLeft: insets.left,
-                  paddingRight: insets.right,
-                },
-              ]}
-              pointerEvents="box-none"
-            >
-              <FileViewer
-                file={fileView}
-                onBack={closeFile}
-                backLabel={diffOpen ? 'Back to changes' : 'Back to terminal'}
-              />
-            </View>
-          ) : null}
-
-          {/* Overflow menu (header ⋯) */}
+          {diffOpen && desktopUi ? <GitDrawerPane app={app} /> : null}
+          <FileOverlay app={app} styles={styles} />
+          {terminalVisible && <TerminalOverflowMenu app={app} />}
+          <TerminalSessionModals app={app} />
           {terminalVisible && (
-            <OverflowMenu
-              visible={menuOpen}
-              onClose={() => setMenuOpen(false)}
-              onRename={openRename}
-              onViewChanges={() => {
-                setMenuOpen(false);
-                void openDiff();
-              }}
-              fontSize={fontSize}
-              onFontDelta={changeFontSize}
-              mouseEnabled={mouseEnabled}
-              onToggleMouse={toggleMouseEnabled}
-              onSelectText={openSelectionView}
-              onJumpPromptUp={() => jumpPrompt(-1)}
-              onJumpPromptDown={() => jumpPrompt(1)}
-              onSnippets={() => {
-                setMenuOpen(false);
-                setSnippetsModalOpen(true);
-              }}
-              onAppearance={() => {
-                setMenuOpen(false);
-                setAppearanceModalOpen(true);
-              }}
-              notificationsEnabled={notificationsEnabled}
-              onToggleNotifications={toggleNotificationsEnabled}
-              onTestNotification={() => {
-                setMenuOpen(false);
-                testNotification();
-              }}
-              onCheckUpdates={() => {
-                setMenuOpen(false);
-                void checkForUpdatesManual();
-              }}
-              onRestart={() => {
-                setMenuOpen(false);
-                hardResetSession();
-              }}
-            />
-          )}
-
-          {/* Rename Modal */}
-          <RenameModal
-            visible={renameModalOpen}
-            onClose={() => setRenameModalOpen(false)}
-            value={renameText}
-            onChangeText={setRenameText}
-            placeholder={activeId}
-            onSubmit={submitRename}
-          />
-
-          {/* Snippets Modal */}
-          <SnippetsModal
-            visible={snippetsModalOpen}
-            onClose={() => setSnippetsModalOpen(false)}
-            snippets={snippets}
-            onSend={sendSnippet}
-            onRemove={removeSnippet}
-            draft={snippetDraft}
-            onDraftChange={setSnippetDraft}
-            onAdd={addSnippet}
-          />
-
-          {/* Appearance Modal (theme + desktop font picker) */}
-          <AppearanceModal
-            visible={appearanceModalOpen}
-            onClose={() => setAppearanceModalOpen(false)}
-            fontFamily={fontFamily}
-            onFontChange={changeFontFamily}
-          />
-
-          {/* Fullscreen selectable-text view (long-press the terminal to open) */}
-          {terminalVisible && (
-            <SelectionView
-              visible={selectionViewOpen}
-              onClose={() => {
-                setSelectionViewOpen(false);
-                setSearchQuery('');
-              }}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              searchInputRef={searchInputRef}
-              text={searchText}
-              insets={insets}
-              fontFamily={fontFamily}
-              fontSize={fontSize}
-              lineHeight={lineHeight}
-            />
-          )}
-
-          {/* Mobile Terminal Shortcuts Utility Bar — desktop uses the real keyboard. */}
-          {!desktopUi && terminalVisible && (
-            <UtilityBar
-              ctrlArmed={ctrlArmed}
-              setCtrlArmed={setCtrlArmed}
-              sendKey={sendKey}
-              cursorSeq={cursorSeq}
-              page={utilityPage}
-              setPage={setUtilityPage}
-              onPaste={handlePaste}
-              onImagePick={pickAndUploadImage}
-              onHideKeyboard={() => {
-                terminalViewRef.current?.blur();
-                inputRef.current?.blur();
-                Keyboard.dismiss();
-              }}
-            />
-          )}
-
-          {/* Hidden IME/dead-key composition target (desktop): the terminal
-              surface is a plain non-focusable View, so it can't receive an OS
-              composition session on its own — this gives the browser an actual
-              editable element to compose into (é/ñ/ö dead-keys, CJK IME candidate
-              windows). Regular typing is unaffected: it's still forwarded by the
-              global keydown listener in useTetherApp.tsx, which preventDefault()s
-              every key it handles, so this field never receives non-composing
-              keystrokes. Rendered inside #tether-terminal so the keydown/
-              composition focus-guard (desktopFocusGuard.ts) already treats it as
-              part of the terminal. Focused on click via the effect below. */}
-          {isDesktop && terminalVisible && (
-            <TextInput
-              ref={inputRef}
-              style={styles.hiddenInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              accessibilityLabel="Terminal IME composition target (hidden)"
-            />
+            <TerminalSelectionAndKeys app={app} styles={styles} desktopUi={desktopUi} />
           )}
         </View>
       </View>
-
-      {/* Desktop right-click menu */}
-      {isDesktop && (
-        <ContextMenu
-          menu={ctxMenu}
-          onClose={() => setCtxMenu(null)}
-          onCopy={() => void copySelection()}
-          onPaste={() => void handlePaste()}
-          onSelectAll={selectAllTerminal}
-        />
-      )}
-
-      {/* Desktop self-update modal */}
-      {isDesktop && (
-        <UpdateModal
-          info={updateInfo}
-          updating={updating}
-          pct={upPct}
-          label={upLabel}
-          onDismiss={dismissUpdate}
-          onUpdate={startUpdate}
-          onDownload={downloadUpdate}
-        />
-      )}
-      {isDesktop && <AlertModal />}
+      <TerminalDesktopChrome app={app} />
     </KeyboardAvoidingView>
   );
 }
