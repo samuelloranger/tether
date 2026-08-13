@@ -7,7 +7,7 @@ test('terminal safe-area padding is inside the well, not wrapping App', async ()
     Bun.file(new URL('../App.tsx', import.meta.url)).text(),
     source('./TerminalCanvas.tsx'),
     source('./terminalRendererHtml.ts'),
-    source('./TerminalView.tsx'),
+    source('./terminalViewDesktop.ts'),
   ]);
 
   // Outer App shell must not pad bottom/left/right around the terminal — that
