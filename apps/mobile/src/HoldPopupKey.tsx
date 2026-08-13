@@ -1,5 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import {
   PanResponder,
   type StyleProp,
@@ -16,10 +17,130 @@ import { usePopupOverlay } from './PopupOverlay';
 const POPUP_SIZE = 44;
 const POPUP_GAP = 8;
 
-// A key that behaves like an iOS keyboard accent key: tap sends `label`, but
-// hold past HOLD_POPUP_DELAY_MS pops `altLabel` up above the finger — slide up
-// into it and release to send that instead. Release without crossing the
-// threshold (or without ever holding long enough) still sends `label`.
+type PopupState = { x: number; y: number; alt: boolean };
+
+type HoldRefs = {
+  originRef: MutableRefObject<{ x: number; y: number }>;
+  timerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  altRef: MutableRefObject<boolean>;
+  poppedRef: MutableRefObject<boolean>;
+};
+
+function clearHoldTimer(timerRef: HoldRefs['timerRef']) {
+  if (timerRef.current) clearTimeout(timerRef.current);
+  timerRef.current = null;
+}
+
+function createHoldPanResponder(opts: {
+  refs: HoldRefs;
+  setPressed: Dispatch<SetStateAction<boolean>>;
+  setPopup: Dispatch<SetStateAction<PopupState | null>>;
+  finish: (commit: boolean) => void;
+}) {
+  const { refs, setPressed, setPopup, finish } = opts;
+  return PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (event) => {
+      const { pageX, pageY } = event.nativeEvent;
+      refs.originRef.current = { x: pageX, y: pageY };
+      setPressed(true);
+      refs.altRef.current = false;
+      refs.poppedRef.current = false;
+      clearHoldTimer(refs.timerRef);
+      refs.timerRef.current = setTimeout(() => {
+        refs.poppedRef.current = true;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setPopup({ x: refs.originRef.current.x, y: refs.originRef.current.y, alt: false });
+      }, HOLD_POPUP_DELAY_MS);
+    },
+    onPanResponderMove: (event) => {
+      if (!refs.poppedRef.current) return;
+      const dy = refs.originRef.current.y - event.nativeEvent.pageY;
+      const alt = resolveHoldPopupSelection(dy);
+      if (alt !== refs.altRef.current) {
+        refs.altRef.current = alt;
+        Haptics.selectionAsync();
+        setPopup((p) => (p ? { ...p, alt } : p));
+      }
+    },
+    onPanResponderRelease: () => finish(true),
+    onPanResponderTerminate: () => finish(false),
+    onPanResponderTerminationRequest: () => false,
+  });
+}
+
+function HoldPopupBubble({
+  popup,
+  altLabel,
+  accent,
+  accentText,
+  surfaceRaised,
+  border,
+  text,
+}: {
+  popup: PopupState;
+  altLabel: string;
+  accent: string;
+  accentText: string;
+  surfaceRaised: string;
+  border: string;
+  text: string;
+}) {
+  return (
+    <View
+      style={[
+        styles.bubble,
+        {
+          left: popup.x - POPUP_SIZE / 2,
+          top: popup.y - POPUP_SIZE - POPUP_GAP,
+          backgroundColor: popup.alt ? accent : surfaceRaised,
+          borderColor: border,
+        },
+      ]}
+    >
+      <Text style={[styles.text, { color: popup.alt ? accentText : text }]}>{altLabel}</Text>
+    </View>
+  );
+}
+
+type HoldPopupKeyProps = {
+  label: string;
+  altLabel: string;
+  onSelect: (value: string) => void;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
+  accessibilityLabel?: string;
+};
+
+function useHoldPopupGesture(label: string, altLabel: string, onSelect: (value: string) => void) {
+  const [pressed, setPressed] = useState(false);
+  const [popup, setPopup] = useState<PopupState | null>(null);
+  const originRef = useRef({ x: 0, y: 0 });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const altRef = useRef(false);
+  const poppedRef = useRef(false);
+  const refs = useRef({ originRef, timerRef, altRef, poppedRef }).current;
+  const finish = useCallback(
+    (commit: boolean) => {
+      clearHoldTimer(refs.timerRef);
+      setPressed(false);
+      const wasAlt = refs.altRef.current;
+      const wasPopped = refs.poppedRef.current;
+      setPopup(null);
+      refs.altRef.current = false;
+      refs.poppedRef.current = false;
+      if (commit) onSelect(wasPopped && wasAlt ? altLabel : label);
+    },
+    [altLabel, label, onSelect, refs],
+  );
+  const panResponder = useMemo(
+    () => createHoldPanResponder({ refs, setPressed, setPopup, finish }),
+    [finish, refs],
+  );
+  return { pressed, popup, panResponder };
+}
+
 export function HoldPopupKey({
   label,
   altLabel,
@@ -27,82 +148,12 @@ export function HoldPopupKey({
   style,
   textStyle,
   accessibilityLabel,
-}: {
-  label: string;
-  altLabel: string;
-  onSelect: (value: string) => void;
-  style?: StyleProp<ViewStyle>;
-  textStyle?: StyleProp<TextStyle>;
-  accessibilityLabel?: string;
-}) {
+}: HoldPopupKeyProps) {
   const { theme } = useAppTheme();
   const c = theme.colors;
   const id = useId();
   const { setContent } = usePopupOverlay();
-  const [pressed, setPressed] = useState(false);
-  const [popup, setPopup] = useState<{ x: number; y: number; alt: boolean } | null>(null);
-  const originRef = useRef({ x: 0, y: 0 });
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const altRef = useRef(false);
-  const poppedRef = useRef(false);
-
-  const clearTimer = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = null;
-  }, []);
-
-  const finish = useCallback(
-    (commit: boolean) => {
-      clearTimer();
-      setPressed(false);
-      const wasAlt = altRef.current;
-      const wasPopped = poppedRef.current;
-      setPopup(null);
-      altRef.current = false;
-      poppedRef.current = false;
-      if (commit) onSelect(wasPopped && wasAlt ? altLabel : label);
-    },
-    [altLabel, clearTimer, label, onSelect],
-  );
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          const { pageX, pageY } = event.nativeEvent;
-          originRef.current = { x: pageX, y: pageY };
-          setPressed(true);
-          altRef.current = false;
-          poppedRef.current = false;
-          clearTimer();
-          timerRef.current = setTimeout(() => {
-            poppedRef.current = true;
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setPopup({ x: originRef.current.x, y: originRef.current.y, alt: false });
-          }, HOLD_POPUP_DELAY_MS);
-        },
-        onPanResponderMove: (event) => {
-          if (!poppedRef.current) return;
-          const dy = originRef.current.y - event.nativeEvent.pageY;
-          const alt = resolveHoldPopupSelection(dy);
-          if (alt !== altRef.current) {
-            altRef.current = alt;
-            Haptics.selectionAsync();
-            setPopup((p) => (p ? { ...p, alt } : p));
-          }
-        },
-        onPanResponderRelease: () => finish(true),
-        onPanResponderTerminate: () => finish(false),
-        onPanResponderTerminationRequest: () => false,
-      }),
-    [clearTimer, finish],
-  );
-
-  // Portal into the app-root overlay instead of a <Modal> — a Modal opens a
-  // second native window on iOS, which steals first-responder status from
-  // whatever TextInput currently holds the keyboard and dismisses it.
+  const { pressed, popup, panResponder } = useHoldPopupGesture(label, altLabel, onSelect);
   useEffect(() => {
     if (!popup) {
       setContent(id, null);
@@ -110,23 +161,18 @@ export function HoldPopupKey({
     }
     setContent(
       id,
-      <View
-        style={[
-          styles.bubble,
-          {
-            left: popup.x - POPUP_SIZE / 2,
-            top: popup.y - POPUP_SIZE - POPUP_GAP,
-            backgroundColor: popup.alt ? c.accent : c.surfaceRaised,
-            borderColor: c.border,
-          },
-        ]}
-      >
-        <Text style={[styles.text, { color: popup.alt ? c.accentText : c.text }]}>{altLabel}</Text>
-      </View>,
+      <HoldPopupBubble
+        popup={popup}
+        altLabel={altLabel}
+        accent={c.accent}
+        accentText={c.accentText}
+        surfaceRaised={c.surfaceRaised}
+        border={c.border}
+        text={c.text}
+      />,
     );
   }, [popup, id, setContent, altLabel, c.accent, c.accentText, c.border, c.surfaceRaised, c.text]);
   useEffect(() => () => setContent(id, null), [id, setContent]);
-
   return (
     <View
       {...panResponder.panHandlers}
