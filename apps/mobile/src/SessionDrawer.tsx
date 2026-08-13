@@ -1,25 +1,13 @@
-import Feather from '@expo/vector-icons/Feather';
 import { useEffect, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  Animated,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { AccessibilityInfo, Animated, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
-import { activityDotKey, type SessionActivity, terminalAccessibilityLabel } from './activity';
-import type { AppColors } from './appTheme';
-import { isRecentlyActive, PANEL_W } from './desktopNavigation';
-import { confirmAction } from './dialog';
-import { HIT_SLOP, MIN_TOUCH_TARGET, SURFACE_RADIUS } from './interaction';
+import type { SessionActivity } from './activity';
+import { PANEL_W } from './desktopNavigation';
 import { motionSpec } from './motion';
 import type { Presentation } from './presentations';
-import { sessionLabel } from './sessionLabel';
+import { confirmKill, DrawerPanelBody } from './sessionDrawerRows';
+import { createDrawerStyles } from './sessionDrawerStyles';
 import type { HostHealthStatus } from './tether/hostHealth';
 import type { HostProfile } from './tether/hostStore';
 
@@ -51,25 +39,49 @@ interface SessionDrawerProps {
   onClosePreview: (id: string) => void;
   onClose: () => void;
   onHostSettings?: (hostId: string) => void;
-  // Desktop: render as a permanent inline sidebar (no scrim, no slide, always
-  // mounted) instead of a slide-in overlay.
   docked?: boolean;
-  // Wide desktop only: show a pin/unpin control in the drawer header.
   showPin?: boolean;
   onTogglePin?: () => void;
 }
 
-// Kill needs a confirm. confirmAction shows a native OS dialog on desktop (the
-// Tauri plugin — not window.confirm, which WebKitGTK titles "JavaScript") and
-// the styled multi-button Alert on mobile.
-function confirmKill(id: string, onKill: (id: string) => void) {
-  void confirmAction(
-    'Kill this terminal?',
-    "The process and its saved output will be deleted. This can't be undone.",
-    { confirmLabel: 'Kill', destructive: true },
-  ).then((ok) => {
-    if (ok) onKill(id);
-  });
+function useDrawerSlide(visible: boolean) {
+  const [mounted, setMounted] = useState(visible);
+  const reduceMotion = useRef(false);
+  const tx = useRef(new Animated.Value(visible ? 0 : -PANEL_W)).current;
+  const fade = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((r) => {
+        reduceMotion.current = r;
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      if (reduceMotion.current) {
+        tx.setValue(0);
+        fade.setValue(1);
+        return;
+      }
+      Animated.parallel([
+        Animated.timing(tx, { toValue: 0, ...motionSpec('drawerEnter', false) }),
+        Animated.timing(fade, { toValue: 1, ...motionSpec('drawerEnter', false) }),
+      ]).start();
+    } else if (mounted) {
+      if (reduceMotion.current) {
+        setMounted(false);
+        return;
+      }
+      Animated.parallel([
+        Animated.timing(tx, { toValue: -PANEL_W, ...motionSpec('drawerExit', false) }),
+        Animated.timing(fade, { toValue: 0, ...motionSpec('drawerExit', false) }),
+      ]).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
+    }
+  }, [visible]);
+  return { mounted, tx, fade };
 }
 
 export function SessionDrawer({
@@ -95,222 +107,34 @@ export function SessionDrawer({
   onTogglePin,
 }: SessionDrawerProps) {
   const { theme } = useAppTheme();
-  const styles = createStyles(theme.colors);
-  const [mounted, setMounted] = useState(visible);
-  const reduceMotion = useRef(false);
-  const tx = useRef(new Animated.Value(visible ? 0 : -PANEL_W)).current;
-  const fade = useRef(new Animated.Value(visible ? 1 : 0)).current;
-
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((r) => {
-        reduceMotion.current = r;
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    // Slide the panel in from the left + fade the scrim; exit is quicker than
-    // enter (feels responsive). Reduced-motion snaps without animating.
-    if (visible) {
-      setMounted(true);
-      if (reduceMotion.current) {
-        tx.setValue(0);
-        fade.setValue(1);
-        return;
-      }
-      Animated.parallel([
-        Animated.timing(tx, { toValue: 0, ...motionSpec('drawerEnter', false) }),
-        Animated.timing(fade, { toValue: 1, ...motionSpec('drawerEnter', false) }),
-      ]).start();
-    } else if (mounted) {
-      if (reduceMotion.current) {
-        setMounted(false);
-        return;
-      }
-      Animated.parallel([
-        Animated.timing(tx, { toValue: -PANEL_W, ...motionSpec('drawerExit', false) }),
-        Animated.timing(fade, { toValue: 0, ...motionSpec('drawerExit', false) }),
-      ]).start(({ finished }) => {
-        if (finished) setMounted(false);
-      });
-    }
-  }, [visible]);
-
-  const panelBody = (
-    <>
-      {showPin && onTogglePin ? (
-        <View style={styles.pinRow}>
-          <TouchableOpacity
-            onPress={onTogglePin}
-            hitSlop={HIT_SLOP}
-            accessibilityRole="button"
-            accessibilityLabel={docked ? 'Unpin sidebar' : 'Pin sidebar'}
-            style={styles.pinBtn}
-          >
-            <Feather name="sidebar" size={16} color={theme.colors.textMuted} />
-            <Text style={styles.pinLabel}>{docked ? 'Unpin' : 'Pin'}</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-      <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-        {hosts.map((host) => {
-          const health = healthByHost[host.id] ?? 'unknown';
-          const unavailable = health === 'unreachable' || health === 'unauthorized';
-          const hostSessions = unavailable
-            ? []
-            : sessions.filter((session) => session.hostId === host.id);
-          return (
-            <View
-              key={host.id}
-              style={[
-                styles.hostSection,
-                { borderLeftColor: host.color },
-                unavailable && styles.hostSectionUnavailable,
-              ]}
-              accessibilityLabel={`${host.name} host section`}
-            >
-              <View style={styles.hostHeader}>
-                <Text style={styles.hostName}>{host.name}</Text>
-                {health === 'unknown' && <Text style={styles.hostStatus}>connecting…</Text>}
-                {health === 'reachable' && (
-                  <Text style={[styles.hostStatus, styles.hostReachable]}>online</Text>
-                )}
-                {health === 'unreachable' && (
-                  <TouchableOpacity
-                    onPress={() => onRetryHost(host.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Retry ${host.name}`}
-                  >
-                    <Text style={styles.hostAction}>Retry</Text>
-                  </TouchableOpacity>
-                )}
-                {health === 'unauthorized' && (
-                  <TouchableOpacity
-                    onPress={() => onReenterPassword(host.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Re-enter password for ${host.name}`}
-                  >
-                    <Text style={styles.hostAction}>Re-enter password</Text>
-                  </TouchableOpacity>
-                )}
-                {onHostSettings && (
-                  <TouchableOpacity
-                    onPress={() => onHostSettings(host.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Server settings for ${host.name}`}
-                  >
-                    <Feather name="settings" size={14} color={theme.colors.textMuted} />
-                  </TouchableOpacity>
-                )}
-              </View>
-              {hostSessions.map((s) => {
-                const active =
-                  activePreviewId === null && s.hostId === activeHostId && s.id === activeId;
-                const live = active || isRecentlyActive(s.last_output_at);
-                const dotKey = activityDotKey(s.status, s.activity, live);
-                return (
-                  <View
-                    key={`${s.hostId}:${s.id}`}
-                    style={[styles.row, active && styles.rowActive]}
-                  >
-                    <TouchableOpacity
-                      style={styles.rowMain}
-                      activeOpacity={0.6}
-                      onPress={() => onSelect(s.hostId, s.id)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}
-                      accessibilityLabel={terminalAccessibilityLabel(
-                        `${sessionLabel(s)} on ${host.name}`,
-                        s.status,
-                        s.activity,
-                        live,
-                      )}
-                    >
-                      <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
-                        {sessionLabel(s)}
-                      </Text>
-                      {s.status === 'stopped' && <Text style={styles.stopped}>stopped</Text>}
-                      {dotKey === 'waiting' && (
-                        <Text style={[styles.stopped, { color: theme.colors.warning }]}>
-                          waiting
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.kill}
-                      hitSlop={HIT_SLOP}
-                      activeOpacity={0.6}
-                      onPress={() => confirmKill(s.id, onKill)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Kill terminal ${s.id}`}
-                    >
-                      <Feather name="x" size={16} color={theme.colors.danger} />
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          );
-        })}
-        {previews.map((preview) => {
-          const active = preview.id === activePreviewId;
-          return (
-            <View key={`preview-${preview.id}`} style={[styles.row, active && styles.rowActive]}>
-              <TouchableOpacity
-                style={styles.rowMain}
-                activeOpacity={0.6}
-                onPress={() => onSelectPreview(preview.id)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`Preview ${preview.title}`}
-              >
-                <Feather
-                  name="layout"
-                  size={14}
-                  color={theme.colors.accent}
-                  style={styles.previewIcon}
-                />
-                <Text style={[styles.name, active && styles.nameActive]} numberOfLines={1}>
-                  {preview.title}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.kill}
-                hitSlop={HIT_SLOP}
-                activeOpacity={0.6}
-                onPress={() => onClosePreview(preview.id)}
-                accessibilityRole="button"
-                accessibilityLabel={`Close preview ${preview.title}`}
-              >
-                <Feather name="x" size={16} color={theme.colors.danger} />
-              </TouchableOpacity>
-            </View>
-          );
-        })}
-      </ScrollView>
-
-      <TouchableOpacity
-        style={styles.newBtn}
-        activeOpacity={0.8}
-        onPress={onNew}
-        accessibilityRole="button"
-        accessibilityLabel="New terminal"
-      >
-        <Feather name="plus" size={16} color={theme.colors.text} />
-        <Text style={styles.newBtnText}>New terminal</Text>
-      </TouchableOpacity>
-    </>
+  const styles = createDrawerStyles(theme.colors);
+  const { mounted, tx, fade } = useDrawerSlide(visible);
+  const body = (
+    <DrawerPanelBody
+      styles={styles}
+      colors={theme.colors}
+      hosts={hosts}
+      healthByHost={healthByHost}
+      sessions={sessions}
+      activeHostId={activeHostId}
+      activeId={activeId}
+      activePreviewId={activePreviewId}
+      previews={previews}
+      showPin={showPin}
+      docked={docked}
+      onTogglePin={onTogglePin}
+      onSelect={onSelect}
+      onKillSession={(id) => confirmKill(id, onKill)}
+      onRetryHost={onRetryHost}
+      onReenterPassword={onReenterPassword}
+      onHostSettings={onHostSettings}
+      onSelectPreview={onSelectPreview}
+      onClosePreview={onClosePreview}
+      onNew={onNew}
+    />
   );
-
-  // Desktop: a fixed inline column, always present.
-  if (docked) {
-    return <View style={[styles.panel, styles.panelDocked]}>{panelBody}</View>;
-  }
-
+  if (docked) return <View style={[styles.panel, styles.panelDocked]}>{body}</View>;
   if (!mounted) return null;
-
-  // Mobile: slide-in overlay with a tap-to-dismiss scrim.
   return (
     <View style={styles.overlay}>
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
@@ -321,122 +145,15 @@ export function SessionDrawer({
           accessibilityLabel="Close terminal list"
         />
       </Animated.View>
-
       <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
-        {/* Wide desktop overlay sits under the title bar — no mobile header to clear.
-            Mobile/compact keep SafeArea so content clears the status bar, home
-            indicator, and landscape notch (App no longer wraps the shell). */}
         {showPin ? (
-          <View style={[styles.panelContent, styles.panelContentDesktop]}>{panelBody}</View>
+          <View style={[styles.panelContent, styles.panelContentDesktop]}>{body}</View>
         ) : (
           <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.panelContent}>
-            {panelBody}
+            {body}
           </SafeAreaView>
         )}
       </Animated.View>
     </View>
   );
 }
-
-const createStyles = (c: AppColors) =>
-  StyleSheet.create({
-    overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-    scrim: { flex: 1, backgroundColor: c.overlay },
-    panel: {
-      width: PANEL_W,
-      backgroundColor: c.surface,
-      borderRightWidth: 1,
-      borderRightColor: c.border,
-      paddingHorizontal: 12,
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      bottom: 0,
-    },
-    panelContent: { flex: 1, paddingTop: 56 },
-    // Wide-desktop overlay: under the title bar, same tight inset as docked.
-    panelContentDesktop: { paddingTop: 8 },
-    // Docked (desktop): inline column, no absolute positioning, tighter top pad
-    // (no mobile status bar to clear).
-    panelDocked: { position: 'relative', paddingTop: 8, alignSelf: 'stretch' },
-    pinRow: {
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      paddingHorizontal: 4,
-      paddingBottom: 4,
-    },
-    pinBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      minHeight: MIN_TOUCH_TARGET,
-      paddingHorizontal: 8,
-    },
-    pinLabel: { color: c.textMuted, fontSize: 12, fontWeight: '600' },
-    list: { flex: 1 },
-    hostSection: { marginBottom: 8, borderLeftWidth: 2, paddingLeft: 8 },
-    hostSectionUnavailable: { opacity: 0.52 },
-    hostHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: 34,
-      paddingHorizontal: 4,
-      gap: 7,
-    },
-    hostName: { color: c.text, fontSize: 11, fontWeight: '600' },
-    hostStatus: {
-      marginLeft: 'auto',
-      color: c.textFaint,
-      fontSize: 11,
-      fontVariant: ['tabular-nums'],
-    },
-    hostReachable: { color: c.success },
-    hostAction: { marginLeft: 'auto', color: c.accent, fontSize: 11, fontWeight: '600' },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      borderRadius: 0,
-      marginBottom: 0,
-      minHeight: MIN_TOUCH_TARGET,
-      backgroundColor: 'transparent',
-      borderLeftWidth: 2,
-      borderLeftColor: 'transparent',
-      marginLeft: -10,
-      paddingLeft: 8,
-    },
-    rowActive: { backgroundColor: c.selected },
-    rowMain: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: MIN_TOUCH_TARGET,
-      paddingHorizontal: 10,
-      paddingVertical: 11,
-    },
-    previewIcon: { marginRight: 10 },
-    name: { color: c.text, fontSize: 13 },
-    nameActive: { color: c.text, fontWeight: '700' },
-    stopped: { color: c.textFaint, fontSize: 10, marginLeft: 8, fontVariant: ['tabular-nums'] },
-    kill: {
-      minWidth: MIN_TOUCH_TARGET,
-      minHeight: MIN_TOUCH_TARGET,
-      paddingHorizontal: 12,
-      paddingVertical: 11,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    newBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      marginVertical: 12,
-      paddingVertical: 13,
-      borderRadius: SURFACE_RADIUS.hero,
-      minHeight: MIN_TOUCH_TARGET,
-      backgroundColor: 'transparent',
-      borderWidth: 1,
-      borderColor: c.border,
-    },
-    newBtnText: { color: c.text, fontWeight: '600', fontSize: 13 },
-  });
