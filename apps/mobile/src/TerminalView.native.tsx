@@ -1,216 +1,144 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import {
+  type ForwardedRef,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { AppState, StyleSheet } from 'react-native';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { RendererLifecycle } from './rendererLifecycle';
 import type { TerminalViewHandle, TerminalViewProps } from './TerminalView.types';
 import { terminalRendererHtml } from './terminalRendererHtml';
-import { parseRendererEvent, RendererQueue, RendererRpc } from './terminalRendererProtocol';
+import { RendererQueue, RendererRpc } from './terminalRendererProtocol';
+import { createTerminalHandle } from './terminalViewHandle';
+import {
+  handleNativeRendererMessage,
+  injectRendererCommand,
+  type NativeTerminalCallbacks,
+} from './terminalViewNative';
 
-// Liveness probe. Gated on the renderer's own global so a bare about:blank page
-// (which still has the ReactNativeWebView bridge) cannot answer for it.
 const PROBE_JS = `window.__tetherDispatch && window.ReactNativeWebView.postMessage(JSON.stringify({v:1,type:'pong'}));true;`;
 
-export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  (
-    {
-      onInput,
-      onResize,
-      onOpenLink,
-      onSelection,
-      onControl,
-      onReply,
-      onClipboardWrite,
-      onFallback,
-      onRecover,
-      onStatus,
+function nativeCallbacks(props: TerminalViewProps): NativeTerminalCallbacks {
+  return {
+    onRecover: props.onRecover,
+    onStatus: props.onStatus,
+    onControl: props.onControl,
+    onReply: props.onReply,
+    onClipboardWrite: props.onClipboardWrite,
+    onInput: props.onInput,
+    onResize: props.onResize,
+    onOpenLink: props.onOpenLink,
+    onSelection: props.onSelection,
+    onFallback: props.onFallback,
+  };
+}
+
+function createNativeLifecycle(
+  webView: { current: WebView | null },
+  rpc: RendererRpc,
+  queue: RendererQueue,
+  callbacks: { current: NativeTerminalCallbacks },
+  setInstance: (update: (n: number) => number) => void,
+) {
+  return new RendererLifecycle({
+    probe: () => webView.current?.injectJavaScript(PROBE_JS),
+    remount: () => {
+      rpc.clear('remount');
+      queue.recover(() => callbacks.current.onRecover());
+      setInstance((n) => n + 1);
     },
+    onStatus: (status) => callbacks.current.onStatus?.(status),
+  });
+}
+
+function useNativeTerminalBridge(props: TerminalViewProps, ref: ForwardedRef<TerminalViewHandle>) {
+  const webView = useRef<WebView>(null);
+  const [instance, setInstance] = useState(0);
+  const queue = useMemo(
+    () => new RendererQueue((command) => injectRendererCommand(webView.current, command)),
+    [],
+  );
+  const rpc = useMemo(
+    () => new RendererRpc((command) => injectRendererCommand(webView.current, command)),
+    [],
+  );
+  const callbacks = useRef(nativeCallbacks(props));
+  callbacks.current = nativeCallbacks(props);
+  const lifecycle = useMemo(
+    () => createNativeLifecycle(webView, rpc, queue, callbacks, setInstance),
+    [queue, rpc],
+  );
+  const hydrateWait = useRef<(() => void) | null>(null);
+  useImperativeHandle(
     ref,
-  ) => {
-    const webView = useRef<WebView>(null);
-    // Bumping this remounts the WebView. Recovery must remount rather than
-    // reload(): once iOS has reclaimed the content process there is nothing left
-    // to reload, and a WebView that never comes back leaves the terminal a blank
-    // white rectangle until the user force-quits the app.
-    const [instance, setInstance] = useState(0);
-    const queue = useMemo(
-      () =>
-        new RendererQueue((command) => {
-          const json = JSON.stringify(command);
-          webView.current?.injectJavaScript(`window.__tetherDispatch(${json});true;`);
-        }),
-      [],
-    );
-    const rpc = useMemo(
-      () =>
-        new RendererRpc((command) => {
-          const json = JSON.stringify(command);
-          webView.current?.injectJavaScript(`window.__tetherDispatch(${json});true;`);
-        }),
-      [],
-    );
-
-    // Callbacks are read through refs so the lifecycle can be built once; it owns
-    // timers, and rebuilding it on every render would rearm them.
-    const callbacks = useRef({
-      onRecover,
-      onStatus,
-      onControl,
-      onReply,
-      onClipboardWrite,
-      onInput,
-      onResize,
-      onOpenLink,
-      onSelection,
-      onFallback,
+    () => createTerminalHandle(queue, rpc, hydrateWait, () => lifecycle.retry()),
+    [queue, rpc, lifecycle],
+  );
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') lifecycle.foregrounded();
     });
-    callbacks.current = {
-      onRecover,
-      onStatus,
-      onControl,
-      onReply,
-      onClipboardWrite,
-      onInput,
-      onResize,
-      onOpenLink,
-      onSelection,
-      onFallback,
+    return () => {
+      subscription.remove();
+      rpc.clear('disposed');
+      lifecycle.dispose();
     };
-
-    const lifecycle = useMemo(
-      () =>
-        new RendererLifecycle({
-          probe: () => webView.current?.injectJavaScript(PROBE_JS),
-          remount: () => {
-            rpc.clear('remount');
-            queue.recover(() => callbacks.current.onRecover());
-            setInstance((n) => n + 1);
-          },
-          onStatus: (status) => callbacks.current.onStatus?.(status),
-        }),
-      [queue, rpc],
+  }, [lifecycle, rpc]);
+  const onMessage = (event: WebViewMessageEvent) =>
+    handleNativeRendererMessage(
+      event.nativeEvent.data,
+      lifecycle,
+      queue,
+      rpc,
+      callbacks.current,
+      hydrateWait,
     );
+  return { instance, webView, lifecycle, queue, rpc, onMessage };
+}
 
-    const hydrateWait = useRef<(() => void) | null>(null);
+function TerminalWebView({
+  instance,
+  webView,
+  lifecycle,
+  queue,
+  rpc,
+  onMessage,
+}: ReturnType<typeof useNativeTerminalBridge>) {
+  return (
+    <WebView
+      key={instance}
+      ref={webView}
+      source={{ html: terminalRendererHtml() }}
+      originWhitelist={['*']}
+      javaScriptEnabled
+      scrollEnabled
+      hideKeyboardAccessoryView
+      bounces={false}
+      overScrollMode="never"
+      style={styles.view}
+      onLoadStart={() => {
+        rpc.clear('reload');
+        queue.notReady();
+        lifecycle.loadStarted();
+      }}
+      onMessage={onMessage}
+      onError={() => lifecycle.crashed()}
+      onHttpError={() => lifecycle.crashed()}
+      onContentProcessDidTerminate={() => lifecycle.crashed()}
+      onRenderProcessGone={() => lifecycle.crashed()}
+      onShouldStartLoadWithRequest={({ url }) => url === 'about:blank'}
+    />
+  );
+}
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        hydrate: (...args) =>
-          new Promise<void>((resolve) => {
-            hydrateWait.current = resolve;
-            queue.hydrate(...args);
-          }),
-        write: (data) => queue.write(data),
-        resize: (cols, rows) => queue.resize(cols, rows),
-        scrollToLine: (line) => queue.scrollToLine(line),
-        selectAll: () => queue.selectAll(),
-        focus: () => queue.focus(),
-        blur: () => queue.blur(),
-        retry: () => lifecycle.retry(),
-        serialize: () => rpc.requestSerialize(),
-        snapshotText: () => rpc.requestSnapshotText(),
-        jumpPrompt: (dir) => queue.jumpPrompt(dir),
-      }),
-      [queue, rpc, lifecycle],
-    );
-
-    // Foregrounding is when a reclaimed content process shows up, so that is when
-    // the renderer gets asked to prove it is alive.
-    useEffect(() => {
-      const subscription = AppState.addEventListener('change', (state) => {
-        if (state === 'active') lifecycle.foregrounded();
-      });
-      return () => {
-        subscription.remove();
-        rpc.clear('disposed');
-        lifecycle.dispose();
-      };
-    }, [lifecycle, rpc]);
-
-    const onMessage = (event: WebViewMessageEvent) => {
-      const message = parseRendererEvent(event.nativeEvent.data);
-      if (!message) return;
-      // Any well-formed message proves the page is running.
-      lifecycle.sawMessage();
-      switch (message.type) {
-        case 'ready':
-          queue.ready();
-          lifecycle.pageReady();
-          break;
-        case 'pong':
-          break;
-        case 'input':
-          callbacks.current.onInput(message.text);
-          break;
-        case 'resize':
-          callbacks.current.onResize(message.cols, message.rows);
-          break;
-        case 'openLink':
-          callbacks.current.onOpenLink(message.target);
-          break;
-        case 'rendererFallback':
-          callbacks.current.onFallback(message.reason);
-          break;
-        case 'selection':
-          callbacks.current.onSelection?.(message.text);
-          break;
-        case 'serialized':
-          rpc.settle(message.requestId, {
-            data: message.data,
-            promptLines: message.promptLines,
-          });
-          break;
-        case 'snapshotText':
-          rpc.settle(message.requestId, message.text);
-          break;
-        case 'hydrated':
-          hydrateWait.current?.();
-          hydrateWait.current = null;
-          break;
-        case 'reply':
-          callbacks.current.onReply?.(message.data);
-          break;
-        case 'clipboardWrite':
-          callbacks.current.onClipboardWrite?.(message.text);
-          break;
-        case 'title':
-        case 'cwd':
-        case 'bell':
-        case 'notify':
-        case 'promptReturn':
-        case 'modes':
-          callbacks.current.onControl?.(message);
-          break;
-      }
-    };
-
-    return (
-      <WebView
-        key={instance}
-        ref={webView}
-        source={{ html: terminalRendererHtml() }}
-        originWhitelist={['*']}
-        javaScriptEnabled
-        scrollEnabled
-        hideKeyboardAccessoryView
-        bounces={false}
-        overScrollMode="never"
-        style={styles.view}
-        onLoadStart={() => {
-          rpc.clear('reload');
-          queue.notReady();
-          lifecycle.loadStarted();
-        }}
-        onMessage={onMessage}
-        onError={() => lifecycle.crashed()}
-        onHttpError={() => lifecycle.crashed()}
-        onContentProcessDidTerminate={() => lifecycle.crashed()}
-        onRenderProcessGone={() => lifecycle.crashed()}
-        onShouldStartLoadWithRequest={({ url }) => url === 'about:blank'}
-      />
-    );
-  },
-);
+export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>((props, ref) => {
+  const bridge = useNativeTerminalBridge(props, ref);
+  return <TerminalWebView {...bridge} />;
+});
 
 const styles = StyleSheet.create({
   view: { flex: 1, backgroundColor: '#1e1e2e' },

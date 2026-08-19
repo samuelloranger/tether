@@ -207,7 +207,7 @@ export function AppearanceModal({
   );
 }
 
-function createStyles(c: AppColors) {
+function panelStyles(c: AppColors) {
   return StyleSheet.create({
     menuBackdrop: {
       flex: 1,
@@ -255,6 +255,11 @@ function createStyles(c: AppColors) {
       fontWeight: '600',
       color: c.textMuted,
     },
+  });
+}
+
+function snippetStyles(c: AppColors) {
+  return StyleSheet.create({
     snippetEmpty: {
       color: c.textFaint,
       fontSize: 13,
@@ -297,4 +302,8 @@ function createStyles(c: AppColors) {
       alignItems: 'center',
     },
   });
+}
+
+function createStyles(c: AppColors) {
+  return { ...panelStyles(c), ...snippetStyles(c) };
 }
