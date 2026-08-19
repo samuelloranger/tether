@@ -1,3 +1,5 @@
+import { configure } from '@testing-library/react-native';
+
 // AsyncStorage ships an official in-memory mock; AppThemeProvider reads it on
 // mount, so without this every render hits a missing NativeModule.
 jest.mock('@react-native-async-storage/async-storage', () =>
@@ -61,3 +63,13 @@ jest.mock('react-native-webview', () => {
   const { View } = require('react-native');
   return { __esModule: true, default: View, WebView: View };
 });
+
+// These suites mount the whole app tree — every hook, the config load from
+// AsyncStorage, then the auto-connect — before their first assertion. Jest runs
+// one worker per core, so under that contention the mount reaches its first
+// socket in anywhere from ~100ms to just over a second: measured over nine full
+// runs the tail sat at 951/981/1013/1053ms, straddling Testing Library's 1000ms
+// default and failing whichever side of it the scheduler landed on. The waits
+// are already condition-based; only the deadline was wrong, so give them room
+// rather than making each call site guess.
+configure({ asyncUtilTimeout: 15000 });
