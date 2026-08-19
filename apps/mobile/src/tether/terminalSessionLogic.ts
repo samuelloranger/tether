@@ -129,22 +129,58 @@ export function createSessionCache(disconnect: (id: string) => void): SessionCac
   return new SessionCache(3, (id) => disconnect(id));
 }
 
+function applyOutputMessage(ctx: WsMessageContext, payload: Record<string, unknown>): void {
+  const { id, entry, activeId, onOutput, onNotify } = ctx;
+  if (!entry || typeof payload.id !== 'number' || payload.id <= entry.lastAppliedId) return;
+  const chunk = payload.chunk;
+  if (typeof chunk !== 'string') return;
+  entry.lastAppliedId = payload.id;
+  entry.sinceId = payload.id;
+  // Active session: the page (WebView / desktop xterm) is the sole parser.
+  // Feeding the headless shadow too doubles Hermes work for every byte.
+  if (id === activeId) {
+    onOutput(id, chunk);
+    return;
+  }
+  entry.term.write(chunk, () => {
+    onNotify(id, entry);
+    onOutput(id, chunk);
+  });
+}
+
+function applyExitMessage(ctx: WsMessageContext, payload: Record<string, unknown>): void {
+  const { id, entry, activeId, onOutput } = ctx;
+  if (!entry) return;
+  const code = typeof payload.exitCode === 'number' ? ` with code ${payload.exitCode}` : '';
+  const text = `\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`;
+  if (id === activeId) {
+    onOutput(id, text);
+    return;
+  }
+  entry.term.write(text, () => onOutput(id, text));
+}
+
+function applyActivityMessage(ctx: WsMessageContext, payload: Record<string, unknown>): void {
+  const activity = payload.activity as SessionActivity;
+  const sessionId = ctx.drawerSessionId ?? ctx.id;
+  const hostId = ctx.drawerHostId ?? '';
+  ctx.onDrawerSessions((rows) =>
+    rows.map((row) => (row.id === sessionId && row.hostId === hostId ? { ...row, activity } : row)),
+  );
+  ctx.onWaitingSessions([
+    {
+      id: sessionId,
+      hostId,
+      status: 'running',
+      last_output_at: null,
+      activity,
+    },
+  ]);
+}
+
 /** Applies one parsed wire message using explicit side effects, without React state closures. */
-export function applyWsMessage({
-  id,
-  drawerSessionId = id,
-  drawerHostId = '',
-  message,
-  entry,
-  activeId,
-  onGitSummaryChanged,
-  onTerminalMetadataChanged,
-  onDrawerSessions,
-  onWaitingSessions,
-  onOutput,
-  onNotify,
-  hydrateRenderer,
-}: WsMessageContext): void {
+export function applyWsMessage(ctx: WsMessageContext): void {
+  const { id, drawerSessionId = id, drawerHostId = '', message, entry, activeId } = ctx;
   const payload = object(message);
   if (!payload || !entry || typeof payload.type !== 'string') return;
   if (payload.type === 'diff') {
@@ -153,40 +189,20 @@ export function applyWsMessage({
     entry.diffSummary = { files: summary.files as DiffFileStat[] };
     const status = parseRepoStatus(payload.status);
     if (status) entry.repoStatus = status;
-    if (id === activeId) onGitSummaryChanged();
+    if (id === activeId) ctx.onGitSummaryChanged();
     return;
   }
   if (payload.type === 'output') {
-    if (typeof payload.id !== 'number' || payload.id <= entry.lastAppliedId) return;
-    const chunk = payload.chunk;
-    if (typeof chunk !== 'string') return;
-    entry.lastAppliedId = payload.id;
-    entry.sinceId = payload.id;
-    // Active session: the page (WebView / desktop xterm) is the sole parser.
-    // Feeding the headless shadow too doubles Hermes work for every byte.
-    if (id === activeId) {
-      onOutput(id, chunk);
-      return;
-    }
-    entry.term.write(chunk, () => {
-      onNotify(id, entry);
-      onOutput(id, chunk);
-    });
+    applyOutputMessage({ ...ctx, drawerSessionId, drawerHostId }, payload);
     return;
   }
   if (payload.type === 'exit') {
-    const code = typeof payload.exitCode === 'number' ? ` with code ${payload.exitCode}` : '';
-    const text = `\r\n\x1b[31m[Process exited${code}]\x1b[0m\r\n`;
-    if (id === activeId) {
-      onOutput(id, text);
-      return;
-    }
-    entry.term.write(text, () => onOutput(id, text));
+    applyExitMessage({ ...ctx, drawerSessionId, drawerHostId }, payload);
     return;
   }
   if (payload.type === 'title' && typeof payload.title === 'string') {
     const title = payload.title;
-    onDrawerSessions((rows) =>
+    ctx.onDrawerSessions((rows) =>
       rows.map((row) =>
         row.id === drawerSessionId && row.hostId === drawerHostId
           ? { ...row, auto_title: title }
@@ -196,21 +212,7 @@ export function applyWsMessage({
     return;
   }
   if (payload.type === 'activity') {
-    const activity = payload.activity as SessionActivity;
-    onDrawerSessions((rows) =>
-      rows.map((row) =>
-        row.id === drawerSessionId && row.hostId === drawerHostId ? { ...row, activity } : row,
-      ),
-    );
-    onWaitingSessions([
-      {
-        id: drawerSessionId,
-        hostId: drawerHostId,
-        status: 'running',
-        last_output_at: null,
-        activity,
-      },
-    ]);
+    applyActivityMessage({ ...ctx, drawerSessionId, drawerHostId }, payload);
     return;
   }
   if (payload.type === 'reset') {
@@ -219,7 +221,7 @@ export function applyWsMessage({
     entry.lastAppliedId = 0;
     entry.lastBellCount = 0;
     entry.lastNotifyCount = 0;
-    if (id === activeId) hydrateRenderer(id);
+    if (id === activeId) ctx.hydrateRenderer(id);
   }
 }
 
