@@ -10,6 +10,8 @@ import { PopupOverlayProvider } from './src/PopupOverlay';
 import { ServerSettings } from './src/ServerSettings';
 import { createStyles } from './src/styles';
 import { TerminalScreen } from './src/TerminalScreen';
+import type { TetherApp } from './src/terminalScreenTypes';
+import type { HostProfile } from './src/tether/hostStore';
 import { useTetherApp } from './src/useTetherApp';
 
 // Hold the native splash until the JS side has painted its identical overlay
@@ -31,19 +33,8 @@ export default function App() {
   );
 }
 
-function AppInner({ onReady }: { onReady: () => void }) {
-  const app = useTetherApp();
-  const { theme } = useAppTheme();
-  const styles = createStyles(theme.colors);
-  const launchReady = app.fontsLoaded;
-  useEffect(() => {
-    if (launchReady) onReady();
-  }, [launchReady, onReady]);
-  if (!app.fontsLoaded) return null;
-  // Rendered once, above both branches. Mounted inside a branch it unmounted
-  // mid-flight when the app flipped config <-> terminal, and react-native-web
-  // left the open Modal's backdrop behind — a permanent dim over a dead app.
-  const serverSettings = (
+function AppServerSettings({ app }: { app: TetherApp }) {
+  return (
     <ServerSettings
       visible={app.serverSettingsOpen}
       host={app.serverSettingsHost}
@@ -76,62 +67,93 @@ function AppInner({ onReady }: { onReady: () => void }) {
       }}
     />
   );
+}
+
+function AppHostPage({
+  app,
+  host,
+  onBack,
+}: {
+  app: TetherApp;
+  host: HostProfile;
+  onBack: () => void;
+}) {
+  return (
+    <ServerSettings
+      inline
+      visible
+      host={host}
+      client={app.clientFor(host)}
+      health={app.healthByHost[host.id] ?? 'unknown'}
+      onClose={onBack}
+      onRetry={() => app.refreshHost(host.id)}
+      onUnauthorized={() => {
+        onBack();
+        void app.openEditHost(host.id);
+      }}
+      onIdentitySaved={(identity) => void app.saveHostIdentity(host.id, identity)}
+      onPasswordChanged={(password) => app.replaceStoredPassword(host.id, password)}
+      onConnectionSaved={(changes, password) => app.saveHostConnection(host.id, changes, password)}
+      onRemoveHost={() => app.removeHost(host.id)}
+    />
+  );
+}
+
+function AppConfigScreen({ app }: { app: TetherApp }) {
+  return (
+    <ConfigScreen
+      serverIp={app.serverIp}
+      setServerIp={app.setServerIp}
+      port={app.port}
+      setPort={app.setPort}
+      password={app.password}
+      setPassword={app.setPassword}
+      confirmPassword={app.confirmPassword}
+      setConfirmPassword={app.setConfirmPassword}
+      setupMode={app.setupMode}
+      setSetupMode={app.setSetupMode}
+      testStatus={app.testStatus}
+      setTestStatus={app.setTestStatus}
+      onSave={app.saveConfig}
+      onTest={app.testConnection}
+      onCloseSettings={() => app.setIsConfiguring(false)}
+      hosts={app.profiles}
+      storeError={app.storeError}
+      onRetryHosts={() => void app.loadProfiles()}
+      onAddHost={app.openAddHost}
+      onReorderHosts={(ids) => void app.reorderHosts(ids)}
+      healthByHost={app.healthByHost}
+      initialHostId={app.serverSettingsHost?.id}
+      onHostPageClose={app.closeServerSettings}
+      renderHostPage={(host, onBack) => <AppHostPage app={app} host={host} onBack={onBack} />}
+      renderAppearancePage={(onBack) => (
+        <AppearanceScreen
+          fontFamily={app.fontFamily}
+          onFontChange={app.changeFontFamily}
+          onBack={onBack}
+        />
+      )}
+    />
+  );
+}
+
+function AppInner({ onReady }: { onReady: () => void }) {
+  const app = useTetherApp();
+  const { theme } = useAppTheme();
+  const styles = createStyles(theme.colors);
+  const launchReady = app.fontsLoaded;
+  useEffect(() => {
+    if (launchReady) onReady();
+  }, [launchReady, onReady]);
+  if (!app.fontsLoaded) return null;
+  // Rendered once, above both branches. Mounted inside a branch it unmounted
+  // mid-flight when the app flipped config <-> terminal, and react-native-web
+  // left the open Modal's backdrop behind — a permanent dim over a dead app.
+  const serverSettings = <AppServerSettings app={app} />;
   if (app.isConfiguring) {
     return (
       <SafeAreaView style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
-        <ConfigScreen
-          serverIp={app.serverIp}
-          setServerIp={app.setServerIp}
-          port={app.port}
-          setPort={app.setPort}
-          password={app.password}
-          setPassword={app.setPassword}
-          confirmPassword={app.confirmPassword}
-          setConfirmPassword={app.setConfirmPassword}
-          setupMode={app.setupMode}
-          setSetupMode={app.setSetupMode}
-          testStatus={app.testStatus}
-          setTestStatus={app.setTestStatus}
-          onSave={app.saveConfig}
-          onTest={app.testConnection}
-          onCloseSettings={() => app.setIsConfiguring(false)}
-          hosts={app.profiles}
-          storeError={app.storeError}
-          onRetryHosts={() => void app.loadProfiles()}
-          onAddHost={app.openAddHost}
-          onReorderHosts={(ids) => void app.reorderHosts(ids)}
-          healthByHost={app.healthByHost}
-          initialHostId={app.serverSettingsHost?.id}
-          onHostPageClose={app.closeServerSettings}
-          renderHostPage={(host, onBack) => (
-            <ServerSettings
-              inline
-              visible
-              host={host}
-              client={app.clientFor(host)}
-              health={app.healthByHost[host.id] ?? 'unknown'}
-              onClose={onBack}
-              onRetry={() => app.refreshHost(host.id)}
-              onUnauthorized={() => {
-                onBack();
-                void app.openEditHost(host.id);
-              }}
-              onIdentitySaved={(identity) => void app.saveHostIdentity(host.id, identity)}
-              onPasswordChanged={(password) => app.replaceStoredPassword(host.id, password)}
-              onConnectionSaved={(changes, password) =>
-                app.saveHostConnection(host.id, changes, password)
-              }
-              onRemoveHost={() => app.removeHost(host.id)}
-            />
-          )}
-          renderAppearancePage={(onBack) => (
-            <AppearanceScreen
-              fontFamily={app.fontFamily}
-              onFontChange={app.changeFontFamily}
-              onBack={onBack}
-            />
-          )}
-        />
+        <AppConfigScreen app={app} />
         {serverSettings}
       </SafeAreaView>
     );
