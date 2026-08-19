@@ -127,6 +127,108 @@ export function HostsScreen({
 
 const DRAG_ROW_HEIGHT = 72;
 
+type RowColors = {
+  surface: string;
+  border: string;
+  text: string;
+  textMuted: string;
+  textFaint: string;
+  success: string;
+  danger: string;
+};
+
+function HostRowHandle({
+  name,
+  dragY,
+  moveBy,
+  c,
+}: {
+  name: string;
+  dragY: Animated.Value;
+  moveBy: (delta: number) => void;
+  c: RowColors;
+}) {
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderMove: (_event, gesture) => dragY.setValue(gesture.dy),
+        onPanResponderRelease: (_event, gesture) => {
+          moveBy(Math.round(gesture.dy / DRAG_ROW_HEIGHT));
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
+        },
+        onPanResponderTerminate: () =>
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start(),
+      }),
+    [dragY, moveBy],
+  );
+  return (
+    <View
+      {...panResponder.panHandlers}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={`Reorder ${name}`}
+      accessibilityActions={[
+        { name: 'decrement', label: `Move ${name} up` },
+        { name: 'increment', label: `Move ${name} down` },
+      ]}
+      onAccessibilityAction={(event) =>
+        moveBy(event.nativeEvent.actionName === 'decrement' ? -1 : 1)
+      }
+      hitSlop={HIT_SLOP}
+      style={{
+        width: MIN_TOUCH_TARGET,
+        minHeight: MIN_TOUCH_TARGET,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Feather name="menu" size={17} color={c.textMuted} />
+    </View>
+  );
+}
+
+function HostRowOpen({
+  host,
+  status,
+  onOpen,
+  c,
+}: {
+  host: HostProfile;
+  status: HostHealthStatus;
+  onOpen: () => void;
+  c: RowColors;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={`${host.name}, ${HEALTH_LABEL[status]}. Open host settings`}
+      style={{
+        flex: 1,
+        minHeight: MIN_TOUCH_TARGET,
+        paddingVertical: 12,
+        paddingRight: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>{host.name}</Text>
+        <Text style={[typeScale.caption, { color: c.textFaint, marginTop: 2 }]}>
+          {host.host}:{host.port}
+        </Text>
+      </View>
+      <Text style={[typeScale.caption, { color: healthColor(status, c) }]}>
+        {HEALTH_LABEL[status]}
+      </Text>
+      <Feather name="chevron-right" size={18} color={c.textFaint} />
+    </TouchableOpacity>
+  );
+}
+
 function HostRow({
   host,
   status,
@@ -149,21 +251,6 @@ function HostRow({
     (delta: number) => onMove(Math.max(0, Math.min(count - 1, index + delta))),
     [count, index, onMove],
   );
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderMove: (_event, gesture) => dragY.setValue(gesture.dy),
-        onPanResponderRelease: (_event, gesture) => {
-          moveBy(Math.round(gesture.dy / DRAG_ROW_HEIGHT));
-          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
-        },
-        onPanResponderTerminate: () =>
-          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start(),
-      }),
-    [dragY, moveBy],
-  );
   return (
     <Animated.View
       style={{
@@ -181,53 +268,8 @@ function HostRow({
         zIndex: 1,
       }}
     >
-      <View
-        {...panResponder.panHandlers}
-        accessible
-        accessibilityRole="adjustable"
-        accessibilityLabel={`Reorder ${host.name}`}
-        accessibilityActions={[
-          { name: 'decrement', label: `Move ${host.name} up` },
-          { name: 'increment', label: `Move ${host.name} down` },
-        ]}
-        onAccessibilityAction={(event) =>
-          moveBy(event.nativeEvent.actionName === 'decrement' ? -1 : 1)
-        }
-        hitSlop={HIT_SLOP}
-        style={{
-          width: MIN_TOUCH_TARGET,
-          minHeight: MIN_TOUCH_TARGET,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Feather name="menu" size={17} color={c.textMuted} />
-      </View>
-      <TouchableOpacity
-        onPress={onOpen}
-        accessibilityRole="button"
-        accessibilityLabel={`${host.name}, ${HEALTH_LABEL[status]}. Open host settings`}
-        style={{
-          flex: 1,
-          minHeight: MIN_TOUCH_TARGET,
-          paddingVertical: 12,
-          paddingRight: 14,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 12,
-        }}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>{host.name}</Text>
-          <Text style={[typeScale.caption, { color: c.textFaint, marginTop: 2 }]}>
-            {host.host}:{host.port}
-          </Text>
-        </View>
-        <Text style={[typeScale.caption, { color: healthColor(status, c) }]}>
-          {HEALTH_LABEL[status]}
-        </Text>
-        <Feather name="chevron-right" size={18} color={c.textFaint} />
-      </TouchableOpacity>
+      <HostRowHandle name={host.name} dragY={dragY} moveBy={moveBy} c={c} />
+      <HostRowOpen host={host} status={status} onOpen={onOpen} c={c} />
     </Animated.View>
   );
 }

@@ -1,45 +1,189 @@
 import { Prism } from 'prism-react-renderer';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
+import type { AppTheme } from './appTheme';
 import { colorForTokenTypes } from './CodeHighlight';
 import { languageForPath, tokenizeLine } from './codeLanguage';
-import { parseDiffLines } from './diffModel';
+import { type DiffLine, parseDiffLines } from './diffModel';
 import { minTouchTarget } from './interaction';
 
-const TOUCH_TARGET = minTouchTarget();
+type Grammar = Parameters<typeof tokenizeLine>[1];
 
+const TOUCH_TARGET = minTouchTarget();
 const TEXT_METRICS = { lineHeight: 20, includeFontPadding: false } as const;
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$/;
 
-// Renders a unified diff with an old/new line-number gutter and per-line
-// syntax highlighting. Tokenizes each content line independently (rather
-// than the whole diff blob at once) so hunk gaps and interleaved +/- markup
-// never corrupt the grammar — see CodeHighlight's `path` doc comment for why
-// that matters.
+type DiffLinesProps = {
+  diffText: string;
+  path: string;
+  onHunkPress?: (hunkIndex: number) => void;
+  hunkActionLabel?: string;
+  onOpenLine?: (line: number) => void;
+};
+
+function DiffHunkRow({
+  theme,
+  hunkContext,
+  hunkIndex,
+  onHunkPress,
+  hunkActionLabel,
+}: {
+  theme: AppTheme;
+  hunkContext: string;
+  hunkIndex: number;
+  onHunkPress?: (hunkIndex: number) => void;
+  hunkActionLabel?: string;
+}) {
+  return (
+    <View style={[styles.hunkRow, { borderTopColor: theme.colors.border }]}>
+      <Text style={[styles.hunkLabel, { color: theme.colors.textFaint }]}>⋯</Text>
+      {hunkContext ? (
+        <Text numberOfLines={1} style={[styles.hunkContext, { color: theme.colors.textFaint }]}>
+          {hunkContext}
+        </Text>
+      ) : null}
+      {onHunkPress ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`${hunkActionLabel ?? 'Stage'} hunk ${hunkIndex + 1}`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          onPress={() => onHunkPress(hunkIndex)}
+          style={styles.hunkActionHit}
+        >
+          <Text style={[styles.hunkAction, { color: theme.colors.accent }]}>
+            {hunkActionLabel ?? 'Stage'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
+function DiffLineContent({
+  theme,
+  line,
+  numberWidth,
+  grammar,
+  onOpenLine,
+}: {
+  theme: AppTheme;
+  line: DiffLine;
+  numberWidth: number;
+  grammar: Grammar;
+  onOpenLine?: (line: number) => void;
+}) {
+  const tokens = tokenizeLine(line.content, grammar);
+  return (
+    <>
+      <Text
+        style={[
+          styles.gutterNum,
+          TEXT_METRICS,
+          { width: numberWidth, color: theme.colors.textFaint },
+        ]}
+      >
+        {line.oldLine ?? ''}
+      </Text>
+      <Text
+        style={[
+          styles.gutterNum,
+          TEXT_METRICS,
+          { width: numberWidth, color: theme.colors.textFaint },
+        ]}
+      >
+        {line.newLine ?? ''}
+      </Text>
+      <Text
+        style={[
+          styles.marker,
+          TEXT_METRICS,
+          {
+            color:
+              line.kind === 'add'
+                ? theme.colors.success
+                : line.kind === 'remove'
+                  ? theme.colors.danger
+                  : theme.colors.textFaint,
+          },
+        ]}
+      >
+        {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}
+      </Text>
+      <Text
+        selectable={!onOpenLine}
+        style={[styles.content, TEXT_METRICS, { color: theme.terminal.fg }]}
+      >
+        {tokens
+          ? tokens.map((token, tokenIndex) => (
+              <Text
+                key={tokenIndex}
+                style={{ color: colorForTokenTypes(token.types, theme.colors) }}
+              >
+                {token.content}
+              </Text>
+            ))
+          : line.content}
+      </Text>
+    </>
+  );
+}
+
+function DiffContentRow({
+  theme,
+  path,
+  line,
+  numberWidth,
+  grammar,
+  onOpenLine,
+}: {
+  theme: AppTheme;
+  path: string;
+  line: DiffLine;
+  numberWidth: number;
+  grammar: Grammar;
+  onOpenLine?: (n: number) => void;
+}) {
+  const rowBg =
+    line.kind === 'add'
+      ? `${theme.colors.success}18`
+      : line.kind === 'remove'
+        ? `${theme.colors.danger}18`
+        : undefined;
+  const openLine = line.newLine ?? line.oldLine;
+  const content = (
+    <DiffLineContent
+      theme={theme}
+      line={line}
+      numberWidth={numberWidth}
+      grammar={grammar}
+      onOpenLine={onOpenLine}
+    />
+  );
+  if (onOpenLine && openLine != null) {
+    return (
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${path} at line ${openLine}`}
+        onPress={() => onOpenLine(openLine)}
+        style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}>{content}</View>;
+}
+
 export function DiffLines({
   diffText,
   path,
   onHunkPress,
   hunkActionLabel,
   onOpenLine,
-}: {
-  diffText: string;
-  path: string;
-  // Stage/unstage affordance on each hunk header. The index passed is the
-  // ordinal over @@ headers — the same numbering the server's hunk endpoints
-  // consume (its splitHunks counts identically).
-  onHunkPress?: (hunkIndex: number) => void;
-  hunkActionLabel?: string;
-  /** Open the working-tree file at this 1-based line (new side preferred). */
-  onOpenLine?: (line: number) => void;
-}) {
+}: DiffLinesProps) {
   const { theme } = useAppTheme();
   const language = languageForPath(path);
   const grammar = language ? Prism.languages[language] : undefined;
-  // Drop the pure-boilerplate git plumbing lines (diff --git/index/---/+++)
-  // — the file path is already the screen's header. Hunk headers (@@ ... @@)
-  // carry real information (lines were skipped here) so they stay, rendered
-  // as a divider instead of raw diff syntax.
   const lines = parseDiffLines(diffText).filter(
     (line) => line.kind !== 'meta' || HUNK_HEADER.test(line.text),
   );
@@ -48,9 +192,6 @@ export function DiffLines({
     1,
   );
   const numberWidth = String(maxLineNumber).length * 8 + 4;
-
-  // Ordinal over the hunk headers that survive the filter above — identical to
-  // the unfiltered ordinal since only non-hunk meta lines were dropped.
   let hunkIndex = -1;
   return (
     <View style={styles.root}>
@@ -58,105 +199,27 @@ export function DiffLines({
         const hunkContext = line.kind === 'meta' ? line.text.match(HUNK_HEADER)?.[1] : undefined;
         if (hunkContext !== undefined) {
           hunkIndex++;
-          const thisHunk = hunkIndex;
           return (
-            <View key={index} style={[styles.hunkRow, { borderTopColor: theme.colors.border }]}>
-              <Text style={[styles.hunkLabel, { color: theme.colors.textFaint }]}>⋯</Text>
-              {hunkContext ? (
-                <Text
-                  numberOfLines={1}
-                  style={[styles.hunkContext, { color: theme.colors.textFaint }]}
-                >
-                  {hunkContext}
-                </Text>
-              ) : null}
-              {onHunkPress ? (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={`${hunkActionLabel ?? 'Stage'} hunk ${thisHunk + 1}`}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  onPress={() => onHunkPress(thisHunk)}
-                  style={styles.hunkActionHit}
-                >
-                  <Text style={[styles.hunkAction, { color: theme.colors.accent }]}>
-                    {hunkActionLabel ?? 'Stage'}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          );
-        }
-        const rowBg =
-          line.kind === 'add'
-            ? `${theme.colors.success}18`
-            : line.kind === 'remove'
-              ? `${theme.colors.danger}18`
-              : undefined;
-        const markerColor =
-          line.kind === 'add'
-            ? theme.colors.success
-            : line.kind === 'remove'
-              ? theme.colors.danger
-              : theme.colors.textFaint;
-        const tokens = tokenizeLine(line.content, grammar);
-        const openLine = line.newLine ?? line.oldLine;
-        const content = (
-          <>
-            <Text
-              style={[
-                styles.gutterNum,
-                TEXT_METRICS,
-                { width: numberWidth, color: theme.colors.textFaint },
-              ]}
-            >
-              {line.oldLine ?? ''}
-            </Text>
-            <Text
-              style={[
-                styles.gutterNum,
-                TEXT_METRICS,
-                { width: numberWidth, color: theme.colors.textFaint },
-              ]}
-            >
-              {line.newLine ?? ''}
-            </Text>
-            <Text style={[styles.marker, TEXT_METRICS, { color: markerColor }]}>
-              {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}
-            </Text>
-            <Text
-              selectable={!onOpenLine}
-              style={[styles.content, TEXT_METRICS, { color: theme.terminal.fg }]}
-            >
-              {tokens
-                ? tokens.map((token, tokenIndex) => (
-                    <Text
-                      key={tokenIndex}
-                      style={{ color: colorForTokenTypes(token.types, theme.colors) }}
-                    >
-                      {token.content}
-                    </Text>
-                  ))
-                : line.content}
-            </Text>
-          </>
-        );
-        if (onOpenLine && openLine != null) {
-          return (
-            <TouchableOpacity
+            <DiffHunkRow
               key={index}
-              accessibilityRole="button"
-              accessibilityLabel={`Open ${path} at line ${openLine}`}
-              onPress={() => onOpenLine(openLine)}
-              style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}
-            >
-              {content}
-            </TouchableOpacity>
+              theme={theme}
+              hunkContext={hunkContext}
+              hunkIndex={hunkIndex}
+              onHunkPress={onHunkPress}
+              hunkActionLabel={hunkActionLabel}
+            />
           );
         }
         return (
-          <View key={index} style={[styles.row, rowBg ? { backgroundColor: rowBg } : null]}>
-            {content}
-          </View>
+          <DiffContentRow
+            key={index}
+            theme={theme}
+            path={path}
+            line={line}
+            numberWidth={numberWidth}
+            grammar={grammar}
+            onOpenLine={onOpenLine}
+          />
         );
       })}
     </View>

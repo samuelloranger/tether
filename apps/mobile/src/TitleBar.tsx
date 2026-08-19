@@ -5,6 +5,7 @@
 // cluster on the right. See src/titlebarChrome.ts for the per-OS decisions.
 
 import Feather from '@expo/vector-icons/Feather';
+import type { ComponentProps } from 'react';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
@@ -68,6 +69,156 @@ function StatusBadge({ status, colors }: { status: TitleBarProps['status']; colo
   );
 }
 
+function TitleBarBtn({
+  styles,
+  color,
+  icon,
+  size,
+  label,
+  onPress,
+}: {
+  styles: ReturnType<typeof createStyles>;
+  color: string;
+  icon: ComponentProps<typeof Feather>['name'];
+  size: number;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      {...NO_DRAG_PROPS}
+      style={styles.btn}
+      activeOpacity={0.6}
+      hitSlop={HIT}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Feather name={icon} size={size} color={color} />
+    </TouchableOpacity>
+  );
+}
+
+function TitleBarWinControls({
+  styles,
+  color,
+  maximized,
+}: {
+  styles: ReturnType<typeof createStyles>;
+  color: string;
+  maximized: boolean;
+}) {
+  return (
+    <View style={styles.winControls}>
+      <TouchableOpacity
+        {...NO_DRAG_PROPS}
+        style={styles.winBtn}
+        activeOpacity={0.6}
+        onPress={() => void minimizeWindow()}
+        accessibilityRole="button"
+        accessibilityLabel="Minimize"
+      >
+        <Feather name="minus" size={18} color={color} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        {...NO_DRAG_PROPS}
+        style={styles.winBtn}
+        activeOpacity={0.6}
+        onPress={() => void toggleMaximizeWindow()}
+        accessibilityRole="button"
+        accessibilityLabel={maximized ? 'Restore' : 'Maximize'}
+      >
+        <Feather name={maximized ? 'copy' : 'square'} size={15} color={color} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        {...NO_DRAG_PROPS}
+        style={[styles.winBtn, styles.winClose]}
+        activeOpacity={0.6}
+        onPress={() => void closeWindow()}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      >
+        <Feather name="x" size={18} color={color} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function TitleBarActions({
+  styles,
+  colors,
+  compact,
+  status,
+  onNew,
+  onChanges,
+  changesLabel,
+  onSettings,
+  onMenu,
+  showControls,
+  maximized,
+}: {
+  styles: ReturnType<typeof createStyles>;
+  colors: AppColors;
+  compact: boolean;
+  status: TitleBarProps['status'];
+  onNew?: () => void;
+  onChanges?: () => void;
+  changesLabel: string | null;
+  onSettings?: () => void;
+  onMenu?: () => void;
+  showControls: boolean;
+  maximized: boolean;
+}) {
+  return (
+    <View style={styles.actions}>
+      {!compact && status ? <StatusBadge status={status} colors={colors} /> : null}
+      {!compact && onNew ? (
+        <TitleBarBtn
+          styles={styles}
+          color={colors.text}
+          icon="plus"
+          size={19}
+          label="New terminal"
+          onPress={onNew}
+        />
+      ) : null}
+      {!compact && onChanges && changesLabel ? (
+        <TitleBarBtn
+          styles={styles}
+          color={colors.accent}
+          icon="git-pull-request"
+          size={18}
+          label={changesLabel}
+          onPress={onChanges}
+        />
+      ) : null}
+      {!compact && onSettings ? (
+        <TitleBarBtn
+          styles={styles}
+          color={colors.text}
+          icon="settings"
+          size={18}
+          label="Settings"
+          onPress={onSettings}
+        />
+      ) : null}
+      {!compact && onMenu ? (
+        <TitleBarBtn
+          styles={styles}
+          color={colors.text}
+          icon="more-vertical"
+          size={19}
+          label="Terminal menu"
+          onPress={onMenu}
+        />
+      ) : null}
+      {showControls ? (
+        <TitleBarWinControls styles={styles} color={colors.text} maximized={maximized} />
+      ) : null}
+    </View>
+  );
+}
+
 export default function TitleBar({
   isMac,
   title,
@@ -111,21 +262,16 @@ export default function TitleBar({
   return (
     <View style={styles.bar} {...DRAG_PROPS}>
       {leftInset > 0 && <View style={{ width: leftInset }} />}
-
       {onOpenDrawer ? (
-        <TouchableOpacity
-          {...NO_DRAG_PROPS}
-          style={styles.btn}
-          activeOpacity={0.6}
-          hitSlop={HIT}
+        <TitleBarBtn
+          styles={styles}
+          color={theme.colors.text}
+          icon="menu"
+          size={18}
+          label="Open terminal list"
           onPress={onOpenDrawer}
-          accessibilityRole="button"
-          accessibilityLabel="Open terminal list"
-        >
-          <Feather name="menu" size={18} color={theme.colors.text} />
-        </TouchableOpacity>
+        />
       ) : null}
-
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={1}>
           {title}
@@ -136,101 +282,19 @@ export default function TitleBar({
           </Text>
         ) : null}
       </View>
-
-      <View style={styles.actions}>
-        {!compact && status ? <StatusBadge status={status} colors={theme.colors} /> : null}
-
-        {!compact && onNew ? (
-          <TouchableOpacity
-            {...NO_DRAG_PROPS}
-            style={styles.btn}
-            activeOpacity={0.6}
-            hitSlop={HIT}
-            onPress={onNew}
-            accessibilityRole="button"
-            accessibilityLabel="New terminal"
-          >
-            <Feather name="plus" size={19} color={theme.colors.text} />
-          </TouchableOpacity>
-        ) : null}
-
-        {!compact && onChanges && changesLabel ? (
-          <TouchableOpacity
-            {...NO_DRAG_PROPS}
-            style={styles.btn}
-            activeOpacity={0.6}
-            hitSlop={HIT}
-            onPress={onChanges}
-            accessibilityRole="button"
-            accessibilityLabel={changesLabel}
-          >
-            <Feather name="git-pull-request" size={18} color={theme.colors.accent} />
-          </TouchableOpacity>
-        ) : null}
-
-        {!compact && onSettings ? (
-          <TouchableOpacity
-            {...NO_DRAG_PROPS}
-            style={styles.btn}
-            activeOpacity={0.6}
-            hitSlop={HIT}
-            onPress={onSettings}
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-          >
-            <Feather name="settings" size={18} color={theme.colors.text} />
-          </TouchableOpacity>
-        ) : null}
-
-        {!compact && onMenu ? (
-          <TouchableOpacity
-            {...NO_DRAG_PROPS}
-            style={styles.btn}
-            activeOpacity={0.6}
-            hitSlop={HIT}
-            onPress={onMenu}
-            accessibilityRole="button"
-            accessibilityLabel="Terminal menu"
-          >
-            <Feather name="more-vertical" size={19} color={theme.colors.text} />
-          </TouchableOpacity>
-        ) : null}
-
-        {showControls && (
-          <View style={styles.winControls}>
-            <TouchableOpacity
-              {...NO_DRAG_PROPS}
-              style={styles.winBtn}
-              activeOpacity={0.6}
-              onPress={() => void minimizeWindow()}
-              accessibilityRole="button"
-              accessibilityLabel="Minimize"
-            >
-              <Feather name="minus" size={18} color={theme.colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              {...NO_DRAG_PROPS}
-              style={styles.winBtn}
-              activeOpacity={0.6}
-              onPress={() => void toggleMaximizeWindow()}
-              accessibilityRole="button"
-              accessibilityLabel={maximized ? 'Restore' : 'Maximize'}
-            >
-              <Feather name={maximized ? 'copy' : 'square'} size={15} color={theme.colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              {...NO_DRAG_PROPS}
-              style={[styles.winBtn, styles.winClose]}
-              activeOpacity={0.6}
-              onPress={() => void closeWindow()}
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-            >
-              <Feather name="x" size={18} color={theme.colors.text} />
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
+      <TitleBarActions
+        styles={styles}
+        colors={theme.colors}
+        compact={compact}
+        status={status}
+        onNew={onNew}
+        onChanges={onChanges}
+        changesLabel={changesLabel}
+        onSettings={onSettings}
+        onMenu={onMenu}
+        showControls={showControls}
+        maximized={maximized}
+      />
     </View>
   );
 }

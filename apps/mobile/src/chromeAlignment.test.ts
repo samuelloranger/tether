@@ -3,11 +3,11 @@ import { expect, test } from 'bun:test';
 const source = (name: string) => Bun.file(new URL(name, import.meta.url)).text();
 
 test('compact desktop chrome pins the affected text metrics', async () => {
-  const [titleBar, panelHeader, fileViewer, gitDrawer, gitReview] = await Promise.all([
+  const [titleBar, panelHeader, fileViewer, gitDrawerPanes, gitReview] = await Promise.all([
     source('./TitleBar.tsx'),
     source('./PanelHeader.tsx'),
     source('./FileViewer.tsx'),
-    source('./GitDrawer.tsx'),
+    source('./gitDrawerPanes.tsx'),
     source('./GitReview.tsx'),
   ]);
 
@@ -22,7 +22,7 @@ test('compact desktop chrome pins the affected text metrics', async () => {
   expect(panelHeader).toMatch(/backText: \{[^}]*TEXT_METRICS/);
   expect(panelHeader).toMatch(/path: \{[^}]*TEXT_METRICS/);
 
-  for (const viewer of [fileViewer, gitDrawer, gitReview]) {
+  for (const viewer of [fileViewer, gitDrawerPanes, gitReview]) {
     expect(viewer).toContain("from './PanelHeader'");
     expect(viewer).toContain('<PanelHeader');
   }

@@ -1,6 +1,7 @@
 import Feather from '@expo/vector-icons/Feather';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as Haptics from 'expo-haptics';
+import type { ComponentProps, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Keyboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,29 +14,14 @@ import { UTILITY_BAR_PAGES, type UtilityBarKey } from './utilityBarModel';
 
 export { UTILITY_BAR_PAGES } from './utilityBarModel';
 
-// Gutter around the key row, and the breathing room above/below it. The row is
-// MIN_TOUCH_TARGET tall on purpose — the padding grows the bar rather than
-// shrinking the keys under the 44pt minimum touch target.
 const BAR_GUTTER = 8;
 const BAR_PAD_V = 2;
 
-// Mobile terminal-shortcuts utility bar — desktop uses the real keyboard.
-export function UtilityBar({
-  ctrlArmed,
-  setCtrlArmed,
-  sendKey,
-  cursorSeq,
-  page,
-  setPage,
-  onPaste,
-  onImagePick,
-  onHideKeyboard,
-}: {
+type BarStyles = ReturnType<typeof createStyles>;
+
+type UtilityBarProps = {
   ctrlArmed: boolean;
   setCtrlArmed: (updater: (prev: boolean) => boolean) => void;
-  // Routes through the armed-Ctrl modifier — never call sendInput directly from
-  // here, or Ctrl+<bar key> sends the unmodified key and leaves Ctrl armed for
-  // the next typed letter.
   sendKey: (bytes: string) => void;
   cursorSeq: (final: string) => string;
   page: number;
@@ -43,13 +29,9 @@ export function UtilityBar({
   onPaste: () => void;
   onImagePick: () => void;
   onHideKeyboard: () => void;
-}) {
-  const { theme } = useAppTheme();
-  const insets = useSafeAreaInsets();
-  const styles = createStyles(theme.colors);
-  // KeyboardAvoidingView's "padding" behavior already lifts this bar clear of
-  // the home indicator once the keyboard is up; stacking insets.bottom on top
-  // of that opened a dead gap between the buttons and the keyboard.
+};
+
+function useKeyboardVisible() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -59,12 +41,21 @@ export function UtilityBar({
       hide.remove();
     };
   }, []);
-  const lastPage = UTILITY_BAR_PAGES.length - 1;
-  const clamped = Math.min(Math.max(page, 0), lastPage);
+  return keyboardVisible;
+}
 
-  const key = (bytes: string) => () => sendKey(bytes);
-
-  const textBtn = (label: string, onPress: () => void, onLongPress?: () => void) => (
+function UtilityTextBtn({
+  styles,
+  label,
+  onPress,
+  onLongPress,
+}: {
+  styles: BarStyles;
+  label: string;
+  onPress: () => void;
+  onLongPress?: () => void;
+}) {
+  return (
     <TouchableOpacity
       key={label}
       style={styles.utilityBtn}
@@ -78,12 +69,22 @@ export function UtilityBar({
       </Text>
     </TouchableOpacity>
   );
+}
 
-  const iconBtn = (
-    name: React.ComponentProps<typeof Feather>['name'],
-    label: string,
-    onPress: () => void,
-  ) => (
+function UtilityIconBtn({
+  styles,
+  color,
+  name,
+  label,
+  onPress,
+}: {
+  styles: BarStyles;
+  color: string;
+  name: ComponentProps<typeof Feather>['name'];
+  label: string;
+  onPress: () => void;
+}) {
+  return (
     <TouchableOpacity
       key={label}
       style={styles.utilityIconBtn}
@@ -92,81 +93,76 @@ export function UtilityBar({
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Feather name={name} size={17} color={theme.colors.text} />
+      <Feather name={name} size={17} color={color} />
     </TouchableOpacity>
   );
+}
 
-  // One entry per key in UTILITY_BAR_PAGES — that model drives the rendering,
-  // so pages can be reordered or added there without touching this component.
-  const CONTROLS: Record<UtilityBarKey, () => React.ReactNode> = {
-    ctrl: () => (
-      <TouchableOpacity
-        key="ctrl"
-        style={[styles.utilityBtn, ctrlArmed && styles.utilityBtnActive]}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          setCtrlArmed((v) => !v);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Control modifier"
-        accessibilityState={{ selected: ctrlArmed }}
-      >
-        <Text style={[styles.utilityBtnText, ctrlArmed && styles.utilityBtnTextActive]}>Ctrl</Text>
-      </TouchableOpacity>
-    ),
-    tab: () =>
-      textBtn('Tab', key('\t'), () => {
+function UtilityCtrlKey({
+  styles,
+  ctrlArmed,
+  setCtrlArmed,
+}: {
+  styles: BarStyles;
+  ctrlArmed: boolean;
+  setCtrlArmed: UtilityBarProps['setCtrlArmed'];
+}) {
+  return (
+    <TouchableOpacity
+      key="ctrl"
+      style={[styles.utilityBtn, ctrlArmed && styles.utilityBtnActive]}
+      onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        sendKey('\x1b[Z');
-      }),
-    esc: () => textBtn('Esc', key('\x1b')),
-    slash: () => (
-      <HoldPopupKey
-        key="slash"
-        label="/"
-        altLabel={'\\'}
-        onSelect={sendKey}
-        style={styles.utilityBtn}
-        textStyle={styles.utilityBtnText}
-      />
-    ),
-    del: () => textBtn('Del', key('\x1b[3~')),
-    home: () => textBtn('Home', () => sendKey(cursorSeq('H'))),
-    end: () => textBtn('End', () => sendKey(cursorSeq('F'))),
-    pgup: () => textBtn('PgUp', key('\x1b[5~')),
-    pgdn: () => textBtn('PgDn', key('\x1b[6~')),
-    dpad: () => (
-      <ArrowCluster
-        key="dpad"
-        onArrow={(dir) => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          sendKey(cursorSeq(dir));
-        }}
-      />
-    ),
-    paste: () => iconBtn('clipboard', 'Paste', onPaste),
-    image: () => iconBtn('image', 'Upload image', onImagePick),
-    // A keyboard with a down arrow, not a bare chevron — the bare one read as
-    // "collapse this bar". Feather has no keyboard glyph, MaterialIcons does.
-    hide: () => (
-      <TouchableOpacity
-        key="hide"
-        style={styles.utilityIconBtn}
-        activeOpacity={0.6}
-        onPress={onHideKeyboard}
-        accessibilityRole="button"
-        accessibilityLabel="Hide keyboard"
-      >
-        <MaterialIcons name="keyboard-hide" size={20} color={theme.colors.text} />
-      </TouchableOpacity>
-    ),
-  };
+        setCtrlArmed((v) => !v);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel="Control modifier"
+      accessibilityState={{ selected: ctrlArmed }}
+    >
+      <Text style={[styles.utilityBtnText, ctrlArmed && styles.utilityBtnTextActive]}>Ctrl</Text>
+    </TouchableOpacity>
+  );
+}
 
-  // The pager lives inline as the edge control of the row it moves away from:
-  // next is the last item on every page but the last, prev the first item on
-  // every page but the first. No dots row — the arrows are the affordance, and
-  // a second row would cost 28pt of terminal for nothing.
-  const pagerBtn = (direction: 'prev' | 'next') => (
+function UtilityHideKey({
+  styles,
+  color,
+  onHideKeyboard,
+}: {
+  styles: BarStyles;
+  color: string;
+  onHideKeyboard: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      key="hide"
+      style={styles.utilityIconBtn}
+      activeOpacity={0.6}
+      onPress={onHideKeyboard}
+      accessibilityRole="button"
+      accessibilityLabel="Hide keyboard"
+    >
+      <MaterialIcons name="keyboard-hide" size={20} color={color} />
+    </TouchableOpacity>
+  );
+}
+
+function UtilityPagerBtn({
+  styles,
+  color,
+  direction,
+  clamped,
+  lastPage,
+  setPage,
+}: {
+  styles: BarStyles;
+  color: string;
+  direction: 'prev' | 'next';
+  clamped: number;
+  lastPage: number;
+  setPage: (page: number) => void;
+}) {
+  return (
     <TouchableOpacity
       key={direction}
       style={styles.pagerBtn}
@@ -174,37 +170,148 @@ export function UtilityBar({
       onPress={() => setPage(direction === 'prev' ? clamped - 1 : clamped + 1)}
       accessibilityRole="button"
       accessibilityLabel={direction === 'prev' ? 'Previous utility page' : 'Next utility page'}
-      accessibilityHint={`Page ${clamped + 1} of ${UTILITY_BAR_PAGES.length}`}
+      accessibilityHint={`Page ${clamped + 1} of ${lastPage + 1}`}
     >
       <Feather
         name={direction === 'prev' ? 'chevron-left' : 'chevron-right'}
         size={20}
-        color={theme.colors.textMuted}
+        color={color}
       />
     </TouchableOpacity>
   );
+}
 
+const KEY_RENDERERS: Record<
+  UtilityBarKey,
+  (p: UtilityBarProps, styles: BarStyles, color: string) => ReactNode
+> = {
+  ctrl: (p, styles) => (
+    <UtilityCtrlKey
+      key="ctrl"
+      styles={styles}
+      ctrlArmed={p.ctrlArmed}
+      setCtrlArmed={p.setCtrlArmed}
+    />
+  ),
+  tab: (p, styles) => (
+    <UtilityTextBtn
+      key="tab"
+      styles={styles}
+      label="Tab"
+      onPress={() => p.sendKey('\t')}
+      onLongPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        p.sendKey('\x1b[Z');
+      }}
+    />
+  ),
+  esc: (p, styles) => (
+    <UtilityTextBtn key="esc" styles={styles} label="Esc" onPress={() => p.sendKey('\x1b')} />
+  ),
+  slash: (p, styles) => (
+    <HoldPopupKey
+      key="slash"
+      label="/"
+      altLabel={'\\'}
+      onSelect={p.sendKey}
+      style={styles.utilityBtn}
+      textStyle={styles.utilityBtnText}
+    />
+  ),
+  del: (p, styles) => (
+    <UtilityTextBtn key="del" styles={styles} label="Del" onPress={() => p.sendKey('\x1b[3~')} />
+  ),
+  home: (p, styles) => (
+    <UtilityTextBtn
+      key="home"
+      styles={styles}
+      label="Home"
+      onPress={() => p.sendKey(p.cursorSeq('H'))}
+    />
+  ),
+  end: (p, styles) => (
+    <UtilityTextBtn
+      key="end"
+      styles={styles}
+      label="End"
+      onPress={() => p.sendKey(p.cursorSeq('F'))}
+    />
+  ),
+  pgup: (p, styles) => (
+    <UtilityTextBtn key="pgup" styles={styles} label="PgUp" onPress={() => p.sendKey('\x1b[5~')} />
+  ),
+  pgdn: (p, styles) => (
+    <UtilityTextBtn key="pgdn" styles={styles} label="PgDn" onPress={() => p.sendKey('\x1b[6~')} />
+  ),
+  dpad: (p) => (
+    <ArrowCluster
+      key="dpad"
+      onArrow={(dir) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        p.sendKey(p.cursorSeq(dir));
+      }}
+    />
+  ),
+  paste: (p, styles, color) => (
+    <UtilityIconBtn
+      key="paste"
+      styles={styles}
+      color={color}
+      name="clipboard"
+      label="Paste"
+      onPress={p.onPaste}
+    />
+  ),
+  image: (p, styles, color) => (
+    <UtilityIconBtn
+      key="image"
+      styles={styles}
+      color={color}
+      name="image"
+      label="Upload image"
+      onPress={p.onImagePick}
+    />
+  ),
+  hide: (p, styles, color) => (
+    <UtilityHideKey key="hide" styles={styles} color={color} onHideKeyboard={p.onHideKeyboard} />
+  ),
+};
+
+function renderUtilityKey(k: UtilityBarKey, p: UtilityBarProps, styles: BarStyles, color: string) {
+  return KEY_RENDERERS[k](p, styles, color);
+}
+
+export function UtilityBar(p: UtilityBarProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const styles = createStyles(theme.colors);
+  const keyboardVisible = useKeyboardVisible();
+  const lastPage = UTILITY_BAR_PAGES.length - 1;
+  const clamped = Math.min(Math.max(p.page, 0), lastPage);
+  const pager = (direction: 'prev' | 'next') => (
+    <UtilityPagerBtn
+      styles={styles}
+      color={theme.colors.textMuted}
+      direction={direction}
+      clamped={clamped}
+      lastPage={lastPage}
+      setPage={p.setPage}
+    />
+  );
   return (
     <View style={[styles.utilityBar, { paddingBottom: keyboardVisible ? 0 : insets.bottom }]}>
-      {/* Only the current page is mounted and the ScrollView cannot be dragged:
-          it is here purely for keyboardShouldPersistTaps, without which a tap on
-          a bar key while the soft keyboard is up is eaten by the dismiss
-          responder instead of pressing the button. */}
       <ScrollView
         scrollEnabled={false}
         keyboardShouldPersistTaps="always"
-        // Insets are added to the gutter, not assigned over it — a bare
-        // paddingLeft/Right here overrides utilityPage's own and flushes the
-        // first and last key against the screen edge.
         contentContainerStyle={[
           styles.utilityPage,
           { paddingLeft: BAR_GUTTER + insets.left, paddingRight: BAR_GUTTER + insets.right },
         ]}
         style={styles.utilityPageOuter}
       >
-        {clamped > 0 && pagerBtn('prev')}
-        {UTILITY_BAR_PAGES[clamped].map((k) => CONTROLS[k]())}
-        {clamped < lastPage && pagerBtn('next')}
+        {clamped > 0 && pager('prev')}
+        {UTILITY_BAR_PAGES[clamped].map((k) => renderUtilityKey(k, p, styles, theme.colors.text))}
+        {clamped < lastPage && pager('next')}
       </ScrollView>
     </View>
   );
@@ -219,8 +326,6 @@ const createStyles = (c: AppColors) =>
       paddingVertical: 0,
     },
     utilityPageOuter: {
-      // Fixed, not minHeight: the bar must never change height between pages,
-      // or switching pages shifts the terminal underneath it.
       height: MIN_TOUCH_TARGET + BAR_PAD_V * 2,
       flexGrow: 0,
     },
@@ -229,8 +334,6 @@ const createStyles = (c: AppColors) =>
       width: '100%',
       paddingVertical: BAR_PAD_V,
       alignItems: 'center',
-      // Spread across the full width instead of bunching in the middle —
-      // center only kicks in once a page's buttons stop filling the row.
       justifyContent: 'space-between',
       flexDirection: 'row',
       gap: 4,
@@ -244,8 +347,6 @@ const createStyles = (c: AppColors) =>
       justifyContent: 'center',
       alignItems: 'center',
       borderRadius: 0,
-      // Filled, not transparent-on-transparent: the hitbox needs to read as a
-      // key, not just a label floating on the bar background.
       backgroundColor: c.surfaceRaised,
     },
     utilityBtnText: {
@@ -270,9 +371,6 @@ const createStyles = (c: AppColors) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    // Flat, no fill: the pager is chrome, not another key to hit by accident.
-    // The separator border it used to carry is gone with the bordered-key
-    // design — the gap between filled keys is the separator now.
     pagerBtn: {
       width: 30,
       height: MIN_TOUCH_TARGET,

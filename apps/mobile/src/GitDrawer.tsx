@@ -1,70 +1,24 @@
-import Feather from '@expo/vector-icons/Feather';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useRef, useState } from 'react';
-import type { GestureResponderEvent, LayoutChangeEvent, View as RNView } from 'react-native';
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { useState } from 'react';
+import { useWindowDimensions, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
-import { CommitBox } from './CommitBox';
-import { DiffFileBody } from './DiffFileBody';
-import { buildFileTree, groupSummary, isImagePath } from './diffModel';
-import { FileTree } from './FileTree';
-import { GitSectionAction, GitSectionActions, GitSectionHeader } from './GitSectionHeader';
+import { groupSummary, isImagePath } from './diffModel';
 import { GitTabBar } from './GitTabBar';
 import {
-  clampGitDrawerLeftWidth,
-  defaultGitDrawerLeftWidth,
-  drawerEscapeAction,
-} from './gitDrawerLayout';
+  GitDrawerHeader,
+  GitDrawerLeftPane,
+  type GitDrawerLeftPaneProps,
+  GitDrawerRightPane,
+  type GitDrawerRightPaneProps,
+  GitDrawerSplitter,
+  SIDE_BY_SIDE_MIN_WIDTH,
+} from './gitDrawerPanes';
+import { gitDrawerStyles as styles } from './gitDrawerStyles';
 import type { GitPanelSharedProps } from './gitPanelProps';
-import { toggleSetMember } from './gitReviewModel';
-import { canPushHead, canRewriteHead, formatRepoStatusLabel } from './gitStatusModel';
-import { HistoryList } from './HistoryList';
-import { minTouchTarget } from './interaction';
-import { PanelHeader } from './PanelHeader';
+import { formatRepoStatusLabel } from './gitStatusModel';
 import { useGitCommitForm } from './useGitCommitForm';
+import { useGitDrawerLayout } from './useGitDrawerLayout';
 
-const TOUCH_TARGET = minTouchTarget();
-const SIDE_BY_SIDE_MIN_WIDTH = 900;
-
-export function GitDrawer({
-  summary,
-  selectedPath,
-  diffMode,
-  diffText,
-  diffTruncated,
-  diffLoading,
-  diffImage,
-  onSelectFile,
-  onDeselectFile,
-  onBack,
-  onStageFile,
-  onUnstageFile,
-  onDiscardFile,
-  onToggleHunk,
-  onCommit,
-  onAmend,
-  onUndoCommit,
-  onPush,
-  onStageAll,
-  onUnstageAll,
-  onDiscardAll,
-  onOpenLine,
-  repoStatus,
-  leftWidthStorageKey,
-  historyEntries,
-  historyCommit,
-  onLoadHistory,
-  onSelectCommit,
-  sideBySide,
-  onToggleSideBySide,
-}: GitPanelSharedProps & {
+export type GitDrawerProps = GitPanelSharedProps & {
   selectedPath: string | null;
   diffMode: 'staged' | 'unstaged' | null;
   diffText: string | null;
@@ -76,375 +30,147 @@ export function GitDrawer({
   leftWidthStorageKey: string;
   sideBySide: boolean;
   onToggleSideBySide: () => void;
-}) {
+};
+
+function leftPaneProps(
+  p: GitDrawerProps,
+  theme: GitDrawerLeftPaneProps['theme'],
+  tab: 'changes' | 'history',
+  collapsedDirs: Set<string>,
+  setCollapsedDirs: (update: (prev: Set<string>) => Set<string>) => void,
+  form: ReturnType<typeof useGitCommitForm>,
+): GitDrawerLeftPaneProps {
+  return {
+    theme,
+    tab,
+    summary: p.summary,
+    groups: groupSummary(p.summary),
+    historyEntries: p.historyEntries,
+    onSelectCommit: p.onSelectCommit,
+    collapsedDirs,
+    setCollapsedDirs,
+    onSelectFile: p.onSelectFile,
+    onUnstageFile: p.onUnstageFile,
+    onStageFile: p.onStageFile,
+    onDiscardFile: p.onDiscardFile,
+    onUnstageAll: p.onUnstageAll,
+    onStageAll: p.onStageAll,
+    onDiscardAll: p.onDiscardAll,
+    form,
+    repoStatus: p.repoStatus,
+    onUndoCommit: p.onUndoCommit,
+    onPush: p.onPush,
+  };
+}
+
+function rightPaneProps(
+  p: GitDrawerProps,
+  theme: GitDrawerRightPaneProps['theme'],
+  viewingCommit: boolean,
+  wideEnough: boolean,
+): GitDrawerRightPaneProps {
+  return {
+    theme,
+    viewingCommit,
+    historyCommit: p.historyCommit,
+    selectedPath: p.selectedPath,
+    selectedFile: p.summary.files.find((file) => file.path === p.selectedPath) ?? null,
+    diffLoading: p.diffLoading,
+    diffText: p.diffText,
+    diffTruncated: p.diffTruncated,
+    diffImage: p.diffImage,
+    diffMode: p.diffMode,
+    sideBySide: p.sideBySide,
+    wideEnough,
+    onToggleHunk: p.onToggleHunk,
+    onOpenLine: p.onOpenLine,
+  };
+}
+
+function drawerTitle(
+  viewingCommit: boolean,
+  historyCommit: GitDrawerProps['historyCommit'],
+  selectedPath: string | null,
+) {
+  if (viewingCommit && historyCommit) {
+    return `${historyCommit.entry.shortSha} ${historyCommit.entry.subject}`;
+  }
+  return selectedPath ?? 'Working tree';
+}
+
+export function GitDrawer(p: GitDrawerProps) {
   const { theme } = useAppTheme();
   const { width } = useWindowDimensions();
-  const drawerRef = useRef<RNView | null>(null);
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'changes' | 'history'>('changes');
-  const { commitMessage, setCommitMessage, committing, submitCommit, submitAmend } =
-    useGitCommitForm(onCommit, onAmend);
-  const [bodyWidth, setBodyWidth] = useState(0);
-  const [leftWidth, setLeftWidth] = useState<number | null>(null);
-  const leftWidthRef = useRef<number | null>(null);
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  leftWidthRef.current = leftWidth;
-
-  const groups = groupSummary(summary);
-  const selectedFile = summary.files.find((file) => file.path === selectedPath) ?? null;
+  const form = useGitCommitForm(p.onCommit, p.onAmend);
+  const selectedFile = p.summary.files.find((file) => file.path === p.selectedPath) ?? null;
   const isImage = selectedFile ? selectedFile.binary && isImagePath(selectedFile.path) : false;
   const wideEnough = width >= SIDE_BY_SIDE_MIN_WIDTH;
-  const viewingCommit = tab === 'history' && historyCommit !== null;
-  const statusLabel = formatRepoStatusLabel(repoStatus);
-  const canAmend = canRewriteHead(repoStatus);
-  const canPush = canPushHead(repoStatus);
-  const resolvedLeft =
-    bodyWidth > 0
-      ? leftWidth !== null
-        ? clampGitDrawerLeftWidth(leftWidth, bodyWidth)
-        : defaultGitDrawerLeftWidth(bodyWidth)
-      : null;
-
-  const headerLabel = viewingCommit
-    ? `${historyCommit.entry.shortSha} ${historyCommit.entry.subject}`
-    : (selectedPath ?? 'Working tree');
-
-  useEffect(() => {
-    void AsyncStorage.getItem(leftWidthStorageKey).then((raw) => {
-      const n = raw ? Number(raw) : NaN;
-      if (Number.isFinite(n) && n > 0) setLeftWidth(n);
-    });
-  }, [leftWidthStorageKey]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      const root = drawerRef.current as unknown as { contains?: (n: Node) => boolean } | null;
-      const target = event.target as Node | null;
-      const el = event.target as HTMLElement | null;
-      const inDrawer = Boolean(root?.contains && target && root.contains(target));
-      const isTextField = el?.tagName === 'TEXTAREA' || el?.tagName === 'INPUT';
-      const isDocumentRoot = target === document.body || target === document.documentElement;
-      const action = drawerEscapeAction({ inDrawer, isTextField, isDocumentRoot });
-      if (action === 'ignore') return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (action === 'blur-field') {
-        el?.blur();
-        return;
-      }
-      if (viewingCommit) onSelectCommit(null);
-      else if (selectedPath) onDeselectFile();
-      else onBack();
-    };
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [viewingCommit, selectedPath, onBack, onDeselectFile, onSelectCommit]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
-    const onMove = (event: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag || bodyWidth <= 0) return;
-      setLeftWidth(
-        clampGitDrawerLeftWidth(drag.startWidth + (event.clientX - drag.startX), bodyWidth),
-      );
-    };
-    const onUp = () => {
-      const wasDragging = dragRef.current !== null;
-      dragRef.current = null;
-      if (typeof document !== 'undefined' && document.body?.style) {
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-      const widthNow = leftWidthRef.current;
-      if (wasDragging && bodyWidth > 0 && widthNow !== null) {
-        const clamped = clampGitDrawerLeftWidth(widthNow, bodyWidth);
-        void AsyncStorage.setItem(leftWidthStorageKey, String(clamped));
-      }
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-    };
-  }, [bodyWidth, leftWidthStorageKey]);
-
-  const onBodyLayout = (event: LayoutChangeEvent) => {
-    const next = event.nativeEvent.layout.width;
-    setBodyWidth(next);
-    setLeftWidth((prev) => (prev === null ? prev : clampGitDrawerLeftWidth(prev, next)));
-  };
-
-  const startResize = (clientX: number) => {
-    if (bodyWidth <= 0) return;
-    const current = resolvedLeft ?? defaultGitDrawerLeftWidth(bodyWidth);
-    dragRef.current = { startX: clientX, startWidth: current };
-    if (typeof document !== 'undefined' && document.body?.style) {
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    }
-  };
-
-  const onSplitterGrant = (event: GestureResponderEvent) => {
-    const native = event.nativeEvent as GestureResponderEvent['nativeEvent'] & {
-      clientX?: number;
-      pageX?: number;
-    };
-    const clientX = native.clientX ?? native.pageX;
-    if (typeof clientX === 'number') startResize(clientX);
-  };
-
-  const rightPane = () => {
-    if (viewingCommit) {
-      return (
-        <DiffFileBody
-          loading={historyCommit.diff === null}
-          path=""
-          diffText={historyCommit.diff}
-          truncated={historyCommit.truncated}
-          sideBySide={sideBySide}
-          wideEnough={wideEnough}
-        />
-      );
-    }
-    if (!selectedPath) {
-      return (
-        <View style={styles.center}>
-          <Text style={{ color: theme.colors.textMuted }}>Select a file to review</Text>
-        </View>
-      );
-    }
-    return (
-      <DiffFileBody
-        loading={diffLoading}
-        path={selectedPath}
-        diffText={diffText}
-        truncated={diffTruncated}
-        image={isImage ? (diffImage ?? { old: null, new: null }) : null}
-        sideBySide={sideBySide}
-        wideEnough={wideEnough}
-        onHunkPress={
-          diffMode
-            ? (hunkIndex) => onToggleHunk(selectedPath, hunkIndex, diffMode === 'staged')
-            : undefined
-        }
-        hunkActionLabel={diffMode === 'staged' ? 'Unstage' : 'Stage'}
-        onOpenLine={(line) => onOpenLine(selectedPath, line)}
-      />
-    );
-  };
-
+  const viewingCommit = tab === 'history' && p.historyCommit !== null;
+  const layout = useGitDrawerLayout({
+    leftWidthStorageKey: p.leftWidthStorageKey,
+    viewingCommit,
+    selectedPath: p.selectedPath,
+    onBack: p.onBack,
+    onDeselectFile: p.onDeselectFile,
+    onSelectCommit: p.onSelectCommit,
+  });
   return (
     <View
-      ref={drawerRef}
+      ref={layout.drawerRef}
       style={[
         styles.root,
-        {
-          backgroundColor: theme.colors.background,
-          borderLeftColor: theme.colors.border,
-        },
+        { backgroundColor: theme.colors.background, borderLeftColor: theme.colors.border },
       ]}
     >
-      <PanelHeader
-        onBack={onBack}
-        backAccessibilityLabel="Close git drawer"
-        backText="Close"
-        title={headerLabel}
-        subtitle={statusLabel && !viewingCommit ? statusLabel : null}
-        right={
-          (selectedPath || viewingCommit) && !isImage && wideEnough ? (
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel={sideBySide ? 'Unified view' : 'Side-by-side view'}
-              onPress={onToggleSideBySide}
-              style={styles.iconButton}
-            >
-              <Feather
-                name={sideBySide ? 'square' : 'columns'}
-                size={16}
-                color={theme.colors.accent}
-              />
-            </TouchableOpacity>
-          ) : null
-        }
+      <GitDrawerHeader
+        theme={theme}
+        onBack={p.onBack}
+        headerLabel={drawerTitle(viewingCommit, p.historyCommit, p.selectedPath)}
+        statusLabel={formatRepoStatusLabel(p.repoStatus)}
+        viewingCommit={viewingCommit}
+        selectedPath={p.selectedPath}
+        isImage={isImage}
+        wideEnough={wideEnough}
+        sideBySide={p.sideBySide}
+        onToggleSideBySide={p.onToggleSideBySide}
       />
-
       <GitTabBar
         tab={tab}
         onChanges={() => {
           setTab('changes');
-          onSelectCommit(null);
+          p.onSelectCommit(null);
         }}
         onHistory={() => {
           setTab('history');
-          onLoadHistory();
+          p.onLoadHistory();
         }}
       />
-
-      <View style={styles.body} onLayout={onBodyLayout}>
+      <View style={styles.body} onLayout={layout.onBodyLayout}>
         <View
           style={[
             styles.left,
-            resolvedLeft !== null ? { width: resolvedLeft } : styles.leftFallback,
+            layout.resolvedLeft !== null ? { width: layout.resolvedLeft } : styles.leftFallback,
           ]}
         >
-          {tab === 'history' ? (
-            <HistoryList entries={historyEntries} onSelect={onSelectCommit} />
-          ) : summary.files.length === 0 ? (
-            <View style={styles.center}>
-              <Text style={{ color: theme.colors.text }}>No uncommitted changes</Text>
-            </View>
-          ) : (
-            <>
-              <ScrollView contentContainerStyle={styles.listContent}>
-                {groups.staged.length > 0 ? (
-                  <>
-                    <GitSectionHeader
-                      label="Staged"
-                      count={groups.staged.length}
-                      actions={<GitSectionAction label="Unstage all" onPress={onUnstageAll} />}
-                    />
-                    <FileTree
-                      nodes={buildFileTree(groups.staged)}
-                      collapseScope="staged"
-                      collapsedDirs={collapsedDirs}
-                      onToggleDir={(key) => setCollapsedDirs((prev) => toggleSetMember(prev, key))}
-                      onSelectFile={(path) => onSelectFile(path, 'staged')}
-                      fileActions={[{ icon: 'minus', label: 'Unstage', onPress: onUnstageFile }]}
-                    />
-                  </>
-                ) : null}
-                {groups.unstaged.length > 0 ? (
-                  <>
-                    <GitSectionHeader
-                      label="Changes"
-                      count={groups.unstaged.length}
-                      actions={
-                        <GitSectionActions>
-                          <GitSectionAction label="Stage all" onPress={onStageAll} />
-                          <GitSectionAction label="Discard all" onPress={onDiscardAll} danger />
-                        </GitSectionActions>
-                      }
-                    />
-                    <FileTree
-                      nodes={buildFileTree(groups.unstaged)}
-                      collapseScope="unstaged"
-                      collapsedDirs={collapsedDirs}
-                      onToggleDir={(key) => setCollapsedDirs((prev) => toggleSetMember(prev, key))}
-                      onSelectFile={(path) => onSelectFile(path, 'unstaged')}
-                      fileActions={[
-                        { icon: 'plus', label: 'Stage', onPress: onStageFile },
-                        {
-                          icon: 'trash-2',
-                          label: 'Discard',
-                          destructive: true,
-                          onPress: onDiscardFile,
-                        },
-                      ]}
-                    />
-                  </>
-                ) : null}
-              </ScrollView>
-              <CommitBox
-                message={commitMessage}
-                onChangeMessage={setCommitMessage}
-                onCommit={() => void submitCommit()}
-                onAmend={() => void submitAmend()}
-                onUndoCommit={onUndoCommit}
-                onPush={onPush}
-                canAmend={canAmend}
-                canPush={canPush}
-                stagedCount={groups.staged.length}
-                committing={committing}
-              />
-            </>
-          )}
+          <GitDrawerLeftPane
+            {...leftPaneProps(p, theme, tab, collapsedDirs, setCollapsedDirs, form)}
+          />
         </View>
-        <View
-          accessibilityRole="adjustable"
-          accessibilityLabel="Resize file list"
-          accessibilityValue={{
-            min: 0,
-            max: Math.max(0, bodyWidth),
-            now: resolvedLeft ?? 0,
-          }}
-          accessibilityActions={[
-            { name: 'increment', label: 'Widen file list' },
-            { name: 'decrement', label: 'Narrow file list' },
-          ]}
-          onAccessibilityAction={(event) => {
-            if (bodyWidth <= 0) return;
-            const step = 24;
-            const current = resolvedLeft ?? defaultGitDrawerLeftWidth(bodyWidth);
-            let next = current;
-            if (event.nativeEvent.actionName === 'increment') {
-              next = clampGitDrawerLeftWidth(current + step, bodyWidth);
-            } else if (event.nativeEvent.actionName === 'decrement') {
-              next = clampGitDrawerLeftWidth(current - step, bodyWidth);
-            } else {
-              return;
-            }
-            setLeftWidth(next);
-            void AsyncStorage.setItem(leftWidthStorageKey, String(next));
-          }}
-          hitSlop={{ left: 4, right: 4, top: 0, bottom: 0 }}
-          onStartShouldSetResponder={() => true}
-          onResponderGrant={onSplitterGrant}
-          {...({
-            onPointerDown: (event: { clientX: number }) => startResize(event.clientX),
-          } as object)}
-          style={[styles.splitterHit, { cursor: 'col-resize' } as object]}
-        >
-          <View style={[styles.splitterLine, { backgroundColor: theme.colors.border }]} />
+        <GitDrawerSplitter
+          theme={theme}
+          bodyWidth={layout.bodyWidth}
+          resolvedLeft={layout.resolvedLeft}
+          setLeftWidth={layout.setLeftWidth}
+          storageKey={p.leftWidthStorageKey}
+          onSplitterGrant={layout.onSplitterGrant}
+          startResize={layout.startResize}
+        />
+        <View style={styles.right}>
+          <GitDrawerRightPane {...rightPaneProps(p, theme, viewingCommit, wideEnough)} />
         </View>
-        <View style={styles.right}>{rightPane()}</View>
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 50,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-  },
-  iconButton: {
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  body: { flex: 1, flexDirection: 'row' },
-  left: {
-    flexGrow: 0,
-    flexShrink: 0,
-    flexDirection: 'column',
-    overflow: 'visible',
-    zIndex: 3,
-  },
-  leftFallback: { flex: 1 },
-  splitterHit: {
-    width: 8,
-    marginLeft: -3,
-    marginRight: -3,
-    zIndex: 2,
-    alignItems: 'center',
-  },
-  splitterLine: {
-    width: StyleSheet.hairlineWidth,
-    flex: 1,
-  },
-  right: { flex: 1, minWidth: 0 },
-  listContent: { padding: 12, alignItems: 'stretch' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
-});
