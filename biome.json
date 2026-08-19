@@ -34,6 +34,23 @@
       "recommended": true,
       "suspicious": {
         "noTemplateCurlyInString": "off"
+      },
+      "complexity": {
+        "noExcessiveLinesPerFunction": {
+          "level": "error",
+          "options": {
+            "maxLines": 60,
+            "skipBlankLines": true
+          }
+        }
+      },
+      "style": {
+        "noExcessiveLinesPerFile": {
+          "level": "error",
+          "options": {
+            "maxLines": 400
+          }
+        }
       }
     }
   },
@@ -46,7 +63,6 @@
         "apps/mobile/src/GitDrawer.tsx",
         "apps/mobile/src/GitReview.tsx",
         "apps/mobile/src/SelectionView.tsx",
-        "apps/mobile/src/TermRow.tsx",
         "apps/mobile/src/SessionModals.tsx"
       ],
       "linter": {
@@ -79,6 +95,40 @@
         "rules": {
           "suspicious": {
             "noAssignInExpressions": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/mobile/src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noExcessiveLinesPerFile": {
+              "level": "error",
+              "options": {
+                "maxLines": 500
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+        "apps/mobile/__tests__/**"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveLinesPerFunction": "off"
+          },
+          "style": {
+            "noExcessiveLinesPerFile": "off"
           }
         }
       }

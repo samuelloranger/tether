@@ -18,6 +18,243 @@ import { minTouchTarget, SURFACE_RADIUS } from './interaction';
 
 const TOUCH_TARGET = minTouchTarget();
 
+type ThemeColors = {
+  text: string;
+  textFaint: string;
+  accent: string;
+  accentText: string;
+  border: string;
+  surface: string;
+};
+
+function openMoreMenu(opts: {
+  useDropdownMenu: boolean;
+  setMenuOpen: (update: boolean | ((open: boolean) => boolean)) => void;
+  onAmend?: () => void;
+  onUndoCommit?: () => void;
+  onPush?: () => void;
+  amendEnabled: boolean;
+  undoEnabled: boolean;
+  pushEnabled: boolean;
+}) {
+  if (opts.useDropdownMenu) {
+    opts.setMenuOpen((open) => !open);
+    return;
+  }
+  const buttons: {
+    text: string;
+    onPress?: () => void;
+    style?: 'cancel' | 'destructive' | 'default';
+  }[] = [];
+  if (opts.onAmend && opts.amendEnabled) buttons.push({ text: 'Amend', onPress: opts.onAmend });
+  if (opts.onUndoCommit && opts.undoEnabled) {
+    buttons.push({ text: 'Undo last commit', onPress: opts.onUndoCommit, style: 'destructive' });
+  }
+  if (opts.onPush && opts.pushEnabled) buttons.push({ text: 'Push', onPress: opts.onPush });
+  buttons.push({ text: 'Cancel', style: 'cancel' });
+  Alert.alert('More git actions', undefined, buttons);
+}
+
+function CommitMenuItem({
+  text,
+  accessibilityLabel,
+  icon,
+  enabled,
+  onPress,
+  color,
+}: {
+  text: string;
+  accessibilityLabel: string;
+  icon: 'edit-2' | 'rotate-ccw' | 'upload-cloud';
+  enabled: boolean;
+  onPress: () => void;
+  color: string;
+}) {
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      disabled={!enabled}
+      onPress={onPress}
+      style={[styles.menuRow, { opacity: enabled ? 1 : 0.45 }]}
+    >
+      <Feather name={icon} size={15} color={color} />
+      <Text style={[styles.menuText, { color }]}>{text}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function CommitDropdown({
+  menuPlacement,
+  colors,
+  onAmend,
+  onUndoCommit,
+  onPush,
+  amendEnabled,
+  undoEnabled,
+  pushEnabled,
+  runAndClose,
+}: {
+  menuPlacement: 'up' | 'down';
+  colors: ThemeColors;
+  onAmend?: () => void;
+  onUndoCommit?: () => void;
+  onPush?: () => void;
+  amendEnabled: boolean;
+  undoEnabled: boolean;
+  pushEnabled: boolean;
+  runAndClose: (action?: () => void) => void;
+}) {
+  return (
+    <View
+      accessibilityRole="menu"
+      style={[
+        styles.menu,
+        menuPlacement === 'down' ? styles.menuDown : styles.menuUp,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      {onAmend ? (
+        <CommitMenuItem
+          text="Amend"
+          accessibilityLabel="Amend last commit"
+          icon="edit-2"
+          enabled={amendEnabled}
+          onPress={() => runAndClose(onAmend)}
+          color={colors.text}
+        />
+      ) : null}
+      {onUndoCommit ? (
+        <CommitMenuItem
+          text="Undo last commit"
+          accessibilityLabel="Undo last commit"
+          icon="rotate-ccw"
+          enabled={undoEnabled}
+          onPress={() => runAndClose(onUndoCommit)}
+          color={colors.text}
+        />
+      ) : null}
+      {onPush ? (
+        <CommitMenuItem
+          text="Push"
+          accessibilityLabel="Push to remote"
+          icon="upload-cloud"
+          enabled={pushEnabled}
+          onPress={() => runAndClose(onPush)}
+          color={colors.text}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function CommitActions({
+  colors,
+  enabled,
+  committing,
+  hasMenu,
+  menuOpen,
+  useDropdownMenu,
+  onCommit,
+  onOpenMore,
+  menuRootRef,
+  dropdown,
+}: {
+  colors: ThemeColors;
+  enabled: boolean;
+  committing: boolean;
+  hasMenu: boolean;
+  menuOpen: boolean;
+  useDropdownMenu: boolean;
+  onCommit: () => void;
+  onOpenMore: () => void;
+  menuRootRef: React.RefObject<View | null>;
+  dropdown: React.ReactNode;
+}) {
+  return (
+    <View style={[styles.commitGroup, menuOpen ? styles.commitGroupRaised : null]}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Commit staged changes"
+        disabled={!enabled}
+        onPress={onCommit}
+        style={[
+          styles.commitButton,
+          hasMenu ? styles.commitButtonMain : styles.commitButtonSolo,
+          { backgroundColor: colors.accent, opacity: enabled ? 1 : 0.5 },
+        ]}
+      >
+        {committing ? (
+          <ActivityIndicator color={colors.accentText} size="small" />
+        ) : (
+          <Text style={[styles.commitButtonText, { color: colors.accentText }]}>Commit</Text>
+        )}
+      </TouchableOpacity>
+      {hasMenu ? (
+        <View ref={menuRootRef} collapsable={false} style={styles.chevronWrap}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="More git actions"
+            disabled={committing}
+            onPress={onOpenMore}
+            style={[
+              styles.chevronButton,
+              {
+                backgroundColor: colors.accent,
+                borderLeftColor: colors.accentText,
+                opacity: committing ? 0.5 : 1,
+              },
+            ]}
+          >
+            <Feather
+              name={menuOpen ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.accentText}
+            />
+          </TouchableOpacity>
+          {useDropdownMenu && menuOpen ? dropdown : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+type CommitBoxProps = {
+  message: string;
+  onChangeMessage: (value: string) => void;
+  onCommit: () => void;
+  onAmend?: () => void;
+  onUndoCommit?: () => void;
+  onPush?: () => void;
+  canAmend?: boolean;
+  canPush?: boolean;
+  stagedCount: number;
+  committing: boolean;
+  style?: StyleProp<ViewStyle>;
+  /** GitReview pins the bar at the top — open the menu downward so it stays on-screen. */
+  menuPlacement?: 'up' | 'down';
+};
+
+function useCommitMenu(useDropdownMenu: boolean) {
+  const menuRootRef = useRef<View>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen || !useDropdownMenu || typeof document === 'undefined') return;
+    const onDoc = (event: MouseEvent) => {
+      const root = menuRootRef.current as unknown as { contains?: (n: Node) => boolean } | null;
+      const target = event.target as Node | null;
+      if (root?.contains && target && root.contains(target)) return;
+      setMenuOpen(false);
+    };
+    const timer = setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', onDoc);
+    };
+  }, [menuOpen, useDropdownMenu]);
+  return { menuRootRef, menuOpen, setMenuOpen };
+}
+
 export function CommitBox({
   message,
   onChangeMessage,
@@ -30,194 +267,70 @@ export function CommitBox({
   stagedCount,
   committing,
   style,
-  /** GitReview pins the bar at the top — open the menu downward so it stays on-screen. */
   menuPlacement = 'up',
-}: {
-  message: string;
-  onChangeMessage: (value: string) => void;
-  onCommit: () => void;
-  onAmend?: () => void;
-  onUndoCommit?: () => void;
-  onPush?: () => void;
-  canAmend?: boolean;
-  canPush?: boolean;
-  stagedCount: number;
-  committing: boolean;
-  style?: StyleProp<ViewStyle>;
-  menuPlacement?: 'up' | 'down';
-}) {
+}: CommitBoxProps) {
   const { theme } = useAppTheme();
-  const menuRootRef = useRef<View>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const colors = theme.colors;
+  const useDropdownMenu = Platform.OS === 'web';
+  const { menuRootRef, menuOpen, setMenuOpen } = useCommitMenu(useDropdownMenu);
   const enabled = canCommit(stagedCount, message, committing);
   const amendEnabled = Boolean(canAmend) && message.trim().length > 0 && !committing;
   const undoEnabled = Boolean(canAmend) && !committing;
   const pushEnabled = Boolean(canPush) && !committing;
   const hasMenu = Boolean(onAmend || onUndoCommit || onPush);
-  // Desktop/web keeps the anchored dropdown; native uses a system alert so
-  // outside-tap dismiss and on-screen placement are handled by the OS.
-  const useDropdownMenu = Platform.OS === 'web';
-
-  useEffect(() => {
-    if (!menuOpen || !useDropdownMenu || typeof document === 'undefined') return;
-    const onDoc = (event: MouseEvent) => {
-      const root = menuRootRef.current as unknown as { contains?: (n: Node) => boolean } | null;
-      const target = event.target as Node | null;
-      // Let the chevron toggle handle its own click (close when already open).
-      if (root?.contains && target && root.contains(target)) return;
-      setMenuOpen(false);
-    };
-    // Defer so the opening click does not immediately dismiss.
-    const timer = setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', onDoc);
-    };
-  }, [menuOpen, useDropdownMenu]);
-
-  const runAndClose = (action?: () => void) => {
-    setMenuOpen(false);
-    action?.();
-  };
-
-  const openMoreMenu = () => {
-    if (useDropdownMenu) {
-      setMenuOpen((open) => !open);
-      return;
-    }
-    const buttons: {
-      text: string;
-      onPress?: () => void;
-      style?: 'cancel' | 'destructive' | 'default';
-    }[] = [];
-    if (onAmend && amendEnabled) buttons.push({ text: 'Amend', onPress: onAmend });
-    if (onUndoCommit && undoEnabled) {
-      buttons.push({ text: 'Undo last commit', onPress: onUndoCommit, style: 'destructive' });
-    }
-    if (onPush && pushEnabled) buttons.push({ text: 'Push', onPress: onPush });
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('More git actions', undefined, buttons);
-  };
-
   return (
-    <View style={[styles.commitBar, { borderTopColor: theme.colors.border }, style]}>
+    <View style={[styles.commitBar, { borderTopColor: colors.border }, style]}>
       <TextInput
         accessibilityLabel="Commit message"
         style={[
           styles.commitInput,
-          {
-            color: theme.colors.text,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.surface,
-          },
+          { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface },
         ]}
         placeholder="Commit message"
-        placeholderTextColor={theme.colors.textFaint}
+        placeholderTextColor={colors.textFaint}
         value={message}
         onChangeText={onChangeMessage}
         editable={!committing}
         multiline
       />
-      <View style={[styles.commitGroup, menuOpen ? styles.commitGroupRaised : null]}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Commit staged changes"
-          disabled={!enabled}
-          onPress={onCommit}
-          style={[
-            styles.commitButton,
-            hasMenu ? styles.commitButtonMain : styles.commitButtonSolo,
-            {
-              backgroundColor: theme.colors.accent,
-              opacity: enabled ? 1 : 0.5,
-            },
-          ]}
-        >
-          {committing ? (
-            <ActivityIndicator color={theme.colors.accentText} size="small" />
-          ) : (
-            <Text style={[styles.commitButtonText, { color: theme.colors.accentText }]}>
-              Commit
-            </Text>
-          )}
-        </TouchableOpacity>
-        {hasMenu ? (
-          <View ref={menuRootRef} collapsable={false} style={styles.chevronWrap}>
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="More git actions"
-              disabled={committing}
-              onPress={openMoreMenu}
-              style={[
-                styles.chevronButton,
-                {
-                  backgroundColor: theme.colors.accent,
-                  borderLeftColor: theme.colors.accentText,
-                  opacity: committing ? 0.5 : 1,
-                },
-              ]}
-            >
-              <Feather
-                name={menuOpen ? 'chevron-up' : 'chevron-down'}
-                size={16}
-                color={theme.colors.accentText}
-              />
-            </TouchableOpacity>
-            {useDropdownMenu && menuOpen ? (
-              <View
-                accessibilityRole="menu"
-                style={[
-                  styles.menu,
-                  menuPlacement === 'down' ? styles.menuDown : styles.menuUp,
-                  {
-                    backgroundColor: theme.colors.surface,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
-              >
-                {onAmend ? (
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityLabel="Amend last commit"
-                    disabled={!amendEnabled}
-                    onPress={() => runAndClose(onAmend)}
-                    style={[styles.menuRow, { opacity: amendEnabled ? 1 : 0.45 }]}
-                  >
-                    <Feather name="edit-2" size={15} color={theme.colors.text} />
-                    <Text style={[styles.menuText, { color: theme.colors.text }]}>Amend</Text>
-                  </TouchableOpacity>
-                ) : null}
-                {onUndoCommit ? (
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityLabel="Undo last commit"
-                    disabled={!undoEnabled}
-                    onPress={() => runAndClose(onUndoCommit)}
-                    style={[styles.menuRow, { opacity: undoEnabled ? 1 : 0.45 }]}
-                  >
-                    <Feather name="rotate-ccw" size={15} color={theme.colors.text} />
-                    <Text style={[styles.menuText, { color: theme.colors.text }]}>
-                      Undo last commit
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-                {onPush ? (
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityLabel="Push to remote"
-                    disabled={!pushEnabled}
-                    onPress={() => runAndClose(onPush)}
-                    style={[styles.menuRow, { opacity: pushEnabled ? 1 : 0.45 }]}
-                  >
-                    <Feather name="upload-cloud" size={15} color={theme.colors.text} />
-                    <Text style={[styles.menuText, { color: theme.colors.text }]}>Push</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
+      <CommitActions
+        colors={colors}
+        enabled={enabled}
+        committing={committing}
+        hasMenu={hasMenu}
+        menuOpen={menuOpen}
+        useDropdownMenu={useDropdownMenu}
+        onCommit={onCommit}
+        onOpenMore={() =>
+          openMoreMenu({
+            useDropdownMenu,
+            setMenuOpen,
+            onAmend,
+            onUndoCommit,
+            onPush,
+            amendEnabled,
+            undoEnabled,
+            pushEnabled,
+          })
+        }
+        menuRootRef={menuRootRef}
+        dropdown={
+          <CommitDropdown
+            menuPlacement={menuPlacement}
+            colors={colors}
+            onAmend={onAmend}
+            onUndoCommit={onUndoCommit}
+            onPush={onPush}
+            amendEnabled={amendEnabled}
+            undoEnabled={undoEnabled}
+            pushEnabled={pushEnabled}
+            runAndClose={(action) => {
+              setMenuOpen(false);
+              action?.();
+            }}
+          />
+        }
+      />
     </View>
   );
 }

@@ -80,64 +80,63 @@ function parseProfiles(value: string | null): HostProfile[] {
   }
 }
 
-export function createHostStore({
-  storage,
-  secrets,
-  makeId = createHostId,
-}: Dependencies): HostStore {
-  const read = async () => parseProfiles(await storage.getItem(HOST_PROFILES_KEY));
-  const write = async (profiles: HostProfile[]) => {
-    await storage.setItem(HOST_PROFILES_KEY, JSON.stringify(ordered(profiles)));
-  };
+async function migrateLegacyHost(
+  storage: HostStorage,
+  secrets: HostSecrets,
+  profiles: HostProfile[],
+  write: (profiles: HostProfile[]) => Promise<void>,
+  makeId: () => string,
+): Promise<HostProfile[]> {
+  const legacyHost = await storage.getItem(LEGACY_SERVER_IP_KEY);
+  if (!legacyHost) return profiles;
 
-  const migrate = async (profiles: HostProfile[]): Promise<HostProfile[]> => {
-    const legacyHost = await storage.getItem(LEGACY_SERVER_IP_KEY);
-    if (!legacyHost) return profiles;
+  const legacyPort = (await storage.getItem(LEGACY_PORT_KEY)) || '8085';
+  let profile = profiles.find(
+    (candidate) => candidate.host === legacyHost && candidate.port === legacyPort,
+  );
+  if (!profile) {
+    profile = {
+      id: makeId(),
+      name: legacyHost,
+      color: DEFAULT_COLOR,
+      host: legacyHost,
+      port: legacyPort,
+      identityName: '',
+      order: profiles.length,
+    };
+    profiles = [...profiles, profile];
+    await write(profiles);
+  }
 
-    const legacyPort = (await storage.getItem(LEGACY_PORT_KEY)) || '8085';
-    let profile = profiles.find(
-      (candidate) => candidate.host === legacyHost && candidate.port === legacyPort,
-    );
-    if (!profile) {
-      profile = {
-        id: makeId(),
-        name: legacyHost,
-        color: DEFAULT_COLOR,
-        host: legacyHost,
-        port: legacyPort,
-        identityName: '',
-        order: profiles.length,
-      };
-      profiles = [...profiles, profile];
-      await write(profiles);
+  const legacyPassword = await secrets.getLegacy();
+  if (legacyPassword !== null) {
+    await secrets.set(profile.id, legacyPassword);
+    if ((await secrets.get(profile.id)) !== legacyPassword) {
+      throw new Error('Migrated host password could not be read back');
     }
+  }
+  const reread = parseProfiles(await storage.getItem(HOST_PROFILES_KEY));
+  if (!reread.some((candidate) => candidate.id === profile.id)) {
+    throw new Error('Migrated host profile could not be read back');
+  }
 
-    const legacyPassword = await secrets.getLegacy();
-    if (legacyPassword !== null) {
-      await secrets.set(profile.id, legacyPassword);
-      if ((await secrets.get(profile.id)) !== legacyPassword) {
-        throw new Error('Migrated host password could not be read back');
-      }
-    }
-    const reread = await read();
-    if (!reread.some((candidate) => candidate.id === profile.id)) {
-      throw new Error('Migrated host profile could not be read back');
-    }
+  // New state is durable. Cleanup is intentionally best-effort: if interrupted,
+  // the next launch re-verifies this same profile before attempting cleanup again.
+  await Promise.all([
+    storage.removeItem(LEGACY_SERVER_IP_KEY).catch(() => {}),
+    storage.removeItem(LEGACY_PORT_KEY).catch(() => {}),
+    secrets.clearLegacy().catch(() => {}),
+  ]);
+  return reread;
+}
 
-    // New state is durable. Cleanup is intentionally best-effort: if interrupted,
-    // the next launch re-verifies this same profile before attempting cleanup again.
-    await Promise.all([
-      storage.removeItem(LEGACY_SERVER_IP_KEY).catch(() => {}),
-      storage.removeItem(LEGACY_PORT_KEY).catch(() => {}),
-      secrets.clearLegacy().catch(() => {}),
-    ]);
-    return reread;
-  };
-
-  const list = async () => migrate(await read());
-
+function bindHostMutations(
+  list: () => Promise<HostProfile[]>,
+  write: (profiles: HostProfile[]) => Promise<void>,
+  makeId: () => string,
+  secrets: HostSecrets,
+): Omit<HostStore, 'list'> {
   return {
-    list,
     async create(input) {
       const profiles = await list();
       const profile: HostProfile = {
@@ -179,4 +178,23 @@ export function createHostStore({
       return next;
     },
   };
+}
+
+export function createHostStore({
+  storage,
+  secrets,
+  makeId = createHostId,
+}: Dependencies): HostStore {
+  const write = async (profiles: HostProfile[]) => {
+    await storage.setItem(HOST_PROFILES_KEY, JSON.stringify(ordered(profiles)));
+  };
+  const list = async () =>
+    migrateLegacyHost(
+      storage,
+      secrets,
+      parseProfiles(await storage.getItem(HOST_PROFILES_KEY)),
+      write,
+      makeId,
+    );
+  return { list, ...bindHostMutations(list, write, makeId, secrets) };
 }

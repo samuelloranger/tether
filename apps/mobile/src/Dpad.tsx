@@ -1,4 +1,5 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import type { MutableRefObject } from 'react';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Animated, PanResponder, StyleSheet, View } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
@@ -21,6 +22,81 @@ const A11Y_ACTIONS: { name: DPadDirection; label: string }[] = [
   { name: 'C', label: 'Right' },
 ];
 
+type RepeatRefs = {
+  activeRef: MutableRefObject<DPadDirection | null>;
+  delayRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  intervalRef: MutableRefObject<ReturnType<typeof setInterval> | null>;
+  onArrowRef: MutableRefObject<(dir: DPadDirection) => void>;
+};
+
+function stopRepeat(refs: RepeatRefs) {
+  if (refs.delayRef.current) clearTimeout(refs.delayRef.current);
+  if (refs.intervalRef.current) clearInterval(refs.intervalRef.current);
+  refs.delayRef.current = null;
+  refs.intervalRef.current = null;
+}
+
+function activateDirection(refs: RepeatRefs, next: DPadDirection | null) {
+  if (next === refs.activeRef.current) return;
+  stopRepeat(refs);
+  refs.activeRef.current = next;
+  if (!next) return;
+  refs.onArrowRef.current(next);
+  refs.delayRef.current = setTimeout(() => {
+    let sent = 0;
+    refs.intervalRef.current = setInterval(() => {
+      const active = refs.activeRef.current;
+      if (!active || sent >= D_PAD_MAX_REPEATS) {
+        stopRepeat(refs);
+        return;
+      }
+      sent++;
+      refs.onArrowRef.current(active);
+    }, D_PAD_REPEAT_MS);
+  }, D_PAD_REPEAT_DELAY_MS);
+}
+
+function createDPadPanResponder(
+  originRef: MutableRefObject<{ x: number; y: number }>,
+  update: (dx: number, dy: number) => void,
+  finish: () => void,
+) {
+  return PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (event) => {
+      const { locationX, locationY } = event.nativeEvent;
+      originRef.current = grantOffset(locationX, locationY);
+      update(0, 0);
+    },
+    onPanResponderMove: (_event, gesture) => update(gesture.dx, gesture.dy),
+    onPanResponderRelease: finish,
+    onPanResponderTerminate: finish,
+    onPanResponderTerminationRequest: () => false,
+  });
+}
+
+function DPadGlyph({
+  color,
+  styles,
+  thumb,
+}: {
+  color: string;
+  styles: ReturnType<typeof createStyles>;
+  thumb: Animated.ValueXY;
+}) {
+  return (
+    <Animated.View pointerEvents="none" style={{ transform: thumb.getTranslateTransform() }}>
+      <View style={styles.axisGlyph}>
+        <MaterialIcons name="arrow-drop-up" size={22} color={color} style={styles.chevronUp} />
+        <MaterialIcons name="arrow-drop-down" size={22} color={color} style={styles.chevronDown} />
+        <MaterialIcons name="arrow-left" size={22} color={color} style={styles.chevronLeft} />
+        <MaterialIcons name="arrow-right" size={22} color={color} style={styles.chevronRight} />
+      </View>
+    </Animated.View>
+  );
+}
+
 // One compact directional puck: tap a chevron for a single arrow, or drag and
 // hold for auto-repeat. It claims its own gestures at touch start so a
 // horizontal drag on the puck is a direction, not a page swipe of the
@@ -38,83 +114,32 @@ export const ArrowCluster = React.memo(function ArrowCluster({
   const activeRef = useRef<DPadDirection | null>(null);
   const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopRepeat = useCallback(() => {
-    if (delayRef.current) clearTimeout(delayRef.current);
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    delayRef.current = null;
-    intervalRef.current = null;
-  }, []);
-
-  const activate = useCallback(
-    (next: DPadDirection | null) => {
-      if (next === activeRef.current) return;
-      stopRepeat();
-      activeRef.current = next;
-      if (!next) return;
-      onArrowRef.current(next);
-      delayRef.current = setTimeout(() => {
-        let sent = 0;
-        intervalRef.current = setInterval(() => {
-          const active = activeRef.current;
-          if (!active || sent >= D_PAD_MAX_REPEATS) {
-            stopRepeat();
-            return;
-          }
-          sent++;
-          onArrowRef.current(active);
-        }, D_PAD_REPEAT_MS);
-      }, D_PAD_REPEAT_DELAY_MS);
-    },
-    [stopRepeat],
-  );
-
-  // Offset of the touch inside the puck at grant time; pan deltas are measured
-  // from there so a gesture starting on a chevron is not double-counted.
   const originRef = useRef({ x: 0, y: 0 });
-
+  const bag = useRef({ activeRef, delayRef, intervalRef, onArrowRef }).current;
   const update = useCallback(
     (dx: number, dy: number) => {
       const x = originRef.current.x + dx;
       const y = originRef.current.y + dy;
-      const next = resolveDPadDirection(x, y, activeRef.current);
-      // Snap the glyph to the resolved axis only — no free 2D slide.
+      const next = resolveDPadDirection(x, y, bag.activeRef.current);
       thumb.setValue(thumbOffset(x, y, next));
-      activate(next);
+      activateDirection(bag, next);
     },
-    [activate, thumb],
+    [bag, thumb],
   );
-
   const finish = useCallback(() => {
-    stopRepeat();
-    activeRef.current = null;
+    stopRepeat(bag);
+    bag.activeRef.current = null;
     originRef.current = { x: 0, y: 0 };
     // useNativeDriver stays off on purpose: the same value is driven from JS via
     // thumb.setValue() during the drag, and mixing a JS write with a
     // native-driven node can leave the thumb stuck off center.
     Animated.spring(thumb, { toValue: { x: 0, y: 0 }, useNativeDriver: false }).start();
-  }, [stopRepeat, thumb]);
-
-  useEffect(() => stopRepeat, [stopRepeat]);
-
+  }, [bag, thumb]);
+  useEffect(() => () => stopRepeat(bag), [bag]);
   const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          const { locationX, locationY } = event.nativeEvent;
-          originRef.current = grantOffset(locationX, locationY);
-          update(0, 0);
-        },
-        onPanResponderMove: (_event, gesture) => update(gesture.dx, gesture.dy),
-        onPanResponderRelease: finish,
-        onPanResponderTerminate: finish,
-        onPanResponderTerminationRequest: () => false,
-      }),
+    () => createDPadPanResponder(originRef, update, finish),
     [finish, update],
   );
-
   return (
     <View
       {...panResponder.panHandlers}
@@ -131,34 +156,7 @@ export const ArrowCluster = React.memo(function ArrowCluster({
         if (action) onArrowRef.current(action.name);
       }}
     >
-      <Animated.View pointerEvents="none" style={{ transform: thumb.getTranslateTransform() }}>
-        <View style={styles.axisGlyph}>
-          <MaterialIcons
-            name="arrow-drop-up"
-            size={22}
-            color={theme.colors.text}
-            style={styles.chevronUp}
-          />
-          <MaterialIcons
-            name="arrow-drop-down"
-            size={22}
-            color={theme.colors.text}
-            style={styles.chevronDown}
-          />
-          <MaterialIcons
-            name="arrow-left"
-            size={22}
-            color={theme.colors.text}
-            style={styles.chevronLeft}
-          />
-          <MaterialIcons
-            name="arrow-right"
-            size={22}
-            color={theme.colors.text}
-            style={styles.chevronRight}
-          />
-        </View>
-      </Animated.View>
+      <DPadGlyph color={theme.colors.text} styles={styles} thumb={thumb} />
     </View>
   );
 });

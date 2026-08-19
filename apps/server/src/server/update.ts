@@ -46,28 +46,26 @@ interface UpdateCtx {
   runningPid: () => number | null;
 }
 
-export async function runUpdate(ctx: UpdateCtx): Promise<void> {
-  if (!ctx.compiled) {
-    console.error('update only works on an installed binary. In dev, use git + bun run.');
-    process.exit(1);
-  }
-  console.log('Checking latest release…');
+async function fetchLatestRelease(): Promise<{
+  tag_name: string;
+  assets: { name: string; browser_download_url: string }[];
+}> {
   const api = `https://api.github.com/repos/${REPO_SLUG}/releases/latest`;
   const res = await fetch(api, { headers: { 'User-Agent': 'tether-update' } });
   if (!res.ok) {
     console.error(`Could not query releases (${res.status}).`);
     process.exit(1);
   }
-  const rel = (await res.json()) as {
+  return (await res.json()) as {
     tag_name: string;
     assets: { name: string; browser_download_url: string }[];
   };
-  if (!shouldUpdate(ctx.version, rel.tag_name)) {
-    console.log(`Already up to date (${ctx.version}).`);
-    return;
-  }
-  // Asset name embeds the release tag, so resolve it after we know the tag.
-  const asset = assetName(process.platform, process.arch);
+}
+
+async function downloadVerifiedAsset(
+  rel: { tag_name: string; assets: { name: string; browser_download_url: string }[] },
+  asset: string,
+): Promise<ArrayBuffer> {
   const match = rel.assets.find((x) => x.name === asset);
   if (!match) {
     console.error(`Release ${rel.tag_name} has no asset "${asset}".`);
@@ -82,16 +80,10 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
     console.error(`Download failed (${dl.status}).`);
     process.exit(1);
   }
-  // Write next to the current binary so the final rename is same-filesystem/atomic.
   // Buffer the whole body first: Bun.write(path, Response) hangs on large streamed
   // bodies (repro'd on 1.3.14 with a ~90MB asset) — arrayBuffer() sidesteps it.
-  const target = process.execPath;
-  const dir = path.dirname(target);
   const bytes = await dl.arrayBuffer();
 
-  // Verify the downloaded bytes against the published SHA256SUMS.txt BEFORE we
-  // ever write, chmod, or execute them. The checksum is the trust decision — we
-  // must not run the untrusted binary as a "sanity check".
   const sums = rel.assets.find((x) => x.name === `${asset}.sha256`);
   if (!sums) {
     console.error(`Release ${rel.tag_name} has no "${asset}.sha256" — refusing to update.`);
@@ -113,13 +105,14 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
     console.error('Update checksum mismatch — aborting (possible tampering).');
     process.exit(1);
   }
+  return bytes;
+}
 
-  let tmp: string;
-  let staging: string | null = null;
+async function stageUpdateBinary(dir: string, asset: string, bytes: ArrayBuffer): Promise<string> {
   if (asset.endsWith('.tar.gz')) {
     // macOS: extract the inner `tether` into a staging dir (same filesystem as
     // target so the final rename stays atomic). tar is present on macOS/Linux.
-    staging = path.join(dir, '.tether-update');
+    const staging = path.join(dir, '.tether-update');
     rmSync(staging, { recursive: true, force: true });
     mkdirSync(staging, { recursive: true });
     const archive = path.join(staging, 'tether.tar.gz');
@@ -130,14 +123,34 @@ export async function runUpdate(ctx: UpdateCtx): Promise<void> {
       rmSync(staging, { recursive: true, force: true });
       process.exit(1);
     }
-    tmp = path.join(staging, 'tether');
-  } else {
-    tmp = path.join(dir, '.tether.new');
-    await Bun.write(tmp, bytes);
+    return path.join(staging, 'tether');
   }
+  const tmp = path.join(dir, '.tether.new');
+  await Bun.write(tmp, bytes);
+  return tmp;
+}
+
+export async function runUpdate(ctx: UpdateCtx): Promise<void> {
+  if (!ctx.compiled) {
+    console.error('update only works on an installed binary. In dev, use git + bun run.');
+    process.exit(1);
+  }
+  console.log('Checking latest release…');
+  const rel = await fetchLatestRelease();
+  if (!shouldUpdate(ctx.version, rel.tag_name)) {
+    console.log(`Already up to date (${ctx.version}).`);
+    return;
+  }
+  const asset = assetName(process.platform, process.arch);
+  const bytes = await downloadVerifiedAsset(rel, asset);
+
+  const target = process.execPath;
+  const dir = path.dirname(target);
+  const tmp = await stageUpdateBinary(dir, asset, bytes);
   chmodSync(tmp, 0o755);
 
   const wasRunning = ctx.runningPid() !== null;
+  const staging = asset.endsWith('.tar.gz') ? path.join(dir, '.tether-update') : null;
   renameSync(tmp, target); // atomic swap; running process keeps the old inode
   if (staging) rmSync(staging, { recursive: true, force: true });
   console.log(`Updated to ${rel.tag_name}.`);

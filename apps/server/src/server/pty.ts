@@ -1,113 +1,34 @@
 import { spawn } from 'node:child_process';
-import {
-  chmodSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { openSync, readdirSync, readFileSync, realpathSync, unlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
-import type { Socket } from 'bun';
 import { getConfig } from './config';
-import { addTerminalLog, clearInsertCount, deleteSession, getSession, upsertSession } from './db';
-import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
-import { findGitRoot } from './gitRoot';
-import { EMPTY_REPO_STATUS, type RepoStatus } from './gitStatus';
-import { GitWatch } from './gitWatch';
-import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
-import type { NotificationEvent } from './notifications';
-import { CONFIG_DIR, OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
-import { clampDims, type Dims, planPtyResize } from './ptyResize';
-import { buildPushContent, sendPush } from './push';
+import { deleteSession, upsertSession } from './db';
+import { clearLiveCwd } from './liveCwd';
+import { OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
+import {
+  attach,
+  broadcast,
+  type FocusSubscriber,
+  HOLDERS_DIR,
+  instances,
+  killed,
+  type SessionInstance,
+  sendFrame,
+  sockPathFor,
+} from './ptyHolder';
+import { clampDims, planPtyResize } from './ptyResize';
+import { getDefaultShell, shellInvocation } from './ptyShell';
 import { COMPILED, selfArgv } from './runtime';
-import { type Activity, clearActivity, recordInput, recordOutputEvent } from './sessionActivity';
-import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './sessionTitle';
+import { clearActivity, recordInput } from './sessionActivity';
+import { clearTitle } from './sessionTitle';
 
-// Generate a bash rcfile that gives a fish-like prompt: cwd abbreviated to
-// first letters (~/S/p/t/a/server), git branch, and a ❯ char. Written to a file
-// (not an inlined PS1) so the shell logic stays readable.
-// bashrc + holder sockets live alongside the DB (CONFIG_DIR already resolves
-// env / installed-binary / dev-source to the right place — see paths.ts).
-const RC_DIR = CONFIG_DIR;
-const RC_PATH = path.join(RC_DIR, 'tether.bashrc');
-const BASHRC = [
-  '[ -f ~/.bashrc ] && source ~/.bashrc',
-  '_tether_pwd() {',
-  '  local tilde="~" p out="" seg i=0 n',
-  '  p="${PWD/#$HOME/$tilde}"', // via var so ~ is not re-expanded back to $HOME
-  '  local -a parts',
-  '  IFS=/ read -ra parts <<< "$p"',
-  '  n=${#parts[@]}',
-  '  for seg in "${parts[@]}"; do',
-  '    i=$((i+1))',
-  '    if [ $i -lt $n ] && [ -n "$seg" ]; then',
-  '      if [[ $seg == .* ]]; then out+="${seg:0:2}"; else out+="${seg:0:1}"; fi',
-  '    else',
-  '      out+="$seg"',
-  '    fi',
-  '    [ $i -lt $n ] && out+="/"',
-  '  done',
-  '  printf "%s" "$out"',
-  '}',
-  '_tether_branch() { local b; b=$(git branch --show-current 2>/dev/null); [ -n "$b" ] && printf " (%s)" "$b"; }',
-  '_tether_osc7() { printf "\\e]7;file://%s%s\\a" "$(hostname)" "$PWD"; }',
-  "PS1='\\[$(_tether_osc7)\\]\\[\\e[36m\\]$(_tether_pwd)\\[\\e[0m\\]\\[\\e[33m\\]$(_tether_branch)\\[\\e[0m\\] \\[\\e[32m\\]❯\\[\\e[0m\\] '",
-  '',
-].join('\n');
-mkdirSync(RC_DIR, { recursive: true, mode: 0o700 });
-// Tighten an existing dir too — the config dir holds the argon2 hash and the
-// holder IPC sockets, so no other local user should be able to traverse it.
-try {
-  chmodSync(RC_DIR, 0o700);
-} catch {}
-writeFileSync(RC_PATH, BASHRC);
+export type { FocusSubscriber, SessionFrame, Subscriber } from './ptyHolder';
+export { sockPathFor } from './ptyHolder';
+export { clampDims } from './ptyResize';
+export { getDefaultShell, type ShellInvocation, shellInvocation } from './ptyShell';
 
-// zsh has no --rcfile-equivalent flag for interactive mode; the standard,
-// safe (zsh-only, unlike XDG_CONFIG_HOME) redirect is the ZDOTDIR env var,
-// which zsh reads $ZDOTDIR/.zshrc from instead of ~/.zshrc. Only the invisible
-// OSC 7 hook is added — no prompt replacement, since zsh users already have
-// their own (bare `~/.zshrc`, not `$ZDOTDIR`-relative, so a customized
-// ZDOTDIR of the user's own is intentionally not chased here — same
-// simplification the bash rcfile already makes for ~/.bashrc).
-const ZSH_RC_DIR = path.join(RC_DIR, 'zsh');
-const ZSHRC = [
-  '[ -f ~/.zshrc ] && source ~/.zshrc',
-  '_tether_osc7() { printf "\\e]7;file://%s%s\\a" "$(hostname)" "$PWD"; }',
-  'precmd_functions+=(_tether_osc7)',
-  '',
-].join('\n');
-// ZDOTDIR redirects ALL of zsh's startup files, not just .zshrc — .zshenv is
-// read even for non-interactive shells and is the canonical place users put
-// PATH/SDK-manager/Nix env setup (zsh does not fall back to ~/.zshenv once
-// ZDOTDIR is set, so without this that setup would silently vanish).
-const ZSHENV = '[ -f ~/.zshenv ] && source ~/.zshenv\n';
-mkdirSync(ZSH_RC_DIR, { recursive: true });
-writeFileSync(path.join(ZSH_RC_DIR, '.zshrc'), ZSHRC);
-writeFileSync(path.join(ZSH_RC_DIR, '.zshenv'), ZSHENV);
-
-// fish has no rcfile-redirect env var without risking collateral effects on
-// other XDG-aware tools in the session (XDG_CONFIG_HOME would redirect ALL of
-// them, not just fish) — --init-command runs before fish's own config.fish,
-// with no environment side effects at all.
-const FISH_INIT =
-  'function _tether_osc7 --on-event fish_prompt; printf "\\e]7;file://%s%s\\a" (hostname) (pwd); end';
-
-// Each session's PTY lives in a detached holder process (holder.ts) so shells
-// survive tether server restarts; we speak newline-delimited JSON to it over a
-// unix socket (see holder.ts for the frame shapes). Holders live next to the
-// bashrc in the same config dir.
-const HOLDERS_DIR = path.join(RC_DIR, 'holders');
 const MAX_SESSIONS = Number(process.env.TETHER_MAX_SESSIONS || 50);
-mkdirSync(HOLDERS_DIR, { recursive: true, mode: 0o700 });
-try {
-  chmodSync(HOLDERS_DIR, 0o700);
-} catch {}
-
-export const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
 
 // If the daemon was (re)started from inside a Claude Code Bash tool, its env
 // carries CLAUDE_CODE_CHILD_SESSION etc. Shells inheriting those make any
@@ -147,252 +68,11 @@ export function sessionEnv(
   return { ...withTermEnv(scrubAgentEnv(env)), ...shellEnv, TETHER_SESSION_ID: id };
 }
 
-export type SessionFrame =
-  | { type: 'output'; chunk: string; id: number }
-  | { type: 'exit'; exitCode?: number }
-  | { type: 'diff'; summary: DiffSummary; status?: RepoStatus }
-  | { type: 'title'; title: string }
-  | { type: 'activity'; activity: Activity };
-
-export type Subscriber = (data: SessionFrame) => void;
-export type FocusSubscriber = Subscriber & { focused?: boolean };
-
-interface SessionInstance {
-  sock: Socket;
-  subscribers: Set<FocusSubscriber>;
-  diffSummary: DiffSummary;
-  repoStatus: RepoStatus;
-  gitWatch: GitWatch;
-  // Each attached client's requested dims. A PTY has one size, so a shared session
-  // is fit to the SMALLEST attached client (tmux model): content fits everyone and
-  // a larger client just gets blank margin. Recomputed on attach/resize/detach.
-  clientDims: Map<FocusSubscriber, { cols: number; rows: number }>;
-  // The size the holder was last told to use. Null until we have set one (a
-  // reattached holder's size is unknown, so the first recompute always sends).
-  // Kept so a recompute that lands on the current size can send nothing at all.
-  ptyDims: Dims | null;
-}
-
-const instances = new Map<string, SessionInstance>();
-
-// Sessions an explicit kill already deleted. The holder answers `{t:'k'}` with a
-// `{t:'x'}` exit frame a moment later, and that handler used to re-`upsertSession`
-// the row killSession had just deleted — the closed tab reappeared as 'stopped'
-// and only a second kill (no live instance left, so no 'x' frame) stuck.
-const killed = new Set<string>();
-
-export { clampDims } from './ptyResize';
-
-function broadcast(id: string, data: SessionFrame) {
-  const inst = instances.get(id);
-  if (!inst) return;
-  for (const sub of inst.subscribers) {
-    try {
-      sub(data);
-    } catch (err) {
-      console.error(`Error notifying subscriber for session "${id}":`, err);
-    }
-  }
-}
-
-function sessionFocused(id: string): boolean {
-  return [...(instances.get(id)?.subscribers ?? [])].some((sub) => sub.focused === true);
-}
-
-function notify(id: string, event: NotificationEvent): void {
-  if (sessionFocused(id)) return;
-  const session = getSession(id);
-  const ctx = {
-    sessionId: id,
-    sessionTitle: autoTitle(getOscTitle(id), getLiveCwd(id), session?.command ?? 'bash'),
-  };
-  const cfg = getConfig();
-  const pushContent = buildPushContent(event, ctx, cfg);
-  if (pushContent) void sendPush(pushContent, ctx);
-}
-
-// Connect to a session's holder socket and wire its frames into the existing
-// log + broadcast pipeline. Resolves once attached; rejects if nothing listens.
-function attach(id: string, sockPath: string = sockPathFor(id)): Promise<SessionInstance> {
-  // Per-session streaming decoder: buffers incomplete multi-byte UTF-8 sequences
-  // across PTY read chunks so split emoji/wide glyphs don't decode to U+FFFD (�).
-  const decoder = new TextDecoder('utf-8');
-  let lineBuf = '';
-  let exited = false;
-
-  // Frames from one socket `data()` read are batched into a single log row +
-  // broadcast instead of one round-trip each — under bursty output (`cat` a big
-  // file, `npm install`) a single read often carries many holder frames.
-  let pendingOutput: string[] = [];
-  const flushOutput = () => {
-    if (pendingOutput.length === 0) return;
-    const text = pendingOutput.join('');
-    pendingOutput = [];
-    const cwdReported = recordChunk(id, text);
-    const cwd = getLiveCwd(id);
-    if (cwdReported) instances.get(id)?.gitWatch.setRoot(cwd ? findGitRoot(cwd) : null);
-    const titleChanged = recordTitleChunk(id, text);
-    const logId = addTerminalLog(id, text);
-    broadcast(id, { type: 'output', chunk: text, id: logId });
-    // OSC title set or cleared — push the recomputed display title so attached
-    // clients relabel their tab without waiting on the session-list poll.
-    if (titleChanged) {
-      const title = autoTitle(getOscTitle(id), getLiveCwd(id), getSession(id)?.command ?? 'bash');
-      broadcast(id, { type: 'title', title });
-    }
-    const activityEvent = recordOutputEvent(id, text);
-    if (activityEvent.activity)
-      broadcast(id, { type: 'activity', activity: activityEvent.activity });
-    if (activityEvent.notify) {
-      notify(id, { type: 'oscNotify', ...activityEvent.notify });
-    } else if (activityEvent.activity === 'waiting') {
-      notify(id, { type: 'waiting' });
-    }
-    if (activityEvent.longJob) {
-      notify(id, { type: 'longJob', seconds: getConfig().longJobSeconds });
-    }
-  };
-
-  const handleLine = (line: string) => {
-    let msg: { t: string; d?: string; code?: number };
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      return;
-    }
-    if (msg.t === 'o' && msg.d) {
-      const text = decoder.decode(Buffer.from(msg.d, 'base64'), { stream: true });
-      if (text) pendingOutput.push(text);
-    } else if (msg.t === 'c' && msg.d) {
-      // A holder-reported cwd (spawn time, or a fresh kernel read on every new
-      // client attach) — arms git watching without waiting on an OSC 7 prompt
-      // redraw, which may be a long time coming (or never, mid-TUI).
-      reportCwd(id, msg.d);
-      instances.get(id)?.gitWatch.setRoot(findGitRoot(msg.d));
-    } else if (msg.t === 'x') {
-      exited = true;
-      // Flush any buffered partial multi-byte sequence the streaming decoder is
-      // still holding (PTY died mid-emoji) so the tail isn't silently dropped.
-      const tail = decoder.decode();
-      if (tail) pendingOutput.push(tail);
-      flushOutput();
-      console.log(`PTY process for session "${id}" exited with code ${msg.code}`);
-      if (killed.delete(id)) {
-        // Explicitly killed: the row is already gone and must stay gone.
-        deleteSession(id);
-      } else {
-        const sess = getSession(id);
-        upsertSession(id, sess?.command ?? 'bash', 'stopped');
-      }
-      broadcast(id, { type: 'exit', exitCode: msg.code });
-      notify(id, { type: 'exit', exitCode: msg.code });
-      instances.get(id)?.gitWatch.dispose();
-      instances.get(id)?.subscribers.clear();
-      instances.delete(id);
-      clearLiveCwd(id);
-      clearTitle(id);
-      clearInsertCount(id);
-      clearActivity(id);
-    }
-  };
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    Bun.connect({
-      unix: sockPath,
-      socket: {
-        open(sock) {
-          settled = true;
-          const gitWatch = new GitWatch((summary, status) => {
-            const active = instances.get(id);
-            if (!active) return;
-            active.diffSummary = summary;
-            active.repoStatus = status;
-            broadcast(id, { type: 'diff', summary, status });
-          });
-          const instance: SessionInstance = {
-            sock,
-            subscribers: new Set(),
-            diffSummary: EMPTY_DIFF_SUMMARY,
-            repoStatus: EMPTY_REPO_STATUS,
-            gitWatch,
-            clientDims: new Map(),
-            ptyDims: null,
-          };
-          instances.set(id, instance);
-          resolve(instance);
-        },
-        data(_sock, buf) {
-          lineBuf += buf.toString('utf8');
-          let nl = lineBuf.indexOf('\n');
-          while (nl !== -1) {
-            const line = lineBuf.slice(0, nl);
-            lineBuf = lineBuf.slice(nl + 1);
-            nl = lineBuf.indexOf('\n');
-            if (line) handleLine(line);
-          }
-          flushOutput();
-        },
-        close() {
-          // Holder gone without an exit frame = it crashed or was killed hard.
-          // Drop the instance so the next startSession spawns a fresh holder.
-          const instance = instances.get(id);
-          if (!exited && instance?.sock) {
-            // Notify attached clients before we clear them, else they keep a
-            // dead subscription and render a live-looking but stopped terminal.
-            for (const sub of instance.subscribers) {
-              try {
-                sub({ type: 'exit' });
-              } catch {}
-            }
-            instance.subscribers.clear();
-            if (instances.delete(id)) {
-              instance.gitWatch.dispose();
-              clearLiveCwd(id);
-              clearTitle(id);
-              clearActivity(id);
-              console.log(`Holder link for session "${id}" closed unexpectedly`);
-            }
-          }
-        },
-        error() {},
-      },
-    }).catch((err) => {
-      if (!settled) reject(err);
-    });
-  });
-}
-
-function sendFrame(id: string, frame: object): boolean {
-  const instance = instances.get(id);
-  if (!instance) return false;
-  try {
-    instance.sock.write(`${JSON.stringify(frame)}\n`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // Concurrent startSession(id) calls (e.g. overlapping WS reconnects) must not
 // each spawn their own holder: instances.set(id, ...) only happens once attach()
 // actually connects, so a synchronous instances.get(id) check alone can't stop
 // two racing callers from both missing it and both spawning a duplicate holder.
 const pendingStarts = new Map<string, Promise<SessionInstance>>();
-
-export function getDefaultShell(): string {
-  try {
-    const username = userInfo().username;
-    const passwd = readFileSync('/etc/passwd', 'utf8');
-    for (const line of passwd.split('\n')) {
-      const parts = line.split(':');
-      if (parts[0] === username && parts[6]) {
-        return parts[6];
-      }
-    }
-  } catch {}
-  return process.env.SHELL || 'bash';
-}
 
 export async function startSession(
   id: string,
@@ -420,28 +100,6 @@ export async function startSession(
   });
   pendingStarts.set(id, promise);
   return promise;
-}
-
-export interface ShellInvocation {
-  args: string[];
-  env?: Record<string, string>;
-}
-
-// Picks the spawn args (and any env override) that wire up shell integration
-// (currently just OSC 7 cwd tracking) for the given command, per-shell since
-// each needs a different injection mechanism — bash's --rcfile, zsh's ZDOTDIR
-// redirect, fish's --init-command. Anything else runs as-is (matches the
-// pre-existing fallback: no shell integration attempted).
-export function shellInvocation(command: string): ShellInvocation {
-  // Dispatch matches on basename, but argv[0] keeps the original (possibly
-  // absolute, e.g. /opt/homebrew/bin/fish) command — the daemon's own PATH may
-  // not include the shell's install directory even when the resolved login
-  // shell (getDefaultShell(), read from /etc/passwd) does exist at that path.
-  const shell = path.basename(command);
-  if (shell === 'bash') return { args: [command, '--rcfile', RC_PATH, '-i'] };
-  if (shell === 'zsh') return { args: [command, '-i'], env: { ZDOTDIR: ZSH_RC_DIR } };
-  if (shell === 'fish') return { args: [command, '--init-command', FISH_INIT, '-i'] };
-  return { args: [command, '-i'] };
 }
 
 async function doStartSession(

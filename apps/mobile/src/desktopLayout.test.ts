@@ -21,7 +21,7 @@ describe('desktopLayout', () => {
   });
 
   it('blocks terminal key forwarding only for full Changes takeovers', () => {
-    // Mirrors useTetherApp: diffOpen && desktopLayout(...) !== 'desktop'
+    // Mirrors TerminalScreen: diffOpen && desktopLayout(...) !== 'desktop'
     const blockKeys = (isDesktopClient: boolean, width: number, diffOpen: boolean) =>
       diffOpen && desktopLayout(isDesktopClient, width) !== 'desktop';
     expect(blockKeys(true, 1440, true)).toBe(false); // GitDrawer — terminal stays live

@@ -4,7 +4,7 @@ import { Dimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppThemeProvider } from '../src/AppThemeProvider';
 import { TerminalScreen } from '../src/TerminalScreen';
-import type { useTetherApp } from '../src/useTetherApp';
+import { DomainFixture } from './mocks/tetherDomains';
 
 jest.mock('../src/platform', () => ({
   isDesktop: true,
@@ -128,14 +128,16 @@ function appFixture(
     get(target, property) {
       return property in target ? target[property as keyof typeof target] : noop;
     },
-  }) as unknown as ReturnType<typeof useTetherApp>;
+  }) as unknown;
 }
 
 function Harness({ initialPinned = false }: { initialPinned?: boolean }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarPinned, setSidebarPinned] = useState(initialPinned);
   return (
-    <TerminalScreen app={appFixture(drawerOpen, setDrawerOpen, sidebarPinned, setSidebarPinned)} />
+    <DomainFixture value={appFixture(drawerOpen, setDrawerOpen, sidebarPinned, setSidebarPinned)}>
+      <TerminalScreen />
+    </DomainFixture>
   );
 }
 
