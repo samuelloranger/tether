@@ -36,7 +36,11 @@ test('installs the requested Claude skill idempotently', async () => {
 
 test('sends the local control token without using the mobile password', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-control-'));
+  // Developers often run this suite from inside a tether shell, where
+  // TETHER_SESSION_ID is set and would add a sessionId field to the body.
+  const originalSessionId = process.env.TETHER_SESSION_ID;
   try {
+    delete process.env.TETHER_SESSION_ID;
     const tokenFile = path.join(root, 'token');
     await Bun.write(tokenFile, 'local-token');
     let request: Request | undefined;
@@ -59,6 +63,8 @@ test('sends the local control token without using the mobile password', async ()
       title: 'UI',
     });
   } finally {
+    if (originalSessionId === undefined) delete process.env.TETHER_SESSION_ID;
+    else process.env.TETHER_SESSION_ID = originalSessionId;
     rmSync(root, { recursive: true, force: true });
   }
 });

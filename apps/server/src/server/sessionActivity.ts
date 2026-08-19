@@ -38,100 +38,104 @@ export interface ScanResult {
 const MAX_RESIDUAL = 4096;
 const MAX_TAIL = 200;
 
+type ScanAcc = {
+  bell: boolean;
+  notify: ScanResult['notify'];
+  promptMark: string | null;
+  visible: string;
+};
+
+function unfinished(acc: ScanAcc, residual: string): ScanResult {
+  return {
+    bell: acc.bell,
+    notify: acc.notify,
+    promptMark: acc.promptMark,
+    tail: lastLine(acc.visible),
+    residual,
+  };
+}
+
+// OSC: consume to BEL or ST (ESC \). Unterminated → residual.
+function consumeOsc(text: string, i: number, acc: ScanAcc): number | ScanResult {
+  let end = i + 2;
+  let term = 0;
+  while (end < text.length) {
+    if (text[end] === '\x07') {
+      term = 1;
+      break;
+    }
+    if (text[end] === '\x1b' && text[end + 1] === '\\') {
+      term = 2;
+      break;
+    }
+    end++;
+  }
+  if (end >= text.length) return unfinished(acc, text.slice(i).slice(-MAX_RESIDUAL));
+  const payload = text.slice(i + 2, end);
+  if (payload.startsWith('9;')) {
+    acc.notify = { body: payload.slice(2) };
+  } else if (payload.startsWith('777;notify;')) {
+    const [, , title = '', ...body] = payload.split(';');
+    acc.notify = { title, body: body.join(';') };
+  } else if (payload.startsWith('133;')) acc.promptMark = payload.slice(4, 5) || null;
+  return end + term;
+}
+
+// CSI (to final byte @-~) or DCS/APC/PM (to ST).
+function consumeCsiOrString(
+  text: string,
+  i: number,
+  next: string,
+  acc: ScanAcc,
+): number | ScanResult {
+  let end = i + 2;
+  if (next === '[') {
+    while (end < text.length && !(text[end] >= '@' && text[end] <= '~')) end++;
+    if (end >= text.length) return unfinished(acc, text.slice(i).slice(-MAX_RESIDUAL));
+    return end + 1;
+  }
+  while (end < text.length && !(text[end] === '\x1b' && text[end + 1] === '\\')) end++;
+  if (end >= text.length) return unfinished(acc, text.slice(i).slice(-MAX_RESIDUAL));
+  return end + 2;
+}
+
 // Scan one PTY output chunk. Walks the text so escape-sequence interiors
 // (OSC payloads, CSI params) never leak into bell detection or the visible
 // tail. `residual` carries an escape sequence split across chunk boundaries.
 export function scanChunk(residual: string, chunk: string): ScanResult {
   const text = residual + chunk;
-  let bell = false;
-  let notify: ScanResult['notify'] = null;
-  let promptMark: string | null = null;
-  let visible = '';
+  const acc: ScanAcc = { bell: false, notify: null, promptMark: null, visible: '' };
   let i = 0;
   while (i < text.length) {
     const ch = text[i];
     if (ch === '\x07') {
-      bell = true;
+      acc.bell = true;
       i++;
       continue;
     }
     if (ch !== '\x1b') {
-      visible += ch;
+      acc.visible += ch;
       i++;
       continue;
     }
     const next = text[i + 1];
     if (next === ']') {
-      // OSC: consume to BEL or ST (ESC \). Unterminated → residual.
-      let end = i + 2;
-      let term = 0;
-      while (end < text.length) {
-        if (text[end] === '\x07') {
-          term = 1;
-          break;
-        }
-        if (text[end] === '\x1b' && text[end + 1] === '\\') {
-          term = 2;
-          break;
-        }
-        end++;
-      }
-      if (end >= text.length) {
-        return {
-          bell,
-          notify,
-          promptMark,
-          tail: lastLine(visible),
-          residual: text.slice(i).slice(-MAX_RESIDUAL),
-        };
-      }
-      const payload = text.slice(i + 2, end);
-      if (payload.startsWith('9;')) {
-        notify = { body: payload.slice(2) };
-      } else if (payload.startsWith('777;notify;')) {
-        const [, , title = '', ...body] = payload.split(';');
-        notify = { title, body: body.join(';') };
-      } else if (payload.startsWith('133;')) promptMark = payload.slice(4, 5) || null;
-      i = end + term;
+      const step = consumeOsc(text, i, acc);
+      if (typeof step !== 'number') return step;
+      i = step;
       continue;
     }
     if (next === '[' || next === 'P' || next === '_' || next === '^') {
-      // CSI (to final byte @-~) or DCS/APC/PM (to ST).
-      let end = i + 2;
-      if (next === '[') {
-        while (end < text.length && !(text[end] >= '@' && text[end] <= '~')) end++;
-        if (end >= text.length) {
-          return {
-            bell,
-            notify,
-            promptMark,
-            tail: lastLine(visible),
-            residual: text.slice(i).slice(-MAX_RESIDUAL),
-          };
-        }
-        i = end + 1;
-      } else {
-        while (end < text.length && !(text[end] === '\x1b' && text[end + 1] === '\\')) end++;
-        if (end >= text.length) {
-          return {
-            bell,
-            notify,
-            promptMark,
-            tail: lastLine(visible),
-            residual: text.slice(i).slice(-MAX_RESIDUAL),
-          };
-        }
-        i = end + 2;
-      }
+      const step = consumeCsiOrString(text, i, next, acc);
+      if (typeof step !== 'number') return step;
+      i = step;
       continue;
     }
     // Two-char escape (ESC + one byte) or bare trailing ESC.
-    if (next === undefined) {
-      return { bell, notify, promptMark, tail: lastLine(visible), residual: '\x1b' };
-    }
+    if (next === undefined) return unfinished(acc, '\x1b');
     i += 2;
   }
-  return { bell, notify, promptMark, tail: lastLine(visible), residual: '' };
+  return unfinished(acc, '');
 }
 
 function lastLine(visible: string): string | null {
