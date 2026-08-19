@@ -8,79 +8,85 @@ import { PresentationBanner } from './PresentationBanner';
 import { PresentationView } from './PresentationView';
 import { findSessionPreview, previewUrl } from './presentations';
 import { sessionLabel } from './sessionLabel';
-import type { TerminalStyles, TetherApp } from './terminalScreenTypes';
+import type { TerminalStyles } from './terminalScreenTypes';
+import { useChrome, useFile, useGit, usePresentation, useSession } from './tether/context';
 
-export function GitReviewPane({ app }: { app: TetherApp }) {
+export function GitReviewPane() {
+  const git = useGit();
   return (
     <GitReview
-      summary={app.changeSummary}
-      onBack={app.closeDiff}
-      onStageFile={app.stageFile}
-      onUnstageFile={app.unstageFile}
-      onDiscardFile={app.discardFile}
-      onToggleHunk={app.toggleHunk}
-      onCommit={app.commitStagedChanges}
-      onAmend={(message) => app.commitStagedChanges(message, true)}
-      onUndoCommit={() => void app.undoLastCommit()}
-      onPush={() => void app.pushChanges()}
-      onStageAll={() => void app.stageAllFiles()}
-      onUnstageAll={() => void app.unstageAllFiles()}
-      onDiscardAll={() => void app.discardAllFiles()}
-      onOpenLine={app.openDiffFileLine}
-      repoStatus={app.repoStatus}
-      historyEntries={app.historyEntries}
-      historyCommit={app.historyCommit}
-      onLoadHistory={app.loadGitLog}
-      onSelectCommit={app.selectCommit}
-      reviewDiffs={app.reviewDiffs}
-      onRetryReviewDiff={app.retryReviewDiff}
-      loadReviewDiffs={app.loadReviewDiffs}
+      summary={git.changeSummary}
+      onBack={git.closeDiff}
+      onStageFile={git.stageFile}
+      onUnstageFile={git.unstageFile}
+      onDiscardFile={git.discardFile}
+      onToggleHunk={git.toggleHunk}
+      onCommit={git.commitStagedChanges}
+      onAmend={(message) => git.commitStagedChanges(message, true)}
+      onUndoCommit={() => void git.undoLastCommit()}
+      onPush={() => void git.pushChanges()}
+      onStageAll={() => void git.stageAllFiles()}
+      onUnstageAll={() => void git.unstageAllFiles()}
+      onDiscardAll={() => void git.discardAllFiles()}
+      onOpenLine={git.openDiffFileLine}
+      repoStatus={git.repoStatus}
+      historyEntries={git.historyEntries}
+      historyCommit={git.historyCommit}
+      onLoadHistory={git.loadGitLog}
+      onSelectCommit={git.selectCommit}
+      reviewDiffs={git.reviewDiffs}
+      onRetryReviewDiff={git.retryReviewDiff}
+      loadReviewDiffs={git.loadReviewDiffs}
     />
   );
 }
 
-export function GitDrawerPane({ app }: { app: TetherApp }) {
+export function GitDrawerPane() {
+  const git = useGit();
   return (
     <GitDrawer
-      summary={app.changeSummary}
-      selectedPath={app.diffSelectedPath}
-      diffMode={app.diffMode}
-      diffText={app.diffText}
-      diffTruncated={app.diffTruncated}
-      diffLoading={app.diffLoading}
-      diffImage={app.diffImage}
-      onSelectFile={app.selectDiffFile}
-      onDeselectFile={app.deselectDiffFile}
-      onBack={app.closeDiff}
-      onStageFile={app.stageFile}
-      onUnstageFile={app.unstageFile}
-      onDiscardFile={app.discardFile}
-      onToggleHunk={app.toggleHunk}
-      onCommit={app.commitStagedChanges}
-      onAmend={(message) => app.commitStagedChanges(message, true)}
-      onUndoCommit={() => void app.undoLastCommit()}
-      onPush={() => void app.pushChanges()}
-      onStageAll={() => void app.stageAllFiles()}
-      onUnstageAll={() => void app.unstageAllFiles()}
-      onDiscardAll={() => void app.discardAllFiles()}
-      onOpenLine={app.openDiffFileLine}
-      repoStatus={app.repoStatus}
-      leftWidthStorageKey={app.gitDrawerLeftWidthKey}
-      historyEntries={app.historyEntries}
-      historyCommit={app.historyCommit}
-      onLoadHistory={app.loadGitLog}
-      onSelectCommit={app.selectCommit}
-      sideBySide={app.diffSideBySide}
-      onToggleSideBySide={app.toggleDiffSideBySide}
+      summary={git.changeSummary}
+      selectedPath={git.diffSelectedPath}
+      diffMode={git.diffMode}
+      diffText={git.diffText}
+      diffTruncated={git.diffTruncated}
+      diffLoading={git.diffLoading}
+      diffImage={git.diffImage}
+      onSelectFile={git.selectDiffFile}
+      onDeselectFile={git.deselectDiffFile}
+      onBack={git.closeDiff}
+      onStageFile={git.stageFile}
+      onUnstageFile={git.unstageFile}
+      onDiscardFile={git.discardFile}
+      onToggleHunk={git.toggleHunk}
+      onCommit={git.commitStagedChanges}
+      onAmend={(message) => git.commitStagedChanges(message, true)}
+      onUndoCommit={() => void git.undoLastCommit()}
+      onPush={() => void git.pushChanges()}
+      onStageAll={() => void git.stageAllFiles()}
+      onUnstageAll={() => void git.unstageAllFiles()}
+      onDiscardAll={() => void git.discardAllFiles()}
+      onOpenLine={git.openDiffFileLine}
+      repoStatus={git.repoStatus}
+      leftWidthStorageKey={git.gitDrawerLeftWidthKey}
+      historyEntries={git.historyEntries}
+      historyCommit={git.historyCommit}
+      onLoadHistory={git.loadGitLog}
+      onSelectCommit={git.selectCommit}
+      sideBySide={git.diffSideBySide}
+      onToggleSideBySide={git.toggleDiffSideBySide}
     />
   );
 }
 
-export function PresentationPane({ app, desktopUi }: { app: TetherApp; desktopUi: boolean }) {
-  const preview = app.activePresentation;
+export function PresentationPane({ desktopUi }: { desktopUi: boolean }) {
+  const { insets } = useChrome();
+  const { activePresentation, selectTerminal } = usePresentation();
+  const { activeId, activeHostId, drawerSessions, client } = useSession();
+  const preview = activePresentation;
   if (!preview) return null;
-  const backTarget = preview.sessionId ?? app.activeId;
-  const backSession = app.drawerSessions.find((s) => s.id === backTarget);
+  const backTarget = preview.sessionId ?? activeId;
+  const backSession = drawerSessions.find((s) => s.id === backTarget);
   const backLabel = backSession ? sessionLabel(backSession) : backTarget;
   return (
     <>
@@ -88,56 +94,62 @@ export function PresentationPane({ app, desktopUi }: { app: TetherApp; desktopUi
         <PresentationBanner
           label={`Back to ${backLabel}`}
           icon="terminal"
-          onPress={() => app.selectTerminal(app.activeHostId, backTarget)}
+          onPress={() => selectTerminal(activeHostId, backTarget)}
         />
       )}
       <View
         style={{
           flex: 1,
-          paddingBottom: app.insets.bottom,
-          paddingLeft: app.insets.left,
-          paddingRight: app.insets.right,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
         }}
       >
-        <PresentationView preview={preview} url={previewUrl(app.client, preview.url)} />
+        <PresentationView preview={preview} url={previewUrl(client, preview.url)} />
       </View>
     </>
   );
 }
 
-export function FileOverlay({ app, styles }: { app: TetherApp; styles: TerminalStyles }) {
-  if (!app.fileView) return null;
+export function FileOverlay({ styles }: { styles: TerminalStyles }) {
+  const { insets } = useChrome();
+  const { fileView, closeFile } = useFile();
+  const { diffOpen } = useGit();
+  if (!fileView) return null;
   return (
     <View
       style={[
         styles.fileOverlay,
         {
-          paddingBottom: app.insets.bottom,
-          paddingLeft: app.insets.left,
-          paddingRight: app.insets.right,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
         },
       ]}
       pointerEvents="box-none"
     >
       <FileViewer
-        file={app.fileView}
-        onBack={app.closeFile}
-        backLabel={app.diffOpen ? 'Back to changes' : 'Back to terminal'}
+        file={fileView}
+        onBack={closeFile}
+        backLabel={diffOpen ? 'Back to changes' : 'Back to terminal'}
       />
     </View>
   );
 }
 
-export function TerminalBanners({ app }: { app: TetherApp }) {
-  const sessionPreview = findSessionPreview(app.presentations, app.activeId);
+export function TerminalBanners() {
+  const { activeId } = useSession();
+  const { presentations, selectPresentation } = usePresentation();
+  const { diffOpen, changeSummary, openDiff } = useGit();
+  const sessionPreview = findSessionPreview(presentations, activeId);
   return (
     <>
-      {!app.diffOpen && <ChangeBanner summary={app.changeSummary} onPress={app.openDiff} />}
+      {!diffOpen && <ChangeBanner summary={changeSummary} onPress={openDiff} />}
       {sessionPreview && (
         <PresentationBanner
           label={`Preview ready: ${sessionPreview.title}`}
           icon="layout"
-          onPress={() => app.selectPresentation(sessionPreview.id)}
+          onPress={() => selectPresentation(sessionPreview.id)}
         />
       )}
     </>

@@ -5,28 +5,27 @@ import { ConnectionBanner } from './ConnectionBanner';
 import { isDesktop } from './platform';
 import type { RendererStatus } from './rendererLifecycle';
 import { TerminalView } from './TerminalView';
-import type { TerminalStyles, TetherApp } from './terminalScreenTypes';
+import type { TerminalStyles } from './terminalScreenTypes';
+import { useChrome, useConnection, useFile, useSession, useTranscript } from './tether/context';
 
-function TerminalRenderer({
-  app,
-  onStatus,
-}: {
-  app: TetherApp;
-  onStatus: (status: RendererStatus) => void;
-}) {
+function TerminalRenderer({ onStatus }: { onStatus: (status: RendererStatus) => void }) {
+  const session = useSession();
+  const { changeFontSize } = useChrome();
+  const { openFile } = useFile();
+  const { handlePaste } = useTranscript();
   const viewProps = {
-    ref: app.terminalViewRef,
-    onResize: app.onRendererResize,
-    onOpenLink: app.openFile,
-    onSelection: app.onRendererSelection,
-    onControl: app.onPageControl,
-    onReply: app.onPageReply,
-    onClipboardWrite: app.onPageClipboardWrite,
-    onPaste: app.handlePaste,
-    onNewTerminal: app.newTerminal,
-    onFontZoom: app.changeFontSize,
+    ref: session.terminalViewRef,
+    onResize: session.onRendererResize,
+    onOpenLink: openFile,
+    onSelection: session.onRendererSelection,
+    onControl: session.onPageControl,
+    onReply: session.onPageReply,
+    onClipboardWrite: session.onPageClipboardWrite,
+    onPaste: handlePaste,
+    onNewTerminal: session.newTerminal,
+    onFontZoom: changeFontSize,
     onFallback: (reason: string) => console.warn('Terminal renderer fallback:', reason),
-    onRecover: app.hydrateRenderer,
+    onRecover: session.hydrateRenderer,
     onStatus,
   };
   if (Platform.OS === 'ios') {
@@ -37,15 +36,15 @@ function TerminalRenderer({
           for (const asset of event.assets) {
             if (!asset.uri) continue;
             const filename = asset.fileName || `drop-${Date.now()}`;
-            app.uploadFile({ uri: asset.uri, name: filename, type: asset.type }, filename);
+            session.uploadFile({ uri: asset.uri, name: filename, type: asset.type }, filename);
           }
         }}
       >
-        <TerminalView {...viewProps} onInput={app.sendTyped} />
+        <TerminalView {...viewProps} onInput={session.sendTyped} />
       </DragDropContentView>
     );
   }
-  return <TerminalView {...viewProps} onInput={isDesktop ? app.sendKey : app.sendTyped} />;
+  return <TerminalView {...viewProps} onInput={isDesktop ? session.sendKey : session.sendTyped} />;
 }
 
 function RendererStalled({ styles, onRetry }: { styles: TerminalStyles; onRetry: () => void }) {
@@ -99,18 +98,19 @@ function DeepLinkNotice({
 }
 
 export function TerminalCanvas({
-  app,
   styles,
   rendererStatus,
   onStatus,
 }: {
-  app: TetherApp;
   styles: TerminalStyles;
   rendererStatus: RendererStatus;
   onStatus: (status: RendererStatus) => void;
 }) {
   const { theme } = useAppTheme();
-  const { insets, connectionStatus, hasConnected, setIsConfiguring, deepLinkNotice } = app;
+  const { insets } = useChrome();
+  const { connectionStatus, hasConnected, terminalViewRef } = useSession();
+  const { setIsConfiguring } = useConnection();
+  const { deepLinkNotice, dismissDeepLinkNotice } = useTranscript();
   return (
     <View style={styles.terminalArea}>
       <View
@@ -124,10 +124,10 @@ export function TerminalCanvas({
           },
         ]}
       >
-        <TerminalRenderer app={app} onStatus={onStatus} />
+        <TerminalRenderer onStatus={onStatus} />
       </View>
       {rendererStatus === 'stalled' && (
-        <RendererStalled styles={styles} onRetry={() => app.terminalViewRef.current?.retry()} />
+        <RendererStalled styles={styles} onRetry={() => terminalViewRef.current?.retry()} />
       )}
       <View style={styles.connectionBannerOverlay} pointerEvents="box-none">
         <ConnectionBanner
@@ -139,7 +139,7 @@ export function TerminalCanvas({
       {deepLinkNotice && (
         <DeepLinkNotice
           notice={deepLinkNotice}
-          onDismiss={app.dismissDeepLinkNotice}
+          onDismiss={dismissDeepLinkNotice}
           surface={theme.colors.surfaceRaised}
           muted={theme.colors.textMuted}
         />

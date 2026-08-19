@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { useAppTheme } from './AppThemeProvider';
 import { minTouchTarget } from './interaction';
-import type { GitLogEntry } from './useTetherApp';
+import type { GitLogEntry } from './tether/types';
 
 const TOUCH_TARGET = minTouchTarget();
 

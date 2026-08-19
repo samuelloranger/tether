@@ -19,7 +19,15 @@ import {
   TerminalBanners,
 } from './TerminalScreenPanes';
 import TitleBar from './TitleBar';
-import type { TerminalStyles, TetherApp } from './terminalScreenTypes';
+import type { TerminalStyles } from './terminalScreenTypes';
+import {
+  useConnection,
+  useFile,
+  useGit,
+  usePresentation,
+  useSession,
+  useUi,
+} from './tether/context';
 
 export function BellFlash({ visible, color }: { visible: boolean; color: string }) {
   if (!visible) return null;
@@ -40,133 +48,140 @@ export function BellFlash({ visible, color }: { visible: boolean; color: string 
   );
 }
 
-function openDrawer(app: TetherApp) {
-  app.refreshSessions();
-  app.refreshPresentations();
-  app.setDrawerOpen(true);
+function openDrawer(
+  refreshSessions: () => void,
+  refreshPresentations: () => void,
+  setDrawerOpen: (open: boolean) => void,
+) {
+  refreshSessions();
+  refreshPresentations();
+  setDrawerOpen(true);
 }
 
 export function TerminalTitleBar({
-  app,
   desktopUi,
   terminalVisible,
 }: {
-  app: TetherApp;
   desktopUi: boolean;
   terminalVisible: boolean;
 }) {
+  const session = useSession();
+  const { serverIp, port, setIsConfiguring } = useConnection();
+  const { openDiff, changeSummary } = useGit();
+  const { activePresentation, refreshPresentations } = usePresentation();
+  const { setMenuOpen, setDrawerOpen } = useUi();
   if (!isDesktop) return null;
-  const titleBarDrawerMenu = showTitleBarDrawerMenu(desktopUi, app.sidebarPinned);
+  const titleBarDrawerMenu = showTitleBarDrawerMenu(desktopUi, session.sidebarPinned);
+  const entry = session.entryFor(session.activeId);
   return (
     <TitleBar
       isMac={isMacDesktop}
-      title={
-        app.activePresentation?.title || app.entryFor(app.activeId).term.title || app.activeName
-      }
-      subtitle={
-        app.activePresentation?.project ||
-        app.entryFor(app.activeId).term.cwd ||
-        `${app.serverIp}:${app.port}`
-      }
-      status={app.titleBarStatus}
-      onNew={app.newTerminal}
-      onChanges={app.openDiff}
-      changeSummary={app.changeSummary}
-      onSettings={() => app.setIsConfiguring(true)}
+      title={activePresentation?.title || entry.term.title || session.activeName}
+      subtitle={activePresentation?.project || entry.term.cwd || `${serverIp}:${port}`}
+      status={session.titleBarStatus}
+      onNew={session.newTerminal}
+      onChanges={openDiff}
+      changeSummary={changeSummary}
+      onSettings={() => setIsConfiguring(true)}
       onMenu={() => {
-        if (terminalVisible) app.setMenuOpen(true);
+        if (terminalVisible) setMenuOpen(true);
       }}
-      onOpenDrawer={titleBarDrawerMenu ? () => openDrawer(app) : undefined}
+      onOpenDrawer={
+        titleBarDrawerMenu
+          ? () => openDrawer(session.refreshSessions, refreshPresentations, setDrawerOpen)
+          : undefined
+      }
       compact={!desktopUi}
     />
   );
 }
 
-function toggleSidebarPin(app: TetherApp) {
-  if (app.sidebarPinned) {
-    app.persistSidebarPinned(false);
-    app.setDrawerOpen(false);
+function toggleSidebarPin(
+  sidebarPinned: boolean,
+  persistSidebarPinned: (next: boolean) => void,
+  setDrawerOpen: (open: boolean) => void,
+) {
+  if (sidebarPinned) {
+    persistSidebarPinned(false);
+    setDrawerOpen(false);
   } else {
-    app.persistSidebarPinned(true);
+    persistSidebarPinned(true);
   }
 }
 
 export function TerminalSessionDrawer({
-  app,
   desktopUi,
   docked,
 }: {
-  app: TetherApp;
   desktopUi: boolean;
   docked: boolean;
 }) {
+  const session = useSession();
+  const { profiles, openEditHost, openServerSettings } = useConnection();
+  const pres = usePresentation();
+  const { drawerOpen, setDrawerOpen } = useUi();
   return (
     <SessionDrawer
-      visible={sidebarVisible(docked, app.drawerOpen)}
+      visible={sidebarVisible(docked, drawerOpen)}
       docked={docked}
       showPin={desktopUi}
-      onTogglePin={() => toggleSidebarPin(app)}
-      hosts={app.profiles ?? []}
-      healthByHost={app.healthByHost}
-      sessions={app.drawerSessions}
-      activeHostId={app.activeHostId}
-      activeId={app.activeId}
+      onTogglePin={() =>
+        toggleSidebarPin(session.sidebarPinned, session.persistSidebarPinned, setDrawerOpen)
+      }
+      hosts={profiles ?? []}
+      healthByHost={session.healthByHost}
+      sessions={session.drawerSessions}
+      activeHostId={session.activeHostId}
+      activeId={session.activeId}
       onSelect={(hostId, id) => {
-        app.selectTerminal(hostId, id);
-        if (!docked) app.setDrawerOpen(false);
+        pres.selectTerminal(hostId, id);
+        if (!docked) setDrawerOpen(false);
       }}
-      onNew={app.newTerminal}
-      onKill={app.killActiveOr}
-      onRetryHost={app.refreshHost}
-      onReenterPassword={app.openEditHost}
-      previews={app.presentations}
-      activePreviewId={app.activePresentationId}
+      onNew={session.newTerminal}
+      onKill={session.killActiveOr}
+      onRetryHost={session.refreshHost}
+      onReenterPassword={openEditHost}
+      previews={pres.presentations}
+      activePreviewId={pres.activePresentationId}
       onSelectPreview={(id) => {
-        app.selectPresentation(id);
-        if (!docked) app.setDrawerOpen(false);
+        pres.selectPresentation(id);
+        if (!docked) setDrawerOpen(false);
       }}
-      onClosePreview={app.closePresentation}
-      onClose={() => app.setDrawerOpen(false)}
+      onClosePreview={pres.closePresentation}
+      onClose={() => setDrawerOpen(false)}
       onHostSettings={(hostId) => {
-        if (!docked) app.setDrawerOpen(false);
-        app.openServerSettings(hostId);
+        if (!docked) setDrawerOpen(false);
+        openServerSettings(hostId);
       }}
     />
   );
 }
 
 function TerminalStage({
-  app,
   styles,
   desktopUi,
   gitTakeover,
   rendererStatus,
   onStatus,
 }: {
-  app: TetherApp;
   styles: TerminalStyles;
   desktopUi: boolean;
   gitTakeover: boolean;
   rendererStatus: RendererStatus;
   onStatus: (status: RendererStatus) => void;
 }) {
-  if (gitTakeover) return <GitReviewPane app={app} />;
-  if (app.activePresentation) return <PresentationPane app={app} desktopUi={desktopUi} />;
+  const { activePresentation } = usePresentation();
+  if (gitTakeover) return <GitReviewPane />;
+  if (activePresentation) return <PresentationPane desktopUi={desktopUi} />;
   return (
     <>
-      {!desktopUi && <TerminalBanners app={app} />}
-      <TerminalCanvas
-        app={app}
-        styles={styles}
-        rendererStatus={rendererStatus}
-        onStatus={onStatus}
-      />
+      {!desktopUi && <TerminalBanners />}
+      <TerminalCanvas styles={styles} rendererStatus={rendererStatus} onStatus={onStatus} />
     </>
   );
 }
 
 export function TerminalMainColumn({
-  app,
   styles,
   desktopUi,
   gitTakeover,
@@ -174,7 +189,6 @@ export function TerminalMainColumn({
   rendererStatus,
   onStatus,
 }: {
-  app: TetherApp;
   styles: TerminalStyles;
   desktopUi: boolean;
   gitTakeover: boolean;
@@ -182,27 +196,24 @@ export function TerminalMainColumn({
   rendererStatus: RendererStatus;
   onStatus: (status: RendererStatus) => void;
 }) {
+  const { diffOpen } = useGit();
+  const { fileLoading } = useFile();
   return (
     <View style={[styles.terminalMain, { position: 'relative' }]}>
-      {!desktopUi && (
-        <TerminalMobileHeader app={app} styles={styles} terminalVisible={terminalVisible} />
-      )}
-      <FileLoadingCover loading={app.fileLoading} />
+      {!desktopUi && <TerminalMobileHeader styles={styles} terminalVisible={terminalVisible} />}
+      <FileLoadingCover loading={fileLoading} />
       <TerminalStage
-        app={app}
         styles={styles}
         desktopUi={desktopUi}
         gitTakeover={gitTakeover}
         rendererStatus={rendererStatus}
         onStatus={onStatus}
       />
-      {app.diffOpen && desktopUi ? <GitDrawerPane app={app} /> : null}
-      <FileOverlay app={app} styles={styles} />
-      {terminalVisible && <TerminalOverflowMenu app={app} />}
-      <TerminalSessionModals app={app} />
-      {terminalVisible && (
-        <TerminalSelectionAndKeys app={app} styles={styles} desktopUi={desktopUi} />
-      )}
+      {diffOpen && desktopUi ? <GitDrawerPane /> : null}
+      <FileOverlay styles={styles} />
+      {terminalVisible && <TerminalOverflowMenu />}
+      <TerminalSessionModals />
+      {terminalVisible && <TerminalSelectionAndKeys styles={styles} desktopUi={desktopUi} />}
     </View>
   );
 }

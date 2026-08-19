@@ -13,29 +13,32 @@ import {
   TerminalSessionDrawer,
   TerminalTitleBar,
 } from './terminalScreenLayout';
-import type { TetherApp } from './terminalScreenTypes';
+import { useFile, useGit, usePresentation, useSession } from './tether/context';
 
-export function TerminalScreen({ app }: { app: TetherApp }) {
+export function TerminalScreen() {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const { width } = useWindowDimensions();
+  const { sidebarPinned } = useSession();
+  const { diffOpen } = useGit();
+  const { fileView } = useFile();
+  const { activePresentation } = usePresentation();
   const desktopUi = desktopLayout(isDesktop, width) === 'desktop';
   const [rendererStatus, setRendererStatus] = useState<RendererStatus>('loading');
-  const docked = sidebarDocked(desktopUi, app.sidebarPinned);
-  const gitTakeover = app.diffOpen && !desktopUi;
-  const terminalVisible = !app.fileView && !gitTakeover && !app.activePresentation;
-  const bellFlash = useTerminalScreenEffects(app, terminalVisible);
+  const docked = sidebarDocked(desktopUi, sidebarPinned);
+  const gitTakeover = diffOpen && !desktopUi;
+  const terminalVisible = !fileView && !gitTakeover && !activePresentation;
+  const bellFlash = useTerminalScreenEffects(terminalVisible);
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.terminalContainer}
     >
       <BellFlash visible={bellFlash} color={theme.colors.danger} />
-      <TerminalTitleBar app={app} desktopUi={desktopUi} terminalVisible={terminalVisible} />
+      <TerminalTitleBar desktopUi={desktopUi} terminalVisible={terminalVisible} />
       <View style={[styles.terminalBody, docked && styles.terminalRow]}>
-        <TerminalSessionDrawer app={app} desktopUi={desktopUi} docked={docked} />
+        <TerminalSessionDrawer desktopUi={desktopUi} docked={docked} />
         <TerminalMainColumn
-          app={app}
           styles={styles}
           desktopUi={desktopUi}
           gitTakeover={gitTakeover}
@@ -44,7 +47,7 @@ export function TerminalScreen({ app }: { app: TetherApp }) {
           onStatus={setRendererStatus}
         />
       </View>
-      <TerminalDesktopChrome app={app} />
+      <TerminalDesktopChrome />
     </KeyboardAvoidingView>
   );
 }

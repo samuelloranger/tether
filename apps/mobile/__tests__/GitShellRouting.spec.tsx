@@ -3,7 +3,7 @@ import { Dimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppThemeProvider } from '../src/AppThemeProvider';
 import { TerminalScreen } from '../src/TerminalScreen';
-import type { useTetherApp } from '../src/useTetherApp';
+import { DomainFixture } from './mocks/tetherDomains';
 
 jest.mock('../src/platform', () => ({
   isDesktop: true,
@@ -119,7 +119,7 @@ function appFixture(overrides: Record<string, unknown> = {}) {
     get(target, property) {
       return property in target ? target[property as keyof typeof target] : noop;
     },
-  }) as unknown as ReturnType<typeof useTetherApp>;
+  }) as unknown;
 }
 
 function setWindowWidth(width: number) {
@@ -139,7 +139,9 @@ function renderScreen(width: number, overrides: Record<string, unknown> = {}) {
       }}
     >
       <AppThemeProvider>
-        <TerminalScreen app={appFixture(overrides)} />
+        <DomainFixture value={appFixture(overrides)}>
+          <TerminalScreen />
+        </DomainFixture>
       </AppThemeProvider>
     </SafeAreaProvider>,
   );

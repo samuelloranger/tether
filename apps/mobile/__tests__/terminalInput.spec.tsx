@@ -57,12 +57,7 @@ import { AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppThemeProvider } from '../src/AppThemeProvider';
 import { TerminalScreen } from '../src/TerminalScreen';
-import { useTetherApp } from '../src/useTetherApp';
-
-function Harness() {
-  const app = useTetherApp();
-  return <TerminalScreen app={app} />;
-}
+import { TetherProvider } from '../src/tether/context';
 
 async function mountTerminal() {
   // Both an address and a stored password are required for the app to leave the
@@ -79,7 +74,9 @@ async function mountTerminal() {
       }}
     >
       <AppThemeProvider>
-        <Harness />
+        <TetherProvider>
+          <TerminalScreen />
+        </TetherProvider>
       </AppThemeProvider>
     </SafeAreaProvider>,
   );

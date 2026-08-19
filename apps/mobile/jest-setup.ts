@@ -42,7 +42,7 @@ jest.mock('expo-image-picker', () => ({
 jest.mock('expo-file-system', () => ({}));
 // Push registration is iOS-only and no-ops under the test platform, but both
 // modules touch native code at import time, so they need stubs for any suite
-// that pulls in useTetherApp.
+// that pulls in TetherProvider.
 jest.mock('expo-notifications', () => ({
   getPermissionsAsync: jest.fn(async () => ({ granted: false })),
   requestPermissionsAsync: jest.fn(async () => ({ granted: false })),

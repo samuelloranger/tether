@@ -2,8 +2,9 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { useAppTheme } from './AppThemeProvider';
 import { isDesktop } from './platform';
-import type { TetherApp } from './terminalScreenTypes';
 import { injectTerminalScrollbarStyles } from './terminalScrollbar';
+import type { Session } from './tether/context';
+import { useFile, useGit, usePresentation, useSession, useUi } from './tether/context';
 
 function useDesktopScrollbarTheme() {
   const { theme } = useAppTheme();
@@ -33,7 +34,7 @@ function useTerminalBellFlash(activeBellCount: number) {
   return bellFlash;
 }
 
-async function dropFiles(event: DragEvent, uploadFile: TetherApp['uploadFile']) {
+async function dropFiles(event: DragEvent, uploadFile: Session['uploadFile']) {
   event.preventDefault();
   const files = event.dataTransfer?.files;
   if (!files?.length) return;
@@ -42,8 +43,11 @@ async function dropFiles(event: DragEvent, uploadFile: TetherApp['uploadFile']) 
   }
 }
 
-function useDesktopFileDrop(app: TetherApp) {
-  const { uploadFile, activePresentation, fileView, diffOpen } = app;
+function useDesktopFileDrop() {
+  const { uploadFile } = useSession();
+  const { activePresentation } = usePresentation();
+  const { fileView } = useFile();
+  const { diffOpen } = useGit();
   useEffect(() => {
     // Takeovers remount #tether-terminal; re-bind so drops keep working.
     void activePresentation;
@@ -63,8 +67,11 @@ function useDesktopFileDrop(app: TetherApp) {
   }, [uploadFile, activePresentation, fileView, diffOpen]);
 }
 
-function useCloseMenusOnTakeover(app: TetherApp) {
-  const { activePresentation, fileView, diffOpen, setMenuOpen, setSelectionViewOpen } = app;
+function useCloseMenusOnTakeover() {
+  const { setMenuOpen, setSelectionViewOpen } = useUi();
+  const { activePresentation } = usePresentation();
+  const { fileView } = useFile();
+  const { diffOpen } = useGit();
   useEffect(() => {
     if (activePresentation || fileView || diffOpen) {
       setMenuOpen(false);
@@ -81,11 +88,12 @@ function useHydrateWhenVisible(terminalVisible: boolean, hydrateRenderer: () => 
   }, [terminalVisible]);
 }
 
-export function useTerminalScreenEffects(app: TetherApp, terminalVisible: boolean) {
+export function useTerminalScreenEffects(terminalVisible: boolean) {
+  const { activeBellCount, hydrateRenderer } = useSession();
   useDesktopScrollbarTheme();
-  const bellFlash = useTerminalBellFlash(app.activeBellCount);
-  useDesktopFileDrop(app);
-  useCloseMenusOnTakeover(app);
-  useHydrateWhenVisible(terminalVisible, app.hydrateRenderer);
+  const bellFlash = useTerminalBellFlash(activeBellCount);
+  useDesktopFileDrop();
+  useCloseMenusOnTakeover();
+  useHydrateWhenVisible(terminalVisible, hydrateRenderer);
   return bellFlash;
 }

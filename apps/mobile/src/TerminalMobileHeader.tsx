@@ -2,14 +2,16 @@ import Feather from '@expo/vector-icons/Feather';
 import { ActivityIndicator, Keyboard, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
-import type { TerminalStyles, TetherApp } from './terminalScreenTypes';
+import type { TerminalStyles } from './terminalScreenTypes';
+import type { Session } from './tether/context';
+import { useConnection, usePresentation, useSession, useUi } from './tether/context';
 
 function ConnectionStatusBadge({
   status,
   styles,
   warningColor,
 }: {
-  status: TetherApp['connectionStatus'];
+  status: Session['connectionStatus'];
   styles: TerminalStyles;
   warningColor: string;
 }) {
@@ -43,26 +45,17 @@ function ConnectionStatusBadge({
 }
 
 export function TerminalMobileHeader({
-  app,
   styles,
   terminalVisible,
 }: {
-  app: TetherApp;
   styles: TerminalStyles;
   terminalVisible: boolean;
 }) {
   const { theme } = useAppTheme();
-  const {
-    connectionStatus,
-    activePresentation,
-    activeName,
-    serverIp,
-    port,
-    refreshSessions,
-    refreshPresentations,
-    setDrawerOpen,
-    setMenuOpen,
-  } = app;
+  const { connectionStatus, activeName, refreshSessions } = useSession();
+  const { serverIp, port } = useConnection();
+  const { activePresentation, refreshPresentations } = usePresentation();
+  const { setDrawerOpen, setMenuOpen } = useUi();
   return (
     <SafeAreaView
       edges={['top', 'left', 'right']}

@@ -5,30 +5,18 @@ import { OverflowMenu } from './OverflowMenu';
 import { isDesktop } from './platform';
 import { SelectionView } from './SelectionView';
 import { AppearanceModal, RenameModal, SnippetsModal } from './SessionModals';
-import type { TerminalStyles, TetherApp } from './terminalScreenTypes';
+import type { TerminalStyles } from './terminalScreenTypes';
+import { useChrome, useGit, useSession, useTranscript, useUi, useUpdater } from './tether/context';
 import { UpdateModal } from './UpdateModal';
 import { UtilityBar } from './UtilityBar';
 
-export function TerminalOverflowMenu({ app }: { app: TetherApp }) {
-  const {
-    menuOpen,
-    setMenuOpen,
-    openRename,
-    openDiff,
-    fontSize,
-    changeFontSize,
-    mouseEnabled,
-    toggleMouseEnabled,
-    openSelectionView,
-    jumpPrompt,
-    setSnippetsModalOpen,
-    setAppearanceModalOpen,
-    notificationsEnabled,
-    toggleNotificationsEnabled,
-    testNotification,
-    checkForUpdatesManual,
-    hardResetSession,
-  } = app;
+export function TerminalOverflowMenu() {
+  const chrome = useChrome();
+  const { menuOpen, setMenuOpen, setSnippetsModalOpen, setAppearanceModalOpen } = useUi();
+  const { openRename, hardResetSession } = useSession();
+  const { openDiff } = useGit();
+  const { openSelectionView, jumpPrompt } = useTranscript();
+  const { checkForUpdatesManual } = useUpdater();
   return (
     <OverflowMenu
       visible={menuOpen}
@@ -38,10 +26,10 @@ export function TerminalOverflowMenu({ app }: { app: TetherApp }) {
         setMenuOpen(false);
         void openDiff();
       }}
-      fontSize={fontSize}
-      onFontDelta={changeFontSize}
-      mouseEnabled={mouseEnabled}
-      onToggleMouse={toggleMouseEnabled}
+      fontSize={chrome.fontSize}
+      onFontDelta={chrome.changeFontSize}
+      mouseEnabled={chrome.mouseEnabled}
+      onToggleMouse={chrome.toggleMouseEnabled}
       onSelectText={openSelectionView}
       onJumpPromptUp={() => jumpPrompt(-1)}
       onJumpPromptDown={() => jumpPrompt(1)}
@@ -53,11 +41,11 @@ export function TerminalOverflowMenu({ app }: { app: TetherApp }) {
         setMenuOpen(false);
         setAppearanceModalOpen(true);
       }}
-      notificationsEnabled={notificationsEnabled}
-      onToggleNotifications={toggleNotificationsEnabled}
+      notificationsEnabled={chrome.notificationsEnabled}
+      onToggleNotifications={chrome.toggleNotificationsEnabled}
       onTestNotification={() => {
         setMenuOpen(false);
-        testNotification();
+        chrome.testNotification();
       }}
       onCheckUpdates={() => {
         setMenuOpen(false);
@@ -71,83 +59,88 @@ export function TerminalOverflowMenu({ app }: { app: TetherApp }) {
   );
 }
 
-export function TerminalSessionModals({ app }: { app: TetherApp }) {
+export function TerminalSessionModals() {
+  const ui = useUi();
+  const session = useSession();
+  const { fontFamily, changeFontFamily } = useChrome();
   return (
     <>
       <RenameModal
-        visible={app.renameModalOpen}
-        onClose={() => app.setRenameModalOpen(false)}
-        value={app.renameText}
-        onChangeText={app.setRenameText}
-        placeholder={app.activeId}
-        onSubmit={app.submitRename}
+        visible={ui.renameModalOpen}
+        onClose={() => ui.setRenameModalOpen(false)}
+        value={ui.renameText}
+        onChangeText={ui.setRenameText}
+        placeholder={session.activeId}
+        onSubmit={session.submitRename}
       />
       <SnippetsModal
-        visible={app.snippetsModalOpen}
-        onClose={() => app.setSnippetsModalOpen(false)}
-        snippets={app.snippets}
-        onSend={app.sendSnippet}
-        onRemove={app.removeSnippet}
-        draft={app.snippetDraft}
-        onDraftChange={app.setSnippetDraft}
-        onAdd={app.addSnippet}
+        visible={ui.snippetsModalOpen}
+        onClose={() => ui.setSnippetsModalOpen(false)}
+        snippets={session.snippets}
+        onSend={session.sendSnippet}
+        onRemove={session.removeSnippet}
+        draft={ui.snippetDraft}
+        onDraftChange={ui.setSnippetDraft}
+        onAdd={session.addSnippet}
       />
       <AppearanceModal
-        visible={app.appearanceModalOpen}
-        onClose={() => app.setAppearanceModalOpen(false)}
-        fontFamily={app.fontFamily}
-        onFontChange={app.changeFontFamily}
+        visible={ui.appearanceModalOpen}
+        onClose={() => ui.setAppearanceModalOpen(false)}
+        fontFamily={fontFamily}
+        onFontChange={changeFontFamily}
       />
     </>
   );
 }
 
 export function TerminalSelectionAndKeys({
-  app,
   styles,
   desktopUi,
 }: {
-  app: TetherApp;
   styles: TerminalStyles;
   desktopUi: boolean;
 }) {
+  const chrome = useChrome();
+  const ui = useUi();
+  const session = useSession();
+  const { searchText, handlePaste } = useTranscript();
   return (
     <>
       <SelectionView
-        visible={app.selectionViewOpen}
+        visible={ui.selectionViewOpen}
         onClose={() => {
-          app.setSelectionViewOpen(false);
-          app.setSearchQuery('');
+          ui.setSelectionViewOpen(false);
+          ui.setSearchQuery('');
         }}
-        searchQuery={app.searchQuery}
-        onSearchChange={app.setSearchQuery}
-        searchInputRef={app.searchInputRef}
-        text={app.searchText}
-        insets={app.insets}
-        fontFamily={app.fontFamily}
-        fontSize={app.fontSize}
-        lineHeight={app.lineHeight}
+        searchQuery={ui.searchQuery}
+        onSearchChange={ui.setSearchQuery}
+        searchInputRef={ui.searchInputRef}
+        text={searchText}
+        insets={chrome.insets}
+        fontFamily={chrome.fontFamily}
+        fontSize={chrome.fontSize}
+        lineHeight={chrome.lineHeight}
       />
       {!desktopUi && (
         <UtilityBar
-          ctrlArmed={app.ctrlArmed}
-          setCtrlArmed={app.setCtrlArmed}
-          sendKey={app.sendKey}
-          cursorSeq={app.cursorSeq}
-          page={app.utilityPage}
-          setPage={app.setUtilityPage}
-          onPaste={app.handlePaste}
-          onImagePick={app.pickAndUploadImage}
+          ctrlArmed={session.ctrlArmed}
+          setCtrlArmed={session.setCtrlArmed}
+          sendKey={session.sendKey}
+          cursorSeq={session.cursorSeq}
+          page={ui.utilityPage}
+          setPage={ui.setUtilityPage}
+          onPaste={handlePaste}
+          onImagePick={session.pickAndUploadImage}
           onHideKeyboard={() => {
-            app.terminalViewRef.current?.blur();
-            app.inputRef.current?.blur();
+            session.terminalViewRef.current?.blur();
+            session.inputRef.current?.blur();
             Keyboard.dismiss();
           }}
         />
       )}
       {isDesktop && (
         <TextInput
-          ref={app.inputRef}
+          ref={session.inputRef}
           style={styles.hiddenInput}
           autoCapitalize="none"
           autoCorrect={false}
@@ -161,25 +154,28 @@ export function TerminalSelectionAndKeys({
   );
 }
 
-export function TerminalDesktopChrome({ app }: { app: TetherApp }) {
+export function TerminalDesktopChrome() {
+  const { ctxMenu, setCtxMenu } = useUi();
+  const { copySelection, handlePaste, selectAllTerminal } = useTranscript();
+  const updater = useUpdater();
   if (!isDesktop) return null;
   return (
     <>
       <ContextMenu
-        menu={app.ctxMenu}
-        onClose={() => app.setCtxMenu(null)}
-        onCopy={() => void app.copySelection()}
-        onPaste={() => void app.handlePaste()}
-        onSelectAll={app.selectAllTerminal}
+        menu={ctxMenu}
+        onClose={() => setCtxMenu(null)}
+        onCopy={() => void copySelection()}
+        onPaste={() => void handlePaste()}
+        onSelectAll={selectAllTerminal}
       />
       <UpdateModal
-        info={app.updateInfo}
-        updating={app.updating}
-        pct={app.upPct}
-        label={app.upLabel}
-        onDismiss={app.dismissUpdate}
-        onUpdate={app.startUpdate}
-        onDownload={app.downloadUpdate}
+        info={updater.updateInfo}
+        updating={updater.updating}
+        pct={updater.upPct}
+        label={updater.upLabel}
+        onDismiss={updater.dismissUpdate}
+        onUpdate={updater.startUpdate}
+        onDownload={updater.downloadUpdate}
       />
       <AlertModal />
     </>
