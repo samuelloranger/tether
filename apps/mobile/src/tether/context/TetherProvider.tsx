@@ -29,6 +29,7 @@ import {
   buildTranscript,
   buildUpdater,
 } from './slices';
+import { useStableDomain } from './useStableDomain';
 
 // The one place the hook graph is assembled. The order is a real dependency
 // chain — chrome before connection, both before sessions, workspace after
@@ -70,18 +71,28 @@ function useTetherParts(): TetherParts {
 
 export function TetherProvider({ children }: { children: ReactNode }) {
   const parts = useTetherParts();
+  // Stabilize each domain independently so a change in one does not invalidate
+  // the other eight. Every hook still runs on every root render; only the
+  // context values held steady.
+  const chrome = useStableDomain(buildChrome(parts));
+  const ui = useStableDomain(parts.chrome.ui);
+  const updater = useStableDomain(buildUpdater(parts));
+  const connection = useStableDomain(buildConnection(parts));
+  const session = useStableDomain(buildSession(parts));
+  const git = useStableDomain(buildGit(parts));
+  const file = useStableDomain(parts.workspace.file);
+  const presentation = useStableDomain(buildPresentation(parts));
+  const transcript = useStableDomain(buildTranscript(parts));
   return (
-    <ChromeProvider value={buildChrome(parts)}>
-      <UiProvider value={parts.chrome.ui}>
-        <UpdaterProvider value={buildUpdater(parts)}>
-          <ConnectionProvider value={buildConnection(parts)}>
-            <SessionProvider value={buildSession(parts)}>
-              <GitProvider value={buildGit(parts)}>
-                <FileProvider value={parts.workspace.file}>
-                  <PresentationProvider value={buildPresentation(parts)}>
-                    <TranscriptProvider value={buildTranscript(parts)}>
-                      {children}
-                    </TranscriptProvider>
+    <ChromeProvider value={chrome}>
+      <UiProvider value={ui}>
+        <UpdaterProvider value={updater}>
+          <ConnectionProvider value={connection}>
+            <SessionProvider value={session}>
+              <GitProvider value={git}>
+                <FileProvider value={file}>
+                  <PresentationProvider value={presentation}>
+                    <TranscriptProvider value={transcript}>{children}</TranscriptProvider>
                   </PresentationProvider>
                 </FileProvider>
               </GitProvider>
