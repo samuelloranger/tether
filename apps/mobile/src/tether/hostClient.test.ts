@@ -1,6 +1,16 @@
-import { expect, test } from 'bun:test';
-import { createHostClient, type HostClientResponse } from './hostClient';
+import { expect, mock, test } from 'bun:test';
+import type { HostClientResponse } from './hostClient';
 import type { HostProfile } from './hostStore';
+
+// hostClient reaches ../wsTransport, which imports Platform from react-native.
+// Declare the mock here rather than relying on another test file having already
+// registered one in the shared module registry — that leak makes this file pass
+// only inside a full serial run, and fail on its own or under --parallel.
+mock.module('react-native', () => ({
+  Platform: { OS: 'web' },
+}));
+
+const { createHostClient } = await import('./hostClient');
 
 const profile: HostProfile = {
   id: 'host-1',

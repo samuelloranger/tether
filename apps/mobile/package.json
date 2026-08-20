@@ -73,7 +73,7 @@
     "pretypecheck": "bun run build:terminal-renderer",
     "typecheck": "tsc --noEmit",
     "pretest": "bun run build:terminal-renderer",
-    "test": "bun test src",
+    "test": "bun test src --parallel",
     "build:terminal-renderer": "bun scripts/build-terminal-renderer.ts",
     "prebuild:web": "bun run build:terminal-renderer",
     "build:web": "expo export --platform web",

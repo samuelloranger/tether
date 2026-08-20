@@ -35,8 +35,9 @@ Run from repo root:
 - `bun docs:dev` / `bun docs:build` — VitePress docs
 
 Per workspace:
-- Server tests: `bun --cwd apps/server test` (bun:test — extensive, most `.ts` files have a sibling `.test.ts`)
-- Mobile logic tests: `bun --cwd apps/mobile test`; component tests: `bun --cwd apps/mobile run test:ui` (jest + `@testing-library/react-native`)
+- Server tests: `bun --cwd apps/server run test` (bun:test — extensive, most `.ts` files have a sibling `.test.ts`)
+- Mobile logic tests: `bun --cwd apps/mobile run test`; component tests: `bun --cwd apps/mobile run test:ui` (jest + `@testing-library/react-native`)
+- Use `run test`, not `bun test`: the built-in runner wins over the script name, so bare `bun test` silently drops the `--parallel` flag the scripts carry (12.8s → 3.3s on the server suite). Never pin `TETHER_DB_PATH` for a suite run — `test-preload.ts` gives each process its own temp DB, and one shared file makes parallel workers fight over it.
 - Terminal WebView bundle: auto-built by `postinstall` from `terminal-renderer/` + `terminalRendererHtml.ts` into `src/terminalRenderer.generated.ts` / `src/terminalFonts.generated.ts` (gitignored, not committed) — run `bun --cwd apps/mobile run build:terminal-renderer` manually if editing those files without reinstalling
 - iOS device build: `cd apps/mobile && npx expo run:ios --device` (Expo Go doesn't support SDK 57)
 - Desktop: `bun --cwd apps/mobile run tauri:dev` / `tauri:build`
