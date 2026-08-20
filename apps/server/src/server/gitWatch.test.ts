@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { DiffSummary } from './gitDiff';
+import { EMPTY_REPO_STATUS } from './gitStatus';
 import { GitWatch } from './gitWatch';
 
 async function withRepo(fn: (root: string) => void | Promise<void>) {
@@ -278,6 +279,78 @@ test('setRoot returns before doing any of the work', async () => {
 
       await watcher.whenScanned();
       expect(seen).toEqual([{ files: [] }]);
+    } finally {
+      watcher.dispose();
+    }
+  });
+});
+
+// The whole point of the watcher: a slow repository must cost the diff badge
+// its freshness, never the PTY. `git diff` + `git status` + one `git diff
+// --no-index` per untracked file used to run through spawnSync on the event
+// loop, so a repo where git needs ~1s (e.g. one whose working tree contains
+// directories git cannot read) froze every session on the server for that long,
+// every debounce, for as long as anything kept writing to it.
+test('a slow git read never blocks the event loop', async () => {
+  await withRepo(async (root) => {
+    const seen: DiffSummary[] = [];
+    const watcher = new GitWatch((summary) => seen.push(summary), 20, undefined, {
+      readDiffSummary: async () => {
+        await Bun.sleep(200);
+        return {
+          files: [{ path: 'slow', insertions: 1, deletions: 0, binary: false, staged: false }],
+        };
+      },
+      readRepoStatus: async () => EMPTY_REPO_STATUS,
+    });
+    try {
+      watcher.setRoot(root);
+      // A timer armed while the read is in flight must still fire on time.
+      const armed = performance.now();
+      let firedAfter = Number.NaN;
+      const timer = new Promise<void>((resolve) => {
+        setTimeout(() => {
+          firedAfter = performance.now() - armed;
+          resolve();
+        }, 10);
+      });
+      await timer;
+      expect(firedAfter).toBeLessThan(100);
+      await waitFor(() => seen.length === 1);
+      expect(seen[0].files[0]?.path).toBe('slow');
+    } finally {
+      watcher.dispose();
+    }
+  });
+});
+
+// Reads are single-flight: writes that land while one is in flight collapse into
+// exactly one follow-up read, so a busy tree cannot queue up a pile of gits.
+test('coalesces changes that arrive while a read is in flight', async () => {
+  await withRepo(async (root) => {
+    let reads = 0;
+    const watcher = new GitWatch(() => {}, 10, undefined, {
+      readDiffSummary: async () => {
+        reads++;
+        await Bun.sleep(120);
+        return {
+          files: [
+            { path: `read-${reads}`, insertions: 1, deletions: 0, binary: false, staged: false },
+          ],
+        };
+      },
+      readRepoStatus: async () => EMPTY_REPO_STATUS,
+    });
+    try {
+      watcher.setRoot(root);
+      await waitFor(() => reads === 1);
+      for (let i = 0; i < 5; i++) {
+        watcher.kick();
+        await Bun.sleep(5);
+      }
+      await Bun.sleep(400);
+      // One in-flight read plus one coalesced follow-up — not five.
+      expect(reads).toBe(2);
     } finally {
       watcher.dispose();
     }
