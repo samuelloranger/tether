@@ -2,12 +2,12 @@
 # only public-facing piece of Tether infrastructure, and it must never share a
 # host, a process, or a network namespace with an actual Tether server — a
 # Tether daemon is a shell on the machine it runs on.
-FROM oven/bun:1.3.14-alpine AS deps
+FROM oven/bun:1.4.0-alpine AS deps
 WORKDIR /app
 COPY package.json ./
 RUN bun install --production --no-save
 
-FROM oven/bun:1.3.14-alpine
+FROM oven/bun:1.4.0-alpine
 WORKDIR /app
 
 # Runs unprivileged. The only secret it touches is the APNs key, mounted
