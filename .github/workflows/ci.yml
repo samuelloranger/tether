@@ -31,14 +31,16 @@ jobs:
       - name: Lint (biome + tsc)
         run: bun lint
 
+      # `bun run test` (not raw `bun test`) so the --parallel flag lives in one
+      # place: apps/server/package.json. No TETHER_DB_PATH here on purpose —
+      # test-preload.ts derives a per-process temp DB, and pinning every worker
+      # to one file makes parallel workers fight over the same SQLite database.
       - name: Server tests
-        run: bun test
+        run: bun run test
         working-directory: apps/server
-        env:
-          TETHER_DB_PATH: /tmp/tether-ci.db
 
       - name: Mobile tests (pure logic)
-        run: bun test src
+        run: bun run test
         working-directory: apps/mobile
 
       - name: Mobile tests (components)
