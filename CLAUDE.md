@@ -47,6 +47,8 @@ Per workspace:
 
 The PTY relies on `Bun.spawn(..., { terminal: {...} })` and `proc.terminal`, which landed in **Bun ≥ 1.3.14**. On older Bun `proc.terminal` is `undefined`, the shell inherits stdio, hits EOF, and dies in ~10ms. If sessions exit instantly, check `bun --version` first.
 
+Development and CI run **Bun 1.4.x** (`bun-version: latest`); 1.3.14 stays the floor because that is where the PTY API landed, not because anything newer is required.
+
 ## Data flow (the core loop)
 
 1. Client opens `GET /api/ws?sessionId=&sinceId=&cols=&rows=` (token-authed).
