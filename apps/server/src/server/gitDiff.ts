@@ -269,3 +269,83 @@ export function readDiffBlob(
   if (result.status !== 0) return null;
   return result.stdout;
 }
+
+/** Bounded concurrency for the per-untracked-file numstat reads. */
+const UNTRACKED_NUMSTAT_CONCURRENCY = 8;
+
+function runGitTextAsync(
+  root: string,
+  args: string[],
+  okStatuses: number[] = [0],
+): Promise<string> {
+  return runGitDiff(root, args, okStatuses).then((buf) => buf.toString('utf8'));
+}
+
+async function mapBounded<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * Same summary as readDiffSummary, off the event loop.
+ *
+ * The git watcher calls this on every worktree change, and a repository where
+ * git is slow (a working tree holding directories git cannot read, say) took
+ * ~1s per read through spawnSync — held on the one event loop, so every
+ * session's keystrokes waited behind it. Untracked numstats are bounded rather
+ * than fired all at once: a fresh checkout can have thousands of them.
+ */
+export async function readDiffSummaryAsync(root: string): Promise<DiffSummary> {
+  const pick = ({
+    insertions,
+    deletions,
+    binary,
+    path: filePath,
+  }: ReturnType<typeof parseNumstatZ>[number]) => ({
+    path: filePath,
+    insertions,
+    deletions,
+    binary,
+  });
+  const [stagedOut, unstagedOut, untrackedOut] = await Promise.all([
+    runGitTextAsync(root, ['diff', '--cached', '--numstat', '-z']),
+    runGitTextAsync(root, ['diff', '--numstat', '-z']),
+    runGitTextAsync(root, ['ls-files', '--others', '--exclude-standard', '-z']),
+  ]);
+  const staged = parseNumstatZ(stagedOut).map((r) => ({ ...pick(r), staged: true }));
+  const unstaged = parseNumstatZ(unstagedOut).map((r) => ({ ...pick(r), staged: false }));
+  const untrackedPaths = untrackedOut.split('\0').filter(Boolean);
+  const untracked = await mapBounded(
+    untrackedPaths,
+    UNTRACKED_NUMSTAT_CONCURRENCY,
+    async (filePath) => {
+      const out = await runGitTextAsync(
+        root,
+        ['diff', '--no-index', '--numstat', '-z', '--', '/dev/null', filePath],
+        NO_INDEX_OK_STATUSES,
+      );
+      const [record] = parseNumstatZ(out);
+      return {
+        path: filePath,
+        insertions: record?.insertions ?? 0,
+        deletions: record?.deletions ?? 0,
+        binary: record?.binary ?? false,
+        staged: false,
+      };
+    },
+  );
+  return { files: [...staged, ...unstaged, ...untracked] };
+}

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 // Server-side RepoStatus + pure helpers. Client mirror:
 // apps/mobile/src/gitStatusModel.ts (parseRepoStatus / canPushHead live there).
@@ -58,6 +58,62 @@ export function readRepoStatus(root: string): RepoStatus {
   let behind = 0;
   if (upstream) {
     const counts = gitOut(root, ['rev-list', '--left-right', '--count', `HEAD...@{upstream}`]);
+    if (counts.status === 0) {
+      const [left, right] = counts.stdout.split(/\s+/);
+      ahead = Number(left) || 0;
+      behind = Number(right) || 0;
+    }
+  }
+
+  return { branch, shortSha, detached, upstream, ahead, behind };
+}
+
+/**
+ * Same reads as readRepoStatus, off the event loop.
+ *
+ * The git watcher runs on every worktree change, so it must never hold the loop:
+ * one blocked read stalls the PTY of every session on the server. HTTP handlers
+ * keep the sync twin — they are per-request, not per-keystroke.
+ */
+function gitOutAsync(
+  root: string,
+  args: string[],
+): Promise<{ status: number | null; stdout: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['-C', root, ...args]);
+    let stdout = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.resume();
+    child.on('error', () => resolve({ status: null, stdout: '' }));
+    child.on('close', (status) => resolve({ status, stdout: stdout.trim() }));
+  });
+}
+
+export async function readRepoStatusAsync(root: string): Promise<RepoStatus> {
+  const [shortShaResult, abbrev] = await Promise.all([
+    gitOutAsync(root, ['rev-parse', '--short', 'HEAD']),
+    gitOutAsync(root, ['rev-parse', '--abbrev-ref', 'HEAD']),
+  ]);
+  const shortSha = shortShaResult.stdout;
+  const detached = abbrev.stdout === 'HEAD';
+  const branch = detached ? '' : abbrev.stdout;
+
+  const upstreamResult = await gitOutAsync(root, ['rev-parse', '--abbrev-ref', '@{upstream}']);
+  const upstream =
+    upstreamResult.status === 0 && upstreamResult.stdout ? upstreamResult.stdout : null;
+
+  let ahead = 0;
+  let behind = 0;
+  if (upstream) {
+    const counts = await gitOutAsync(root, [
+      'rev-list',
+      '--left-right',
+      '--count',
+      'HEAD...@{upstream}',
+    ]);
     if (counts.status === 0) {
       const [left, right] = counts.stdout.split(/\s+/);
       ahead = Number(left) || 0;

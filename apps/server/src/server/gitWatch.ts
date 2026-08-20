@@ -1,9 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, type FSWatcher, readdirSync, statSync, watch } from 'node:fs';
 import path from 'node:path';
-import { type DiffSummary, EMPTY_DIFF_SUMMARY, GitDiffError, readDiffSummary } from './gitDiff';
+import {
+  type DiffSummary,
+  EMPTY_DIFF_SUMMARY,
+  GitDiffError,
+  readDiffSummaryAsync,
+} from './gitDiff';
 import { resolveGitDir } from './gitRoot';
-import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatus } from './gitStatus';
+import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './gitStatus';
 
 // Directories git itself never has to look inside of when diffing/statusing —
 // the working-tree half of the watch skips these instead of handing the bare
@@ -48,6 +53,17 @@ const MAX_WATCHED_DIRS = 4096;
 // because setRoot is called from the PTY output path: `cd` must not wait on it.
 const SCAN_SLICE_MS = 8;
 
+/** The two git reads the watcher publishes, injectable so tests can slow them down. */
+export type GitWatchReaders = {
+  readDiffSummary: (root: string) => Promise<DiffSummary>;
+  readRepoStatus: (root: string) => Promise<RepoStatus>;
+};
+
+const DEFAULT_READERS: GitWatchReaders = {
+  readDiffSummary: readDiffSummaryAsync,
+  readRepoStatus: readRepoStatusAsync,
+};
+
 // A directory with its own .git is a separate repository (or a submodule):
 // the parent's diff treats it as an opaque entry.
 function isNestedRepo(dir: string): boolean {
@@ -75,10 +91,16 @@ export class GitWatch {
   private settled: Promise<void> = Promise.resolve();
   private settle: () => void = () => {};
 
+  // A read in flight, and whether anything changed while it ran.
+  private reading = false;
+  private readAgain = false;
+  private current: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly onChange: (summary: DiffSummary, status: RepoStatus) => void,
     private readonly debounceMs = 150,
     private readonly maxWatchedDirs = MAX_WATCHED_DIRS,
+    private readonly readers: GitWatchReaders = DEFAULT_READERS,
   ) {}
 
   // Returns immediately. This is called from the PTY output path in pty.ts, so
@@ -109,9 +131,12 @@ export class GitWatch {
 
   // First slice: the cheap-but-blocking setup, then publish the diff summary
   // before walking, because the summary is the part the user actually sees.
-  /** Awaits the deferred scan for the current root (tests). */
-  whenScanned(): Promise<void> {
-    return this.settled;
+  /** Awaits the deferred scan and any git read still in flight (tests). */
+  async whenScanned(): Promise<void> {
+    await this.settled;
+    // Reads are async now, and a coalesced follow-up can start as one ends —
+    // drain until the watcher is genuinely idle.
+    while (this.reading) await this.current;
   }
 
   private beginScan(root: string, gen: number) {
@@ -248,30 +273,53 @@ export class GitWatch {
     this.schedule();
   }
 
+  // Single-flight: a busy tree fires events far faster than git can answer, and
+  // piling reads on top of each other only starves the loop further. Anything
+  // that lands mid-read collapses into exactly one follow-up.
   private refresh = () => {
     this.timer = undefined;
     if (this.disposed) return;
+    if (this.reading) {
+      this.readAgain = true;
+      return;
+    }
+    this.reading = true;
+    this.current = this.read().finally(() => {
+      this.reading = false;
+      if (this.disposed || !this.readAgain) return;
+      this.readAgain = false;
+      this.refresh();
+    });
+    void this.current;
+  };
+
+  private async read(): Promise<void> {
+    const root = this.root;
+    const gen = this.scanGen;
     let summary = EMPTY_DIFF_SUMMARY;
     let status = EMPTY_REPO_STATUS;
-    if (this.root) {
+    if (root) {
       try {
-        summary = readDiffSummary(this.root);
+        summary = await this.readers.readDiffSummary(root);
       } catch (error) {
         if (!(error instanceof GitDiffError)) return;
       }
       try {
-        status = readRepoStatus(this.root);
+        status = await this.readers.readRepoStatus(root);
       } catch {
         status = EMPTY_REPO_STATUS;
       }
     }
+    // The root can change (another `cd`) or the watch can be disposed while git
+    // is running — publishing then would label one repo's diff with another's.
+    if (this.disposed || this.root !== root || this.scanGen !== gen) return;
     const sameSummary = JSON.stringify(summary.files) === JSON.stringify(this.lastSummary?.files);
     const sameStatus = JSON.stringify(status) === JSON.stringify(this.lastStatus);
     if (sameSummary && sameStatus) return;
     this.lastSummary = summary;
     this.lastStatus = status;
     this.onChange(summary, status);
-  };
+  }
 
   private closeHandles() {
     for (const handle of this.handles) handle.close();
