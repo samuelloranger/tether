@@ -15,7 +15,7 @@
     },
     "apps/mobile": {
       "name": "tether-mobile",
-      "version": "2.8.6",
+      "version": "2.8.7",
       "dependencies": {
         "@expo-google-fonts/fira-code": "^0.4.1",
         "@expo-google-fonts/jetbrains-mono": "^0.4.1",
@@ -82,7 +82,7 @@
     },
     "apps/server": {
       "name": "tether",
-      "version": "2.8.6",
+      "version": "2.8.7",
       "bin": {
         "tether": "./src/server/main.ts",
       },
@@ -95,6 +95,9 @@
         "@types/bun": "^1.4.0",
       },
     },
+  },
+  "patchedDependencies": {
+    "expo-modules-jsi@57.0.5": "patches/expo-modules-jsi@57.0.5.patch",
   },
   "packages": {
     "@algolia/abtesting": ["@algolia/abtesting@1.21.2", "", { "dependencies": { "@algolia/client-common": "5.55.2", "@algolia/requester-browser-xhr": "5.55.2", "@algolia/requester-fetch": "5.55.2", "@algolia/requester-node-http": "5.55.2" } }, "sha512-uXj0rgk30EpsKvOpuS+R+1XFDrnm56hED1Lz56e8uBkZdKCxw99LS2U8eXBqAHYU8kpkbsnV1GC8velBG070Hg=="],
