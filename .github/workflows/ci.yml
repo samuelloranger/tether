@@ -53,11 +53,18 @@ jobs:
 
       - name: Expo dependency compatibility
         # Advisory only. The old expo-modules-jsi pin is gone (jsi 57.0.5 fixed the
-        # ambiguous abs() upstream), but this still reports drift for the jest
-        # toolchain: expo expects jest ~29, and the component suite deliberately
-        # runs jest 30 on React Native's own preset, not jest-expo's. Don't
-        # hard-fail the build on that.
-        run: npx expo install --check || echo "::warning::expo install --check reported drift (expected — jest 30 vs expo's jest 29 expectation)"
+        # ambiguous abs() upstream), but three deliberate deviations remain and
+        # each one will be reported here forever:
+        #   jest / @types/jest  - expo expects ~29; the component suite runs jest
+        #     30 on React Native's own preset, not jest-expo's (see jest.config.js).
+        #     jest is capped at 30.2.0: 30.4.x calls a jest-mock method that RN's
+        #     jest-environment-node ^29.7.0 does not have.
+        #   jest-expo          - held at 57.0.2. Installed but never used as a
+        #     preset; 57.0.4 only adds a second jest 29 tree to the lockfile.
+        #   safe-area-context  - 5.9.1 vs the bundled ~5.7.0, taken for the
+        #     react-native-web inset fixes the Tauri desktop build needs.
+        # Never hard-fail the build on this drift.
+        run: npx expo install --check || echo "::warning::expo install --check reported drift (expected — jest 30, jest-expo 57.0.2, safe-area-context 5.9.1 are all deliberate)"
         working-directory: apps/mobile
 
   # Warm release caches on main only. Tag-triggered Release builds can restore
