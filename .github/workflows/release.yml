@@ -232,18 +232,9 @@ jobs:
           restore-keys: |
             bun-install-${{ runner.os }}-
       # Expo SDK 57 SPM deps need Swift 6.2+; the image default Xcode is older.
-      #
-      # Pinned to 26.2 rather than latest-stable. On 26.3, clang rejects the
-      # SWIFT_RETURNS_RETAINED annotations that expo-modules-jsi 57.0.5 added to
-      # the RuntimeScheduler constructors — "not returning a
-      # SWIFT_SHARED_REFERENCE type" — even though the class does carry
-      # SWIFT_SHARED_REFERENCE, as a trailing attribute declared after them.
-      # Unpin once expo ships a jsi that compiles clean on the newest Xcode;
-      # leaving this frozen forever is a debt, since Apple enforces a minimum
-      # Xcode for App Store submissions.
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
-          xcode-version: '26.2'
+          xcode-version: latest-stable
 
       - name: Install workspace deps
         run: bun install --frozen-lockfile
