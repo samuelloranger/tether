@@ -60,7 +60,7 @@ Do not hand-upload the missing asset and publish manually. That reintroduces the
 | Push rejected, "remote has diverged" | Something landed on origin since your last pull. `release.sh` rebases onto `origin/$BRANCH` before the bump; if you still see this, fetch/rebase manually and re-run. (The old altstore-bot-to-main race is gone — the manifest now publishes to samlo.cloud.) |
 | Interactive prompt errors out | No TTY (agent shell, CI). Pass `--patch`/`--minor`/`--major` or an explicit version — the script refuses rather than hanging. |
 | Release aborts on formatting | `bun format` touched real source. Commit that separately; a release commit may only contain the 7 version files. |
-| iOS build fails on Xcode | Expo is pinned to 57.0.7 with an `expo-modules-jsi@57.0.3` patch. Never bump Expo as part of a release. |
+| iOS build fails on Xcode | Check the resolved `expo-modules-jsi` version. Never bump Expo as part of a release — do it in its own PR with a real iOS archive. |
 | Sessions die instantly after install | Unrelated to release — Bun < 1.3.14 has no `proc.terminal`. |
 
 The Android APK is signed with the **public** React Native debug keystore (see the TODO in `release.yml`). It provides no authenticity and cannot be trusted for in-place updates. Don't present it as a signed build.

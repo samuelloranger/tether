@@ -79,7 +79,7 @@ Because the holder is a separate detached process, **the shell survives both cli
 - Tests are colocated (`foo.ts` + `foo.test.ts`). New server logic is expected to come with tests; keep pure logic in its own module so it's testable without a PTY.
 - Runtime state lives in `~/.tether/` (`config/tether.db`, `holders/`, pid, log). `TETHER_DB_PATH` overrides the DB.
 - Icons are Feather from `@expo/vector-icons`.
-- **Mobile:** read the versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing Expo code (per `apps/mobile/AGENTS.md`). Expo 57 / RN 0.86 / React 19. Don't bump Expo past 57.0.7 — the pinned `expo-modules-jsi@57.0.3` patch is keyed to it.
+- **Mobile:** read the versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing Expo code (per `apps/mobile/AGENTS.md`). Expo 57 / RN 0.86 / React 19. Stay on SDK 57: RN 0.87 needs SDK 58, which has no stable release. Expo 57.0.15 → `expo-modules-core@57.0.12` → `expo-modules-jsi@57.0.5`, which fixed the ambiguous `abs()` in `JavaScriptCodable+Date.swift` upstream — the old root `overrides` and the `expo-modules-jsi@57.0.3` Swift patch are gone. If a future jsi version reintroduces a Swift build break, patch the new version rather than re-pinning.
 - Releases: see the `releasing-tether` skill / `scripts/release.sh`. CI requires green before tagging.
 
 ## Security note
