@@ -1,9 +1,12 @@
-import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking } from 'react-native';
 import { createDeepLinkHandler, listenForDeepLinks } from '../deepLink';
 import { isDesktop, isTauri } from '../platform';
 import type { HostProfile } from './hostStore';
+import {
+  addNotificationResponseReceivedListener,
+  useLastNotificationResponse,
+} from './notifications';
 import { linkFromNotificationResponse } from './pushDeepLink';
 
 export function useDeepLinks({
@@ -31,7 +34,7 @@ export function useDeepLinks({
   }, []);
   const handleDeepLinkRef = useRef(handleDeepLink);
   handleDeepLinkRef.current = handleDeepLink;
-  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const lastNotificationResponse = useLastNotificationResponse();
   useEffect(() => {
     const link = linkFromNotificationResponse(lastNotificationResponse);
     if (link) handleDeepLinkRef.current(link);
@@ -46,7 +49,7 @@ export function useDeepLinks({
       })
       .catch(() => {});
     const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
-    const notificationSub = Notifications.addNotificationResponseReceivedListener((response) => {
+    const notificationSub = addNotificationResponseReceivedListener((response) => {
       const link = linkFromNotificationResponse(response);
       if (link) handleUrl(link);
     });
