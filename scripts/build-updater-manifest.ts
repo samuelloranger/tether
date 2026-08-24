@@ -33,6 +33,19 @@ export interface SignedBundle {
   signature: string;
 }
 
+/**
+ * The URL an asset will have once the release is published.
+ *
+ * Deliberately built from the tag rather than read from the asset's
+ * `browser_download_url`: this runs while the release is still a draft, and a
+ * draft's download URLs carry a placeholder tag (`untagged-<hash>`) that stops
+ * resolving the moment it is published. v2.8.12 shipped a manifest full of
+ * those and every updater URL 404'd.
+ */
+export function assetUrl(repo: string, tag: string, name: string): string {
+  return `https://github.com/${repo}/releases/download/${tag}/${name}`;
+}
+
 export interface UpdaterManifest {
   version: string;
   notes: string;
@@ -131,24 +144,24 @@ export function buildManifest(
 
 interface GhAsset {
   name: string;
-  url: string;
 }
 
 /** Pairs each `<bundle>.sig` asset with its bundle and that signature's text. */
 export function pairSignatures(
   assets: GhAsset[],
+  repo: string,
+  tag: string,
   readSignature: (sigName: string) => string,
 ): SignedBundle[] {
-  const byName = new Map(assets.map((a) => [a.name, a]));
+  const names = new Set(assets.map((a) => a.name));
   const bundles: SignedBundle[] = [];
   for (const asset of assets) {
     if (!asset.name.endsWith('.sig')) continue;
     const bundleName = asset.name.slice(0, -'.sig'.length);
-    const bundle = byName.get(bundleName);
-    if (!bundle) throw new Error(`${asset.name} has no matching bundle asset`);
+    if (!names.has(bundleName)) throw new Error(`${asset.name} has no matching bundle asset`);
     bundles.push({
-      name: bundle.name,
-      url: bundle.url,
+      name: bundleName,
+      url: assetUrl(repo, tag, bundleName),
       signature: readSignature(asset.name).trim(),
     });
   }
@@ -162,6 +175,11 @@ if (import.meta.main) {
     process.exit(2);
   }
 
+  const repo =
+    process.env.GITHUB_REPOSITORY ??
+    (await Bun.$`gh repo view --json nameWithOwner -q .nameWithOwner`.text()).trim();
+  if (!repo) throw new Error('cannot determine the repository (set GITHUB_REPOSITORY)');
+
   const view = await Bun.$`gh release view ${tag} --json assets,body`.json();
   const assets = (view.assets ?? []) as GhAsset[];
 
@@ -172,12 +190,20 @@ if (import.meta.main) {
   await Bun.$`mkdir -p ${sigDir}`;
   await Bun.$`gh release download ${tag} --pattern '*.sig' --dir ${sigDir} --clobber`;
 
-  const bundles = pairSignatures(assets, (sigName) =>
+  const bundles = pairSignatures(assets, repo, tag, (sigName) =>
     readFileSync(`${sigDir}/${sigName}`, 'utf8'),
   );
 
   const version = tag.replace(/^v/, '');
   const manifest = buildManifest(version, '', new Date().toISOString(), bundles);
+
+  // The draft-URL bug was invisible until an updater actually followed a link,
+  // so assert the shape here rather than trusting it.
+  for (const [key, entry] of Object.entries(manifest.platforms)) {
+    if (!entry.url.includes(`/releases/download/${tag}/`)) {
+      throw new Error(`platform ${key} has a non-tag download URL: ${entry.url}`);
+    }
+  }
   await Bun.write(outPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(
     `Wrote ${outPath}: ${Object.keys(manifest.platforms).length} platforms for v${version}`,

@@ -39,6 +39,12 @@ jobs:
         run: bun run test
         working-directory: apps/server
 
+      # Release tooling. Small, but it builds the updater manifest that every
+      # desktop auto-update resolves, and a mistake there is only visible after
+      # a release has already published.
+      - name: Release script tests
+        run: bun test scripts/
+
       - name: Mobile tests (pure logic)
         run: bun run test
         working-directory: apps/mobile
