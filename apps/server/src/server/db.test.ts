@@ -3,7 +3,7 @@ import {
   addTerminalLog,
   db,
   getLogs,
-  getLogsNewest,
+  getReplayLogs,
   getSession,
   listSessions,
   pruneLogs,
@@ -18,15 +18,26 @@ function ok(cond: boolean, msg: string) {
   pass++;
 }
 
-// Replay reads newest-first in bounded batches so a byte-budget cutoff stays lazy.
+// Replay materializes only the selected byte-bounded suffix of large chunks.
 {
-  upsertSession('term-replay-order', 'bash', 'running');
-  for (const chunk of ['a', 'b', 'c', 'd', 'e']) addTerminalLog('term-replay-order', chunk);
-  const logs = [...getLogsNewest('term-replay-order', 0, 2)];
-  ok(
-    logs.map((row) => row.chunk).join('') === 'edcba',
-    'newest-first replay iterator preserves descending id order across batches',
-  );
+  upsertSession('term-replay-budget', 'bash', 'running');
+  for (let i = 0; i < 250; i++) addTerminalLog('term-replay-budget', `${i}`.padEnd(10_000, 'x'));
+  const replay = getReplayLogs('term-replay-budget', 0, 20_000);
+  ok(replay.reset, 'bounded replay resets when older rows are excluded');
+  ok(replay.logs.length === 2, `bounded replay fetches only 2 rows, got ${replay.logs.length}`);
+  ok(replay.bytes === 20_000, `bounded replay reports 20000 UTF-8 bytes, got ${replay.bytes}`);
+  ok(replay.logs[1].chunk.startsWith('249'), 'bounded replay retains the newest row');
+}
+
+// Replay selection also treats multibyte output as UTF-8 octets in SQL metadata.
+{
+  upsertSession('term-replay-unicode', 'bash', 'running');
+  addTerminalLog('term-replay-unicode', '🚀🚀');
+  addTerminalLog('term-replay-unicode', '中');
+  const replay = getReplayLogs('term-replay-unicode', 0, 5);
+  ok(replay.logs.length === 1, `Unicode replay keeps one row, got ${replay.logs.length}`);
+  ok(replay.logs[0].chunk === '中', 'Unicode replay keeps the newest fitting row');
+  ok(replay.bytes === 3, `Unicode replay measures 3 bytes, got ${replay.bytes}`);
 }
 
 // Database startup enables page reclamation for future pruning.

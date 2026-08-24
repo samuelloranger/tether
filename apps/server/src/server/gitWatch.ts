@@ -163,12 +163,14 @@ export class GitWatch {
   private async beginScan(root: string, gen: number): Promise<void> {
     this.scanTimer = undefined;
     if (this.disposed || gen !== this.scanGen) return;
+    let ignoredDirs: Set<string>;
     try {
-      this.ignoredDirs = await this.readIgnoredDirs(root);
+      ignoredDirs = await this.readIgnoredDirs(root);
     } catch {
-      this.ignoredDirs = new Set();
+      ignoredDirs = new Set();
     }
     if (this.disposed || gen !== this.scanGen) return;
+    this.ignoredDirs = ignoredDirs;
     try {
       this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
     } catch (err) {

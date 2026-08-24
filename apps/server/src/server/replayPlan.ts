@@ -66,6 +66,42 @@ export interface ReplayOutputFrame {
   chunk: string;
 }
 
+export interface ReplayRowSize {
+  id: number;
+  bytes: number;
+}
+
+export interface ReplaySelection {
+  reset: boolean;
+  oldestId: number | null;
+  newestId: number | null;
+  count: number;
+  bytes: number;
+}
+
+/** Selects a byte-bounded newest suffix from rows that contain no chunk data. */
+export function selectReplayNewest(
+  newestFirst: Iterable<ReplayRowSize>,
+  budget = REPLAY_BYTE_BUDGET,
+): ReplaySelection {
+  let bytes = 0;
+  let count = 0;
+  let oldestId: number | null = null;
+  let newestId: number | null = null;
+  let reset = false;
+  for (const row of newestFirst) {
+    if (count > 0 && bytes + row.bytes > budget) {
+      reset = true;
+      break;
+    }
+    if (newestId === null) newestId = row.id;
+    oldestId = row.id;
+    count++;
+    bytes += row.bytes;
+  }
+  return { reset, oldestId, newestId, count, bytes };
+}
+
 /** Coalesces replay rows while preserving the final acknowledged log id. */
 export function replayOutputFrames<T extends ReplayChunk & { id: number }>(
   logs: T[],

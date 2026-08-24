@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DB_PATH, OLD_DB_PATH, USING_DEFAULT_DB } from './paths';
+import { type ReplayPlan, selectReplayNewest } from './replayPlan';
 import { COMPILED } from './runtime';
 
 const DB_DIR = path.dirname(DB_PATH);
@@ -309,18 +310,16 @@ export function getLogs(sessionId: string, sinceId = 0): TerminalLog[] {
     .all({ $sessionId: sessionId, $sinceId: sinceId }) as TerminalLog[];
 }
 
-/** Reads replay rows newest-first without materializing the full retained history. */
-export function* getLogsNewest(
+function* getLogSizesNewest(
   sessionId: string,
-  sinceId = 0,
+  sinceId: number,
   batchSize = 200,
-): Generator<TerminalLog> {
-  const limit = Math.max(1, Math.trunc(batchSize));
+): Generator<{ id: number; bytes: number }> {
   let beforeId = Number.MAX_SAFE_INTEGER;
   while (true) {
-    const logs = db
+    const rows = db
       .query(
-        `SELECT id, session_id, chunk, created_at
+        `SELECT id, octet_length(chunk) AS bytes
          FROM terminal_logs
          WHERE session_id = $sessionId AND id > $sinceId AND id < $beforeId
          ORDER BY id DESC LIMIT $limit`,
@@ -329,12 +328,37 @@ export function* getLogsNewest(
         $sessionId: sessionId,
         $sinceId: sinceId,
         $beforeId: beforeId,
-        $limit: limit,
-      }) as TerminalLog[];
-    if (logs.length === 0) return;
-    yield* logs;
-    beforeId = logs[logs.length - 1].id;
+        $limit: batchSize,
+      }) as { id: number; bytes: number }[];
+    if (rows.length === 0) return;
+    yield* rows;
+    beforeId = rows[rows.length - 1].id;
   }
+}
+
+/** Selects replay rows by byte metadata, then fetches only the chosen suffix. */
+export function getReplayLogs(
+  sessionId: string,
+  sinceId: number,
+  budget: number,
+): ReplayPlan<TerminalLog> {
+  const selection = selectReplayNewest(getLogSizesNewest(sessionId, sinceId), budget);
+  if (selection.oldestId === null || selection.newestId === null) {
+    return { reset: false, logs: [], bytes: 0 };
+  }
+  const logs = db
+    .query(
+      `SELECT id, session_id, chunk, created_at
+       FROM terminal_logs
+       WHERE session_id = $sessionId AND id >= $oldestId AND id <= $newestId
+       ORDER BY id ASC`,
+    )
+    .all({
+      $sessionId: sessionId,
+      $oldestId: selection.oldestId,
+      $newestId: selection.newestId,
+    }) as TerminalLog[];
+  return { reset: selection.reset, logs, bytes: selection.bytes };
 }
 
 export function clearLogs(sessionId: string) {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { planReplay, planReplayNewest, replayOutputFrames } from './replayPlan';
+import { planReplay, planReplayNewest, replayOutputFrames, selectReplayNewest } from './replayPlan';
 
 const rows = (...sizes: number[]) =>
   sizes.map((size, i) => ({ id: i + 1, chunk: 'x'.repeat(size) }));
@@ -73,6 +73,32 @@ describe('planReplayNewest', () => {
     expect(plan.reset).toBe(true);
     expect(plan.logs.map((row) => row.id)).toEqual([3, 4]);
     expect(plan.bytes).toBe(100);
+    expect(consumed).toBe(3);
+  });
+});
+
+describe('selectReplayNewest', () => {
+  test('selects an id range from byte metadata without reading older rows', () => {
+    let consumed = 0;
+    function* newestFirst() {
+      for (const row of [
+        { id: 4, bytes: 50 },
+        { id: 3, bytes: 50 },
+        { id: 2, bytes: 50 },
+        { id: 1, bytes: 50 },
+      ]) {
+        consumed++;
+        yield row;
+      }
+    }
+
+    expect(selectReplayNewest(newestFirst(), 100)).toEqual({
+      reset: true,
+      oldestId: 3,
+      newestId: 4,
+      count: 2,
+      bytes: 100,
+    });
     expect(consumed).toBe(3);
   });
 });

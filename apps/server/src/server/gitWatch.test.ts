@@ -326,6 +326,46 @@ test('ignored-directory discovery yields the event loop before scanning', async 
   });
 });
 
+test('a stale ignored-directory result cannot overwrite the active root', async () => {
+  await withRepo(async (first) => {
+    await withRepo(async (second) => {
+      const pending = new Map<string, (dirs: Set<string>) => void>();
+      const watcher = new GitWatch(
+        () => {},
+        150,
+        undefined,
+        {
+          readDiffSummary: async () => ({ files: [] }),
+          readRepoStatus: async () => EMPTY_REPO_STATUS,
+        },
+        (root) =>
+          new Promise<Set<string>>((resolve) => {
+            pending.set(root, resolve);
+          }),
+      );
+      try {
+        watcher.setRoot(first);
+        await waitFor(() => pending.has(first));
+        watcher.setRoot(second);
+        await waitFor(() => pending.has(second));
+
+        const activeIgnored = path.join(second, 'ignored');
+        pending.get(second)!(new Set([activeIgnored]));
+        await watcher.whenScanned();
+        pending.get(first)!(new Set());
+        await Bun.sleep(20);
+
+        const state = watcher as unknown as { ignoredDirs: Set<string> };
+        expect(state.ignoredDirs).toEqual(new Set([activeIgnored]));
+      } finally {
+        pending.get(first)?.(new Set());
+        pending.get(second)?.(new Set());
+        watcher.dispose();
+      }
+    });
+  });
+});
+
 test('skips unreadable directories without attempting a watch', async () => {
   await withRepo(async (root) => {
     const locked = path.join(root, 'locked');

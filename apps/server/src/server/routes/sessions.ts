@@ -1,6 +1,6 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
-import { getLogs, getLogsNewest, getSession, listSessions, renameSession } from '../db';
+import { getLogs, getReplayLogs, getSession, listSessions, renameSession } from '../db';
 import { getLiveCwd } from '../liveCwd';
 import {
   type FocusSubscriber,
@@ -12,7 +12,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from '../pty';
-import { planReplayNewest, replayOutputFrames } from '../replayPlan';
+import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '../replayPlan';
 import { getActivity } from '../sessionActivity';
 import { autoTitle, getOscTitle } from '../sessionTitle';
 
@@ -78,7 +78,7 @@ async function hydrateTerminalSocket(
     // (one TUI repaint frame can be >100 KB), and an unbounded replay kills
     // the client mid-stream — it reconnects with a barely advanced sinceId
     // and the next replay is bigger still.
-    const plan = planReplayNewest(getLogsNewest(sessionId, sinceId));
+    const plan = getReplayLogs(sessionId, sinceId, REPLAY_BYTE_BUDGET);
     const missedLogs = plan.logs;
 
     // Either a prune or a trimmed replay leaves a hole in the client's
