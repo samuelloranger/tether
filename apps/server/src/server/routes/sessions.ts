@@ -1,6 +1,6 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
-import { getLogs, getSession, listSessions, renameSession } from '../db';
+import { getLogs, getLogsNewest, getSession, listSessions, renameSession } from '../db';
 import { getLiveCwd } from '../liveCwd';
 import {
   type FocusSubscriber,
@@ -12,7 +12,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from '../pty';
-import { planReplay } from '../replayPlan';
+import { planReplayNewest, replayOutputFrames } from '../replayPlan';
 import { getActivity } from '../sessionActivity';
 import { autoTitle, getOscTitle } from '../sessionTitle';
 
@@ -78,7 +78,7 @@ async function hydrateTerminalSocket(
     // (one TUI repaint frame can be >100 KB), and an unbounded replay kills
     // the client mid-stream — it reconnects with a barely advanced sinceId
     // and the next replay is bigger still.
-    const plan = planReplay(getLogs(sessionId, sinceId));
+    const plan = planReplayNewest(getLogsNewest(sessionId, sinceId));
     const missedLogs = plan.logs;
 
     // Either a prune or a trimmed replay leaves a hole in the client's
@@ -93,11 +93,11 @@ async function hydrateTerminalSocket(
       `Streaming ${missedLogs.length} missed logs (${plan.bytes} bytes) to client...` +
         (plan.reset ? ' [trimmed to byte budget, sent reset]' : ''),
     );
-    for (const log of missedLogs) {
+    for (const frame of replayOutputFrames(missedLogs)) {
       try {
-        ws.send(JSON.stringify({ type: 'output', id: log.id, chunk: log.chunk }));
+        ws.send(JSON.stringify(frame));
       } catch (sendErr) {
-        console.error(`Failed to send log ${log.id} to client:`, sendErr);
+        console.error(`Failed to send replay through log ${frame.id} to client:`, sendErr);
         return;
       }
     }

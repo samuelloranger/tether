@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { planReplay } from './replayPlan';
+import { planReplay, planReplayNewest, replayOutputFrames } from './replayPlan';
 
 const rows = (...sizes: number[]) =>
   sizes.map((size, i) => ({ id: i + 1, chunk: 'x'.repeat(size) }));
@@ -45,5 +45,45 @@ describe('planReplay', () => {
     const plan = planReplay(rows(500), 100);
     expect(plan.reset).toBe(false);
     expect(plan.logs.map((row) => row.id)).toEqual([1]);
+  });
+
+  test('counts UTF-8 bytes for multibyte terminal output', () => {
+    const logs = [
+      { id: 1, chunk: '🚀'.repeat(2) },
+      { id: 2, chunk: '中' },
+    ];
+    const plan = planReplay(logs, 10);
+    expect(plan.reset).toBe(true);
+    expect(plan.logs.map((row) => row.id)).toEqual([2]);
+    expect(plan.bytes).toBe(3);
+  });
+});
+
+describe('planReplayNewest', () => {
+  test('stops consuming rows once the newest suffix fills the budget', () => {
+    let consumed = 0;
+    function* newestFirst() {
+      for (const log of [...rows(50, 50, 50, 50)].reverse()) {
+        consumed++;
+        yield log;
+      }
+    }
+
+    const plan = planReplayNewest(newestFirst(), 100);
+    expect(plan.reset).toBe(true);
+    expect(plan.logs.map((row) => row.id)).toEqual([3, 4]);
+    expect(plan.bytes).toBe(100);
+    expect(consumed).toBe(3);
+  });
+});
+
+describe('replayOutputFrames', () => {
+  test('coalesces contiguous rows and advances each frame to its final log id', () => {
+    const logs = ['a', 'b', 'c', 'd', 'e'].map((chunk, index) => ({ id: index + 1, chunk }));
+    expect(replayOutputFrames(logs, 2)).toEqual([
+      { type: 'output', id: 2, chunk: 'ab' },
+      { type: 'output', id: 4, chunk: 'cd' },
+      { type: 'output', id: 5, chunk: 'e' },
+    ]);
   });
 });

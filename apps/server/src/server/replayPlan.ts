@@ -35,15 +35,50 @@ export function planReplay<T extends ReplayChunk>(
   logs: T[],
   budget = REPLAY_BYTE_BUDGET,
 ): ReplayPlan<T> {
+  return planReplayNewest([...logs].reverse(), budget);
+}
+
+/** Plans a replay from a newest-to-oldest source and stops reading once full. */
+export function planReplayNewest<T extends ReplayChunk>(
+  newestFirst: Iterable<T>,
+  budget = REPLAY_BYTE_BUDGET,
+): ReplayPlan<T> {
   let bytes = 0;
-  let start = logs.length;
-  while (start > 0) {
-    const size = logs[start - 1].chunk.length;
-    // `start === logs.length` is the newest row: take it unconditionally.
-    if (start < logs.length && bytes + size > budget) break;
+  let reset = false;
+  const logs: T[] = [];
+  for (const log of newestFirst) {
+    const size = Buffer.byteLength(log.chunk);
+    // The first row is the newest: take it unconditionally, even if oversized.
+    if (logs.length > 0 && bytes + size > budget) {
+      reset = true;
+      break;
+    }
+    logs.push(log);
     bytes += size;
-    start--;
-    if (bytes >= budget) break;
   }
-  return { reset: start > 0, logs: logs.slice(start), bytes };
+  logs.reverse();
+  return { reset, logs, bytes };
+}
+
+export interface ReplayOutputFrame {
+  type: 'output';
+  id: number;
+  chunk: string;
+}
+
+/** Coalesces replay rows while preserving the final acknowledged log id. */
+export function replayOutputFrames<T extends ReplayChunk & { id: number }>(
+  logs: T[],
+  rowsPerFrame = 200,
+): ReplayOutputFrame[] {
+  const frames: ReplayOutputFrame[] = [];
+  for (let start = 0; start < logs.length; start += rowsPerFrame) {
+    const batch = logs.slice(start, start + rowsPerFrame);
+    frames.push({
+      type: 'output',
+      id: batch[batch.length - 1].id,
+      chunk: batch.map((log) => log.chunk).join(''),
+    });
+  }
+  return frames;
 }

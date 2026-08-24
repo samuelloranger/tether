@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { execSync } from 'node:child_process';
 import * as nodeFs from 'node:fs';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { DiffSummary } from './gitDiff';
@@ -281,6 +281,72 @@ test('setRoot returns before doing any of the work', async () => {
       expect(seen).toEqual([{ files: [] }]);
     } finally {
       watcher.dispose();
+    }
+  });
+});
+
+test('ignored-directory discovery yields the event loop before scanning', async () => {
+  await withRepo(async (root) => {
+    let releaseIgnored!: (dirs: Set<string>) => void;
+    const ignored = new Promise<Set<string>>((resolve) => {
+      releaseIgnored = resolve;
+    });
+    const watcher = new GitWatch(
+      () => {},
+      150,
+      undefined,
+      {
+        readDiffSummary: async () => ({ files: [] }),
+        readRepoStatus: async () => EMPTY_REPO_STATUS,
+      },
+      () => ignored,
+    );
+    try {
+      watcher.setRoot(root);
+      let settled = false;
+      void watcher.whenScanned().then(() => {
+        settled = true;
+      });
+
+      let timerFired = false;
+      setTimeout(() => {
+        timerFired = true;
+      }, 10);
+      await Bun.sleep(50);
+      expect(timerFired).toBe(true);
+      expect(settled).toBe(false);
+
+      releaseIgnored(new Set());
+      await watcher.whenScanned();
+      expect(settled).toBe(true);
+    } finally {
+      releaseIgnored(new Set());
+      watcher.dispose();
+    }
+  });
+});
+
+test('skips unreadable directories without attempting a watch', async () => {
+  await withRepo(async (root) => {
+    const locked = path.join(root, 'locked');
+    mkdirSync(locked);
+    chmodSync(locked, 0o000);
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    const watchSpy = spyOn(nodeFs, 'watch');
+    const watcher = new GitWatch(() => {}, 50);
+    try {
+      watcher.setRoot(root);
+      await watcher.whenScanned();
+      const watchedPaths = watchSpy.mock.calls.map((call) => String(call[0]));
+      expect(watchedPaths).not.toContain(locked);
+      expect(warnSpy.mock.calls.some((call) => call.map(String).join(' ').includes(locked))).toBe(
+        false,
+      );
+    } finally {
+      chmodSync(locked, 0o700);
+      watcher.dispose();
+      watchSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 });

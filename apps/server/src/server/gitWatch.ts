@@ -1,5 +1,12 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, type FSWatcher, readdirSync, statSync, watch } from 'node:fs';
+import {
+  accessSync,
+  constants,
+  existsSync,
+  type FSWatcher,
+  readdirSync,
+  statSync,
+  watch,
+} from 'node:fs';
 import path from 'node:path';
 import {
   type DiffSummary,
@@ -17,10 +24,10 @@ import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './gitSt
 // A real repo's tree (this one: ~21.8k dirs incl. node_modules vs ~4.6k
 // tracked) blows past Linux's default fs.inotify.max_user_watches (8192)
 // long before anything worth watching is even covered.
-function listIgnoredDirs(root: string): Set<string> {
-  const result = spawnSync(
-    'git',
+async function listIgnoredDirs(root: string): Promise<Set<string>> {
+  const process = Bun.spawn(
     [
+      'git',
       '-C',
       root,
       'ls-files',
@@ -31,15 +38,28 @@ function listIgnoredDirs(root: string): Set<string> {
       '--directory',
       '--no-empty-directory',
     ],
-    { encoding: 'utf8' },
+    { stdout: 'pipe', stderr: 'ignore' },
   );
-  if (result.status !== 0) return new Set();
+  const [stdout, exitCode] = await Promise.all([
+    new Response(process.stdout).text(),
+    process.exited,
+  ]);
+  if (exitCode !== 0) return new Set();
   return new Set(
-    result.stdout
+    stdout
       .split('\0')
       .filter(Boolean)
       .map((rel) => path.join(root, rel.replace(/\/$/, ''))),
   );
+}
+
+function isReadableDirectory(dir: string): boolean {
+  try {
+    accessSync(dir, constants.R_OK | constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Hard ceiling on watched directories. Ignore-pruning plus the nested-repo
@@ -101,6 +121,7 @@ export class GitWatch {
     private readonly debounceMs = 150,
     private readonly maxWatchedDirs = MAX_WATCHED_DIRS,
     private readonly readers: GitWatchReaders = DEFAULT_READERS,
+    private readonly readIgnoredDirs: (root: string) => Promise<Set<string>> = listIgnoredDirs,
   ) {}
 
   // Returns immediately. This is called from the PTY output path in pty.ts, so
@@ -126,7 +147,7 @@ export class GitWatch {
       this.settle = resolve;
     });
     const gen = ++this.scanGen;
-    this.scanTimer = setTimeout(() => this.beginScan(root, gen), 0);
+    this.scanTimer = setTimeout(() => void this.beginScan(root, gen), 0);
   }
 
   // First slice: the cheap-but-blocking setup, then publish the diff summary
@@ -139,10 +160,15 @@ export class GitWatch {
     while (this.reading) await this.current;
   }
 
-  private beginScan(root: string, gen: number) {
+  private async beginScan(root: string, gen: number): Promise<void> {
     this.scanTimer = undefined;
     if (this.disposed || gen !== this.scanGen) return;
-    this.ignoredDirs = listIgnoredDirs(root);
+    try {
+      this.ignoredDirs = await this.readIgnoredDirs(root);
+    } catch {
+      this.ignoredDirs = new Set();
+    }
+    if (this.disposed || gen !== this.scanGen) return;
     try {
       this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
     } catch (err) {
@@ -192,6 +218,7 @@ export class GitWatch {
       this.queue = [];
       return;
     }
+    if (!isReadableDirectory(dir)) return;
     this.watchDir(root, dir);
     let names: string[];
     try {

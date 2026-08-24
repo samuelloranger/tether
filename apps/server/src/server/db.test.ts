@@ -1,7 +1,9 @@
 // Run: TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/server/db.test.ts
 import {
   addTerminalLog,
+  db,
   getLogs,
+  getLogsNewest,
   getSession,
   listSessions,
   pruneLogs,
@@ -16,6 +18,23 @@ function ok(cond: boolean, msg: string) {
   pass++;
 }
 
+// Replay reads newest-first in bounded batches so a byte-budget cutoff stays lazy.
+{
+  upsertSession('term-replay-order', 'bash', 'running');
+  for (const chunk of ['a', 'b', 'c', 'd', 'e']) addTerminalLog('term-replay-order', chunk);
+  const logs = [...getLogsNewest('term-replay-order', 0, 2)];
+  ok(
+    logs.map((row) => row.chunk).join('') === 'edcba',
+    'newest-first replay iterator preserves descending id order across batches',
+  );
+}
+
+// Database startup enables page reclamation for future pruning.
+{
+  const mode = db.query('PRAGMA auto_vacuum').get() as { auto_vacuum: number };
+  ok(mode.auto_vacuum === 2, `auto_vacuum is incremental, got ${mode.auto_vacuum}`);
+}
+
 // listSessions returns rows with last_output_at
 {
   upsertSession('term-1', 'bash', 'running');
@@ -28,6 +47,23 @@ function ok(cond: boolean, msg: string) {
   upsertSession('term-2', 'bash', 'running');
   const empty = listSessions().find((r) => r.id === 'term-2');
   ok(empty!.last_output_at == null, 'term-2 has null last_output_at with no output');
+}
+
+// last_output_at follows the newest inserted log, without scanning every timestamp.
+{
+  upsertSession('term-latest', 'bash', 'running');
+  const olderId = addTerminalLog('term-latest', 'older');
+  const newerId = addTerminalLog('term-latest', 'newer');
+  db.query('UPDATE terminal_logs SET created_at = $at WHERE id = $id').run({
+    $id: olderId,
+    $at: '2099-01-01 00:00:00',
+  });
+  db.query('UPDATE terminal_logs SET created_at = $at WHERE id = $id').run({
+    $id: newerId,
+    $at: '2000-01-01 00:00:00',
+  });
+  const row = listSessions().find((session) => session.id === 'term-latest');
+  ok(row?.last_output_at === '2000-01-01 00:00:00', 'last output comes from newest log id');
 }
 
 // pruneLogs keeps only the last `cap` rows for a session
@@ -81,6 +117,18 @@ function ok(cond: boolean, msg: string) {
   ok(getSession('term-bytes')!.pruned_before > 0, 'byte prune records the watermark');
 }
 
+// Byte caps count UTF-8 octets, not Unicode code points or UTF-16 code units.
+{
+  upsertSession('term-unicode-bytes', 'bash', 'running');
+  addTerminalLog('term-unicode-bytes', '🚀');
+  addTerminalLog('term-unicode-bytes', '中');
+  pruneLogs('term-unicode-bytes', 1000, 5);
+  const logs = getLogs('term-unicode-bytes', 0);
+  const bytes = logs.reduce((sum, row) => sum + Buffer.byteLength(row.chunk), 0);
+  ok(logs.length === 1, `UTF-8 byte cap keeps one 4-byte row, got ${logs.length}`);
+  ok(bytes === 3, `retained UTF-8 bytes are measured exactly, got ${bytes}`);
+}
+
 // pruneLogs never drops the newest row, even if it alone exceeds the byte cap
 {
   upsertSession('term-huge', 'bash', 'running');
@@ -90,6 +138,16 @@ function ok(cond: boolean, msg: string) {
   const logs = getLogs('term-huge', 0);
   ok(logs.length === 1, `oversized newest row retained alone, got ${logs.length}`);
   ok(logs[0].chunk.length === 5000, 'the retained row is the newest one');
+}
+
+// Pruning returns freed pages to the filesystem instead of growing forever.
+{
+  upsertSession('term-reclaim', 'bash', 'running');
+  for (let i = 0; i < 100; i++) addTerminalLog('term-reclaim', 'z'.repeat(20_000));
+  const before = db.query('PRAGMA page_count').get() as { page_count: number };
+  pruneLogs('term-reclaim', 1000, 100_000);
+  const after = db.query('PRAGMA page_count').get() as { page_count: number };
+  ok(after.page_count < before.page_count, 'incremental vacuum shrinks the database after prune');
 }
 
 // resetRunningSessions marks every running session stopped
