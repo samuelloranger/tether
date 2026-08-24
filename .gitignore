@@ -67,3 +67,6 @@ apps/mobile/src-tauri/gen/
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# scratch dir from scripts/build-updater-manifest.ts
+.updater-sigs/

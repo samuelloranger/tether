@@ -191,6 +191,16 @@ jobs:
           args: ${{ matrix.args }}
           tagName: ${{ github.event_name == 'push' && env.TAG || '' }}
           releaseId: ${{ needs.draft.outputs.release_id }}
+          # Each leg uploads its own bundles and .sig files, whose names never
+          # collide. latest.json is the one asset they would all share, and
+          # tauri-action maintains it by read-modify-write (fetch, merge in this
+          # platform, delete, re-upload) — so with the legs in parallel they race
+          # on it. v2.8.11 hit both outcomes: a leg deleted the asset another was
+          # reading and failed the run *after* uploading its bundles, and a lost
+          # update can silently drop a platform, which breaks in-app updates for
+          # it with no failed job to notice. The `publish` job builds the
+          # manifest once instead, from the signed bundles on the release.
+          includeUpdaterJson: false
 
       # tauri-action has no built-in workflow-artifact upload; on manual runs,
       # upload the built bundles so they can be downloaded and tested. The
@@ -524,6 +534,25 @@ jobs:
     needs: [desktop, ios, android, server]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      # The single writer of latest.json — see includeUpdaterJson in `desktop`.
+      # Runs before the release leaves draft, and refuses to emit a manifest
+      # that is missing a platform, so an incomplete updater manifest holds the
+      # release as a draft instead of stranding those users on the old version.
+      - name: Build the updater manifest
+        run: bun scripts/build-updater-manifest.ts "$TAG" latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Attach the updater manifest
+        run: gh release upload "$TAG" latest.json --clobber --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Publish the release
         run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
         env:
