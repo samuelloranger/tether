@@ -1,6 +1,6 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
-import { getLogs, getReplayLogs, getSession, listSessions, renameSession } from '../db';
+import { getSession, listSessions, renameSession } from '../db';
 import { getLiveCwd } from '../liveCwd';
 import {
   type FocusSubscriber,
@@ -13,6 +13,7 @@ import {
   writeToSession,
 } from '../pty';
 import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '../replayPlan';
+import { getReplayLogs } from '../replayRead';
 import { getActivity } from '../sessionActivity';
 import { autoTitle, getOscTitle } from '../sessionTitle';
 
@@ -236,8 +237,9 @@ sessionsRoutes.get('/api/sessions/:id/logs', (c) => {
   const sessionId = c.req.param('id');
   const sinceId = Number(c.req.query('sinceId') || 0);
 
-  const logs = getLogs(sessionId, sinceId);
-  return c.json(logs);
+  // Same byte budget as the WebSocket catch-up: an unbounded read here can
+  // materialize the whole retained scrollback into one JSON response.
+  return c.json(getReplayLogs(sessionId, sinceId, REPLAY_BYTE_BUDGET).logs);
 });
 
 sessionsRoutes.get(

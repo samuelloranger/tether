@@ -2,7 +2,6 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DB_PATH, OLD_DB_PATH, USING_DEFAULT_DB } from './paths';
-import { type ReplayPlan, selectReplayNewest } from './replayPlan';
 import { COMPILED } from './runtime';
 
 const DB_DIR = path.dirname(DB_PATH);
@@ -184,6 +183,11 @@ function retained(sessionId: string): RetentionStats {
   return stats;
 }
 
+/** Retained UTF-8 bytes for a session — an upper bound on any replay of it. */
+export function retainedBytes(sessionId: string): number {
+  return retained(sessionId).bytes;
+}
+
 function configuredLogCap(): number {
   try {
     const value = JSON.parse(getSetting('config.session') ?? '{}') as { scrollbackRows?: unknown };
@@ -310,63 +314,15 @@ export function getLogs(sessionId: string, sinceId = 0): TerminalLog[] {
     .all({ $sessionId: sessionId, $sinceId: sinceId }) as TerminalLog[];
 }
 
-function* getLogSizesNewest(
-  sessionId: string,
-  sinceId: number,
-  batchSize = 200,
-): Generator<{ id: number; bytes: number }> {
-  let beforeId = Number.MAX_SAFE_INTEGER;
-  while (true) {
-    const rows = db
-      .query(
-        `SELECT id, octet_length(chunk) AS bytes
-         FROM terminal_logs
-         WHERE session_id = $sessionId AND id > $sinceId AND id < $beforeId
-         ORDER BY id DESC LIMIT $limit`,
-      )
-      .all({
-        $sessionId: sessionId,
-        $sinceId: sinceId,
-        $beforeId: beforeId,
-        $limit: batchSize,
-      }) as { id: number; bytes: number }[];
-    if (rows.length === 0) return;
-    yield* rows;
-    beforeId = rows[rows.length - 1].id;
-  }
-}
-
-/** Selects replay rows by byte metadata, then fetches only the chosen suffix. */
-export function getReplayLogs(
-  sessionId: string,
-  sinceId: number,
-  budget: number,
-): ReplayPlan<TerminalLog> {
-  const selection = selectReplayNewest(getLogSizesNewest(sessionId, sinceId), budget);
-  if (selection.oldestId === null || selection.newestId === null) {
-    return { reset: false, logs: [], bytes: 0 };
-  }
-  const logs = db
-    .query(
-      `SELECT id, session_id, chunk, created_at
-       FROM terminal_logs
-       WHERE session_id = $sessionId AND id >= $oldestId AND id <= $newestId
-       ORDER BY id ASC`,
-    )
-    .all({
-      $sessionId: sessionId,
-      $oldestId: selection.oldestId,
-      $newestId: selection.newestId,
-    }) as TerminalLog[];
-  return { reset: selection.reset, logs, bytes: selection.bytes };
-}
-
 export function clearLogs(sessionId: string) {
   db.query('DELETE FROM terminal_logs WHERE session_id = $sessionId').run({
     $sessionId: sessionId,
   });
   insertCounts.delete(sessionId);
-  retentionStats.set(sessionId, { rows: 0, bytes: 0 });
+  // Drop the entry rather than zeroing it: `retained()` recreates it on the next
+  // insert, so keeping a zero row here would grow the map without bound across
+  // transient sessions (same reason clearInsertCount exists).
+  retentionStats.delete(sessionId);
 }
 
 // Drop just the in-memory prune counter (without touching logs) — call when a

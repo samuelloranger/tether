@@ -3,7 +3,6 @@ import {
   addTerminalLog,
   db,
   getLogs,
-  getReplayLogs,
   getSession,
   listSessions,
   pruneLogs,
@@ -11,6 +10,7 @@ import {
   resetRunningSessions,
   upsertSession,
 } from './db';
+import { getReplayLogs } from './replayRead';
 
 let pass = 0;
 function ok(cond: boolean, msg: string) {
@@ -27,6 +27,22 @@ function ok(cond: boolean, msg: string) {
   ok(replay.logs.length === 2, `bounded replay fetches only 2 rows, got ${replay.logs.length}`);
   ok(replay.bytes === 20_000, `bounded replay reports 20000 UTF-8 bytes, got ${replay.bytes}`);
   ok(replay.logs[1].chunk.startsWith('249'), 'bounded replay retains the newest row');
+}
+
+// Under budget, replay skips the metadata pass and still reports UTF-8 bytes.
+{
+  upsertSession('term-replay-fast', 'bash', 'running');
+  addTerminalLog('term-replay-fast', 'hello');
+  addTerminalLog('term-replay-fast', '🚀');
+  const all = getReplayLogs('term-replay-fast', 0, 1_000_000);
+  ok(!all.reset, 'under-budget replay never asks for a reset');
+  ok(all.logs.length === 2, `under-budget replay returns both rows, got ${all.logs.length}`);
+  ok(all.bytes === 9, `under-budget replay reports 9 UTF-8 bytes, got ${all.bytes}`);
+  // The fast path must still honour sinceId rather than replaying from scratch.
+  const since = getReplayLogs('term-replay-fast', all.logs[0].id, 1_000_000);
+  ok(since.logs.length === 1, `under-budget replay honours sinceId, got ${since.logs.length}`);
+  ok(since.logs[0].chunk === '🚀', 'under-budget replay resumes after sinceId');
+  ok(since.bytes === 4, `under-budget replay reports 4 UTF-8 bytes, got ${since.bytes}`);
 }
 
 // Replay selection also treats multibyte output as UTF-8 octets in SQL metadata.
