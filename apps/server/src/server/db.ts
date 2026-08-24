@@ -28,11 +28,19 @@ if (COMPILED && USING_DEFAULT_DB && !existsSync(DB_PATH) && existsSync(OLD_DB_PA
 
 export const db = new Database(DB_PATH, { create: true });
 
+// Incremental auto-vacuum needs a one-time VACUUM to add its pointer map to an
+// existing database. Do that on clean startup, before the server begins serving
+// requests; new databases can enable it before their first table is created.
+const autoVacuum = (db.query('PRAGMA auto_vacuum').get() as { auto_vacuum: number }).auto_vacuum;
+if (autoVacuum !== 2) {
+  const hasSchema = db.query('SELECT 1 FROM sqlite_schema LIMIT 1').get() !== null;
+  db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
+  if (autoVacuum === 0 && hasSchema) db.exec('VACUUM;');
+}
 // WAL + relaxed sync: terminal logs are written on every PTY chunk (incl. each
 // keystroke echo). Default rollback-journal fsyncs per insert, adding latency to
 // the echo path. WAL removes per-write fsync — much lower input latency.
 db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
-
 // --- Migrations System ---
 const migrations = [
   {
@@ -145,6 +153,9 @@ export function runMigrations() {
 
 // Initialize database schema
 runMigrations();
+// A previous process can leave a large high-water WAL even after all readers
+// are gone. Startup is the safe point to checkpoint it, after migration writes.
+db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
 
 // --- DB Helper Functions ---
 
@@ -152,6 +163,30 @@ const LOG_CAP = 2000;
 /** Hard ceiling on retained scrollback bytes per session (see pruneLogs). */
 const LOG_BYTE_CAP = 8_000_000;
 const insertCounts = new Map<string, number>();
+type RetentionStats = { rows: number; bytes: number };
+const retentionStats = new Map<string, RetentionStats>();
+for (const row of db
+  .query(
+    `SELECT session_id, COUNT(*) AS rows, COALESCE(SUM(octet_length(chunk)), 0) AS bytes
+     FROM terminal_logs GROUP BY session_id`,
+  )
+  .all() as { session_id: string; rows: number; bytes: number }[]) {
+  retentionStats.set(row.session_id, { rows: row.rows, bytes: row.bytes });
+}
+
+function retained(sessionId: string): RetentionStats {
+  let stats = retentionStats.get(sessionId);
+  if (!stats) {
+    stats = { rows: 0, bytes: 0 };
+    retentionStats.set(sessionId, stats);
+  }
+  return stats;
+}
+
+/** Retained UTF-8 bytes for a session — an upper bound on any replay of it. */
+export function retainedBytes(sessionId: string): number {
+  return retained(sessionId).bytes;
+}
 
 function configuredLogCap(): number {
   try {
@@ -164,38 +199,55 @@ function configuredLogCap(): number {
 }
 
 export function pruneLogs(sessionId: string, cap = LOG_CAP, byteCap = LOG_BYTE_CAP) {
-  // Row cap: keep the newest `cap` rows.
-  const rowCut = db
-    .query(
-      `SELECT id FROM terminal_logs WHERE session_id = $id
-       ORDER BY id DESC LIMIT 1 OFFSET $cap`,
-    )
-    .get({ $id: sessionId, $cap: cap }) as { id: number } | null;
-  if (rowCut) deleteLogsThrough(sessionId, rowCut.id);
+  const stats = retained(sessionId);
+  if (stats.rows <= cap && stats.bytes <= byteCap) return;
 
-  // Byte cap: a row cap is not a size cap. One full-screen TUI repaint frame
-  // can exceed 100 KB, so 2000 rows has reached 91 MB in practice — enough to
-  // kill any client that tries to replay it. Drop the oldest rows until the
-  // retained tail fits. The newest row is never dropped.
-  const byteCut = db
-    .query(
-      `SELECT id FROM (
-         SELECT id, SUM(LENGTH(chunk)) OVER (ORDER BY id DESC) AS running
-         FROM terminal_logs WHERE session_id = $id
-       )
-       WHERE running > $cap
-         AND id < (SELECT MAX(id) FROM terminal_logs WHERE session_id = $id)
-       ORDER BY id DESC LIMIT 1`,
-    )
-    .get({ $id: sessionId, $cap: byteCap }) as { id: number } | null;
-  if (byteCut) deleteLogsThrough(sessionId, byteCut.id);
+  let removedRows = 0;
+  let removedBytes = 0;
+  let cut = 0;
+  let afterId = 0;
+  let done = false;
+  while (!done) {
+    const oldest = db
+      .query(
+        `SELECT id, octet_length(chunk) AS bytes FROM terminal_logs
+         WHERE session_id = $id AND id > $afterId ORDER BY id ASC LIMIT 200`,
+      )
+      .all({ $id: sessionId, $afterId: afterId }) as { id: number; bytes: number }[];
+    if (oldest.length === 0) break;
+    for (const row of oldest) {
+      const overRows = stats.rows - removedRows > cap;
+      const overBytes = stats.bytes - removedBytes > byteCap;
+      if ((!overRows && !overBytes) || stats.rows - removedRows <= 1) {
+        done = true;
+        break;
+      }
+      cut = row.id;
+      removedRows++;
+      removedBytes += row.bytes;
+    }
+    afterId = oldest[oldest.length - 1].id;
+  }
+  if (cut === 0) return;
+  deleteLogsThrough(sessionId, cut, removedRows, removedBytes);
+  // Reclaim a bounded number of pages per prune so retention stays close to its
+  // steady-state disk footprint without turning the PTY output path into VACUUM.
+  db.exec('PRAGMA incremental_vacuum(200);');
 }
 
-function deleteLogsThrough(sessionId: string, cut: number) {
+function deleteLogsThrough(
+  sessionId: string,
+  cut: number,
+  removedRows: number,
+  removedBytes: number,
+) {
   db.query('DELETE FROM terminal_logs WHERE session_id = $id AND id <= $cut').run({
     $id: sessionId,
     $cut: cut,
   });
+  const stats = retained(sessionId);
+  stats.rows -= removedRows;
+  stats.bytes -= removedBytes;
   // Watermark lets the WS gateway detect a client whose sinceId predates the
   // prune (gap in replay) and tell it to reset instead of rendering a hole.
   db.query('UPDATE sessions SET pruned_before = $cut WHERE id = $id AND pruned_before < $cut').run({
@@ -242,6 +294,9 @@ export function addTerminalLog(sessionId: string, chunk: string): number {
   const result = db
     .query(`INSERT INTO terminal_logs (session_id, chunk) VALUES ($sessionId, $chunk)`)
     .run({ $sessionId: sessionId, $chunk: chunk });
+  const stats = retained(sessionId);
+  stats.rows++;
+  stats.bytes += Buffer.byteLength(chunk);
   const n = (insertCounts.get(sessionId) ?? 0) + 1;
   insertCounts.set(sessionId, n);
   if (n % 200 === 0) pruneLogs(sessionId, configuredLogCap());
@@ -264,6 +319,10 @@ export function clearLogs(sessionId: string) {
     $sessionId: sessionId,
   });
   insertCounts.delete(sessionId);
+  // Drop the entry rather than zeroing it: `retained()` recreates it on the next
+  // insert, so keeping a zero row here would grow the map without bound across
+  // transient sessions (same reason clearInsertCount exists).
+  retentionStats.delete(sessionId);
 }
 
 // Drop just the in-memory prune counter (without touching logs) — call when a
@@ -327,6 +386,7 @@ export function setAuthHashIfUnset(hash: string): boolean {
 export function deleteSession(id: string) {
   clearLogs(id);
   db.query('DELETE FROM sessions WHERE id = $id').run({ $id: id });
+  retentionStats.delete(id);
 }
 
 export interface SessionRow extends Session {
@@ -337,7 +397,8 @@ export function listSessions(): SessionRow[] {
   return db
     .query(
       `SELECT s.*,
-        (SELECT MAX(created_at) FROM terminal_logs WHERE session_id = s.id) AS last_output_at
+        (SELECT created_at FROM terminal_logs WHERE session_id = s.id ORDER BY id DESC LIMIT 1)
+          AS last_output_at
        FROM sessions s ORDER BY s.created_at DESC`,
     )
     .all() as SessionRow[];

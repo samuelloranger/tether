@@ -26,24 +26,61 @@ export interface ReplayPlan<T> {
   bytes: number;
 }
 
-/**
- * Trims `logs` (oldest → newest) to the newest suffix fitting `budget` bytes.
- * The newest row is always kept, even if it alone exceeds the budget — sending
- * a truncated tail beats sending nothing.
- */
-export function planReplay<T extends ReplayChunk>(
-  logs: T[],
+export interface ReplayOutputFrame {
+  type: 'output';
+  id: number;
+  chunk: string;
+}
+
+export interface ReplayRowSize {
+  id: number;
+  bytes: number;
+}
+
+export interface ReplaySelection {
+  reset: boolean;
+  oldestId: number | null;
+  newestId: number | null;
+  count: number;
+  bytes: number;
+}
+
+/** Selects a byte-bounded newest suffix from rows that contain no chunk data. */
+export function selectReplayNewest(
+  newestFirst: Iterable<ReplayRowSize>,
   budget = REPLAY_BYTE_BUDGET,
-): ReplayPlan<T> {
+): ReplaySelection {
   let bytes = 0;
-  let start = logs.length;
-  while (start > 0) {
-    const size = logs[start - 1].chunk.length;
-    // `start === logs.length` is the newest row: take it unconditionally.
-    if (start < logs.length && bytes + size > budget) break;
-    bytes += size;
-    start--;
-    if (bytes >= budget) break;
+  let count = 0;
+  let oldestId: number | null = null;
+  let newestId: number | null = null;
+  let reset = false;
+  for (const row of newestFirst) {
+    if (count > 0 && bytes + row.bytes > budget) {
+      reset = true;
+      break;
+    }
+    if (newestId === null) newestId = row.id;
+    oldestId = row.id;
+    count++;
+    bytes += row.bytes;
   }
-  return { reset: start > 0, logs: logs.slice(start), bytes };
+  return { reset, oldestId, newestId, count, bytes };
+}
+
+/** Coalesces replay rows while preserving the final acknowledged log id. */
+export function replayOutputFrames<T extends ReplayChunk & { id: number }>(
+  logs: T[],
+  rowsPerFrame = 200,
+): ReplayOutputFrame[] {
+  const frames: ReplayOutputFrame[] = [];
+  for (let start = 0; start < logs.length; start += rowsPerFrame) {
+    const batch = logs.slice(start, start + rowsPerFrame);
+    frames.push({
+      type: 'output',
+      id: batch[batch.length - 1].id,
+      chunk: batch.map((log) => log.chunk).join(''),
+    });
+  }
+  return frames;
 }
