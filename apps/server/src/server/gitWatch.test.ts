@@ -1,5 +1,4 @@
 import { expect, spyOn, test } from 'bun:test';
-import { execSync } from 'node:child_process';
 import * as nodeFs from 'node:fs';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,14 +7,31 @@ import type { DiffSummary } from './gitDiff';
 import { EMPTY_REPO_STATUS } from './gitStatus';
 import { GitWatch } from './gitWatch';
 
+/**
+ * Runs git without blocking the event loop.
+ *
+ * These tests used to shell out synchronously, which pins the JS thread for the
+ * whole call — so when git was slow on a loaded runner, bun's per-test timeout
+ * could never fire and the worker simply stopped. On CI that stalled the
+ * server-test step indefinitely after every other file had already reported.
+ * gitWatch.ts had the same bug in production and moved to Bun.spawn; this test
+ * helper kept it.
+ */
+async function git(cwd: string, ...args: string[]): Promise<void> {
+  const proc = Bun.spawn(['git', ...args], { cwd, stdout: 'ignore', stderr: 'pipe' });
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  if (code !== 0) throw new Error(`git ${args.join(' ')} failed (${code}): ${stderr}`);
+}
+
 async function withRepo(fn: (root: string) => void | Promise<void>) {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-gitwatch-'));
   try {
-    execSync('git init -q', { cwd: root });
-    execSync('git config user.email test@example.com', { cwd: root });
-    execSync('git config user.name test', { cwd: root });
+    await git(root, 'init', '-q');
+    await git(root, 'config', 'user.email', 'test@example.com');
+    await git(root, 'config', 'user.name', 'test');
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 42;\n');
-    execSync('git add main.ts && git commit -q -m initial', { cwd: root });
+    await git(root, 'add', 'main.ts');
+    await git(root, 'commit', '-q', '-m', 'initial');
     await fn(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -61,7 +77,8 @@ test('debounces native worktree events and suppresses an identical summary', asy
     await Bun.sleep(250);
     expect(seen).toHaveLength(2);
 
-    execSync('git add main.ts && git commit -q -m update', { cwd: root });
+    await git(root, 'add', 'main.ts');
+    await git(root, 'commit', '-q', '-m', 'update');
     await waitFor(() => seen.length === 3);
     expect(seen[2]).toEqual({ files: [] });
     watch.dispose();
@@ -83,7 +100,7 @@ test('kick schedules a refresh after an out-of-band index change', async () => {
     expect(seen).toEqual([{ files: [] }]);
 
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 99;\n');
-    execSync('git add main.ts', { cwd: root });
+    await git(root, 'add', 'main.ts');
     // Bypass inotify: HTTP stage/commit path calls kick() after the write.
     watch.kick();
     await waitFor(() => seen.length === 2);
@@ -177,7 +194,8 @@ test('captures changes that already existed before setRoot was first called', as
 test('does not open a watch inside a gitignored directory (e.g. node_modules)', async () => {
   await withRepo(async (root) => {
     writeFileSync(path.join(root, '.gitignore'), 'ignored_dir/\n');
-    execSync('git add .gitignore && git commit -q -m gitignore', { cwd: root });
+    await git(root, 'add', '.gitignore');
+    await git(root, 'commit', '-q', '-m', 'gitignore');
     mkdirSync(path.join(root, 'ignored_dir', 'nested'), { recursive: true });
     writeFileSync(path.join(root, 'ignored_dir', 'nested', 'file.txt'), 'one\n');
 
@@ -247,7 +265,7 @@ test('does not walk into nested repositories', async () => {
   await withRepo(async (parent) => {
     const nested = path.join(parent, 'child-repo');
     mkdirSync(nested);
-    execSync('git init -q', { cwd: nested });
+    await git(nested, 'init', '-q');
     mkdirSync(path.join(nested, 'node_modules', 'pkg'), { recursive: true });
     mkdirSync(path.join(parent, 'src'));
 

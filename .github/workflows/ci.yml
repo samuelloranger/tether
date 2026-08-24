@@ -36,6 +36,9 @@ jobs:
       # test-preload.ts derives a per-process temp DB, and pinning every worker
       # to one file makes parallel workers fight over the same SQLite database.
       - name: Server tests
+        # A hung test used to stall this step until the 6h job ceiling and
+        # publish nothing. Bounded so it fails fast and the log is available.
+        timeout-minutes: 10
         run: bun run test
         working-directory: apps/server
 
@@ -43,13 +46,16 @@ jobs:
       # desktop auto-update resolves, and a mistake there is only visible after
       # a release has already published.
       - name: Release script tests
+        timeout-minutes: 5
         run: bun test scripts/
 
       - name: Mobile tests (pure logic)
+        timeout-minutes: 10
         run: bun run test
         working-directory: apps/mobile
 
       - name: Mobile tests (components)
+        timeout-minutes: 15
         run: bun run test:ui
         working-directory: apps/mobile
 
