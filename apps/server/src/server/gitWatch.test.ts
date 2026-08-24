@@ -22,6 +22,12 @@ async function withRepo(fn: (root: string) => void | Promise<void>) {
   }
 }
 
+// Ignore-pruning spawns a real `git ls-files` per watcher. Only the
+// gitignore test below actually needs it, and under `bun test --parallel` the
+// extra subprocess per test pushed several past the 5s timeout. Stub it
+// everywhere else so the suite is deterministic (and faster).
+const noIgnoredDirs = async () => new Set<string>();
+
 async function waitFor(condition: () => boolean, timeout = 2_000) {
   const deadline = Date.now() + timeout;
   while (!condition() && Date.now() < deadline) await Bun.sleep(20);
@@ -31,7 +37,13 @@ async function waitFor(condition: () => boolean, timeout = 2_000) {
 test('debounces native worktree events and suppresses an identical summary', async () => {
   await withRepo(async (root) => {
     const seen: DiffSummary[] = [];
-    const watch = new GitWatch((summary) => seen.push(summary), 150);
+    const watch = new GitWatch(
+      (summary) => seen.push(summary),
+      150,
+      undefined,
+      undefined,
+      noIgnoredDirs,
+    );
     watch.setRoot(root);
     await watch.whenScanned();
     expect(seen).toEqual([{ files: [] }]);
@@ -59,7 +71,13 @@ test('debounces native worktree events and suppresses an identical summary', asy
 test('kick schedules a refresh after an out-of-band index change', async () => {
   await withRepo(async (root) => {
     const seen: DiffSummary[] = [];
-    const watch = new GitWatch((summary) => seen.push(summary), 50);
+    const watch = new GitWatch(
+      (summary) => seen.push(summary),
+      50,
+      undefined,
+      undefined,
+      noIgnoredDirs,
+    );
     watch.setRoot(root);
     await watch.whenScanned();
     expect(seen).toEqual([{ files: [] }]);
@@ -80,7 +98,13 @@ test('retargets to a new repository and stops publishing the old root', async ()
   await withRepo(async (first) => {
     await withRepo(async (second) => {
       const seen: DiffSummary[] = [];
-      const watch = new GitWatch((summary) => seen.push(summary), 150);
+      const watch = new GitWatch(
+        (summary) => seen.push(summary),
+        150,
+        undefined,
+        undefined,
+        noIgnoredDirs,
+      );
       watch.setRoot(first);
       // Retargeted before the deferred scan for `first` ever ran, so `first` is
       // never scanned and never published — two quick `cd`s cost one scan.
@@ -104,7 +128,13 @@ test('retargets to a new repository and stops publishing the old root', async ()
 test('dispose prevents later watcher callbacks', async () => {
   await withRepo(async (root) => {
     const seen: DiffSummary[] = [];
-    const watch = new GitWatch((summary) => seen.push(summary), 150);
+    const watch = new GitWatch(
+      (summary) => seen.push(summary),
+      150,
+      undefined,
+      undefined,
+      noIgnoredDirs,
+    );
     watch.setRoot(root);
     await watch.whenScanned();
     watch.dispose();
@@ -123,7 +153,13 @@ test('captures changes that already existed before setRoot was first called', as
     writeFileSync(path.join(root, 'fresh.ts'), 'export const x = 1;\n');
 
     const seen: DiffSummary[] = [];
-    const watch = new GitWatch((summary) => seen.push(summary), 50);
+    const watch = new GitWatch(
+      (summary) => seen.push(summary),
+      50,
+      undefined,
+      undefined,
+      noIgnoredDirs,
+    );
     watch.setRoot(root);
     await watch.whenScanned();
     expect(seen).toEqual([
@@ -146,6 +182,7 @@ test('does not open a watch inside a gitignored directory (e.g. node_modules)', 
     writeFileSync(path.join(root, 'ignored_dir', 'nested', 'file.txt'), 'one\n');
 
     const watchSpy = spyOn(nodeFs, 'watch');
+    // Deliberately the real reader: this test is what covers ignore-pruning.
     const watch = new GitWatch(() => {}, 50);
     watch.setRoot(root);
     await watch.whenScanned();
@@ -166,7 +203,7 @@ test('logs instead of throwing when a watch cannot be created', async () => {
       throw new Error('ENOSPC: System limit for number of file watchers reached');
     });
     try {
-      const watch = new GitWatch(() => {}, 50);
+      const watch = new GitWatch(() => {}, 50, undefined, undefined, noIgnoredDirs);
       expect(() => watch.setRoot(root)).not.toThrow();
       await watch.whenScanned();
       expect(warnSpy).toHaveBeenCalled();
@@ -182,7 +219,13 @@ test('degrades to empty and closes a partial watcher for a non-repository root',
   const root = mkdtempSync(path.join(tmpdir(), 'tether-gitwatch-notgit-'));
   try {
     const seen: DiffSummary[] = [];
-    const watch = new GitWatch((summary) => seen.push(summary), 50);
+    const watch = new GitWatch(
+      (summary) => seen.push(summary),
+      50,
+      undefined,
+      undefined,
+      noIgnoredDirs,
+    );
     watch.setRoot(root);
     await watch.whenScanned();
     writeFileSync(path.join(root, 'plain.txt'), 'changed\n');
@@ -214,7 +257,7 @@ test('does not walk into nested repositories', async () => {
       return { close() {} } as unknown as nodeFs.FSWatcher;
     }) as typeof nodeFs.watch);
 
-    const watcher = new GitWatch(() => {}, 150);
+    const watcher = new GitWatch(() => {}, 150, undefined, undefined, noIgnoredDirs);
     try {
       watcher.setRoot(parent);
       await watcher.whenScanned();
@@ -242,7 +285,7 @@ test('stops watching past the directory cap instead of blocking', async () => {
       return { close() {} } as unknown as nodeFs.FSWatcher;
     }) as typeof nodeFs.watch);
 
-    const watcher = new GitWatch(() => {}, 150, 5);
+    const watcher = new GitWatch(() => {}, 150, 5, undefined, noIgnoredDirs);
     try {
       watcher.setRoot(root);
       await watcher.whenScanned();
@@ -267,7 +310,13 @@ test('setRoot returns before doing any of the work', async () => {
     }
 
     const seen: DiffSummary[] = [];
-    const watcher = new GitWatch((summary) => seen.push(summary), 150);
+    const watcher = new GitWatch(
+      (summary) => seen.push(summary),
+      150,
+      undefined,
+      undefined,
+      noIgnoredDirs,
+    );
     try {
       const start = performance.now();
       watcher.setRoot(root);
@@ -373,7 +422,7 @@ test('skips unreadable directories without attempting a watch', async () => {
     chmodSync(locked, 0o000);
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     const watchSpy = spyOn(nodeFs, 'watch');
-    const watcher = new GitWatch(() => {}, 50);
+    const watcher = new GitWatch(() => {}, 50, undefined, undefined, noIgnoredDirs);
     try {
       watcher.setRoot(root);
       await watcher.whenScanned();
@@ -400,15 +449,21 @@ test('skips unreadable directories without attempting a watch', async () => {
 test('a slow git read never blocks the event loop', async () => {
   await withRepo(async (root) => {
     const seen: DiffSummary[] = [];
-    const watcher = new GitWatch((summary) => seen.push(summary), 20, undefined, {
-      readDiffSummary: async () => {
-        await Bun.sleep(200);
-        return {
-          files: [{ path: 'slow', insertions: 1, deletions: 0, binary: false, staged: false }],
-        };
+    const watcher = new GitWatch(
+      (summary) => seen.push(summary),
+      20,
+      undefined,
+      {
+        readDiffSummary: async () => {
+          await Bun.sleep(200);
+          return {
+            files: [{ path: 'slow', insertions: 1, deletions: 0, binary: false, staged: false }],
+          };
+        },
+        readRepoStatus: async () => EMPTY_REPO_STATUS,
       },
-      readRepoStatus: async () => EMPTY_REPO_STATUS,
-    });
+      noIgnoredDirs,
+    );
     try {
       watcher.setRoot(root);
       // A timer armed while the read is in flight must still fire on time.
@@ -435,18 +490,24 @@ test('a slow git read never blocks the event loop', async () => {
 test('coalesces changes that arrive while a read is in flight', async () => {
   await withRepo(async (root) => {
     let reads = 0;
-    const watcher = new GitWatch(() => {}, 10, undefined, {
-      readDiffSummary: async () => {
-        reads++;
-        await Bun.sleep(120);
-        return {
-          files: [
-            { path: `read-${reads}`, insertions: 1, deletions: 0, binary: false, staged: false },
-          ],
-        };
+    const watcher = new GitWatch(
+      () => {},
+      10,
+      undefined,
+      {
+        readDiffSummary: async () => {
+          reads++;
+          await Bun.sleep(120);
+          return {
+            files: [
+              { path: `read-${reads}`, insertions: 1, deletions: 0, binary: false, staged: false },
+            ],
+          };
+        },
+        readRepoStatus: async () => EMPTY_REPO_STATUS,
       },
-      readRepoStatus: async () => EMPTY_REPO_STATUS,
-    });
+      noIgnoredDirs,
+    );
     try {
       watcher.setRoot(root);
       await waitFor(() => reads === 1);
