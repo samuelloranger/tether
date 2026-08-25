@@ -194,12 +194,33 @@ fn sync_directory(_path: &Path) -> std::io::Result<()> {
 /// Interior mutability because Tauri command handlers hold shared state, and
 /// because iOS will call this from Swift through an immutable reference.
 #[derive(Debug)]
-pub struct ReplayStore(Mutex<ReplayStoreState>);
+pub struct ReplayStore {
+    state: Mutex<ReplayStoreState>,
+    /// Serializes cursor writes, and holds the sequence number of the newest
+    /// snapshot already on disk.
+    ///
+    /// Disk I/O deliberately happens with this held and `state` released, so a
+    /// cursor flush never stalls `accept_output` on another session. The
+    /// sequence number is what makes that safe: two threads can each take a
+    /// flush job and then race to write, so a writer that finds a newer
+    /// snapshot already persisted skips its own stale one rather than
+    /// overwriting it.
+    writer: Mutex<u64>,
+}
 
 #[derive(Debug)]
 struct ReplayStoreState {
     trackers: HashMap<String, ReplayTracker>,
     persistence: PersistenceMode,
+    /// Monotonic, stamped on each flush job as it is taken under `state`.
+    next_seq: u64,
+}
+
+/// A flush decided under the state lock and executed outside it.
+struct FlushJob {
+    adapter: Arc<dyn CursorPersistence>,
+    cursors: HashMap<String, u64>,
+    seq: u64,
 }
 
 #[derive(Debug)]
@@ -215,10 +236,14 @@ enum PersistenceMode {
 
 impl Default for ReplayStore {
     fn default() -> Self {
-        Self(Mutex::new(ReplayStoreState {
-            trackers: HashMap::new(),
-            persistence: PersistenceMode::Noop(NoopCursorPersistence),
-        }))
+        Self {
+            state: Mutex::new(ReplayStoreState {
+                trackers: HashMap::new(),
+                persistence: PersistenceMode::Noop(NoopCursorPersistence),
+                next_seq: 0,
+            }),
+            writer: Mutex::new(0),
+        }
     }
 }
 
@@ -243,19 +268,29 @@ impl ReplayStore {
             .into_iter()
             .map(|(session_id, cursor)| (session_id, ReplayTracker::from_since_id(cursor)))
             .collect();
-        Self(Mutex::new(ReplayStoreState {
-            trackers,
-            persistence: PersistenceMode::Configured {
-                adapter: persistence,
-                policy,
-                advances_since_flush: 0,
-                last_flush_attempt: Instant::now(),
-            },
-        }))
+        Self {
+            state: Mutex::new(ReplayStoreState {
+                trackers,
+                persistence: PersistenceMode::Configured {
+                    adapter: persistence,
+                    policy,
+                    advances_since_flush: 0,
+                    last_flush_attempt: Instant::now(),
+                },
+                next_seq: 0,
+            }),
+            writer: Mutex::new(0),
+        }
     }
 
+    /// Persists cursors now. Used for graceful shutdown.
+    ///
+    /// The write happens with the state lock RELEASED — see [`ReplayStore::writer`].
     pub fn flush(&self) -> Result<(), CursorPersistenceError> {
-        flush_state(&mut self.lock())
+        match self.take_flush_job(true) {
+            Some(job) => self.run_flush_job(job, true),
+            None => Ok(()),
+        }
     }
 
     /// The `sinceId` for the next connection to this session. Unknown sessions
@@ -276,8 +311,19 @@ impl ReplayStore {
             .entry(session_id.to_string())
             .or_default()
             .accept_output(id);
-        if accepted {
-            maybe_auto_flush(&mut state);
+        let job = if accepted {
+            take_due_flush_job(&mut state)
+        } else {
+            None
+        };
+        // Release the state lock BEFORE any disk I/O. Holding it across an
+        // fsync would stall every other session's output path, which is the
+        // hottest path in the product.
+        drop(state);
+        if let Some(job) = job {
+            // An auto-flush failure must not break a live session; explicit
+            // `flush` is what surfaces the error to the shell.
+            let _ = self.run_flush_job(job, false);
         }
         accepted
     }
@@ -291,17 +337,67 @@ impl ReplayStore {
             .or_default()
             .reset();
         // Resets are rare and must not resurrect a stale cursor after restart.
-        let _ = flush_state(&mut state);
+        drop(state);
+        let _ = self.flush();
     }
 
     /// Drops a session's cursor entirely — for a killed session, so a later
     /// session reusing the id doesn't skip its own early output.
     pub fn forget(&self, session_id: &str) {
         let mut state = self.lock();
-        if state.trackers.remove(session_id).is_some() {
+        let removed = state.trackers.remove(session_id).is_some();
+        drop(state);
+        if removed {
             // Session ids may be reused, so forgetting is persisted eagerly.
-            let _ = flush_state(&mut state);
+            let _ = self.flush();
         }
+    }
+
+    /// Decides a flush under the state lock and returns the work to do outside
+    /// it. `force` skips the policy check (explicit flush, reset, forget).
+    ///
+    /// Counters are reset here, under the lock, so only ONE caller can take a
+    /// given flush job — that is what keeps the write off the hot path without
+    /// every advance contending on the writer mutex.
+    fn take_flush_job(&self, force: bool) -> Option<FlushJob> {
+        let mut state = self.lock();
+        if force {
+            take_flush_job_now(&mut state)
+        } else {
+            take_due_flush_job(&mut state)
+        }
+    }
+
+    /// Performs the write with the state lock released.
+    ///
+    /// Skips its own snapshot if a newer one already reached disk, so two
+    /// racing writers cannot leave the older cursor set persisted.
+    ///
+    /// `blocking` is false for automatic flushes: if another write is already
+    /// in progress they give up rather than queue behind it. Waiting would put
+    /// a second session's output path back behind someone else's fsync, which
+    /// is the very stall this design exists to avoid. The cost of skipping is
+    /// bounded — the in-flight write persists a snapshot only slightly older,
+    /// and the elapsed-time half of the policy re-arms the next one. An
+    /// explicit flush (shutdown, reset, forget) always waits.
+    fn run_flush_job(&self, job: FlushJob, blocking: bool) -> Result<(), CursorPersistenceError> {
+        let mut last_written = if blocking {
+            self.writer
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+        } else {
+            match self.writer.try_lock() {
+                Ok(guard) => guard,
+                Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => return Ok(()),
+            }
+        };
+        if job.seq <= *last_written {
+            return Ok(());
+        }
+        job.adapter.save_all(&job.cursors)?;
+        *last_written = job.seq;
+        Ok(())
     }
 
     /// A poisoned mutex here means another thread panicked mid-update. The
@@ -309,17 +405,18 @@ impl ReplayStore {
     /// the guard is safe and strictly better than propagating a panic into a
     /// Tauri command.
     fn lock(&self) -> std::sync::MutexGuard<'_, ReplayStoreState> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
-fn maybe_auto_flush(state: &mut ReplayStoreState) {
-    if matches!(state.persistence, PersistenceMode::Noop(_)) {
-        return;
-    }
+/// Takes a flush job only if the durability policy says one is due.
+///
+/// Also advances the counter, so this must be called exactly once per accepted
+/// output frame.
+fn take_due_flush_job(state: &mut ReplayStoreState) -> Option<FlushJob> {
     let now = Instant::now();
     let due = match &mut state.persistence {
-        PersistenceMode::Noop(_) => unreachable!("no-op persistence returned above"),
+        PersistenceMode::Noop(_) => return None,
         PersistenceMode::Configured {
             policy,
             advances_since_flush,
@@ -332,43 +429,34 @@ fn maybe_auto_flush(state: &mut ReplayStoreState) {
         }
     };
     if !due {
-        return;
+        return None;
     }
-
-    let cursors = cursor_snapshot(&state.trackers);
-    if let PersistenceMode::Configured {
-        adapter,
-        advances_since_flush,
-        last_flush_attempt,
-        ..
-    } = &mut state.persistence
-    {
-        // Auto-flush errors cannot break the live session. Treat this as an
-        // attempt so a bad disk does not turn every output frame into an fsync;
-        // explicit `flush` still exposes the error to the shell.
-        *advances_since_flush = 0;
-        *last_flush_attempt = now;
-        let _ = adapter.save_all(&cursors);
-    }
+    take_flush_job_now(state)
 }
 
-fn flush_state(state: &mut ReplayStoreState) -> Result<(), CursorPersistenceError> {
+/// Takes a flush job unconditionally, resetting the policy counters.
+fn take_flush_job_now(state: &mut ReplayStoreState) -> Option<FlushJob> {
     if matches!(state.persistence, PersistenceMode::Noop(_)) {
-        return Ok(());
+        return None;
     }
     let cursors = cursor_snapshot(&state.trackers);
+    let seq = state.next_seq.saturating_add(1);
+    state.next_seq = seq;
     match &mut state.persistence {
-        PersistenceMode::Noop(_) => unreachable!("no-op persistence returned above"),
+        PersistenceMode::Noop(_) => None,
         PersistenceMode::Configured {
             adapter,
             advances_since_flush,
             last_flush_attempt,
             ..
         } => {
-            adapter.save_all(&cursors)?;
             *advances_since_flush = 0;
             *last_flush_attempt = Instant::now();
-            Ok(())
+            Some(FlushJob {
+                adapter: Arc::clone(adapter),
+                cursors,
+                seq,
+            })
         }
     }
 }
@@ -440,6 +528,81 @@ mod tests {
             NonZeroU64::new(max_advances).unwrap(),
             Duration::from_secs(60 * 60),
         )
+    }
+
+    /// A slow disk must not stall other sessions.
+    ///
+    /// Regression guard: `accept_output` used to call the flush while holding
+    /// the state mutex, so an fsync blocked every other session's output path.
+    /// Under that bug this test DEADLOCKS rather than failing an assertion,
+    /// which is why the second call runs on its own thread with a timeout.
+    #[test]
+    fn a_blocked_flush_does_not_stall_other_sessions() {
+        use std::sync::mpsc;
+
+        #[derive(Debug)]
+        struct BlockingPersistence {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+
+        impl CursorPersistence for BlockingPersistence {
+            fn load_all(&self) -> Result<HashMap<String, u64>, CursorPersistenceError> {
+                Ok(HashMap::new())
+            }
+
+            fn save_all(
+                &self,
+                _cursors: &HashMap<String, u64>,
+            ) -> Result<(), CursorPersistenceError> {
+                let _ = self.entered.send(());
+                let receiver = self.release.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = receiver.recv();
+                Ok(())
+            }
+        }
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let store = Arc::new(ReplayStore::with_persistence_policy(
+            Arc::new(BlockingPersistence {
+                entered: entered_tx,
+                release: Mutex::new(release_rx),
+            }),
+            // Flush on every advance so the very first one blocks in save_all.
+            CursorFlushPolicy::new(
+                NonZeroU64::new(1).expect("1 is non-zero"),
+                Duration::from_secs(3600),
+            ),
+        ));
+
+        let flushing = {
+            let store = Arc::clone(&store);
+            thread::spawn(move || store.accept_output("session-a", 1))
+        };
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the flush should have started");
+
+        // The flush is now parked inside save_all. A different session must
+        // still be able to advance, which is only possible if the state lock
+        // was released before the write.
+        let (done_tx, done_rx) = mpsc::channel();
+        let other = {
+            let store = Arc::clone(&store);
+            thread::spawn(move || {
+                let accepted = store.accept_output("session-b", 1);
+                let _ = done_tx.send(accepted);
+            })
+        };
+        let accepted = done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("accept_output stalled behind an in-progress flush");
+        assert!(accepted);
+
+        let _ = release_tx.send(());
+        assert!(flushing.join().expect("flushing thread panicked"));
+        other.join().expect("second thread panicked");
     }
 
     #[test]
