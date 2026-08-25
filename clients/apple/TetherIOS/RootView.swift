@@ -3,17 +3,77 @@ import TetherKit
 
 struct RootView: View {
   @Bindable var store: SessionStore
-  @State private var columnVisibility = NavigationSplitViewVisibility.all
+  @Bindable var preferences: AppPreferences
+
+  @State private var drawerOpen = false
+  @State private var showSettings = false
   @State private var showPairing = false
+  @State private var showOverflow = false
+  @State private var showRename = false
+  @State private var renameText = ""
+  @State private var settingsHostId: String?
   /// Set when a selected host has no stored password, so the app can ask for
   /// one instead of appearing to do nothing on tap.
   @State private var passwordPromptHostId: String?
 
   var body: some View {
-    NavigationSplitView(columnVisibility: $columnVisibility) {
-      sidebar
-    } detail: {
-      detail
+    ZStack {
+      VStack(spacing: 0) {
+        TerminalTitleBar(
+          store: store,
+          onOpenDrawer: openDrawer,
+          onNewSession: {
+            Task {
+              await store.newTerminal()
+            }
+          },
+          onSettings: { showSettings = true },
+          onOverflow: { showOverflow = true }
+        )
+
+        TerminalView(store: store)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+
+      #if canImport(UIKit)
+      SessionDrawerOverlay(
+        isPresented: $drawerOpen,
+        store: store,
+        onSelectSession: { hostId, sessionId in
+          if !store.hasPassword(hostId: hostId) {
+            passwordPromptHostId = hostId
+            return
+          }
+          Task {
+            await store.selectSession(hostId: hostId, sessionId: sessionId)
+          }
+        },
+        onReenterPassword: { hostId in
+          passwordPromptHostId = hostId
+        },
+        onHostSettings: { hostId in
+          settingsHostId = hostId
+          showSettings = true
+        }
+      )
+      #endif
+    }
+    .background(TetherColors.background)
+    .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
+    .sheet(isPresented: $showSettings) {
+      ConfigSettingsView(
+        store: store,
+        preferences: preferences,
+        onAddHost: {
+          showSettings = false
+          showPairing = true
+        },
+        onDismiss: {
+          settingsHostId = nil
+          showSettings = false
+        },
+        initialHostId: settingsHostId
+      )
     }
     .sheet(item: $passwordPromptHostId) { hostId in
       NavigationStack {
@@ -40,46 +100,36 @@ struct RootView: View {
           }
       }
     }
-  }
-
-  @ViewBuilder
-  private var sidebar: some View {
-    NavigationStack {
-      VStack(spacing: 0) {
-        HostListView(store: store, onAddHost: { showPairing = true }) { hostId in
-          store.activeHostId = hostId
-          // Selecting a host with no credential used to set this id and stop,
-          // which read as the tap doing nothing at all.
-          if !store.hasPassword(hostId: hostId) {
-            passwordPromptHostId = hostId
-          }
+    .confirmationDialog("Terminal", isPresented: $showOverflow, titleVisibility: .visible) {
+      if store.activeSessionId != nil {
+        Button("Rename session") {
+          renameText = store.activeSession?.name ?? store.activeSessionId ?? ""
+          showRename = true
         }
-        Divider()
-        SessionListView(store: store) { sessionId in
-          Task {
-            if let hostId = store.activeHostId {
-              await store.selectSession(hostId: hostId, sessionId: sessionId)
-            }
+        Button("Kill session", role: .destructive) {
+          if let id = store.activeSessionId {
+            Task { await store.killSession(id: id) }
           }
         }
       }
-      .navigationTitle("Tether")
-      .background(TetherColors.background)
+      Button("Cancel", role: .cancel) {}
+    }
+    .alert("Rename session", isPresented: $showRename) {
+      TextField("Name", text: $renameText)
+      Button("Save") {
+        guard let id = store.activeSessionId else { return }
+        Task {
+          await store.renameSession(id: id, name: renameText)
+        }
+      }
+      Button("Cancel", role: .cancel) {}
     }
   }
 
-  @ViewBuilder
-  private var detail: some View {
-    if store.activeSessionId != nil {
-      TerminalView(store: store)
-        .navigationBarTitleDisplayMode(.inline)
-    } else {
-      ContentUnavailableView(
-        "Select a session",
-        systemImage: "terminal",
-        description: Text("Choose a host and session from the drawer.")
-      )
-      .background(TetherColors.background)
+  private func openDrawer() {
+    Task {
+      await store.refreshDrawer()
+      drawerOpen = true
     }
   }
 }

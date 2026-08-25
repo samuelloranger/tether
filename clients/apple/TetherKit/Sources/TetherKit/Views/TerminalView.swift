@@ -2,31 +2,43 @@
 import SwiftUI
 import UIKit
 
-/// Compact modifier keys for touch-only use. Replaces the RN utility bar / floating d-pad.
+/// Full utility key row for touch input — horizontally scrollable instead of RN paging.
 public struct TerminalAccessoryBar: View {
   public var ctrlArmed: Binding<Bool>
   public var onKey: (String) -> Void
   public var onPaste: () -> Void
+  public var onHideKeyboard: () -> Void
 
-  public init(ctrlArmed: Binding<Bool>, onKey: @escaping (String) -> Void, onPaste: @escaping () -> Void) {
+  public init(
+    ctrlArmed: Binding<Bool>,
+    onKey: @escaping (String) -> Void,
+    onPaste: @escaping () -> Void,
+    onHideKeyboard: @escaping () -> Void
+  ) {
     self.ctrlArmed = ctrlArmed
     self.onKey = onKey
     self.onPaste = onPaste
+    self.onHideKeyboard = onHideKeyboard
   }
 
   public var body: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
-        accessoryButton(ctrlArmed.wrappedValue ? "Ctrl ✓" : "Ctrl") {
-          ctrlArmed.wrappedValue.toggle()
-        }
+        ctrlButton
         accessoryButton("Esc") { onKey("\u{1B}") }
         accessoryButton("Tab") { send(ctrlArmed, base: "\t") }
         accessoryButton("↑") { send(ctrlArmed, base: "\u{1B}[A") }
         accessoryButton("↓") { send(ctrlArmed, base: "\u{1B}[B") }
         accessoryButton("←") { send(ctrlArmed, base: "\u{1B}[D") }
         accessoryButton("→") { send(ctrlArmed, base: "\u{1B}[C") }
+        accessoryButton("/") { onKey("/") }
+        accessoryButton("Del") { onKey("\u{1B}[3~") }
+        accessoryButton("Home") { send(ctrlArmed, base: "\u{1B}[H") }
+        accessoryButton("End") { send(ctrlArmed, base: "\u{1B}[F") }
+        accessoryButton("PgUp") { onKey("\u{1B}[5~") }
+        accessoryButton("PgDn") { onKey("\u{1B}[6~") }
         accessoryButton("Paste", systemImage: "doc.on.clipboard", action: onPaste)
+        accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
@@ -34,11 +46,29 @@ public struct TerminalAccessoryBar: View {
     .background(.ultraThinMaterial)
   }
 
+  private var ctrlButton: some View {
+    Button {
+      ctrlArmed.wrappedValue.toggle()
+    } label: {
+      Text(ctrlArmed.wrappedValue ? "Ctrl ✓" : "Ctrl")
+        .font(.callout.weight(.medium))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(ctrlArmed.wrappedValue ? TetherColors.accent : TetherColors.surface)
+        .foregroundStyle(ctrlArmed.wrappedValue ? Color.black : TetherColors.textPrimary)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Control modifier")
+  }
+
   private func accessoryButton(_ title: String, systemImage: String? = nil, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       Group {
         if let systemImage {
           Label(title, systemImage: systemImage)
+            .labelStyle(.iconOnly)
+            .accessibilityLabel(title)
         } else {
           Text(title)
         }
@@ -47,6 +77,7 @@ public struct TerminalAccessoryBar: View {
       .padding(.horizontal, 10)
       .padding(.vertical, 8)
       .background(TetherColors.surface)
+      .foregroundStyle(TetherColors.textPrimary)
       .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     .buttonStyle(.plain)
@@ -69,15 +100,22 @@ public struct TerminalInputBridge: UIViewRepresentable {
   @Binding public var text: String
   public var accessory: AnyView
   public var onSubmitBytes: (String) -> Void
+  public var isFocused: Binding<Bool>
 
-  public init(text: Binding<String>, accessory: AnyView, onSubmitBytes: @escaping (String) -> Void) {
+  public init(
+    text: Binding<String>,
+    accessory: AnyView,
+    onSubmitBytes: @escaping (String) -> Void,
+    isFocused: Binding<Bool>
+  ) {
     _text = text
     self.accessory = accessory
     self.onSubmitBytes = onSubmitBytes
+    self.isFocused = isFocused
   }
 
   public func makeCoordinator() -> Coordinator {
-    Coordinator(onSubmitBytes: onSubmitBytes)
+    Coordinator(onSubmitBytes: onSubmitBytes, isFocused: isFocused)
   }
 
   public func makeUIView(context: Context) -> TerminalInputTextView {
@@ -99,13 +137,20 @@ public struct TerminalInputBridge: UIViewRepresentable {
     if uiView.text != text {
       uiView.text = text
     }
+    if isFocused.wrappedValue, !uiView.isFirstResponder {
+      uiView.becomeFirstResponder()
+    } else if !isFocused.wrappedValue, uiView.isFirstResponder {
+      uiView.resignFirstResponder()
+    }
   }
 
   public final class Coordinator: NSObject, UITextViewDelegate {
     let onSubmitBytes: (String) -> Void
+    let isFocused: Binding<Bool>
 
-    init(onSubmitBytes: @escaping (String) -> Void) {
+    init(onSubmitBytes: @escaping (String) -> Void, isFocused: Binding<Bool>) {
       self.onSubmitBytes = onSubmitBytes
+      self.isFocused = isFocused
     }
 
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
@@ -117,6 +162,10 @@ public struct TerminalInputBridge: UIViewRepresentable {
         onSubmitBytes(text)
       }
       return false
+    }
+
+    public func textViewDidEndEditing(_ textView: UITextView) {
+      isFocused.wrappedValue = false
     }
   }
 }
@@ -173,10 +222,15 @@ public struct TerminalView: View {
           TerminalAccessoryBar(
             ctrlArmed: $ctrlArmed,
             onKey: { store.sendInput($0) },
-            onPaste: pasteFromClipboard
+            onPaste: pasteFromClipboard,
+            onHideKeyboard: { keyboardFocused = false }
           )
         ),
-        onSubmitBytes: { store.sendInput($0) }
+        onSubmitBytes: { store.sendInput($0) },
+        isFocused: Binding(
+          get: { keyboardFocused },
+          set: { keyboardFocused = $0 }
+        )
       )
       .frame(height: 1)
       .focused($keyboardFocused)
@@ -184,12 +238,6 @@ public struct TerminalView: View {
     .background(TetherColors.background)
     .onAppear {
       keyboardFocused = true
-    }
-    .toolbar {
-      ToolbarItemGroup(placement: .keyboard) {
-        Spacer()
-        Button("Done") { keyboardFocused = false }
-      }
     }
   }
 

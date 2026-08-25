@@ -7,6 +7,8 @@ import TetherFFIBindings
 public final class SessionStore {
   public private(set) var hosts: [HostProfileModel] = []
   public private(set) var sessions: [RemoteSession] = []
+  /// Sessions keyed by host id — populated by `refreshDrawer()` for the slide-over.
+  public private(set) var sessionsByHost: [String: [RemoteSession]] = [:]
   public private(set) var healthByHost: [String: HostHealthModel] = [:]
   public var activeHostId: String?
   public var activeSessionId: String?
@@ -136,20 +138,69 @@ public final class SessionStore {
   }
 
   public func refreshSessions() async {
-    guard let client = await activeClient() else { return }
+    guard let hostId = activeHostId else { return }
+    await refreshHost(hostId: hostId)
+  }
+
+  /// Refreshes every host's session list and health for the session drawer.
+  public func refreshDrawer() async {
     isLoading = true
     defer { isLoading = false }
-    do {
-      sessions = try await client.listSessions()
-      let status = try await client.testConnection()
-      updateHealth(for: client.profile.id, status: UInt16(status))
-    } catch HostClientError.unauthorized {
-      updateHealth(for: client.profile.id, status: 401)
-      errorMessage = HostClientError.unauthorized.localizedDescription
-    } catch {
-      markHostFailure(client.profile.id)
-      errorMessage = error.localizedDescription
+    var nextSessions: [String: [RemoteSession]] = [:]
+    for host in hosts {
+      nextSessions[host.id] = await fetchSessions(for: host.id)
     }
+    sessionsByHost = nextSessions
+    if let activeHostId {
+      sessions = nextSessions[activeHostId] ?? []
+    }
+  }
+
+  /// Re-checks one host after Retry or password save.
+  public func refreshHost(hostId: String) async {
+    isLoading = true
+    defer { isLoading = false }
+    let list = await fetchSessions(for: hostId)
+    sessionsByHost[hostId] = list
+    if activeHostId == hostId {
+      sessions = list
+    }
+  }
+
+  public func newTerminal() async {
+    guard activeHostId != nil else { return }
+    let id = nextSessionId()
+    await startSession(named: id)
+  }
+
+  public var activeSession: RemoteSession? {
+    guard let activeSessionId else { return nil }
+    return sessions.first(where: { $0.id == activeSessionId })
+  }
+
+  public var activeHost: HostProfileModel? {
+    guard let activeHostId else { return nil }
+    return hosts.first(where: { $0.id == activeHostId })
+  }
+
+  public func connectionStatus(for hostId: String) -> ConnectionStatus {
+    switch healthByHost[hostId] ?? .unknown {
+    case .reachable:
+      .online
+    case .unauthorized:
+      .authFailed
+    case .unknown:
+      .connecting
+    case .unreachable:
+      .offline
+    }
+  }
+
+  public enum ConnectionStatus: Equatable, Sendable {
+    case online
+    case connecting
+    case offline
+    case authFailed
   }
 
   public func startSession(named id: String) async {
@@ -269,12 +320,49 @@ public final class SessionStore {
   }
 
   private func activeClient() async -> NativeHostClient? {
+    guard let hostId = activeHostId else { return nil }
+    return client(for: hostId)
+  }
+
+  private func client(for hostId: String) -> NativeHostClient? {
     guard
-      let hostId = activeHostId,
       let profile = hosts.first(where: { $0.id == hostId }),
-      let password = try? hostStore.password(for: hostId)
+      let password = try? hostStore.password(for: hostId),
+      let pwd = password,
+      !pwd.isEmpty
     else { return nil }
-    return NativeHostClient(profile: profile, password: password)
+    return NativeHostClient(profile: profile, password: pwd)
+  }
+
+  private func fetchSessions(for hostId: String) async -> [RemoteSession] {
+    guard let client = client(for: hostId) else { return [] }
+    do {
+      let list = try await client.listSessions()
+      let status = try await client.testConnection()
+      updateHealth(for: hostId, status: UInt16(status))
+      return list
+    } catch HostClientError.unauthorized {
+      updateHealth(for: hostId, status: 401)
+      if activeHostId == hostId {
+        errorMessage = HostClientError.unauthorized.localizedDescription
+      }
+      return []
+    } catch {
+      markHostFailure(hostId)
+      if activeHostId == hostId {
+        errorMessage = error.localizedDescription
+      }
+      return []
+    }
+  }
+
+  private func nextSessionId() -> String {
+    let existing = Set(sessions.map(\.id))
+    var index = 1
+    while existing.contains("term-\(index)") {
+      index += 1
+    }
+    return "term-\(index)"
   }
 
   private func startPolling() {
