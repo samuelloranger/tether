@@ -71,13 +71,26 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             crates/tether-core/target
-          key: cargo-core-${{ runner.os }}-${{ hashFiles('crates/tether-core/Cargo.toml') }}
+            crates/tether-proto/target
+          key: cargo-core-${{ runner.os }}-${{ hashFiles('crates/tether-core/Cargo.toml', 'crates/tether-core/Cargo.lock', 'crates/tether-proto/Cargo.toml', 'crates/tether-proto/Cargo.lock') }}
           restore-keys: |
             cargo-core-${{ runner.os }}-
 
       - name: Core tests (rust)
         timeout-minutes: 10
         run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
+        working-directory: crates/tether-core
+
+      - name: Proto crate tests (rust)
+        timeout-minutes: 10
+        run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
+        working-directory: crates/tether-proto
+
+      # Spawns the real Bun server over proto=2. Marked #[ignore] in-tree so
+      # plain `cargo test` stays hermetic; run explicitly here after bun install.
+      - name: Proto v2 conformance (rust ↔ bun)
+        timeout-minutes: 5
+        run: cargo test --test proto2_conformance -- --ignored --nocapture
         working-directory: crates/tether-core
 
       - name: Web bundle (desktop build uses this — catches web-only module resolution)
