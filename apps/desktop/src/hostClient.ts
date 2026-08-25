@@ -1,8 +1,6 @@
-export interface HostConfig {
-  host: string;
-  port: string;
-  password: string;
-}
+import type { SessionActivity } from './activity';
+import type { HostProfile } from './hostStore';
+import { authHeaders } from './secureConfig';
 
 export interface TetherSession {
   id: string;
@@ -10,9 +8,11 @@ export interface TetherSession {
   last_output_at: string | null;
   name?: string | null;
   auto_title?: string | null;
+  activity?: SessionActivity | null;
 }
 
 export interface HostClient {
+  profile: HostProfile;
   baseUrl: string;
   wsOrigin: string;
   password: string;
@@ -20,25 +20,26 @@ export interface HostClient {
   post(path: string, init?: RequestInit): Promise<Response>;
 }
 
-function authHeaders(password: string, headers?: HeadersInit): Headers {
+function mergeAuth(password: string, headers?: HeadersInit): Headers {
   const merged = new Headers(headers);
-  merged.set('Authorization', `Bearer ${password}`);
+  for (const [key, value] of Object.entries(authHeaders(password))) merged.set(key, value);
   return merged;
 }
 
-export function createHostClient(config: HostConfig): HostClient {
-  const baseUrl = `http://${config.host}:${config.port}`;
-  const wsOrigin = `ws://${config.host}:${config.port}`;
+export function createHostClient(profile: HostProfile, password: string): HostClient {
+  const baseUrl = `http://${profile.host}:${profile.port}`;
+  const wsOrigin = `ws://${profile.host}:${profile.port}`;
   const request = (path: string, init: RequestInit = {}) =>
     fetch(`${baseUrl}${path}`, {
       ...init,
-      headers: authHeaders(config.password, init.headers),
+      headers: mergeAuth(password, init.headers),
     });
 
   return {
+    profile,
     baseUrl,
     wsOrigin,
-    password: config.password,
+    password,
     get: request,
     post: (path, init = {}) => request(path, { ...init, method: init.method ?? 'POST' }),
   };
@@ -94,18 +95,32 @@ export async function fetchSessions(client: HostClient): Promise<TetherSession[]
   return rows as TetherSession[];
 }
 
-const STORAGE_KEY = 'tether.desktop.config';
-
-export function loadStoredConfig(): Partial<HostConfig> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) as Partial<HostConfig>;
-  } catch {
-    return {};
+export function nextTermId(existing: string[]): string {
+  let max = 0;
+  for (const id of existing) {
+    const match = /^term-(\d+)$/.exec(id);
+    if (match) max = Math.max(max, Number(match[1]));
   }
+  return `term-${max + 1}`;
 }
 
-export function saveStoredConfig(config: HostConfig): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+export async function killSession(client: HostClient, id: string): Promise<void> {
+  await client.post('/api/sessions/kill', {
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+}
+
+export async function renameSession(client: HostClient, id: string, name: string): Promise<void> {
+  await client.post('/api/sessions/rename', {
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, name }),
+  });
+}
+
+export async function startSession(client: HostClient, id: string): Promise<void> {
+  await client.post('/api/sessions/start', {
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
 }

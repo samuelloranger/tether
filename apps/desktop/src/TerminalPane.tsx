@@ -3,34 +3,41 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
 import { nextConnId, openCoreSocket, sendJson, type TerminalSocket } from './coreTransport';
-import { applyServerFrame, createFrameSink } from './frameHandler';
+import { applyServerFrame, createFrameSink, type FrameApplyResult } from './frameHandler';
+import type { UI_THEMES } from './preferences';
+import { createReplayGate } from './replayGate';
 
 import '@xterm/xterm/css/xterm.css';
-
-const TERM_THEME = {
-  background: '#1e1e2e',
-  foreground: '#cdd6f4',
-  cursor: '#f5e0dc',
-};
 
 export interface TerminalPaneProps {
   wsOrigin: string;
   password: string;
   sessionId: string;
+  hostId: string;
+  terminalTheme: (typeof UI_THEMES)[keyof typeof UI_THEMES]['terminal'];
+  fontFamily: string;
+  fontSize?: number;
+  onFrame: (hostId: string, sessionId: string, frame: FrameApplyResult) => void;
   onDisconnected: () => void;
 }
 
-function mountTerminal(container: HTMLElement): {
+function mountTerminal(
+  container: HTMLElement,
+  terminalTheme: TerminalPaneProps['terminalTheme'],
+  fontFamily: string,
+  fontSize: number,
+): {
   term: Terminal;
   fit: FitAddon;
   dispose: () => void;
 } {
   const term = new Terminal({
     cursorBlink: true,
-    fontFamily: 'JetBrains Mono, Fira Code, monospace',
-    fontSize: 14,
-    theme: TERM_THEME,
+    fontFamily: `${fontFamily}, ui-monospace, monospace`,
+    fontSize,
+    theme: terminalTheme,
     allowProposedApi: true,
+    scrollback: 1000,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -49,18 +56,29 @@ function readDims(fit: FitAddon): { cols: number; rows: number } {
   return { cols: dims?.cols ?? 80, rows: dims?.rows ?? 24 };
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: one effect owns connect, replay gate, and resize
 export function TerminalPane(props: TerminalPaneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef(0);
+  const onFrameRef = useRef(props.onFrame);
+  onFrameRef.current = props.onFrame;
 
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return undefined;
 
-    const { term, fit, dispose } = mountTerminal(container);
+    const { term, fit, dispose } = mountTerminal(
+      container,
+      props.terminalTheme,
+      props.fontFamily,
+      props.fontSize ?? 14,
+    );
     const sink = createFrameSink(term);
+    const replay = createReplayGate();
     let socket: TerminalSocket | null = null;
     let closed = false;
+
+    replay.onConnect();
 
     const onClose = () => {
       if (closed) return;
@@ -78,17 +96,15 @@ export function TerminalPane(props: TerminalPaneProps) {
       {
         onOpen: () => {},
         onMessage: (raw) => {
-          lastIdRef.current = applyServerFrame(sink, raw, lastIdRef.current);
+          const result = applyServerFrame(sink, raw, lastIdRef.current);
+          lastIdRef.current = result.lastAppliedId;
+          if (result.kind === 'output') replay.onOutput();
+          if (result.kind === 'reset') replay.onReset();
+          onFrameRef.current(props.hostId, props.sessionId, result);
         },
         onClose,
       },
     ).then((s) => {
-      // The effect can be torn down before this resolves — React StrictMode
-      // does exactly that on every mount, and a fast unmount does it in
-      // production too. Without this the cleanup below runs while `socket` is
-      // still null, its `socket?.close()` no-ops, and the connection that
-      // arrives a moment later is never closed: a leaked live WebSocket per
-      // mount, each one costing the server a full replay.
       if (closed) {
         s.close();
         return;
@@ -97,6 +113,7 @@ export function TerminalPane(props: TerminalPaneProps) {
     });
 
     term.onData((text) => {
+      if (replay.isReplaying()) return;
       if (socket) sendJson(socket, { type: 'input', text });
     });
 
@@ -110,11 +127,21 @@ export function TerminalPane(props: TerminalPaneProps) {
 
     return () => {
       closed = true;
+      replay.dispose();
       observer.disconnect();
       socket?.close();
       dispose();
     };
-  }, [props.sessionId, props.wsOrigin, props.password, props.onDisconnected]);
+  }, [
+    props.sessionId,
+    props.hostId,
+    props.wsOrigin,
+    props.password,
+    props.terminalTheme,
+    props.fontFamily,
+    props.fontSize,
+    props.onDisconnected,
+  ]);
 
   return <div className="terminal-host" ref={hostRef} />;
 }

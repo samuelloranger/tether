@@ -7,9 +7,6 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc;
 
-// Core-backed transport: tether-core owns the replay cursor and forwards server
-// frames verbatim. The frontend listens on conn_id-scoped events so a superseded
-// connection's late frames cannot land on a newer socket.
 #[derive(Default)]
 struct CoreBridge {
     sessions: Mutex<HashMap<String, tether_core::session::SessionHandle>>,
@@ -95,6 +92,56 @@ fn core_forget(bridge: State<CoreBridge>, session_id: String) {
     bridge.replay.forget(&session_id);
 }
 
+fn secure_entry(host_id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new("tether-desktop", &format!("server-password-{host_id}"))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secure_get_password(host_id: String) -> Result<Option<String>, String> {
+    match secure_entry(&host_id)?.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn secure_set_password(host_id: String, password: String) -> Result<(), String> {
+    secure_entry(&host_id)?
+        .set_password(&password)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secure_clear_password(host_id: String) -> Result<(), String> {
+    match secure_entry(&host_id)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn legacy_secure_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("tether-desktop", "server-password").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secure_get_legacy_password() -> Result<Option<String>, String> {
+    match legacy_secure_entry()?.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn secure_clear_legacy_password() -> Result<(), String> {
+    match legacy_secure_entry()?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(CoreBridge::default())
@@ -102,7 +149,12 @@ fn main() {
             core_connect,
             core_send,
             core_close,
-            core_forget
+            core_forget,
+            secure_get_password,
+            secure_set_password,
+            secure_clear_password,
+            secure_get_legacy_password,
+            secure_clear_legacy_password,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");

@@ -1,77 +1,165 @@
-import { useCallback, useState } from 'react';
-import { ConnectScreen } from './ConnectScreen';
-import type { HostConfig } from './hostClient';
-import { SessionListScreen } from './SessionListScreen';
+import { useMemo, useState } from 'react';
+import { HostFormScreen } from './HostFormScreen';
+import { HostsScreen } from './HostsScreen';
+import { loadPreferences, UI_THEMES } from './preferences';
+import { SessionDrawer } from './SessionDrawer';
+import { SettingsScreen } from './SettingsScreen';
+import { hostSecrets } from './secureConfig';
 import { TerminalPane } from './TerminalPane';
+import { useTetherDesktop } from './useTetherDesktop';
 
-type Screen = 'connect' | 'sessions' | 'terminal';
-
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
 export function App() {
-  const [screen, setScreen] = useState<Screen>('connect');
-  const [config, setConfig] = useState<HostConfig | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const app = useTetherDesktop();
+  const [prefs, setPrefs] = useState(loadPreferences);
+  const theme = UI_THEMES[prefs.theme];
 
-  const openSession = useCallback((id: string) => {
-    setSessionId(id);
-    setScreen('terminal');
-  }, []);
+  const editingHost = useMemo(
+    () => app.hosts.find((host) => host.id === app.editingHostId) ?? null,
+    [app.hosts, app.editingHostId],
+  );
 
-  const backToSessions = useCallback(() => {
-    setSessionId(null);
-    setScreen('sessions');
-  }, []);
-
-  if (screen === 'connect' || !config) {
+  if (!app.ready) {
     return (
-      <ConnectScreen
-        onConnected={(next) => {
-          setConfig(next);
-          setScreen('sessions');
-        }}
-      />
+      <div className="app-shell" style={{ background: theme.background, color: theme.text }}>
+        <p className="muted boot-message">Loading…</p>
+      </div>
     );
   }
 
-  if (screen === 'sessions') {
+  if (app.hosts.length === 0 || app.screen === 'host-form') {
     return (
-      <SessionListScreen
-        config={config}
-        onOpenSession={openSession}
-        onDisconnect={() => {
-          setConfig(null);
-          setScreen('connect');
-        }}
-      />
-    );
-  }
-
-  if (screen === 'terminal' && sessionId) {
-    return (
-      <div className="terminal-screen">
-        <header className="terminal-toolbar">
-          <button type="button" className="secondary" onClick={backToSessions}>
-            ← Sessions
-          </button>
-          <span className="terminal-label">{sessionId}</span>
-        </header>
-        <TerminalPane
-          wsOrigin={`ws://${config.host}:${config.port}`}
-          password={config.password}
-          sessionId={sessionId}
-          onDisconnected={backToSessions}
+      <div
+        className="app-shell centered"
+        style={{ background: theme.background, color: theme.text }}
+      >
+        <HostFormScreen
+          editing={editingHost}
+          onCancel={() => {
+            if (app.hosts.length === 0) return;
+            app.setScreen('main');
+            app.setEditingHostId(null);
+          }}
+          onSave={async (input) => {
+            let password = input.password;
+            if (input.id && !password) {
+              password = (await hostSecrets.get(input.id)) ?? '';
+            }
+            await app.saveHost({ ...input, password });
+          }}
         />
       </div>
     );
   }
 
+  if (app.screen === 'hosts') {
+    return (
+      <div
+        className="app-shell centered"
+        style={{ background: theme.background, color: theme.text }}
+      >
+        <HostsScreen
+          hosts={app.hosts}
+          healthByHost={app.healthByHost}
+          onBack={() => app.setScreen('main')}
+          onAdd={() => {
+            app.setEditingHostId(null);
+            app.setScreen('host-form');
+          }}
+          onEdit={(hostId) => {
+            app.setEditingHostId(hostId);
+            app.setScreen('host-form');
+          }}
+          onRemove={(hostId) => void app.removeHost(hostId)}
+          onSelect={app.selectHost}
+        />
+      </div>
+    );
+  }
+
+  if (app.screen === 'settings') {
+    return (
+      <div
+        className="app-shell centered"
+        style={{ background: theme.background, color: theme.text }}
+      >
+        <SettingsScreen
+          onBack={() => {
+            setPrefs(loadPreferences());
+            app.setScreen('main');
+          }}
+        />
+      </div>
+    );
+  }
+
+  const client = app.activeHost ? app.clientFor(app.activeHost) : null;
+
   return (
-    <SessionListScreen
-      config={config}
-      onOpenSession={openSession}
-      onDisconnect={() => {
-        setConfig(null);
-        setScreen('connect');
+    <div
+      className="app-shell"
+      style={{
+        background: theme.background,
+        color: theme.text,
+        ['--surface' as string]: theme.surface,
+        ['--border' as string]: theme.border,
+        ['--text-muted' as string]: theme.textMuted,
+        ['--accent' as string]: theme.accent,
+        ['--danger' as string]: theme.danger,
+        ['--success' as string]: theme.success,
+        ['--warning' as string]: theme.warning,
       }}
-    />
+    >
+      <SessionDrawer
+        hosts={app.hosts}
+        healthByHost={app.healthByHost}
+        sessions={app.sessions}
+        activeHostId={app.activeHostId}
+        activeSessionId={app.activeSessionId}
+        onSelect={app.selectSession}
+        onNew={app.newSession}
+        onKill={app.killSessionById}
+        onRename={app.renameSessionById}
+        onRetryHost={app.retryHost}
+        onReenterPassword={(hostId) => {
+          app.setEditingHostId(hostId);
+          app.setScreen('host-form');
+        }}
+        onOpenHosts={() => app.setScreen('hosts')}
+        onOpenSettings={() => app.setScreen('settings')}
+      />
+      <main className="main-pane">
+        {client && app.activeHost ? (
+          <>
+            <header className="terminal-toolbar">
+              <span className="terminal-label">{app.activeSessionLabel}</span>
+              <span className="terminal-host-label muted">
+                {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
+              </span>
+            </header>
+            <TerminalPane
+              key={`${app.terminalKey}:${prefs.theme}:${prefs.terminalFont}`}
+              hostId={app.activeHost.id}
+              sessionId={app.activeSessionId}
+              wsOrigin={client.wsOrigin}
+              password={app.activePassword}
+              terminalTheme={theme.terminal}
+              fontFamily={prefs.terminalFont}
+              onFrame={app.handleWsFrame}
+              onDisconnected={() => {
+                if (app.activeHostId) app.retryHost(app.activeHostId);
+              }}
+            />
+          </>
+        ) : (
+          <div className="empty-main">
+            <p>Select a host to connect.</p>
+            <button type="button" onClick={() => app.setScreen('hosts')}>
+              Manage hosts
+            </button>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
