@@ -183,9 +183,14 @@ jobs:
   # job starts doing real work with no edit.
   ios:
     needs: core
+    # OPT-IN ONLY. Deliberately NOT run on push, and not part of scope=all.
+    # iOS is built on a real Mac locally (see scripts/build-xcframework.sh);
+    # burning macOS runner minutes to rediscover what a local Xcode reports in
+    # seconds is the wrong trade. Dispatch with scope=ios when you want CI to
+    # confirm it independently.
     if: |
       always() && (needs.core.result == 'success' || needs.core.result == 'skipped')
-      && (github.event_name == 'push' || inputs.scope == 'all' || inputs.scope == 'ios')
+      && inputs.scope == 'ios'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
