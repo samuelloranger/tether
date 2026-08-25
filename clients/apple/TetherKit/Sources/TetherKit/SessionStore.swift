@@ -28,8 +28,10 @@ public final class SessionStore {
     profilesProvider: { [weak self] in self?.hosts ?? [] },
     onSession: { [weak self] hostId, sessionId in
       Task { @MainActor in
-        self?.activeHostId = hostId
-        self?.activeSessionId = sessionId
+        // Must go through selectSession: setting the ids alone leaves the
+        // session selected but NOT CONNECTED, so the title updates while every
+        // keystroke is dropped by `sendInput`'s missing-socket guard.
+        await self?.selectSession(hostId: hostId, sessionId: sessionId)
       }
     }
   )
