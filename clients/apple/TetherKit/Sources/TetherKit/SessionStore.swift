@@ -408,7 +408,7 @@ public final class SessionStore {
     do {
       let task = try await client.openWebSocket(
         sessionId: sessionId, sinceId: sinceId,
-        cols: Int32(terminalCols), rows: Int32(terminalRows))
+        cols: terminalCols, rows: terminalRows)
       socket = task
       task.resume()
       socketTask = Task { [weak self] in
