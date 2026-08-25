@@ -281,7 +281,11 @@ public final class SessionStore {
   }
 
   public func sendInput(_ text: String) {
-    guard let socket else { return }
+    guard let socket else {
+      NSLog("TETHERDBG sendInput dropped: no socket (session=%@)", activeSessionId ?? "nil")
+      return
+    }
+    NSLog("TETHERDBG sendInput sending %d bytes", text.utf8.count)
     guard
       let payload = try? JSONSerialization.data(withJSONObject: ["type": "input", "text": text]),
       let frame = String(data: payload, encoding: .utf8)
