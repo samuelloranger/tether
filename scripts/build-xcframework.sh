@@ -22,6 +22,7 @@ OUT_XCF="$ROOT/clients/apple/TetherKit/Frameworks/TetherFFI.xcframework"
 OUT_SWIFT="$ROOT/clients/apple/TetherKit/Sources/TetherFFIBindings"
 OUT_HEADERS="$BUILD_DIR/headers"
 
+UNIFFI_VERSION="0.28.3"
 LIB_NAME="tether_ffi"
 DEVICE_TARGET="aarch64-apple-ios"
 SIM_ARM_TARGET="aarch64-apple-ios-sim"
@@ -71,15 +72,27 @@ echo "==> Generating Swift bindings (uniffi 0.28.3)"
     --out-dir "$OUT_SWIFT"
 )
 
-# UniFFI emits tether_ffiFFI.h and tether_ffi.modulemap alongside the Swift sources.
-if [[ ! -f "$OUT_SWIFT/${LIB_NAME}FFI.h" ]]; then
-  echo "error: UniFFI header not found at $OUT_SWIFT/${LIB_NAME}FFI.h" >&2
-  exit 1
-fi
+# UniFFI emits <lib>FFI.h and <lib>FFI.modulemap next to the Swift sources.
+#
+# BOTH are required. Without the modulemap Clang cannot form the tether_ffiFFI
+# module, so the generated Swift's `#if canImport(tether_ffiFFI)` is false, the
+# import is skipped, and every C type it needs (RustBuffer, RustCallStatus,
+# ForeignBytes) is missing — producing a wall of "cannot find type in scope".
+# An earlier version guarded this copy with `if [[ -f ... ]]` and looked for the
+# wrong filename, so the miss was a silent no-op. Fail loudly instead.
+for required in "${LIB_NAME}FFI.h" "${LIB_NAME}FFI.modulemap"; do
+  if [[ ! -f "$OUT_SWIFT/$required" ]]; then
+    echo "error: UniFFI did not emit $required in $OUT_SWIFT" >&2
+    echo "       (uniffi $UNIFFI_VERSION may have changed its output names)" >&2
+    exit 1
+  fi
+done
 cp "$OUT_SWIFT/${LIB_NAME}FFI.h" "$OUT_HEADERS/"
-if [[ -f "$OUT_SWIFT/${LIB_NAME}.modulemap" ]]; then
-  cp "$OUT_SWIFT/${LIB_NAME}.modulemap" "$OUT_HEADERS/module.modulemap"
-fi
+cp "$OUT_SWIFT/${LIB_NAME}FFI.modulemap" "$OUT_HEADERS/module.modulemap"
+
+# The Swift target must contain ONLY Swift. A stray .h/.modulemap in a SwiftPM
+# source directory is not a mixed target — it is an error waiting to happen.
+rm -f "$OUT_SWIFT/${LIB_NAME}FFI.h" "$OUT_SWIFT/${LIB_NAME}FFI.modulemap"
 
 rm -rf "$OUT_XCF"
 mkdir -p "$(dirname "$OUT_XCF")"
