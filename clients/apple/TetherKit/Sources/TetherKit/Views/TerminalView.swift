@@ -124,10 +124,28 @@ public struct TerminalInputBridge: UIViewRepresentable {
 public final class TerminalInputTextView: UITextView {
   let accessoryHosting = UIHostingController<AnyView>(rootView: AnyView(EmptyView()))
 
+  /// Configured once rather than on every getter call — the previous version
+  /// mutated the hosting view's frame and background each time UIKit asked for
+  /// the accessory, which UIKit does often.
+  private lazy var accessoryContainer: UIView = {
+    let view = accessoryHosting.view!
+    view.frame.size.height = 52
+    view.backgroundColor = .clear
+    return view
+  }()
+
+  private var assignedAccessoryView: UIView?
+
+  /// UIKit declares `inputAccessoryView` as settable, so an override must
+  /// supply a setter as well — a get-only override fails to compile with
+  /// "cannot override mutable property with read-only property".
+  ///
+  /// The keyboard accessory is owned by this view; an explicit assignment from
+  /// outside still wins, which keeps the property honest rather than silently
+  /// ignoring the setter.
   public override var inputAccessoryView: UIView? {
-    accessoryHosting.view.frame.size.height = 52
-    accessoryHosting.view.backgroundColor = .clear
-    return accessoryHosting.view
+    get { assignedAccessoryView ?? accessoryContainer }
+    set { assignedAccessoryView = newValue }
   }
 
   public override var canBecomeFirstResponder: Bool { true }
