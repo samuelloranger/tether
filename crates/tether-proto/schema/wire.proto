@@ -1,0 +1,138 @@
+// Tether protocol v2 wire schema.
+//
+// Frames are length-prefixed binary:
+//
+//     u8  kind        (FrameKind)
+//     u32 len         (big-endian)
+//     [len bytes payload]
+//
+// `kind = FRAME_KIND_OUTPUT` carries RAW PTY BYTES — no protobuf wrapper and no
+// base64. Every other kind carries one protobuf message from this file, named
+// after the kind. `FRAME_KIND_RESET` / `FRAME_KIND_PING` carry empty messages so
+// they can grow fields later without a kind change.
+//
+// Protocol v1 (`/api/ws?proto=1`) is the JSON protocol the shipping Expo client
+// speaks; it is frozen and is NOT described here. v2 is `?proto=2`.
+//
+// Field numbers are explicit and never reused. Ranges 1..15 are the cheap
+// single-byte tags; leave the tail of each message free for additions.
+
+syntax = "proto3";
+
+package tether.v2;
+
+// ---------------------------------------------------------------------------
+// Frame kinds — the single source of truth for the `kind` byte, in BOTH
+// directions. Server->client kinds are 1..31, client->server kinds are 32..63.
+// Values are stable; a retired kind is `reserved`, never recycled.
+// ---------------------------------------------------------------------------
+enum FrameKind {
+  FRAME_KIND_UNSPECIFIED = 0;
+
+  // server -> client
+  FRAME_KIND_OUTPUT = 1; // raw PTY bytes, NOT protobuf
+  FRAME_KIND_EXIT = 2; // ExitFrame
+  FRAME_KIND_TITLE = 3; // TitleFrame
+  FRAME_KIND_ACTIVITY = 4; // ActivityFrame
+  FRAME_KIND_DIFF = 5; // DiffFrame
+  FRAME_KIND_RESET = 6; // ResetFrame
+  FRAME_KIND_PING = 7; // PingFrame
+  FRAME_KIND_CURSOR = 8; // CursorFrame — opaque replay position
+
+  // client -> server
+  FRAME_KIND_INPUT = 32; // InputFrame
+  FRAME_KIND_RESIZE = 33; // ResizeFrame
+  FRAME_KIND_FOCUS = 34; // FocusFrame
+}
+
+// ---------------------------------------------------------------------------
+// server -> client
+// ---------------------------------------------------------------------------
+
+// v1: {type:'exit', exitCode?:number}
+message ExitFrame {
+  optional int32 exit_code = 1;
+}
+
+// v1: {type:'title', title:string}
+message TitleFrame {
+  string title = 1;
+}
+
+enum Activity {
+  ACTIVITY_UNSPECIFIED = 0;
+  ACTIVITY_WORKING = 1;
+  ACTIVITY_WAITING = 2;
+  ACTIVITY_IDLE = 3;
+}
+
+// v1: {type:'activity', activity:'working'|'waiting'|'idle'}
+message ActivityFrame {
+  Activity activity = 1;
+}
+
+// gitDiff.ts DiffFileStat
+message DiffFileStat {
+  string path = 1;
+  int32 insertions = 2;
+  int32 deletions = 3;
+  bool binary = 4;
+  // Index (staged) vs working-tree (unstaged) side. A partially staged file
+  // appears twice, once per side. Absent on older payloads.
+  optional bool staged = 5;
+}
+
+// gitDiff.ts DiffSummary
+message DiffSummary {
+  repeated DiffFileStat files = 1;
+}
+
+// gitStatus.ts RepoStatus
+message RepoStatus {
+  string branch = 1;
+  string short_sha = 2;
+  bool detached = 3;
+  optional string upstream = 4;
+  int32 ahead = 5;
+  int32 behind = 6;
+}
+
+// v1: {type:'diff', summary:DiffSummary, status:RepoStatus}
+message DiffFrame {
+  DiffSummary summary = 1;
+  optional RepoStatus status = 2;
+}
+
+// v1: {type:'reset'} — wipe the emulator, a replay hole follows.
+message ResetFrame {}
+
+// v1: {type:'ping'} — keepalive.
+message PingFrame {}
+
+// v2 only. Replaces v1's per-output-frame integer `id`: the client stores this
+// opaque string and hands it back as `?cursor=` on reconnect. Row ids in
+// `terminal_logs` are an implementation detail the client never sees.
+message CursorFrame {
+  string cursor = 1;
+}
+
+// ---------------------------------------------------------------------------
+// client -> server
+// ---------------------------------------------------------------------------
+
+// v1: {type:'input', text:string}. Bytes, not string: a paste is arbitrary
+// binary as far as the PTY is concerned.
+message InputFrame {
+  bytes data = 1;
+}
+
+// v1: {type:'resize', cols:number, rows:number}
+message ResizeFrame {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+// v1: {type:'focus', focused:boolean}
+message FocusFrame {
+  bool focused = 1;
+}
