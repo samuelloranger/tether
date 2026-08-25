@@ -190,6 +190,31 @@ public final class SessionStore {
     }
   }
 
+  /// Whether a password is already stored for this host.
+  ///
+  /// A host can exist without one — restored from storage, or created before
+  /// pairing completed — and in that state every authenticated request will
+  /// fail. The UI needs to know so it can ask, rather than silently doing
+  /// nothing when the host is selected.
+  public func hasPassword(hostId: String) -> Bool {
+    guard let password = try? hostStore.password(for: hostId) else { return false }
+    return !(password ?? "").isEmpty
+  }
+
+  /// Stores a password for an existing host and immediately re-checks the host.
+  ///
+  /// Distinct from pairing, which CREATES a host. This attaches a credential to
+  /// one that is already saved.
+  public func savePassword(_ password: String, for hostId: String) async {
+    do {
+      try hostStore.setPassword(password, for: hostId)
+      errorMessage = nil
+      await refreshSessions()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
   public func selectSession(hostId: String, sessionId: String) async {
     activeHostId = hostId
     activeSessionId = sessionId
