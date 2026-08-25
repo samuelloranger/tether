@@ -25,8 +25,8 @@ Tauri desktop backend, and over UniFFI by a native SwiftUI iOS app.
    reason to be React Native.
 4. **Native iOS.** A real SwiftUI app with real keyboard handling, replacing the
    WebView-in-RN terminal.
-5. **A protocol worth keeping.** Binary frames, no base64 on the hot path, and TLS with
-   certificate pinning.
+5. **A protocol worth keeping.** Binary frames end-to-end (no JSON escaping on the client
+   path, no base64 on the holder path), and TLS with certificate pinning.
 
 ## Non-goals
 
@@ -125,9 +125,15 @@ u32 len
 [len bytes payload]
 ```
 
-`kind=OUTPUT` carries **raw PTY bytes** — no base64, no protobuf wrapper on the hot
-path, killing today's 33% inflation. Everything structural (title, activity, exit, diff,
-session list) is a protobuf message.
+`kind=OUTPUT` carries **raw PTY bytes** — no protobuf wrapper on the hot path.
+Everything structural (title, activity, exit, diff, session list) is a protobuf message.
+
+What this actually saves on the client path: today's output frame is
+`{"type":"output","chunk":"...","id":N}` with the chunk as a plain UTF-8 string, so the
+cost is JSON escaping (every `ESC` becomes `` — six bytes for one, and
+ANSI-heavy TUI output is dense with them) plus a `JSON.parse` per frame on the client.
+Raw bytes remove both. Note this is *not* a base64 saving — the client protocol does not
+base64-encode. That inflation exists only on the holder socket, below.
 
 **Replay** moves from a monotonic `sinceId` to an **opaque cursor** returned with each
 batch. This decouples replay from `terminal_logs` row ids, so the log store can later
@@ -138,7 +144,8 @@ shapes with protobuf bodies. They are request/response and low frequency; moving
 WS-RPC would be churn for no gain. Only the WS gateway changes character.
 
 **The holder socket adopts the same framing.** Server ↔ holder is newline-delimited JSON
-with base64 payloads today. Same length-prefixed frames, no base64, and the codec is now
+with base64 payloads today — this is where the 33% inflation actually lives, on every
+byte the PTY produces. Same length-prefixed frames, no base64, and the codec is now
 shared with the client protocol — one implementation, one set of tests.
 
 **Coexistence.** `/api/ws?proto=1` is today's JSON protocol, untouched, serving the
