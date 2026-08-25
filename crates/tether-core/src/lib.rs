@@ -5,11 +5,18 @@
 //! dependency.
 
 pub mod deep_link;
+pub mod host_client;
 pub mod host_health;
+pub mod host_polling;
 pub mod host_store;
 pub mod protocol;
 pub mod push_deep_link;
 pub mod push_registration;
 pub mod replay;
 pub mod session;
+pub mod session_cache;
+pub mod session_host_ops;
+pub mod session_polling;
 pub mod store;
+pub mod terminal_session_logic;
+pub mod tether_app_actions;
