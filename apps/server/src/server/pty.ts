@@ -14,7 +14,9 @@ import {
   instances,
   killed,
   type SessionInstance,
-  sendFrame,
+  sendHolderInput,
+  sendHolderKill,
+  sendHolderResize,
   sockPathFor,
 } from './ptyHolder';
 import { clampDims, planPtyResize } from './ptyResize';
@@ -209,7 +211,7 @@ export function writeToSession(id: string, text: string) {
   // immediately instead of waiting for echo output.
   const activity = recordInput(id);
   if (activity) broadcast(id, { type: 'activity', activity });
-  return sendFrame(id, { t: 'i', d: Buffer.from(text, 'utf8').toString('base64') });
+  return sendHolderInput(id, text);
 }
 
 // Fit the PTY to the smallest attached client so a shared session renders
@@ -221,7 +223,7 @@ function recomputeSize(id: string) {
   const dims = planPtyResize(inst.ptyDims, inst.clientDims.values());
   if (!dims) return;
   inst.ptyDims = dims;
-  sendFrame(id, { t: 'r', c: dims.cols, r: dims.rows });
+  sendHolderResize(id, dims.cols, dims.rows);
 }
 
 // Record this client's requested size and re-fit the PTY to the smallest client.
@@ -265,7 +267,7 @@ export function kickSessionGitWatch(id: string): void {
 
 export function killSession(id: string) {
   const instance = instances.get(id);
-  const hadInstance = sendFrame(id, { t: 'k' });
+  const hadInstance = sendHolderKill(id);
   // The holder's exit frame lands after we return; flag it so the 'x' handler
   // doesn't resurrect the row (see `killed`).
   if (hadInstance) killed.add(id);

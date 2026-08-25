@@ -3,7 +3,9 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { decodeHolderFrame, HOLDER_PROTO_VERSION, type HolderMessage } from './holderFrame';
 import { getLiveCwd, recordChunk } from './liveCwd';
+import { FrameDecoder } from './proto/frame';
 import {
   killSession,
   type Subscriber,
@@ -90,21 +92,17 @@ test("a fresh connection to an existing holder immediately learns the shell's cu
     // A brand new raw connection to the same holder socket — exactly what a
     // restarted server process does on reattach, bypassing pty.ts's own
     // instances Map (which already holds this session live in this test).
-    const frames: Array<{ t: string; d?: string }> = [];
-    let lineBuf = '';
+    const frames: HolderMessage[] = [];
+    const decoder = new FrameDecoder();
     raw = await new Promise<import('bun').Socket>((resolve, reject) => {
       Bun.connect({
         unix: sockPathFor(id),
         socket: {
           open: (sock) => resolve(sock),
           data: (_sock, buf) => {
-            lineBuf += buf.toString('utf8');
-            let nl = lineBuf.indexOf('\n');
-            while (nl !== -1) {
-              const line = lineBuf.slice(0, nl);
-              lineBuf = lineBuf.slice(nl + 1);
-              nl = lineBuf.indexOf('\n');
-              if (line) frames.push(JSON.parse(line));
+            for (const frame of decoder.push(new Uint8Array(buf))) {
+              const msg = decodeHolderFrame(frame);
+              if (msg) frames.push(msg);
             }
           },
           error: reject,
@@ -113,8 +111,12 @@ test("a fresh connection to an existing holder immediately learns the shell's cu
       });
     });
 
-    await waitFor(() => frames.some((f) => f.t === 'c'));
-    expect(frames.find((f) => f.t === 'c')?.d).toBe(root);
+    // HELLO first, so a reattaching server knows the dialect before it writes.
+    await waitFor(() => frames.some((f) => f.type === 'hello'));
+    expect(frames[0]).toEqual({ type: 'hello', version: HOLDER_PROTO_VERSION });
+    await waitFor(() => frames.some((f) => f.type === 'cwd'));
+    const cwdFrame = frames.find((f) => f.type === 'cwd');
+    expect(cwdFrame?.type === 'cwd' && cwdFrame.cwd).toBe(root);
   } finally {
     raw?.end();
     killSession(id);

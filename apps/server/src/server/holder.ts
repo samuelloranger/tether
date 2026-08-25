@@ -1,17 +1,28 @@
 // PTY holder: a tiny detached process that owns one session's PTY so the shell
 // (and everything running in it — claude, builds, ssh) survives tether server
-// restarts. The server talks to it over a unix socket with newline-delimited
-// JSON frames; base64 payloads keep the byte stream binary-safe.
-//
-//   server -> holder: {t:'i', d}(input b64) {t:'r', c, r}(resize) {t:'k'}(kill)
-//   holder -> server: {t:'o', d}(output b64) {t:'x', code}(pty exit) {t:'c', d}(cwd)
+// restarts. The server talks to it over a unix socket with length-prefixed
+// binary frames — see holderFrame.ts for the frame kinds and for why a holder
+// still understands the pre-v2 newline-JSON dialect on the way in.
 //
 // Invoked in-process via the `holder` subcommand (main.ts), so it works whether
 // running from source (bun) or the compiled binary. argv is the tail after the
 // subcommand: <socketPath> <cols> <rows> <cwd> <cmd> [args...]
 
 import { chmodSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  decodeHolderFrame,
+  decodeLegacyHolderLine,
+  encodeHolderCwd,
+  encodeHolderExit,
+  encodeHolderHello,
+  encodeHolderOutput,
+  type HolderDialect,
+  type HolderMessage,
+  sniffDialect,
+  takeLegacyLines,
+} from './holderFrame';
 import { getProcessCwd } from './procCwd';
+import { FrameDecoder } from './proto/frame';
 
 // A process's session id, read straight from the kernel (/proc/<pid>/stat
 // field 6 — session — after the "pid (comm)" prefix, which we skip past by
@@ -75,14 +86,14 @@ function killHolderPty(proc: HolderProc): void {
   }, 1000);
 }
 
-function applyHolderFrame(proc: HolderProc, line: string, killPty: () => void): void {
+function applyHolderFrame(proc: HolderProc, msg: HolderMessage | null, killPty: () => void): void {
+  if (!msg) return;
   try {
-    const msg = JSON.parse(line);
-    if (msg.t === 'i' && proc.terminal) {
-      proc.terminal.write(Buffer.from(msg.d, 'base64').toString('utf8'));
-    } else if (msg.t === 'r' && proc.terminal) {
-      proc.terminal.resize(msg.c, msg.r);
-    } else if (msg.t === 'k') {
+    if (msg.type === 'input' && proc.terminal) {
+      proc.terminal.write(Buffer.from(msg.data).toString('utf8'));
+    } else if (msg.type === 'resize' && proc.terminal) {
+      proc.terminal.resize(msg.cols, msg.rows);
+    } else if (msg.type === 'kill') {
       killPty();
     }
   } catch {}
@@ -96,21 +107,52 @@ type HolderClient = import('bun').Socket<unknown>;
 
 type HolderBuffer = {
   client: HolderClient | null;
-  frames: string[];
+  frames: Uint8Array[];
   bytes: number;
+  // Inbound state, reset per connection: which dialect the attached server is
+  // speaking, plus the reassembly buffer for whichever it turned out to be.
+  dialect: HolderDialect | null;
+  decoder: FrameDecoder;
   lineBuf: string;
 };
 
-function sendHolderFrame(buf: HolderBuffer, frame: string, rawLen: number): void {
+function sendHolderFrame(buf: HolderBuffer, frame: Uint8Array): void {
   if (buf.client) {
     buf.client.write(frame);
     return;
   }
   buf.frames.push(frame);
-  buf.bytes += rawLen;
+  buf.bytes += frame.byteLength;
   while (buf.bytes > BUFFER_CAP && buf.frames.length > 1) {
     const dropped = buf.frames.shift();
-    if (dropped) buf.bytes -= dropped.length;
+    if (dropped) buf.bytes -= dropped.byteLength;
+  }
+}
+
+// A server can only be mid-update, not mid-dialect: the first byte it sends
+// decides, and the frame kinds can never collide with `{`.
+function readHolderInput(
+  buf: HolderBuffer,
+  chunk: Buffer,
+  proc: HolderProc,
+  killPty: () => void,
+): void {
+  if (buf.dialect === null && chunk.length > 0) buf.dialect = sniffDialect(chunk[0]);
+  if (buf.dialect === 'legacy') {
+    buf.lineBuf += chunk.toString('utf8');
+    const { lines, rest } = takeLegacyLines(buf.lineBuf);
+    buf.lineBuf = rest;
+    for (const line of lines) applyHolderFrame(proc, decodeLegacyHolderLine(line), killPty);
+    return;
+  }
+  try {
+    for (const frame of buf.decoder.push(new Uint8Array(chunk))) {
+      applyHolderFrame(proc, decodeHolderFrame(frame), killPty);
+    }
+  } catch {
+    // Desynced stream: there is no honest resync point. Drop the link and let
+    // the server reconnect — the PTY is untouched, so nothing is lost.
+    buf.client?.end();
   }
 }
 
@@ -127,24 +169,24 @@ function listenHolder(
         // One server at a time: a reconnecting tether server replaces the old link.
         if (buf.client) buf.client.end();
         buf.client = sock;
+        buf.dialect = null;
+        buf.decoder = new FrameDecoder();
+        buf.lineBuf = '';
+        // HELLO first, before anything else: it is how the server learns which
+        // dialect this holder speaks without waiting on PTY output. A pre-v2
+        // server discards it as an unparseable line, which is harmless.
+        sock.write(encodeHolderHello());
         // Fresh read (not just whatever was true at spawn time) so a
         // reattaching server learns about every `cd` that happened while it
         // was gone, not just the shell's starting directory.
         const currentCwd = getProcessCwd(proc.pid);
-        if (currentCwd) sock.write(`${JSON.stringify({ t: 'c', d: currentCwd })}\n`);
+        if (currentCwd) sock.write(encodeHolderCwd(currentCwd));
         for (const frame of buf.frames) sock.write(frame);
         buf.frames = [];
         buf.bytes = 0;
       },
       data(_sock, chunk) {
-        buf.lineBuf += chunk.toString('utf8');
-        let nl = buf.lineBuf.indexOf('\n');
-        while (nl !== -1) {
-          const line = buf.lineBuf.slice(0, nl);
-          buf.lineBuf = buf.lineBuf.slice(nl + 1);
-          nl = buf.lineBuf.indexOf('\n');
-          if (line) applyHolderFrame(proc, line, killPty);
-        }
+        readHolderInput(buf, chunk, proc, killPty);
       },
       close(sock) {
         if (buf.client === sock) buf.client = null; // detached — keep running, buffer output
@@ -170,7 +212,14 @@ export function runHolder(argv: string[]): void {
     process.exit(2);
   }
 
-  const buf: HolderBuffer = { client: null, frames: [], bytes: 0, lineBuf: '' };
+  const buf: HolderBuffer = {
+    client: null,
+    frames: [],
+    bytes: 0,
+    dialect: null,
+    decoder: new FrameDecoder(),
+    lineBuf: '',
+  };
   const proc = Bun.spawn(cmdArgs, {
     cwd,
     env: { ...process.env, TERM: 'xterm-256color' },
@@ -178,8 +227,7 @@ export function runHolder(argv: string[]): void {
       cols: Number(colsArg) || 80,
       rows: Number(rowsArg) || 24,
       data(_terminal, bytes) {
-        const d = Buffer.from(bytes).toString('base64');
-        sendHolderFrame(buf, `${JSON.stringify({ t: 'o', d })}\n`, bytes.length);
+        sendHolderFrame(buf, encodeHolderOutput(new Uint8Array(bytes)));
       },
     },
   });
@@ -188,7 +236,7 @@ export function runHolder(argv: string[]): void {
   // shell ever draws a prompt (a brand new session, or a server reconnecting
   // to a holder that survived a restart) would otherwise have no way to know
   // it until the next OSC 7 escape comes through.
-  sendHolderFrame(buf, `${JSON.stringify({ t: 'c', d: cwd })}\n`, 0);
+  sendHolderFrame(buf, encodeHolderCwd(cwd));
 
   try {
     unlinkSync(socketPath); // stale socket from a crashed predecessor
@@ -218,7 +266,7 @@ export function runHolder(argv: string[]): void {
   } catch {}
 
   proc.exited.then((code) => {
-    sendHolderFrame(buf, `${JSON.stringify({ t: 'x', code })}\n`, 0);
+    sendHolderFrame(buf, encodeHolderExit(code));
     // Give the attached server a beat to read the exit frame before dying.
     setTimeout(() => {
       server.stop(true);

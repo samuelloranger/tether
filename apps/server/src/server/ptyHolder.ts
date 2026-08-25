@@ -7,9 +7,22 @@ import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
 import { findGitRoot } from './gitRoot';
 import { EMPTY_REPO_STATUS, type RepoStatus } from './gitStatus';
 import { GitWatch } from './gitWatch';
+import {
+  decodeHolderFrame,
+  decodeLegacyHolderLine,
+  encodeHolderInput,
+  encodeHolderKill,
+  encodeHolderResize,
+  encodeLegacyHolderFrame,
+  type HolderDialect,
+  type HolderMessage,
+  sniffDialect,
+  takeLegacyLines,
+} from './holderFrame';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import type { NotificationEvent } from './notifications';
 import { CONFIG_DIR } from './paths';
+import { FrameDecoder } from './proto/frame';
 import type { Dims } from './ptyResize';
 import { buildPushContent, sendPush } from './push';
 import { type Activity, clearActivity, recordOutputEvent } from './sessionActivity';
@@ -35,6 +48,8 @@ export type FocusSubscriber = Subscriber & { focused?: boolean };
 
 export interface SessionInstance {
   sock: Socket;
+  /** Framing state for this holder link — see negotiation notes on HolderLink. */
+  link: HolderLink;
   subscribers: Set<FocusSubscriber>;
   diffSummary: DiffSummary;
   repoStatus: RepoStatus;
@@ -85,12 +100,88 @@ function notify(id: string, event: NotificationEvent): void {
   if (pushContent) void sendPush(pushContent, ctx);
 }
 
+/**
+ * Per-connection state for one holder link, including which framing dialect the
+ * holder on the other end speaks.
+ *
+ * Holders are detached processes, so a server that has just been updated will
+ * find holders still running the pre-v2 newline-JSON code. Adopting them is not
+ * optional: a user with a running shell must not lose it to a server update.
+ *
+ * Negotiation is one byte. A v2 holder sends HELLO the moment we connect; the
+ * legacy dialect's frames are JSON objects, so they always start with `{`, which
+ * no binary frame can. Until the first inbound byte arrives, outbound frames are
+ * queued rather than guessed at — sending binary to a legacy holder would drop a
+ * resize on the floor. Only a legacy holder can be silent on connect (a v2 one
+ * always says HELLO), so if nothing arrives we settle on legacy.
+ */
 type HolderLink = {
   decoder: TextDecoder;
   pendingOutput: string[];
   exited: boolean;
+  dialect: HolderDialect | null;
+  frames: FrameDecoder;
   lineBuf: string;
+  outQueue: HolderMessage[];
+  dialectTimer: ReturnType<typeof setTimeout> | null;
+  sock: Socket | null;
 };
+
+/** How long to wait for a holder's first byte before assuming the old dialect. */
+export const HOLDER_DIALECT_TIMEOUT_MS = 1000;
+
+function newHolderLink(): HolderLink {
+  return {
+    decoder: new TextDecoder('utf-8'),
+    pendingOutput: [],
+    exited: false,
+    dialect: null,
+    frames: new FrameDecoder(),
+    lineBuf: '',
+    outQueue: [],
+    dialectTimer: null,
+    sock: null,
+  };
+}
+
+function writeHolderMessage(link: HolderLink, msg: HolderMessage): void {
+  if (!link.sock) return;
+  if (link.dialect === 'legacy') {
+    const line = encodeLegacyHolderFrame(msg);
+    if (line) link.sock.write(line);
+    return;
+  }
+  if (msg.type === 'input') link.sock.write(encodeHolderInput(msg.data));
+  else if (msg.type === 'resize') link.sock.write(encodeHolderResize(msg.cols, msg.rows));
+  else if (msg.type === 'kill') link.sock.write(encodeHolderKill());
+}
+
+function settleDialect(link: HolderLink, dialect: HolderDialect): void {
+  link.dialect = dialect;
+  if (link.dialectTimer) {
+    clearTimeout(link.dialectTimer);
+    link.dialectTimer = null;
+  }
+  const queued = link.outQueue;
+  link.outQueue = [];
+  for (const msg of queued) writeHolderMessage(link, msg);
+}
+
+/** Queues until the dialect is known, then writes in it. */
+export function sendHolderMessage(id: string, msg: HolderMessage): boolean {
+  const link = instances.get(id)?.link;
+  if (!link) return false;
+  if (link.dialect === null) {
+    link.outQueue.push(msg);
+    return true;
+  }
+  try {
+    writeHolderMessage(link, msg);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function flushHolderOutput(id: string, link: HolderLink): void {
   if (link.pendingOutput.length === 0) return;
@@ -120,38 +211,33 @@ function flushHolderOutput(id: string, link: HolderLink): void {
   }
 }
 
-function handleHolderLine(id: string, line: string, link: HolderLink): void {
-  let msg: { t: string; d?: string; code?: number };
-  try {
-    msg = JSON.parse(line);
-  } catch {
-    return;
-  }
-  if (msg.t === 'o' && msg.d) {
-    const text = link.decoder.decode(Buffer.from(msg.d, 'base64'), { stream: true });
+function handleHolderMessage(id: string, msg: HolderMessage | null, link: HolderLink): void {
+  if (!msg) return;
+  if (msg.type === 'output') {
+    const text = link.decoder.decode(msg.data, { stream: true });
     if (text) link.pendingOutput.push(text);
-  } else if (msg.t === 'c' && msg.d) {
+  } else if (msg.type === 'cwd') {
     // A holder-reported cwd (spawn time, or a fresh kernel read on every new
     // client attach) — arms git watching without waiting on an OSC 7 prompt
     // redraw, which may be a long time coming (or never, mid-TUI).
-    reportCwd(id, msg.d);
-    instances.get(id)?.gitWatch.setRoot(findGitRoot(msg.d));
-  } else if (msg.t === 'x') {
+    reportCwd(id, msg.cwd);
+    instances.get(id)?.gitWatch.setRoot(findGitRoot(msg.cwd));
+  } else if (msg.type === 'exit') {
     link.exited = true;
     // Flush any buffered partial multi-byte sequence the streaming decoder is
     // still holding (PTY died mid-emoji) so the tail isn't silently dropped.
     const tail = link.decoder.decode();
     if (tail) link.pendingOutput.push(tail);
     flushHolderOutput(id, link);
-    console.log(`PTY process for session "${id}" exited with code ${msg.code}`);
+    console.log(`PTY process for session "${id}" exited with code ${msg.exitCode}`);
     if (killed.delete(id)) {
       deleteSession(id);
     } else {
       const sess = getSession(id);
       upsertSession(id, sess?.command ?? 'bash', 'stopped');
     }
-    broadcast(id, { type: 'exit', exitCode: msg.code });
-    notify(id, { type: 'exit', exitCode: msg.code });
+    broadcast(id, { type: 'exit', exitCode: msg.exitCode });
+    notify(id, { type: 'exit', exitCode: msg.exitCode });
     instances.get(id)?.gitWatch.dispose();
     instances.get(id)?.subscribers.clear();
     instances.delete(id);
@@ -160,6 +246,33 @@ function handleHolderLine(id: string, line: string, link: HolderLink): void {
     clearInsertCount(id);
     clearActivity(id);
   }
+}
+
+/**
+ * Feeds inbound holder bytes through whichever dialect this link settled on,
+ * choosing it from the first byte if we have not yet.
+ */
+function readHolderData(id: string, link: HolderLink, buf: Buffer): void {
+  if (link.dialect === null && buf.length > 0) settleDialect(link, sniffDialect(buf[0]));
+  if (link.dialect === 'legacy') {
+    link.lineBuf += buf.toString('utf8');
+    const { lines, rest } = takeLegacyLines(link.lineBuf);
+    link.lineBuf = rest;
+    for (const line of lines) handleHolderMessage(id, decodeLegacyHolderLine(line), link);
+  } else {
+    try {
+      for (const frame of link.frames.push(new Uint8Array(buf))) {
+        handleHolderMessage(id, decodeHolderFrame(frame), link);
+      }
+    } catch (err) {
+      // Desynced framing: nothing after this point can be trusted, so drop the
+      // link. The holder keeps the PTY alive and the next attach starts clean.
+      console.error(`Holder link for session "${id}" desynced:`, err);
+      link.sock?.end();
+      return;
+    }
+  }
+  flushHolderOutput(id, link);
 }
 
 function onHolderSocketClose(id: string, link: HolderLink): void {
@@ -188,12 +301,7 @@ function onHolderSocketClose(id: string, link: HolderLink): void {
 // Connect to a session's holder socket and wire its frames into the existing
 // log + broadcast pipeline. Resolves once attached; rejects if nothing listens.
 export function attach(id: string, sockPath: string = sockPathFor(id)): Promise<SessionInstance> {
-  const link: HolderLink = {
-    decoder: new TextDecoder('utf-8'),
-    pendingOutput: [],
-    exited: false,
-    lineBuf: '',
-  };
+  const link = newHolderLink();
   return new Promise((resolve, reject) => {
     let settled = false;
     Bun.connect({
@@ -201,6 +309,13 @@ export function attach(id: string, sockPath: string = sockPathFor(id)): Promise<
       socket: {
         open(sock) {
           settled = true;
+          link.sock = sock;
+          // Only a pre-v2 holder can stay silent on connect; a v2 one answers
+          // with HELLO immediately. Waiting is what lets queued frames go out
+          // in the right dialect instead of the wrong one.
+          link.dialectTimer = setTimeout(() => {
+            if (link.dialect === null) settleDialect(link, 'legacy');
+          }, HOLDER_DIALECT_TIMEOUT_MS);
           const gitWatch = new GitWatch((summary, status) => {
             const active = instances.get(id);
             if (!active) return;
@@ -210,6 +325,7 @@ export function attach(id: string, sockPath: string = sockPathFor(id)): Promise<
           });
           const instance: SessionInstance = {
             sock,
+            link,
             subscribers: new Set(),
             diffSummary: EMPTY_DIFF_SUMMARY,
             repoStatus: EMPTY_REPO_STATUS,
@@ -221,17 +337,10 @@ export function attach(id: string, sockPath: string = sockPathFor(id)): Promise<
           resolve(instance);
         },
         data(_sock, buf) {
-          link.lineBuf += buf.toString('utf8');
-          let nl = link.lineBuf.indexOf('\n');
-          while (nl !== -1) {
-            const line = link.lineBuf.slice(0, nl);
-            link.lineBuf = link.lineBuf.slice(nl + 1);
-            nl = link.lineBuf.indexOf('\n');
-            if (line) handleHolderLine(id, line, link);
-          }
-          flushHolderOutput(id, link);
+          readHolderData(id, link, buf);
         },
         close() {
+          if (link.dialectTimer) clearTimeout(link.dialectTimer);
           onHolderSocketClose(id, link);
         },
         error() {},
@@ -242,13 +351,17 @@ export function attach(id: string, sockPath: string = sockPathFor(id)): Promise<
   });
 }
 
-export function sendFrame(id: string, frame: object): boolean {
-  const instance = instances.get(id);
-  if (!instance) return false;
-  try {
-    instance.sock.write(`${JSON.stringify(frame)}\n`);
-    return true;
-  } catch {
-    return false;
-  }
+/** Sends keystrokes/paste to the PTY. */
+export function sendHolderInput(id: string, text: string): boolean {
+  return sendHolderMessage(id, { type: 'input', data: new TextEncoder().encode(text) });
+}
+
+/** Resizes the PTY. */
+export function sendHolderResize(id: string, cols: number, rows: number): boolean {
+  return sendHolderMessage(id, { type: 'resize', cols, rows });
+}
+
+/** Asks the holder to take its PTY down. */
+export function sendHolderKill(id: string): boolean {
+  return sendHolderMessage(id, { type: 'kill' });
 }
