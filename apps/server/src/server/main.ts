@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { LOG_FILE, PID_FILE, PRESENT_CONTROL_TOKEN_FILE, STATE_DIR } from './paths';
 import { processStartTime } from './procIdentity';
 import { COMPILED, selfArgv, VERSION } from './runtime';
+import { resolveListenerPlan } from './tlsConfig';
 
 const PORT = process.env.TETHER_PORT ?? '8085';
 
@@ -159,13 +160,25 @@ async function status(): Promise<void> {
     console.log('tether: stopped');
     return;
   }
+  const plan = resolveListenerPlan();
+  // Probe whichever listener is actually open. Under TETHER_TLS=only there is no
+  // plaintext port, and probing it would report a healthy daemon as dead.
+  const probe =
+    plan.httpPort !== null
+      ? { url: `http://localhost:${plan.httpPort}/`, label: `:${plan.httpPort} HTTP` }
+      : { url: `https://localhost:${plan.httpsPort}/`, label: `:${plan.httpsPort} HTTPS` };
   let reachable = false;
   try {
-    const res = await fetch(`http://localhost:${PORT}/`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(probe.url, {
+      signal: AbortSignal.timeout(1500),
+      // Our own self-signed certificate: pinning is the client's job, and this
+      // probe already proved identity via the pid file.
+      tls: { rejectUnauthorized: false },
+    });
     reachable = res.ok;
   } catch {}
   console.log(
-    `tether: running (pid ${pid}) on :${PORT} — HTTP ${reachable ? 'ok' : 'not responding'}`,
+    `tether: running (pid ${pid}) on ${probe.label} ${reachable ? 'ok' : 'not responding'}`,
   );
 }
 
@@ -258,6 +271,8 @@ Usage: tether <command>
   help             Show this help
 
 Env: TETHER_PORT (default 8085), TETHER_DB_PATH, TETHER_REPO_SLUG
+     TETHER_TLS (both|only|off, default both), TETHER_TLS_PORT (default 8443)
+     TETHER_TLS_EXTRA_NAMES (extra SANs, comma-separated, first run only)
 State: ${STATE_DIR}`);
 }
 
@@ -289,8 +304,13 @@ switch (cmd) {
   case 'present': {
     const { parsePresentArgs, runPresent } = await import('./presentCli');
     try {
+      const plan = resolveListenerPlan();
       await runPresent(parsePresentArgs(process.argv.slice(3)), {
         port: PORT,
+        baseUrl:
+          plan.httpPort === null
+            ? `https://127.0.0.1:${plan.httpsPort}`
+            : `http://127.0.0.1:${plan.httpPort}`,
         tokenFile: PRESENT_CONTROL_TOKEN_FILE,
       });
     } catch (error) {

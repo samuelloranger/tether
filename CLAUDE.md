@@ -11,9 +11,10 @@ Clients are a single Expo React Native codebase: iOS/Android app, plus a Tauri d
 ## Monorepo layout (Bun workspaces)
 
 - `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary.
-  - Entry/lifecycle: `main.ts` (argv dispatch + control CLI + `holder` subcommand), `serve.ts` (`serve()` — reattach holders + `Bun.serve`), `index.ts` (dev entry), `app.ts` (Hono routes + WS gateway), `paths.ts` / `runtime.ts`, `update.ts` (self-update).
+  - Entry/lifecycle: `main.ts` (argv dispatch + control CLI + `holder` subcommand), `serve.ts` (`serve()` — reattach holders + the http/https `Bun.serve` listeners), `index.ts` (dev entry), `app.ts` (Hono routes + WS gateway), `paths.ts` / `runtime.ts`, `update.ts` (self-update).
   - PTY: `pty.ts` (session registry, holder spawn/reattach, subscribe/write/resize/kill), `holder.ts` (the detached one-PTY-per-process owner), `procCwd.ts` / `procIdentity.ts` / `liveCwd.ts` (cwd + process tracking), `sessionActivity.ts` (`working`/`waiting`/`idle` inference from output), `sessionTitle.ts` (OSC title + auto-title).
   - Data/auth: `db.ts` (bun:sqlite + versioned migrations), `auth.ts` (argon2 password + tokens), `config.ts` (zod-typed settings over the `settings` table, client-editable).
+  - Transport: `x509.ts` (hand-rolled DER + self-signed cert generation, no deps), `tlsStore.ts` (`~/.tether/config/tls/`, generate-once), `tlsConfig.ts` (listener plan from env — pure), `tlsRuntime.ts` (the report the routes read).
   - Features: `gitDiff.ts` / `gitOps.ts` / `gitRoot.ts` / `gitWatch.ts`, `workspaceFile.ts`, `upload.ts`, `presentations.ts` / `presentCli.ts`, `push.ts` / `pushCrypto.ts` / `pushDevices.ts` / `pushRelay.ts` (native APNs push via the relay), `admin.ts` (password/update/restart/test-notification).
 - `apps/mobile/` — Expo RN client (`tether-mobile`), also the desktop app.
   - `App.tsx` + `src/useTetherApp.tsx` (composition facade), `src/TerminalScreen.tsx`, `src/SessionDrawer.tsx`, `src/UtilityBar.tsx`, `src/Dpad.tsx`, `src/ConfigScreen.tsx`, `src/ServerSettings.tsx`.
@@ -42,7 +43,7 @@ Per workspace:
 - iOS device build: `cd apps/mobile && npx expo run:ios --device` (Expo Go doesn't support SDK 57)
 - Desktop: `bun --cwd apps/mobile run tauri:dev` / `tauri:build`
 
-**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | set-password | present | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
+**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | set-password | present | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
 
 ## Runtime requirement (important)
 
@@ -70,7 +71,7 @@ Because the holder is a separate detached process, **the shell survives both cli
 
 ## HTTP API surface (`app.ts`)
 
-`/api/status` + `/api/setup` (TOFU pairing) · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices`) · `/api/push/{register,unregister}` · `/api/admin/{password,update,restart,test-notification}` (the first three require the current password in the body, on top of the token).
+`/api/status` + `/api/setup` (TOFU pairing) · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices` and `tls`) · `/api/push/{register,unregister}` · `/api/admin/{password,update,restart,test-notification}` (the first three require the current password in the body, on top of the token).
 
 ## Conventions & gotchas
 
@@ -84,4 +85,10 @@ Because the holder is a separate detached process, **the shell survives both cli
 
 ## Security note
 
-All `/api/*` routes (HTTP + WS upgrade) require a shared password — argon2 hash in the DB, set via `tether set-password` or first-run TOFU pairing (`GET /api/status` + one-time `POST /api/setup`), exchanged for a token. No password ⇒ every client is rejected (401). **Transport is still unencrypted** (`0.0.0.0`, `cors origin: '*'`) — run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only. Note the API exposes file read, upload, and git write ops, so the password is the only thing between the port and the machine.
+All `/api/*` routes (HTTP + WS upgrade) require a shared password — argon2 hash in the DB, set via `tether set-password` or first-run TOFU pairing (`GET /api/status` + one-time `POST /api/setup`), exchanged for a token. No password ⇒ every client is rejected (401).
+
+**Transport:** the server opens two listeners — plaintext on `TETHER_PORT` (8085) and TLS on `TETHER_TLS_PORT` (8443), both `0.0.0.0`, `cors origin: '*'`. A self-signed P-256 certificate is generated on first boot into `~/.tether/config/tls/` (key `0600`, dir `0700`) and **never rotated automatically** — clients pin its fingerprint. `/api/status` and `/api/setup` report `secure` (was *this response* on the TLS socket? derived from the socket, never from a header) plus `tls.fingerprint` (`sha256:<hex>` over the cert DER); a client may only pin what it read with `secure: true`, and must match it against the cert that actually terminated the connection.
+
+`TETHER_TLS` = `both` (default) | `only` (closes plaintext) | `off`. It is host-side env config on purpose and is **not** in `/api/config` — a client that could close the plaintext port would lock out every other client. Default `both` means `tether update` strands nobody; `only` is the operator's deliberate cutover.
+
+Still keep tether behind a tunnel (Tailscale / WireGuard / SSH) or LAN-only: the cert is self-signed (an unpinned first contact is MITM-able), CORS is open, and the API exposes file read, upload, and git write ops. See `docs/security.md`.

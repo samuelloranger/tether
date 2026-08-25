@@ -23,6 +23,7 @@ import {
 } from './routes/presentations';
 import { sessionsRoutes } from './routes/sessions';
 import { VERSION } from './runtime';
+import { getTlsReport, isSecureRequest } from './tlsRuntime';
 
 export { hasControlToken, presentationControlToken };
 
@@ -63,8 +64,25 @@ app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
 // pairing endpoints (/api/status, /api/setup), which the middleware exempts.
 app.use('/api/*', authMiddleware);
 
-// First-run pairing (unauthenticated): does the server need a password yet?
-app.get('/api/status', (c) => c.json({ needsSetup: getAuthHash() === null }));
+// First-run pairing (unauthenticated): does the server need a password yet, and
+// how should the client reach us?
+//
+// `tls.fingerprint` is what a client pins. Pinning on first contact is only as
+// good as that first contact, so two things matter here:
+//   - `secure` reports whether THIS response came over the TLS listener. It is
+//     derived from the socket, never from a header. A client must only pin a
+//     fingerprint it read over TLS, and must compare it against the certificate
+//     it actually saw on that connection — self-reported bytes over plaintext
+//     are a MITM's to rewrite, and are advisory discovery only.
+//   - A mismatch between the pinned value and the observed peer certificate is
+//     a hard failure, not a re-pair prompt.
+app.get('/api/status', (c) =>
+  c.json({
+    needsSetup: getAuthHash() === null,
+    secure: isSecureRequest(c.req.url),
+    tls: getTlsReport(),
+  }),
+);
 
 // First-run pairing (unauthenticated, one-time): set the password iff none exists.
 // TOFU — safe only on a trusted LAN/tunnel; self-locks once a hash is stored.
@@ -77,7 +95,9 @@ app.post('/api/setup', async (c) => {
   // does nothing and we report already_setup — no check-then-write window.
   const hash = await Bun.password.hash(password, { algorithm: 'argon2id' });
   if (!setAuthHashIfUnset(hash)) return c.json({ error: 'already_setup' }, 409);
-  return c.json({ ok: true });
+  // Echo the transport facts so a client can pair and pin in one round trip,
+  // under the same rule as /api/status: only pin what came over TLS.
+  return c.json({ ok: true, secure: isSecureRequest(c.req.url), tls: getTlsReport() });
 });
 
 // Lightweight authed reachability + password probe for the client's Test connection.

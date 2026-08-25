@@ -19,8 +19,9 @@ export async function verifyPassword(provided: string): Promise<boolean> {
 const PUBLIC_API_PATHS = new Set(['/api/status', '/api/setup']);
 
 // Reject any request lacking a valid `Authorization: Bearer <password>`.
-// Applied to /api/* (including the WS upgrade). Encryption is the tunnel's job;
-// this only closes the "anyone on the port gets a shell" hole.
+// Applied to /api/* (including the WS upgrade), on the plaintext and TLS
+// listeners alike. This closes the "anyone on the port gets a shell" hole;
+// confidentiality is the TLS listener's job (see tlsConfig.ts).
 export const authMiddleware: MiddlewareHandler = async (c, next) => {
   if (PUBLIC_API_PATHS.has(c.req.path)) return next();
   const header = c.req.header('Authorization') ?? '';
