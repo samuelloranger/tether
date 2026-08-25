@@ -10,6 +10,15 @@ pub struct ReplayTracker {
 }
 
 impl ReplayTracker {
+    /// Restores both cursors together so a persisted frame is also rejected as
+    /// a duplicate after process restart.
+    pub(crate) fn from_since_id(since_id: u64) -> Self {
+        Self {
+            since_id,
+            last_applied_id: since_id,
+        }
+    }
+
     /// The `sinceId` to send on the next connection.
     pub fn since_id(&self) -> u64 {
         self.since_id
