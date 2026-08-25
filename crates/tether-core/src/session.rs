@@ -85,6 +85,12 @@ impl SessionHandle {
         let _ = self.outgoing.send(Outgoing::Frame(frame.to_json()));
     }
 
+    /// Sends an already-serialized v1 client frame. Used by hosts whose UI layer
+    /// builds the JSON itself.
+    pub fn send_raw(&self, text: String) {
+        let _ = self.outgoing.send(Outgoing::Frame(text));
+    }
+
     pub fn close(&self) {
         let _ = self.outgoing.send(Outgoing::Close);
     }
