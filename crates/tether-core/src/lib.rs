@@ -6,3 +6,4 @@
 
 pub mod protocol;
 pub mod replay;
+pub mod store;
