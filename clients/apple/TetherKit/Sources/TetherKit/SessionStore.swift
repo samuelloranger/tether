@@ -264,7 +264,8 @@ public final class SessionStore {
     guard let client = await activeClient() else { return }
     let sinceId = replayStore.sinceId(sessionId: sessionId)
     do {
-      let task = try client.openWebSocket(sessionId: sessionId, sinceId: sinceId, cols: 120, rows: 40)
+      let task = try await client.openWebSocket(
+        sessionId: sessionId, sinceId: sinceId, cols: 120, rows: 40)
       socket = task
       task.resume()
       socketTask = Task { [weak self] in

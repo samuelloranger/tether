@@ -34,7 +34,12 @@ public enum DeepLinkResolution: Equatable, Sendable {
 public final class DeepLinkCoordinator: HostProfileProvider, DeepLinkSessionCallback {
   private var profilesProvider: () -> [HostProfileModel]
   private var onSession: (String, String) -> Void
-  private let resolver: DeepLinkResolver
+  /// `lazy` because the resolver takes `self` as both provider and callback,
+  /// and `self` cannot be passed out of an initializer before every stored
+  /// property is initialized — which is what "variable 'self.resolver' used
+  /// before being initialized" was reporting. A lazy property is built on
+  /// first use, by which point initialization has completed.
+  private lazy var resolver: DeepLinkResolver = .init(provider: self, callback: self)
 
   public init(
     profilesProvider: @escaping () -> [HostProfileModel],
@@ -42,7 +47,6 @@ public final class DeepLinkCoordinator: HostProfileProvider, DeepLinkSessionCall
   ) {
     self.profilesProvider = profilesProvider
     self.onSession = onSession
-    resolver = DeepLinkResolver(provider: self, callback: self)
   }
 
   public func profiles() -> [FfiHostProfile]? {
