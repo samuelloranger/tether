@@ -16,8 +16,10 @@ CRATE="$ROOT/crates/tether-ffi"
 MANIFEST="$CRATE/Cargo.toml"
 PROFILE="${PROFILE:-release}"
 BUILD_DIR="$ROOT/build/ios-ffi"
-OUT_XCF="$ROOT/clients/apple/xcframework/TetherFFI.xcframework"
-OUT_SWIFT="$ROOT/clients/apple/xcframework/swift"
+# SwiftPM refuses a target whose path escapes the package root, so the
+# generated framework and bindings are emitted INSIDE TetherKit.
+OUT_XCF="$ROOT/clients/apple/TetherKit/Frameworks/TetherFFI.xcframework"
+OUT_SWIFT="$ROOT/clients/apple/TetherKit/Sources/TetherFFIBindings"
 OUT_HEADERS="$BUILD_DIR/headers"
 
 LIB_NAME="tether_ffi"

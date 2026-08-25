@@ -13,12 +13,12 @@ let package = Package(
   targets: [
     .binaryTarget(
       name: "TetherFFI",
-      path: "../xcframework/TetherFFI.xcframework"
+      path: "Frameworks/TetherFFI.xcframework"
     ),
     .target(
       name: "TetherFFIBindings",
       dependencies: ["TetherFFI"],
-      path: "../xcframework/swift"
+      path: "Sources/TetherFFIBindings"
     ),
     .target(
       name: "TetherKit",

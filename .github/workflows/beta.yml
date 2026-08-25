@@ -260,5 +260,5 @@ jobs:
           name: beta-ios-${{ github.sha }}
           if-no-files-found: warn
           path: |
-            clients/apple/xcframework/**
+            clients/apple/TetherKit/Frameworks/**
             build/**/*.xcframework/**
