@@ -6,6 +6,7 @@ mod grid_snapshot;
 mod host_health;
 mod host_store;
 mod replay;
+mod terminal;
 
 pub use deep_link::{
     DeepLinkResolver, DeepLinkSessionCallback, FfiDeepLinkResult, FfiSessionDeepLink,
@@ -24,5 +25,6 @@ pub use host_store::{
     SecretStore,
 };
 pub use replay::FfiReplayStore;
+pub use terminal::FfiTerminalEmulator;
 
 uniffi::setup_scaffolding!();
