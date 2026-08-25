@@ -70,3 +70,6 @@ apps/mobile/src-tauri/gen/
 
 # scratch dir from scripts/build-updater-manifest.ts
 .updater-sigs/
+
+# Rust build artifacts
+**/target/
