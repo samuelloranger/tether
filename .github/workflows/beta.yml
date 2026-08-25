@@ -17,6 +17,14 @@ on:
         type: choice
         default: all
         options: [all, core, desktop, ios]
+  # GitHub only exposes workflow_dispatch for workflows that exist on the
+  # DEFAULT branch, and this one lives on the rewrite branch. A push trigger
+  # runs from the branch's own definition instead, which is how the rewrite
+  # gets a real build signal before it is anywhere near main.
+  # Generalise or drop this branch list when the rewrite merges.
+  push:
+    branches:
+      - feat/tether-core-p0
 
 concurrency:
   group: beta-${{ github.ref }}
@@ -30,7 +38,7 @@ jobs:
   # gates the platform legs: if the core is broken there is no point paying for
   # five desktop runners.
   core:
-    if: inputs.scope == 'all' || inputs.scope == 'core'
+    if: github.event_name == 'push' || inputs.scope == 'all' || inputs.scope == 'core'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -83,7 +91,7 @@ jobs:
     # `needs` alone would skip this when scope=desktop, because core is skipped.
     if: |
       always() && (needs.core.result == 'success' || needs.core.result == 'skipped')
-      && (inputs.scope == 'all' || inputs.scope == 'desktop')
+      && (github.event_name == 'push' || inputs.scope == 'all' || inputs.scope == 'desktop')
     strategy:
       fail-fast: false
       matrix:
@@ -177,7 +185,7 @@ jobs:
     needs: core
     if: |
       always() && (needs.core.result == 'success' || needs.core.result == 'skipped')
-      && (inputs.scope == 'all' || inputs.scope == 'ios')
+      && (github.event_name == 'push' || inputs.scope == 'all' || inputs.scope == 'ios')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
