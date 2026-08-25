@@ -59,6 +59,27 @@ jobs:
         run: bun run test:ui
         working-directory: apps/mobile
 
+      # tether-core is plain Rust with no Tauri dependency, so it tests on a
+      # bare runner — no system webkit/gtk packages needed.
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/tether-core/target
+          key: cargo-core-${{ runner.os }}-${{ hashFiles('crates/tether-core/Cargo.toml') }}
+          restore-keys: |
+            cargo-core-${{ runner.os }}-
+
+      - name: Core tests (rust)
+        timeout-minutes: 10
+        run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
+        working-directory: crates/tether-core
+
       - name: Web bundle (desktop build uses this — catches web-only module resolution)
         run: bun run build:web
         working-directory: apps/mobile
