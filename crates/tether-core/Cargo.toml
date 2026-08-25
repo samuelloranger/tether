@@ -14,4 +14,8 @@ futures-util = "0.3"
 thiserror = "2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "process", "io-util"] }
+tether-proto = { path = "../tether-proto" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3"
+prost = "0.14"
