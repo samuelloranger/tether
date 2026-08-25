@@ -18,7 +18,19 @@ public final class SessionStore {
 
   private let hostStore: HostStoreAdapter
   private let replayStore: FfiReplayStore
-  private var deepLinks: DeepLinkCoordinator
+  /// `lazy` + `@ObservationIgnored`: the coordinator's closures capture `self`,
+  /// which cannot happen inside `init` before every stored property is
+  /// initialized. Building it on first use sidesteps that. It is internal
+  /// plumbing rather than view state, so Observation should not track it.
+  @ObservationIgnored private lazy var deepLinks: DeepLinkCoordinator = .init(
+    profilesProvider: { [weak self] in self?.hosts ?? [] },
+    onSession: { [weak self] hostId, sessionId in
+      Task { @MainActor in
+        self?.activeHostId = hostId
+        self?.activeSessionId = sessionId
+      }
+    }
+  )
   private var pollTask: Task<Void, Never>?
   private var socketTask: Task<Void, Never>?
   private var socket: URLSessionWebSocketTask?
@@ -27,15 +39,6 @@ public final class SessionStore {
   public init(hostStore: HostStoreAdapter = HostStoreAdapter()) {
     self.hostStore = hostStore
     replayStore = FfiReplayStore()
-    deepLinks = DeepLinkCoordinator(
-      profilesProvider: { [weak self] in self?.hosts ?? [] },
-      onSession: { [weak self] hostId, sessionId in
-        Task { @MainActor in
-          self?.activeHostId = hostId
-          self?.activeSessionId = sessionId
-        }
-      }
-    )
   }
 
   public func bootstrap() async {
