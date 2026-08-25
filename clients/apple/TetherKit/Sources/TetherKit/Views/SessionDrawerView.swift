@@ -81,7 +81,7 @@ public struct SessionDrawerView: View {
 
   private func sessions(for hostId: String) -> [RemoteSession] {
     let health = store.healthByHost[hostId] ?? .unknown
-    if health == .unreachable || health == .unauthorized { return [] }
+    if health.isUnavailable { return [] }
     return store.sessionsByHost[hostId] ?? []
   }
 }
@@ -139,9 +139,7 @@ private struct HostDrawerSection: View {
     .opacity(isUnavailable ? 0.55 : 1)
   }
 
-  private var isUnavailable: Bool {
-    health == .unreachable || health == .unauthorized
-  }
+  private var isUnavailable: Bool { health.isUnavailable }
 
   @ViewBuilder
   private var statusView: some View {
@@ -214,6 +212,22 @@ private struct SessionDrawerRow: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("The process and its saved output will be deleted. This can't be undone.")
+    }
+  }
+}
+
+
+/// `FfiHostHealth.unreachable` carries a failure count, so it cannot be
+/// compared with `==` — it needs pattern matching. This keeps the call sites
+/// readable and stops the associated value leaking into view code that does not
+/// care how many attempts have failed.
+extension FfiHostHealth {
+  var isUnavailable: Bool {
+    switch self {
+    case .unreachable, .unauthorized:
+      return true
+    case .unknown, .reachable:
+      return false
     }
   }
 }
