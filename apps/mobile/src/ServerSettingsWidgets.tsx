@@ -255,7 +255,9 @@ export function createStyles(c: AppColors, desktopUi: boolean) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    body: { padding: 18, gap: 24 },
+    // Capped and centred like the other settings screens: a form stretched the
+    // full width of an iPad puts its labels and its controls a bezel apart.
+    body: { padding: 18, gap: 24, width: '100%', maxWidth: 720, alignSelf: 'center' },
     state: { flex: 1, padding: 24, gap: 16, justifyContent: 'center' },
     hint: { color: c.textMuted, ...typeScale.label },
     message: { color: c.success, ...typeScale.body },

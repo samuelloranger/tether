@@ -47,9 +47,12 @@ function ConnectionStatusBadge({
 export function TerminalMobileHeader({
   styles,
   terminalVisible,
+  docked = false,
 }: {
   styles: TerminalStyles;
   terminalVisible: boolean;
+  /** The session list is already pinned beside us — the menu button is dead weight. */
+  docked?: boolean;
 }) {
   const { theme } = useAppTheme();
   const { connectionStatus, activeName, refreshSessions } = useSession();
@@ -58,25 +61,27 @@ export function TerminalMobileHeader({
   const { setDrawerOpen, setMenuOpen } = useUi();
   return (
     <SafeAreaView
-      edges={['top', 'left', 'right']}
+      edges={docked ? ['top', 'right'] : ['top', 'left', 'right']}
       style={{ backgroundColor: theme.colors.surface }}
     >
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.headerBtn}
-          activeOpacity={0.6}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          onPress={() => {
-            Keyboard.dismiss();
-            refreshSessions();
-            refreshPresentations();
-            setDrawerOpen(true);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Open terminal list"
-        >
-          <Feather name="menu" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
+        {!docked && (
+          <TouchableOpacity
+            style={styles.headerBtn}
+            activeOpacity={0.6}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={() => {
+              Keyboard.dismiss();
+              refreshSessions();
+              refreshPresentations();
+              setDrawerOpen(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open terminal list"
+          >
+            <Feather name="menu" size={20} color={theme.colors.text} />
+          </TouchableOpacity>
+        )}
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle}>{activePresentation?.title || activeName}</Text>
           <Text style={styles.headerSubtitle}>
