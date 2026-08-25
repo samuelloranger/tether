@@ -14,7 +14,7 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
-tether-core = { path = "../tether-core" }
+tether-core = { path = "../tether-core", features = ["terminal-parser"] }
 thiserror = "2"
 # Bindgen binary and runtime must share this exact version — see scripts/build-xcframework.sh.
 uniffi = { version = "=0.28.3", features = ["cli"] }
