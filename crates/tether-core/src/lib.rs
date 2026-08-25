@@ -18,5 +18,7 @@ pub mod session_cache;
 pub mod session_host_ops;
 pub mod session_polling;
 pub mod store;
+#[cfg(feature = "terminal-parser")]
+pub mod terminal;
 pub mod terminal_session_logic;
 pub mod tether_app_actions;
