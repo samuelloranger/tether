@@ -188,13 +188,19 @@ pub struct RenamePlan {
     pub failure: FailureNotice,
 }
 
-pub fn submit_rename(client: &HostClient, session_id: &str, rename_text: &str) -> RenamePlan {
+/// Builds the rename request from a host-qualified key. TypeScript reads
+/// `deps.activeId` (bare) and relies on `activeClient` for host scope; the core
+/// requires `SessionKey` so rename cannot target another host's colliding id.
+pub fn submit_rename(client: &HostClient, session: &SessionKey, rename_text: &str) -> RenamePlan {
     RenamePlan {
         close_modal: true,
         request: client.post(
             "/api/sessions/rename",
             BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
-            Some(serde_json::json!({ "id": session_id, "name": rename_text.trim() }).to_string()),
+            Some(
+                serde_json::json!({ "id": session.session_id(), "name": rename_text.trim() })
+                    .to_string(),
+            ),
         ),
         refresh_after_success: true,
         failure: FailureNotice {
@@ -212,9 +218,11 @@ pub struct HardResetPlan {
     pub failure: FailureNotice,
 }
 
+/// Hard-reset payload uses the session id half of the key; host routing stays
+/// on `client`, matching TypeScript's `deps.activeId` + `activeClient` split.
 pub fn hard_reset_session(
     client: &HostClient,
-    session_id: &str,
+    session: &SessionKey,
     confirmed: bool,
 ) -> Option<HardResetPlan> {
     confirmed.then(|| HardResetPlan {
@@ -222,7 +230,7 @@ pub fn hard_reset_session(
         request: client.post(
             "/api/sessions/kill",
             BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]),
-            Some(serde_json::json!({ "id": session_id }).to_string()),
+            Some(serde_json::json!({ "id": session.session_id() }).to_string()),
         ),
         restart_after_success: true,
         failure: FailureNotice {
@@ -420,10 +428,7 @@ mod tests {
                 open_modal: true
             }
         );
-        assert_eq!(
-            open_rename(&[], &"host-1:term-1".parse().unwrap()).text,
-            ""
-        );
+        assert_eq!(open_rename(&[], &"host-1:term-1".parse().unwrap()).text, "");
     }
 
     #[test]
@@ -444,7 +449,8 @@ mod tests {
 
     #[test]
     fn rename_and_hard_reset_build_the_shipping_request_payloads() {
-        let rename = submit_rename(&client(), "term-1", "  Build  ");
+        let session = "host-1:term-1".parse::<SessionKey>().unwrap();
+        let rename = submit_rename(&client(), &session, "  Build  ");
         assert!(rename.close_modal);
         assert_eq!(
             rename.request.body.as_deref(),
@@ -452,8 +458,8 @@ mod tests {
         );
         assert_eq!(rename.failure.title, "Rename failed");
 
-        assert_eq!(hard_reset_session(&client(), "term-1", false), None);
-        let reset = hard_reset_session(&client(), "term-1", true).unwrap();
+        assert_eq!(hard_reset_session(&client(), &session, false), None);
+        let reset = hard_reset_session(&client(), &session, true).unwrap();
         assert!(reset.reset_terminal_before_request);
         assert!(reset.restart_after_success);
         assert_eq!(reset.request.body.as_deref(), Some(r#"{"id":"term-1"}"#));

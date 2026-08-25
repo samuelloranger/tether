@@ -38,18 +38,22 @@ impl SessionPollingState {
         self.adopted_hosts.contains(host_id)
     }
 
+    /// Applies one host's poll result. `active_key` is host-qualified so adoption
+    /// cannot consult another host's row when default `term-N` ids collide.
+    /// TypeScript compares bare `activeIdRef` here, which is safe only because
+    /// rows are already scoped to `profile.id`; the core still takes `SessionKey`
+    /// so callers cannot pass an unqualified id into session-selection logic.
     pub fn apply_polled_sessions(
         &mut self,
         profile_id: &str,
         mut rows: Vec<SessionRow>,
-        active_host_id: &str,
-        active_session_id: &str,
+        active_key: &SessionKey,
         ready: bool,
     ) -> Result<SessionPollingUpdate, InvalidSessionKey> {
         for row in &mut rows {
             row.host_id = profile_id.to_string();
         }
-        if profile_id != active_host_id {
+        if profile_id != active_key.host_id() {
             return Ok(SessionPollingUpdate {
                 rows,
                 notify_waiting: false,
@@ -70,7 +74,7 @@ impl SessionPollingState {
             .iter()
             .filter(|row| row.status == "running")
             .collect::<Vec<_>>();
-        let adoption = if running.iter().any(|row| row.id == active_session_id) {
+        let adoption = if running.iter().any(|row| row.id == active_key.session_id()) {
             None
         } else {
             newest_running(&running)
@@ -98,10 +102,10 @@ impl SessionPollingState {
     pub fn probe_unreachable_active_host(
         &mut self,
         profile_id: &str,
-        active_host_id: &str,
+        active_key: &SessionKey,
         ready: bool,
     ) -> bool {
-        if profile_id != active_host_id
+        if profile_id != active_key.host_id()
             || self.adopted_hosts.contains(profile_id)
             || self.probed_hosts.contains(profile_id)
             || !ready
@@ -147,6 +151,10 @@ mod tests {
         }
     }
 
+    fn key(host_id: &str, session_id: &str) -> SessionKey {
+        SessionKey::new(host_id, session_id).unwrap()
+    }
+
     #[test]
     fn inactive_host_rows_are_qualified_without_adoption_or_notification() {
         let mut state = SessionPollingState::new();
@@ -154,8 +162,7 @@ mod tests {
             .apply_polled_sessions(
                 "host-2",
                 vec![row("term-1", "running", None)],
-                "host-1",
-                "term-1",
+                &key("host-1", "term-1"),
                 true,
             )
             .unwrap();
@@ -177,8 +184,7 @@ mod tests {
                     row("term-3", "running", Some("2026-08-25T11:00:00Z")),
                     row("term-4", "exited", Some("2026-08-25T12:00:00Z")),
                 ],
-                "host-1",
-                "term-1",
+                &key("host-1", "term-1"),
                 true,
             )
             .unwrap();
@@ -200,8 +206,7 @@ mod tests {
             .apply_polled_sessions(
                 "host-1",
                 vec![row("term-5", "running", None)],
-                "host-1",
-                "term-3",
+                &key("host-1", "term-3"),
                 true,
             )
             .unwrap();
@@ -219,8 +224,7 @@ mod tests {
                     row("term-1", "running", None),
                     row("term-2", "running", None),
                 ],
-                "host-1",
-                "term-1",
+                &key("host-1", "term-1"),
                 true,
             )
             .unwrap();
@@ -232,7 +236,7 @@ mod tests {
     fn an_empty_host_is_marked_adopted_and_connects_only_when_ready() {
         let mut state = SessionPollingState::new();
         let update = state
-            .apply_polled_sessions("host-1", Vec::new(), "host-1", "term-1", false)
+            .apply_polled_sessions("host-1", Vec::new(), &key("host-1", "term-1"), false)
             .unwrap();
         assert_eq!(update.adoption, None);
         assert!(!update.connect_active);
@@ -242,9 +246,9 @@ mod tests {
     #[test]
     fn probes_an_unreachable_active_host_once_without_marking_it_adopted() {
         let mut state = SessionPollingState::new();
-        assert!(state.probe_unreachable_active_host("host-1", "host-1", true));
-        assert!(!state.probe_unreachable_active_host("host-1", "host-1", true));
+        assert!(state.probe_unreachable_active_host("host-1", &key("host-1", "term-1"), true));
+        assert!(!state.probe_unreachable_active_host("host-1", &key("host-1", "term-1"), true));
         assert!(!state.has_adopted("host-1"));
-        assert!(!state.probe_unreachable_active_host("host-2", "host-1", true));
+        assert!(!state.probe_unreachable_active_host("host-2", &key("host-1", "term-1"), true));
     }
 }
