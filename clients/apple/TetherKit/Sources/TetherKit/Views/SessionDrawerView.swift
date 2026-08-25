@@ -217,17 +217,3 @@ private struct SessionDrawerRow: View {
 }
 
 
-/// `FfiHostHealth.unreachable` carries a failure count, so it cannot be
-/// compared with `==` — it needs pattern matching. This keeps the call sites
-/// readable and stops the associated value leaking into view code that does not
-/// care how many attempts have failed.
-extension FfiHostHealth {
-  var isUnavailable: Bool {
-    switch self {
-    case .unreachable, .unauthorized:
-      return true
-    case .unknown, .reachable:
-      return false
-    }
-  }
-}

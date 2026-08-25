@@ -55,3 +55,19 @@ public enum HostHealthLogic {
     ffiNextHostPollDelay(health: health.ffi, normalIntervalMs: normalIntervalMs)
   }
 }
+
+extension HostHealthModel {
+  /// True when the host cannot currently serve requests.
+  ///
+  /// `unreachable` carries a failure count, so these cases cannot be compared
+  /// with `==`. Keeping the pattern match here stops that associated value
+  /// leaking into view code, which does not care how many attempts have failed.
+  public var isUnavailable: Bool {
+    switch self {
+    case .unreachable, .unauthorized:
+      return true
+    case .unknown, .reachable:
+      return false
+    }
+  }
+}
