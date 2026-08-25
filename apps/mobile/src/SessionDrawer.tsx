@@ -5,6 +5,7 @@ import { useAppTheme } from './AppThemeProvider';
 import type { SessionActivity } from './activity';
 import { PANEL_W } from './desktopNavigation';
 import { motionSpec } from './motion';
+import { isDesktop } from './platform';
 import type { Presentation } from './presentations';
 import { confirmKill, DrawerPanelBody } from './sessionDrawerRows';
 import { createDrawerStyles } from './sessionDrawerStyles';
@@ -133,7 +134,17 @@ export function SessionDrawer({
       onNew={onNew}
     />
   );
-  if (docked) return <View style={[styles.panel, styles.panelDocked]}>{body}</View>;
+  // On desktop the sidebar sits under the title bar, so it needs no insets. On a
+  // tablet it runs to the bezel — status bar on top, home indicator below, and a
+  // landscape notch inset on the left.
+  if (docked) {
+    if (isDesktop) return <View style={[styles.panel, styles.panelDocked]}>{body}</View>;
+    return (
+      <SafeAreaView edges={['top', 'bottom', 'left']} style={[styles.panel, styles.panelDocked]}>
+        {body}
+      </SafeAreaView>
+    );
+  }
   if (!mounted) return null;
   return (
     <View style={styles.overlay}>
@@ -146,7 +157,7 @@ export function SessionDrawer({
         />
       </Animated.View>
       <Animated.View style={[styles.panel, { transform: [{ translateX: tx }] }]}>
-        {showPin ? (
+        {isDesktop && showPin ? (
           <View style={[styles.panelContent, styles.panelContentDesktop]}>{body}</View>
         ) : (
           <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.panelContent}>

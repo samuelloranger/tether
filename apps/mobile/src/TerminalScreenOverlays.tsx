@@ -96,9 +96,11 @@ export function TerminalSessionModals() {
 export function TerminalSelectionAndKeys({
   styles,
   desktopUi,
+  docked,
 }: {
   styles: TerminalStyles;
   desktopUi: boolean;
+  docked: boolean;
 }) {
   const chrome = useChrome();
   const ui = useUi();
@@ -129,6 +131,7 @@ export function TerminalSelectionAndKeys({
           cursorSeq={session.cursorSeq}
           page={ui.utilityPage}
           setPage={ui.setUtilityPage}
+          docked={docked}
           onPaste={handlePaste}
           onImagePick={session.pickAndUploadImage}
           onHideKeyboard={() => {

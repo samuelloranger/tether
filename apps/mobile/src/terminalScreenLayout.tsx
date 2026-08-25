@@ -109,13 +109,7 @@ function toggleSidebarPin(
   }
 }
 
-export function TerminalSessionDrawer({
-  desktopUi,
-  docked,
-}: {
-  desktopUi: boolean;
-  docked: boolean;
-}) {
+export function TerminalSessionDrawer({ wideUi, docked }: { wideUi: boolean; docked: boolean }) {
   const session = useSession();
   const { profiles, openEditHost, openServerSettings } = useConnection();
   const pres = usePresentation();
@@ -124,7 +118,7 @@ export function TerminalSessionDrawer({
     <SessionDrawer
       visible={sidebarVisible(docked, drawerOpen)}
       docked={docked}
-      showPin={desktopUi}
+      showPin={wideUi}
       onTogglePin={() =>
         toggleSidebarPin(session.sidebarPinned, session.persistSidebarPinned, setDrawerOpen)
       }
@@ -184,6 +178,7 @@ function TerminalStage({
 export function TerminalMainColumn({
   styles,
   desktopUi,
+  docked,
   gitTakeover,
   terminalVisible,
   rendererStatus,
@@ -191,6 +186,7 @@ export function TerminalMainColumn({
 }: {
   styles: TerminalStyles;
   desktopUi: boolean;
+  docked: boolean;
   gitTakeover: boolean;
   terminalVisible: boolean;
   rendererStatus: RendererStatus;
@@ -200,7 +196,9 @@ export function TerminalMainColumn({
   const { fileLoading } = useFile();
   return (
     <View style={[styles.terminalMain, { position: 'relative' }]}>
-      {!desktopUi && <TerminalMobileHeader styles={styles} terminalVisible={terminalVisible} />}
+      {!desktopUi && (
+        <TerminalMobileHeader styles={styles} terminalVisible={terminalVisible} docked={docked} />
+      )}
       <FileLoadingCover loading={fileLoading} />
       <TerminalStage
         styles={styles}
@@ -213,7 +211,9 @@ export function TerminalMainColumn({
       <FileOverlay styles={styles} />
       {terminalVisible && <TerminalOverflowMenu />}
       <TerminalSessionModals />
-      {terminalVisible && <TerminalSelectionAndKeys styles={styles} desktopUi={desktopUi} />}
+      {terminalVisible && (
+        <TerminalSelectionAndKeys styles={styles} desktopUi={desktopUi} docked={docked} />
+      )}
     </View>
   );
 }

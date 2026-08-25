@@ -4,6 +4,7 @@ import {
   showTitleBarDrawerMenu,
   sidebarDocked,
   sidebarVisible,
+  wideLayout,
 } from './desktopLayout';
 
 describe('desktopLayout', () => {
@@ -48,5 +49,26 @@ describe('sidebar pin gating', () => {
     expect(showTitleBarDrawerMenu(true, false)).toBe(true);
     expect(showTitleBarDrawerMenu(true, true)).toBe(false);
     expect(showTitleBarDrawerMenu(false, false)).toBe(false);
+  });
+});
+
+describe('wideLayout', () => {
+  it('is width-only, so a native tablet earns the two-column shell', () => {
+    expect(wideLayout(719)).toBe(false);
+    expect(wideLayout(720)).toBe(true);
+    // iPad mini portrait (744) and iPad 11" portrait (834) both qualify.
+    expect(wideLayout(744)).toBe(true);
+    expect(wideLayout(834)).toBe(true);
+  });
+
+  it('leaves phone-sized viewports compact', () => {
+    expect(wideLayout(390)).toBe(false);
+    expect(wideLayout(440)).toBe(false);
+  });
+
+  it('docks the sidebar on a pinned tablet even though it is not a desktop client', () => {
+    const wideUi = wideLayout(834);
+    expect(desktopLayout(false, 834)).toBe('compact'); // no title bar, keeps mobile chrome
+    expect(sidebarDocked(wideUi, true)).toBe(true);
   });
 });

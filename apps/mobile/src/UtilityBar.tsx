@@ -3,16 +3,24 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as Haptics from 'expo-haptics';
 import type { ComponentProps, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { Keyboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Keyboard,
+  type LayoutChangeEvent,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from './AppThemeProvider';
 import type { AppColors } from './appTheme';
 import { ArrowCluster } from './Dpad';
 import { HoldPopupKey } from './HoldPopupKey';
 import { MIN_TOUCH_TARGET } from './interaction';
-import { UTILITY_BAR_PAGES, type UtilityBarKey } from './utilityBarModel';
+import { type UtilityBarKey, utilityBarPages } from './utilityBarModel';
 
-export { UTILITY_BAR_PAGES } from './utilityBarModel';
+export { UTILITY_BAR_KEYS, UTILITY_BAR_PAGES } from './utilityBarModel';
 
 const BAR_GUTTER = 8;
 const BAR_PAD_V = 2;
@@ -26,6 +34,8 @@ type UtilityBarProps = {
   cursorSeq: (final: string) => string;
   page: number;
   setPage: (page: number) => void;
+  /** The sidebar is docked to our left, so the left safe-area inset isn't ours. */
+  docked?: boolean;
   onPaste: () => void;
   onImagePick: () => void;
   onHideKeyboard: () => void;
@@ -286,8 +296,17 @@ export function UtilityBar(p: UtilityBarProps) {
   const insets = useSafeAreaInsets();
   const styles = createStyles(theme.colors);
   const keyboardVisible = useKeyboardVisible();
-  const lastPage = UTILITY_BAR_PAGES.length - 1;
+  // Measured rather than derived from the window: the bar sits in the terminal
+  // column, so a docked sidebar (or an iPad Split View / Stage Manager resize)
+  // changes its width without changing the window's.
+  const [barWidth, setBarWidth] = useState(0);
+  const onLayout = (event: LayoutChangeEvent) => setBarWidth(event.nativeEvent.layout.width);
+  const padLeft = BAR_GUTTER + (p.docked ? 0 : insets.left);
+  const padRight = BAR_GUTTER + insets.right;
+  const pages = utilityBarPages(Math.max(0, barWidth - padLeft - padRight));
+  const lastPage = pages.length - 1;
   const clamped = Math.min(Math.max(p.page, 0), lastPage);
+  const single = lastPage === 0;
   const pager = (direction: 'prev' | 'next') => (
     <UtilityPagerBtn
       styles={styles}
@@ -299,18 +318,25 @@ export function UtilityBar(p: UtilityBarProps) {
     />
   );
   return (
-    <View style={[styles.utilityBar, { paddingBottom: keyboardVisible ? 0 : insets.bottom }]}>
+    <View
+      testID="utility-bar"
+      onLayout={onLayout}
+      style={[styles.utilityBar, { paddingBottom: keyboardVisible ? 0 : insets.bottom }]}
+    >
       <ScrollView
         scrollEnabled={false}
         keyboardShouldPersistTaps="always"
         contentContainerStyle={[
           styles.utilityPage,
-          { paddingLeft: BAR_GUTTER + insets.left, paddingRight: BAR_GUTTER + insets.right },
+          // One unpaginated row centres instead of stretching: on a wide iPad
+          // `space-between` would fling the keys to opposite bezels.
+          single && styles.utilityPageSingle,
+          { paddingLeft: padLeft, paddingRight: padRight },
         ]}
         style={styles.utilityPageOuter}
       >
         {clamped > 0 && pager('prev')}
-        {UTILITY_BAR_PAGES[clamped].map((k) => renderUtilityKey(k, p, styles, theme.colors.text))}
+        {pages[clamped].map((k) => renderUtilityKey(k, p, styles, theme.colors.text))}
         {clamped < lastPage && pager('next')}
       </ScrollView>
     </View>
@@ -338,6 +364,9 @@ const createStyles = (c: AppColors) =>
       flexDirection: 'row',
       gap: 4,
       flexGrow: 1,
+    },
+    utilityPageSingle: {
+      justifyContent: 'center',
     },
     utilityBtn: {
       flexBasis: MIN_TOUCH_TARGET,

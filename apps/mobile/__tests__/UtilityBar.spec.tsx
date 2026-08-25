@@ -90,3 +90,43 @@ test('only the current page is mounted, so there is nothing to scroll sideways',
   expect(bar.view.getByLabelText('Tab')).toBeTruthy();
   expect(bar.view.queryByLabelText('PgUp')).toBeNull();
 });
+
+// The bar measures itself rather than reading the window, so a docked sidebar or
+// an iPad Split View resize is accounted for. Until it has been laid out it
+// assumes the narrow case, which is the safe default.
+function layoutTo(view: ReturnType<typeof renderBar>['view'], width: number) {
+  fireEvent(view.getByTestId('utility-bar'), 'layout', {
+    nativeEvent: { layout: { x: 0, y: 0, width, height: 48 } },
+  });
+}
+
+test('a tablet-width bar drops the pager and shows every key at once', () => {
+  const bar = renderBar({ page: 0 });
+  layoutTo(bar.view, 834); // iPad 11" portrait
+  expect(bar.view.queryByLabelText('Next utility page')).toBeNull();
+  expect(bar.view.queryByLabelText('Previous utility page')).toBeNull();
+  // A key from each of the old pages, live on the same row.
+  fireEvent.press(bar.view.getByLabelText('Tab'));
+  expect(bar.sendKey).toHaveBeenCalledWith('\t');
+  fireEvent.press(bar.view.getByLabelText('PgUp'));
+  expect(bar.sendKey).toHaveBeenCalledWith('\x1b[5~');
+  fireEvent.press(bar.view.getByLabelText('Del'));
+  expect(bar.sendKey).toHaveBeenCalledWith('\x1b[3~');
+  expect(bar.view.getByLabelText('Upload image')).toBeTruthy();
+  expect(bar.view.getByLabelText('Hide keyboard')).toBeTruthy();
+});
+
+test('a stale page index cannot blank the single-row bar', () => {
+  // Rotating from a phone-width Split View onto page 2 and back to full width.
+  const bar = renderBar({ page: 1 });
+  layoutTo(bar.view, 1024);
+  expect(bar.view.getByLabelText('Tab')).toBeTruthy();
+  expect(bar.view.getByLabelText('PgDn')).toBeTruthy();
+});
+
+test('a narrow iPad Split View keeps the phone pager', () => {
+  const bar = renderBar({ page: 0 });
+  layoutTo(bar.view, 375);
+  expect(bar.view.getByLabelText('Next utility page')).toBeTruthy();
+  expect(bar.view.queryByLabelText('PgUp')).toBeNull();
+});
