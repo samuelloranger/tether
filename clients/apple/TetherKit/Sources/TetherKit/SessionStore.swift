@@ -283,11 +283,7 @@ public final class SessionStore {
   }
 
   public func sendInput(_ text: String) {
-    guard let socket else {
-      NSLog("TETHERDBG sendInput dropped: no socket (session=%@)", activeSessionId ?? "nil")
-      return
-    }
-    NSLog("TETHERDBG sendInput sending %d bytes", text.utf8.count)
+    guard let socket else { return }
     guard
       let payload = try? JSONSerialization.data(withJSONObject: ["type": "input", "text": text]),
       let frame = String(data: payload, encoding: .utf8)
@@ -470,8 +466,12 @@ public final class SessionStore {
       // The id advances the replay cursor; the chunk is the actual terminal
       // output and must reach the parser, or the surface stays blank however
       // much data arrives.
-      if let id = json["id"] as? UInt64 {
-        _ = replayStore.acceptOutput(sessionId: sessionId, id: id)
+      // acceptOutput is the duplicate guard — it returns false for a frame
+      // already applied. Discarding that answer and feeding anyway makes a
+      // repeated frame reach the parser twice, which renders as doubled
+      // characters ("abc" typed, "aabbcc" on screen).
+      if let id = json["id"] as? UInt64, !replayStore.acceptOutput(sessionId: sessionId, id: id) {
+        return
       }
       if let chunk = json["chunk"] as? String, let bytes = chunk.data(using: .utf8) {
         emulator?.feed(bytes: bytes)
