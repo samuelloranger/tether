@@ -129,6 +129,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.textColor = .clear
     view.tintColor = .clear
     view.accessoryHosting.rootView = accessory
+    // 0x7F (DEL) is what terminals and readline expect from backspace.
+    view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7f}") }
     return view
   }
 
@@ -172,6 +174,18 @@ public struct TerminalInputBridge: UIViewRepresentable {
 
 public final class TerminalInputTextView: UITextView {
   let accessoryHosting = UIHostingController<AnyView>(rootView: AnyView(EmptyView()))
+
+  /// Called on backspace.
+  ///
+  /// `shouldChangeTextIn` reports a deletion as an EMPTY replacement string,
+  /// which the input path skipped, and this view is deliberately kept empty so
+  /// UIKit may not route a delete through the delegate at all. Overriding
+  /// `deleteBackward` catches the key in both cases.
+  var onBackspace: (() -> Void)?
+
+  public override func deleteBackward() {
+    onBackspace?()
+  }
 
   /// Configured once rather than on every getter call — the previous version
   /// mutated the hosting view's frame and background each time UIKit asked for
