@@ -94,3 +94,9 @@ export async function openCoreSocket(
 export function sendJson(socket: TerminalSocket, payload: unknown): void {
   socket.send(JSON.stringify(payload));
 }
+
+/** Drop the core replay cursor when the visible emulator is torn down. */
+export async function forgetCoreSession(sessionId: string): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('core_forget', { sessionId }).catch(() => {});
+}
