@@ -73,7 +73,18 @@ export function TerminalPane(props: TerminalPaneProps) {
       props.fontFamily,
       props.fontSize ?? 14,
     );
-    const sink = createFrameSink(term);
+    // writeDepth > 0 means xterm is parsing SERVER output right now, so
+    // anything it emits on onData in that window is a parser auto-reply
+    // rather than the user typing.
+    let writeDepth = 0;
+    const sink = createFrameSink(term, {
+      beginWrite: () => {
+        writeDepth += 1;
+      },
+      endWrite: () => {
+        writeDepth = Math.max(0, writeDepth - 1);
+      },
+    });
     const replay = createReplayGate();
     let socket: TerminalSocket | null = null;
     let closed = false;
@@ -113,7 +124,11 @@ export function TerminalPane(props: TerminalPaneProps) {
     });
 
     term.onData((text) => {
-      if (replay.isReplaying()) return;
+      // Suppress ONLY auto-replies to queries embedded in replayed scrollback.
+      // User keystrokes always go through: gating them on output activity made
+      // the terminal silently swallow typing during any busy output.
+      const isAutoReply = writeDepth > 0;
+      if (isAutoReply && replay.isReplaying()) return;
       if (socket) sendJson(socket, { type: 'input', text });
     });
 

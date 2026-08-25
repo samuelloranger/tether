@@ -13,10 +13,26 @@ export type FrameApplyResult = {
   activity?: SessionActivity;
 };
 
-export function createFrameSink(term: Terminal): FrameSink {
+/**
+ * Hooks that bracket the window in which xterm is parsing SERVER output.
+ *
+ * This is how a parser-generated auto-reply (a Device Attributes or cursor
+ * position answer) is told apart from a user keystroke: replies are emitted
+ * synchronously while `term.write` parses the bytes that asked for them, so
+ * anything arriving on `onData` outside that window is the user typing.
+ * Without this distinction the only way to suppress replies is to drop
+ * `onData` wholesale, which silently swallows real keystrokes.
+ */
+export interface FrameSinkHooks {
+  beginWrite(): void;
+  endWrite(): void;
+}
+
+export function createFrameSink(term: Terminal, hooks?: FrameSinkHooks): FrameSink {
   return {
     write: (chunk) => {
-      term.write(chunk);
+      hooks?.beginWrite();
+      term.write(chunk, () => hooks?.endWrite());
     },
     reset: () => {
       term.reset();
