@@ -1,0 +1,256 @@
+# Beta builds for the native client rewrite.
+#
+# Deliberately separate from release.yml, which builds the SHIPPING clients
+# (apps/mobile — the Expo app and the react-native-web Tauri desktop). This one
+# builds the REPLACEMENTS being written in the rewrite: apps/desktop and, once
+# it exists, the Swift iOS app. Nothing here touches a GitHub Release; every
+# leg uploads workflow artifacts you download and run by hand.
+#
+# Manual only. These are test builds, not a publishing path.
+name: Beta (native rewrite)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: What to build
+        type: choice
+        default: all
+        options: [all, core, desktop, ios]
+
+concurrency:
+  group: beta-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The Rust core plus the cross-language conformance suite. Cheap, and it
+  # gates the platform legs: if the core is broken there is no point paying for
+  # five desktop runners.
+  core:
+    if: inputs.scope == 'all' || inputs.scope == 'core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/tether-core
+            crates/tether-proto
+
+      # The conformance test spawns the real Bun server, so workspace deps must
+      # be installed before it runs.
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+
+      - name: Core crate
+        timeout-minutes: 15
+        run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
+        working-directory: crates/tether-core
+
+      - name: Proto crate
+        timeout-minutes: 15
+        run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
+        working-directory: crates/tether-proto
+
+      # #[ignore]d in-tree so plain `cargo test` stays hermetic; this is the
+      # cross-language check that Rust and the Bun server agree on the v2 wire.
+      - name: proto=2 conformance (rust ↔ bun)
+        timeout-minutes: 10
+        run: cargo test --test proto2_conformance -- --ignored --nocapture
+        working-directory: crates/tether-core
+
+  desktop:
+    needs: core
+    # `needs` alone would skip this when scope=desktop, because core is skipped.
+    if: |
+      always() && (needs.core.result == 'success' || needs.core.result == 'skipped')
+      && (inputs.scope == 'all' || inputs.scope == 'desktop')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            rust-target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+            cache-key: macos-aarch64
+          - os: macos-latest
+            rust-target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+            cache-key: macos-x86_64
+          - os: windows-latest
+            args: ""
+            cache-key: windows-x64
+          # Split for the same reason release.yml splits: native packages build
+          # on the older LTS for the widest glibc range, while the AppImage
+          # bundles its own webkit and needs 26.04's newer engine to avoid a
+          # blank window on some GPU/compositor combinations.
+          - os: ubuntu-24.04
+            args: --bundles deb,rpm
+            cache-key: linux-deb-rpm
+          - os: ubuntu-26.04
+            args: --bundles appimage
+            cache-key: linux-appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          key: ${{ matrix.cache-key }}
+
+      - name: Linux Tauri deps
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev rpm
+
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+
+      # No tagName/releaseId: beta builds never touch a Release. Unsigned by
+      # design — these are for local testing, and an unsigned bundle is the
+      # honest artifact for that. Signing belongs to release.yml.
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          args: ${{ matrix.args }}
+          includeUpdaterJson: false
+
+      # Bundle dir is target/release/bundle without --target, and
+      # target/<triple>/release/bundle with one (the macOS legs pass --target).
+      - name: Upload beta desktop bundles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: beta-desktop-${{ matrix.cache-key }}-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/**
+            apps/desktop/src-tauri/target/*/release/bundle/**
+
+  # iOS. This is the leg that cannot be built or verified on the Linux dev box,
+  # which is exactly why it lives here: a macOS runner is the only place the
+  # XCFramework can be assembled and any Swift can be compiled.
+  #
+  # crates/tether-ffi and clients/apple land in later sprints. Rather than fail
+  # a run for work that has not been written yet, each stage checks for its
+  # inputs and reports plainly when it is not there. When the sprint lands, this
+  # job starts doing real work with no edit.
+  ios:
+    needs: core
+    if: |
+      always() && (needs.core.result == 'success' || needs.core.result == 'skipped')
+      && (inputs.scope == 'all' || inputs.scope == 'ios')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tether-core
+          key: ios
+
+      - name: What exists in this commit
+        id: probe
+        run: |
+          ffi=false; app=false
+          [ -f crates/tether-ffi/Cargo.toml ] && ffi=true
+          [ -d clients/apple ] && app=true
+          echo "ffi=$ffi" >> "$GITHUB_OUTPUT"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "tether-ffi crate present: $ffi"
+          echo "clients/apple present:    $app"
+
+      # Always runs: the core itself must cross-compile to a device target long
+      # before any Swift exists. This is the earliest possible signal that the
+      # core is actually iOS-portable, and it would have caught a host-only
+      # dependency sneaking in.
+      - name: Cross-compile tether-core for iOS (device)
+        timeout-minutes: 20
+        run: cargo build --target aarch64-apple-ios --release
+        working-directory: crates/tether-core
+
+      - name: Cross-compile tether-core for the simulator
+        timeout-minutes: 20
+        run: cargo build --target aarch64-apple-ios-sim --release
+        working-directory: crates/tether-core
+
+      - name: Build tether-ffi and assemble the XCFramework
+        if: steps.probe.outputs.ffi == 'true'
+        timeout-minutes: 30
+        run: bash scripts/build-xcframework.sh
+
+      - name: Build the iOS app
+        if: steps.probe.outputs.app == 'true'
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          xcodebuild -project clients/apple/Tether.xcodeproj \
+            -scheme TetherIOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Not-yet-written stages
+        if: steps.probe.outputs.ffi != 'true' || steps.probe.outputs.app != 'true'
+        run: |
+          echo "::notice::iOS legs skipped for work not yet in this commit."
+          echo "  tether-ffi crate:  ${{ steps.probe.outputs.ffi }}"
+          echo "  clients/apple:     ${{ steps.probe.outputs.app }}"
+          echo "The tether-core cross-compile above DID run and is a real signal."
+
+      - name: Upload beta iOS artifacts
+        if: steps.probe.outputs.ffi == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: beta-ios-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            clients/apple/xcframework/**
+            build/**/*.xcframework/**

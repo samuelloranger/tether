@@ -83,6 +83,16 @@ export function TerminalPane(props: TerminalPaneProps) {
         onClose,
       },
     ).then((s) => {
+      // The effect can be torn down before this resolves — React StrictMode
+      // does exactly that on every mount, and a fast unmount does it in
+      // production too. Without this the cleanup below runs while `socket` is
+      // still null, its `socket?.close()` no-ops, and the connection that
+      // arrives a moment later is never closed: a leaked live WebSocket per
+      // mount, each one costing the server a full replay.
+      if (closed) {
+        s.close();
+        return;
+      }
       socket = s;
     });
 
