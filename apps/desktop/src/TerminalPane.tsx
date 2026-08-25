@@ -2,7 +2,13 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
-import { nextConnId, openCoreSocket, sendJson, type TerminalSocket } from './coreTransport';
+import {
+  forgetCoreSession,
+  nextConnId,
+  openCoreSocket,
+  sendJson,
+  type TerminalSocket,
+} from './coreTransport';
 import { applyServerFrame, createFrameSink, type FrameApplyResult } from './frameHandler';
 import type { UI_THEMES } from './preferences';
 import { createReplayGate } from './replayGate';
@@ -59,13 +65,19 @@ function readDims(fit: FitAddon): { cols: number; rows: number } {
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: one effect owns connect, replay gate, and resize
 export function TerminalPane(props: TerminalPaneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const lastIdRef = useRef(0);
   const onFrameRef = useRef(props.onFrame);
+  const onDisconnectedRef = useRef(props.onDisconnected);
   onFrameRef.current = props.onFrame;
+  onDisconnectedRef.current = props.onDisconnected;
 
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return undefined;
+
+    // Tied to this xterm instance — must not survive effect re-runs or session
+    // switches. Log ids are global on the server, so a stale cursor drops another
+    // session's replay as "already applied".
+    let lastAppliedId = 0;
 
     const { term, fit, dispose } = mountTerminal(
       container,
@@ -94,7 +106,7 @@ export function TerminalPane(props: TerminalPaneProps) {
     const onClose = () => {
       if (closed) return;
       closed = true;
-      props.onDisconnected();
+      onDisconnectedRef.current();
     };
 
     fit.fit();
@@ -107,8 +119,8 @@ export function TerminalPane(props: TerminalPaneProps) {
       {
         onOpen: () => {},
         onMessage: (raw) => {
-          const result = applyServerFrame(sink, raw, lastIdRef.current);
-          lastIdRef.current = result.lastAppliedId;
+          const result = applyServerFrame(sink, raw, lastAppliedId);
+          lastAppliedId = result.lastAppliedId;
           if (result.kind === 'output') replay.onOutput();
           if (result.kind === 'reset') replay.onReset();
           onFrameRef.current(props.hostId, props.sessionId, result);
@@ -146,6 +158,7 @@ export function TerminalPane(props: TerminalPaneProps) {
       observer.disconnect();
       socket?.close();
       dispose();
+      void forgetCoreSession(props.sessionId);
     };
   }, [
     props.sessionId,
@@ -155,7 +168,6 @@ export function TerminalPane(props: TerminalPaneProps) {
     props.terminalTheme,
     props.fontFamily,
     props.fontSize,
-    props.onDisconnected,
   ]);
 
   return <div className="terminal-host" ref={hostRef} />;
