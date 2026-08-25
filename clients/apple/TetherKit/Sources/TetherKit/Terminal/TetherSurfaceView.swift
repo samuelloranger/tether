@@ -110,10 +110,19 @@ public final class TetherSurfaceView: UIView {
         let line = CTLineCreateWithAttributedString(attributed)
         let bounds = CTLineGetBoundsWithOptions(line, [])
         let drawX = x + max(0, (cellWidth - bounds.width) / 2 - bounds.origin.x)
-        let drawY = y + (cellHeight - selectedFont.lineHeight) / 2 + selectedFont.descender.magnitude
+        // CoreText draws with y increasing UPWARD, while this view lays cells
+        // out in UIKit coordinates with y increasing downward. Without a
+        // flipped text matrix every glyph renders upside down — the cell
+        // rectangles look right because CGContext.fill uses UIKit coordinates,
+        // which is why only the text appeared mirrored.
+        //
+        // With the flip in place, textPosition is the BASELINE measured down
+        // from the top of the cell, so it is derived from the ascender rather
+        // than the descender.
+        let drawY = y + (cellHeight - selectedFont.lineHeight) / 2 + selectedFont.ascender
 
         context.saveGState()
-        context.textMatrix = .identity
+        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
         context.textPosition = CGPoint(x: drawX, y: drawY)
         CTLineDraw(line, context)
 
