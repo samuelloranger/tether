@@ -90,12 +90,17 @@ where
 
     pub fn list(&self) -> Result<Vec<HostProfile>, HostStoreError> {
         let profiles = parse_profiles(self.storage.get_item(HOST_PROFILES_KEY)?.as_deref());
-        let Some(legacy_host) = self.storage.get_item(LEGACY_SERVER_IP_KEY)? else {
+        let Some(legacy_host) = self
+            .storage
+            .get_item(LEGACY_SERVER_IP_KEY)?
+            .filter(|host| !host.is_empty())
+        else {
             return Ok(profiles);
         };
         let legacy_port = self
             .storage
             .get_item(LEGACY_PORT_KEY)?
+            .filter(|port| !port.is_empty())
             .unwrap_or_else(|| "8085".to_string());
 
         let mut profiles = profiles;
@@ -408,6 +413,29 @@ mod tests {
             secrets.get_value("legacy").as_deref(),
             Some("orphaned-password")
         );
+    }
+
+    #[test]
+    fn treats_an_empty_legacy_address_as_absent() {
+        let storage = MemoryStorage::seeded(&[(LEGACY_SERVER_IP_KEY, "")]);
+        let secrets = MemorySecrets::seeded(&[("legacy", "orphaned-password")]);
+        let store = HostStore::new(storage.clone(), secrets.clone(), || "unused".to_string());
+
+        assert_eq!(store.list().unwrap(), Vec::<HostProfile>::new());
+        assert_eq!(storage.get(LEGACY_SERVER_IP_KEY).as_deref(), Some(""));
+        assert_eq!(
+            secrets.get_value("legacy").as_deref(),
+            Some("orphaned-password")
+        );
+    }
+
+    #[test]
+    fn defaults_an_empty_legacy_port_to_8085() {
+        let storage =
+            MemoryStorage::seeded(&[(LEGACY_SERVER_IP_KEY, "agent.local"), (LEGACY_PORT_KEY, "")]);
+        let store = HostStore::new(storage, MemorySecrets::default(), || "host-1".to_string());
+
+        assert_eq!(store.list().unwrap()[0].port, "8085");
     }
 
     #[test]
