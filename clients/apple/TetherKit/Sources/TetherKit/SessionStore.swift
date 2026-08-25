@@ -37,6 +37,14 @@ public final class SessionStore {
   private var socketTask: Task<Void, Never>?
   private var socket: URLSessionWebSocketTask?
   private var lastRenderedGeneration: UInt64?
+  /// The core's VT parser for the active session. Output bytes are fed in and
+  /// packed TGRD grids come back out; this is what turns a byte stream into
+  /// something the CoreText surface can draw.
+  @ObservationIgnored private var emulator: FfiTerminalEmulator?
+  /// One source of truth for the grid size: the socket, the parser and any
+  /// later resize must agree or the rendered grid will not match the PTY.
+  private let terminalCols: UInt16 = 120
+  private let terminalRows: UInt16 = 40
 
   public init(hostStore: HostStoreAdapter = HostStoreAdapter()) {
     self.hostStore = hostStore
@@ -305,6 +313,19 @@ public final class SessionStore {
     }
   }
 
+  /// Publishes a new grid only when the visible contents actually changed.
+  ///
+  /// `generation` is why this is cheap: it is compared before pulling the
+  /// packed bytes, so a burst of output that does not alter the viewport costs
+  /// nothing beyond the counter read.
+  private func refreshTerminalSnapshot() {
+    guard let emulator else { return }
+    let generation = emulator.generation()
+    guard generation != lastRenderedGeneration else { return }
+    lastRenderedGeneration = generation
+    terminalSnapshot = emulator.snapshot()
+  }
+
   /// Pulls a grid snapshot from the core when terminal FFI is wired. Until then, no-op.
   public func pullTerminalSnapshot(from provider: () -> Data?) {
     guard let bytes = provider() else { return }
@@ -380,10 +401,14 @@ public final class SessionStore {
   private func connectTerminal(sessionId: String) async {
     disconnectTerminal()
     guard let client = await activeClient() else { return }
+    emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
+    lastRenderedGeneration = nil
+    terminalSnapshot = nil
     let sinceId = replayStore.sinceId(sessionId: sessionId)
     do {
       let task = try await client.openWebSocket(
-        sessionId: sessionId, sinceId: sinceId, cols: 120, rows: 40)
+        sessionId: sessionId, sinceId: sinceId,
+        cols: Int32(terminalCols), rows: Int32(terminalRows))
       socket = task
       task.resume()
       socketTask = Task { [weak self] in
@@ -395,6 +420,7 @@ public final class SessionStore {
   }
 
   private func disconnectTerminal() {
+    emulator = nil
     socketTask?.cancel()
     socketTask = nil
     socket?.cancel(with: .goingAway, reason: nil)
@@ -435,12 +461,23 @@ public final class SessionStore {
 
     switch type {
     case "output":
+      // The id advances the replay cursor; the chunk is the actual terminal
+      // output and must reach the parser, or the surface stays blank however
+      // much data arrives.
       if let id = json["id"] as? UInt64 {
         _ = replayStore.acceptOutput(sessionId: sessionId, id: id)
       }
-    // Terminal grid snapshots will arrive via core FFI once the parser lands.
+      if let chunk = json["chunk"] as? String, let bytes = chunk.data(using: .utf8) {
+        emulator?.feed(bytes: bytes)
+        refreshTerminalSnapshot()
+      }
     case "reset":
       replayStore.reset(sessionId: sessionId)
+      // A reset means the client's history has a hole; rebuild the grid rather
+      // than letting the old contents linger under the replayed tail.
+      emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
+      lastRenderedGeneration = nil
+      terminalSnapshot = nil
     case "title", "activity", "exit":
       Task { await refreshSessions() }
     default:
