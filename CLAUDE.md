@@ -10,7 +10,7 @@ Clients are a single Expo React Native codebase: iOS/Android app, plus a Tauri d
 
 ## Monorepo layout (Bun workspaces)
 
-- `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary.
+- `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary. **Source lives in `apps/server/src/server/`** — every filename in the four bullets below is relative to that directory (so `main.ts` is `apps/server/src/server/main.ts`). Routes are split under `src/server/routes/` (`sessions.ts`, `git.ts`, `presentations.ts`, …). `src/web/dist/` holds the built web assets the binary serves.
   - Entry/lifecycle: `main.ts` (argv dispatch + control CLI + `holder` subcommand), `serve.ts` (`serve()` — reattach holders + `Bun.serve`), `index.ts` (dev entry), `app.ts` (Hono routes + WS gateway), `paths.ts` / `runtime.ts`, `update.ts` (self-update).
   - PTY: `pty.ts` (session registry, holder spawn/reattach, subscribe/write/resize/kill), `holder.ts` (the detached one-PTY-per-process owner), `procCwd.ts` / `procIdentity.ts` / `liveCwd.ts` (cwd + process tracking), `sessionActivity.ts` (`working`/`waiting`/`idle` inference from output), `sessionTitle.ts` (OSC title + auto-title).
   - Data/auth: `db.ts` (bun:sqlite + versioned migrations), `auth.ts` (argon2 password + tokens), `config.ts` (zod-typed settings over the `settings` table, client-editable).
@@ -21,7 +21,8 @@ Clients are a single Expo React Native codebase: iOS/Android app, plus a Tauri d
   - Terminal: `src/terminalEngine.ts` (`@xterm/headless` engine), `src/TerminalView*.tsx` + `src/terminalRendererHtml.ts` + `terminal-renderer/` (built to gitignored `src/terminalRenderer.generated.ts`, xterm.js inside a WebView), `src/terminalRendererProtocol.ts` (RN ↔ WebView messages), `src/ptyInput.ts` / `src/input.ts` / `src/mouseInput.ts`.
   - Features: `src/GitDrawer.tsx` / `src/GitReview.tsx` + `src/diffModel.ts`, `src/FileTree.tsx` / `src/FileViewer.tsx`, `src/PresentationView*.tsx`, `src/CodeHighlight.tsx`, `src/sessionCache.ts` (LRU tab cache).
   - Desktop-only: `src/desktop*.ts`, `src/TitleBar.tsx`, `src/windowControls.ts`, `src-tauri/` (Rust shell, updater, notifications).
-- `docs/` — VitePress site (`architecture.md`, `data-flow.md`, `security.md`, `terminal/`, `superpowers/specs/` design docs).
+- `apps/relay/` — Bun + Hono push relay (`tether-relay`), deployed separately (`Dockerfile` + `docker-compose.yml`). Routes ciphertext it cannot read from a tether server to APNs; see **Push notifications** below. Own tests (`bun --cwd apps/relay run test`).
+- `docs/` — VitePress site (`architecture.md`, `data-flow.md`, `security.md`, `terminal/`, `superpowers/specs/` design docs, `superpowers/plans/` implementation plans).
 
 ## Commands
 
