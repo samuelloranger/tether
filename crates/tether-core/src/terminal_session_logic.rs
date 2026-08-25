@@ -251,7 +251,8 @@ pub fn dispatch_server_frame(
 }
 
 /// Applies host-qualified title/activity effects and returns the waiting row
-/// emitted by an activity edge.
+/// emitted by an activity edge. Row lookup matches both host and id because
+/// drawer sessions from multiple hosts share default `term-N` ids.
 pub fn apply_session_metadata(rows: &mut [SessionRow], effect: &FrameEffect) -> Vec<SessionRow> {
     match effect {
         FrameEffect::Title { session, title } => {

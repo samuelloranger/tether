@@ -123,13 +123,7 @@ fn encode_query_value(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'*'
-            | b'-'
-            | b'.'
-            | b'_' => {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => {
                 encoded.push(byte as char);
             }
             b' ' => encoded.push('+'),

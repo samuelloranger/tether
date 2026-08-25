@@ -32,7 +32,8 @@ pub struct HostPollOutcome {
 
 /// Classifies each host independently. This is the portable equivalent of the
 /// TypeScript `Promise.all` containment boundary: every input always produces
-/// its own outcome and cannot reject the batch.
+/// its own outcome and cannot reject the batch. Session rows stay as raw JSON
+/// here; host qualification happens in `reduce_session_list_response`.
 pub fn poll_host_sessions(
     inputs: impl IntoIterator<Item = (HostProfile, HostPollInput)>,
 ) -> Vec<HostPollOutcome> {

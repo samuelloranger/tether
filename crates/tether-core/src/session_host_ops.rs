@@ -52,6 +52,9 @@ struct RemoteSessionRow {
 
 /// Reduces one completed `/api/sessions` request. Fetching and observer calls
 /// remain shell responsibilities; malformed rows cannot enter core state.
+/// Each row is stamped with `profile.id` as `host_id`, matching TypeScript's
+/// `applyPolledSessions` merge but doing it at reduction time so drawer state
+/// is host-qualified before any session-selection logic runs.
 pub fn reduce_session_list_response(
     profile: &HostProfile,
     active_host_id: &str,
@@ -267,6 +270,26 @@ mod tests {
         let plan = kill_plan(&[row("host-1", "term-1"), row("host-1", "term-2")]);
         let latest_active_key = "host-1:term-2".parse().unwrap();
         assert!(!plan.complete(&latest_active_key).clear_presentation);
+    }
+
+    #[test]
+    fn board_798_same_session_id_on_two_hosts_stays_host_qualified() {
+        use crate::tether_app_actions::open_rename;
+
+        let mut host_two = row("host-2", "term-1");
+        host_two.name = Some("Other host".to_string());
+        let mut host_one = row("host-1", "term-1");
+        host_one.name = Some("Studio".to_string());
+        let rows = vec![host_two, row("host-1", "term-2"), host_one];
+
+        let client = HostClient::new(profile("host-1"), "secret");
+        let active = "host-1:term-1".parse().unwrap();
+        let plan = plan_kill_session(&client, &active, &rows);
+        assert_eq!(
+            plan.complete(&active).switch_to,
+            Some("host-1:term-2".parse().unwrap())
+        );
+        assert_eq!(open_rename(&rows, &active).text, "Studio");
     }
 
     #[test]
