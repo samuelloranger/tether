@@ -12,7 +12,8 @@
       "*.json",
       "!apps/**/dist",
       "!apps/**/node_modules",
-      "!apps/mobile/src/*.generated.ts"
+      "!apps/mobile/src/*.generated.ts",
+      "!apps/server/src/server/proto/gen"
     ]
   },
   "formatter": {
