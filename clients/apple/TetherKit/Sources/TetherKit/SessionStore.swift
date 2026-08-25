@@ -325,13 +325,15 @@ public final class SessionStore {
   }
 
   private func client(for hostId: String) -> NativeHostClient? {
+    // `try?` on a throwing call that already returns String? flattens in
+    // Swift 5+, so `password` binds as a non-optional String here — a second
+    // `let` to unwrap it does not compile.
     guard
       let profile = hosts.first(where: { $0.id == hostId }),
       let password = try? hostStore.password(for: hostId),
-      let pwd = password,
-      !pwd.isEmpty
+      !password.isEmpty
     else { return nil }
-    return NativeHostClient(profile: profile, password: pwd)
+    return NativeHostClient(profile: profile, password: password)
   }
 
   private func fetchSessions(for hostId: String) async -> [RemoteSession] {
