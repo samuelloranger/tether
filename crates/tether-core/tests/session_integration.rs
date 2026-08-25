@@ -40,7 +40,7 @@ async fn spawn_server(
         .unwrap();
         let (mut write, mut read) = socket.split();
         for frame in to_send {
-            write.send(Message::Text(frame.into())).await.unwrap();
+            write.send(Message::Text(frame)).await.unwrap();
         }
         // Tests that don't send a client frame would hang forever on read.next().
         // Race a short idle against the first client message, then hang up so

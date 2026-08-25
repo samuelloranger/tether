@@ -148,7 +148,7 @@ pub async fn open_session(
         while let Some(outgoing) = outgoing_rx.recv().await {
             match outgoing {
                 Outgoing::Frame(text) => {
-                    if write.send(Message::Text(text.into())).await.is_err() {
+                    if write.send(Message::Text(text)).await.is_err() {
                         break;
                     }
                 }
