@@ -56,11 +56,18 @@ lipo -create "$SIM_ARM_LIB" "$SIM_X86_LIB" -output "$SIM_FAT_LIB"
 
 mkdir -p "$OUT_SWIFT" "$OUT_HEADERS"
 echo "==> Generating Swift bindings (uniffi 0.28.3)"
-cargo run --manifest-path "$MANIFEST" --"$PROFILE" --bin uniffi-bindgen -- \
-  generate \
-  --library "$DEVICE_LIB" \
-  --language swift \
-  --out-dir "$OUT_SWIFT"
+# uniffi-bindgen's --library mode shells out to `cargo metadata` in the CURRENT
+# working directory, and this repo has no workspace manifest at its root — so
+# running this from the repo root fails with "error running cargo metadata".
+# Run it from inside the crate instead.
+(
+  cd "$CRATE"
+  cargo run --manifest-path "$MANIFEST" --"$PROFILE" --bin uniffi-bindgen -- \
+    generate \
+    --library "$DEVICE_LIB" \
+    --language swift \
+    --out-dir "$OUT_SWIFT"
+)
 
 # UniFFI emits tether_ffiFFI.h and tether_ffi.modulemap alongside the Swift sources.
 if [[ ! -f "$OUT_SWIFT/${LIB_NAME}FFI.h" ]]; then
