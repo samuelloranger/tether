@@ -1,5 +1,10 @@
 import { Platform } from 'react-native';
 import { isTauri } from './platform';
+import {
+  type CoreConnectParams,
+  coreTransportEnabled,
+  openCoreSocket,
+} from './tether/coreTransport';
 
 // Terminal WebSocket transport, abstracted over platform so App.tsx doesn't care
 // how the socket is opened:
@@ -84,6 +89,55 @@ async function openTauriSocket(
   };
 }
 
+// Spike-only: the core transport needs origin + params separately, while every
+// caller still builds a full URL for the ws_* path. Splitting it here keeps the
+// blast radius at one file. When the core becomes the only transport, push this
+// split up into hostClient.openSocket and delete this.
+function splitSocketUrl(url: string): { baseWsUrl: string; params: CoreConnectParams } {
+  const parsed = new URL(url);
+  const number = (key: string, fallback: number) => {
+    const raw = parsed.searchParams.get(key);
+    const value = raw === null ? Number.NaN : Number(raw);
+    return Number.isFinite(value) ? value : fallback;
+  };
+  return {
+    baseWsUrl: `${parsed.protocol}//${parsed.host}`,
+    params: {
+      sessionId: parsed.searchParams.get('sessionId') ?? 'default',
+      cols: number('cols', 80),
+      rows: number('rows', 24),
+    },
+  };
+}
+
+// Adapts a Promise<TerminalSocket> into the synchronous TerminalSocket callers
+// expect, queueing sends until the real socket resolves. Extracted from
+// openTerminalSocket's Tauri branch so both transports share it.
+function deferredSocket(pending$: Promise<TerminalSocket>): TerminalSocket {
+  let real: TerminalSocket | null = null;
+  let closed = false;
+  const pending: string[] = [];
+  pending$.then((s) => {
+    if (closed) {
+      s.close();
+      return;
+    }
+    real = s;
+    for (const t of pending) s.send(t);
+    pending.length = 0;
+  });
+  return {
+    send: (t) => {
+      if (real) real.send(t);
+      else pending.push(t);
+    },
+    close: () => {
+      closed = true;
+      real?.close();
+    },
+  };
+}
+
 // Open a terminal socket for the current platform.
 export function openTerminalSocket(
   url: string,
@@ -92,28 +146,11 @@ export function openTerminalSocket(
 ): TerminalSocket {
   if (isTauri()) {
     const connId = `c${++connSeq}`;
-    let real: TerminalSocket | null = null;
-    let closed = false;
-    const pending: string[] = [];
-    openTauriSocket(connId, url, password, h).then((s) => {
-      if (closed) {
-        s.close();
-        return;
-      }
-      real = s;
-      for (const t of pending) s.send(t);
-      pending.length = 0;
-    });
-    return {
-      send: (t) => {
-        if (real) real.send(t);
-        else pending.push(t);
-      },
-      close: () => {
-        closed = true;
-        real?.close();
-      },
-    };
+    if (coreTransportEnabled()) {
+      const { baseWsUrl, params } = splitSocketUrl(url);
+      return deferredSocket(openCoreSocket(connId, baseWsUrl, password, params, h));
+    }
+    return deferredSocket(openTauriSocket(connId, url, password, h));
   }
 
   // Plain web has no way to send the Authorization header on a WebSocket — the
