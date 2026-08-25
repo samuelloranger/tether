@@ -1,0 +1,157 @@
+:root {
+  color: #cdd6f4;
+  background: #11111b;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.panel {
+  max-width: 420px;
+  margin: 4rem auto;
+  padding: 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.panel h1 {
+  margin: 0;
+}
+
+.muted {
+  color: #a6adc8;
+  margin: 0;
+}
+
+.error {
+  color: #f38ba8;
+  margin: 0;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+input {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #45475a;
+  background: #1e1e2e;
+  color: inherit;
+}
+
+button {
+  padding: 0.55rem 0.85rem;
+  border-radius: 8px;
+  border: none;
+  background: #89b4fa;
+  color: #11111b;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.session-panel {
+  max-width: 720px;
+}
+
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.session-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.session-row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  background: #1e1e2e;
+  color: inherit;
+}
+
+.session-status {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-running {
+  color: #a6e3a1;
+}
+
+.status-stopped {
+  color: #fab387;
+}
+
+.terminal-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+}
+
+.terminal-label {
+  color: #a6adc8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 0.25rem;
+  background: #1e1e2e;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
