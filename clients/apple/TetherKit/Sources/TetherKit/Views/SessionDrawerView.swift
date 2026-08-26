@@ -124,6 +124,9 @@ private struct HostDrawerSection: View {
             title: session.displayTitle,
             stopped: !session.isRunning,
             active: host.id == activeHostId && session.id == activeSessionId,
+            status: session.status,
+            activity: session.activity,
+            lastOutputAt: session.lastOutputAt,
             onSelect: { onSelectSession(host.id, session.id) },
             onKill: { onKillSession(session.id) }
           )
@@ -170,6 +173,9 @@ private struct SessionDrawerRow: View {
   let title: String
   let stopped: Bool
   let active: Bool
+  let status: String
+  let activity: String?
+  let lastOutputAt: String?
   let onSelect: () -> Void
   let onKill: () -> Void
   @State private var confirmKill = false
@@ -181,6 +187,14 @@ private struct SessionDrawerRow: View {
           Text(title)
             .foregroundStyle(active ? TetherColors.accent : TetherColors.textPrimary)
             .lineLimit(1)
+          // Which session needs you is the drawer's whole job; without this the
+          // rows are indistinguishable.
+          SessionActivityBadge(
+            status: status,
+            activity: activity,
+            live: active
+              || SessionActivityLogic.isRecentlyActive(lastOutputAt: lastOutputAt)
+          )
           if stopped {
             Text("stopped")
               .font(.caption2)

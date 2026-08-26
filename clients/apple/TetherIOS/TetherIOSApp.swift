@@ -11,6 +11,7 @@ struct TetherIOSApp: App {
   #if canImport(UIKit)
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   #endif
+  @Environment(\.scenePhase) private var scenePhase
   @State private var store = SessionStore()
   @State private var preferences = AppPreferences()
 
@@ -30,6 +31,16 @@ struct TetherIOSApp: App {
           #if canImport(UIKit)
           appDelegate.pushRegistrar.start()
           #endif
+        }
+        .onChange(of: scenePhase) { _, phase in
+          switch phase {
+          case .active:
+            store.handleAppLifecycle(.active)
+          case .inactive, .background:
+            store.handleAppLifecycle(.inactive)
+          @unknown default:
+            break
+          }
         }
     }
   }

@@ -37,24 +37,41 @@ public struct SessionListView: View {
             .foregroundStyle(TetherColors.textSecondary)
         }
         ForEach(store.sessions) { session in
+          let active = store.activeSessionId == session.id
+          let live = active || SessionActivityLogic.isRecentlyActive(lastOutputAt: session.lastOutputAt)
+          let a11y = SessionActivityLogic.accessibilityLabel(
+            title: session.displayTitle,
+            status: session.status,
+            activity: session.activity,
+            live: live
+          )
           Button {
             onOpenSession(session.id)
           } label: {
-            HStack {
+            HStack(spacing: 10) {
+              SessionActivityBadge(
+                status: session.status,
+                activity: session.activity,
+                live: live
+              )
               VStack(alignment: .leading, spacing: 2) {
                 Text(session.displayTitle)
                   .foregroundStyle(TetherColors.textPrimary)
-                Text(session.isRunning ? "Running" : "Stopped")
-                  .font(.caption)
-                  .foregroundStyle(session.isRunning ? .green : TetherColors.textSecondary)
+                if !session.isRunning {
+                  Text("stopped")
+                    .font(.caption)
+                    .foregroundStyle(TetherColors.textSecondary)
+                }
               }
               Spacer()
-              if store.activeSessionId == session.id {
+              if active {
                 Image(systemName: "terminal.fill")
                   .foregroundStyle(TetherColors.accent)
               }
             }
           }
+          .accessibilityLabel(a11y)
+          .accessibilityAddTraits(active ? .isSelected : [])
           .contextMenu {
             Button("Rename") {
               renamingSession = session

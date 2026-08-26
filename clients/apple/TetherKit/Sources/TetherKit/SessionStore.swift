@@ -17,6 +17,8 @@ public final class SessionStore {
   public var isLoading = false
   public var isPairing = false
   public var pairingNeedsSetup = false
+  /// Whether the app scene is foreground — gates `{type:focus}` and resume.
+  public private(set) var isAppActive = true
 
   private let hostStore: HostStoreAdapter
   private let replayStore: FfiReplayStore
@@ -38,6 +40,10 @@ public final class SessionStore {
   private var pollTask: Task<Void, Never>?
   private var socketTask: Task<Void, Never>?
   private var socket: URLSessionWebSocketTask?
+  /// Tracks whether the active socket is usable (set false on cancel / read end).
+  private var socketIsOpen = false
+  /// Last inbound WS traffic (any frame, including ping), epoch ms — for resume stale check.
+  private var lastTrafficMs: Int64 = 0
   private var lastRenderedGeneration: UInt64?
   /// The core's VT parser for the active session. Output bytes are fed in and
   /// packed TGRD grids come back out; this is what turns a byte stream into
@@ -218,6 +224,9 @@ public final class SessionStore {
     do {
       _ = try await client.startSession(id: id)
       await refreshSessions()
+      if activeSessionId != id {
+        sendFocus(focused: false)
+      }
       activeSessionId = id
       await connectTerminal(sessionId: id)
     } catch {
@@ -231,6 +240,7 @@ public final class SessionStore {
       try await client.killSession(id: id)
       replayStore.forget(sessionId: id)
       if activeSessionId == id {
+        sendFocus(focused: false)
         disconnectTerminal()
         activeSessionId = nil
         terminalSnapshot = nil
@@ -239,6 +249,45 @@ public final class SessionStore {
     } catch {
       errorMessage = error.localizedDescription
     }
+  }
+
+  /// Drive from `@Environment(\.scenePhase)` in `TetherIOSApp` (one place).
+  public func handleAppLifecycle(_ phase: AppLifecyclePhase) {
+    switch phase {
+    case .active:
+      isAppActive = true
+      Task { await resumeFromForeground() }
+    case .inactive:
+      isAppActive = false
+      sendFocus(focused: false)
+    }
+  }
+
+  /// Re-evaluate the active socket after suspension (port of RN `onResumeActive`).
+  public func resumeFromForeground() async {
+    guard let sessionId = activeSessionId else {
+      sendFocus(focused: true)
+      return
+    }
+    let now = Int64(Date().timeIntervalSince1970 * 1000)
+    switch ResumeLogic.action(open: socketIsOpen, lastSeenMs: lastTrafficMs, nowMs: now) {
+    case .reconnect, .close:
+      // Native has no onClose→backoff reconnect path, so both actions reconnect.
+      await connectTerminal(sessionId: sessionId)
+    case .none:
+      sendFocus(focused: true)
+    }
+  }
+
+  /// `{ type: "focus", focused }` — server suppresses push while focused is true.
+  public func sendFocus(focused: Bool) {
+    guard socketIsOpen, let socket else { return }
+    guard
+      let payload = try? JSONSerialization.data(
+        withJSONObject: ["type": "focus", "focused": focused]),
+      let frame = String(data: payload, encoding: .utf8)
+    else { return }
+    socket.send(.string(frame)) { _ in }
   }
 
   public func renameSession(id: String, name: String) async {
@@ -277,6 +326,9 @@ public final class SessionStore {
   }
 
   public func selectSession(hostId: String, sessionId: String) async {
+    if activeSessionId != sessionId || activeHostId != hostId {
+      sendFocus(focused: false)
+    }
     activeHostId = hostId
     activeSessionId = sessionId
     await connectTerminal(sessionId: sessionId)
@@ -293,6 +345,17 @@ public final class SessionStore {
     emulator?.resize(cols: cols, rows: rows)
     refreshTerminalSnapshot()
     sendResize(cols: cols, rows: rows)
+  }
+
+  /// Scrolls the local VT viewport through scrollback (not PTY PgUp/PgDn).
+  ///
+  /// Positive `lines` moves into history (older output); negative toward the
+  /// live bottom. Lives next to `updateGrid` because `emulator` is private —
+  /// an extension in another file cannot reach it.
+  public func scrollViewport(lines: Int32) {
+    guard lines != 0 else { return }
+    emulator?.scrollViewport(lines: lines)
+    refreshTerminalSnapshot()
   }
 
   private func sendResize(cols: UInt16, rows: UInt16) {
@@ -443,11 +506,21 @@ public final class SessionStore {
         sessionId: sessionId, sinceId: sinceId,
         cols: terminalCols, rows: terminalRows)
       socket = task
+      socketIsOpen = true
+      lastTrafficMs = Int64(Date().timeIntervalSince1970 * 1000)
       task.resume()
+      // Fresh connection is focused unless the app is known to be backgrounded
+      // (matches RN sessionTransport.onSocketOpen).
+      if isAppActive {
+        sendFocus(focused: true)
+      } else {
+        sendFocus(focused: false)
+      }
       socketTask = Task { [weak self] in
         await self?.readSocket(sessionId: sessionId, task: task)
       }
     } catch {
+      socketIsOpen = false
       errorMessage = error.localizedDescription
     }
   }
@@ -458,6 +531,11 @@ public final class SessionStore {
     socketTask = nil
     socket?.cancel(with: .goingAway, reason: nil)
     socket = nil
+    socketIsOpen = false
+  }
+
+  private func noteSocketTraffic() {
+    lastTrafficMs = Int64(Date().timeIntervalSince1970 * 1000)
   }
 
   private func readSocket(sessionId: String, task: URLSessionWebSocketTask) async {
@@ -475,12 +553,18 @@ public final class SessionStore {
           break
         }
       } catch {
-        if !Task.isCancelled {
-          await MainActor.run {
+        await MainActor.run {
+          self.socketIsOpen = false
+          if !Task.isCancelled {
             self.errorMessage = "Connection closed"
           }
         }
         break
+      }
+    }
+    await MainActor.run {
+      if self.socket === task {
+        self.socketIsOpen = false
       }
     }
   }
@@ -491,6 +575,8 @@ public final class SessionStore {
       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let type = json["type"] as? String
     else { return }
+
+    noteSocketTraffic()
 
     switch type {
     case "output":
@@ -515,6 +601,8 @@ public final class SessionStore {
       emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
       lastRenderedGeneration = nil
       terminalSnapshot = nil
+    case "ping":
+      break
     case "title", "activity", "exit":
       Task { await refreshSessions() }
     default:
