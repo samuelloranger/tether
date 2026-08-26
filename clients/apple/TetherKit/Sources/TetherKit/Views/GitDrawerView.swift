@@ -9,6 +9,28 @@ public struct GitDrawerView: View {
   @State private var loading = true
   @State private var committing = false
   @State private var path = NavigationPath()
+  /// Set to the discard the user is about to confirm. Discarding throws work
+  /// away irreversibly, so — like killing a session — it asks first.
+  @State private var pendingDiscard: PendingDiscard?
+
+  private enum PendingDiscard: Identifiable {
+    case all
+    case file(String)
+
+    var id: String {
+      switch self {
+      case .all: "all"
+      case let .file(path): "file:\(path)"
+      }
+    }
+
+    var title: String {
+      switch self {
+      case .all: "Discard all changes?"
+      case let .file(path): "Discard changes to \(path)?"
+      }
+    }
+  }
 
   public init(store: SessionStore, onDismiss: @escaping () -> Void) {
     self.store = store
@@ -105,10 +127,7 @@ public struct GitDrawerView: View {
                 }
               }
               Button("Discard all", role: .destructive) {
-                Task {
-                  await store.gitDiscardAll()
-                  await reload()
-                }
+                pendingDiscard = .all
               }
             }
           }
@@ -116,6 +135,30 @@ public struct GitDrawerView: View {
       }
     }
     .listStyle(.plain)
+    .confirmationDialog(
+      pendingDiscard?.title ?? "",
+      isPresented: Binding(
+        get: { pendingDiscard != nil },
+        set: { if !$0 { pendingDiscard = nil } }
+      ),
+      titleVisibility: .visible,
+      presenting: pendingDiscard
+    ) { target in
+      Button("Discard", role: .destructive) {
+        Task {
+          switch target {
+          case .all:
+            await store.gitDiscardAll()
+          case let .file(path):
+            await store.gitDiscard(path: path)
+          }
+          await reload()
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { _ in
+      Text("This cannot be undone.")
+    }
     .scrollContentBackground(.hidden)
     .background(TetherColors.background)
   }
@@ -190,10 +233,7 @@ public struct GitDrawerView: View {
         }
         .tint(TetherColors.accent)
         Button("Discard", role: .destructive) {
-          Task {
-            await store.gitDiscard(path: file.path)
-            await reload()
-          }
+          pendingDiscard = .file(file.path)
         }
       }
     }
