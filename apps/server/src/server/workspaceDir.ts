@@ -15,7 +15,14 @@ export type WorkspaceDirEntry = {
   size: number;
 };
 
-export function readWorkspaceDir(root: string, requestedPath: string, cwd?: string) {
+type ScannedName = { name: string; isDir: boolean; isLink: boolean };
+
+/**
+ * Resolves the requested path to a real directory inside the workspace, or
+ * throws. Returns the canonical root, the target, and the lstat that
+ * readWorkspaceDir compares against once the read is done.
+ */
+function resolveDirTarget(root: string, requestedPath: string, cwd?: string) {
   if (path.isAbsolute(requestedPath) || requestedPath.split(/[\\/]/).includes('..'))
     throw new WorkspaceFileError(400, 'invalid file path');
   const canonicalRoot = realpathSync(root);
@@ -37,18 +44,25 @@ export function readWorkspaceDir(root: string, requestedPath: string, cwd?: stri
   }
   if (!inside(canonicalRoot, target)) throw new WorkspaceFileError(400, 'path escapes workspace');
   // lstat, not stat: the target came from realpathSync so it is already
-  // symlink-free, and lstat lets the identity below be compared against what we
-  // validated rather than against whatever the name resolves to later.
+  // symlink-free, and lstat lets the identity check after the read compare
+  // against what we validated rather than against whatever the name resolves to
+  // later.
   const validated = lstatSync(target);
   if (!validated.isDirectory()) throw new WorkspaceFileError(415, 'path is not a directory');
+  return { canonicalRoot, target, validated };
+}
 
-  // Names first, cheaply, then sort, THEN stat only the page we return.
-  //
-  // The previous version took the filesystem's arbitrary first 2000 entries and
-  // sorted afterwards, so in a directory of 2001+ files some entries were
-  // permanently unreachable — sorted output that silently omitted whatever the
-  // readdir order happened to put last. It also stat'd every entry it walked.
-  const names: { name: string; isDir: boolean; isLink: boolean }[] = [];
+/**
+ * Reads the directory's names only — no stat per entry.
+ *
+ * The previous version took the filesystem's arbitrary first 2000 entries and
+ * sorted afterwards, so in a directory of 2001+ files some entries were
+ * permanently unreachable: sorted output that silently omitted whatever the
+ * readdir order happened to put last. Names first, cheaply, then sort, THEN stat
+ * only the page that is returned.
+ */
+function scanDirNames(target: string): { names: ScannedName[]; scanned: number } {
+  const names: ScannedName[] = [];
   let scanned = 0;
   const handle = opendirSync(target);
   try {
@@ -69,33 +83,15 @@ export function readWorkspaceDir(root: string, requestedPath: string, cwd?: stri
   } finally {
     handle.closeSync();
   }
+  return { names, scanned };
+}
 
-  // Was the directory we just read still the one we validated?
-  //
-  // Containment is checked by resolving the path, but the path is resolved again
-  // when it is opened, so between those two steps the name can be swapped for a
-  // symlink pointing outside the workspace. Comparing the device and inode of
-  // what we validated against what we hold now closes that: on a swap the
-  // identity differs and the listing is discarded rather than returned.
-  //
-  // This is verify-after-read, not openat(2) — Node cannot readdir from a file
-  // descriptor, so a genuinely atomic version is not expressible here. What it
-  // guarantees is that no result which escaped the workspace is ever RETURNED.
-  const after = lstatSync(target);
-  if (after.dev !== validated.dev || after.ino !== validated.ino) {
-    throw new WorkspaceFileError(409, 'directory changed while it was being read');
-  }
-  if (realpathSync(target) !== target) {
-    throw new WorkspaceFileError(409, 'directory changed while it was being read');
-  }
-
-  names.sort((a, b) => {
-    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-  const truncated = scanned > MAX_ENTRIES || names.length >= SCAN_CEILING;
-  const page = names.slice(0, MAX_ENTRIES);
-
+/** Stats one page of names, reporting a symlink in a way that reveals no target. */
+function pageEntries(
+  canonicalRoot: string,
+  target: string,
+  page: ScannedName[],
+): WorkspaceDirEntry[] {
   const entries: WorkspaceDirEntry[] = [];
   for (const item of page) {
     const full = path.join(target, item.name);
@@ -125,7 +121,38 @@ export function readWorkspaceDir(root: string, requestedPath: string, cwd?: stri
     }
     entries.push({ name: item.name, kind: item.isDir ? 'dir' : 'file', size });
   }
+  return entries;
+}
 
+export function readWorkspaceDir(root: string, requestedPath: string, cwd?: string) {
+  const { canonicalRoot, target, validated } = resolveDirTarget(root, requestedPath, cwd);
+  const { names, scanned } = scanDirNames(target);
+
+  // Was the directory we just read still the one we validated?
+  //
+  // Containment is checked by resolving the path, but the path is resolved again
+  // when it is opened, so between those two steps the name can be swapped for a
+  // symlink pointing outside the workspace. Comparing the device and inode of
+  // what we validated against what we hold now closes that: on a swap the
+  // identity differs and the listing is discarded rather than returned.
+  //
+  // This is verify-after-read, not openat(2) — Node cannot readdir from a file
+  // descriptor, so a genuinely atomic version is not expressible here. What it
+  // guarantees is that no result which escaped the workspace is ever RETURNED.
+  const after = lstatSync(target);
+  if (after.dev !== validated.dev || after.ino !== validated.ino) {
+    throw new WorkspaceFileError(409, 'directory changed while it was being read');
+  }
+  if (realpathSync(target) !== target) {
+    throw new WorkspaceFileError(409, 'directory changed while it was being read');
+  }
+
+  names.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  const truncated = scanned > MAX_ENTRIES || names.length >= SCAN_CEILING;
+  const entries = pageEntries(canonicalRoot, target, names.slice(0, MAX_ENTRIES));
 
   const result: {
     path: string;
