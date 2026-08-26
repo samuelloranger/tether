@@ -61,6 +61,20 @@ public struct SessionDrawerView: View {
         }
         .padding(.vertical, 12)
       }
+      .overlay {
+        if store.hosts.isEmpty {
+          VStack(spacing: 6) {
+            Text("No server yet")
+              .font(.footnote.weight(.semibold))
+              .foregroundStyle(TetherColors.textPrimary)
+            Text("Add one from Settings to open a terminal.")
+              .font(.caption)
+              .foregroundStyle(TetherColors.textSecondary)
+              .multilineTextAlignment(.center)
+          }
+          .padding(.horizontal, 24)
+        }
+      }
 
       Button {
         Task {
@@ -71,6 +85,9 @@ public struct SessionDrawerView: View {
         Label("New terminal", systemImage: "plus")
           .frame(maxWidth: .infinity)
       }
+      // With no server paired there is nothing to start a terminal on; the
+      // button used to sit there as the primary action and simply fail.
+      .disabled(store.hosts.isEmpty)
       .buttonStyle(.borderedProminent)
       .tint(TetherColors.accent)
       .padding(16)

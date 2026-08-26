@@ -360,9 +360,61 @@ public final class TerminalInputTextView: UITextView {
   }
 }
 
+/// What the terminal area should show when there is nothing to stream.
+///
+/// A void with a live key bar above it is not an empty state — it gives the
+/// reader nothing to do and no idea what is missing. Each case names the thing
+/// that is absent and offers the one action that resolves it.
+struct TerminalPlaceholder: View {
+  enum Reason {
+    case noHost
+    case noSession
+  }
+
+  let reason: Reason
+  let onAddHost: () -> Void
+  let onNewTerminal: () -> Void
+
+  var body: some View {
+    VStack(spacing: 14) {
+      Image(systemName: reason == .noHost ? "server.rack" : "terminal")
+        .font(.system(size: 34, weight: .light))
+        .foregroundStyle(TetherColors.textSecondary)
+      VStack(spacing: 5) {
+        Text(reason == .noHost ? "No server yet" : "No session open")
+          .font(.headline)
+          .foregroundStyle(TetherColors.textPrimary)
+        Text(
+          reason == .noHost
+            ? "Add the machine you want a shell on. Tether pairs with it once and remembers."
+            : "Start a terminal to pick up where the shell left off."
+        )
+        .font(.footnote)
+        .foregroundStyle(TetherColors.textSecondary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 280)
+      }
+      Button(reason == .noHost ? "Add a server" : "New terminal") {
+        reason == .noHost ? onAddHost() : onNewTerminal()
+      }
+      .font(.subheadline.weight(.semibold))
+      .padding(.horizontal, 18)
+      .padding(.vertical, 10)
+      .background(TetherColors.accent)
+      .foregroundStyle(TetherColors.onAccent)
+      .clipShape(Capsule())
+      .padding(.top, 2)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(TetherColors.background)
+  }
+}
+
 public struct TerminalView: View {
   @Bindable public var store: SessionStore
   @Bindable public var preferences: AppPreferences
+  /// Routed from RootView so the empty state can open pairing.
+  public var onAddHost: () -> Void = {}
   @State private var ctrlArmed = false
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
@@ -378,14 +430,26 @@ public struct TerminalView: View {
   @State private var keyboardInset: CGFloat = 0
   @FocusState private var keyboardFocused: Bool
 
-  public init(store: SessionStore, preferences: AppPreferences) {
+  public init(
+    store: SessionStore,
+    preferences: AppPreferences,
+    onAddHost: @escaping () -> Void = {}
+  ) {
     self.store = store
     self.preferences = preferences
+    self.onAddHost = onAddHost
   }
 
   public var body: some View {
     VStack(spacing: 0) {
       ZStack(alignment: .topTrailing) {
+        if let placeholder = placeholderReason {
+          TerminalPlaceholder(
+            reason: placeholder,
+            onAddHost: onAddHost,
+            onNewTerminal: { Task { await store.newTerminal() } }
+          )
+        } else {
         TetherSurfaceRepresentable(
           snapshot: $store.terminalSnapshot,
           fontName: preferences.terminalFont.postScriptName,
@@ -406,6 +470,8 @@ public struct TerminalView: View {
         // home-indicator inset — shows this through, and Color.black read as a
         // dead strip against the terminal's navy.
         .background(TetherColors.terminalBackground)
+
+        }
 
         if scrollOffsetFromBottom > 0 {
           ScrollPositionIndicator(offset: scrollOffsetFromBottom)
@@ -461,7 +527,9 @@ public struct TerminalView: View {
       keyboardInset = 0
     }
     .onAppear {
-      keyboardFocused = true
+      // Only claim the keyboard when there is a session to type into. Focusing
+      // with nothing open put the key bar on screen with nothing to act on.
+      keyboardFocused = placeholderReason == nil
     }
     .onChange(of: store.activeSessionId) { _, _ in
       scrollOffsetFromBottom = 0
@@ -502,6 +570,13 @@ public struct TerminalView: View {
       let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
     else { return 0 }
     return max(0, window.bounds.maxY - end.minY)
+  }
+
+  /// Nothing to stream: either no server is paired, or none is open.
+  private var placeholderReason: TerminalPlaceholder.Reason? {
+    if store.hosts.isEmpty { return .noHost }
+    if store.activeSessionId == nil { return .noSession }
+    return nil
   }
 
   /// Sends typed input, folding in a latched Ctrl.

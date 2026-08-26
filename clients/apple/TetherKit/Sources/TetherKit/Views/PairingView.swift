@@ -32,6 +32,7 @@ public struct PairingView: View {
             }
           }
         }
+        .buttonStyle(PairingActionStyle(prominent: false))
         .disabled(host.isEmpty || store.isPairing)
 
         // A probe that fails silently is indistinguishable from a dead button,
@@ -79,11 +80,46 @@ public struct PairingView: View {
             )
           }
         }
+        .buttonStyle(PairingActionStyle(prominent: true))
         .disabled(host.isEmpty || password.isEmpty || store.isLoading)
       }
     }
     .navigationTitle("Add host")
+    .listRowSeparatorTint(TetherColors.textSecondary.opacity(0.2))
     .onChange(of: host) { store.probeSucceeded = false }
     .onChange(of: port) { store.probeSucceeded = false }
+  }
+}
+
+
+/// Gives a Form row that is an ACTION a shape a field never has.
+///
+/// Both the probe and the submit row used to render as plain grey text inside a
+/// grouped list, so a disabled action looked exactly like an empty placeholder
+/// and the primary action was invisible. A capsule reads as pressable whether or
+/// not it is currently available.
+private struct PairingActionStyle: ButtonStyle {
+  let prominent: Bool
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.subheadline.weight(.semibold))
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 9)
+      .background(background)
+      .foregroundStyle(foreground)
+      .clipShape(Capsule())
+      .opacity(configuration.isPressed ? 0.75 : 1)
+  }
+
+  private var background: Color {
+    guard isEnabled else { return TetherColors.textSecondary.opacity(0.14) }
+    return prominent ? TetherColors.accent : TetherColors.accent.opacity(0.16)
+  }
+
+  private var foreground: Color {
+    guard isEnabled else { return TetherColors.textSecondary }
+    return prominent ? TetherColors.onAccent : TetherColors.accent
   }
 }

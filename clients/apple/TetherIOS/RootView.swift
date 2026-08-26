@@ -36,8 +36,12 @@ struct RootView: View {
 
         PresentationBannerSlot(store: store, workspace: workspace)
 
-        TerminalView(store: store, preferences: preferences)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TerminalView(
+          store: store,
+          preferences: preferences,
+          onAddHost: { showPairing = true }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
 
       #if canImport(UIKit)
