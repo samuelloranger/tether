@@ -4137,6 +4137,7 @@ dependencies = [
 name = "tether-desktop-native"
 version = "2.8.12"
 dependencies = [
+ "base64 0.22.1",
  "keyring",
  "reqwest 0.12.28",
  "serde",
