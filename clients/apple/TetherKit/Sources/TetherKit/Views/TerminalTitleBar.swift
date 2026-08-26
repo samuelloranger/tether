@@ -89,7 +89,9 @@ public struct TerminalTitleBar: View {
     if let host = store.activeHost {
       return "\(host.host):\(host.port)"
     }
-    return "Select a session"
+    // "Select a session" told the reader to do something impossible when no
+    // server was paired at all.
+    return store.hosts.isEmpty ? "No server paired" : "Select a session"
   }
 }
 

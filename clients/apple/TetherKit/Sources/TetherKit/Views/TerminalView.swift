@@ -486,6 +486,10 @@ public struct TerminalView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+      // Not merely unfocused — absent. Leaving the bridge in the hierarchy left
+      // its inputAccessoryView docked at the bottom, so the Ctrl/Tab/Esc bar sat
+      // on screen with no terminal to act on.
+      if placeholderReason == nil {
       TerminalInputBridge(
         text: $inputBuffer,
         accessory: AnyView(
@@ -505,6 +509,7 @@ public struct TerminalView: View {
       )
       .frame(height: 1)
       .focused($keyboardFocused)
+      }
     }
     .background(TetherColors.background)
     // Own the keyboard inset explicitly, so SwiftUI cannot also apply one and
