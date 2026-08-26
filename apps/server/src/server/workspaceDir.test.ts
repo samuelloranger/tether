@@ -116,5 +116,13 @@ test('caps listing at 2000 entries and sets truncated', () => {
     const result = readWorkspaceDir(root, '');
     expect(result.entries).toHaveLength(2000);
     expect(result.truncated).toBe(true);
+
+    // The page must be the sorted PREFIX, not an arbitrary 2000 sorted after
+    // the fact. Slicing before sorting made whichever names readdir happened to
+    // return last permanently unreachable — invisible, because the output still
+    // came back neatly ordered.
+    expect(result.entries[0]?.name).toBe('f0000.txt');
+    expect(result.entries[1999]?.name).toBe('f1999.txt');
+    expect(result.entries.map((e) => e.name)).not.toContain('f2004.txt');
   });
 });

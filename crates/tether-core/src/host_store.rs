@@ -277,19 +277,29 @@ where
         profiles: Vec<HostProfile>,
     ) -> Result<Vec<HostProfile>, HostStoreError> {
         let mut seen: HashSet<String> = HashSet::with_capacity(profiles.len());
-        let mut repaired = false;
+        let mut ambiguous: Vec<String> = Vec::new();
         let mut out = Vec::with_capacity(profiles.len());
         for mut profile in profiles {
             if !seen.insert(profile.id.clone()) {
+                // The colliding id's stored secret belongs to whichever host
+                // wrote it LAST, and nothing records which that was. Leaving it
+                // in place is not merely untidy: the profile that keeps the id
+                // would then send the other host's password to its own server.
+                // Both sides therefore have to re-authenticate.
+                ambiguous.push(profile.id.clone());
                 let fresh = self.unique_id(&seen);
                 seen.insert(fresh.clone());
                 profile.id = fresh;
-                repaired = true;
             }
             out.push(profile);
         }
-        if repaired {
+        if !ambiguous.is_empty() {
             self.write(&out)?;
+            // After the profiles are persisted, so an interrupted repair leaves
+            // a password to re-enter rather than a duplicate id still in place.
+            for id in ambiguous {
+                self.secrets.clear(&id)?;
+            }
         }
         Ok(out)
     }
@@ -457,9 +467,11 @@ mod tests {
         // Exactly what the simulator had on disk after adding a second host.
         let stored = r##"[{"id":"host-0","name":"first","color":"#89b4fa","host":"10.0.0.1","port":"8097","identityName":"first","order":0},{"id":"host-0","name":"second","color":"#89b4fa","host":"10.0.0.2","port":"8100","identityName":"second","order":1}]"##;
         let storage = MemoryStorage::seeded(&[(HOST_PROFILES_KEY, stored)]);
-        let store = HostStore::new(storage.clone(), MemorySecrets::default(), || {
-            "host-0".to_string()
-        });
+        // The secret the collision left behind. It was written by whichever host
+        // saved last, so it belongs to neither profile in particular — the whole
+        // point of the assertion below.
+        let secrets = MemorySecrets::seeded(&[("host-0", "second-hosts-password")]);
+        let store = HostStore::new(storage.clone(), secrets.clone(), || "host-0".to_string());
 
         let profiles = store.list().unwrap();
         assert_eq!(profiles.len(), 2);
@@ -471,6 +483,12 @@ mod tests {
         // Persisted, so the split survives the next launch.
         let reread = parse_profiles(storage.get(HOST_PROFILES_KEY).as_deref());
         assert_eq!(reread, profiles);
+
+        // The ambiguous secret is GONE for both ids. Keeping it under the
+        // profile that retained the id would have sent the second host's
+        // password to the first host's server.
+        assert_eq!(secrets.get_value("host-0"), None);
+        assert_eq!(secrets.get_value(&profiles[1].id), None);
     }
 
     #[test]
