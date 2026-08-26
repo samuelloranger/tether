@@ -434,6 +434,13 @@ public struct TerminalView: View {
   @Bindable public var preferences: AppPreferences
   /// Routed from RootView so the empty state can open pairing.
   public var onAddHost: () -> Void = {}
+  /// True while an in-app overlay (the session drawer) is covering the terminal.
+  ///
+  /// The key bar is an inputAccessoryView, so it lives in the KEYBOARD window —
+  /// above the app's own window. An in-app overlay cannot cover it, and the bar
+  /// drew across the drawer, clipping its "New terminal" button. A sheet does not
+  /// have this problem because presenting one takes first responder away.
+  public var overlayPresented: Bool = false
   @State private var ctrlArmed = false
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
@@ -452,11 +459,13 @@ public struct TerminalView: View {
   public init(
     store: SessionStore,
     preferences: AppPreferences,
-    onAddHost: @escaping () -> Void = {}
+    onAddHost: @escaping () -> Void = {},
+    overlayPresented: Bool = false
   ) {
     self.store = store
     self.preferences = preferences
     self.onAddHost = onAddHost
+    self.overlayPresented = overlayPresented
   }
 
   public var body: some View {
@@ -521,7 +530,7 @@ public struct TerminalView: View {
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
-        showsAccessory: placeholderReason == nil,
+        showsAccessory: placeholderReason == nil && !overlayPresented,
         onSubmitBytes: submit,
         isFocused: Binding(
           get: { keyboardFocused },

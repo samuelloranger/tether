@@ -39,7 +39,8 @@ struct RootView: View {
         TerminalView(
           store: store,
           preferences: preferences,
-          onAddHost: { showPairing = true }
+          onAddHost: { showPairing = true },
+          overlayPresented: drawerOpen
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
