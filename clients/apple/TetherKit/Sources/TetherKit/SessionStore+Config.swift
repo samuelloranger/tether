@@ -50,7 +50,13 @@ extension SessionStore {
     guard let client = makeConfigClient(hostId: hostId) else { return nil }
     do {
       let next = try await client.patchServerConfig(patch)
-      applyServerIdentity(hostId: hostId, identity: next.identity)
+      // Only mirror the identity into the local host profile when the identity
+      // is what was edited. Doing it on every save renamed the user's host —
+      // changing a notification trigger relabelled "devbox" to the server's
+      // identity, silently discarding a name they chose.
+      if !(patch.identity?.isEmpty ?? true) {
+        applyServerIdentity(hostId: hostId, identity: next.identity)
+      }
       errorMessage = nil
       return next
     } catch {
