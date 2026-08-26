@@ -606,7 +606,15 @@ public struct TerminalView: View {
             onKey: { store.sendInput($0) },
             onPaste: { store.sendInput($0) },
             onArrow: { store.sendInput($0.escapeSequence) },
-            onHideKeyboard: { keyboardFocused = false }
+            // Deferred by one runloop turn, like `report` above and for the
+            // same reason. This button lives inside the accessory bar, which is
+            // the inputAccessoryView's own UIHostingController. Dropping focus
+            // synchronously makes UIKit dismiss the keyboard and tear that
+            // hosting view down while the touch that triggered it is still being
+            // delivered to it — the view is deallocated underneath its own
+            // handler, which crashes the app. One turn later the touch is
+            // finished and the teardown has nothing live to pull out from under.
+            onHideKeyboard: { DispatchQueue.main.async { keyboardFocused = false } }
           )
         ),
         showsAccessory: accessoryVisible,
