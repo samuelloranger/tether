@@ -17,13 +17,20 @@ extension SessionStore {
   }
 
   public func loadDiffSummary() async -> DiffSummary? {
-    guard let sessionId = activeSessionId, let client = makeGitClient() else { return nil }
-    do {
-      return try await client.fetchDiffSummary(sessionId: sessionId)
-    } catch {
-      errorMessage = error.localizedDescription
-      return nil
-    }
+    try? await fetchDiffSummary()
+  }
+
+  /// Throwing variant, for callers that must tell "no changes" from "could not
+  /// look".
+  ///
+  /// `loadDiffSummary` answers `nil` for both, and the git sheet rendered that
+  /// as its empty state — so a server reply of `not a git repository` appeared
+  /// on screen as "No uncommitted changes". The two are opposites and a reader
+  /// cannot recover one from the other.
+  public func fetchDiffSummary() async throws -> DiffSummary {
+    guard let sessionId = activeSessionId else { throw GitLoadError.noSession }
+    guard let client = makeGitClient() else { throw GitLoadError.noCredentials }
+    return try await client.fetchDiffSummary(sessionId: sessionId)
   }
 
   public func loadFileDiff(
@@ -160,6 +167,19 @@ extension SessionStore {
       try await body(client, sessionId)
     } catch {
       errorMessage = error.localizedDescription
+    }
+  }
+}
+
+/// Why the git sheet has nothing to show, when the reason is not the server's.
+public enum GitLoadError: LocalizedError {
+  case noSession
+  case noCredentials
+
+  public var errorDescription: String? {
+    switch self {
+    case .noSession: "Open a terminal to see its changes."
+    case .noCredentials: "This server needs its password again."
     }
   }
 }

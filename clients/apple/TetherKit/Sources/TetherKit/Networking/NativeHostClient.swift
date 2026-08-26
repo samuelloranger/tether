@@ -54,6 +54,12 @@ public struct ConfigResponse: Decodable, Sendable {
 public enum HostClientError: Error, LocalizedError {
   case invalidURL
   case httpStatus(Int)
+  /// A non-2xx reply whose body carried the server's own `{"error": …}` text.
+  ///
+  /// Discarding that text is how `not a git repository` reached the user as
+  /// "Server returned HTTP 404" — and, in the git sheet, as "No uncommitted
+  /// changes". The server already says something useful; relay it.
+  case server(status: Int, message: String)
   case decodeFailed
   case unauthorized
   case missingPassword
@@ -64,6 +70,8 @@ public enum HostClientError: Error, LocalizedError {
       "Invalid server URL"
     case let .httpStatus(code):
       "Server returned HTTP \(code)"
+    case let .server(_, message):
+      message
     case .decodeFailed:
       "Could not decode server response"
     case .unauthorized:
@@ -215,4 +223,20 @@ public actor NativeHostClient {
     request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
     return session.webSocketTask(with: request)
   }
+}
+
+/// The server's own error text for a failed response, when it sent one.
+///
+/// Every route answers a failure as `{"error": "..."}`, so one reader covers
+/// them all. Falls back to the bare status when the body is not that shape.
+func hostClientError(status: Int, data: Data) -> HostClientError {
+  if status == 401 { return .unauthorized }
+  if
+    let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    let message = object["error"] as? String,
+    !message.isEmpty
+  {
+    return .server(status: status, message: message)
+  }
+  return .httpStatus(status)
 }

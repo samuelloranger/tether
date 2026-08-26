@@ -9,6 +9,9 @@ public struct GitDrawerView: View {
   @State private var historyEntries: [GitLogEntry]?
   @State private var commitMessage = ""
   @State private var loading = true
+  /// Why the last refresh failed, if it did. Distinct from an empty summary:
+  /// "nothing changed" and "could not look" must not share a view.
+  @State private var loadError: String?
   @State private var committing = false
   @State private var path = NavigationPath()
   /// Discard / undo / push all need a confirm — irreversible or disruptive.
@@ -141,6 +144,21 @@ public struct GitDrawerView: View {
         ProgressView()
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .tint(TetherColors.accent)
+      } else if let loadError {
+        VStack(spacing: 10) {
+          Image(systemName: "exclamationmark.triangle")
+            .font(.title2)
+            .foregroundStyle(TetherColors.textSecondary)
+          Text(loadError)
+            .font(.callout)
+            .multilineTextAlignment(.center)
+            .foregroundStyle(TetherColors.textSecondary)
+          Button("Try again") { Task { await reload() } }
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(TetherColors.accent)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if summary.files.isEmpty {
         Text("No uncommitted changes")
           .foregroundStyle(TetherColors.textSecondary)
@@ -406,8 +424,11 @@ public struct GitDrawerView: View {
 
   private func reload() async {
     loading = summary.files.isEmpty
-    if let next = await store.loadDiffSummary() {
-      summary = next
+    do {
+      summary = try await store.fetchDiffSummary()
+      loadError = nil
+    } catch {
+      loadError = error.localizedDescription
     }
     loading = false
   }
