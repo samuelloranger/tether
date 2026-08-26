@@ -52,6 +52,9 @@ public final class SessionStore {
   /// packed TGRD grids come back out; this is what turns a byte stream into
   /// something the CoreText surface can draw.
   @ObservationIgnored private var emulator: FfiTerminalEmulator?
+  /// Which session `emulator` holds the scrollback for. A reconnect to the SAME
+  /// session must reuse it; only a different session earns a fresh one.
+  @ObservationIgnored private var emulatorSessionId: String?
   /// One source of truth for the grid size: the socket, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
   private var terminalCols: UInt16 = 80
@@ -249,9 +252,8 @@ public final class SessionStore {
       replayStore.forget(sessionId: id)
       if activeSessionId == id {
         sendFocus(focused: false)
-        disconnectTerminal()
+        releaseTerminal()
         activeSessionId = nil
-        terminalSnapshot = nil
       }
       await refreshSessions()
     } catch {
@@ -512,9 +514,17 @@ public final class SessionStore {
   private func connectTerminal(sessionId: String) async {
     disconnectTerminal()
     guard let client = await activeClient() else { return }
-    emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
+    // Rebuilding the emulator here while KEEPING the replay cursor threw away all
+    // scrollback on every foreground resume: an empty grid plus a cursor at the
+    // newest applied frame means the server replays only what arrived since, and
+    // everything before it is gone for good. Reuse the emulator when reconnecting
+    // the same session so `sinceId` resumes into the history it belongs to.
+    if emulatorSessionId != sessionId || emulator == nil {
+      emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
+      emulatorSessionId = sessionId
+      terminalSnapshot = nil
+    }
     lastRenderedGeneration = nil
-    terminalSnapshot = nil
     let sinceId = replayStore.sinceId(sessionId: sessionId)
     do {
       let task = try await client.openWebSocket(
@@ -540,13 +550,26 @@ public final class SessionStore {
     }
   }
 
+  /// Drops the emulator along with the socket — for leaving the terminal
+  /// entirely, as opposed to reconnecting to the same session.
+  private func releaseTerminal() {
+    disconnectTerminal()
+    emulator = nil
+    emulatorSessionId = nil
+    terminalSnapshot = nil
+    lastRenderedGeneration = nil
+  }
+
   private func disconnectTerminal() {
     defer { lastFocusSent = nil }
     // Order matters: sendFocus needs the socket, so the frame has to go out
     // before it is torn down. Switching sessions otherwise left the server
     // believing the old one was still on screen, and suppressing its pushes.
     sendFocus(focused: false)
-    emulator = nil
+    // Deliberately NOT clearing `emulator`: this runs at the top of every
+    // connectTerminal, so dropping it here defeated reusing the scrollback on a
+    // foreground reconnect. connectTerminal rebuilds it when the session
+    // actually changes, and `releaseTerminal` clears it when there is no session.
     socketTask?.cancel()
     socketTask = nil
     socket?.cancel(with: .goingAway, reason: nil)
@@ -617,8 +640,10 @@ public final class SessionStore {
     case "reset":
       replayStore.reset(sessionId: sessionId)
       // A reset means the client's history has a hole; rebuild the grid rather
-      // than letting the old contents linger under the replayed tail.
+      // than letting the old contents linger under the replayed tail. This is the
+      // one case where a same-session rebuild is right.
       emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
+      emulatorSessionId = sessionId
       lastRenderedGeneration = nil
       terminalSnapshot = nil
     case "ping":
