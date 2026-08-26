@@ -44,6 +44,8 @@ export function useTetherDesktop() {
   const [activeSessionId, setActiveSessionId] = useState('term-1');
   const [screen, setScreen] = useState<Screen>('main');
   const [editingHostId, setEditingHostId] = useState<string | null>(null);
+  const [gitOpen, setGitOpen] = useState(false);
+  const [gitMode, setGitMode] = useState<'drawer' | 'review'>('drawer');
 
   const activeHostIdRef = useRef<string | null>(null);
   const hostsRef = useRef<HostProfile[]>([]);
@@ -255,8 +257,12 @@ export function useTetherDesktop() {
     activeSessionLabel,
     screen,
     editingHostId,
+    gitOpen,
+    gitMode,
     setScreen,
     setEditingHostId,
+    setGitOpen,
+    setGitMode,
     selectHost,
     selectSession,
     newSession,

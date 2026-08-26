@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react';
+import { GitDrawer } from './git/GitDrawer';
+import { GitReview } from './git/GitReview';
+import { useGitPanel } from './git/useGitPanel';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
 import { loadPreferences, UI_THEMES } from './preferences';
@@ -13,6 +16,7 @@ export function App() {
   const app = useTetherDesktop();
   const [prefs, setPrefs] = useState(loadPreferences);
   const theme = UI_THEMES[prefs.theme];
+  const gitPanel = useGitPanel(app.activeHostId, app.activeSessionId, app.gitOpen);
 
   const editingHost = useMemo(
     () => app.hosts.find((host) => host.id === app.editingHostId) ?? null,
@@ -134,18 +138,51 @@ export function App() {
               <span className="terminal-host-label muted">
                 {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
               </span>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => {
+                  app.setGitMode('drawer');
+                  app.setGitOpen(true);
+                }}
+              >
+                Git
+              </button>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => {
+                  app.setGitMode('review');
+                  app.setGitOpen(true);
+                }}
+              >
+                Review
+              </button>
             </header>
-            <ResidentTerminals
-              hosts={app.hosts}
-              passwords={app.passwords}
-              sessions={app.sessions}
-              activeHostId={app.activeHostId}
-              activeSessionId={app.activeSessionId}
-              terminalTheme={theme.terminal}
-              fontFamily={prefs.terminalFont}
-              onFrame={app.handleWsFrame}
-              onDisconnected={(hostId) => app.retryHost(hostId)}
-            />
+            <div className="main-work-area">
+              <ResidentTerminals
+                hosts={app.hosts}
+                passwords={app.passwords}
+                sessions={app.sessions}
+                activeHostId={app.activeHostId}
+                activeSessionId={app.activeSessionId}
+                terminalTheme={theme.terminal}
+                fontFamily={prefs.terminalFont}
+                onFrame={app.handleWsFrame}
+                onDisconnected={(hostId) => app.retryHost(hostId)}
+              />
+              {app.gitOpen && app.gitMode === 'drawer' ? (
+                <GitDrawer panel={gitPanel} onClose={() => app.setGitOpen(false)} />
+              ) : null}
+              {app.gitOpen && app.gitMode === 'review' && app.activeHostId ? (
+                <GitReview
+                  panel={gitPanel}
+                  hostId={app.activeHostId}
+                  sessionId={app.activeSessionId}
+                  onClose={() => app.setGitOpen(false)}
+                />
+              ) : null}
+            </div>
           </>
         ) : (
           <div className="empty-main">
