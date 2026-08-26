@@ -157,11 +157,26 @@ public final class TetherSurfaceView: UIView {
     )
   }
 
+  /// Vertical offset that anchors the grid to the BOTTOM of the view.
+  ///
+  /// The grid is a whole number of rows, so it is almost never exactly the view's
+  /// height, and a resize round-trip can leave the emulator a few rows short of
+  /// what fits. Drawing from the top put that slack between the last line and the
+  /// key bar, where it reads as a gap in the content. A terminal's newest output
+  /// is at the bottom, so anchoring there moves the slack up against the title
+  /// bar, where it is indistinguishable from empty scrollback.
+  private var gridOriginY: CGFloat {
+    guard let header else { return 0 }
+    let drawn = CGFloat(header.rows) * cellHeight
+    return max(0, bounds.height - drawn)
+  }
+
   public override func draw(_ rect: CGRect) {
     guard let context = UIGraphicsGetCurrentContext(), let header else { return }
 
     let cols = Int(header.cols)
     let rows = Int(header.rows)
+    let originY = gridOriginY
 
     for row in 0..<rows {
       for col in 0..<cols {
@@ -169,7 +184,7 @@ public final class TetherSurfaceView: UIView {
         guard index < cells.count else { continue }
         let cell = cells[index]
         let x = CGFloat(col) * cellWidth
-        let y = CGFloat(row) * cellHeight
+        let y = CGFloat(row) * cellHeight + originY
         let cellRect = CGRect(x: x, y: y, width: cellWidth, height: cellHeight)
 
         var fg = cell.foreground
@@ -238,7 +253,7 @@ public final class TetherSurfaceView: UIView {
 
     if header.cursorVisible {
       let cursorX = CGFloat(header.cursorCol) * cellWidth
-      let cursorY = CGFloat(header.cursorRow) * cellHeight
+      let cursorY = CGFloat(header.cursorRow) * cellHeight + originY
       context.setFillColor(UIColor.white.withAlphaComponent(0.35).cgColor)
       context.fill(CGRect(x: cursorX, y: cursorY, width: cellWidth, height: cellHeight))
     }
@@ -251,11 +266,11 @@ public final class TetherSurfaceView: UIView {
   private func drawSelectionHandles(context: CGContext, selection: TerminalSelection) {
     let start = CGPoint(
       x: CGFloat(selection.startCol) * cellWidth,
-      y: CGFloat(selection.startRow) * cellHeight
+      y: CGFloat(selection.startRow) * cellHeight + gridOriginY
     )
     let end = CGPoint(
       x: CGFloat(selection.endCol + 1) * cellWidth,
-      y: CGFloat(selection.endRow + 1) * cellHeight
+      y: CGFloat(selection.endRow + 1) * cellHeight + gridOriginY
     )
     context.setFillColor(UIColor.systemBlue.cgColor)
     context.fillEllipse(in: CGRect(x: start.x - 6, y: start.y - 6, width: 12, height: 12))
@@ -334,7 +349,7 @@ public final class TetherSurfaceView: UIView {
   private func cellAt(_ point: CGPoint) -> (row: Int, col: Int)? {
     guard let header, cellWidth > 0, cellHeight > 0 else { return nil }
     let col = Int(point.x / cellWidth)
-    let row = Int(point.y / cellHeight)
+    let row = Int((point.y - gridOriginY) / cellHeight)
     guard col >= 0, row >= 0, col < Int(header.cols), row < Int(header.rows) else {
       return nil
     }
