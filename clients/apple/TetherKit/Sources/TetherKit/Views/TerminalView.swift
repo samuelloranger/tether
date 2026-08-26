@@ -5,17 +5,20 @@ import UIKit
 /// Full utility key row for touch input — horizontally scrollable instead of RN paging.
 public struct TerminalAccessoryBar: View {
   public var ctrlArmed: Binding<Bool>
+  public var showDpad: Binding<Bool>
   public var onKey: (String) -> Void
   public var onPaste: (String) -> Void
   public var onHideKeyboard: () -> Void
 
   public init(
     ctrlArmed: Binding<Bool>,
+    showDpad: Binding<Bool> = .constant(false),
     onKey: @escaping (String) -> Void,
     onPaste: @escaping (String) -> Void,
     onHideKeyboard: @escaping () -> Void
   ) {
     self.ctrlArmed = ctrlArmed
+    self.showDpad = showDpad
     self.onKey = onKey
     self.onPaste = onPaste
     self.onHideKeyboard = onHideKeyboard
@@ -25,6 +28,7 @@ public struct TerminalAccessoryBar: View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
         ctrlButton
+        dpadToggle
         accessoryButton("Esc") { onKey("\u{1B}") }
         accessoryButton("Tab") { send(ctrlArmed, base: "\t") }
         accessoryButton("↑") { send(ctrlArmed, base: "\u{1B}[A") }
@@ -44,6 +48,22 @@ public struct TerminalAccessoryBar: View {
       .padding(.vertical, 8)
     }
     .background(.ultraThinMaterial)
+  }
+
+  private var dpadToggle: some View {
+    Button {
+      showDpad.wrappedValue.toggle()
+    } label: {
+      Text(showDpad.wrappedValue ? "Pad ✓" : "Pad")
+        .font(.callout.weight(.medium))
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(showDpad.wrappedValue ? TetherColors.accent : TetherColors.surface)
+    .foregroundStyle(showDpad.wrappedValue ? Color.black : TetherColors.textPrimary)
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .buttonStyle(.plain)
+    .accessibilityLabel("Toggle floating D-pad")
   }
 
   /// The system paste control.
@@ -327,6 +347,9 @@ public struct TerminalView: View {
   @Bindable public var preferences: AppPreferences
   @State private var ctrlArmed = false
   @State private var inputBuffer = ""
+  @State private var scrollOffsetFromBottom = 0
+  @State private var selectionText: String?
+  @State private var dpadPosition = CGPoint(x: 72, y: 220)
   @FocusState private var keyboardFocused: Bool
 
   public init(store: SessionStore, preferences: AppPreferences) {
@@ -336,24 +359,48 @@ public struct TerminalView: View {
 
   public var body: some View {
     VStack(spacing: 0) {
-      TetherSurfaceRepresentable(
-        snapshot: $store.terminalSnapshot,
-        fontName: preferences.terminalFont.postScriptName,
-        fontSize: preferences.terminalFontSize,
-        onGridSizeChange: { cols, rows in store.updateGrid(cols: cols, rows: rows) }
-      )
+      ZStack(alignment: .topTrailing) {
+        TetherSurfaceRepresentable(
+          snapshot: $store.terminalSnapshot,
+          fontName: preferences.terminalFont.postScriptName,
+          fontSize: preferences.terminalFontSize,
+          onGridSizeChange: { cols, rows in store.updateGrid(cols: cols, rows: rows) },
+          onScrollLines: { lines in
+            store.scrollViewport(lines: lines)
+            scrollOffsetFromBottom = max(0, scrollOffsetFromBottom + Int(lines))
+          },
+          onTap: { keyboardFocused = true },
+          onSelectionText: { text in selectionText = text },
+          onOpenURL: { url in UIApplication.shared.open(url) },
+          onMouseBytes: { store.sendInput($0) }
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        // Without this the Hide button is a one-way door: nothing else in the
-        // terminal view takes focus, so the session becomes uninputtable.
-        .contentShape(Rectangle())
-        .onTapGesture { keyboardFocused = true }
+
+        if scrollOffsetFromBottom > 0 {
+          ScrollPositionIndicator(offset: scrollOffsetFromBottom)
+            .padding(.trailing, 4)
+            .padding(.top, 8)
+        }
+
+        if let selectionText, !selectionText.isEmpty {
+          selectionChrome(text: selectionText)
+        }
+
+        if preferences.showDpad {
+          FloatingDpad(position: $dpadPosition) { dir in
+            store.sendInput(dir.escapeSequence)
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
 
       TerminalInputBridge(
         text: $inputBuffer,
         accessory: AnyView(
           TerminalAccessoryBar(
             ctrlArmed: $ctrlArmed,
+            showDpad: $preferences.showDpad,
             onKey: { store.sendInput($0) },
             onPaste: { store.sendInput($0) },
             onHideKeyboard: { keyboardFocused = false }
@@ -372,6 +419,34 @@ public struct TerminalView: View {
     .onAppear {
       keyboardFocused = true
     }
+    .onChange(of: store.activeSessionId) { _, _ in
+      scrollOffsetFromBottom = 0
+      selectionText = nil
+    }
+  }
+
+  @ViewBuilder
+  private func selectionChrome(text: String) -> some View {
+    VStack {
+      Spacer()
+      HStack {
+        Spacer()
+        Button {
+          UIPasteboard.general.string = text
+          selectionText = nil
+        } label: {
+          Label("Copy", systemImage: "doc.on.doc")
+            .font(.callout.weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(TetherColors.accent)
+            .foregroundStyle(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .padding(12)
+      }
+    }
   }
 
   /// Sends typed input, folding in a latched Ctrl.
@@ -385,6 +460,28 @@ public struct TerminalView: View {
       return
     }
     store.sendInput(text)
+  }
+}
+
+/// Thin thumb on the trailing edge while scrolled into history.
+struct ScrollPositionIndicator: View {
+  var offset: Int
+
+  var body: some View {
+    GeometryReader { geo in
+      let track = max(geo.size.height - 24, 1)
+      // Approximate: more offset → thumb closer to top. Cap visual travel.
+      let progress = min(1, CGFloat(offset) / 200)
+      let thumbH: CGFloat = 36
+      let y = 12 + (1 - progress) * (track - thumbH)
+      Capsule()
+        .fill(TetherColors.textSecondary.opacity(0.55))
+        .frame(width: 3, height: thumbH)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .offset(y: y)
+    }
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
   }
 }
 #endif
