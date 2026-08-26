@@ -6,6 +6,8 @@ description = "Shared Tether client core: protocol, replay, sessions"
 publish = false
 
 [dependencies]
+base64 = "0.22"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
