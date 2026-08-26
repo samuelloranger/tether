@@ -367,6 +367,15 @@ public struct TerminalView: View {
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
   @State private var selectionText: String?
+  /// How far the keyboard (plus its accessory bar) overlaps this view.
+  ///
+  /// Measured rather than left to SwiftUI's automatic avoidance: the first
+  /// responder here is a UIKit UITextView carrying its own inputAccessoryView,
+  /// not a SwiftUI field, and the implicit avoidance does not engage for it —
+  /// the terminal simply stayed full height and the keyboard covered the last
+  /// rows. Shrinking the view also makes TetherSurfaceView.reportGridSize fire,
+  /// so the PTY learns the new row count.
+  @State private var keyboardInset: CGFloat = 0
   @FocusState private var keyboardFocused: Bool
 
   public init(store: SessionStore, preferences: AppPreferences) {
@@ -432,6 +441,20 @@ public struct TerminalView: View {
       .focused($keyboardFocused)
     }
     .background(TetherColors.background)
+    // Own the keyboard inset explicitly, so SwiftUI cannot also apply one and
+    // double-count it.
+    .ignoresSafeArea(.keyboard, edges: .bottom)
+    .padding(.bottom, keyboardInset)
+    .onReceive(
+      NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)
+    ) { note in
+      keyboardInset = Self.keyboardOverlap(note)
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+    ) { _ in
+      keyboardInset = 0
+    }
     .onAppear {
       keyboardFocused = true
     }
@@ -463,6 +486,17 @@ public struct TerminalView: View {
         .padding(12)
       }
     }
+  }
+
+  /// Height of the window the keyboard's end frame covers. Uses the window
+  /// rather than UIScreen so it stays correct in a resized or split window.
+  private static func keyboardOverlap(_ note: Notification) -> CGFloat {
+    guard
+      let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+      let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+      let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
+    else { return 0 }
+    return max(0, window.bounds.maxY - end.minY)
   }
 
   /// Sends typed input, folding in a latched Ctrl.
