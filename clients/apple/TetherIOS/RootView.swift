@@ -50,10 +50,13 @@ struct RootView: View {
           // Anything that covers the terminal has to take the key bar with it.
           // The bar is an inputAccessoryView, so it lives in the keyboard
           // window ABOVE the app: an in-app overlay cannot hide it, and it sat
-          // over the presentation and file viewer, clipping their last lines.
+          // over the presentation, file viewer, and the viewer's loading/error
+          // states, clipping their last lines.
           overlayPresented: drawerOpen
             || workspace.activePresentation != nil
             || workspace.fileView != nil
+            || workspace.fileError != nil
+            || workspace.fileLoading
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }

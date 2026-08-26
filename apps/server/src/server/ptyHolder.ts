@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Socket } from 'bun';
 import { getConfig } from './config';
+import { CwdRefreshGate } from './cwdRefresh';
 import { addTerminalLog, clearInsertCount, deleteSession, getSession, upsertSession } from './db';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
 import { findGitRoot } from './gitRoot';
@@ -127,14 +128,14 @@ type HolderLink = {
   outQueue: HolderMessage[];
   dialectTimer: ReturnType<typeof setTimeout> | null;
   sock: Socket | null;
-  /** Resolvers waiting on the next CWD frame — see `refreshLiveCwd`. */
-  cwdWaiters: ((cwd: string | null) => void)[];
   /**
-   * Set once a CWDREQ went unanswered, so a pre-v2 holder — which has never
-   * heard of the frame and will never reply — is asked once and then left alone
-   * instead of costing every git request the full timeout.
+   * Cooldown + waiter coalesce for on-demand CWDREQ — see `refreshLiveCwd` and
+   * `cwdRefresh.ts`. Legacy holders never touch this; they return at the dialect
+   * check before any request is sent.
    */
-  cwdRequestUnanswered: boolean;
+  cwdRefresh: CwdRefreshGate;
+  /** Timer for the single in-flight CWDREQ; cleared when waiters settle. */
+  cwdRefreshTimer: ReturnType<typeof setTimeout> | null;
 };
 
 /** How long to wait for a holder's first byte before assuming the old dialect. */
@@ -151,8 +152,8 @@ function newHolderLink(): HolderLink {
     outQueue: [],
     dialectTimer: null,
     sock: null,
-    cwdWaiters: [],
-    cwdRequestUnanswered: false,
+    cwdRefresh: new CwdRefreshGate(),
+    cwdRefreshTimer: null,
   };
 }
 
@@ -230,10 +231,11 @@ function handleHolderMessage(id: string, msg: HolderMessage | null, link: Holder
     const text = link.decoder.decode(msg.data, { stream: true });
     if (text) link.pendingOutput.push(text);
   } else if (msg.type === 'cwd') {
-    link.cwdRequestUnanswered = false;
-    const waiters = link.cwdWaiters;
-    link.cwdWaiters = [];
-    for (const resolve of waiters) resolve(msg.cwd);
+    if (link.cwdRefreshTimer) {
+      clearTimeout(link.cwdRefreshTimer);
+      link.cwdRefreshTimer = null;
+    }
+    link.cwdRefresh.onAnswer(true);
     // A holder-reported cwd (spawn time, or a fresh kernel read on every new
     // client attach) — arms git watching without waiting on an OSC 7 prompt
     // redraw, which may be a long time coming (or never, mid-TUI).
@@ -389,35 +391,37 @@ export function sendHolderResize(id: string, cols: number, rows: number): boolea
  *
  * Deliberately best-effort. It resolves false rather than throwing when there is
  * no holder, when the holder speaks the pre-v2 dialect (which cannot express the
- * request), or when the answer does not arrive in time — the caller then uses
- * the cwd it already had, which is exactly the old behaviour. The point is to be
- * right more often, not to add a way for a diff request to fail.
+ * request), when a prior ask is still cooling down after a timeout, or when the
+ * answer does not arrive in time — the caller then uses the cwd it already had,
+ * which is exactly the old behaviour. The point is to be right more often, not
+ * to add a way for a diff request to fail.
+ *
+ * An unanswered request used to latch forever (`cwdRequestUnanswered`); that was
+ * wrong once dialect negotiation already filters legacy holders — a healthy
+ * binary holder that was merely slow would never be asked again. Now a timeout
+ * only opens a short cooldown (see `CWD_REFRESH_COOLDOWN_MS`).
  */
 export async function refreshLiveCwd(id: string, timeoutMs = 250): Promise<boolean> {
   const link = instances.get(id)?.link;
-  if (!link || link.exited || link.cwdRequestUnanswered) return false;
-  if (link.dialect === 'legacy') return false;
+  if (!link) return false;
+
+  const plan = link.cwdRefresh.plan({
+    hasLink: true,
+    exited: link.exited,
+    dialect: link.dialect,
+    now: Date.now(),
+  });
+  if (plan === 'skip') return false;
+  if (plan === 'join') return await link.cwdRefresh.wait();
+
   if (!sendHolderMessage(id, { type: 'cwdRequest' })) return false;
 
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      // Remember the silence: this is how a legacy holder that never sent HELLO
-      // stops costing 250ms on every request.
-      link.cwdRequestUnanswered = true;
-      link.cwdWaiters = link.cwdWaiters.filter((waiter) => waiter !== onCwd);
-      resolve(false);
-    }, timeoutMs);
-    const onCwd = (cwd: string | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(cwd !== null);
-    };
-    link.cwdWaiters.push(onCwd);
-  });
+  const waited = link.cwdRefresh.wait();
+  link.cwdRefreshTimer = setTimeout(() => {
+    link.cwdRefreshTimer = null;
+    link.cwdRefresh.onTimeout(Date.now());
+  }, timeoutMs);
+  return await waited;
 }
 
 export function sendHolderKill(id: string): boolean {

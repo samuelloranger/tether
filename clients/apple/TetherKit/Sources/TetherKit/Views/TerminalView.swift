@@ -23,13 +23,11 @@ public final class TerminalAccessoryModel {
   /// Distance from the window's bottom edge to the TOP of the docked bar, as
   /// the bar itself measures it.
   ///
-  /// `barHeight` was a guess, and it was wrong twice over: the row is 56pt tall
-  /// (40pt keys + 8pt padding either side), not 52, and UIKit docks the bar 15pt
-  /// above the screen edge rather than above the 34pt home indicator. Reserving
-  /// a constant therefore left ~15pt of dead space between the last terminal row
-  /// and the keys. Measuring removes the arithmetic: whatever the bar actually
-  /// occupies is what the terminal gives up, so the two cannot drift again if a
-  /// key size or padding changes.
+  /// `barHeight` is only a first-frame fallback (keySize + padding either side).
+  /// UIKit docks the bar ~15pt above the screen edge rather than above the 34pt
+  /// home indicator, so a fixed constant left dead space between the last
+  /// terminal row and the keys. Measuring removes that arithmetic: whatever the
+  /// bar actually occupies is what the terminal gives up.
   public var dockedHeight: CGFloat = 0
   public init() {}
 }
@@ -58,9 +56,10 @@ public struct TerminalAccessoryBar: View {
   /// Every key in the bar is this tall, the D-pad included — a control that is
   /// taller than its neighbours reads as a different kind of thing.
   static let keySize: CGFloat = 40
-  /// Height the bar occupies when docked. The terminal reserves this so its last
-  /// rows are not hidden underneath.
-  public static let barHeight: CGFloat = 52
+  static let barVerticalPadding: CGFloat = 8
+  /// First-frame fallback before GeometryReader reports the real docked height.
+  /// Derived from key + padding so it cannot drift from the row's layout again.
+  public static let barHeight: CGFloat = keySize + barVerticalPadding * 2
 
   /// Key order matches `UTILITY_BAR_KEYS` in the RN client. There are no arrow
   /// keys: the D-pad is one square key in the row and covers all four
@@ -82,7 +81,7 @@ public struct TerminalAccessoryBar: View {
         accessoryButton("PgDn") { onKey("\u{1B}[6~") }
       }
       .padding(.horizontal, 12)
-      .padding(.vertical, 8)
+      .padding(.vertical, Self.barVerticalPadding)
     }
     // ignoresSafeAreaEdges defaults to .all, so the material bled down into the
     // home-indicator strip and the bar read as half again as tall. Confined to

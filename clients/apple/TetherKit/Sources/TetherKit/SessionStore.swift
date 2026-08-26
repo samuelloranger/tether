@@ -636,8 +636,12 @@ public final class SessionStore {
       } else {
         sendFocus(focused: false)
       }
+      // Capture the host-qualified key for this socket once. Reading
+      // activeHostId again inside the frame handler races a host switch: a late
+      // frame from host A would key under B, feed B's emulator, and advance B's
+      // replay cursor — which can silently skip history.
       socketTask = Task { [weak self] in
-        await self?.readSocket(sessionId: sessionId, task: task)
+        await self?.readSocket(key: key, task: task)
       }
     } catch {
       socketIsOpen = false
@@ -676,16 +680,16 @@ public final class SessionStore {
     lastTrafficMs = Int64(Date().timeIntervalSince1970 * 1000)
   }
 
-  private func readSocket(sessionId: String, task: URLSessionWebSocketTask) async {
+  private func readSocket(key: String, task: URLSessionWebSocketTask) async {
     while !Task.isCancelled {
       do {
         let message = try await task.receive()
         switch message {
         case let .string(text):
-          handleServerFrame(text, sessionId: sessionId)
+          handleServerFrame(text, key: key)
         case let .data(data):
           if let text = String(data: data, encoding: .utf8) {
-            handleServerFrame(text, sessionId: sessionId)
+            handleServerFrame(text, key: key)
           }
         @unknown default:
           break
@@ -707,7 +711,10 @@ public final class SessionStore {
     }
   }
 
-  private func handleServerFrame(_ text: String, sessionId: String) {
+  private func handleServerFrame(_ text: String, key: String) {
+    // Stale socket: the active terminal moved on since this connection opened.
+    // Do not re-derive the key from activeHostId — that is the race this guards.
+    guard key == emulatorKey else { return }
     guard
       let data = text.data(using: .utf8),
       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -726,7 +733,7 @@ public final class SessionStore {
       // repeated frame reach the parser twice, which renders as doubled
       // characters ("abc" typed, "aabbcc" on screen).
       if let id = json["id"] as? UInt64,
-        !replayStore.acceptOutput(sessionId: terminalKey(sessionId), id: id)
+        !replayStore.acceptOutput(sessionId: key, id: id)
       {
         return
       }
@@ -735,12 +742,12 @@ public final class SessionStore {
         refreshTerminalSnapshot()
       }
     case "reset":
-      replayStore.reset(sessionId: terminalKey(sessionId))
+      replayStore.reset(sessionId: key)
       // A reset means the client's history has a hole; rebuild the grid rather
       // than letting the old contents linger under the replayed tail. This is the
       // one case where a same-session rebuild is right.
       emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
-      emulatorKey = terminalKey(sessionId)
+      emulatorKey = key
       lastRenderedGeneration = nil
       terminalSnapshot = nil
     case "ping":

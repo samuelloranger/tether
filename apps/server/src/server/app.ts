@@ -130,7 +130,8 @@ app.post('/api/admin/password', async (c) => {
   if (!(await changePassword(body.current, body.next, clientKey(c)))) {
     return c.json({ error: 'invalid current password or rate limited' }, 403);
   }
-  logInfo(`Admin password changed at ${new Date().toISOString()}`);
+  // logInfo owns the timestamp prefix — do not embed another ISO stamp here.
+  logInfo('Admin password changed');
   return c.json({ ok: true });
 });
 
@@ -139,7 +140,7 @@ app.post('/api/admin/update', async (c) => {
   if (!(await requireCurrentPassword(body.current, clientKey(c)))) {
     return c.json({ error: 'invalid current password or rate limited' }, 403);
   }
-  logInfo(`Admin update requested at ${new Date().toISOString()}`);
+  logInfo('Admin update requested');
   scheduleAdminCommand('update');
   return c.json({ ok: true, targetVersion: updateTargetVersion() });
 });
@@ -149,11 +150,10 @@ app.post('/api/admin/restart', async (c) => {
   if (!(await requireCurrentPassword(body.current, clientKey(c)))) {
     return c.json({ error: 'invalid current password or rate limited' }, 403);
   }
-  logInfo(`Admin restart requested at ${new Date().toISOString()}`);
+  logInfo('Admin restart requested');
   scheduleAdminCommand('restart');
   return c.json({ ok: true });
 });
-
 app.post('/api/admin/test-notification', async (c) => {
   if (!allowAdminRequest(clientKey(c))) {
     return c.json({ ok: false, error: 'rate limited' }, 429);
