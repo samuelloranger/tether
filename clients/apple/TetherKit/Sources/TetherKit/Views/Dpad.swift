@@ -26,7 +26,7 @@ public struct DpadView: View {
   public var body: some View {
     ZStack {
       RoundedRectangle(cornerRadius: 8)
-        .fill(TetherColors.surface)
+        .fill(TetherColors.surfaceRaised)
       glyph
     }
     .frame(width: size, height: size)

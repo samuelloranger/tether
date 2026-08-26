@@ -33,7 +33,7 @@ public struct SessionActivityBadge: View {
       if showWaitingLabel, key == .waiting {
         Text("waiting")
           .font(.caption2)
-          .foregroundStyle(TetherColors.danger)
+          .foregroundStyle(TetherColors.heatWaiting)
       }
     }
   }

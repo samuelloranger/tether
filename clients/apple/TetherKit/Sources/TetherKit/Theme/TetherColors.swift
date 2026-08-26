@@ -4,34 +4,44 @@ import SwiftUI
 import UIKit
 #endif
 
-/// Chrome colours, resolved per appearance.
+/// Aurora chrome tokens, resolved per appearance.
 ///
-/// These were a single hardcoded dark palette, so `preferredColorScheme(.light)`
-/// changed the scheme and nothing else — light mode rendered identically to dark.
-/// Each colour is now dynamic, which fixes every existing call site without
-/// touching any of them.
-///
-/// Light values are Catppuccin Latte, matching the flavours the desktop client
-/// ships, so the two stay recognisably the same product.
+/// Hex values match desktop `default-dark` / `default-light` in
+/// `apps/desktop/src/preferences.ts`. Call sites keep the existing property
+/// names (`textPrimary`, `onAccent`, …) so the restyle is mostly a palette swap.
 public enum TetherColors {
-  public static let background = dynamic(dark: 0x11_11_1B, light: 0xDC_E0_E8)
-  public static let surface = dynamic(dark: 0x1E_1E_2E, light: 0xEF_F1_F5)
-  public static let accent = dynamic(dark: 0x87_B5_FA, light: 0x1E_66_F5)
-  public static let textPrimary = dynamic(dark: 0xCD_D6_F4, light: 0x4C_4F_69)
-  public static let textSecondary = dynamic(dark: 0xA6_AD_C8, light: 0x6C_6F_85)
-  public static let danger = dynamic(dark: 0xF3_8B_A8, light: 0xD2_0F_39)
-  public static let success = dynamic(dark: 0xA6_E3_A1, light: 0x40_A0_2B)
+  // ── Aurora defaults (dark / light) ──────────────────────────────────────
+  public static let background = dynamic(dark: 0x08_08_0E, light: 0xF1_F1_F6)
+  public static let surface = dynamic(dark: 0x12_12_1D, light: 0xFF_FF_FF)
+  public static let surfaceRaised = dynamic(dark: 0x19_19_26, light: 0xE9_E9_F2)
+  public static let input = dynamic(dark: 0x0B_0B_13, light: 0xFF_FF_FF)
 
-  /// Foreground for text sitting ON the accent fill. Accent is a pale blue in
-  /// dark mode and a deep blue in light mode, so a fixed black label was
-  /// unreadable in one of the two.
-  public static let onAccent = dynamic(dark: 0x11_11_1B, light: 0xFF_FF_FF)
+  public static let textPrimary = dynamic(dark: 0xED_EE_F6, light: 0x14_14_1B)
+  public static let textSecondary = dynamic(dark: 0x97_97_AC, light: 0x5C_5C_6C)
+  public static let textFaint = dynamic(dark: 0x61_61_7A, light: 0x8A_8A_9C)
 
-  /// Deliberately NOT dynamic. This is the backing behind the terminal grid and
-  /// has to stay in step with `TetherSurfaceView.backgroundColor`; the emulator
-  /// renders its own palette, so a light backing would show as a bright seam
-  /// around a dark grid.
-  public static let terminalBackground = Color(hex: "1E1E2E")
+  public static let border = dynamic(dark: 0x23_23_33, light: 0xDC_DC_E6)
+  public static let overlay = dynamic(dark: 0x08_08_0E, light: 0x14_14_1B).opacity(0.8)
+  public static let selected = dynamic(dark: 0x19_19_26, light: 0xE9_E9_F2)
+
+  public static let accent = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
+  public static let onAccent = dynamic(dark: 0x08_08_0E, light: 0xFF_FF_FF)
+
+  public static let success = dynamic(dark: 0x6E_E7_A8, light: 0x1C_7A_4F)
+  public static let warning = dynamic(dark: 0xF2_B3_4C, light: 0x8A_5A_00)
+  public static let danger = dynamic(dark: 0xFF_70_50, light: 0xC4_38_1C)
+  public static let info = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
+
+  /// Heat ramp — what the active session is doing. Light values are darkened so
+  /// state words stay legible on white.
+  public static let heatWorking = dynamic(dark: 0xF2_B3_4C, light: 0x8A_5A_00)
+  public static let heatWaiting = dynamic(dark: 0xFF_70_50, light: 0xC4_38_1C)
+  public static let heatCool = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
+
+  /// Deliberately NOT dynamic. Backing behind the terminal grid; must stay in
+  /// step with `TetherSurfaceView.backgroundColor`. A light backing would show
+  /// as a bright seam around a dark grid.
+  public static let terminalBackground = Color(hex: "0B0B13")
 
   private static func dynamic(dark: UInt32, light: UInt32) -> Color {
     #if canImport(UIKit)

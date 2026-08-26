@@ -36,7 +36,7 @@ public struct SessionDrawerView: View {
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 12)
-      .background(TetherColors.surface)
+      .background(TetherColors.surfaceRaised)
 
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 16) {
@@ -91,7 +91,7 @@ public struct SessionDrawerView: View {
       .buttonStyle(.borderedProminent)
       .tint(TetherColors.accent)
       .padding(16)
-      .background(TetherColors.surface)
+      .background(TetherColors.surfaceRaised)
     }
     .background(TetherColors.background)
     // The drawer is a fixed 264pt wide, so an accessibility text size does not
@@ -219,13 +219,25 @@ private struct SessionDrawerRow: View {
   let onKill: () -> Void
   @State private var confirmKill = false
 
+  private var wantsAttention: Bool {
+    !active && SessionActivityLogic.dotKey(
+      status: status,
+      activity: activity,
+      live: SessionActivityLogic.isRecentlyActive(lastOutputAt: lastOutputAt)
+    ) == .waiting
+  }
+
+  private var rowLit: LitChrome {
+    LitChrome.resolve(status: status, activity: activity, lastOutputAt: lastOutputAt)
+  }
+
   var body: some View {
     HStack(spacing: 0) {
       Button(action: onSelect) {
         HStack {
           Text(title)
             .font(.footnote)
-            .foregroundStyle(active ? TetherColors.accent : TetherColors.textPrimary)
+            .foregroundStyle(active ? rowLit.color : TetherColors.textPrimary)
             .lineLimit(1)
           // Which session needs you is the drawer's whole job; without this the
           // rows are indistinguishable.
@@ -244,7 +256,17 @@ private struct SessionDrawerRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(active ? TetherColors.accent.opacity(0.12) : .clear)
+        .background(rowBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(rowBorder, lineWidth: 1)
+        )
+        .shadow(
+          color: active ? rowLit.color.opacity(rowLit.bloom.b2) : .clear,
+          radius: active ? 10 : 0,
+          y: active ? 4 : 0
+        )
       }
       .buttonStyle(.plain)
 
@@ -257,6 +279,8 @@ private struct SessionDrawerRow: View {
       }
       .accessibilityLabel("Kill terminal")
     }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
     .confirmationDialog(
       "Kill this terminal?",
       isPresented: $confirmKill,
@@ -267,6 +291,26 @@ private struct SessionDrawerRow: View {
     } message: {
       Text("The process and its saved output will be deleted. This can't be undone.")
     }
+  }
+
+  private var rowBackground: Color {
+    if active {
+      return rowLit.color.opacity(0.14)
+    }
+    if wantsAttention {
+      return TetherColors.heatWaiting.opacity(0.08)
+    }
+    return TetherColors.surfaceRaised.opacity(0.55)
+  }
+
+  private var rowBorder: Color {
+    if active {
+      return rowLit.color.opacity(0.35)
+    }
+    if wantsAttention {
+      return TetherColors.heatWaiting.opacity(0.28)
+    }
+    return TetherColors.border.opacity(0.7)
   }
 }
 

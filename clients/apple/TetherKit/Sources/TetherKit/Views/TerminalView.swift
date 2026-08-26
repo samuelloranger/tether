@@ -150,7 +150,7 @@ public struct TerminalAccessoryBar: View {
         .font(.callout.weight(.medium))
         .padding(.horizontal, 10)
         .frame(minWidth: Self.keySize, minHeight: Self.keySize)
-        .background(model.ctrlArmed ? TetherColors.accent : TetherColors.surface)
+        .background(model.ctrlArmed ? TetherColors.accent : TetherColors.surfaceRaised)
         .foregroundStyle(model.ctrlArmed ? TetherColors.onAccent : TetherColors.textPrimary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -172,7 +172,7 @@ public struct TerminalAccessoryBar: View {
       .font(.callout.weight(.medium))
       .padding(.horizontal, 10)
       .frame(minWidth: Self.keySize, minHeight: Self.keySize)
-      .background(TetherColors.surface)
+      .background(TetherColors.surfaceRaised)
       .foregroundStyle(TetherColors.textPrimary)
       .clipShape(RoundedRectangle(cornerRadius: 8))
     }

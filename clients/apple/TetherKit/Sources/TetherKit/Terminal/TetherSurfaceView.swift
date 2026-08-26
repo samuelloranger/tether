@@ -75,7 +75,7 @@ public final class TetherSurfaceView: UIView {
 
   private func commonInit() {
     isOpaque = true
-    backgroundColor = UIColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1)
+    backgroundColor = UIColor(red: 11/255, green: 11/255, blue: 19/255, alpha: 1) // Aurora terminal #0B0B13
     contentMode = .redraw
     isMultipleTouchEnabled = false
     invalidateMetrics()

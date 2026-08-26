@@ -15,6 +15,8 @@ public struct TerminalTitleBar<Overflow: View>: View {
   /// overflow control anyway.
   @ViewBuilder public var overflow: () -> Overflow
 
+  @Environment(\.litChrome) private var lit
+
   public init(
     store: SessionStore,
     onOpenDrawer: @escaping () -> Void,
@@ -32,49 +34,90 @@ public struct TerminalTitleBar<Overflow: View>: View {
   }
 
   public var body: some View {
-    HStack(spacing: 8) {
-      iconButton("line.3.horizontal", label: "Open session list", action: onOpenDrawer)
+    VStack(spacing: 0) {
+      HStack(spacing: 8) {
+        iconButton("line.3.horizontal", label: "Open session list", action: onOpenDrawer)
 
-      VStack(alignment: .leading, spacing: 2) {
-        Text(sessionTitle)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(TetherColors.textPrimary)
-          .lineLimit(1)
-        Text(subtitle)
-          .font(.caption)
-          .foregroundStyle(TetherColors.textSecondary)
-          .lineLimit(1)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-
-      if let hostId = store.activeHostId {
-        ConnectionBadge(status: store.connectionStatus(for: hostId))
-      }
-
-      // No spacing inside the cluster: the 44pt targets already sit their glyphs
-      // 44pt apart, and adding gaps on top pushed the row wide enough to
-      // truncate the session title — the one thing in the bar that carries
-      // information.
-      HStack(spacing: 0) {
-        iconButton("plus", label: "New terminal", action: onNewSession)
-        iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
-          .disabled(store.activeSessionId == nil)
-        iconButton("gearshape", label: "Settings", action: onSettings)
-        Menu {
-          overflow()
-        } label: {
-          Image(systemName: "ellipsis")
-            .font(.body.weight(.semibold))
-            .tapTarget()
+        VStack(alignment: .leading, spacing: 2) {
+          Text(sessionTitle)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(TetherColors.textPrimary)
+            .lineLimit(1)
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(TetherColors.textSecondary)
+            .lineLimit(1)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Terminal menu")
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        if lit.state != .none {
+          Text(LitTheme.label(for: lit.state))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(lit.color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(lit.color.opacity(0.14), in: Capsule())
+            .accessibilityLabel("Session \(LitTheme.label(for: lit.state))")
+        }
+
+        if let hostId = store.activeHostId {
+          ConnectionBadge(status: store.connectionStatus(for: hostId))
+        }
+
+        // No spacing inside the cluster: the 44pt targets already sit their glyphs
+        // 44pt apart, and adding gaps on top pushed the row wide enough to
+        // truncate the session title — the one thing in the bar that carries
+        // information.
+        HStack(spacing: 0) {
+          iconButton("plus", label: "New terminal", action: onNewSession)
+          iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
+            .disabled(store.activeSessionId == nil)
+          iconButton("gearshape", label: "Settings", action: onSettings)
+          Menu {
+            overflow()
+          } label: {
+            Image(systemName: "ellipsis")
+              .font(.body.weight(.semibold))
+              .tapTarget()
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Terminal menu")
+        }
+      }
+      .foregroundStyle(TetherColors.textPrimary)
+      .padding(.horizontal, 4)
+      .padding(.vertical, 4)
+
+      // Desktop status strip, folded into the title bar so it does not fight the
+      // utility bar / keyboard for the bottom edge.
+      if let session = store.activeSession {
+        HStack(spacing: 8) {
+          Text(session.id)
+            .font(.system(.caption2, design: .monospaced))
+            .foregroundStyle(TetherColors.textFaint)
+            .lineLimit(1)
+          Text("out \(SessionStrip.relativeSince(session.lastOutputAt))")
+            .font(.system(.caption2, design: .monospaced))
+            .foregroundStyle(TetherColors.textFaint)
+          Text(LitTheme.label(for: lit.state))
+            .font(.system(.caption2, design: .monospaced).weight(.semibold))
+            .foregroundStyle(lit.color)
+          Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+          "Session \(session.id), last output \(SessionStrip.relativeSince(session.lastOutputAt)), \(LitTheme.label(for: lit.state))"
+        )
       }
     }
-    .foregroundStyle(TetherColors.textPrimary)
-    .padding(.horizontal, 4)
-    .padding(.vertical, 4)
     .background(TetherColors.surface)
+    .overlay(alignment: .bottom) {
+      Rectangle()
+        .fill(lit.state == .none ? TetherColors.border : lit.color.opacity(max(lit.bloom.rim, 0.25)))
+        .frame(height: 1)
+    }
   }
 
   /// An icon on a 44pt target — see `tapTarget()`. These were 32pt frames (36
@@ -152,7 +195,7 @@ private struct ConnectionBadge: View {
   private var tint: Color {
     switch status {
     case .online: TetherColors.success
-    case .connecting: Color.orange
+    case .connecting: TetherColors.warning
     case .offline: TetherColors.textSecondary
     case .authFailed: TetherColors.danger
     }

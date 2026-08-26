@@ -17,7 +17,17 @@ struct RootView: View {
   /// one instead of appearing to do nothing on tap.
   @State private var passwordPromptHostId: String?
 
+  private var litChrome: LitChrome {
+    let session = store.activeSession
+    return LitChrome.resolve(
+      status: session?.status,
+      activity: session?.activity,
+      lastOutputAt: session?.lastOutputAt
+    )
+  }
+
   var body: some View {
+
     ZStack {
       // The backdrop, as the ZStack's FIRST child rather than a .background()
       // modifier. As a modifier it did not reach the home-indicator strip even
@@ -26,6 +36,24 @@ struct RootView: View {
       // the scrim instead of (20,20,30).
       TetherColors.terminalBackground
         .ignoresSafeArea()
+
+      // Atmospheric bloom — the active session's heat colour, soft and inset so
+      // it belongs to the screen rather than washing the whole chrome.
+      if litChrome.state != .none {
+        RadialGradient(
+          colors: [
+            litChrome.color.opacity(litChrome.bloom.b1),
+            litChrome.color.opacity(litChrome.bloom.b2),
+            litChrome.color.opacity(litChrome.bloom.b3),
+            .clear,
+          ],
+          center: .init(x: 0.72, y: 0.28),
+          startRadius: 20,
+          endRadius: 420
+        )
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+      }
 
       VStack(spacing: 0) {
         TerminalTitleBar(
@@ -97,6 +125,7 @@ struct RootView: View {
     // the terminal to a strip at the top.
     .ignoresSafeArea(.keyboard, edges: .bottom)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
+    .environment(\.litChrome, litChrome)
     // Chained on the ZStack, not hung off zero-size sibling hosts. The hosts
     // were an attempt at the dead … button — SwiftUI keeps one presentation slot
     // per view, so I suspected the sixth modifier was losing it — and they did

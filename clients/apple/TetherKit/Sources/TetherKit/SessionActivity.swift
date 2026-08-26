@@ -73,13 +73,13 @@ public enum SessionActivityLogic {
   public static func color(for key: SessionActivityDot) -> Color {
     switch key {
     case .stopped:
-      TetherColors.textSecondary
+      TetherColors.textFaint
     case .waiting:
-      TetherColors.danger
+      TetherColors.heatWaiting
     case .working:
-      Color.green
+      TetherColors.heatWorking
     case .idle:
-      TetherColors.textSecondary
+      TetherColors.heatCool
     }
   }
 
