@@ -25,7 +25,7 @@ public struct SessionDrawerView: View {
     VStack(spacing: 0) {
       HStack {
         Text("Sessions")
-          .font(.subheadline.weight(.semibold))
+          .font(.footnote.weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary)
         Spacer()
         Button(action: onClose) {
@@ -105,7 +105,7 @@ private struct HostDrawerSection: View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
         Text(host.name)
-          .font(.footnote.weight(.semibold))
+          .font(.caption.weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary)
         statusView
         Spacer()
@@ -188,7 +188,7 @@ private struct SessionDrawerRow: View {
       Button(action: onSelect) {
         HStack {
           Text(title)
-            .font(.subheadline)
+            .font(.footnote)
             .foregroundStyle(active ? TetherColors.accent : TetherColors.textPrimary)
             .lineLimit(1)
           // Which session needs you is the drawer's whole job; without this the

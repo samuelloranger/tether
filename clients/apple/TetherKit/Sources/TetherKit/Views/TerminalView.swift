@@ -183,9 +183,14 @@ public struct TerminalInputBridge: UIViewRepresentable {
         onSubmitBytes("\r")
         return false
       }
-      if !text.isEmpty {
-        onSubmitBytes(text)
+      // An EMPTY replacement is a deletion. UIKit reports the software backspace
+      // here rather than through `deleteBackward()`, so the previous code — which
+      // only forwarded non-empty text — silently dropped every backspace.
+      if text.isEmpty {
+        onSubmitBytes("\u{7F}")
+        return false
       }
+      onSubmitBytes(text)
       return false
     }
 
@@ -337,6 +342,22 @@ public final class TerminalInputTextView: UITextView {
   }
 
   public override var canBecomeFirstResponder: Bool { true }
+
+  /// With a hardware keyboard attached (and on iPad generally) UIKit renders the
+  /// system input-assistant shortcuts bar for the first responder. This view has
+  /// no shortcuts to offer, so it showed up as an empty strip along the bottom.
+  /// Emptying both groups removes the bar rather than leaving it blank.
+  public override init(frame: CGRect, textContainer: NSTextContainer?) {
+    super.init(frame: frame, textContainer: textContainer)
+    inputAssistantItem.leadingBarButtonGroups = []
+    inputAssistantItem.trailingBarButtonGroups = []
+  }
+
+  public required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    inputAssistantItem.leadingBarButtonGroups = []
+    inputAssistantItem.trailingBarButtonGroups = []
+  }
 }
 
 public struct TerminalView: View {
