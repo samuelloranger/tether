@@ -25,13 +25,8 @@ public struct TerminalTitleBar: View {
   }
 
   public var body: some View {
-    HStack(spacing: 10) {
-      Button(action: onOpenDrawer) {
-        Image(systemName: "line.3.horizontal")
-          .font(.body.weight(.semibold))
-          .frame(width: 36, height: 36)
-      }
-      .accessibilityLabel("Open session list")
+    HStack(spacing: 8) {
+      iconButton("line.3.horizontal", label: "Open session list", action: onOpenDrawer)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(sessionTitle)
@@ -49,36 +44,46 @@ public struct TerminalTitleBar: View {
         ConnectionBadge(status: store.connectionStatus(for: hostId))
       }
 
-      Button(action: onNewSession) {
-        Image(systemName: "plus")
-          .frame(width: 32, height: 32)
+      // No spacing inside the cluster: the 44pt targets already sit their glyphs
+      // 44pt apart, and adding gaps on top pushed the row wide enough to
+      // truncate the session title — the one thing in the bar that carries
+      // information.
+      HStack(spacing: 0) {
+        iconButton("plus", label: "New terminal", action: onNewSession)
+        iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
+          .disabled(store.activeSessionId == nil)
+        iconButton("gearshape", label: "Settings", action: onSettings)
+        iconButton("ellipsis", label: "Terminal menu", action: onOverflow)
       }
-      .accessibilityLabel("New terminal")
+    }
+    .foregroundStyle(TetherColors.textPrimary)
+    .padding(.horizontal, 4)
+    .padding(.vertical, 4)
+    .background(TetherColors.surface)
+  }
 
-      Button(action: onGit) {
-        Image(systemName: "arrow.triangle.branch")
-          .frame(width: 32, height: 32)
-      }
-      .accessibilityLabel("Git changes")
-      .disabled(store.activeSessionId == nil)
-
-      Button(action: onSettings) {
-        Image(systemName: "gearshape")
-          .frame(width: 32, height: 32)
-      }
-      .accessibilityLabel("Settings")
-
-      Button(action: onOverflow) {
-        Image(systemName: "ellipsis")
-          .frame(width: 32, height: 32)
-      }
-      .accessibilityLabel("Terminal menu")
+  /// A 44pt-square tap target, which is Apple's minimum and was the problem:
+  /// these were 32pt frames (36 for the drawer), so a third of each button's
+  /// area was dead. `ellipsis` was the worst of them — it sits at the trailing
+  /// edge, where a thumb naturally lands slightly outside the frame, and its
+  /// glyph is a thin horizontal strip that gives no clue where the target ends.
+  ///
+  /// `contentShape` is the other half. A `Button` hit-tests its label, and an
+  /// `Image` inside a larger frame leaves that frame transparent — so even the
+  /// 32pt box was not fully live. The rectangle makes the whole square hittable.
+  private func iconButton(
+    _ systemName: String,
+    label: String,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: systemName)
+        .font(.body.weight(.semibold))
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .foregroundStyle(TetherColors.textPrimary)
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
-    .background(TetherColors.surface)
+    .accessibilityLabel(label)
   }
 
   private var sessionTitle: String {
