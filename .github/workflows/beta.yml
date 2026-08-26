@@ -7,6 +7,20 @@
 # leg uploads workflow artifacts you download and run by hand.
 #
 # Manual only. These are test builds, not a publishing path.
+#
+# TestFlight signing secrets. With the first three set, the iOS leg signs with a
+# stored identity and creates nothing; without them it falls back to automatic
+# signing, which mints a new distribution certificate on EVERY run and will hit
+# Apple's per-account cap within a few builds.
+#
+#   IOS_DIST_CERT_P12_BASE64     Apple Distribution cert + private key, .p12,
+#                                base64 (`base64 -i dist.p12 | pbcopy`)
+#   IOS_DIST_CERT_PASSWORD       the password set when exporting that .p12
+#   IOS_PROVISIONING_PROFILE_BASE64
+#                                App Store profile for
+#                                com.samuelloranger.tether-mobile, base64
+#   APP_STORE_CONNECT_KEY_P8_BASE64 / _KEY_ID / _ISSUER_ID, APPLE_TEAM_ID
+#                                unchanged — still needed for upload
 name: Beta (native rewrite)
 
 on:
@@ -298,6 +312,79 @@ jobs:
           printf '%s' "$KEY_B64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
           chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
 
+      # Why this exists: with CODE_SIGN_STYLE=Automatic and
+      # -allowProvisioningUpdates, Xcode looks for a distribution identity in the
+      # runner's keychain, finds none — the runner is ephemeral, so the private
+      # key never survives — and asks App Store Connect to CREATE one. Every run.
+      # Apple caps distribution certificates per account, so after a handful of
+      # builds signing fails outright and the only cure is revoking certificates
+      # by hand in the developer portal. That happened during this pipeline's
+      # first day.
+      #
+      # A persisted identity fixes it at the root: import one certificate and one
+      # profile from secrets, sign manually, create nothing. The automatic path
+      # is kept as a fallback so the workflow still runs before the secrets are
+      # configured — but it is the path that burns certificates, so the log says
+      # so loudly.
+      - name: Detect signing mode
+        id: signing
+        if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
+        env:
+          HAS_CERT: ${{ secrets.IOS_DIST_CERT_P12_BASE64 != '' && secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_CERT" = "true" ]; then
+            echo 'mode=manual' >> "$GITHUB_OUTPUT"
+            echo 'Signing manually with the stored identity — no certificate will be created.'
+          else
+            echo 'mode=automatic' >> "$GITHUB_OUTPUT"
+            echo '::warning::No IOS_DIST_CERT_P12_BASE64 / IOS_PROVISIONING_PROFILE_BASE64 secret set.'
+            echo '::warning::Falling back to automatic signing, which MINTS A NEW CERTIFICATE on every run and will hit Apple'"'"'s per-account cap.'
+          fi
+
+      - name: Install signing identity
+        if: steps.signing.outputs.mode == 'manual'
+        env:
+          CERT_B64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE_B64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          # A throwaway keychain, not the login one: it is deleted in a
+          # post-job step, and nothing else on the runner should see this key.
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          KEYCHAIN=~/Library/Keychains/tether-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          printf '%s' "$CERT_B64" | base64 --decode > /tmp/dist.p12
+          security import /tmp/dist.p12 -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
+          rm -f /tmp/dist.p12
+          # Without this, codesign prompts for keychain access and hangs the job.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Search list, not default-keychain: xcodebuild reads the search list,
+          # and replacing the default breaks other tooling on the runner.
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$PROFILES"
+          printf '%s' "$PROFILE_B64" | base64 --decode > /tmp/profile.mobileprovision
+          # The profile's own name is what PROVISIONING_PROFILE_SPECIFIER wants,
+          # and its UUID is the filename Xcode looks for. Read both out of the
+          # profile rather than hard-coding them, so rotating it needs no edit here.
+          security cms -D -i /tmp/profile.mobileprovision > /tmp/profile.plist
+          UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)"
+          NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist)"
+          cp /tmp/profile.mobileprovision "$PROFILES/$UUID.mobileprovision"
+          rm -f /tmp/profile.plist /tmp/profile.mobileprovision
+          echo "PROVISIONING_PROFILE_SPECIFIER=$NAME" >> "$GITHUB_ENV"
+          echo "Installed profile '$NAME' ($UUID)"
+          security find-identity -v -p codesigning "$KEYCHAIN" | sed 's/([0-9A-F]*)/(…)/'
+
       - name: Build signed archive
         if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
         timeout-minutes: 45
@@ -307,20 +394,38 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MARKETING_VERSION: ${{ steps.ver.outputs.version }}
           CURRENT_PROJECT_VERSION: ${{ steps.ver.outputs.build }}
+          SIGN_MODE: ${{ steps.signing.outputs.mode }}
         run: |
           set -euo pipefail
-          xcodebuild -project clients/apple/Tether.xcodeproj \
-            -scheme TetherIOS \
-            -configuration Release -sdk iphoneos \
-            -archivePath build/TetherIOS.xcarchive archive \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            MARKETING_VERSION="$MARKETING_VERSION" \
-            CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
+          # Manual signing passes NO -allowProvisioningUpdates and no API key:
+          # that flag is what lets Xcode create a certificate, so withholding it
+          # is the fix rather than an optimisation. Automatic keeps both, and
+          # keeps the cost that comes with them.
+          if [ "$SIGN_MODE" = manual ]; then
+            xcodebuild -project clients/apple/Tether.xcodeproj \
+              -scheme TetherIOS \
+              -configuration Release -sdk iphoneos \
+              -archivePath build/TetherIOS.xcarchive archive \
+              DEVELOPMENT_TEAM="$TEAM_ID" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="Apple Distribution" \
+              PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER" \
+              MARKETING_VERSION="$MARKETING_VERSION" \
+              CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
+          else
+            xcodebuild -project clients/apple/Tether.xcodeproj \
+              -scheme TetherIOS \
+              -configuration Release -sdk iphoneos \
+              -archivePath build/TetherIOS.xcarchive archive \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+              -authenticationKeyID "$KEY_ID" \
+              -authenticationKeyIssuerID "$ISSUER_ID" \
+              DEVELOPMENT_TEAM="$TEAM_ID" \
+              CODE_SIGN_STYLE=Automatic \
+              MARKETING_VERSION="$MARKETING_VERSION" \
+              CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
+          fi
 
       - name: Export IPA
         if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
@@ -328,9 +433,37 @@ jobs:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SIGN_MODE: ${{ steps.signing.outputs.mode }}
+          BUNDLE_ID: com.samuelloranger.tether-mobile
         run: |
           set -euo pipefail
-          cat > ExportOptions.plist <<PLIST
+          # The export has to agree with how the archive was signed, or it
+          # re-resolves the identity and can mint a certificate at THIS step
+          # instead — the same cap, one stage later.
+          if [ "$SIGN_MODE" = manual ]; then
+            cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$BUNDLE_ID</key><string>$PROVISIONING_PROFILE_SPECIFIER</string>
+            </dict>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+            xcodebuild -exportArchive \
+              -archivePath build/TetherIOS.xcarchive \
+              -exportPath build/export \
+              -exportOptionsPlist ExportOptions.plist
+          else
+            cat > ExportOptions.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -343,14 +476,24 @@ jobs:
           </dict>
           </plist>
           PLIST
-          xcodebuild -exportArchive \
-            -archivePath build/TetherIOS.xcarchive \
-            -exportPath build/export \
-            -exportOptionsPlist ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID"
+            xcodebuild -exportArchive \
+              -archivePath build/TetherIOS.xcarchive \
+              -exportPath build/export \
+              -exportOptionsPlist ExportOptions.plist \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+              -authenticationKeyID "$KEY_ID" \
+              -authenticationKeyIssuerID "$ISSUER_ID"
+          fi
+
+      # if: always() — a failed archive still leaves the key on the runner, and
+      # the runner image is reused within a job even though it is discarded after.
+      - name: Remove the signing keychain
+        if: always() && steps.signing.outputs.mode == 'manual'
+        run: |
+          security list-keychains -d user -s login.keychain-db || true
+          security delete-keychain ~/Library/Keychains/tether-signing.keychain-db || true
+          rm -f ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision || true
 
       - name: Validate build
         if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
