@@ -70,7 +70,11 @@ public struct TerminalAccessoryBar: View {
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
     }
-    .background(.ultraThinMaterial)
+    // ignoresSafeAreaEdges defaults to .all, so the material bled down into the
+    // home-indicator strip and the bar read as half again as tall. Confined to
+    // its own bounds, the strip below shows the window colour instead — which is
+    // the terminal's colour, so it reads as terminal rather than as chrome.
+    .background(.ultraThinMaterial, ignoresSafeAreaEdges: [])
     // Slide the whole row clear of the bottom edge rather than letting UIKit
     // nudge it by its own height.
     .offset(y: model.visible ? 0 : Self.keySize * 2.4)
