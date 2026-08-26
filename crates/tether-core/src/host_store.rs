@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,10 @@ use thiserror::Error;
 pub const HOST_PROFILES_KEY: &str = "tether_host_profiles";
 pub const LEGACY_SERVER_IP_KEY: &str = "tether_server_ip";
 pub const LEGACY_PORT_KEY: &str = "tether_port";
+
+fn taken(profiles: &[HostProfile]) -> HashSet<String> {
+    profiles.iter().map(|profile| profile.id.clone()).collect()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,7 +94,10 @@ where
     }
 
     pub fn list(&self) -> Result<Vec<HostProfile>, HostStoreError> {
-        let profiles = parse_profiles(self.storage.get_item(HOST_PROFILES_KEY)?.as_deref());
+        let profiles =
+            self.repair_duplicate_ids(parse_profiles(
+                self.storage.get_item(HOST_PROFILES_KEY)?.as_deref(),
+            ))?;
         let Some(legacy_host) = self
             .storage
             .get_item(LEGACY_SERVER_IP_KEY)?
@@ -112,7 +120,7 @@ where
             profile
         } else {
             let profile = HostProfile {
-                id: self.next_id(),
+                id: self.unique_id(&taken(&profiles)),
                 name: legacy_host.clone(),
                 color: "#89b4fa".to_string(),
                 host: legacy_host,
@@ -148,7 +156,7 @@ where
     pub fn create(&self, input: NewHostProfile) -> Result<HostProfile, HostStoreError> {
         let mut profiles = self.list()?;
         let profile = HostProfile {
-            id: self.next_id(),
+            id: self.unique_id(&taken(&profiles)),
             name: input.name,
             color: input.color,
             host: input.host,
@@ -211,6 +219,64 @@ where
         }
         self.write(&next)?;
         Ok(next)
+    }
+
+    /// An id no stored profile is already using.
+    ///
+    /// The injected generator cannot know what is persisted — the iOS one is a
+    /// counter that restarts at zero on every launch, so the first host added in
+    /// a later run was handed `host-0` again, the id the first host already had.
+    /// That collision is not cosmetic: the keychain entry and the session cache
+    /// are both keyed by host id, so the new host silently took over the older
+    /// one's password (leaving it permanently 401) and its cached sessions.
+    ///
+    /// Uniqueness is this store's invariant, so it is enforced here instead of
+    /// being trusted to whoever supplied the generator. Suffixing rather than
+    /// re-rolling also terminates against a generator that always answers the
+    /// same string.
+    fn unique_id(&self, taken: &HashSet<String>) -> String {
+        let base = self.next_id();
+        let mut id = base.clone();
+        let mut suffix = 1;
+        while taken.contains(&id) {
+            id = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        id
+    }
+
+    /// Repairs ids an earlier build handed out twice.
+    ///
+    /// Anyone who added a second host before `unique_id` existed has two
+    /// profiles sharing one id on disk, and no amount of correct code going
+    /// forward untangles that — the drawer collapses them into one row and every
+    /// request for the second one authenticates as the first. Renaming the later
+    /// profile splits them apart.
+    ///
+    /// Secrets are deliberately left alone. The stored password sits under the
+    /// shared id, so after the split the first profile keeps it and the second
+    /// has none, which makes the app ask for that host's password. That is the
+    /// visible version of what was already happening silently.
+    fn repair_duplicate_ids(
+        &self,
+        profiles: Vec<HostProfile>,
+    ) -> Result<Vec<HostProfile>, HostStoreError> {
+        let mut seen: HashSet<String> = HashSet::with_capacity(profiles.len());
+        let mut repaired = false;
+        let mut out = Vec::with_capacity(profiles.len());
+        for mut profile in profiles {
+            if !seen.insert(profile.id.clone()) {
+                let fresh = self.unique_id(&seen);
+                seen.insert(fresh.clone());
+                profile.id = fresh;
+                repaired = true;
+            }
+            out.push(profile);
+        }
+        if repaired {
+            self.write(&out)?;
+        }
+        Ok(out)
     }
 
     fn next_id(&self) -> String {
@@ -369,6 +435,65 @@ mod tests {
             port: "8085".to_string(),
             identity_name: id.to_string(),
         }
+    }
+
+    #[test]
+    fn splits_apart_profiles_an_earlier_build_stored_under_one_id() {
+        // Exactly what the simulator had on disk after adding a second host.
+        let stored = r##"[{"id":"host-0","name":"first","color":"#89b4fa","host":"10.0.0.1","port":"8097","identityName":"first","order":0},{"id":"host-0","name":"second","color":"#89b4fa","host":"10.0.0.2","port":"8100","identityName":"second","order":1}]"##;
+        let storage = MemoryStorage::seeded(&[(HOST_PROFILES_KEY, stored)]);
+        let store = HostStore::new(storage.clone(), MemorySecrets::default(), || {
+            "host-0".to_string()
+        });
+
+        let profiles = store.list().unwrap();
+        assert_eq!(profiles.len(), 2);
+        assert_ne!(profiles[0].id, profiles[1].id);
+        assert_eq!(profiles[0].id, "host-0", "the first profile keeps its id");
+        assert_eq!(profiles[0].port, "8097");
+        assert_eq!(profiles[1].port, "8100");
+
+        // Persisted, so the split survives the next launch.
+        let reread = parse_profiles(storage.get(HOST_PROFILES_KEY).as_deref());
+        assert_eq!(reread, profiles);
+    }
+
+    #[test]
+    fn create_never_reuses_an_id_the_generator_hands_out_twice() {
+        // The iOS generator is a counter built at launch, so a second app run
+        // starts back at `host-0`. A constant generator is that bug at its worst.
+        let storage = MemoryStorage::default();
+        let store = HostStore::new(storage, MemorySecrets::default(), || {
+            "host-0".to_string()
+        });
+
+        let first = store
+            .create(NewHostProfile {
+                name: "first".to_string(),
+                color: "#89b4fa".to_string(),
+                host: "10.0.0.1".to_string(),
+                port: "8085".to_string(),
+                identity_name: "first".to_string(),
+            })
+            .unwrap();
+        let second = store
+            .create(NewHostProfile {
+                name: "second".to_string(),
+                color: "#89b4fa".to_string(),
+                host: "10.0.0.2".to_string(),
+                port: "8085".to_string(),
+                identity_name: "second".to_string(),
+            })
+            .unwrap();
+
+        assert_ne!(first.id, second.id);
+        assert_eq!(store.list().unwrap().len(), 2);
+
+        // The reason the invariant matters: the keychain and the session cache
+        // are both keyed by this id, so a duplicate makes the newer host take
+        // over the older one's password and cached sessions.
+        let ids: Vec<String> = store.list().unwrap().into_iter().map(|p| p.id).collect();
+        assert_eq!(ids.iter().collect::<std::collections::HashSet<_>>().len(), 2);
     }
 
     #[test]
