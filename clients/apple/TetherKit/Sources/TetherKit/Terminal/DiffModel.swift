@@ -72,6 +72,90 @@ public func displayDiff(_ diff: String, truncated: Bool) -> String {
   truncated ? "\(diff)\n[Diff truncated at 1 MiB]" : diff
 }
 
+/// Hunk headers only (`@@ … @@`). File-level `diff --git` / `---` / `+++` lines
+/// are meta but hidden in the review UI (matches RN `DiffLines`).
+private let visibleHunkHeaderRegex = try! NSRegularExpression(
+  pattern: #"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@"#)
+
+/// Drops file-header meta lines; keeps hunk headers and body lines.
+public func visibleDiffLines(_ lines: [DiffLine]) -> [DiffLine] {
+  lines.filter { line in
+    if line.kind != .meta { return true }
+    return isHunkHeaderLine(line.text)
+  }
+}
+
+/// Same filter as `visibleDiffLines`, keeping hunk-index annotations aligned.
+public func visibleDiffLines(
+  _ lines: [DiffLine],
+  hunkIndices: [Int?]
+) -> (lines: [DiffLine], hunkIndices: [Int?]) {
+  var outLines: [DiffLine] = []
+  var outIndices: [Int?] = []
+  for (i, line) in lines.enumerated() {
+    if line.kind != .meta || isHunkHeaderLine(line.text) {
+      outLines.append(line)
+      outIndices.append(i < hunkIndices.count ? hunkIndices[i] : nil)
+    }
+  }
+  return (outLines, outIndices)
+}
+
+private func isHunkHeaderLine(_ text: String) -> Bool {
+  let range = NSRange(text.startIndex..<text.endIndex, in: text)
+  return visibleHunkHeaderRegex.firstMatch(in: text, range: range) != nil
+}
+
+public struct SideBySideRow: Equatable, Sendable {
+  public var left: DiffLine?
+  public var right: DiffLine?
+  /// Meta rows (hunk headers) span the full width.
+  public var span: Bool
+
+  public init(left: DiffLine?, right: DiffLine?, span: Bool) {
+    self.left = left
+    self.right = right
+    self.span = span
+  }
+}
+
+/// Pairs remove/add runs into aligned two-column rows (RN `pairDiffRows`).
+public func pairDiffRows(_ lines: [DiffLine]) -> [SideBySideRow] {
+  var rows: [SideBySideRow] = []
+  var removes: [DiffLine] = []
+  var adds: [DiffLine] = []
+  func flush() {
+    let n = max(removes.count, adds.count)
+    for i in 0..<n {
+      rows.append(
+        SideBySideRow(
+          left: i < removes.count ? removes[i] : nil,
+          right: i < adds.count ? adds[i] : nil,
+          span: false
+        )
+      )
+    }
+    removes = []
+    adds = []
+  }
+  for line in lines {
+    switch line.kind {
+    case .remove:
+      removes.append(line)
+    case .add:
+      adds.append(line)
+    case .meta:
+      flush()
+      rows.append(SideBySideRow(left: line, right: nil, span: true))
+    case .context:
+      flush()
+      rows.append(SideBySideRow(left: line, right: line, span: false))
+    }
+  }
+  flush()
+  return rows
+}
+
 public func diffLineKind(_ line: String) -> DiffLineKind {
   if line.hasPrefix("diff --git")
     || line.hasPrefix("index ")
@@ -103,7 +187,10 @@ private let hunkHeaderRegex = try! NSRegularExpression(
 private let hunkStartRegex = try! NSRegularExpression(pattern: #"^@@ -\d"#)
 
 /// Walks a unified diff assigning old/new line numbers per hunk.
+/// Empty input yields `[]` — an empty string's split is `[""]`, which would
+/// otherwise become a degenerate context line rendering as "0 0".
 public func parseDiffLines(_ diff: String) -> [DiffLine] {
+  if diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
   var oldLine = 0
   var newLine = 0
   let parts = diff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)

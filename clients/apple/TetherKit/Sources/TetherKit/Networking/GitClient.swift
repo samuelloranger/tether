@@ -63,7 +63,7 @@ public struct DiffTextResponse: Codable, Equatable, Sendable {
   }
 }
 
-public struct GitLogEntry: Codable, Equatable, Sendable, Identifiable {
+public struct GitLogEntry: Codable, Equatable, Hashable, Sendable, Identifiable {
   public var sha: String
   public var shortSha: String
   public var author: String
@@ -81,6 +81,11 @@ public enum GitDiffMode: String, Sendable, Hashable {
   case head
   case staged
   case unstaged
+}
+
+public enum DiffBlobSide: String, Sendable, Hashable {
+  case old
+  case new
 }
 
 // MARK: - NativeHostClient git API
@@ -146,6 +151,43 @@ extension NativeHostClient {
     return try await decode([GitLogEntry].self, request: request)
   }
 
+  /// Patch for one commit (`GET …/git/commit/:sha/diff`).
+  public func fetchCommitDiff(
+    sessionId: String,
+    sha: String,
+    path: String? = nil
+  ) async throws -> DiffTextResponse {
+    var items: [URLQueryItem] = []
+    if let path {
+      items.append(URLQueryItem(name: "path", value: path))
+    }
+    let request = try gitRequest(
+      path: "/api/sessions/\(sessionId)/git/commit/\(sha)/diff",
+      queryItems: items.isEmpty ? nil : items)
+    return try await decode(DiffTextResponse.self, request: request)
+  }
+
+  /// Raw bytes for one side of a binary/image diff (`GET …/diff/file`).
+  /// Returns `nil` when that side is absent (added/deleted file → 404).
+  public func fetchDiffBlob(
+    sessionId: String,
+    path: String,
+    side: DiffBlobSide
+  ) async throws -> Data? {
+    let request = try gitRequest(
+      path: "/api/sessions/\(sessionId)/diff/file",
+      queryItems: [
+        URLQueryItem(name: "path", value: path),
+        URLQueryItem(name: "side", value: side.rawValue),
+      ])
+    let (data, response) = try await URLSession.shared.data(for: request)
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    if status == 404 { return nil }
+    guard status != 401 else { throw HostClientError.unauthorized }
+    guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
+    return data
+  }
+
   public func commitStaged(
     sessionId: String,
     message: String,
@@ -159,6 +201,14 @@ extension NativeHostClient {
       method: "POST",
       body: body)
     _ = try await decode(GitOkResponse.self, request: request)
+  }
+
+  public func undoLastCommit(sessionId: String) async throws {
+    try await postEmpty(path: "/api/sessions/\(sessionId)/git/undo-commit")
+  }
+
+  public func pushBranch(sessionId: String) async throws {
+    try await postEmpty(path: "/api/sessions/\(sessionId)/git/push")
   }
 
   public func stageHunk(sessionId: String, path: String, hunkIndex: Int) async throws {

@@ -98,6 +98,60 @@ extension SessionStore {
     }
   }
 
+  public func loadGitLog(limit: Int = 50) async -> [GitLogEntry]? {
+    guard let sessionId = activeSessionId, let client = makeGitClient() else { return nil }
+    do {
+      return try await client.fetchGitLog(sessionId: sessionId, limit: limit)
+    } catch {
+      errorMessage = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func loadCommitDiff(sha: String, path: String? = nil) async -> DiffTextResponse? {
+    guard let sessionId = activeSessionId, let client = makeGitClient() else { return nil }
+    do {
+      return try await client.fetchCommitDiff(sessionId: sessionId, sha: sha, path: path)
+    } catch {
+      errorMessage = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func loadDiffBlob(path: String, side: DiffBlobSide) async -> Data? {
+    guard let sessionId = activeSessionId, let client = makeGitClient() else { return nil }
+    do {
+      return try await client.fetchDiffBlob(sessionId: sessionId, path: path, side: side)
+    } catch {
+      // Absent side is nil (404); other errors surface via errorMessage.
+      if case HostClientError.httpStatus(404) = error { return nil }
+      errorMessage = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func gitUndoLastCommit() async -> Bool {
+    guard let sessionId = activeSessionId, let client = makeGitClient() else { return false }
+    do {
+      try await client.undoLastCommit(sessionId: sessionId)
+      return true
+    } catch {
+      errorMessage = error.localizedDescription
+      return false
+    }
+  }
+
+  public func gitPushBranch() async -> Bool {
+    guard let sessionId = activeSessionId, let client = makeGitClient() else { return false }
+    do {
+      try await client.pushBranch(sessionId: sessionId)
+      return true
+    } catch {
+      errorMessage = error.localizedDescription
+      return false
+    }
+  }
+
   private func runGit(
     _ body: (NativeHostClient, String) async throws -> Void
   ) async {

@@ -4,25 +4,37 @@ public struct GitReviewView: View {
   @Bindable public var store: SessionStore
   public var path: String
   public var mode: GitDiffMode
+  public var binary: Bool
   public var onChanged: () -> Void
+
+  @Environment(\.dismiss) private var dismiss
 
   @State private var lines: [DiffLine] = []
   @State private var hunkIndices: [Int?] = []
   @State private var truncated = false
   @State private var loading = true
   @State private var loadError: String?
+  @State private var sideBySide = false
+  @State private var imageOld: Data?
+  @State private var imageNew: Data?
+  @State private var imageLoading = false
+  @State private var pendingDiscard = false
 
   public init(
     store: SessionStore,
     path: String,
     mode: GitDiffMode,
+    binary: Bool = false,
     onChanged: @escaping () -> Void = {}
   ) {
     self.store = store
     self.path = path
     self.mode = mode
+    self.binary = binary
     self.onChanged = onChanged
   }
+
+  private var isImage: Bool { binary && isImagePath(path) }
 
   public var body: some View {
     Group {
@@ -40,6 +52,12 @@ public struct GitReviewView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if isImage {
+        ImageDiffView(oldData: imageOld, newData: imageNew, loading: imageLoading)
+      } else if binary {
+        Text("Binary file")
+          .foregroundStyle(TetherColors.textSecondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if lines.isEmpty {
         Text("Empty diff")
           .foregroundStyle(TetherColors.textSecondary)
@@ -52,13 +70,21 @@ public struct GitReviewView: View {
     .navigationTitle(path)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
+      if !binary && !lines.isEmpty {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button(sideBySide ? "Unified" : "Side by side") {
+            sideBySide.toggle()
+          }
+          .tint(TetherColors.accent)
+        }
+      }
       ToolbarItemGroup(placement: .bottomBar) {
         if mode == .staged {
           Button("Unstage") {
             Task {
               await store.gitUnstage(path: path)
               onChanged()
-              await load()
+              await load(popIfEmpty: true)
             }
           }
         } else {
@@ -66,48 +92,70 @@ public struct GitReviewView: View {
             Task {
               await store.gitStage(path: path)
               onChanged()
-              await load()
+              await load(popIfEmpty: true)
             }
           }
           Button("Discard", role: .destructive) {
-            Task {
-              await store.gitDiscard(path: path)
-              onChanged()
-              await load()
-            }
+            pendingDiscard = true
           }
         }
       }
+    }
+    .confirmationDialog(
+      "Discard changes to \(path)?",
+      isPresented: $pendingDiscard,
+      titleVisibility: .visible
+    ) {
+      Button("Discard", role: .destructive) {
+        Task {
+          await store.gitDiscard(path: path)
+          onChanged()
+          dismiss()
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This cannot be undone.")
     }
     .task { await load() }
   }
 
   private var diffScroll: some View {
-    ScrollView([.vertical, .horizontal]) {
-      LazyVStack(alignment: .leading, spacing: 0) {
-        if truncated {
-          Text("[Diff truncated at 1 MiB]")
-            .font(.caption.monospaced())
-            .foregroundStyle(TetherColors.textSecondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+    GeometryReader { proxy in
+      ScrollView([.vertical, .horizontal]) {
+        VStack(alignment: .leading, spacing: 0) {
+          if truncated {
+            Text("[Diff truncated at 1 MiB]")
+              .font(.caption.monospaced())
+              .foregroundStyle(TetherColors.textSecondary)
+              .padding(.horizontal, 12)
+              .padding(.vertical, 6)
+          }
+          if sideBySide {
+            SideBySideDiffView(lines: lines, path: path)
+          } else {
+            UnifiedDiffBody(
+              lines: lines,
+              path: path,
+              hunkIndices: hunkIndices,
+              mode: mode,
+              onToggleHunk: { hunk in
+                Task { await toggleHunk(hunk) }
+              }
+            )
+          }
         }
-        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-          DiffLineRow(
-            line: line,
-            hunkIndex: index < hunkIndices.count ? hunkIndices[index] : nil,
-            mode: mode,
-            onToggleHunk: { hunk in
-              Task { await toggleHunk(hunk) }
-            }
-          )
-        }
+        .frame(minWidth: proxy.size.width, alignment: .leading)
+        .padding(.vertical, 8)
       }
-      .padding(.vertical, 8)
     }
   }
 
-  private func load() async {
+  private func load(popIfEmpty: Bool = false) async {
+    if isImage {
+      await loadImages()
+      return
+    }
     loading = true
     loadError = nil
     defer { loading = false }
@@ -115,10 +163,26 @@ public struct GitReviewView: View {
       loadError = store.errorMessage ?? "Failed to load diff"
       return
     }
-    let text = displayDiff(response.diff, truncated: response.truncated)
     truncated = response.truncated
-    lines = parseDiffLines(text)
-    hunkIndices = annotateHunkIndices(lines)
+    let parsed = parseDiffLines(response.diff)
+    let fullIndices = annotateHunkIndices(parsed)
+    let visible = visibleDiffLines(parsed, hunkIndices: fullIndices)
+    lines = visible.lines
+    hunkIndices = visible.hunkIndices
+
+    if popIfEmpty && lines.isEmpty && !binary {
+      dismiss()
+    }
+  }
+
+  private func loadImages() async {
+    loading = false
+    imageLoading = true
+    defer { imageLoading = false }
+    async let old = store.loadDiffBlob(path: path, side: .old)
+    async let new = store.loadDiffBlob(path: path, side: .new)
+    imageOld = await old
+    imageNew = await new
   }
 
   private func toggleHunk(_ hunkIndex: Int) async {
@@ -128,29 +192,62 @@ public struct GitReviewView: View {
       await store.gitStageHunk(path: path, hunkIndex: hunkIndex)
     }
     onChanged()
-    await load()
+    await load(popIfEmpty: true)
   }
 }
 
-private struct DiffLineRow: View {
-  let line: DiffLine
-  let hunkIndex: Int?
-  let mode: GitDiffMode
-  let onToggleHunk: (Int) -> Void
+struct UnifiedDiffBody: View {
+  var lines: [DiffLine]
+  var path: String
+  var hunkIndices: [Int?]
+  var mode: GitDiffMode?
+  var onToggleHunk: ((Int) -> Void)?
+
+  private var language: CodeLanguage? { languageForPath(path) }
 
   var body: some View {
-    if line.kind == .meta && line.text.hasPrefix("@@"), let hunkIndex {
+    LazyVStack(alignment: .leading, spacing: 0) {
+      ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+        DiffLineRow(
+          line: line,
+          hunkIndex: index < hunkIndices.count ? hunkIndices[index] : nil,
+          mode: mode,
+          language: language,
+          onToggleHunk: onToggleHunk
+        )
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+struct DiffLineRow: View {
+  let line: DiffLine
+  let hunkIndex: Int?
+  let mode: GitDiffMode?
+  let language: CodeLanguage?
+  let onToggleHunk: ((Int) -> Void)?
+
+  private let hunkContextRegex = try! NSRegularExpression(
+    pattern: #"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$"#)
+
+  var body: some View {
+    if line.kind == .meta && line.text.hasPrefix("@@") {
       HStack(spacing: 8) {
-        Text(line.text)
+        Text("⋯")
+          .foregroundStyle(TetherColors.textSecondary)
+        Text(hunkContext)
           .font(.system(.caption, design: .monospaced))
           .foregroundStyle(TetherColors.textSecondary)
           .lineLimit(1)
         Spacer(minLength: 8)
-        Button(mode == .staged ? "Unstage" : "Stage") {
-          onToggleHunk(hunkIndex)
+        if let hunkIndex, let mode, let onToggleHunk {
+          Button(mode == .staged ? "Unstage" : "Stage") {
+            onToggleHunk(hunkIndex)
+          }
+          .font(.caption.weight(.semibold))
+          .tint(TetherColors.accent)
         }
-        .font(.caption.weight(.semibold))
-        .tint(TetherColors.accent)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 6)
@@ -167,8 +264,11 @@ private struct DiffLineRow: View {
         Text(marker)
           .frame(width: 14, alignment: .center)
           .foregroundStyle(markerColor)
-        Text(line.content.isEmpty ? " " : line.content)
-          .foregroundStyle(TetherColors.textPrimary)
+        HighlightedCodeText(
+          content: line.content.isEmpty ? " " : line.content,
+          language: language
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
       .font(.system(.caption, design: .monospaced))
       .padding(.horizontal, 8)
@@ -176,6 +276,15 @@ private struct DiffLineRow: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(rowBackground)
     }
+  }
+
+  private var hunkContext: String {
+    let range = NSRange(line.text.startIndex..<line.text.endIndex, in: line.text)
+    guard let match = hunkContextRegex.firstMatch(in: line.text, range: range),
+          match.numberOfRanges >= 2,
+          let r = Range(match.range(at: 1), in: line.text)
+    else { return "" }
+    return String(line.text[r])
   }
 
   private func gutter(_ n: Int?) -> String {
@@ -187,8 +296,7 @@ private struct DiffLineRow: View {
     switch line.kind {
     case .add: "+"
     case .remove: "-"
-    case .context: " "
-    case .meta: " "
+    case .context, .meta: " "
     }
   }
 

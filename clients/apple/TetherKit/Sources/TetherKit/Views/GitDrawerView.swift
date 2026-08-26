@@ -4,30 +4,63 @@ public struct GitDrawerView: View {
   @Bindable public var store: SessionStore
   public var onDismiss: () -> Void
 
+  @State private var tab: GitTabBar.Tab = .changes
   @State private var summary = DiffSummary()
+  @State private var historyEntries: [GitLogEntry]?
   @State private var commitMessage = ""
   @State private var loading = true
   @State private var committing = false
   @State private var path = NavigationPath()
-  /// Set to the discard the user is about to confirm. Discarding throws work
-  /// away irreversibly, so — like killing a session — it asks first.
-  @State private var pendingDiscard: PendingDiscard?
+  /// Discard / undo / push all need a confirm — irreversible or disruptive.
+  @State private var pendingConfirm: PendingConfirm?
 
-  private enum PendingDiscard: Identifiable {
-    case all
-    case file(String)
+  private enum PendingConfirm: Identifiable {
+    case discardAll
+    case discardFile(String)
+    case undoCommit
+    case push
 
     var id: String {
       switch self {
-      case .all: "all"
-      case let .file(path): "file:\(path)"
+      case .discardAll: "discard-all"
+      case let .discardFile(path): "discard:\(path)"
+      case .undoCommit: "undo"
+      case .push: "push"
       }
     }
 
     var title: String {
       switch self {
-      case .all: "Discard all changes?"
-      case let .file(path): "Discard changes to \(path)?"
+      case .discardAll: "Discard all changes?"
+      case let .discardFile(path): "Discard changes to \(path)?"
+      case .undoCommit: "Undo last commit?"
+      case .push: "Push current branch?"
+      }
+    }
+
+    var message: String {
+      switch self {
+      case .discardAll, .discardFile:
+        "This cannot be undone."
+      case .undoCommit:
+        "HEAD will move back one commit. Changes stay staged."
+      case .push:
+        "Pushes the current branch to its upstream (or origin/HEAD)."
+      }
+    }
+
+    var confirmLabel: String {
+      switch self {
+      case .discardAll, .discardFile: "Discard"
+      case .undoCommit: "Undo commit"
+      case .push: "Push"
+      }
+    }
+
+    var isDestructive: Bool {
+      switch self {
+      case .discardAll, .discardFile, .undoCommit: true
+      case .push: false
       }
     }
   }
@@ -43,39 +76,88 @@ public struct GitDrawerView: View {
     NavigationStack(path: $path) {
       VStack(spacing: 0) {
         header
-        if loading {
-          ProgressView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .tint(TetherColors.accent)
-        } else if summary.files.isEmpty {
-          Text("No uncommitted changes")
-            .foregroundStyle(TetherColors.textSecondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-          fileList
+        GitTabBar(tab: $tab)
+          .onChange(of: tab) { _, newTab in
+            if newTab == .history {
+              Task { await loadHistory() }
+            }
+          }
+        Group {
+          switch tab {
+          case .changes:
+            changesBody
+          case .history:
+            GitHistoryListView(entries: historyEntries) { entry in
+              path.append(GitNavRoute.commit(entry))
+            }
+          }
         }
-        commitBar
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        if tab == .changes {
+          commitBar
+        }
       }
       .background(TetherColors.background)
-      .navigationDestination(for: GitReviewRoute.self) { route in
-        GitReviewView(
-          store: store,
-          path: route.path,
-          mode: route.mode,
-          onChanged: { Task { await reload() } }
-        )
+      .navigationDestination(for: GitNavRoute.self) { route in
+        switch route {
+        case let .review(review):
+          GitReviewView(
+            store: store,
+            path: review.path,
+            mode: review.mode,
+            binary: review.binary,
+            onChanged: { Task { await reload() } }
+          )
+        case let .commit(entry):
+          GitCommitDiffView(store: store, entry: entry)
+        }
       }
     }
     .task { await reload() }
+    .confirmationDialog(
+      pendingConfirm?.title ?? "",
+      isPresented: Binding(
+        get: { pendingConfirm != nil },
+        set: { if !$0 { pendingConfirm = nil } }
+      ),
+      titleVisibility: .visible,
+      presenting: pendingConfirm
+    ) { target in
+      Button(
+        target.confirmLabel,
+        role: target.isDestructive ? .destructive : nil
+      ) {
+        Task { await performConfirm(target) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { target in
+      Text(target.message)
+    }
+  }
+
+  private var changesBody: some View {
+    Group {
+      if loading {
+        ProgressView()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .tint(TetherColors.accent)
+      } else if summary.files.isEmpty {
+        Text("No uncommitted changes")
+          .foregroundStyle(TetherColors.textSecondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        fileList
+      }
+    }
   }
 
   private var header: some View {
     HStack {
-      Text("Working tree")
+      Text("Git")
         .font(.headline)
         .foregroundStyle(TetherColors.textPrimary)
       Spacer()
-      if let label = changeLabel(summary) {
+      if tab == .changes, let label = changeLabel(summary) {
         Text(label)
           .font(.caption.monospaced())
           .foregroundStyle(TetherColors.textSecondary)
@@ -127,7 +209,7 @@ public struct GitDrawerView: View {
                 }
               }
               Button("Discard all", role: .destructive) {
-                pendingDiscard = .all
+                pendingConfirm = .discardAll
               }
             }
           }
@@ -135,30 +217,6 @@ public struct GitDrawerView: View {
       }
     }
     .listStyle(.plain)
-    .confirmationDialog(
-      pendingDiscard?.title ?? "",
-      isPresented: Binding(
-        get: { pendingDiscard != nil },
-        set: { if !$0 { pendingDiscard = nil } }
-      ),
-      titleVisibility: .visible,
-      presenting: pendingDiscard
-    ) { target in
-      Button("Discard", role: .destructive) {
-        Task {
-          switch target {
-          case .all:
-            await store.gitDiscardAll()
-          case let .file(path):
-            await store.gitDiscard(path: path)
-          }
-          await reload()
-        }
-      }
-      Button("Cancel", role: .cancel) {}
-    } message: { _ in
-      Text("This cannot be undone.")
-    }
     .scrollContentBackground(.hidden)
     .background(TetherColors.background)
   }
@@ -182,7 +240,11 @@ public struct GitDrawerView: View {
 
   private func fileRow(_ file: DiffFileStat, mode: GitDiffMode) -> some View {
     Button {
-      path.append(GitReviewRoute(path: file.path, mode: mode))
+      path.append(
+        GitNavRoute.review(
+          GitReviewRoute(path: file.path, mode: mode, binary: file.binary)
+        )
+      )
     } label: {
       HStack(spacing: 10) {
         Text(file.statusLetter)
@@ -233,7 +295,7 @@ public struct GitDrawerView: View {
         }
         .tint(TetherColors.accent)
         Button("Discard", role: .destructive) {
-          pendingDiscard = .file(file.path)
+          pendingConfirm = .discardFile(file.path)
         }
       }
     }
@@ -244,10 +306,27 @@ public struct GitDrawerView: View {
       TextField("Commit message", text: $commitMessage, axis: .vertical)
         .lineLimit(1...4)
         .textFieldStyle(.plain)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
         .padding(10)
         .background(TetherColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .foregroundStyle(TetherColors.textPrimary)
+
+      Menu {
+        Button("Undo last commit", role: .destructive) {
+          pendingConfirm = .undoCommit
+        }
+        Button("Push") {
+          pendingConfirm = .push
+        }
+      } label: {
+        Image(systemName: "ellipsis.circle")
+          .font(.title3)
+          .foregroundStyle(TetherColors.accent)
+          .frame(width: 36, height: 36)
+      }
+      .accessibilityLabel("More git actions")
 
       Button {
         Task { await submitCommit() }
@@ -291,6 +370,10 @@ public struct GitDrawerView: View {
     loading = false
   }
 
+  private func loadHistory() async {
+    historyEntries = await store.loadGitLog() ?? []
+  }
+
   private func submitCommit() async {
     let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !message.isEmpty else { return }
@@ -299,11 +382,39 @@ public struct GitDrawerView: View {
     if await store.gitCommit(message: message) {
       commitMessage = ""
       await reload()
+      // History is stale after a commit.
+      if historyEntries != nil {
+        historyEntries = nil
+      }
     }
   }
+
+  private func performConfirm(_ target: PendingConfirm) async {
+    switch target {
+    case .discardAll:
+      await store.gitDiscardAll()
+      await reload()
+    case let .discardFile(path):
+      await store.gitDiscard(path: path)
+      await reload()
+    case .undoCommit:
+      if await store.gitUndoLastCommit() {
+        await reload()
+        historyEntries = nil
+      }
+    case .push:
+      _ = await store.gitPushBranch()
+    }
+  }
+}
+
+enum GitNavRoute: Hashable {
+  case review(GitReviewRoute)
+  case commit(GitLogEntry)
 }
 
 struct GitReviewRoute: Hashable {
   var path: String
   var mode: GitDiffMode
+  var binary: Bool
 }
