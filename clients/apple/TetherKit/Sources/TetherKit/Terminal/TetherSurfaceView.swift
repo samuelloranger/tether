@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import CoreText
+import SwiftUI
 import UIKit
 
 /// CoreText terminal surface. Redraws only when the snapshot generation changes.
@@ -75,7 +76,9 @@ public final class TetherSurfaceView: UIView {
 
   private func commonInit() {
     isOpaque = true
-    backgroundColor = UIColor(red: 11/255, green: 11/255, blue: 19/255, alpha: 1) // Aurora terminal #0B0B13
+    // Same constant the SwiftUI chrome uses, so the grid and everything around
+    // it are one colour rather than two that nearly match.
+    backgroundColor = UIColor(TetherColors.terminalBackground)
     contentMode = .redraw
     isMultipleTouchEnabled = false
     invalidateMetrics()

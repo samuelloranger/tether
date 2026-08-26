@@ -41,7 +41,17 @@ public enum TetherColors {
   /// Deliberately NOT dynamic. Backing behind the terminal grid; must stay in
   /// step with `TetherSurfaceView.backgroundColor`. A light backing would show
   /// as a bright seam around a dark grid.
-  public static let terminalBackground = Color(hex: "0B0B13")
+  /// The terminal's own background, and it must equal the one the emulator
+  /// paints into its cells — `theme.background` in
+  /// `crates/tether-core/src/terminal/alacritty.rs` (0x1E1E2E).
+  ///
+  /// It used to be 0B0B13, two shades darker than the grid. Every area the grid
+  /// does not cover showed it: the gutter either side, the slack above the first
+  /// row, and the strip reserved for the key bar. The result was a frame drawn
+  /// around the terminal on all four sides, which reads as padding rather than
+  /// as terminal.
+  public static let terminalBackgroundHex: UInt32 = 0x1E1E2E
+  public static let terminalBackground = Color(hex: "1E1E2E")
 
   private static func dynamic(dark: UInt32, light: UInt32) -> Color {
     #if canImport(UIKit)

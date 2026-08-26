@@ -17,8 +17,12 @@ public final class SessionStore {
   /// Sessions keyed by host id — populated by `refreshDrawer()` for the slide-over.
   public private(set) var sessionsByHost: [String: [RemoteSession]] = [:]
   public private(set) var healthByHost: [String: HostHealthModel] = [:]
-  public var activeHostId: String?
-  public var activeSessionId: String?
+  public var activeHostId: String? {
+    didSet { ResumeMemory.rememberHost(activeHostId) }
+  }
+  public var activeSessionId: String? {
+    didSet { ResumeMemory.rememberSession(activeSessionId, forHost: activeHostId) }
+  }
   public var terminalSnapshot: Data?
   public var errorMessage: String?
   public var isLoading = false
@@ -29,6 +33,8 @@ public final class SessionStore {
   public var pairingNeedsSetup = false
   /// Whether the app scene is foreground — gates `{type:focus}` and resume.
   public private(set) var isAppActive = true
+  /// Cold-launch restore is a one-shot; see `restoreSessionIfNeeded`.
+  @ObservationIgnored private var hasRestoredSession = false
 
   private let hostStore: HostStoreAdapter
   private let replayStore: FfiReplayStore
@@ -83,7 +89,10 @@ public final class SessionStore {
         healthByHost[host.id] = .unknown
       }
       if activeHostId == nil {
-        activeHostId = hosts.first?.id
+        activeHostId = SessionResume.pickHost(
+          remembered: ResumeMemory.rememberedHost(),
+          available: hosts.map(\.id)
+        )
       }
       startPolling()
       rememberSessionTitle()
@@ -250,7 +259,30 @@ public final class SessionStore {
     sessionsByHost[hostId] = list
     if activeHostId == hostId {
       sessions = list
+      await restoreSessionIfNeeded()
     }
+  }
+
+  /// Opens the terminal a cold launch should land on, once.
+  ///
+  /// It has to run here rather than in `bootstrap()`: at bootstrap the session
+  /// list is still empty, because the first fetch is what this method waits for.
+  ///
+  /// The latch matters. Without it the 3-second poll would also re-open a
+  /// terminal the moment the user killed the active one, turning "I closed that"
+  /// into "it came back" — a different behaviour from the bug being fixed.
+  private func restoreSessionIfNeeded() async {
+    guard !hasRestoredSession, activeSessionId == nil, let hostId = activeHostId else { return }
+    guard !sessions.isEmpty else { return }
+    hasRestoredSession = true
+    guard
+      let id = SessionResume.pick(
+        remembered: ResumeMemory.rememberedSession(forHost: hostId),
+        available: SessionResume.restorable(sessions.map { ($0.id, $0.status) })
+      )
+    else { return }
+    activeSessionId = id
+    await connectTerminal(sessionId: id)
   }
 
   public func newTerminal() async {
@@ -291,6 +323,8 @@ public final class SessionStore {
 
   public func startSession(named id: String) async {
     guard let client = await activeClient() else { return }
+    // Explicit, so the cold-launch restore is spent — see `selectSession`.
+    hasRestoredSession = true
     do {
       _ = try await client.startSession(id: id)
       await refreshSessions()
@@ -415,6 +449,12 @@ public final class SessionStore {
   }
 
   public func selectSession(hostId: String, sessionId: String) async {
+    // The user has chosen a terminal, so the cold-launch restore has no more
+    // work to do. Without this the latch could still be unspent — a launch whose
+    // first fetch returned nothing never spends it — and killing this session
+    // later would let the poll open another one, which is the "I closed that and
+    // it came back" behaviour the latch exists to prevent.
+    hasRestoredSession = true
     if activeSessionId != sessionId || activeHostId != hostId {
       sendFocus(focused: false)
     }

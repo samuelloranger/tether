@@ -573,11 +573,9 @@ public struct TerminalView: View {
           onOpenURL: { url in UIApplication.shared.open(url) },
           onMouseBytes: { store.sendInput($0) }
         )
-        // A small gutter, applied to the frame rather than the drawing: the grid
-        // draws from (0,0) and cell hit-testing is relative to the same origin,
-        // so insetting the view keeps rendering and touch in agreement. Costs
-        // about two columns and stops the prompt sitting on the screen edge.
-        .padding(.horizontal, 6)
+        // No inset. The gutter that used to be here cost two columns and, being
+        // a different colour from the grid, was itself half of the frame the
+        // terminal appeared to sit inside.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Must match TetherSurfaceView's own backgroundColor. Any area the grid
         // does not cover — the remainder below the last whole row, and the
@@ -608,7 +606,15 @@ public struct TerminalView: View {
             onKey: { store.sendInput($0) },
             onPaste: { store.sendInput($0) },
             onArrow: { store.sendInput($0.escapeSequence) },
-            onHideKeyboard: { keyboardFocused = false }
+            // Deferred by one runloop turn, like `report` above and for the
+            // same reason. This button lives inside the accessory bar, which is
+            // the inputAccessoryView's own UIHostingController. Dropping focus
+            // synchronously makes UIKit dismiss the keyboard and tear that
+            // hosting view down while the touch that triggered it is still being
+            // delivered to it — the view is deallocated underneath its own
+            // handler, which crashes the app. One turn later the touch is
+            // finished and the teardown has nothing live to pull out from under.
+            onHideKeyboard: { DispatchQueue.main.async { keyboardFocused = false } }
           )
         ),
         showsAccessory: accessoryVisible,
