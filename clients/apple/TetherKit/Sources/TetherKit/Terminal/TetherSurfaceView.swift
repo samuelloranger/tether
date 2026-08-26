@@ -12,6 +12,14 @@ public final class TetherSurfaceView: UIView {
     didSet { invalidateMetrics() }
   }
 
+  /// Reports the grid size the current bounds and font can display.
+  ///
+  /// The terminal used a fixed 120x40 regardless of the device, so on a phone
+  /// most columns fell off-screen and the PTY, believing it had 120 columns,
+  /// never wrapped — output wider than the screen was unreachable.
+  public var onGridSizeChange: ((UInt16, UInt16) -> Void)?
+
+  private var reportedGrid: (cols: UInt16, rows: UInt16)?
   private var lastGeneration: UInt64?
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
@@ -156,6 +164,21 @@ public final class TetherSurfaceView: UIView {
     }
   }
 
+  public override func layoutSubviews() {
+    super.layoutSubviews()
+    reportGridSize()
+  }
+
+  /// A terminal needs at least a 1x1 grid; bounds are zero before first layout.
+  private func reportGridSize() {
+    guard bounds.width > 0, bounds.height > 0, cellWidth > 0, cellHeight > 0 else { return }
+    let cols = UInt16(max(1, min(500, Int(bounds.width / cellWidth))))
+    let rows = UInt16(max(1, min(300, Int(bounds.height / cellHeight))))
+    guard reportedGrid?.cols != cols || reportedGrid?.rows != rows else { return }
+    reportedGrid = (cols, rows)
+    onGridSizeChange?(cols, rows)
+  }
+
   private func invalidateMetrics() {
     font = UIFont(name: fontName, size: fontSize)
       ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -168,6 +191,8 @@ public final class TetherSurfaceView: UIView {
     cellHeight = ceil(font.lineHeight)
     invalidateIntrinsicContentSize()
     setNeedsDisplay()
+    // A font change resizes the cell, so the grid that fits changes with it.
+    reportGridSize()
   }
 
   private func colorFromARGB(_ argb: UInt32) -> UIColor {

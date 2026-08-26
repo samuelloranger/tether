@@ -45,8 +45,8 @@ public final class SessionStore {
   @ObservationIgnored private var emulator: FfiTerminalEmulator?
   /// One source of truth for the grid size: the socket, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
-  private let terminalCols: UInt16 = 120
-  private let terminalRows: UInt16 = 40
+  private var terminalCols: UInt16 = 80
+  private var terminalRows: UInt16 = 24
 
   public init(hostStore: HostStoreAdapter = HostStoreAdapter()) {
     self.hostStore = hostStore
@@ -280,6 +280,29 @@ public final class SessionStore {
     activeHostId = hostId
     activeSessionId = sessionId
     await connectTerminal(sessionId: sessionId)
+  }
+
+  /// Adopts the grid the surface can actually display.
+  ///
+  /// Resizes the local emulator and tells the PTY, so the two agree and the
+  /// shell wraps at the width the user can see.
+  public func updateGrid(cols: UInt16, rows: UInt16) {
+    guard cols != terminalCols || rows != terminalRows else { return }
+    terminalCols = cols
+    terminalRows = rows
+    emulator?.resize(cols: cols, rows: rows)
+    refreshTerminalSnapshot()
+    sendResize(cols: cols, rows: rows)
+  }
+
+  private func sendResize(cols: UInt16, rows: UInt16) {
+    guard let socket else { return }
+    guard
+      let payload = try? JSONSerialization.data(
+        withJSONObject: ["type": "resize", "cols": Int(cols), "rows": Int(rows)]),
+      let frame = String(data: payload, encoding: .utf8)
+    else { return }
+    socket.send(.string(frame)) { _ in }
   }
 
   public func sendInput(_ text: String) {

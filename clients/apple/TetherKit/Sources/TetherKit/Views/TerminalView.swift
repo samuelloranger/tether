@@ -339,7 +339,8 @@ public struct TerminalView: View {
       TetherSurfaceRepresentable(
         snapshot: $store.terminalSnapshot,
         fontName: preferences.terminalFont.postScriptName,
-        fontSize: preferences.terminalFontSize
+        fontSize: preferences.terminalFontSize,
+        onGridSizeChange: { cols, rows in store.updateGrid(cols: cols, rows: rows) }
       )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)

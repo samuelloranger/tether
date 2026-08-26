@@ -5,17 +5,25 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   @Binding public var snapshot: Data?
   public var fontName: String
   public var fontSize: CGFloat
+  public var onGridSizeChange: (UInt16, UInt16) -> Void
 
-  public init(snapshot: Binding<Data?>, fontName: String, fontSize: CGFloat) {
+  public init(
+    snapshot: Binding<Data?>,
+    fontName: String,
+    fontSize: CGFloat,
+    onGridSizeChange: @escaping (UInt16, UInt16) -> Void
+  ) {
     _snapshot = snapshot
     self.fontName = fontName
     self.fontSize = fontSize
+    self.onGridSizeChange = onGridSizeChange
   }
 
   public func makeUIView(context: Context) -> TetherSurfaceView {
     let view = TetherSurfaceView()
     view.fontName = fontName
     view.fontSize = fontSize
+    view.onGridSizeChange = { cols, rows in onGridSizeChange(cols, rows) }
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
     return view
