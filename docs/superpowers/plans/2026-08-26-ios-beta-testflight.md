@@ -40,7 +40,7 @@ That puts every beta build in a `9xxxxx` band that release.yml's counter cannot 
 
 1. GitHub → **Actions** → **Beta (native rewrite)**.
 2. **Run workflow**.
-3. Branch: the rewrite branch that has this workflow (today: `feat/ios-beta-pipeline` / wherever `beta.yml` lives).
+3. Branch: the rewrite branch that had this workflow (`feat/ios-beta-pipeline`, renamed to `feat/native-client-release-pipeline`). The workflow no longer exists on any branch.
 4. **scope** = `testflight`.
 5. **version** (optional): defaults to `3.0.0`. Set it only to publish a different 3.x beta, e.g. `3.0.1`. Do not set it to a 2.8.x value — that would put a native build into the Expo client's version train.
 
