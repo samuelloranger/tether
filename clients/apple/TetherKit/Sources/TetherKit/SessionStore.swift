@@ -526,6 +526,10 @@ public final class SessionStore {
   }
 
   private func disconnectTerminal() {
+    // Order matters: sendFocus needs the socket, so the frame has to go out
+    // before it is torn down. Switching sessions otherwise left the server
+    // believing the old one was still on screen, and suppressing its pushes.
+    sendFocus(focused: false)
     emulator = nil
     socketTask?.cancel()
     socketTask = nil
