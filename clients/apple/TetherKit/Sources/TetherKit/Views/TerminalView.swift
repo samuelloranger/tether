@@ -20,6 +20,17 @@ public final class TerminalAccessoryModel {
   /// the bar's height, which reads as a short hop; this carries it fully off the
   /// bottom before UIKit removes the view.
   public var visible = true
+  /// Distance from the window's bottom edge to the TOP of the docked bar, as
+  /// the bar itself measures it.
+  ///
+  /// `barHeight` was a guess, and it was wrong twice over: the row is 56pt tall
+  /// (40pt keys + 8pt padding either side), not 52, and UIKit docks the bar 15pt
+  /// above the screen edge rather than above the 34pt home indicator. Reserving
+  /// a constant therefore left ~15pt of dead space between the last terminal row
+  /// and the keys. Measuring removes the arithmetic: whatever the bar actually
+  /// occupies is what the terminal gives up, so the two cannot drift again if a
+  /// key size or padding changes.
+  public var dockedHeight: CGFloat = 0
   public init() {}
 }
 
@@ -78,6 +89,16 @@ public struct TerminalAccessoryBar: View {
     // its own bounds, the strip below shows the window colour instead — which is
     // the terminal's colour, so it reads as terminal rather than as chrome.
     .background(.ultraThinMaterial, ignoresSafeAreaEdges: [])
+    // The bar lives in the keyboard window, so `.global` here is that window's
+    // space — which shares the screen's geometry. Reporting its top edge lets
+    // the terminal reserve the real height instead of a constant.
+    .background(
+      GeometryReader { proxy in
+        Color.clear
+          .onAppear { report(proxy) }
+          .onChange(of: proxy.frame(in: .global)) { _, _ in report(proxy) }
+      }
+    )
     // Slide the whole row clear of the bottom edge rather than letting UIKit
     // nudge it by its own height.
     .offset(y: model.visible ? 0 : Self.keySize * 2.4)
@@ -85,6 +106,20 @@ public struct TerminalAccessoryBar: View {
     .animation(.easeInOut(duration: 0.22), value: model.visible)
   }
 
+
+  /// Publishes the bar's docked height, skipping the slide-out frames — while
+  /// the bar is animating away its top edge is off-screen, and reporting that
+  /// would tell the terminal the bar is taller than it is.
+  private func report(_ proxy: GeometryProxy) {
+    guard model.visible else { return }
+    let frame = proxy.frame(in: .global)
+    guard let screen = UIApplication.shared.connectedScenes
+      .compactMap({ ($0 as? UIWindowScene)?.screen })
+      .first
+    else { return }
+    let height = max(0, screen.bounds.maxY - frame.minY)
+    if abs(height - model.dockedHeight) > 0.5 { model.dockedHeight = height }
+  }
 
   /// The system paste control.
   ///
@@ -366,7 +401,15 @@ public final class TerminalInputTextView: UITextView {
   /// the accessory, which UIKit does often.
   private lazy var accessoryContainer: UIView = {
     let view = accessoryHosting.view!
-    view.frame.size.height = TerminalAccessoryBar.barHeight
+    // Ask the bar how tall it is instead of asserting 52pt. The keys are 40pt
+    // with 8pt padding either side, so the assertion clipped 4pt off the row and
+    // then reserved the wrong amount of terminal for it.
+    let width = view.window?.bounds.width
+      ?? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width
+      ?? 390
+    let fitted = accessoryHosting.sizeThatFits(
+      in: CGSize(width: width, height: .greatestFiniteMagnitude))
+    view.frame.size.height = fitted.height > 0 ? fitted.height : TerminalAccessoryBar.barHeight
     view.backgroundColor = .clear
     return view
   }()
@@ -583,7 +626,10 @@ public struct TerminalView: View {
     // docked when the keyboard is down. Padding by the keyboard alone left the
     // last terminal rows underneath it, because keyboardWillHide zeroes the
     // inset while the bar is still on screen. Reserve whichever is taller.
-    .padding(.bottom, max(keyboardInset, accessoryVisible ? TerminalAccessoryBar.barHeight : 0))
+    // The bar's measured height, minus the container's own bottom inset — this
+    // padding is applied INSIDE the safe area, so not subtracting it stacks the
+    // two and leaves a home-indicator-sized band above the keys.
+    .padding(.bottom, max(keyboardInset, accessoryVisible ? accessoryReserve : 0))
     // keyboardWillChangeFrame already carries the END frame, so go straight to the
     // final height. Animating this padding would walk the view through
     // intermediate heights, and every one of those is a grid size the surface
@@ -656,6 +702,23 @@ public struct TerminalView: View {
   }
 
   private var accessoryVisible: Bool { placeholderReason == nil && !overlayPresented }
+
+  /// Padding that puts the last terminal row exactly on the bar's top edge.
+  /// Falls back to the constant only for the first frame, before the bar has
+  /// laid out and measured itself.
+  private var accessoryReserve: CGFloat {
+    let measured = accessory.dockedHeight
+    guard measured > 0 else { return TerminalAccessoryBar.barHeight }
+    return max(0, measured - Self.bottomSafeInset())
+  }
+
+  private static func bottomSafeInset() -> CGFloat {
+    guard
+      let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+      let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
+    else { return 0 }
+    return window.safeAreaInsets.bottom
+  }
 
   /// Nothing to stream: either no server is paired, or none is open.
   private var placeholderReason: TerminalPlaceholder.Reason? {
