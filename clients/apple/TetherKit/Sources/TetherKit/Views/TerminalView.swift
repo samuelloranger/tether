@@ -570,7 +570,12 @@ public struct TerminalView: View {
       .frame(height: 1)
       .focused($keyboardFocused)
     }
-    .background(TetherColors.background)
+    // The terminal's own colour, not the chrome colour. .background() bleeds into
+    // the safe area by default, so this painted #11111b over the window backdrop
+    // in the home-indicator strip — which is exactly the band that showed on the
+    // startup screen and with the sidebar open, the two states where the key bar
+    // is not there to cover it.
+    .background(TetherColors.terminalBackground)
     .padding(.bottom, keyboardInset)
     // keyboardWillChangeFrame already carries the END frame, so go straight to the
     // final height. Animating this padding would walk the view through
