@@ -3,21 +3,37 @@ import SwiftUI
 import UIKit
 
 /// Full utility key row for touch input — horizontally scrollable instead of RN paging.
+/// Mutable state of the key bar.
+///
+/// An @Observable class rather than a Binding, because the bar is hosted in a
+/// UIHostingController for use as an inputAccessoryView. A Binding does not
+/// publish into that separate SwiftUI graph, so the only way to refresh the bar
+/// was to reassign the controller's rootView on every updateUIView — and
+/// reassigning it made reloadInputViews() rebuild SwiftUI content INSIDE a
+/// SwiftUI update. That re-entrancy is what let any focus change spin the main
+/// thread at 100% CPU. Observing an object instead lets the bar update on its
+/// own, so rootView is assigned exactly once.
+@Observable
+public final class TerminalAccessoryModel {
+  public var ctrlArmed = false
+  public init() {}
+}
+
 public struct TerminalAccessoryBar: View {
-  public var ctrlArmed: Binding<Bool>
+  public var model: TerminalAccessoryModel
   public var onKey: (String) -> Void
   public var onPaste: (String) -> Void
   public var onArrow: (DPadDirection) -> Void
   public var onHideKeyboard: () -> Void
 
   public init(
-    ctrlArmed: Binding<Bool>,
+    model: TerminalAccessoryModel,
     onKey: @escaping (String) -> Void,
     onPaste: @escaping (String) -> Void,
     onArrow: @escaping (DPadDirection) -> Void,
     onHideKeyboard: @escaping () -> Void
   ) {
-    self.ctrlArmed = ctrlArmed
+    self.model = model
     self.onKey = onKey
     self.onPaste = onPaste
     self.onArrow = onArrow
@@ -35,15 +51,15 @@ public struct TerminalAccessoryBar: View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
         ctrlButton
-        accessoryButton("Tab") { send(ctrlArmed, base: "\t") }
+        accessoryButton("Tab") { send(base: "\t") }
         accessoryButton("Esc") { onKey("\u{1B}") }
         accessoryButton("/") { onKey("/") }
         DpadView(size: Self.keySize, onArrow: onArrow)
         pasteButton
         accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
         accessoryButton("Del") { onKey("\u{1B}[3~") }
-        accessoryButton("Home") { send(ctrlArmed, base: "\u{1B}[H") }
-        accessoryButton("End") { send(ctrlArmed, base: "\u{1B}[F") }
+        accessoryButton("Home") { send(base: "\u{1B}[H") }
+        accessoryButton("End") { send(base: "\u{1B}[F") }
         accessoryButton("PgUp") { onKey("\u{1B}[5~") }
         accessoryButton("PgDn") { onKey("\u{1B}[6~") }
       }
@@ -72,14 +88,14 @@ public struct TerminalAccessoryBar: View {
 
   private var ctrlButton: some View {
     Button {
-      ctrlArmed.wrappedValue.toggle()
+      model.ctrlArmed.toggle()
     } label: {
-      Text(ctrlArmed.wrappedValue ? "Ctrl ✓" : "Ctrl")
+      Text(model.ctrlArmed ? "Ctrl ✓" : "Ctrl")
         .font(.callout.weight(.medium))
         .padding(.horizontal, 10)
         .frame(minWidth: Self.keySize, minHeight: Self.keySize)
-        .background(ctrlArmed.wrappedValue ? TetherColors.accent : TetherColors.surface)
-        .foregroundStyle(ctrlArmed.wrappedValue ? TetherColors.onAccent : TetherColors.textPrimary)
+        .background(model.ctrlArmed ? TetherColors.accent : TetherColors.surface)
+        .foregroundStyle(model.ctrlArmed ? TetherColors.onAccent : TetherColors.textPrimary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     .buttonStyle(.plain)
@@ -107,12 +123,12 @@ public struct TerminalAccessoryBar: View {
     .buttonStyle(.plain)
   }
 
-  private func send(_ ctrlArmed: Binding<Bool>, base: String) {
-    guard ctrlArmed.wrappedValue else {
+  private func send(base: String) {
+    guard model.ctrlArmed else {
       onKey(base)
       return
     }
-    ctrlArmed.wrappedValue = false
+    model.ctrlArmed = false
     onKey(TerminalKeyMap.ctrlModified(base))
   }
 }
@@ -166,7 +182,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
   }
 
   public func updateUIView(_ uiView: TerminalInputTextView, context: Context) {
-    uiView.accessoryHosting.rootView = accessory
+    // rootView is set once in makeUIView. Reassigning it here is what made
+    // reloadInputViews() rebuild SwiftUI inside a SwiftUI update.
     if uiView.showsAccessory != showsAccessory {
       uiView.showsAccessory = showsAccessory
       uiView.reloadInputViews()
@@ -441,7 +458,7 @@ public struct TerminalView: View {
   /// drew across the drawer, clipping its "New terminal" button. A sheet does not
   /// have this problem because presenting one takes first responder away.
   public var overlayPresented: Bool = false
-  @State private var ctrlArmed = false
+  @State private var accessory = TerminalAccessoryModel()
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
   @State private var selectionText: String?
@@ -523,7 +540,7 @@ public struct TerminalView: View {
         text: $inputBuffer,
         accessory: AnyView(
           TerminalAccessoryBar(
-            ctrlArmed: $ctrlArmed,
+            model: accessory,
             onKey: { store.sendInput($0) },
             onPaste: { store.sendInput($0) },
             onArrow: { store.sendInput($0.escapeSequence) },
@@ -619,8 +636,8 @@ public struct TerminalView: View {
   /// The Ctrl button used to affect only the five keys that routed through
   /// `send`, so the on-screen keyboard could not produce Ctrl+C at all.
   private func submit(_ text: String) {
-    if ctrlArmed, let folded = TerminalKeyMap.ctrlFolded(text) {
-      ctrlArmed = false
+    if accessory.ctrlArmed, let folded = TerminalKeyMap.ctrlFolded(text) {
+      accessory.ctrlArmed = false
       store.sendInput(folded)
       return
     }
