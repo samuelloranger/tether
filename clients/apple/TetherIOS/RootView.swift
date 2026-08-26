@@ -39,7 +39,7 @@ struct RootView: View {
       }
 
       #if canImport(UIKit)
-      // TMPDISABLE WorkspaceChromeView(store: store, workspace: workspace)
+      WorkspaceChromeView(store: store, workspace: workspace)
 
       SessionDrawerOverlay(
         isPresented: $drawerOpen,
