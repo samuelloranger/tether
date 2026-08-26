@@ -130,7 +130,7 @@ public struct GitReviewView: View {
 
   private var diffScroll: some View {
     GeometryReader { proxy in
-      ScrollView([.vertical, .horizontal]) {
+      ScrollView(.vertical) {
         VStack(alignment: .leading, spacing: 0) {
           if truncated {
             Text("[Diff truncated at 1 MiB]")
@@ -157,11 +157,7 @@ public struct GitReviewView: View {
         }
         // Bi-axis ScrollView centres undersized content; pin to top-leading and
         // fill the viewport so short diffs are left-aligned edge-to-edge.
-        .frame(
-          minWidth: proxy.size.width,
-          minHeight: proxy.size.height,
-          alignment: .topLeading
-        )
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.vertical, 8)
       }
     }
@@ -239,7 +235,7 @@ struct UnifiedDiffBody: View {
         )
       }
     }
-    .frame(minWidth: minWidth, maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -262,7 +258,7 @@ struct DiffLineRow: View {
         Text(hunkContext)
           .font(.system(.caption, design: .monospaced))
           .foregroundStyle(TetherColors.textSecondary)
-          .lineLimit(1)
+          .fixedSize(horizontal: false, vertical: true)
         Spacer(minLength: 8)
         if let hunkIndex, let mode, let onToggleHunk {
           Button(mode == .staged ? "Unstage" : "Stage") {
@@ -274,7 +270,7 @@ struct DiffLineRow: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 6)
-      .frame(minWidth: minWidth, maxWidth: .infinity, alignment: .leading)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .background(TetherColors.surface)
     } else {
       HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -296,7 +292,7 @@ struct DiffLineRow: View {
       .font(.system(.caption, design: .monospaced))
       .padding(.horizontal, 8)
       .padding(.vertical, 1)
-      .frame(minWidth: minWidth, maxWidth: .infinity, alignment: .leading)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .background(rowBackground)
     }
   }

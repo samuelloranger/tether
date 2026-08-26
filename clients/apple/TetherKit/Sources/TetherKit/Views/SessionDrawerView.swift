@@ -25,7 +25,7 @@ public struct SessionDrawerView: View {
     VStack(spacing: 0) {
       HStack {
         Text("Sessions")
-          .font(.headline)
+          .font(.subheadline.weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary)
         Spacer()
         Button(action: onClose) {
@@ -77,6 +77,9 @@ public struct SessionDrawerView: View {
       .background(TetherColors.surface)
     }
     .background(TetherColors.background)
+    // The drawer is a fixed 264pt wide, so an accessibility text size does not
+    // just enlarge it — it truncates every session name. Cap it here.
+    .dynamicTypeSize(...DynamicTypeSize.large)
   }
 
   private func sessions(for hostId: String) -> [RemoteSession] {
@@ -102,7 +105,7 @@ private struct HostDrawerSection: View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
         Text(host.name)
-          .font(.subheadline.weight(.semibold))
+          .font(.footnote.weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary)
         statusView
         Spacer()
@@ -185,6 +188,7 @@ private struct SessionDrawerRow: View {
       Button(action: onSelect) {
         HStack {
           Text(title)
+            .font(.subheadline)
             .foregroundStyle(active ? TetherColors.accent : TetherColors.textPrimary)
             .lineLimit(1)
           // Which session needs you is the drawer's whole job; without this the

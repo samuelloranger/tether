@@ -38,7 +38,7 @@ public struct GitCommitDiffView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         GeometryReader { proxy in
-          ScrollView([.vertical, .horizontal]) {
+          ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
               if truncated {
                 Text("[Diff truncated at 1 MiB]")
@@ -60,7 +60,7 @@ public struct GitCommitDiffView: View {
                 )
               }
             }
-            .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(.vertical, 8)
           }
         }

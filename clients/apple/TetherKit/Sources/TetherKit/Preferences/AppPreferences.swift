@@ -84,6 +84,6 @@ public final class AppPreferences {
     ) ?? .dark
     terminalFont = TerminalFont(rawValue: defaults.string(forKey: Key.terminalFont) ?? "") ?? .menlo
     let size = defaults.double(forKey: Key.terminalFontSize)
-    terminalFontSize = size > 0 ? size : 14
+    terminalFontSize = size > 0 ? size : 11
   }
 }

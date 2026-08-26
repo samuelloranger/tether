@@ -286,6 +286,13 @@ public final class TerminalInputTextView: UITextView {
   /// the delegate, so it needs its own hook.
   var onBackspace: (() -> Void)?
 
+  /// UIKit only routes the software delete key to `deleteBackward()` while the
+  /// input view reports that it has something to delete. This view's text is
+  /// always empty — the delegate refuses every change and forwards bytes to the
+  /// PTY instead — so `hasText` was always false and the on-screen backspace
+  /// did nothing at all. Claiming text unconditionally restores the key.
+  public override var hasText: Bool { true }
+
   public override func deleteBackward() {
     onBackspace?()
   }
@@ -378,6 +385,9 @@ public struct TerminalView: View {
 
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      // Without this the home-indicator inset is left as a dead near-black
+      // strip below the grid.
+      .ignoresSafeArea(.container, edges: .bottom)
 
       TerminalInputBridge(
         text: $inputBuffer,
