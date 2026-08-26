@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react';
+import { FileViewer } from './FileViewer';
 import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
+import { PresentationBanner, PresentationView } from './PresentationView';
 import { loadPreferences, UI_THEMES } from './preferences';
 import { ResidentTerminals } from './ResidentTerminals';
 import { SessionDrawer } from './SessionDrawer';
 import { SettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
+import { httpOriginFor } from './types';
 import { useTetherDesktop } from './useTetherDesktop';
+import { useWorkspace, WorkspacePanel } from './useWorkspace';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
 export function App() {
@@ -17,6 +21,13 @@ export function App() {
   const [prefs, setPrefs] = useState(loadPreferences);
   const theme = UI_THEMES[prefs.theme];
   const gitPanel = useGitPanel(app.activeHostId, app.activeSessionId, app.gitOpen);
+  const httpBase = app.activeHost ? httpOriginFor(app.activeHost) : null;
+  const workspace = useWorkspace({
+    hostId: app.activeHostId,
+    sessionId: app.activeSessionId,
+    baseUrl: httpBase,
+    enabled: app.ready && app.screen === 'main' && !!app.activeHost,
+  });
 
   const editingHost = useMemo(
     () => app.hosts.find((host) => host.id === app.editingHostId) ?? null,
@@ -135,6 +146,20 @@ export function App() {
           <>
             <header className="terminal-toolbar">
               <span className="terminal-label">{app.activeSessionLabel}</span>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => workspace.setWorkspaceOpen(true)}
+              >
+                Workspace
+              </button>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => void workspace.pickAndUpload()}
+              >
+                Upload
+              </button>
               <span className="terminal-host-label muted">
                 {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
               </span>
@@ -159,29 +184,65 @@ export function App() {
                 Review
               </button>
             </header>
-            <div className="main-work-area">
-              <ResidentTerminals
-                hosts={app.hosts}
-                passwords={app.passwords}
-                sessions={app.sessions}
-                activeHostId={app.activeHostId}
-                activeSessionId={app.activeSessionId}
-                terminalTheme={theme.terminal}
-                fontFamily={prefs.terminalFont}
-                onFrame={app.handleWsFrame}
-                onDisconnected={(hostId) => app.retryHost(hostId)}
+            {workspace.sessionPreview && !workspace.activePresentation && !workspace.fileView && (
+              <PresentationBanner
+                label={`Preview ready: ${workspace.sessionPreview.title}`}
+                onPress={() => {
+                  const preview = workspace.sessionPreview;
+                  if (preview) workspace.setActivePresentationId(preview.id);
+                }}
               />
-              {app.gitOpen && app.gitMode === 'drawer' ? (
-                <GitDrawer panel={gitPanel} onClose={() => app.setGitOpen(false)} />
-              ) : null}
-              {app.gitOpen && app.gitMode === 'review' && app.activeHostId ? (
-                <GitReview
-                  panel={gitPanel}
-                  hostId={app.activeHostId}
-                  sessionId={app.activeSessionId}
-                  onClose={() => app.setGitOpen(false)}
+            )}
+            <div className="main-body">
+              {workspace.workspaceOpen && <WorkspacePanel workspace={workspace} />}
+              <div className="terminal-stack">
+                <ResidentTerminals
+                  hosts={app.hosts}
+                  passwords={app.passwords}
+                  sessions={app.sessions}
+                  activeHostId={app.activeHostId}
+                  activeSessionId={app.activeSessionId}
+                  terminalTheme={theme.terminal}
+                  fontFamily={prefs.terminalFont}
+                  onFrame={app.handleWsFrame}
+                  onDisconnected={(hostId) => app.retryHost(hostId)}
                 />
-              ) : null}
+                {app.gitOpen && app.gitMode === 'drawer' ? (
+                  <GitDrawer panel={gitPanel} onClose={() => app.setGitOpen(false)} />
+                ) : null}
+                {app.gitOpen && app.gitMode === 'review' && app.activeHostId ? (
+                  <GitReview
+                    panel={gitPanel}
+                    hostId={app.activeHostId}
+                    sessionId={app.activeSessionId}
+                    onClose={() => app.setGitOpen(false)}
+                  />
+                ) : null}
+                {workspace.fileLoading && (
+                  <div className="workspace-cover muted">Loading file…</div>
+                )}
+                {workspace.uploading && <div className="workspace-cover muted">Uploading…</div>}
+                {workspace.fileView && (
+                  <FileViewer
+                    file={workspace.fileView}
+                    onBack={workspace.closeFile}
+                    theme={theme}
+                    backLabel={app.activeSessionLabel}
+                  />
+                )}
+                {workspace.activePresentation && workspace.activePresentationUrl && (
+                  <PresentationView
+                    preview={workspace.activePresentation}
+                    url={workspace.activePresentationUrl}
+                    backLabel={app.activeSessionLabel}
+                    onBack={() => workspace.setActivePresentationId(null)}
+                    onClose={() => {
+                      const preview = workspace.activePresentation;
+                      if (preview) void workspace.closePresentation(preview.id);
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </>
         ) : (

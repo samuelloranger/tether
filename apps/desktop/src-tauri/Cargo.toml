@@ -12,10 +12,11 @@ tauri = { version = "2", features = [] }
 tokio = { version = "1", features = ["sync", "time", "rt"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 tether-core = { path = "../../../crates/tether-core" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 base64 = "0.22"
+tauri-plugin-dialog = "2"

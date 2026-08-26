@@ -4,6 +4,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import { sendJson, type TerminalSocket } from './coreTransport';
+import { setPasteListener } from './pasteBus';
 import type { FrameApplyResult } from './frameHandler';
 import type { UI_THEMES } from './preferences';
 import { bindTerminalSession } from './terminalBind';
@@ -114,6 +115,17 @@ export function TerminalPane(props: TerminalPaneProps) {
     term.options.fontSize = props.fontSize ?? 14;
     fitRef.current?.fit();
   }, [props.terminalTheme, props.fontFamily, props.fontSize, termRef, fitRef]);
+
+  // Sprint D's paste bridge, gated to the active tab: every resident session
+  // keeps a live socket, but only the focused one may receive a paste.
+  useEffect(() => {
+    if (!props.interactive) return undefined;
+    setPasteListener((text) => {
+      const socket = getSocketRef.current?.() ?? null;
+      if (socket) sendJson(socket, { type: 'input', text });
+    });
+    return () => setPasteListener(null);
+  }, [props.interactive, getSocketRef]);
 
   useEffect(() => {
     const term = termRef.current;

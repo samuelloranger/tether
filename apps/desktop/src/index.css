@@ -597,6 +597,50 @@ button.linkish {
   list-style: none;
   margin: 0;
   padding: 0.5rem;
+.main-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.terminal-stack {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.workspace-panel {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-right: 1px solid var(--border, #313244);
+  background: var(--surface, #181825);
+  overflow: auto;
+}
+
+.workspace-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.workspace-open-form {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.workspace-open-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-actions {
   display: grid;
   gap: 0.25rem;
 }
@@ -760,4 +804,142 @@ button.linkish {
 
 .tok-comment {
   color: #6c7086;
+.workspace-drop-hint {
+  font-size: 0.75rem;
+}
+
+.workspace-tree {
+  flex: 1;
+  overflow: auto;
+}
+
+.file-tree-dir-row,
+.file-tree-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  background: none;
+  color: inherit;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+}
+
+.file-tree-dir-row:hover,
+.file-tree-file-row:hover {
+  background: color-mix(in srgb, var(--accent, #89b4fa) 12%, transparent);
+}
+
+.file-tree-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-chevron,
+.file-tree-folder {
+  color: var(--text-muted, #a6adc8);
+  width: 0.85rem;
+}
+
+.file-tree-stat {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.file-tree-add {
+  color: var(--success, #a6e3a1);
+}
+
+.file-tree-del {
+  color: var(--danger, #f38ba8);
+}
+
+.file-viewer,
+.presentation-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--background, #11111b);
+  z-index: 2;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border, #313244);
+  background: var(--surface, #181825);
+}
+
+.panel-header-title {
+  flex: 1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.code-highlight {
+  margin: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.code-line {
+  min-height: 1.45em;
+}
+
+.presentation-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 1rem;
+  border: none;
+  border-bottom: 1px solid var(--border, #313244);
+  background: var(--surface, #181825);
+  color: var(--accent, #89b4fa);
+  text-align: left;
+  cursor: pointer;
+}
+
+.presentation-banner-text {
+  flex: 1;
+  font-size: 0.8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presentation-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.workspace-cover {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--background, #11111b) 55%, transparent);
+  z-index: 3;
 }

@@ -32,3 +32,7 @@ export function activeSessionStorageKey(hostId: string): string {
 export function wsOriginFor(profile: HostProfile): string {
   return `ws://${profile.host}:${profile.port}`;
 }
+
+export function httpOriginFor(profile: HostProfile): string {
+  return `http://${profile.host}:${profile.port}`;
+}

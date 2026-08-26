@@ -74,7 +74,13 @@ fn main() {
             commands::git::core_git_undo_commit,
             commands::git::core_git_push,
             commands::git::core_diff_parse,
+            commands::workspace::core_file_tree_build,
+            commands::workspace::core_workspace_file,
+            commands::workspace::core_workspace_upload,
+            commands::workspace::core_presentations_list,
+            commands::workspace::core_presentation_close,
         ])
+        .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");
 }
