@@ -76,6 +76,7 @@ public final class TetherSurfaceView: UIView {
   }
 
   private func installGestures() {
+    NSLog("[GESTPROBE] installGestures called, uie=\(isUserInteractionEnabled)")
     let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
     pan.maximumNumberOfTouches = 1
     addGestureRecognizer(pan)
@@ -302,6 +303,7 @@ public final class TetherSurfaceView: UIView {
   }
 
   @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+    NSLog("[GESTPROBE] pan state=\(gesture.state.rawValue)")
     let point = gesture.location(in: self)
     if mouseMode != .off {
       handleMousePan(gesture, point: point)
