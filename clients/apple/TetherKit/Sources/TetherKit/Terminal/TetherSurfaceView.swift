@@ -44,6 +44,13 @@ public final class TetherSurfaceView: UIView {
   }
 
   private var reportedGrid: (cols: UInt16, rows: UInt16)?
+  /// Coalesces grid-size reports so only a SETTLED size reaches the emulator and
+  /// the PTY. A keyboard animation drives layoutSubviews once per frame, and the
+  /// intermediate heights include very short ones. Each report used to resize
+  /// both sides immediately, and a resize down to a handful of rows destroys a
+  /// full-screen TUI's screen for good — when the view settled the rows came
+  /// back but the content did not, leaving a few lines and blank space.
+  private var gridSettleWork: DispatchWorkItem?
   private var lastGeneration: UInt64?
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
@@ -261,12 +268,45 @@ public final class TetherSurfaceView: UIView {
   }
 
   private func reportGridSize() {
-    guard bounds.width > 0, bounds.height > 0, cellWidth > 0, cellHeight > 0 else { return }
-    let cols = UInt16(max(1, min(500, Int(bounds.width / cellWidth))))
-    let rows = UInt16(max(1, min(300, Int(bounds.height / cellHeight))))
-    guard reportedGrid?.cols != cols || reportedGrid?.rows != rows else { return }
-    reportedGrid = (cols, rows)
-    onGridSizeChange?(cols, rows)
+    guard let size = currentGridSize() else { return }
+    guard reportedGrid?.cols != size.cols || reportedGrid?.rows != size.rows else { return }
+
+    // The very first size is sent straight through, so connecting is not delayed
+    // by the settle window.
+    if reportedGrid == nil {
+      commitGridSize(size)
+      return
+    }
+
+    gridSettleWork?.cancel()
+    let work = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      // Re-derive from the CURRENT bounds rather than trusting the size that
+      // scheduled this, so a transient frame can never be what gets committed.
+      guard let settled = self.currentGridSize() else { return }
+      guard self.reportedGrid?.cols != settled.cols || self.reportedGrid?.rows != settled.rows
+      else { return }
+      self.commitGridSize(settled)
+    }
+    gridSettleWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.gridSettleDelay, execute: work)
+  }
+
+  /// Long enough to outlast a keyboard show/hide animation (~0.25s on iOS), short
+  /// enough that a deliberate window resize still feels immediate.
+  private static let gridSettleDelay: TimeInterval = 0.3
+
+  private func currentGridSize() -> (cols: UInt16, rows: UInt16)? {
+    guard bounds.width > 0, bounds.height > 0, cellWidth > 0, cellHeight > 0 else { return nil }
+    return (
+      UInt16(max(1, min(500, Int(bounds.width / cellWidth)))),
+      UInt16(max(1, min(300, Int(bounds.height / cellHeight))))
+    )
+  }
+
+  private func commitGridSize(_ size: (cols: UInt16, rows: UInt16)) {
+    reportedGrid = size
+    onGridSizeChange?(size.cols, size.rows)
   }
 
   private func invalidateMetrics() {

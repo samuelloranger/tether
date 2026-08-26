@@ -445,6 +445,11 @@ public struct TerminalView: View {
     // double-count it.
     .ignoresSafeArea(.keyboard, edges: .bottom)
     .padding(.bottom, keyboardInset)
+    // keyboardWillChangeFrame already carries the END frame, so go straight to the
+    // final height. Animating this padding would walk the view through
+    // intermediate heights, and every one of those is a grid size the surface
+    // would otherwise report.
+    .animation(nil, value: keyboardInset)
     .onReceive(
       NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)
     ) { note in
