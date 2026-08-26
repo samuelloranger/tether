@@ -168,6 +168,13 @@ update_json "apps/server/package.json" ".version = \$v"
 update_json "apps/mobile/package.json" ".version = \$v"
 update_json "apps/mobile/src-tauri/tauri.conf.json" ".version = \$v"
 update_json "apps/mobile/app.json" ".expo.version = \$v"
+# apps/desktop is the shipping desktop client (release.yml's `desktop` job). Its
+# version is what the updater compares against latest.json, so leaving it behind
+# makes every install think an update is permanently available: the manifest
+# advertises the new tag, the downloaded bundle reports the old one, and the
+# prompt returns on the next check forever.
+update_json "apps/desktop/package.json" ".version = \$v"
+update_json "apps/desktop/src-tauri/tauri.conf.json" ".version = \$v"
 
 # Update Cargo.toml
 if [ "$DRY_RUN" = true ]; then
@@ -175,6 +182,8 @@ if [ "$DRY_RUN" = true ]; then
 else
   sed -i -E 's/^version = "[^"]*"/version = "'"$TARGET_VERSION"'"/' apps/mobile/src-tauri/Cargo.toml
   echo "Updated apps/mobile/src-tauri/Cargo.toml"
+  sed -i -E '0,/^version = "[^"]*"/s//version = "'"$TARGET_VERSION"'"/' apps/desktop/src-tauri/Cargo.toml
+  echo "Updated apps/desktop/src-tauri/Cargo.toml"
 fi
 
 # Regenerate Cargo.lock
@@ -184,6 +193,8 @@ else
   echo "Regenerating Cargo.lock..."
   cargo check --manifest-path apps/mobile/src-tauri/Cargo.toml > /dev/null 2>&1
   echo "Updated apps/mobile/src-tauri/Cargo.lock"
+  cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml > /dev/null 2>&1
+  echo "Updated apps/desktop/src-tauri/Cargo.lock"
 fi
 
 # The complete set of files a release is allowed to modify. Anything else showing
@@ -197,6 +208,10 @@ VERSION_FILES=(
   apps/mobile/src-tauri/tauri.conf.json
   apps/mobile/src-tauri/Cargo.toml
   apps/mobile/src-tauri/Cargo.lock
+  apps/desktop/package.json
+  apps/desktop/src-tauri/tauri.conf.json
+  apps/desktop/src-tauri/Cargo.toml
+  apps/desktop/src-tauri/Cargo.lock
 )
 
 # Validation

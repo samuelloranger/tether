@@ -87,8 +87,23 @@ jobs:
         working-directory: apps/mobile
         run: bun run build:terminal-renderer
 
+  # Builds apps/desktop — the native Tauri client (vite + xterm.js over
+  # tether-core), which REPLACED the react-native-web app under apps/mobile.
+  # apps/mobile still ships iOS and Android below; its src-tauri is legacy and is
+  # no longer built by any release.
+  #
+  # apps/desktop deliberately keeps the OLD bundle identifier
+  # (cloud.samlo.tether). The identifier is what names the webview data
+  # directory, and the app's own host-profile migration reads the previous app's
+  # localStorage (tether_host_profiles) out of it — so a user updating in place
+  # keeps their hosts. It is also what NSIS uses for the install path and
+  # uninstall registry key, so a new identifier would install beside the old app
+  # on Windows instead of upgrading it.
+  #
+  # `needs: draft` only — no renderer: the RN WebView terminal bundle is an
+  # apps/mobile artifact, and apps/desktop imports xterm.js through vite.
   desktop:
-    needs: [draft, renderer]
+    needs: draft
     if: github.event_name == 'push' || inputs.scope == 'desktop' || inputs.scope == 'all'
     strategy:
       fail-fast: false
@@ -147,7 +162,7 @@ jobs:
       # must not throw away a successful compile.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/mobile/src-tauri
+          workspaces: apps/desktop/src-tauri
           shared-key: tether-${{ matrix.cache-key }}
           cache-on-failure: true
 
@@ -187,7 +202,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          projectPath: apps/mobile
+          projectPath: apps/desktop
           args: ${{ matrix.args }}
           tagName: ${{ github.event_name == 'push' && env.TAG || '' }}
           releaseId: ${{ needs.draft.outputs.release_id }}
@@ -212,8 +227,8 @@ jobs:
         with:
           name: desktop-${{ matrix.os }}-${{ strategy.job-index }}
           path: |
-            apps/mobile/src-tauri/target/release/bundle/**
-            apps/mobile/src-tauri/target/*/release/bundle/**
+            apps/desktop/src-tauri/target/release/bundle/**
+            apps/desktop/src-tauri/target/*/release/bundle/**
           if-no-files-found: error
 
   # iOS ships through TestFlight only. Sideloading was dropped once the public

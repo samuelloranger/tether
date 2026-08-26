@@ -6,7 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY shell processes through detached *holder* processes, streams their output over WebSocket, and logs every byte to SQLite so clients can reconnect and replay missed output. Around that core it also serves git diff/stage/commit, a workspace file tree/viewer, file uploads, and HTML "presentations" (previews pushed from a coding agent to the client).
 
-Clients are a single Expo React Native codebase: iOS/Android app, plus a Tauri desktop app built from the same source via `react-native-web`.
+iOS and Android come from one Expo React Native codebase (`apps/mobile`). The
+desktop client is **`apps/desktop`** — a separate Tauri app (vite + xterm.js over
+the `tether-core` Rust crate) that replaced the `react-native-web` desktop build
+that used to come out of `apps/mobile/src-tauri`. `release.yml`'s `desktop` job
+builds `apps/desktop`; `apps/mobile/src-tauri` is legacy and is built by nothing.
+It keeps the old bundle identifier (`cloud.samlo.tether`) on purpose, so an
+in-place update inherits the previous app's webview storage and its host
+profiles migrate.
 
 ## Monorepo layout (Bun workspaces)
 
@@ -31,12 +38,15 @@ Run from repo root:
 - `bun install` — install/link all workspaces
 - `bun dev:server` — backend on `:8085` (binds `0.0.0.0`), watch mode
 - `bun dev:mobile` — Expo Metro bundler
+- `bun dev:desktop` — the Tauri desktop client (`apps/desktop`)
 - `bun lint` — Biome + server typecheck + mobile typecheck
 - `bun format` — `biome check --write`
 - `bun build:server` / `bun start:server` — compile and run `apps/server/dist/tether`
 - `bun docs:dev` / `bun docs:build` — VitePress docs
 
 Per workspace:
+- Desktop tests: `bun --cwd apps/desktop run test`; its Rust half is
+  `cd apps/desktop/src-tauri && cargo test` (CI: the `desktop-build` job)
 - Server tests: `bun --cwd apps/server run test` (bun:test — extensive, most `.ts` files have a sibling `.test.ts`)
 - Mobile logic tests: `bun --cwd apps/mobile run test`; component tests: `bun --cwd apps/mobile run test:ui` (jest + `@testing-library/react-native`)
 - Use `run test`, not `bun test`: the built-in runner wins over the script name, so bare `bun test` silently drops the `--parallel` flag the scripts carry (12.8s → 3.3s on the server suite). Never pin `TETHER_DB_PATH` for a suite run — `test-preload.ts` gives each process its own temp DB, and one shared file makes parallel workers fight over it.

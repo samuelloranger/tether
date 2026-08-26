@@ -1,6 +1,15 @@
 # iOS beta → TestFlight (native Swift client)
 
-Operator runbook for the `scope=testflight` lane in `.github/workflows/beta.yml`.
+> **Obsolete as a runbook — kept for the signing facts.** `.github/workflows/beta.yml`
+> was deleted on 2026-08-26; there is no `scope=testflight` lane to dispatch any
+> more, and the native Swift client currently has **no CI publish path** — it is
+> built and uploaded from the Mac by hand (`scripts/build-xcframework.sh`, then
+> Xcode). `release.yml`'s `ios` job still builds the *Expo* client, not this one.
+> Everything below about the shared App Store identity, the build-number rule and
+> the certificate cap still applies to whatever replaces it.
+
+Operator runbook for the `scope=testflight` lane that used to live in
+`.github/workflows/beta.yml`.
 
 ## Shared app identity
 

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Dispatchable so a long-lived branch can ask for these checks before it is
+  # anywhere near a PR to main. cache-warm* stay gated on main by their own `if`.
+  workflow_dispatch:
 
 jobs:
   lint-test:
@@ -48,6 +51,13 @@ jobs:
       - name: Release script tests
         timeout-minutes: 5
         run: bun test scripts/
+
+      # apps/desktop is the client that ships to desktop users. Its suite ran in
+      # no pipeline at all until this step existed.
+      - name: Desktop tests (pure logic)
+        timeout-minutes: 10
+        run: bun run test
+        working-directory: apps/desktop
 
       - name: Mobile tests (pure logic)
         timeout-minutes: 10
@@ -113,6 +123,87 @@ jobs:
         run: npx expo install --check || echo "::warning::expo install --check reported drift (expected — jest 30, jest-expo 57.0.2, safe-area-context 5.9.1 are all deliberate)"
         working-directory: apps/mobile
 
+  # The desktop client's Rust half, on every OS it ships to.
+  #
+  # lint-test cannot host this: tauri needs the system webkit/gtk headers, and
+  # installing them for every other suite would tax runs that never touch Rust.
+  #
+  # All three platforms, not just Linux, because nothing else compiles this crate
+  # before a tag: cache-warm runs on main only, and the beta workflow that used
+  # to build it (whose desktop leg had in fact never once run) is gone. Without
+  # this the first time apps/desktop is compiled for macOS or Windows is while a
+  # release is being cut — which is how v2.0.0 shipped with every desktop bundle
+  # broken. No bundling here; that is release.yml's job.
+  desktop-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+
+      # The iOS targets are only meaningful on the macOS leg, and only the macOS
+      # SDK can build them — see the cross-compile step at the end of this job.
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: clippy, rustfmt
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-ios,aarch64-apple-ios-sim' || '' }}
+
+      # Its own key, not release.yml's shared-key: a PR must not overwrite the
+      # cache tagged releases restore from.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: tether-desktop-ci-${{ matrix.os }}
+          cache-on-failure: true
+
+      - name: Linux Tauri deps
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev
+
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+
+      # tauri::generate_context! reads frontendDist (apps/desktop/dist), so the
+      # web build has to come first — and it is `tsc --noEmit && vite build`,
+      # which is also the check that the bundle itself still builds.
+      - name: Build the desktop frontend
+        working-directory: apps/desktop
+        run: bun run build
+
+      - name: Desktop Rust (fmt, clippy, tests)
+        timeout-minutes: 30
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+      # Carried over from the deleted beta workflow, which was the only thing
+      # checking that tether-core still cross-compiles to a real device target.
+      # It is shared with the Swift client, so a host-only dependency sneaking in
+      # here breaks iOS — and that is invisible from the desktop build alone.
+      # macOS-only: nothing else has the iOS SDK.
+      - name: tether-core cross-compiles for iOS
+        if: runner.os == 'macOS'
+        timeout-minutes: 25
+        working-directory: crates/tether-core
+        run: |
+          cargo build --target aarch64-apple-ios --release
+          cargo build --target aarch64-apple-ios-sim --release
+
   # Warm release caches on main only. Tag-triggered Release builds can restore
   # from the default branch, but cannot see caches saved under other tags —
   # so every release was a cold Rust compile until this job populates main.
@@ -162,7 +253,7 @@ jobs:
       # Must match release.yml shared-key exactly or tag restores miss.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/mobile/src-tauri
+          workspaces: apps/desktop/src-tauri
           shared-key: tether-${{ matrix.cache-key }}
           cache-on-failure: true
 
@@ -176,15 +267,15 @@ jobs:
       - name: Install workspace deps
         run: bun install --frozen-lockfile
 
-      # tauri::generate_context! requires frontendDist (apps/mobile/dist).
+      # tauri::generate_context! requires frontendDist (apps/desktop/dist).
       - name: Build web frontend for Tauri context
-        working-directory: apps/mobile
-        run: bun run build:web
+        working-directory: apps/desktop
+        run: bun run build
 
       # Release-profile compile fills the target dir rust-cache persists. No
       # bundling — that stays in Release builds.
       - name: Warm Rust release artifacts
-        working-directory: apps/mobile/src-tauri
+        working-directory: apps/desktop/src-tauri
         run: cargo build --release ${{ matrix.cargo-args }}
 
   # Gradle wrapper + dependency cache for Android release APKs. Prebuild once
