@@ -14,7 +14,19 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRATE="$ROOT/crates/tether-ffi"
 MANIFEST="$CRATE/Cargo.toml"
+# `debug` and `dev` both mean cargo's dev profile, whose output lands in
+# target/<triple>/debug. The script used to interpolate PROFILE straight into a
+# `--$PROFILE` flag, so PROFILE=debug produced `cargo build --debug`, which cargo
+# rejects outright — the knob only ever worked for its own default.
 PROFILE="${PROFILE:-release}"
+case "$PROFILE" in
+  release) CARGO_PROFILE=(--profile release); TARGET_SUBDIR=release ;;
+  debug|dev) CARGO_PROFILE=(--profile dev); TARGET_SUBDIR=debug ;;
+  *)
+    echo "error: PROFILE must be 'release' or 'debug' (got '$PROFILE')." >&2
+    exit 1
+    ;;
+esac
 BUILD_DIR="$ROOT/build/ios-ffi"
 # SwiftPM refuses a target whose path escapes the package root, so the
 # generated framework and bindings are emitted INSIDE TetherKit.
@@ -33,17 +45,17 @@ echo "==> Installing Rust iOS targets (if missing)"
 rustup target add "$DEVICE_TARGET" "$SIM_ARM_TARGET" "$SIM_X86_TARGET"
 
 echo "==> Building $LIB_NAME for iOS device ($DEVICE_TARGET, $PROFILE)"
-cargo build --manifest-path "$MANIFEST" --"$PROFILE" --target "$DEVICE_TARGET"
+cargo build --manifest-path "$MANIFEST" "${CARGO_PROFILE[@]}" --target "$DEVICE_TARGET"
 
 echo "==> Building $LIB_NAME for iOS simulator ($SIM_ARM_TARGET, $PROFILE)"
-cargo build --manifest-path "$MANIFEST" --"$PROFILE" --target "$SIM_ARM_TARGET"
+cargo build --manifest-path "$MANIFEST" "${CARGO_PROFILE[@]}" --target "$SIM_ARM_TARGET"
 
 echo "==> Building $LIB_NAME for iOS simulator ($SIM_X86_TARGET, $PROFILE)"
-cargo build --manifest-path "$MANIFEST" --"$PROFILE" --target "$SIM_X86_TARGET"
+cargo build --manifest-path "$MANIFEST" "${CARGO_PROFILE[@]}" --target "$SIM_X86_TARGET"
 
-DEVICE_LIB="$CRATE/target/$DEVICE_TARGET/$PROFILE/lib${LIB_NAME}.a"
-SIM_ARM_LIB="$CRATE/target/$SIM_ARM_TARGET/$PROFILE/lib${LIB_NAME}.a"
-SIM_X86_LIB="$CRATE/target/$SIM_X86_TARGET/$PROFILE/lib${LIB_NAME}.a"
+DEVICE_LIB="$CRATE/target/$DEVICE_TARGET/$TARGET_SUBDIR/lib${LIB_NAME}.a"
+SIM_ARM_LIB="$CRATE/target/$SIM_ARM_TARGET/$TARGET_SUBDIR/lib${LIB_NAME}.a"
+SIM_X86_LIB="$CRATE/target/$SIM_X86_TARGET/$TARGET_SUBDIR/lib${LIB_NAME}.a"
 
 for lib in "$DEVICE_LIB" "$SIM_ARM_LIB" "$SIM_X86_LIB"; do
   if [[ ! -f "$lib" ]]; then
@@ -65,7 +77,7 @@ echo "==> Generating Swift bindings (uniffi 0.28.3)"
 # Run it from inside the crate instead.
 (
   cd "$CRATE"
-  cargo run --manifest-path "$MANIFEST" --"$PROFILE" --bin uniffi-bindgen -- \
+  cargo run --manifest-path "$MANIFEST" "${CARGO_PROFILE[@]}" --bin uniffi-bindgen -- \
     generate \
     --library "$DEVICE_LIB" \
     --language swift \
