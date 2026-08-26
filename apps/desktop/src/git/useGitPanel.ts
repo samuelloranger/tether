@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { confirmAction } from '../dialog';
 import {
   bytesToDataUrl,
   canPushHead,
@@ -194,11 +195,13 @@ export function useGitPanel(hostId: string | null, sessionId: string | null, ope
       hostId && sessionId
         ? runOp(() => coreGitUnstage(hostId, sessionId, path))
         : Promise.resolve(false),
-    discardFile: (path: string) => {
-      if (!window.confirm(`Discard changes to ${path}?`)) return Promise.resolve(false);
-      return hostId && sessionId
-        ? runOp(() => coreGitDiscard(hostId, sessionId, path))
-        : Promise.resolve(false);
+    discardFile: async (path: string) => {
+      const ok = await confirmAction('Discard changes', `Discard changes to ${path}?`, {
+        confirmLabel: 'Discard',
+        destructive: true,
+      });
+      if (!ok) return false;
+      return hostId && sessionId ? runOp(() => coreGitDiscard(hostId, sessionId, path)) : false;
     },
     stageAll: () =>
       hostId && sessionId
@@ -208,11 +211,14 @@ export function useGitPanel(hostId: string | null, sessionId: string | null, ope
       hostId && sessionId
         ? runOp(() => coreGitUnstageAll(hostId, sessionId))
         : Promise.resolve(false),
-    discardAll: () => {
-      if (!window.confirm('Discard all unstaged changes?')) return Promise.resolve(false);
-      return hostId && sessionId
-        ? runOp(() => coreGitDiscardAll(hostId, sessionId))
-        : Promise.resolve(false);
+    discardAll: async () => {
+      const ok = await confirmAction(
+        'Discard all changes',
+        'Discard all unstaged changes? This cannot be undone.',
+        { confirmLabel: 'Discard all', destructive: true },
+      );
+      if (!ok) return false;
+      return hostId && sessionId ? runOp(() => coreGitDiscardAll(hostId, sessionId)) : false;
     },
     toggleHunk: (path: string, hunkIndex: number, staged: boolean) => {
       if (!hostId || !sessionId) return Promise.resolve(false);
@@ -232,9 +238,13 @@ export function useGitPanel(hostId: string | null, sessionId: string | null, ope
       return runOp(() => coreGitCommit(hostId, sessionId, message, true));
     },
     undoCommit: () => {
-      if (!window.confirm('Undo last commit? Changes stay staged.')) return;
-      if (!hostId || !sessionId) return;
-      void runOp(() => coreGitUndoCommit(hostId, sessionId));
+      void (async () => {
+        const ok = await confirmAction('Undo commit', 'Undo last commit? Changes stay staged.', {
+          confirmLabel: 'Undo',
+        });
+        if (!ok || !hostId || !sessionId) return;
+        await runOp(() => coreGitUndoCommit(hostId, sessionId));
+      })();
     },
     push: () => {
       if (!hostId || !sessionId) return;

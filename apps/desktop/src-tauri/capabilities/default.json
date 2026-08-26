@@ -6,6 +6,10 @@
     "permissions": [
       "core:default",
       "dialog:default",
+      "notification:default",
+      "process:default",
+      "updater:default",
+      "deep-link:default",
       "clipboard-manager:allow-read-text",
       "clipboard-manager:allow-write-text",
       "opener:allow-open-url",

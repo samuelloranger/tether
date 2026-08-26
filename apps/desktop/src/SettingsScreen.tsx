@@ -5,22 +5,23 @@ import {
   savePreferences,
   TERMINAL_FONTS,
   type TerminalFont,
+  THEME_LABELS,
+  THEME_OPTIONS,
   type ThemePreference,
 } from './preferences';
 
-interface SettingsScreenProps {
+interface LocalSettingsProps {
   onBack: () => void;
+  prefs: AppPreferences;
+  onPrefsChange: (prefs: AppPreferences) => void;
 }
 
-export function SettingsScreen({ onBack }: SettingsScreenProps) {
-  const [prefs, setPrefs] = useState<AppPreferences>(() => loadPreferences());
-
+/** Local client preferences (theme, font, notifications, sidebar). */
+export function LocalSettingsScreen({ onBack, prefs, onPrefsChange }: LocalSettingsProps) {
   const update = (next: Partial<AppPreferences>) => {
-    setPrefs((current) => {
-      const merged = { ...current, ...next };
-      savePreferences(merged);
-      return merged;
-    });
+    const merged = { ...prefs, ...next };
+    savePreferences(merged);
+    onPrefsChange(merged);
   };
 
   return (
@@ -28,19 +29,18 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
       <button type="button" className="linkish back-link" onClick={onBack}>
         ← Sessions
       </button>
-      <h1>Settings</h1>
+      <h1>Appearance</h1>
       <label>
         Theme
         <select
           value={prefs.theme}
           onChange={(e) => update({ theme: e.target.value as ThemePreference })}
         >
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="mocha">Catppuccin Mocha</option>
-          <option value="macchiato">Catppuccin Macchiato</option>
-          <option value="frappe">Catppuccin Frappé</option>
-          <option value="latte">Catppuccin Latte</option>
+          {THEME_OPTIONS.map((theme) => (
+            <option key={theme} value={theme}>
+              {THEME_LABELS[theme]}
+            </option>
+          ))}
         </select>
       </label>
       <label>
@@ -55,6 +55,22 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
             </option>
           ))}
         </select>
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={prefs.notificationsEnabled}
+          onChange={(e) => update({ notificationsEnabled: e.target.checked })}
+        />
+        Desktop notifications
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={prefs.sidebarPinned}
+          onChange={(e) => update({ sidebarPinned: e.target.checked })}
+        />
+        Pin session sidebar
       </label>
     </div>
   );

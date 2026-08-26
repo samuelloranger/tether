@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { CodeHighlight } from './CodeHighlight';
-import type { UI_THEMES } from './preferences';
+import type { UiTheme } from './preferences';
 import { type FileView, lineOffset } from './workspaceTypes';
 
 export function FileViewer({
@@ -11,7 +11,7 @@ export function FileViewer({
 }: {
   file: FileView;
   onBack: () => void;
-  theme: (typeof UI_THEMES)[keyof typeof UI_THEMES];
+  theme: UiTheme;
   backLabel?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -37,13 +37,13 @@ export function FileViewer({
           path={file.path}
           code={file.content}
           colors={{
-            text: theme.text,
-            textMuted: theme.textMuted,
-            danger: theme.danger,
-            warning: theme.warning,
-            success: theme.success,
-            info: theme.accent,
-            accent: theme.accent,
+            text: theme.colors.text,
+            textMuted: theme.colors.textMuted,
+            danger: theme.colors.danger,
+            warning: theme.colors.warning,
+            success: theme.colors.success,
+            info: theme.colors.accent,
+            accent: theme.colors.accent,
           }}
           foreground={theme.terminal.foreground}
         />

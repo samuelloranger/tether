@@ -11,6 +11,7 @@ pub enum HttpMethod {
     Get,
     Post,
     Delete,
+    Patch,
 }
 
 /// Complete shell-executable request description. Constructing it performs no
@@ -77,6 +78,15 @@ impl HostClient {
 
     pub fn delete(&self, path: &str, headers: BTreeMap<String, String>) -> HttpRequest {
         self.request(HttpMethod::Delete, path, headers, None)
+    }
+
+    pub fn patch(
+        &self,
+        path: &str,
+        headers: BTreeMap<String, String>,
+        body: Option<String>,
+    ) -> HttpRequest {
+        self.request(HttpMethod::Patch, path, headers, body)
     }
 
     pub fn identity_request(&self) -> HttpRequest {

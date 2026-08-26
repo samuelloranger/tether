@@ -1,6 +1,7 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { normalizeInvokeError } from './invokeError';
+import type { ServerConfig, ServerConfigPatch } from './serverSettingsModel';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 
 /// Every core command goes through here so a failure arrives as an Error with
@@ -177,5 +178,95 @@ export function listenSessions(
 ): Promise<UnlistenFn> {
   return listen<{ hostId: string; sessions: DrawerSession[] }>('core-sessions', (event) => {
     handler(event.payload.hostId, event.payload.sessions);
+  });
+}
+
+export async function coreConfigGet(hostId: string): Promise<ServerConfig> {
+  return invoke<ServerConfig>('core_config_get', { hostId });
+}
+
+export async function coreConfigPatch(
+  hostId: string,
+  patch: ServerConfigPatch,
+): Promise<ServerConfig> {
+  return invoke<ServerConfig>('core_config_patch', { hostId, patch });
+}
+
+export async function coreAdminChangePassword(
+  hostId: string,
+  current: string,
+  next: string,
+): Promise<void> {
+  await invoke('core_admin_change_password', { hostId, current, next });
+}
+
+export async function coreAdminUpdate(hostId: string, current: string): Promise<void> {
+  await invoke('core_admin_update', { hostId, current });
+}
+
+export async function coreAdminRestart(hostId: string, current: string): Promise<void> {
+  await invoke('core_admin_restart', { hostId, current });
+}
+
+export async function coreAdminTestNotification(hostId: string): Promise<void> {
+  await invoke('core_admin_test_notification', { hostId });
+}
+
+export async function coreHealthVersion(hostId: string): Promise<string | null> {
+  return invoke<string | null>('core_health_version', { hostId });
+}
+
+export async function coreHostsUpdateIdentity(
+  hostId: string,
+  identity: { name: string; color: string },
+): Promise<HostProfile> {
+  return invoke<HostProfile>('core_hosts_update_identity', { hostId, identity });
+}
+
+export async function coreHostsUpdateConnection(
+  hostId: string,
+  update: { host: string; port: string; replacementPassword?: string },
+): Promise<HostProfile> {
+  return invoke<HostProfile>('core_hosts_update_connection', {
+    hostId,
+    update: {
+      host: update.host,
+      port: update.port,
+      replacementPassword: update.replacementPassword ?? null,
+    },
+  });
+}
+
+export type DeepLinkResolveResult =
+  | { kind: 'matched'; hostId: string; sessionId: string }
+  | { kind: 'unknownHost'; identityName: string }
+  | { kind: 'invalid' };
+
+export async function coreDeepLinkResolve(url: string): Promise<DeepLinkResolveResult> {
+  return invoke<DeepLinkResolveResult>('core_deep_link_resolve', { url });
+}
+
+export async function coreNotifyDecide(edge: {
+  notifyFired: boolean;
+  bellFired: boolean;
+  oscTitle: string;
+  oscBody: string;
+  label: string;
+  notificationsEnabled: boolean;
+  sessionIsActive: boolean;
+  windowFocused: boolean;
+}): Promise<{ shouldNotify: boolean; title?: string; body?: string }> {
+  return invoke('core_notify_decide', { edge });
+}
+
+export async function coreNotifyWaitingEdge(
+  prevActivity: string | null | undefined,
+  nextActivity: string | null | undefined,
+  isActive: boolean,
+): Promise<boolean> {
+  return invoke<boolean>('core_notify_waiting_edge', {
+    prevActivity: prevActivity ?? null,
+    nextActivity: nextActivity ?? null,
+    isActive,
   });
 }

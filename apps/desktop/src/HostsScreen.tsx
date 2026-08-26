@@ -1,3 +1,4 @@
+import { confirmAction } from './dialog';
 import type { HostHealthStatus, HostProfile } from './types';
 
 const HEALTH_LABEL: Record<HostHealthStatus, string> = {
@@ -55,9 +56,14 @@ export function HostsScreen({
                 type="button"
                 className="secondary small danger"
                 onClick={() => {
-                  if (window.confirm(`Remove ${host.name}? Saved credentials will be deleted.`)) {
-                    void onRemove(host.id);
-                  }
+                  void (async () => {
+                    const ok = await confirmAction(
+                      'Remove host',
+                      `Remove ${host.name}? Saved credentials will be deleted.`,
+                      { confirmLabel: 'Remove', destructive: true },
+                    );
+                    if (ok) await onRemove(host.id);
+                  })();
                 }}
               >
                 Remove

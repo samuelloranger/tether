@@ -29,6 +29,7 @@ pub async fn execute(client: &Client, request: &HttpRequest) -> Result<HttpRespo
         HttpMethod::Get => client.get(&request.url),
         HttpMethod::Post => client.post(&request.url),
         HttpMethod::Delete => client.delete(&request.url),
+        HttpMethod::Patch => client.patch(&request.url),
     };
     for (name, value) in &request.headers {
         builder = builder.header(name, value);
@@ -54,6 +55,8 @@ pub async fn execute_bytes(
     let mut builder = match request.method {
         HttpMethod::Get => client.get(&request.url),
         HttpMethod::Post => client.post(&request.url),
+        HttpMethod::Delete => client.delete(&request.url),
+        HttpMethod::Patch => client.patch(&request.url),
     };
     for (name, value) in &request.headers {
         builder = builder.header(name, value);
@@ -78,6 +81,8 @@ pub async fn execute_bytes(
         body,
         content_type,
     })
+}
+
 /// Multipart upload — shell owns reading the local file; core only supplied the plan.
 pub async fn execute_upload(
     client: &Client,
