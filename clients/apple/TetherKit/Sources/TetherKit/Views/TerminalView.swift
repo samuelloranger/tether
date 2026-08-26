@@ -121,17 +121,24 @@ public struct TerminalAccessoryBar: View {
 public struct TerminalInputBridge: UIViewRepresentable {
   @Binding public var text: String
   public var accessory: AnyView
+  /// Whether to offer the key bar at all. Gating the ACCESSORY is safe; gating
+  /// the bridge's existence was not — a view carrying .focused() that appears
+  /// and disappears makes SwiftUI's FocusStore and UIKit's first-responder
+  /// machinery loop against each other, and the app spins at 100% CPU.
+  public var showsAccessory: Bool = true
   public var onSubmitBytes: (String) -> Void
   public var isFocused: Binding<Bool>
 
   public init(
     text: Binding<String>,
     accessory: AnyView,
+    showsAccessory: Bool = true,
     onSubmitBytes: @escaping (String) -> Void,
     isFocused: Binding<Bool>
   ) {
     _text = text
     self.accessory = accessory
+    self.showsAccessory = showsAccessory
     self.onSubmitBytes = onSubmitBytes
     self.isFocused = isFocused
   }
@@ -151,6 +158,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.textColor = .clear
     view.tintColor = .clear
     view.accessoryHosting.rootView = accessory
+    view.showsAccessory = showsAccessory
     // 0x7F (DEL) is what terminals and readline expect from backspace.
     view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
     view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
@@ -159,6 +167,10 @@ public struct TerminalInputBridge: UIViewRepresentable {
 
   public func updateUIView(_ uiView: TerminalInputTextView, context: Context) {
     uiView.accessoryHosting.rootView = accessory
+    if uiView.showsAccessory != showsAccessory {
+      uiView.showsAccessory = showsAccessory
+      uiView.reloadInputViews()
+    }
     if uiView.text != text {
       uiView.text = text
     }
@@ -336,8 +348,15 @@ public final class TerminalInputTextView: UITextView {
   /// The keyboard accessory is owned by this view; an explicit assignment from
   /// outside still wins, which keeps the property honest rather than silently
   /// ignoring the setter.
+  /// Set false when there is no session, so the key bar does not sit on screen
+  /// with nothing to act on.
+  var showsAccessory = true
+
   public override var inputAccessoryView: UIView? {
-    get { assignedAccessoryView ?? accessoryContainer }
+    get {
+      guard showsAccessory else { return assignedAccessoryView }
+      return assignedAccessoryView ?? accessoryContainer
+    }
     set { assignedAccessoryView = newValue }
   }
 
@@ -491,10 +510,6 @@ public struct TerminalView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-      // Not merely unfocused — absent. Leaving the bridge in the hierarchy left
-      // its inputAccessoryView docked at the bottom, so the Ctrl/Tab/Esc bar sat
-      // on screen with no terminal to act on.
-      if placeholderReason == nil {
       TerminalInputBridge(
         text: $inputBuffer,
         accessory: AnyView(
@@ -506,6 +521,7 @@ public struct TerminalView: View {
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
+        showsAccessory: placeholderReason == nil,
         onSubmitBytes: submit,
         isFocused: Binding(
           get: { keyboardFocused },
@@ -514,7 +530,6 @@ public struct TerminalView: View {
       )
       .frame(height: 1)
       .focused($keyboardFocused)
-      }
     }
     .background(TetherColors.background)
     .padding(.bottom, keyboardInset)
