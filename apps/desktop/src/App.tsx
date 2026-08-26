@@ -1,19 +1,29 @@
 import { useMemo, useState } from 'react';
+import { FileViewer } from './FileViewer';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
+import { PresentationBanner, PresentationView } from './PresentationView';
 import { loadPreferences, UI_THEMES } from './preferences';
 import { SessionDrawer } from './SessionDrawer';
 import { SettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
 import { TerminalPane } from './TerminalPane';
-import { wsOriginFor } from './types';
+import { httpOriginFor, wsOriginFor } from './types';
 import { useTetherDesktop } from './useTetherDesktop';
+import { useWorkspace, WorkspacePanel } from './useWorkspace';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
 export function App() {
   const app = useTetherDesktop();
   const [prefs, setPrefs] = useState(loadPreferences);
   const theme = UI_THEMES[prefs.theme];
+  const httpBase = app.activeHost ? httpOriginFor(app.activeHost) : null;
+  const workspace = useWorkspace({
+    hostId: app.activeHostId,
+    sessionId: app.activeSessionId,
+    baseUrl: httpBase,
+    enabled: app.ready && app.screen === 'main' && !!app.activeHost,
+  });
 
   const editingHost = useMemo(
     () => app.hosts.find((host) => host.id === app.editingHostId) ?? null,
@@ -132,23 +142,75 @@ export function App() {
           <>
             <header className="terminal-toolbar">
               <span className="terminal-label">{app.activeSessionLabel}</span>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => workspace.setWorkspaceOpen(true)}
+              >
+                Workspace
+              </button>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => void workspace.pickAndUpload()}
+              >
+                Upload
+              </button>
               <span className="terminal-host-label muted">
                 {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
               </span>
             </header>
-            <TerminalPane
-              key={`${app.terminalKey}:${prefs.theme}:${prefs.terminalFont}`}
-              hostId={app.activeHost.id}
-              sessionId={app.activeSessionId}
-              wsOrigin={wsOriginFor(app.activeHost)}
-              password={app.activePassword}
-              terminalTheme={theme.terminal}
-              fontFamily={prefs.terminalFont}
-              onFrame={app.handleWsFrame}
-              onDisconnected={() => {
-                if (app.activeHostId) app.retryHost(app.activeHostId);
-              }}
-            />
+            {workspace.sessionPreview && !workspace.activePresentation && !workspace.fileView && (
+              <PresentationBanner
+                label={`Preview ready: ${workspace.sessionPreview.title}`}
+                onPress={() => {
+                  const preview = workspace.sessionPreview;
+                  if (preview) workspace.setActivePresentationId(preview.id);
+                }}
+              />
+            )}
+            <div className="main-body">
+              {workspace.workspaceOpen && <WorkspacePanel workspace={workspace} />}
+              <div className="terminal-stack">
+                <TerminalPane
+                  key={`${app.terminalKey}:${prefs.theme}:${prefs.terminalFont}`}
+                  hostId={app.activeHost.id}
+                  sessionId={app.activeSessionId}
+                  wsOrigin={wsOriginFor(app.activeHost)}
+                  password={app.activePassword}
+                  terminalTheme={theme.terminal}
+                  fontFamily={prefs.terminalFont}
+                  onFrame={app.handleWsFrame}
+                  onDisconnected={() => {
+                    if (app.activeHostId) app.retryHost(app.activeHostId);
+                  }}
+                />
+                {workspace.fileLoading && (
+                  <div className="workspace-cover muted">Loading file…</div>
+                )}
+                {workspace.uploading && <div className="workspace-cover muted">Uploading…</div>}
+                {workspace.fileView && (
+                  <FileViewer
+                    file={workspace.fileView}
+                    onBack={workspace.closeFile}
+                    theme={theme}
+                    backLabel={app.activeSessionLabel}
+                  />
+                )}
+                {workspace.activePresentation && workspace.activePresentationUrl && (
+                  <PresentationView
+                    preview={workspace.activePresentation}
+                    url={workspace.activePresentationUrl}
+                    backLabel={app.activeSessionLabel}
+                    onBack={() => workspace.setActivePresentationId(null)}
+                    onClose={() => {
+                      const preview = workspace.activePresentation;
+                      if (preview) void workspace.closePresentation(preview.id);
+                    }}
+                  />
+                )}
+              </div>
+            </div>
           </>
         ) : (
           <div className="empty-main">

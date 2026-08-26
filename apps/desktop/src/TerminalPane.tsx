@@ -10,6 +10,7 @@ import {
   type TerminalSocket,
 } from './coreTransport';
 import { applyServerFrame, createFrameSink, type FrameApplyResult } from './frameHandler';
+import { setPasteListener } from './pasteBus';
 import type { UI_THEMES } from './preferences';
 import { createReplayGate } from './replayGate';
 
@@ -70,6 +71,7 @@ export function TerminalPane(props: TerminalPaneProps) {
   onFrameRef.current = props.onFrame;
   onDisconnectedRef.current = props.onDisconnected;
 
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: paste bridge adds a few lines to the connect effect
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return undefined;
@@ -144,6 +146,10 @@ export function TerminalPane(props: TerminalPaneProps) {
       if (socket) sendJson(socket, { type: 'input', text });
     });
 
+    setPasteListener((text) => {
+      if (socket) sendJson(socket, { type: 'input', text });
+    });
+
     const observer = new ResizeObserver(() => {
       fit.fit();
       if (!socket) return;
@@ -154,6 +160,7 @@ export function TerminalPane(props: TerminalPaneProps) {
 
     return () => {
       closed = true;
+      setPasteListener(null);
       replay.dispose();
       observer.disconnect();
       socket?.close();
