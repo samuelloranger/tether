@@ -125,9 +125,12 @@ async fn round_trips_input_through_a_live_pty() {
     .await
     .expect("open session");
 
-    // A marker the shell echoes back, distinctive enough not to match a prompt.
+    // The shell echoes the command line before running it, so the needle is
+    // split with '' — the echo shows `e2e-mark''er-42`, only the command's own
+    // output contains `e2e-marker-42`. Matching the echo would pass even if the
+    // shell never ran the command.
     handle.send(ClientFrame::Input {
-        text: "echo e2e-marker-42\r".to_string(),
+        text: "echo e2e-mark''er-42\r".to_string(),
     });
 
     let mut seen = String::new();

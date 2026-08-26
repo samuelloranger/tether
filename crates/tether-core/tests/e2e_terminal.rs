@@ -43,6 +43,11 @@ async fn start_session(server: &Server, id: &str) {
 
 /// Collects frames until `needle` shows up, or the deadline passes. Returns
 /// everything seen so a failure can show what did arrive.
+///
+/// Callers must pass a needle that cannot appear in the shell's echo of the
+/// command line — the echo arrives as the first output frame, so a needle
+/// matching it returns immediately, with the cursor barely advanced and the
+/// command possibly never run.
 async fn collect_until(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<CoreEvent>,
     needle: &str,
@@ -79,7 +84,7 @@ async fn serves_the_replay_log_over_http() {
         .await
         .expect("open");
     handle.send(ClientFrame::Input {
-        text: "echo http-replay-marker\r".to_string(),
+        text: "echo http-replay-mark''er\r".to_string(),
     });
     let seen = collect_until(&mut rx, "http-replay-marker", Duration::from_secs(15)).await;
     assert!(seen.contains("http-replay-marker"), "no PTY output: {seen}");
@@ -124,7 +129,7 @@ async fn a_reconnect_does_not_replay_what_the_cursor_already_saw() {
         .await
         .expect("open");
     handle.send(ClientFrame::Input {
-        text: "echo first-connection-marker\r".to_string(),
+        text: "echo first-connection-mark''er\r".to_string(),
     });
     let seen = collect_until(
         &mut rx,
@@ -173,7 +178,7 @@ async fn a_session_survives_a_server_restart() {
         .await
         .expect("open");
     handle.send(ClientFrame::Input {
-        text: "echo before-restart-marker\r".to_string(),
+        text: "echo before-restart-mark''er\r".to_string(),
     });
     let seen = collect_until(&mut rx, "before-restart-marker", Duration::from_secs(15)).await;
     assert!(seen.contains("before-restart-marker"), "no output: {seen}");
@@ -195,7 +200,7 @@ async fn a_session_survives_a_server_restart() {
         .await
         .expect("reopen after restart");
     handle2.send(ClientFrame::Input {
-        text: "echo after-restart-marker\r".to_string(),
+        text: "echo after-restart-mark''er\r".to_string(),
     });
     let seen = collect_until(&mut rx2, "after-restart-marker", Duration::from_secs(15)).await;
     handle2.close();
@@ -248,7 +253,7 @@ async fn classifies_session_activity() {
         .await
         .expect("open");
     handle.send(ClientFrame::Input {
-        text: "echo activity-marker\r".to_string(),
+        text: "echo activity-mark''er\r".to_string(),
     });
     let _ = collect_until(&mut rx, "activity-marker", Duration::from_secs(15)).await;
 
