@@ -1,3 +1,4 @@
+import { splitPath } from './filePath';
 import { GitSectionHeader } from './GitSectionHeader';
 import type { DiffFileStat, GitLogEntry } from './gitApi';
 
@@ -20,6 +21,7 @@ function FileRow({
   onSecondary?: () => void;
   danger?: boolean;
 }) {
+  const { dir, base } = splitPath(file.path);
   return (
     <div className="git-file-row">
       <button
@@ -28,7 +30,10 @@ function FileRow({
         onClick={() => onSelect(file.path, mode)}
         title={file.path}
       >
-        <span className="git-file-name">{file.path}</span>
+        <span className="git-file-name">
+          {dir ? <span className="git-file-dir">{dir}</span> : null}
+          <span className="git-file-base">{base}</span>
+        </span>
         <span className="git-file-stats muted">
           {file.binary ? 'binary' : `+${file.insertions} -${file.deletions}`}
         </span>

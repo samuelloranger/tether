@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertModal } from './AlertModal';
-import { ensureNotificationPermission, sendOsNotification } from './desktopNotifications';
-import { checkForUpdates } from './desktopUpdater';
+import { AppOverflowMenu } from './AppOverflowMenu';
+import { ensureNotificationPermission } from './desktopNotifications';
 import { FileViewer } from './FileViewer';
 import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
-import { OverflowMenu } from './OverflowMenu';
+import { activeSessionDot, litStateFor, shellVars } from './litTheme';
 import { PresentationBanner, PresentationView } from './PresentationView';
 import {
   type AppPreferences,
@@ -23,10 +23,14 @@ import { ServerSettingsScreen } from './ServerSettingsScreen';
 import { SessionDrawer } from './SessionDrawer';
 import { KillConfirmModal, RenameModal, useSessionModals } from './SessionModals';
 import { LocalSettingsScreen } from './SettingsScreen';
+import { StatusStrip } from './StatusStrip';
 import { hostSecrets } from './secureConfig';
+import { TerminalToolbar } from './TerminalToolbar';
 import { httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
+import { useLaunchUpdateCheck } from './useLaunchUpdateCheck';
 import { useTetherDesktop } from './useTetherDesktop';
+import { useWindowTheme } from './useWindowTheme';
 import { useWorkspace, WorkspacePanel } from './useWorkspace';
 
 function useMediaScheme(): 'light' | 'dark' {
@@ -58,6 +62,12 @@ export function App() {
   const [prefs, setPrefs] = useState<AppPreferences>(loadPreferences);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // Which trigger opened the overflow menu, so the panel can hang on that side.
+  const [overflowAlign, setOverflowAlign] = useState<'start' | 'end'>('end');
+  const openOverflow = (align: 'start' | 'end') => {
+    setOverflowAlign(align);
+    setOverflowOpen(true);
+  };
   const gitPanel = useGitPanel(app.activeHostId, app.activeSessionId, app.gitOpen);
   const httpBase = app.activeHost ? httpOriginFor(app.activeHost) : null;
   const workspace = useWorkspace({
@@ -81,6 +91,9 @@ export function App() {
     void ensureNotificationPermission();
   }, []);
 
+  useWindowTheme(flavor);
+  useLaunchUpdateCheck();
+
   useDeepLinks({
     ready: app.ready,
     profiles: app.hosts,
@@ -97,18 +110,25 @@ export function App() {
     [app.hosts, app.settingsHostId, app.activeHost],
   );
 
+  // Everything tinted in index.css resolves through --lit, so this is what
+  // re-colours the app on a session switch. A stopped session tints nothing.
+  const { session: activeSession, dot: activeDot } = useMemo(
+    () => activeSessionDot(app.sessions, app.activeHostId, app.activeSessionId),
+    [app.sessions, app.activeHostId, app.activeSessionId],
+  );
+  const litState = litStateFor(activeDot);
+
+  // A file viewer or presentation owns the whole terminal pane while it is up, so
+  // the git overlays stand down rather than stacking over one — opening a file
+  // with git open used to look like a no-op. Git returns when the viewer closes.
+  const fileOrPreviewUp = Boolean(
+    workspace.fileView || workspace.fileLoading || workspace.activePresentation,
+  );
+
   const shellStyle = {
+    ...shellVars(theme, litState),
     background: theme.colors.background,
     color: theme.colors.text,
-    ['--surface' as string]: theme.colors.surface,
-    ['--border' as string]: theme.colors.border,
-    ['--text-muted' as string]: theme.colors.textMuted,
-    ['--accent' as string]: theme.colors.accent,
-    ['--accent-text' as string]: theme.colors.accentText,
-    ['--danger' as string]: theme.colors.danger,
-    ['--success' as string]: theme.colors.success,
-    ['--warning' as string]: theme.colors.warning,
-    ['--overlay' as string]: theme.colors.overlay,
   };
 
   if (!app.ready) {
@@ -261,65 +281,34 @@ export function App() {
               app.setScreen('host-form');
             }}
             onOpenHosts={() => app.setScreen('hosts')}
-            onOpenSettings={() => setOverflowOpen(true)}
+            onOpenSettings={() => openOverflow('start')}
             onOpenHostSettings={(hostId) => {
               app.setSettingsHostId(hostId);
               app.setScreen('settings');
             }}
-            onOpenLocalSettings={() => app.setScreen('local-settings')}
           />
         </>
       ) : null}
       <main className="main-pane">
         {app.activeHost ? (
           <>
-            <header className={`terminal-toolbar${layout.showMenuButton ? ' with-menu' : ''}`}>
-              <span className="terminal-label">{app.activeSessionLabel}</span>
-              <button
-                type="button"
-                className="secondary small"
-                onClick={() => {
-                  app.setGitMode('drawer');
-                  app.setGitOpen(true);
-                }}
-              >
-                Git
-              </button>
-              <button
-                type="button"
-                className="secondary small"
-                onClick={() => {
-                  app.setGitMode('review');
-                  app.setGitOpen(true);
-                }}
-              >
-                Review
-              </button>
-              <button
-                type="button"
-                className="secondary small"
-                onClick={() => workspace.setWorkspaceOpen(true)}
-              >
-                Workspace
-              </button>
-              <button
-                type="button"
-                className="secondary small"
-                onClick={() => void workspace.pickAndUpload()}
-              >
-                Upload
-              </button>
-              <span className="terminal-host-label muted">
-                {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
-              </span>
-              <button
-                type="button"
-                className="secondary small"
-                onClick={() => setOverflowOpen(true)}
-              >
-                ⋯
-              </button>
-            </header>
+            <TerminalToolbar
+              sessionLabel={app.activeSessionLabel}
+              dot={activeDot}
+              address={`${app.activeHost.host}:${app.activeHost.port}`}
+              inset={layout.showMenuButton}
+              onGit={() => {
+                app.setGitMode('drawer');
+                app.setGitOpen(true);
+              }}
+              onReview={() => {
+                app.setGitMode('review');
+                app.setGitOpen(true);
+              }}
+              onWorkspace={() => workspace.setWorkspaceOpen(true)}
+              onUpload={() => void workspace.pickAndUpload()}
+              onOverflow={() => openOverflow('end')}
+            />
             {workspace.sessionPreview && !workspace.activePresentation && !workspace.fileView && (
               <PresentationBanner
                 label={`Preview ready: ${workspace.sessionPreview.title}`}
@@ -332,21 +321,28 @@ export function App() {
             <div className="main-body">
               {workspace.workspaceOpen && <WorkspacePanel workspace={workspace} />}
               <div className="terminal-stack">
-                <ResidentTerminals
-                  hosts={app.hosts}
-                  passwords={app.passwords}
-                  sessions={app.sessions}
-                  activeHostId={app.activeHostId}
-                  activeSessionId={app.activeSessionId}
-                  terminalTheme={theme.terminal}
-                  fontFamily={prefs.terminalFont}
-                  onFrame={app.handleWsFrame}
-                  onDisconnected={(hostId) => app.retryHost(hostId)}
-                />
-                {app.gitOpen && app.gitMode === 'drawer' ? (
+                <div className="screen">
+                  <ResidentTerminals
+                    hosts={app.hosts}
+                    passwords={app.passwords}
+                    sessions={app.sessions}
+                    activeHostId={app.activeHostId}
+                    activeSessionId={app.activeSessionId}
+                    terminalTheme={theme.terminal}
+                    fontFamily={prefs.terminalFont}
+                    onFrame={app.handleWsFrame}
+                    onDisconnected={(hostId) => app.retryHost(hostId)}
+                  />
+                  <StatusStrip
+                    sessionId={app.activeSessionId}
+                    dot={activeDot}
+                    lastOutputAt={activeSession?.last_output_at ?? null}
+                  />
+                </div>
+                {app.gitOpen && !fileOrPreviewUp && app.gitMode === 'drawer' ? (
                   <GitDrawer panel={gitPanel} onClose={() => app.setGitOpen(false)} />
                 ) : null}
-                {app.gitOpen && app.gitMode === 'review' && app.activeHostId ? (
+                {app.gitOpen && !fileOrPreviewUp && app.gitMode === 'review' && app.activeHostId ? (
                   <GitReview
                     panel={gitPanel}
                     hostId={app.activeHostId}
@@ -417,11 +413,13 @@ export function App() {
           modals.closeKill();
         }}
       />
-      <OverflowMenu
+      <AppOverflowMenu
         visible={overflowOpen}
+        align={overflowAlign}
         onClose={() => setOverflowOpen(false)}
+        prefs={prefs}
+        onPrefsChange={setPrefs}
         onRename={() => {
-          setOverflowOpen(false);
           if (!app.activeHost) return;
           modals.openRename(
             app.activeHost.id,
@@ -430,33 +428,11 @@ export function App() {
             app.activeSessionLabel,
           );
         }}
-        onAppearance={() => {
-          setOverflowOpen(false);
-          app.setScreen('local-settings');
-        }}
-        notificationsEnabled={prefs.notificationsEnabled}
-        onToggleNotifications={() => {
-          const next = {
-            ...prefs,
-            notificationsEnabled: !prefs.notificationsEnabled,
-          };
-          savePreferences(next);
-          setPrefs(next);
-        }}
-        onTestNotification={() => {
-          setOverflowOpen(false);
-          void sendOsNotification('Tether', 'Test notification');
-        }}
-        onCheckUpdates={() => {
-          setOverflowOpen(false);
-          void checkForUpdates();
-        }}
-        onOpenSettings={() => {
-          setOverflowOpen(false);
-          if (app.activeHostId) {
-            app.setSettingsHostId(app.activeHostId);
-            app.setScreen('settings');
-          }
+        onAppearance={() => app.setScreen('local-settings')}
+        onOpenServerSettings={() => {
+          if (!app.activeHostId) return;
+          app.setSettingsHostId(app.activeHostId);
+          app.setScreen('settings');
         }}
       />
       <AlertModal />

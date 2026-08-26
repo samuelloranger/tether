@@ -1,6 +1,6 @@
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
-import { sessionLabel } from './sessionLabel';
+import { sessionLabel, sessionLabels } from './sessionLabel';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 
 interface SessionDrawerProps {
@@ -22,18 +22,36 @@ interface SessionDrawerProps {
   onOpenHosts: () => void;
   onOpenSettings: () => void;
   onOpenHostSettings: (hostId: string) => void;
-  onOpenLocalSettings: () => void;
+}
+
+function PinIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M12 17v5M9 10.8V4h6v6.8l2 3.2H7z" />
+    </svg>
+  );
+}
+
+function HostsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <rect x="3" y="4" width="18" height="7" rx="2" />
+      <rect x="3" y="14" width="18" height="7" rx="2" />
+    </svg>
+  );
 }
 
 function HostHeader({
   host,
   health,
+  count,
   onRetryHost,
   onReenterPassword,
   onOpenHostSettings,
 }: {
   host: HostProfile;
   health: HostHealthStatus;
+  count: number;
   onRetryHost: (hostId: string) => void;
   onReenterPassword: (hostId: string) => void;
   onOpenHostSettings: (hostId: string) => void;
@@ -47,6 +65,7 @@ function HostHeader({
       >
         {host.name}
       </button>
+      {count > 0 ? <span className="drawer-host-count">{count}</span> : null}
       {health === 'unknown' ? <span className="drawer-host-status">connecting…</span> : null}
       {health === 'reachable' ? <span className="drawer-host-status online">online</span> : null}
       {health === 'unreachable' ? (
@@ -67,6 +86,7 @@ function SessionRow({
   host,
   session,
   active,
+  label,
   onSelect,
   onRequestKill,
   onRequestRename,
@@ -74,16 +94,22 @@ function SessionRow({
   host: HostProfile;
   session: DrawerSession;
   active: boolean;
+  /** Resolved by the parent, which is the only place that can see collisions. */
+  label?: string;
   onSelect: (hostId: string, sessionId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
 }) {
   const live = active || isRecentlyActive(session.last_output_at);
   const dot = activityDotKey(session.status, session.activity, live);
-  const label = sessionLabel(session);
+  const shown = label ?? sessionLabel(session);
+
+  // A shell that wants an answer marks its own row even when you are somewhere
+  // else — the one thing allowed to pull attention away from the active session.
+  const wants = !active && dot === 'waiting';
 
   return (
-    <div className={`drawer-session-row${active ? ' active' : ''}`}>
+    <div className={`drawer-session-row${active ? ' active' : ''}${wants ? ' wants' : ''}`}>
       <button
         type="button"
         className="drawer-session-main"
@@ -91,14 +117,14 @@ function SessionRow({
         title={activityLabel(dot)}
       >
         <span className={`activity-dot dot-${dot}`} aria-hidden />
-        <span className="drawer-session-title">{label}</span>
+        <span className="drawer-session-title">{shown}</span>
         {session.status === 'stopped' ? <span className="drawer-session-meta">stopped</span> : null}
       </button>
       <button
         type="button"
         className="icon-button"
         title="Rename session"
-        onClick={() => onRequestRename(host.id, session.id, session.name ?? label, label)}
+        onClick={() => onRequestRename(host.id, session.id, session.name ?? shown, shown)}
       >
         ✎
       </button>
@@ -106,7 +132,7 @@ function SessionRow({
         type="button"
         className="icon-button danger"
         title="Kill session"
-        onClick={() => onRequestKill(host.id, session.id, label)}
+        onClick={() => onRequestKill(host.id, session.id, shown)}
       >
         ×
       </button>
@@ -133,43 +159,57 @@ export function SessionDrawer({
   onOpenHosts,
   onOpenSettings,
   onOpenHostSettings,
-  onOpenLocalSettings,
 }: SessionDrawerProps) {
   return (
     <aside className={`session-drawer${docked ? ' docked' : ' overlay'}`}>
       <header className="drawer-toolbar">
-        <strong>Sessions</strong>
+        <span className="drawer-mark" aria-hidden />
+        <span className="drawer-title">Tether</span>
         <div className="drawer-toolbar-actions">
           {showPin ? (
             <button
               type="button"
-              className="secondary small"
+              className="icon-button"
+              aria-label={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
               title={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+              aria-pressed={sidebarPinned}
               onClick={onTogglePin}
             >
-              {sidebarPinned ? 'Unpin' : 'Pin'}
+              <PinIcon />
             </button>
           ) : null}
-          <button type="button" className="secondary small" onClick={onOpenLocalSettings}>
-            App
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Hosts"
+            title="Hosts"
+            onClick={onOpenHosts}
+          >
+            <HostsIcon />
           </button>
-          <button type="button" className="secondary small" onClick={onOpenSettings}>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="More actions"
+            title="More actions"
+            onClick={onOpenSettings}
+          >
             ⋯
-          </button>
-          <button type="button" className="secondary small" onClick={onOpenHosts}>
-            Hosts
           </button>
         </div>
       </header>
       <div className="drawer-scroll">
         {hosts.map((host) => {
           const hostSessions = sessions.filter((row) => row.hostId === host.id);
+          // Computed per host, because a collision only matters within one list.
+          const labels = sessionLabels(hostSessions);
           const health = healthByHost[host.id] ?? 'unknown';
           return (
             <section key={host.id} className="drawer-host-section">
               <HostHeader
                 host={host}
                 health={health}
+                count={hostSessions.length}
                 onRetryHost={onRetryHost}
                 onReenterPassword={onReenterPassword}
                 onOpenHostSettings={onOpenHostSettings}
@@ -183,6 +223,7 @@ export function SessionDrawer({
                     host={host}
                     session={session}
                     active={host.id === activeHostId && session.id === activeSessionId}
+                    label={labels.get(session.id)}
                     onSelect={onSelect}
                     onRequestKill={onRequestKill}
                     onRequestRename={onRequestRename}
@@ -194,8 +235,8 @@ export function SessionDrawer({
         })}
       </div>
       <footer className="drawer-footer">
-        <button type="button" onClick={onNew} disabled={!activeHostId}>
-          + New session
+        <button type="button" className="secondary" onClick={onNew} disabled={!activeHostId}>
+          New terminal
         </button>
       </footer>
     </aside>

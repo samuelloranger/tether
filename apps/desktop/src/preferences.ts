@@ -11,14 +11,24 @@ export const THEME_OPTIONS = [
 export type ThemePreference = (typeof THEME_OPTIONS)[number];
 export type ResolvedFlavor = Exclude<ThemePreference, 'system'>;
 export type DarkFlavor = Exclude<ResolvedFlavor, 'latte' | 'default-light'>;
+
+/**
+ * Whether a flavour is a light one. The native title bar follows the *window*
+ * theme rather than our CSS, so the shell has to tell the window which way to
+ * dress — otherwise a light palette renders under a dark title bar.
+ */
+export function isLightFlavor(flavor: ResolvedFlavor): boolean {
+  return flavor === 'latte' || flavor === 'default-light';
+}
 export type CatppuccinFlavor = 'latte' | 'frappe' | 'macchiato' | 'mocha';
 
-export type TerminalFont =
-  | 'JetBrains Mono'
-  | 'Fira Code'
-  | 'IBM Plex Mono'
-  | 'Source Code Pro'
-  | 'monospace';
+/**
+ * Only faces the app actually ships. The list used to offer Fira Code, IBM Plex
+ * Mono and Source Code Pro, none of which were bundled — so they resolved to
+ * whatever the OS had, and `loadPreferences` did not accept them back anyway,
+ * which meant picking one appeared to work and silently reverted on reload.
+ */
+export type TerminalFont = 'JetBrains Mono Variable' | 'monospace';
 
 const THEME_KEY = 'tether.desktop.theme';
 const FONT_KEY = 'tether.desktop.terminalFont';
@@ -50,10 +60,28 @@ export interface TerminalThemeColors {
   cursor: string;
 }
 
+/**
+ * The three colours a session's state can be wearing.
+ *
+ * These are not decoration and not a second accent palette: the chrome reads
+ * whichever one matches the state of the session you are looking at (see
+ * `litTheme.ts`), so switching sessions re-tints the app. Every flavour carries
+ * its own triple so a Catppuccin theme stays inside its own palette.
+ */
+export interface HeatColors {
+  /** producing output */
+  working: string;
+  /** wants an answer from you */
+  waiting: string;
+  /** alive and quiet — also the structural/idle tint */
+  cool: string;
+}
+
 export interface UiTheme {
   flavor: ResolvedFlavor;
   colors: AppColors;
   terminal: TerminalThemeColors;
+  heat: HeatColors;
 }
 
 export interface AppPreferences {
@@ -63,13 +91,12 @@ export interface AppPreferences {
   notificationsEnabled: boolean;
 }
 
-export const TERMINAL_FONTS: TerminalFont[] = [
-  'JetBrains Mono',
-  'Fira Code',
-  'IBM Plex Mono',
-  'Source Code Pro',
-  'monospace',
-];
+export const TERMINAL_FONTS: TerminalFont[] = ['JetBrains Mono Variable', 'monospace'];
+
+export const TERMINAL_FONT_LABELS: Record<TerminalFont, string> = {
+  'JetBrains Mono Variable': 'JetBrains Mono',
+  monospace: 'System monospace',
+};
 
 export const THEME_LABELS: Record<ThemePreference, string> = {
   system: 'System',
@@ -183,31 +210,35 @@ function fromCatppuccin(flavor: CatppuccinFlavor): UiTheme {
       foreground: p.text,
       cursor: flavor === 'latte' ? '#dc8a78' : '#f5e0dc',
     },
+    heat: { working: p.yellow, waiting: p.red, cool: p.blue },
   };
 }
 
+/** Aurora: violet-tinted ink rather than neutral black, and the terminal is a
+ *  deeper slab than the chrome so it reads as a lit screen inset in it. */
 function defaultDark(): UiTheme {
   return {
     flavor: 'default-dark',
     colors: {
-      background: '#0b0c0f',
-      surface: '#12141a',
-      surfaceRaised: '#1a1d24',
-      input: '#08090c',
-      text: '#e8eaef',
-      textMuted: '#9aa0ad',
-      textFaint: '#6b7280',
-      border: '#2a2e38',
-      overlay: '#08090c99',
-      selected: '#1a1d24',
-      accent: '#3ddc97',
-      accentText: '#0b0c0f',
-      success: '#3ddc97',
-      warning: '#e6b84d',
-      danger: '#ff5c6a',
-      info: '#4d8dff',
+      background: '#08080e',
+      surface: '#12121d',
+      surfaceRaised: '#191926',
+      input: '#0b0b13',
+      text: '#edeef6',
+      textMuted: '#9797ac',
+      textFaint: '#61617a',
+      border: '#232333',
+      overlay: '#08080ecc',
+      selected: '#191926',
+      accent: '#7c8cf8',
+      accentText: '#08080e',
+      success: '#6ee7a8',
+      warning: '#f2b34c',
+      danger: '#ff7050',
+      info: '#7c8cf8',
     },
-    terminal: fromCatppuccin('mocha').terminal,
+    terminal: { background: '#0b0b13', foreground: '#ccccdf', cursor: '#f5e0dc' },
+    heat: { working: '#f2b34c', waiting: '#ff7050', cool: '#7c8cf8' },
   };
 }
 
@@ -215,24 +246,25 @@ function defaultLight(): UiTheme {
   return {
     flavor: 'default-light',
     colors: {
-      background: '#f4f5f7',
+      background: '#f1f1f6',
       surface: '#ffffff',
-      surfaceRaised: '#eceef2',
+      surfaceRaised: '#e9e9f2',
       input: '#ffffff',
-      text: '#0a0a0b',
-      textMuted: '#5c5c66',
-      textFaint: '#8b8b96',
-      border: '#d5d7de',
-      overlay: '#0a0a0b66',
-      selected: '#eceef2',
-      accent: '#0b7a4b',
+      text: '#14141b',
+      textMuted: '#5c5c6c',
+      textFaint: '#8a8a9c',
+      border: '#dcdce6',
+      overlay: '#14141b66',
+      selected: '#e9e9f2',
+      accent: '#4353d0',
       accentText: '#ffffff',
-      success: '#0b7a4b',
-      warning: '#9a6b00',
-      danger: '#c41e3a',
-      info: '#002fa7',
+      success: '#1c7a4f',
+      warning: '#8a5a00',
+      danger: '#c4381c',
+      info: '#4353d0',
     },
     terminal: fromCatppuccin('latte').terminal,
+    heat: { working: '#8a5a00', waiting: '#c4381c', cool: '#4353d0' },
   };
 }
 
@@ -269,10 +301,9 @@ export function loadPreferences(): AppPreferences {
   const notifications = localStorage.getItem(NOTIFICATIONS_KEY);
   return {
     theme,
-    terminalFont:
-      terminalFont === 'Fira Code' || terminalFont === 'monospace'
-        ? terminalFont
-        : 'JetBrains Mono',
+    terminalFont: TERMINAL_FONTS.includes(terminalFont as TerminalFont)
+      ? (terminalFont as TerminalFont)
+      : 'JetBrains Mono Variable',
     sidebarPinned: pinned === 'true',
     notificationsEnabled: notifications !== 'false',
   };

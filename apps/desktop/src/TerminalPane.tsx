@@ -25,9 +25,11 @@ export interface TerminalPaneProps {
   onDisconnected: () => void;
 }
 
-const BOOT_THEME = { background: '#1e1e2e', foreground: '#cdd6f4', cursor: '#f5e0dc' };
-
-function mountTerminal(container: HTMLElement): {
+function mountTerminal(
+  container: HTMLElement,
+  boot: TerminalPaneProps['terminalTheme'],
+  fontFamily: string,
+): {
   term: Terminal;
   fit: FitAddon;
   search: SearchAddon;
@@ -35,9 +37,12 @@ function mountTerminal(container: HTMLElement): {
 } {
   const term = new Terminal({
     cursorBlink: true,
-    fontFamily: 'monospace',
+    // Mount with the real theme and face. Booting from a fixed Catppuccin
+    // Mocha constant flashed the wrong background for a frame on every other
+    // flavour — visibly so on the light ones.
+    fontFamily: `${fontFamily}, ui-monospace, monospace`,
     fontSize: 14,
-    theme: BOOT_THEME,
+    theme: boot,
     allowProposedApi: true,
     scrollback: 1000,
   });
@@ -64,13 +69,23 @@ function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: b
   const onDisconnectedRef = useRef(props.onDisconnected);
   onFrameRef.current = props.onFrame;
   onDisconnectedRef.current = props.onDisconnected;
+  // Boot-only values. They must not sit in the mount effect's dependencies:
+  // remounting the terminal on a theme or font change would throw away the
+  // scrollback. A later effect applies changes to the live instance.
+  const bootRef = useRef({ theme: props.terminalTheme, fontFamily: props.fontFamily });
+  bootRef.current = { theme: props.terminalTheme, fontFamily: props.fontFamily };
   const [search, setSearch] = useState<SearchAddon | null>(null);
   const [findOpen, setFindOpen] = useState(false);
 
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return undefined;
-    const { term, fit, search: searchAddon, dispose } = mountTerminal(container);
+    const {
+      term,
+      fit,
+      search: searchAddon,
+      dispose,
+    } = mountTerminal(container, bootRef.current.theme, bootRef.current.fontFamily);
     termRef.current = term;
     fitRef.current = fit;
     setSearch(searchAddon);

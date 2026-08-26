@@ -2,11 +2,19 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
 import { confirmAction, notify } from './dialog';
 
-export async function checkForUpdates(): Promise<void> {
+/**
+ * `silent` suppresses the two outcomes that are only interesting to someone who
+ * asked — "you're up to date" and "the check failed" — so the same function can
+ * run unprompted at launch (see useLaunchUpdateCheck) without talking to a user
+ * who did nothing.
+ */
+export async function checkForUpdates(options: { silent?: boolean } = {}): Promise<void> {
   try {
     const update = await check();
     if (!update) {
-      await notify('Up to date', "You're running the latest version of Tether.");
+      if (!options.silent) {
+        await notify('Up to date', "You're running the latest version of Tether.");
+      }
       return;
     }
     const install = await confirmAction(
@@ -21,6 +29,8 @@ export async function checkForUpdates(): Promise<void> {
     await update.downloadAndInstall();
     await relaunch();
   } catch {
-    await notify('Update check failed', 'Could not reach the update server.', 'error');
+    if (!options.silent) {
+      await notify('Update check failed', 'Could not reach the update server.', 'error');
+    }
   }
 }

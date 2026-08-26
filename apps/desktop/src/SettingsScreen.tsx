@@ -3,6 +3,7 @@ import {
   type AppPreferences,
   loadPreferences,
   savePreferences,
+  TERMINAL_FONT_LABELS,
   TERMINAL_FONTS,
   type TerminalFont,
   THEME_LABELS,
@@ -51,7 +52,7 @@ export function LocalSettingsScreen({ onBack, prefs, onPrefsChange }: LocalSetti
         >
           {TERMINAL_FONTS.map((font) => (
             <option key={font} value={font}>
-              {font}
+              {TERMINAL_FONT_LABELS[font]}
             </option>
           ))}
         </select>

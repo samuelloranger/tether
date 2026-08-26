@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
+
 export function OverflowMenu({
   visible,
+  align = 'end',
   onClose,
   onRename,
   onAppearance,
@@ -10,6 +13,8 @@ export function OverflowMenu({
   onOpenSettings,
 }: {
   visible: boolean;
+  /** Which side to hang the panel on — the sidebar's trigger is on the left. */
+  align?: 'start' | 'end';
   onClose: () => void;
   onRename: () => void;
   onAppearance: () => void;
@@ -19,9 +24,20 @@ export function OverflowMenu({
   onCheckUpdates: () => void;
   onOpenSettings: () => void;
 }) {
+  // Every other overlay in the app closes on Escape; this one only closed by
+  // clicking the scrim, which left the keyboard with no way out.
+  useEffect(() => {
+    if (!visible) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [visible, onClose]);
+
   if (!visible) return null;
   return (
-    <div className="modal-backdrop overflow-backdrop">
+    <div className={`modal-backdrop overflow-backdrop align-${align}`}>
       <button type="button" className="modal-scrim" aria-label="Close menu" onClick={onClose} />
       <div className="overflow-panel" role="menu">
         <button type="button" className="overflow-row" role="menuitem" onClick={onRename}>
