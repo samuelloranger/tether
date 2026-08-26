@@ -121,9 +121,22 @@ private struct HostDrawerSection: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
-        Text(host.name)
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(TetherColors.textPrimary)
+        // The host's own colour, which the store has carried all along and the
+        // drawer never showed.
+        Circle()
+          .fill(Color(hex: host.color))
+          .frame(width: 8, height: 8)
+        // Two servers that never got a custom name are both called by their
+        // identity — "Tether" and "Tether" — so the name alone cannot say which
+        // machine a session is about to open on. The address can.
+        VStack(alignment: .leading, spacing: 1) {
+          Text(host.name)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(TetherColors.textPrimary)
+          Text("\(host.host):\(host.port)")
+            .font(.caption2)
+            .foregroundStyle(TetherColors.textSecondary)
+        }
         statusView
         Spacer()
         Button {
@@ -132,8 +145,9 @@ private struct HostDrawerSection: View {
           Image(systemName: "gearshape")
             .font(.caption)
             .foregroundStyle(TetherColors.textSecondary)
+            .tapTarget(36)
         }
-        .accessibilityLabel("Server settings for \(host.name)")
+        .accessibilityLabel("Server settings for \(host.name) at \(host.host):\(host.port)")
       }
       .padding(.horizontal, 16)
       .padding(.bottom, 8)
