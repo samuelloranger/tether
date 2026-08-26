@@ -270,9 +270,6 @@ public struct TerminalInputBridge: UIViewRepresentable {
         onSubmitBytes("\u{7F}")
         return false
       }
-      #if DEBUG
-      print("[TetherInput] delegate -> \(text.debugDescription)")
-      #endif
       onSubmitBytes(text)
       return false
     }
@@ -388,15 +385,7 @@ public final class TerminalInputTextView: UITextView {
   public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
     var unhandled: Set<UIPress> = []
     for press in presses {
-      #if DEBUG
-      if let key = press.key {
-        print("[TetherInput] press \(key.charactersIgnoringModifiers.debugDescription)")
-      }
-      #endif
       if let key = press.key, let bytes = TerminalKeyMap.bytes(for: key) {
-        #if DEBUG
-        print("[TetherInput] keymap -> \(bytes.debugDescription)")
-        #endif
         onKeyBytes?(bytes)
       } else {
         unhandled.insert(press)
