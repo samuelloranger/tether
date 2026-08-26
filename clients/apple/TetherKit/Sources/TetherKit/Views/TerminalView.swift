@@ -6,13 +6,13 @@ import UIKit
 public struct TerminalAccessoryBar: View {
   public var ctrlArmed: Binding<Bool>
   public var onKey: (String) -> Void
-  public var onPaste: () -> Void
+  public var onPaste: (String) -> Void
   public var onHideKeyboard: () -> Void
 
   public init(
     ctrlArmed: Binding<Bool>,
     onKey: @escaping (String) -> Void,
-    onPaste: @escaping () -> Void,
+    onPaste: @escaping (String) -> Void,
     onHideKeyboard: @escaping () -> Void
   ) {
     self.ctrlArmed = ctrlArmed
@@ -37,13 +37,28 @@ public struct TerminalAccessoryBar: View {
         accessoryButton("End") { send(ctrlArmed, base: "\u{1B}[F") }
         accessoryButton("PgUp") { onKey("\u{1B}[5~") }
         accessoryButton("PgDn") { onKey("\u{1B}[6~") }
-        accessoryButton("Paste", systemImage: "doc.on.clipboard", action: onPaste)
+        pasteButton
         accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
     }
     .background(.ultraThinMaterial)
+  }
+
+  /// The system paste control.
+  ///
+  /// Reading `UIPasteboard.general` directly is denied unless the user
+  /// confirms, and the denial is silent — the button appeared to do nothing.
+  /// `PasteButton` is granted access without a prompt.
+  private var pasteButton: some View {
+    PasteButton(payloadType: String.self) { strings in
+      guard let text = strings.first else { return }
+      onPaste(text)
+    }
+    .labelStyle(.iconOnly)
+    .buttonBorderShape(.roundedRectangle(radius: 8))
+    .tint(TetherColors.surface)
   }
 
   private var ctrlButton: some View {
@@ -322,6 +337,10 @@ public struct TerminalView: View {
       TetherSurfaceRepresentable(snapshot: $store.terminalSnapshot)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+        // Without this the Hide button is a one-way door: nothing else in the
+        // terminal view takes focus, so the session becomes uninputtable.
+        .contentShape(Rectangle())
+        .onTapGesture { keyboardFocused = true }
 
       TerminalInputBridge(
         text: $inputBuffer,
@@ -329,7 +348,7 @@ public struct TerminalView: View {
           TerminalAccessoryBar(
             ctrlArmed: $ctrlArmed,
             onKey: { store.sendInput($0) },
-            onPaste: pasteFromClipboard,
+            onPaste: { store.sendInput($0) },
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
@@ -359,14 +378,6 @@ public struct TerminalView: View {
       return
     }
     store.sendInput(text)
-  }
-
-  private func pasteFromClipboard() {
-    #if canImport(UIKit)
-    if let text = UIPasteboard.general.string {
-      store.sendInput(text)
-    }
-    #endif
   }
 }
 #endif
