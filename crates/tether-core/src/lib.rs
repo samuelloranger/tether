@@ -6,6 +6,10 @@
 
 pub mod connection_test;
 pub mod deep_link;
+pub mod diff_model;
+pub mod git_api;
+pub mod git_review;
+pub mod git_status;
 pub mod host_client;
 pub mod host_health;
 pub mod host_polling;
