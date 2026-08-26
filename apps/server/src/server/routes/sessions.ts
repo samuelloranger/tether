@@ -2,6 +2,7 @@ import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { getSession, listSessions, renameSession } from '../db';
 import { getLiveCwd } from '../liveCwd';
+import { logError, logInfo, logWarn } from '../log';
 import {
   type FocusSubscriber,
   getActiveSession,
@@ -33,12 +34,16 @@ type WsSessionState = {
   keepAlive: ReturnType<typeof setInterval> | null;
 };
 
-function ptySubscriber(ws: WsSink, codec: TerminalCodec): FocusSubscriber {
+function ptySubscriber(ws: WsSink, codec: TerminalCodec, sessionId: string): FocusSubscriber {
   const onData: FocusSubscriber = (data) => {
     // ponytail: no queueing for slow clients — if the socket's send
     // buffer blows past 4MB, close it; reconnect replays from the cursor.
     const raw = ws.raw as { getBufferedAmount?: () => number } | undefined;
-    if (raw?.getBufferedAmount && raw.getBufferedAmount() > 4_000_000) {
+    const buffered = raw?.getBufferedAmount?.();
+    if (buffered !== undefined && buffered > 4_000_000) {
+      logWarn(
+        `WebSocket backpressure: closing session "${sessionId}" (bufferedAmount=${buffered})`,
+      );
       try {
         ws.close();
       } catch {}
@@ -58,7 +63,7 @@ function ptySubscriber(ws: WsSink, codec: TerminalCodec): FocusSubscriber {
         if (frame !== null) ws.send(frame);
       }
     } catch (wsErr) {
-      console.warn('WebSocket send error during PTY broadcast:', wsErr);
+      logWarn('WebSocket send error during PTY broadcast:', wsErr);
     }
   };
   onData.focused = true;
@@ -95,7 +100,7 @@ async function hydrateTerminalSocket(
       ws.send(codec.reset());
     }
 
-    console.log(
+    logInfo(
       `Streaming ${missedLogs.length} missed logs (${plan.bytes} bytes) to client...` +
         (plan.reset ? ' [trimmed to byte budget, sent reset]' : ''),
     );
@@ -103,7 +108,7 @@ async function hydrateTerminalSocket(
       try {
         ws.send(codec.replayOutput(frame));
       } catch (sendErr) {
-        console.error(`Failed to send replay through log ${frame.id} to client:`, sendErr);
+        logError(`Failed to send replay through log ${frame.id} to client:`, sendErr);
         return;
       }
     }
@@ -120,7 +125,7 @@ async function hydrateTerminalSocket(
       ws.send(codec.exit());
     }
   } catch (err) {
-    console.error('Error inside settled WebSocket init:', err);
+    logError('Error inside settled WebSocket init:', err);
   }
 }
 
@@ -133,14 +138,14 @@ function openTerminalSocket(
   state: WsSessionState,
   codec: TerminalCodec,
 ): void {
-  console.log(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
+  logInfo(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
   // 20s < the client's 30s watchdog, so a quiet session never trips it.
   state.keepAlive = setInterval(() => {
     try {
       ws.send(codec.ping());
     } catch {}
   }, 20_000);
-  state.onData = ptySubscriber(ws, codec);
+  state.onData = ptySubscriber(ws, codec, sessionId);
   // Yield execution to let Hono/Bun complete the protocol upgrade before writing
   setTimeout(() => {
     void hydrateTerminalSocket(ws, sessionId, sinceId, cols, rows, state, codec);
@@ -165,7 +170,7 @@ function handleTerminalWsMessage(
       }
     }
   } catch (e) {
-    console.error('Failed to handle incoming WebSocket message:', e);
+    logError('Failed to handle incoming WebSocket message:', e);
   }
 }
 
@@ -192,7 +197,7 @@ function createTerminalWsHandlers(c: Context) {
       handleTerminalWsMessage(event, sessionId, state.onData, codec);
     },
     onClose() {
-      console.log(`WebSocket closed for session "${sessionId}"`);
+      logInfo(`WebSocket closed for session "${sessionId}"`);
       state.closed = true;
       if (state.keepAlive) clearInterval(state.keepAlive);
       state.unsubscribe();

@@ -21,6 +21,7 @@ import {
   takeLegacyLines,
 } from './holderFrame';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
+import { logError, logInfo } from './log';
 import type { NotificationEvent } from './notifications';
 import { CONFIG_DIR } from './paths';
 import { FrameDecoder } from './proto/frame';
@@ -80,7 +81,7 @@ export function broadcast(id: string, data: SessionFrame) {
     try {
       sub(data);
     } catch (err) {
-      console.error(`Error notifying subscriber for session "${id}":`, err);
+      logError(`Error notifying subscriber for session "${id}":`, err);
     }
   }
 }
@@ -245,7 +246,7 @@ function handleHolderMessage(id: string, msg: HolderMessage | null, link: Holder
     const tail = link.decoder.decode();
     if (tail) link.pendingOutput.push(tail);
     flushHolderOutput(id, link);
-    console.log(`PTY process for session "${id}" exited with code ${msg.exitCode}`);
+    logInfo(`PTY process for session "${id}" exited with code ${msg.exitCode}`);
     if (killed.delete(id)) {
       deleteSession(id);
     } else {
@@ -283,7 +284,7 @@ function readHolderData(id: string, link: HolderLink, buf: Buffer): void {
     } catch (err) {
       // Desynced framing: nothing after this point can be trusted, so drop the
       // link. The holder keeps the PTY alive and the next attach starts clean.
-      console.error(`Holder link for session "${id}" desynced:`, err);
+      logError(`Holder link for session "${id}" desynced:`, err);
       link.sock?.end();
       return;
     }
@@ -309,7 +310,7 @@ function onHolderSocketClose(id: string, link: HolderLink): void {
       clearLiveCwd(id);
       clearTitle(id);
       clearActivity(id);
-      console.log(`Holder link for session "${id}" closed unexpectedly`);
+      logInfo(`Holder link for session "${id}" closed unexpectedly`);
     }
   }
 }

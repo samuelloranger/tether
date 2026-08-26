@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { logInfo } from './log';
 import { DB_PATH, OLD_DB_PATH, USING_DEFAULT_DB } from './paths';
 import { COMPILED } from './runtime';
 
@@ -15,7 +16,7 @@ try {
 // source copy. Only for the installed binary on its default path (never a dev
 // run or a TETHER_DB_PATH override), and only if the new DB doesn't exist yet.
 if (COMPILED && USING_DEFAULT_DB && !existsSync(DB_PATH) && existsSync(OLD_DB_PATH)) {
-  console.log(`Migrating database from ${OLD_DB_PATH} to ${DB_PATH}`);
+  logInfo(`Migrating database from ${OLD_DB_PATH} to ${DB_PATH}`);
   // The old DB runs in WAL mode; recently-committed rows (schema, sessions, the
   // password) may still live only in the -wal file. Copy the whole set so the
   // new DB replays the WAL on first open instead of losing that data.
@@ -138,7 +139,7 @@ export function runMigrations() {
   const transaction = db.transaction(() => {
     for (const migration of migrations) {
       if (!appliedMigrations.has(migration.version)) {
-        console.log(`Running migration: ${migration.version}_${migration.name}`);
+        logInfo(`Running migration: ${migration.version}_${migration.name}`);
         db.exec(migration.up);
         db.query('INSERT INTO _migrations (version, name) VALUES ($version, $name)').run({
           $version: migration.version,

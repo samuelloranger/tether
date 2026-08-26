@@ -1,18 +1,48 @@
 import { websocket } from 'hono/bun';
 import { app } from './app';
 import { getAuthHash, resetRunningSessions, setSessionStatus } from './db';
+import { logError, logInfo, logWarn } from './log';
 import { reattachHolders } from './pty';
 import { type ListenerPlan, resolveListenerPlan } from './tlsConfig';
 import { publishTlsReport } from './tlsRuntime';
 import { ensureTlsMaterial, TLS_DIR, type TlsMaterial } from './tlsStore';
 
+type PeerCapable = { requestIP?: (req: Request) => { address: string } | null };
+
+/**
+ * The socket's peer address, or 'unknown'.
+ *
+ * `requestIP` MUST be invoked as a method on the server. Pulling it into a local
+ * and calling it bare loses `this` and Bun throws
+ * `ERR_INVALID_THIS: Expected this to be instanceof DebugHTTPServer` — which,
+ * from inside `fetch`, turns every single request into a 500. The unit tests do
+ * not catch it because they call `app.fetch` directly and never go through
+ * `Bun.serve`; only starting the server does.
+ */
+function peerFromServe(server: unknown, req: Request): string {
+  const candidate = server as PeerCapable | null;
+  if (!candidate || typeof candidate.requestIP !== 'function') return 'unknown';
+  try {
+    return candidate.requestIP(req)?.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 function baseServeOptions() {
   return {
     hostname: '0.0.0.0',
-    fetch: app.fetch,
+    // Thread the real socket peer into Hono once for both listeners. Never key
+    // auth rate limits on X-Forwarded-For — those headers are spoofable on a
+    // direct bind. Pass `server` so hono/bun websocket upgrade still finds it.
+    // Second arg typed as `unknown` so Bun.serve still infers websocket data
+    // from `websocket` (annotating Bun.Server collapses that generic).
+    fetch(req: Request, server: unknown) {
+      return app.fetch(req, { peerAddress: peerFromServe(server, req), server });
+    },
     websocket,
     error(err: Error) {
-      console.error('Unhandled request error:', err);
+      logError('Unhandled request error:', err);
       return new Response('Internal Server Error', { status: 500 });
     },
   };
@@ -31,10 +61,10 @@ function loadTlsMaterial(plan: ListenerPlan): TlsMaterial | null {
   try {
     const material = ensureTlsMaterial();
     if (material.generated) {
-      console.log(`TLS: generated a self-signed certificate in ${TLS_DIR}`);
+      logInfo(`TLS: generated a self-signed certificate in ${TLS_DIR}`);
     }
     if (new Date(material.notAfter).getTime() < Date.now()) {
-      console.warn(
+      logWarn(
         `TLS: the certificate expired on ${material.notAfter}. It is NOT being rotated ` +
           'automatically, because paired clients pin its fingerprint. To replace it, delete ' +
           `${TLS_DIR} and re-pair every client.`,
@@ -42,14 +72,14 @@ function loadTlsMaterial(plan: ListenerPlan): TlsMaterial | null {
     }
     return material;
   } catch (err) {
-    console.error(`TLS: could not load certificate material — serving plaintext only. ${err}`);
+    logError(`TLS: could not load certificate material — serving plaintext only. ${err}`);
     return null;
   }
 }
 
 export async function serve(): Promise<void> {
   const plan = resolveListenerPlan();
-  for (const warning of plan.warnings) console.warn(`Config: ${warning}`);
+  for (const warning of plan.warnings) logWarn(`Config: ${warning}`);
 
   // A previous server process may have died with sessions still marked running.
   // Their PTYs live in detached holder processes, so first reattach to the ones
@@ -57,7 +87,7 @@ export async function serve(): Promise<void> {
   resetRunningSessions();
   for (const id of await reattachHolders()) {
     setSessionStatus(id, 'running');
-    console.log(`Reattached to surviving session "${id}"`);
+    logInfo(`Reattached to surviving session "${id}"`);
   }
 
   const tls = loadTlsMaterial(plan);
@@ -67,14 +97,14 @@ export async function serve(): Promise<void> {
   const httpPort = plan.httpPort ?? (tls === null ? Number(process.env.TETHER_PORT ?? 8085) : null);
   const httpsPort = tls === null ? null : plan.httpsPort;
   if (plan.httpPort === null && tls === null) {
-    console.warn(`TLS: requested TETHER_TLS=only without TLS; falling back to :${httpPort} plain.`);
+    logWarn(`TLS: requested TETHER_TLS=only without TLS; falling back to :${httpPort} plain.`);
   }
 
   publishTlsReport({ ...plan, httpPort, httpsPort }, tls?.fingerprintSha256 ?? null);
 
   if (httpPort !== null) {
     Bun.serve({ ...baseServeOptions(), port: httpPort });
-    console.log(`Tether server listening on :${httpPort} (http)`);
+    logInfo(`Tether server listening on :${httpPort} (http)`);
   }
   if (httpsPort !== null && tls) {
     Bun.serve({
@@ -82,27 +112,27 @@ export async function serve(): Promise<void> {
       port: httpsPort,
       tls: { cert: tls.certPem, key: tls.keyPem },
     });
-    console.log(`Tether server listening on :${httpsPort} (https)`);
-    console.log(`TLS certificate fingerprint: sha256:${tls.fingerprintSha256}`);
+    logInfo(`Tether server listening on :${httpsPort} (https)`);
+    logInfo(`TLS certificate fingerprint: sha256:${tls.fingerprintSha256}`);
   }
 
   if (getAuthHash()) {
-    console.log('Auth: password required on all /api routes.');
+    logInfo('Auth: password required on all /api routes.');
   } else {
-    console.warn(
+    logWarn(
       'Auth: NO PASSWORD SET — /api routes will reject all clients. Run: tether set-password',
     );
   }
 
   if (httpPort !== null && httpsPort !== null) {
-    console.log(
+    logInfo(
       'Transport: TLS on the https port; the http port stays plaintext for older clients. ' +
         'Set TETHER_TLS=only once every client has paired over https.',
     );
   } else if (httpsPort !== null) {
-    console.log('Transport: TLS only. Clients pin the fingerprint above.');
+    logInfo('Transport: TLS only. Clients pin the fingerprint above.');
   } else {
-    console.log(
+    logInfo(
       "Transport: plaintext only — encryption is the tunnel's job (Tailscale / WireGuard / SSH).",
     );
   }

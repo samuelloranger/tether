@@ -5,6 +5,7 @@ import { getSession } from '../db';
 import { resolveGitRoot } from '../gitRoot';
 import { UPLOADS_DIR } from '../paths';
 import { resolveUploadPath } from '../upload';
+import { readWorkspaceDir } from '../workspaceDir';
 import { readWorkspaceFile, WorkspaceFileError } from '../workspaceFile';
 import { resolveSessionCwd } from './sessionCwd';
 
@@ -15,6 +16,17 @@ filesRoutes.get('/api/sessions/:id/file', async (c) => {
   if ('response' in resolved) return resolved.response;
   try {
     return c.json(readWorkspaceFile(resolved.root, c.req.query('path') ?? '', resolved.cwd));
+  } catch (error) {
+    if (error instanceof WorkspaceFileError) return c.json({ error: error.message }, error.status);
+    throw error;
+  }
+});
+
+filesRoutes.get('/api/sessions/:id/dir', async (c) => {
+  const resolved = await resolveSessionCwd(c, c.req.param('id'));
+  if ('response' in resolved) return resolved.response;
+  try {
+    return c.json(readWorkspaceDir(resolved.root, c.req.query('path') ?? '', resolved.cwd));
   } catch (error) {
     if (error instanceof WorkspaceFileError) return c.json({ error: error.message }, error.status);
     throw error;

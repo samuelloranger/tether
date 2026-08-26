@@ -128,7 +128,10 @@ test('test notification reports a delivery failure', async () => {
       error: 'relay returned 503',
       code: 'notification_delivery_failed',
     });
-    expect(error).toHaveBeenCalledWith('Test notification delivery failed:', expect.any(Error));
+    expect(error).toHaveBeenCalledWith(
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.+ Test notification delivery failed:$/),
+      expect.any(Error),
+    );
   } finally {
     setAuthHash(hash);
     globalThis.fetch = previous;
