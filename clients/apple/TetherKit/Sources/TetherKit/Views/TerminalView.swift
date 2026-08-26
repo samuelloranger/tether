@@ -84,14 +84,12 @@ public struct TerminalAccessoryBar: View {
   }
 
   private func send(_ ctrlArmed: Binding<Bool>, base: String) {
-    if ctrlArmed.wrappedValue, let last = base.last {
-      ctrlArmed.wrappedValue = false
-      let value = last.asciiValue ?? 0
-      let control = UnicodeScalar(Int(value) & 0x1F)!
-      onKey(String(control))
+    guard ctrlArmed.wrappedValue else {
+      onKey(base)
       return
     }
-    onKey(base)
+    ctrlArmed.wrappedValue = false
+    onKey(TerminalKeyMap.ctrlModified(base))
   }
 }
 
@@ -216,6 +214,29 @@ enum TerminalKeyMap {
     return "\u{1B}" + String(ch)
   }
 
+  /// Applies the Ctrl latch to an accessory-bar key.
+  ///
+  /// A CSI sequence carries its modifier as a parameter. Masking its final
+  /// byte instead produced a control code from the wrong character entirely:
+  /// Ctrl+Left became 0x04 (EOF) and killed the shell, and Ctrl+Up became
+  /// 0x01 (start of line).
+  static func ctrlModified(_ sequence: String) -> String {
+    guard sequence.hasPrefix("\u{1B}["), let final = sequence.last else { return sequence }
+    return "\u{1B}[1;5\(final)"
+  }
+
+  /// Folds a latched Ctrl into the next typed character.
+  ///
+  /// Only printable ASCII has a control form; applying the mask to Return or
+  /// DEL would corrupt them.
+  static func ctrlFolded(_ text: String) -> String? {
+    guard text.count == 1, let ch = text.first, let ascii = ch.asciiValue,
+          (0x20...0x7E).contains(ascii)
+    else { return nil }
+    let upper = (ascii >= 97 && ascii <= 122) ? ascii - 32 : ascii
+    return String(UnicodeScalar(upper & 0x1F))
+  }
+
   /// xterm's modifier parameter: 1 + shift(1) + alt(2) + ctrl(4).
   private static func modifierParam(_ m: UIKeyModifierFlags) -> Int {
     var value = 1
@@ -312,7 +333,7 @@ public struct TerminalView: View {
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
-        onSubmitBytes: { store.sendInput($0) },
+        onSubmitBytes: submit,
         isFocused: Binding(
           get: { keyboardFocused },
           set: { keyboardFocused = $0 }
@@ -325,6 +346,19 @@ public struct TerminalView: View {
     .onAppear {
       keyboardFocused = true
     }
+  }
+
+  /// Sends typed input, folding in a latched Ctrl.
+  ///
+  /// The Ctrl button used to affect only the five keys that routed through
+  /// `send`, so the on-screen keyboard could not produce Ctrl+C at all.
+  private func submit(_ text: String) {
+    if ctrlArmed, let folded = TerminalKeyMap.ctrlFolded(text) {
+      ctrlArmed = false
+      store.sendInput(folded)
+      return
+    }
+    store.sendInput(text)
   }
 
   private func pasteFromClipboard() {
