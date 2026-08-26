@@ -57,7 +57,6 @@ public final class AppPreferences {
     static let colorScheme = "tether.colorScheme"
     static let terminalFont = "tether.terminalFont"
     static let terminalFontSize = "tether.terminalFontSize"
-    static let showDpad = "tether.showDpad"
   }
 
   public var colorSchemePreference: ColorSchemePreference {
@@ -78,13 +77,6 @@ public final class AppPreferences {
     }
   }
 
-  /// Floating on-screen D-pad over the terminal (user-requested keep).
-  public var showDpad: Bool {
-    didSet {
-      UserDefaults.standard.set(showDpad, forKey: Key.showDpad)
-    }
-  }
-
   public init() {
     let defaults = UserDefaults.standard
     colorSchemePreference = ColorSchemePreference(
@@ -93,10 +85,5 @@ public final class AppPreferences {
     terminalFont = TerminalFont(rawValue: defaults.string(forKey: Key.terminalFont) ?? "") ?? .menlo
     let size = defaults.double(forKey: Key.terminalFontSize)
     terminalFontSize = size > 0 ? size : 14
-    if defaults.object(forKey: Key.showDpad) == nil {
-      showDpad = true
-    } else {
-      showDpad = defaults.bool(forKey: Key.showDpad)
-    }
   }
 }

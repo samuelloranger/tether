@@ -5,7 +5,6 @@ import UIKit
 /// Full utility key row for touch input — horizontally scrollable instead of RN paging.
 public struct TerminalAccessoryBar: View {
   public var ctrlArmed: Binding<Bool>
-  public var showDpad: Binding<Bool>
   public var onKey: (String) -> Void
   public var onPaste: (String) -> Void
   public var onArrow: (DPadDirection) -> Void
@@ -13,85 +12,43 @@ public struct TerminalAccessoryBar: View {
 
   public init(
     ctrlArmed: Binding<Bool>,
-    showDpad: Binding<Bool> = .constant(false),
     onKey: @escaping (String) -> Void,
     onPaste: @escaping (String) -> Void,
     onArrow: @escaping (DPadDirection) -> Void,
     onHideKeyboard: @escaping () -> Void
   ) {
     self.ctrlArmed = ctrlArmed
-    self.showDpad = showDpad
     self.onKey = onKey
     self.onPaste = onPaste
     self.onArrow = onArrow
     self.onHideKeyboard = onHideKeyboard
   }
 
-  /// Height of the key row, and of the docked D-pad row when it is showing.
-  /// `inputAccessoryView` needs a concrete height, so these are shared with the
-  /// text view rather than left to intrinsic sizing.
-  public static let keyRowHeight: CGFloat = 52
-  public static let dpadRowHeight: CGFloat = DPadModel.buttonSize + 24
-
-  public static func height(showDpad: Bool) -> CGFloat {
-    showDpad ? keyRowHeight + dpadRowHeight : keyRowHeight
-  }
-
+  /// Key order matches `UTILITY_BAR_KEYS` in the RN client. There are no arrow
+  /// keys: the D-pad is one square key in the row and covers all four
+  /// directions, which is why four separate arrows would be redundant.
   public var body: some View {
-    VStack(spacing: 0) {
-      keyRow
-      if showDpad.wrappedValue {
-        // Docked rather than floating: a pad that hovers over the terminal
-        // covers the output you are steering through.
-        DpadView(onArrow: onArrow)
-          .frame(height: Self.dpadRowHeight)
-          .frame(maxWidth: .infinity)
-      }
-    }
-    .background(.ultraThinMaterial)
-  }
-
-  private var keyRow: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
         ctrlButton
-        dpadToggle
-        accessoryButton("Esc") { onKey("\u{1B}") }
         accessoryButton("Tab") { send(ctrlArmed, base: "\t") }
-        accessoryButton("↑") { send(ctrlArmed, base: "\u{1B}[A") }
-        accessoryButton("↓") { send(ctrlArmed, base: "\u{1B}[B") }
-        accessoryButton("←") { send(ctrlArmed, base: "\u{1B}[D") }
-        accessoryButton("→") { send(ctrlArmed, base: "\u{1B}[C") }
+        accessoryButton("Esc") { onKey("\u{1B}") }
         accessoryButton("/") { onKey("/") }
+        DpadView(onArrow: onArrow)
+        pasteButton
+        accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
         accessoryButton("Del") { onKey("\u{1B}[3~") }
         accessoryButton("Home") { send(ctrlArmed, base: "\u{1B}[H") }
         accessoryButton("End") { send(ctrlArmed, base: "\u{1B}[F") }
         accessoryButton("PgUp") { onKey("\u{1B}[5~") }
         accessoryButton("PgDn") { onKey("\u{1B}[6~") }
-        pasteButton
-        accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
     }
-    .frame(height: Self.keyRowHeight)
+    .background(.ultraThinMaterial)
   }
 
-  private var dpadToggle: some View {
-    Button {
-      showDpad.wrappedValue.toggle()
-    } label: {
-      Text(showDpad.wrappedValue ? "Pad ✓" : "Pad")
-        .font(.callout.weight(.medium))
-    }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 8)
-    .background(showDpad.wrappedValue ? TetherColors.accent : TetherColors.surface)
-    .foregroundStyle(showDpad.wrappedValue ? Color.black : TetherColors.textPrimary)
-    .clipShape(RoundedRectangle(cornerRadius: 8))
-    .buttonStyle(.plain)
-    .accessibilityLabel("Toggle floating D-pad")
-  }
 
   /// The system paste control.
   ///
@@ -159,20 +116,17 @@ public struct TerminalAccessoryBar: View {
 public struct TerminalInputBridge: UIViewRepresentable {
   @Binding public var text: String
   public var accessory: AnyView
-  public var accessoryHeight: CGFloat
   public var onSubmitBytes: (String) -> Void
   public var isFocused: Binding<Bool>
 
   public init(
     text: Binding<String>,
     accessory: AnyView,
-    accessoryHeight: CGFloat,
     onSubmitBytes: @escaping (String) -> Void,
     isFocused: Binding<Bool>
   ) {
     _text = text
     self.accessory = accessory
-    self.accessoryHeight = accessoryHeight
     self.onSubmitBytes = onSubmitBytes
     self.isFocused = isFocused
   }
@@ -192,7 +146,6 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.textColor = .clear
     view.tintColor = .clear
     view.accessoryHosting.rootView = accessory
-    view.accessoryHeight = accessoryHeight
     // 0x7F (DEL) is what terminals and readline expect from backspace.
     view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
     view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
@@ -201,7 +154,6 @@ public struct TerminalInputBridge: UIViewRepresentable {
 
   public func updateUIView(_ uiView: TerminalInputTextView, context: Context) {
     uiView.accessoryHosting.rootView = accessory
-    uiView.accessoryHeight = accessoryHeight
     if uiView.text != text {
       uiView.text = text
     }
@@ -352,21 +304,11 @@ public final class TerminalInputTextView: UITextView {
   /// the accessory, which UIKit does often.
   private lazy var accessoryContainer: UIView = {
     let view = accessoryHosting.view!
-    view.frame.size.height = accessoryHeight
+    view.frame.size.height = 52
     view.backgroundColor = .clear
     return view
   }()
 
-  /// `inputAccessoryView` is laid out by UIKit from a concrete frame, so the
-  /// height has to be set explicitly and the input views reloaded when the
-  /// docked D-pad appears or disappears.
-  var accessoryHeight: CGFloat = 52 {
-    didSet {
-      guard accessoryHeight != oldValue else { return }
-      accessoryContainer.frame.size.height = accessoryHeight
-      reloadInputViews()
-    }
-  }
 
   private var assignedAccessoryView: UIView?
 
@@ -437,14 +379,12 @@ public struct TerminalView: View {
         accessory: AnyView(
           TerminalAccessoryBar(
             ctrlArmed: $ctrlArmed,
-            showDpad: $preferences.showDpad,
             onKey: { store.sendInput($0) },
             onPaste: { store.sendInput($0) },
             onArrow: { store.sendInput($0.escapeSequence) },
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
-        accessoryHeight: TerminalAccessoryBar.height(showDpad: preferences.showDpad),
         onSubmitBytes: submit,
         isFocused: Binding(
           get: { keyboardFocused },

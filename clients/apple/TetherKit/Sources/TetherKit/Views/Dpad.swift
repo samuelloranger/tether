@@ -1,7 +1,8 @@
 #if canImport(UIKit)
 import SwiftUI
+import UIKit
 
-/// Floating terminal D-pad: drag for a locked cardinal + capped auto-repeat.
+/// Terminal D-pad: one bar key, drag for a locked cardinal + capped auto-repeat.
 ///
 /// Port of `apps/mobile/src/Dpad.tsx`. Position is owned by the parent so the
 /// pad can be dragged around the terminal surface.
@@ -13,6 +14,8 @@ public struct DpadView: View {
   @State private var grantOrigin = CGPoint.zero
   @State private var gestureLive = false
   @State private var repeatTask: Task<Void, Never>?
+
+  private static let feedback = UIImpactFeedbackGenerator(style: .light)
 
   public init(onArrow: @escaping (DPadDirection) -> Void) {
     self.onArrow = onArrow
@@ -81,6 +84,9 @@ public struct DpadView: View {
     stopRepeat()
     active = next
     guard let next else { return }
+    // The RN cluster taps a light impact per arrow — without it a drag that
+    // locks a new direction gives no signal that anything was sent.
+    Self.feedback.impactOccurred()
     onArrow(next)
     repeatTask = Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(DPadModel.repeatDelayMs))
@@ -108,47 +114,6 @@ public struct DpadView: View {
   private func stopRepeat() {
     repeatTask?.cancel()
     repeatTask = nil
-  }
-}
-
-/// Draggable chrome around `DpadView` so the puck can float over the terminal.
-public struct FloatingDpad: View {
-  public var onArrow: (DPadDirection) -> Void
-  @Binding public var position: CGPoint
-  @State private var dragOrigin: CGPoint?
-
-  public init(position: Binding<CGPoint>, onArrow: @escaping (DPadDirection) -> Void) {
-    _position = position
-    self.onArrow = onArrow
-  }
-
-  public var body: some View {
-    VStack(spacing: 6) {
-      Capsule()
-        .fill(TetherColors.textSecondary.opacity(0.5))
-        .frame(width: 28, height: 4)
-        .padding(.top, 6)
-        .gesture(
-          DragGesture()
-            .onChanged { value in
-              if dragOrigin == nil { dragOrigin = position }
-              if let dragOrigin {
-                position = CGPoint(
-                  x: dragOrigin.x + value.translation.width,
-                  y: dragOrigin.y + value.translation.height
-                )
-              }
-            }
-            .onEnded { _ in dragOrigin = nil }
-        )
-        .accessibilityLabel("Move D-pad")
-      DpadView(onArrow: onArrow)
-        .padding(.horizontal, 6)
-        .padding(.bottom, 6)
-    }
-    .background(TetherColors.surface.opacity(0.92))
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .position(position)
   }
 }
 #endif
