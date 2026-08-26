@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { validateAddress } from './address';
-import type { HostProfile } from './hostStore';
+import type { HostProfile } from './types';
 
 interface HostFormScreenProps {
   editing?: HostProfile | null;

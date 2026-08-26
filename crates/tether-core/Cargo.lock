@@ -1421,8 +1421,10 @@ name = "tether-core"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64",
  "futures-util",
  "prost",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

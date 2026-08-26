@@ -1,0 +1,279 @@
+import { useEffect, useRef, useState } from 'react';
+import { CommitBox } from './CommitBox';
+import { DiffLines } from './DiffLines';
+import { GitPaneError } from './GitPaneError';
+import { GitTabBar } from './GitSectionHeader';
+import { formatRepoStatusLabel } from './gitApi';
+import { FileSectionList, HistoryList, ImageDiff } from './gitDrawerPanes';
+import { changesPaneContent, loadPaneContent } from './gitPanelState';
+import { useGitCommitForm } from './useGitCommitForm';
+import type { GitPanelState } from './useGitPanel';
+
+const MIN_LEFT = 220;
+const MIN_RIGHT = 320;
+const SIDE_BY_SIDE_MIN = 900;
+
+type GitDrawerProps = {
+  panel: GitPanelState;
+  onClose: () => void;
+};
+
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: mirrors mobile GitDrawer pane composition
+export function GitDrawer({ panel, onClose }: GitDrawerProps) {
+  const [tab, setTab] = useState<'changes' | 'history'>('changes');
+  const [leftWidth, setLeftWidth] = useState(320);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const form = useGitCommitForm(panel.commit, panel.amend);
+  const viewingCommit = tab === 'history' && panel.historyCommit !== null;
+  const wideEnough = (bodyRef.current?.clientWidth ?? 1200) - leftWidth >= SIDE_BY_SIDE_MIN;
+
+  useEffect(() => {
+    if (tab === 'history' && panel.historyEntries === null) void panel.loadHistory();
+  }, [tab, panel]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const target = event.target as HTMLElement | null;
+      const isField =
+        target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT' || target?.isContentEditable;
+      if (isField) {
+        target.blur();
+        return;
+      }
+      if (panel.historyCommit) {
+        void panel.selectCommit(null);
+        return;
+      }
+      if (panel.selectedPath) {
+        panel.deselectFile();
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, panel]);
+
+  const title = viewingCommit
+    ? `${panel.historyCommit?.entry.shortSha} ${panel.historyCommit?.entry.subject}`
+    : (panel.selectedPath ?? 'Working tree');
+
+  const statusLabel = formatRepoStatusLabel(panel.repoStatus);
+  const changes = changesPaneContent(panel.error, panel.summary.files.length);
+  const historyPane = loadPaneContent(panel.error, panel.historyEntries !== null);
+  const diffHasContent = Boolean(
+    panel.diffParsed?.lines.length || panel.diffImage || panel.historyCommit?.parsed?.lines.length,
+  );
+  const diffPane = loadPaneContent(
+    panel.selectedPath || viewingCommit ? panel.error : null,
+    diffHasContent,
+  );
+  const errorShownInPane =
+    (tab === 'changes' && changes.type === 'error') ||
+    (tab === 'history' && historyPane.type === 'error') ||
+    diffPane.type === 'error';
+
+  const startResize = (clientX: number) => {
+    const startX = clientX;
+    const startWidth = leftWidth;
+    const total = bodyRef.current?.clientWidth ?? 0;
+    const onMove = (event: MouseEvent) => {
+      const next = Math.round(startWidth + (event.clientX - startX));
+      if (total <= MIN_LEFT + MIN_RIGHT) {
+        setLeftWidth(Math.floor(total / 2));
+        return;
+      }
+      setLeftWidth(Math.min(Math.max(next, MIN_LEFT), total - MIN_RIGHT));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  return (
+    <aside className="git-drawer" aria-label="Git">
+      <header className="git-drawer-header">
+        <div className="git-drawer-title-row">
+          <strong>{title}</strong>
+          {statusLabel ? <span className="muted">{statusLabel}</span> : null}
+        </div>
+        <div className="git-drawer-header-actions">
+          {panel.selectedPath || viewingCommit ? (
+            <button
+              type="button"
+              className="secondary small"
+              onClick={() => {
+                if (viewingCommit) void panel.selectCommit(null);
+                else panel.deselectFile();
+              }}
+            >
+              Back
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="secondary small"
+            disabled={!wideEnough && !panel.sideBySide}
+            onClick={() => panel.setSideBySide(!panel.sideBySide)}
+          >
+            {panel.sideBySide ? 'Unified' : 'Side by side'}
+          </button>
+          <button type="button" className="secondary small" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </header>
+      <GitTabBar
+        tab={tab}
+        onChange={(next) => {
+          setTab(next);
+          if (next === 'changes') void panel.selectCommit(null);
+        }}
+      />
+      {panel.error && !errorShownInPane ? (
+        <p className="error git-pane-message">{panel.error}</p>
+      ) : null}
+      <div className="git-drawer-body" ref={bodyRef}>
+        <div className="git-drawer-left" style={{ width: leftWidth }}>
+          {tab === 'history' ? (
+            historyPane.type === 'error' ? (
+              <GitPaneError
+                message={historyPane.message}
+                onRetry={() => void panel.loadHistory()}
+              />
+            ) : (
+              <HistoryList
+                entries={panel.historyEntries}
+                onSelect={(entry) => void panel.selectCommit(entry)}
+              />
+            )
+          ) : changes.type === 'error' ? (
+            <GitPaneError message={changes.message} onRetry={() => void panel.refresh()} />
+          ) : changes.type === 'empty' ? (
+            <p className="muted git-pane-message">No uncommitted changes</p>
+          ) : (
+            <>
+              <div className="git-drawer-file-scroll">
+                <FileSectionList
+                  label="Staged"
+                  files={panel.groups.staged}
+                  mode="staged"
+                  onSelect={panel.selectFile}
+                  primaryLabel="Unstage"
+                  onPrimary={(path) => void panel.unstageFile(path)}
+                  sectionPrimary={{
+                    label: 'Unstage all',
+                    onClick: () => void panel.unstageAll(),
+                  }}
+                />
+                <FileSectionList
+                  label="Unstaged"
+                  files={panel.groups.unstaged}
+                  mode="unstaged"
+                  onSelect={panel.selectFile}
+                  primaryLabel="Stage"
+                  onPrimary={(path) => void panel.stageFile(path)}
+                  secondaryLabel="Discard"
+                  onSecondary={(path) => void panel.discardFile(path)}
+                  dangerSecondary
+                  sectionPrimary={{ label: 'Stage all', onClick: () => void panel.stageAll() }}
+                  sectionSecondary={{
+                    label: 'Discard all',
+                    onClick: () => void panel.discardAll(),
+                    danger: true,
+                  }}
+                />
+                <FileSectionList
+                  label="Untracked"
+                  files={panel.groups.untracked}
+                  mode="unstaged"
+                  onSelect={panel.selectFile}
+                  primaryLabel="Stage"
+                  onPrimary={(path) => void panel.stageFile(path)}
+                  secondaryLabel="Discard"
+                  onSecondary={(path) => void panel.discardFile(path)}
+                  dangerSecondary
+                />
+              </div>
+              <CommitBox
+                message={form.commitMessage}
+                onChangeMessage={form.setCommitMessage}
+                onCommit={() => void form.submitCommit()}
+                onAmend={() => void form.submitAmend()}
+                onUndoCommit={panel.undoCommit}
+                onPush={panel.push}
+                canAmend={panel.canAmend}
+                canPush={panel.canPush}
+                stagedCount={panel.groups.staged.length}
+                committing={form.committing}
+              />
+            </>
+          )}
+        </div>
+        <button
+          type="button"
+          className="git-drawer-splitter"
+          aria-label="Resize panes"
+          onMouseDown={(event) => startResize(event.clientX)}
+        />
+        <div className="git-drawer-right">
+          {panel.diffLoading ? (
+            <p className="muted git-pane-message">Loading diff…</p>
+          ) : diffPane.type === 'error' ? (
+            <GitPaneError
+              message={diffPane.message}
+              onRetry={() => {
+                if (viewingCommit && panel.historyCommit) {
+                  void panel.selectCommit(panel.historyCommit.entry);
+                } else if (panel.selectedPath) {
+                  panel.selectFile(panel.selectedPath, panel.diffMode ?? undefined);
+                } else {
+                  void panel.refresh();
+                }
+              }}
+            />
+          ) : viewingCommit && panel.historyCommit ? (
+            <DiffLines
+              parsed={panel.historyCommit.parsed}
+              path={panel.historyCommit.entry.subject}
+              emptyLabel="Empty commit diff"
+              sideBySide={panel.sideBySide && wideEnough}
+            />
+          ) : panel.diffImage ? (
+            <ImageDiff oldUrl={panel.diffImage.old} newUrl={panel.diffImage.new} />
+          ) : panel.selectedPath && panel.diffMode ? (
+            <DiffLines
+              parsed={panel.diffParsed}
+              path={panel.selectedPath}
+              emptyLabel="No changes in this file"
+              sideBySide={panel.sideBySide && wideEnough}
+              hunkActionLabel={panel.diffMode === 'staged' ? 'Unstage' : 'Stage'}
+              onHunkPress={(hunkIndex) => {
+                const path = panel.selectedPath;
+                const mode = panel.diffMode;
+                if (!path || !mode) return;
+                void panel.toggleHunk(path, hunkIndex, mode === 'staged');
+              }}
+            />
+          ) : panel.selectedPath ? (
+            <DiffLines
+              parsed={panel.diffParsed}
+              path={panel.selectedPath}
+              emptyLabel="No changes in this file"
+              sideBySide={panel.sideBySide && wideEnough}
+            />
+          ) : (
+            <p className="muted git-pane-message">Select a file to review</p>
+          )}
+          {panel.diffTruncated ? (
+            <p className="muted git-pane-message">Diff truncated at 1 MiB</p>
+          ) : null}
+        </div>
+      </div>
+    </aside>
+  );
+}

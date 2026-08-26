@@ -10,6 +10,8 @@ use crate::host_store::HostProfile;
 pub enum HttpMethod {
     Get,
     Post,
+    Delete,
+    Patch,
 }
 
 /// Complete shell-executable request description. Constructing it performs no
@@ -74,6 +76,19 @@ impl HostClient {
         self.request(HttpMethod::Post, path, headers, body)
     }
 
+    pub fn delete(&self, path: &str, headers: BTreeMap<String, String>) -> HttpRequest {
+        self.request(HttpMethod::Delete, path, headers, None)
+    }
+
+    pub fn patch(
+        &self,
+        path: &str,
+        headers: BTreeMap<String, String>,
+        body: Option<String>,
+    ) -> HttpRequest {
+        self.request(HttpMethod::Patch, path, headers, body)
+    }
+
     pub fn identity_request(&self) -> HttpRequest {
         self.get("/api/config", BTreeMap::new())
     }
@@ -119,7 +134,7 @@ impl HostClient {
     }
 }
 
-fn encode_query_value(value: &str) -> String {
+pub fn encode_query_value(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {

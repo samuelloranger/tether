@@ -43,5 +43,20 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "tether"
+        ]
+      }
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/samuelloranger/tether/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI5NTY5N0UyQjAxOTQwNApSV1FFbEFFcmZtbVZDL3RZUmJNcGlZQVNhOXZqL1NQaVA3UXdiMkc5cXBhdHd1UVFNMjcrSHNaOAo="
+    }
   }
 }

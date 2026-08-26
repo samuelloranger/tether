@@ -1,161 +1,103 @@
 // Prevent a console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashMap;
-use std::sync::Mutex;
+mod commands;
+mod http;
+mod state;
+mod storage;
 
-use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::mpsc;
+use std::sync::Arc;
 
-#[derive(Default)]
-struct CoreBridge {
-    sessions: Mutex<HashMap<String, tether_core::session::SessionHandle>>,
-    replay: std::sync::Arc<tether_core::store::ReplayStore>,
-}
+use tauri::Manager;
 
-#[tauri::command]
-async fn core_connect(
-    app: AppHandle,
-    conn_id: String,
-    base_ws_url: String,
-    password: String,
-    session_id: String,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
-    let (tx, mut rx) = mpsc::unbounded_channel::<tether_core::session::CoreEvent>();
-    let replay = app.state::<CoreBridge>().replay.clone();
-    let handle = tether_core::session::open_session(
-        tether_core::session::SessionConfig {
-            base_ws_url,
-            password,
-            session_id,
-            cols,
-            rows,
-        },
-        replay,
-        tx,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    app.state::<CoreBridge>()
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(conn_id.clone(), handle);
-
-    let msg_evt = format!("core-message-{conn_id}");
-    let close_evt = format!("core-closed-{conn_id}");
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                tether_core::session::CoreEvent::Frame(text) => {
-                    let _ = app.emit(&msg_evt, text);
-                }
-                tether_core::session::CoreEvent::Closed => break,
-            }
-        }
-        app.state::<CoreBridge>()
-            .sessions
-            .lock()
-            .unwrap()
-            .remove(&conn_id);
-        let _ = app.emit(&close_evt, ());
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-fn core_send(bridge: State<CoreBridge>, conn_id: String, text: String) -> Result<(), String> {
-    let handle = bridge
-        .sessions
-        .lock()
-        .unwrap()
-        .get(&conn_id)
-        .cloned()
-        .ok_or_else(|| format!("no core session for {conn_id}"))?;
-    handle.send_raw(text);
-    Ok(())
-}
-
-#[tauri::command]
-fn core_close(bridge: State<CoreBridge>, conn_id: String) {
-    if let Some(handle) = bridge.sessions.lock().unwrap().remove(&conn_id) {
-        handle.close();
-    }
-}
-
-#[tauri::command]
-fn core_forget(bridge: State<CoreBridge>, session_id: String) {
-    bridge.replay.forget(&session_id);
-}
-
-fn secure_entry(host_id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new("tether-desktop", &format!("server-password-{host_id}"))
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn secure_get_password(host_id: String) -> Result<Option<String>, String> {
-    match secure_entry(&host_id)?.get_password() {
-        Ok(pw) => Ok(Some(pw)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-#[tauri::command]
-fn secure_set_password(host_id: String, password: String) -> Result<(), String> {
-    secure_entry(&host_id)?
-        .set_password(&password)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn secure_clear_password(host_id: String) -> Result<(), String> {
-    match secure_entry(&host_id)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-fn legacy_secure_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new("tether-desktop", "server-password").map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn secure_get_legacy_password() -> Result<Option<String>, String> {
-    match legacy_secure_entry()?.get_password() {
-        Ok(pw) => Ok(Some(pw)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-#[tauri::command]
-fn secure_clear_legacy_password() -> Result<(), String> {
-    match legacy_secure_entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
-}
+use crate::state::AppState;
 
 fn main() {
     tauri::Builder::default()
-        .manage(CoreBridge::default())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| error.to_string())?;
+            std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
+            let storage_path = data_dir.join("host_storage.json");
+            app.manage(Arc::new(AppState::new(storage_path)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
-            core_connect,
-            core_send,
-            core_close,
-            core_forget,
-            secure_get_password,
-            secure_set_password,
-            secure_clear_password,
-            secure_get_legacy_password,
-            secure_clear_legacy_password,
+            commands::connect::core_connect,
+            commands::connect::core_send,
+            commands::connect::core_close,
+            commands::connect::core_forget,
+            commands::hosts::core_hosts_list,
+            commands::hosts::core_hosts_migrate,
+            commands::hosts::core_hosts_save,
+            commands::hosts::core_hosts_remove,
+            commands::hosts::core_test_connection,
+            commands::sessions::core_sessions_kill,
+            commands::sessions::core_sessions_rename,
+            commands::sessions::core_next_term_id,
+            commands::polling::core_polling_start,
+            commands::polling::core_polling_stop,
+            commands::polling::core_polling_restart,
+            commands::polling::core_polling_set_active,
+            commands::polling::core_host_retry,
+            commands::secrets::secure_get_password,
+            commands::secrets::secure_set_password,
+            commands::secrets::secure_clear_password,
+            commands::secrets::secure_get_legacy_password,
+            commands::secrets::secure_clear_legacy_password,
+            commands::terminal::core_detect_links,
+            commands::terminal::core_osc52_decode,
+            commands::terminal::core_mouse_cell,
+            commands::terminal::core_mouse_encode,
+            commands::terminal::core_cache_touch,
+            commands::terminal::core_cache_delete,
+            commands::terminal::core_cache_ids,
+            commands::git::core_git_summary,
+            commands::git::core_git_diff,
+            commands::git::core_git_diff_file,
+            commands::git::core_git_status,
+            commands::git::core_git_log,
+            commands::git::core_git_commit_diff,
+            commands::git::core_git_stage,
+            commands::git::core_git_unstage,
+            commands::git::core_git_discard,
+            commands::git::core_git_stage_hunk,
+            commands::git::core_git_unstage_hunk,
+            commands::git::core_git_stage_all,
+            commands::git::core_git_unstage_all,
+            commands::git::core_git_discard_all,
+            commands::git::core_git_commit,
+            commands::git::core_git_undo_commit,
+            commands::git::core_git_push,
+            commands::git::core_diff_parse,
+            commands::workspace::core_file_tree_build,
+            commands::workspace::core_workspace_dir,
+            commands::workspace::core_workspace_file,
+            commands::workspace::core_workspace_upload,
+            commands::workspace::core_presentations_list,
+            commands::workspace::core_presentation_close,
+            commands::config::core_config_get,
+            commands::config::core_config_patch,
+            commands::config::core_admin_change_password,
+            commands::config::core_admin_update,
+            commands::config::core_admin_restart,
+            commands::config::core_admin_test_notification,
+            commands::config::core_health_version,
+            commands::config::core_hosts_update_identity,
+            commands::config::core_hosts_update_connection,
+            commands::config::core_deep_link_resolve,
+            commands::config::core_notify_decide,
+            commands::config::core_notify_waiting_edge,
         ])
+        .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");
 }

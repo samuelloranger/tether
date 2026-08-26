@@ -1,10 +1,7 @@
-import { useState } from 'react';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
-import type { HostHealthStatus } from './hostHealth';
-import type { HostProfile } from './hostStore';
 import { sessionLabel } from './sessionLabel';
-import type { DrawerSession } from './useTetherDesktop';
+import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 
 interface SessionDrawerProps {
   hosts: HostProfile[];
@@ -12,14 +9,20 @@ interface SessionDrawerProps {
   sessions: DrawerSession[];
   activeHostId: string | null;
   activeSessionId: string;
+  docked?: boolean;
+  showPin?: boolean;
+  sidebarPinned?: boolean;
+  onTogglePin?: () => void;
   onSelect: (hostId: string, sessionId: string) => void;
   onNew: () => void;
-  onKill: (hostId: string, sessionId: string) => void;
-  onRename: (hostId: string, sessionId: string, name: string) => void;
+  onRequestKill: (hostId: string, sessionId: string, label: string) => void;
+  onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
   onRetryHost: (hostId: string) => void;
   onReenterPassword: (hostId: string) => void;
   onOpenHosts: () => void;
   onOpenSettings: () => void;
+  onOpenHostSettings: (hostId: string) => void;
+  onOpenLocalSettings: () => void;
 }
 
 function HostHeader({
@@ -27,15 +30,23 @@ function HostHeader({
   health,
   onRetryHost,
   onReenterPassword,
+  onOpenHostSettings,
 }: {
   host: HostProfile;
   health: HostHealthStatus;
   onRetryHost: (hostId: string) => void;
   onReenterPassword: (hostId: string) => void;
+  onOpenHostSettings: (hostId: string) => void;
 }) {
   return (
     <div className="drawer-host-header">
-      <span className="drawer-host-name">{host.name}</span>
+      <button
+        type="button"
+        className="linkish drawer-host-name"
+        onClick={() => onOpenHostSettings(host.id)}
+      >
+        {host.name}
+      </button>
       {health === 'unknown' ? <span className="drawer-host-status">connecting…</span> : null}
       {health === 'reachable' ? <span className="drawer-host-status online">online</span> : null}
       {health === 'unreachable' ? (
@@ -57,25 +68,19 @@ function SessionRow({
   session,
   active,
   onSelect,
-  onKill,
-  onRename,
+  onRequestKill,
+  onRequestRename,
 }: {
   host: HostProfile;
   session: DrawerSession;
   active: boolean;
   onSelect: (hostId: string, sessionId: string) => void;
-  onKill: (hostId: string, sessionId: string) => void;
-  onRename: (hostId: string, sessionId: string, name: string) => void;
+  onRequestKill: (hostId: string, sessionId: string, label: string) => void;
+  onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
 }) {
-  const [renaming, setRenaming] = useState(false);
-  const [renameText, setRenameText] = useState(session.name ?? '');
   const live = active || isRecentlyActive(session.last_output_at);
   const dot = activityDotKey(session.status, session.activity, live);
-
-  const submitRename = () => {
-    setRenaming(false);
-    void onRename(host.id, session.id, renameText.trim());
-  };
+  const label = sessionLabel(session);
 
   return (
     <div className={`drawer-session-row${active ? ' active' : ''}`}>
@@ -86,30 +91,14 @@ function SessionRow({
         title={activityLabel(dot)}
       >
         <span className={`activity-dot dot-${dot}`} aria-hidden />
-        {renaming ? (
-          <input
-            className="rename-input"
-            value={renameText}
-            onChange={(e) => setRenameText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submitRename();
-              if (e.key === 'Escape') setRenaming(false);
-            }}
-            onBlur={submitRename}
-          />
-        ) : (
-          <span className="drawer-session-title">{sessionLabel(session)}</span>
-        )}
+        <span className="drawer-session-title">{label}</span>
         {session.status === 'stopped' ? <span className="drawer-session-meta">stopped</span> : null}
       </button>
       <button
         type="button"
         className="icon-button"
         title="Rename session"
-        onClick={() => {
-          setRenameText(session.name ?? sessionLabel(session));
-          setRenaming(true);
-        }}
+        onClick={() => onRequestRename(host.id, session.id, session.name ?? label, label)}
       >
         ✎
       </button>
@@ -117,11 +106,7 @@ function SessionRow({
         type="button"
         className="icon-button danger"
         title="Kill session"
-        onClick={() => {
-          if (window.confirm('Kill this terminal? The process and saved output will be deleted.')) {
-            void onKill(host.id, session.id);
-          }
-        }}
+        onClick={() => onRequestKill(host.id, session.id, label)}
       >
         ×
       </button>
@@ -135,22 +120,41 @@ export function SessionDrawer({
   sessions,
   activeHostId,
   activeSessionId,
+  docked = true,
+  showPin = false,
+  sidebarPinned = false,
+  onTogglePin,
   onSelect,
   onNew,
-  onKill,
-  onRename,
+  onRequestKill,
+  onRequestRename,
   onRetryHost,
   onReenterPassword,
   onOpenHosts,
   onOpenSettings,
+  onOpenHostSettings,
+  onOpenLocalSettings,
 }: SessionDrawerProps) {
   return (
-    <aside className="session-drawer">
+    <aside className={`session-drawer${docked ? ' docked' : ' overlay'}`}>
       <header className="drawer-toolbar">
         <strong>Sessions</strong>
         <div className="drawer-toolbar-actions">
+          {showPin ? (
+            <button
+              type="button"
+              className="secondary small"
+              title={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+              onClick={onTogglePin}
+            >
+              {sidebarPinned ? 'Unpin' : 'Pin'}
+            </button>
+          ) : null}
+          <button type="button" className="secondary small" onClick={onOpenLocalSettings}>
+            App
+          </button>
           <button type="button" className="secondary small" onClick={onOpenSettings}>
-            Settings
+            ⋯
           </button>
           <button type="button" className="secondary small" onClick={onOpenHosts}>
             Hosts
@@ -168,6 +172,7 @@ export function SessionDrawer({
                 health={health}
                 onRetryHost={onRetryHost}
                 onReenterPassword={onReenterPassword}
+                onOpenHostSettings={onOpenHostSettings}
               />
               {hostSessions.length === 0 ? (
                 <p className="muted drawer-empty">No sessions</p>
@@ -179,8 +184,8 @@ export function SessionDrawer({
                     session={session}
                     active={host.id === activeHostId && session.id === activeSessionId}
                     onSelect={onSelect}
-                    onKill={onKill}
-                    onRename={onRename}
+                    onRequestKill={onRequestKill}
+                    onRequestRename={onRequestRename}
                   />
                 ))
               )}

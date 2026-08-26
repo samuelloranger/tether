@@ -1,79 +1,74 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FrameApplyResult } from './frameHandler';
 import {
-  createHostClient,
-  killSession,
-  nextTermId,
-  renameSession,
-  type TetherSession,
-  testConnection,
-} from './hostClient';
-import { type HostHealth, type HostHealthStatus, initialHostHealth } from './hostHealth';
-import { applyPollHealth, createHostPolling, type PollResult } from './hostPolling';
+  coreCacheDelete,
+  coreHostRetry,
+  coreHostsList,
+  coreHostsMigrate,
+  coreHostsRemove,
+  coreHostsSave,
+  coreHostsUpdateConnection,
+  coreHostsUpdateIdentity,
+  coreNextTermId,
+  coreNotifyWaitingEdge,
+  corePollingRestart,
+  corePollingSetActive,
+  corePollingStart,
+  corePollingStop,
+  coreSessionsKill,
+  coreSessionsRename,
+  listenHostHealth,
+  listenSessions,
+} from './coreApi';
+import type { FrameApplyResult } from './frameHandler';
+import { hostSecrets } from './secureConfig';
+import { sessionKey } from './sessionKey';
+import { sessionLabel } from './sessionLabel';
 import {
   activeSessionStorageKey,
-  createDefaultHostStore,
+  type DrawerSession,
+  HOST_PROFILES_KEY,
+  type HostHealthStatus,
   type HostProfile,
   KEY_ACTIVE_HOST,
-} from './hostStore';
-import { hostSecrets } from './secureConfig';
-import { sessionLabel } from './sessionLabel';
+} from './types';
 
-export interface DrawerSession extends TetherSession {
-  hostId: string;
-}
+export type { DrawerSession } from './types';
 
-type Screen = 'main' | 'hosts' | 'host-form' | 'settings';
+type Screen = 'main' | 'hosts' | 'host-form' | 'settings' | 'local-settings';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: desktop app state hook mirrors mobile session runtime scope
 export function useTetherDesktop() {
-  const store = useMemo(() => createDefaultHostStore(hostSecrets), []);
   const [ready, setReady] = useState(false);
   const [hosts, setHosts] = useState<HostProfile[]>([]);
   const [passwords, setPasswords] = useState<Record<string, string>>({});
   const [sessions, setSessions] = useState<DrawerSession[]>([]);
   const [healthByHost, setHealthByHost] = useState<Record<string, HostHealthStatus>>({});
-  const healthRef = useRef<Map<string, HostHealth>>(new Map());
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState('term-1');
   const [screen, setScreen] = useState<Screen>('main');
   const [editingHostId, setEditingHostId] = useState<string | null>(null);
-  const [terminalKey, setTerminalKey] = useState(0);
+  const [gitOpen, setGitOpen] = useState(false);
+  const [gitMode, setGitMode] = useState<'drawer' | 'review'>('drawer');
+  const [settingsHostId, setSettingsHostId] = useState<string | null>(null);
 
   const activeHostIdRef = useRef<string | null>(null);
   const hostsRef = useRef<HostProfile[]>([]);
-  const passwordsRef = useRef<Record<string, string>>({});
+  const sessionsRef = useRef<DrawerSession[]>([]);
+  const activeSessionIdRef = useRef(activeSessionId);
 
   activeHostIdRef.current = activeHostId;
   hostsRef.current = hosts;
-  passwordsRef.current = passwords;
-
-  const clientFor = useCallback((profile: HostProfile) => {
-    const password = passwordsRef.current[profile.id] ?? '';
-    return createHostClient(profile, password);
-  }, []);
-
-  const updateHealth = useCallback((profile: HostProfile, result: PollResult) => {
-    const previous = healthRef.current.get(profile.id) ?? initialHostHealth();
-    const next = applyPollHealth(previous, result);
-    healthRef.current.set(profile.id, next);
-    setHealthByHost((current) => ({ ...current, [profile.id]: next.status }));
-  }, []);
-
-  const pollingRef = useRef<ReturnType<typeof createHostPolling> | null>(null);
-
-  const mergeSessions = useCallback((profile: HostProfile, rows: unknown[]) => {
-    const mapped = (rows as Omit<DrawerSession, 'hostId'>[]).map((row) => ({
-      ...row,
-      hostId: profile.id,
-    }));
-    setSessions((previous) => [...previous.filter((row) => row.hostId !== profile.id), ...mapped]);
-  }, []);
+  sessionsRef.current = sessions;
+  activeSessionIdRef.current = activeSessionId;
 
   useEffect(() => {
     let cancelled = false;
+    let unlistenHealth: (() => void) | undefined;
+    let unlistenSessions: (() => void) | undefined;
     void (async () => {
-      const listed = await store.list();
+      const legacy = localStorage.getItem(HOST_PROFILES_KEY);
+      const listed = await coreHostsMigrate(legacy);
+      if (legacy) localStorage.removeItem(HOST_PROFILES_KEY);
       const loaded: Record<string, string> = {};
       for (const profile of listed) {
         const password = await hostSecrets.get(profile.id);
@@ -83,7 +78,6 @@ export function useTetherDesktop() {
       setHosts(listed);
       setPasswords(loaded);
       for (const profile of listed) {
-        healthRef.current.set(profile.id, initialHostHealth());
         setHealthByHost((current) => ({ ...current, [profile.id]: 'unknown' }));
       }
       const savedHost = localStorage.getItem(KEY_ACTIVE_HOST);
@@ -91,31 +85,32 @@ export function useTetherDesktop() {
         listed.find((profile) => profile.id === savedHost)?.id ?? listed[0]?.id ?? null;
       if (initialHost) {
         setActiveHostId(initialHost);
+        localStorage.setItem(KEY_ACTIVE_HOST, initialHost);
+        await corePollingSetActive(initialHost);
         const savedSession = localStorage.getItem(activeSessionStorageKey(initialHost));
         if (savedSession) setActiveSessionId(savedSession);
       }
+      unlistenHealth = await listenHostHealth((hostId, status) => {
+        setHealthByHost((current) => ({ ...current, [hostId]: status }));
+      });
+      unlistenSessions = await listenSessions((hostId, rows) => {
+        setSessions((previous) => [...previous.filter((row) => row.hostId !== hostId), ...rows]);
+      });
+      if (listed.length > 0) await corePollingStart();
       setReady(true);
     })();
     return () => {
       cancelled = true;
+      unlistenHealth?.();
+      unlistenSessions?.();
+      void corePollingStop();
     };
-  }, [store]);
+  }, []);
 
   useEffect(() => {
-    if (!ready || hosts.length === 0) return undefined;
-    pollingRef.current?.stop();
-    const polling = createHostPolling({
-      getProfiles: () => hostsRef.current,
-      getActiveHostId: () => activeHostIdRef.current,
-      getHealth: (profile) => healthRef.current.get(profile.id) ?? initialHostHealth(),
-      clientFor,
-      onSessions: mergeSessions,
-      onHealth: updateHealth,
-    });
-    pollingRef.current = polling;
-    void polling.start();
-    return () => polling.stop();
-  }, [ready, hosts, clientFor, mergeSessions, updateHealth]);
+    if (!ready) return;
+    void corePollingSetActive(activeHostId);
+  }, [ready, activeHostId]);
 
   const activeHost = hosts.find((host) => host.id === activeHostId) ?? null;
   const activePassword = activeHost ? (passwords[activeHost.id] ?? '') : '';
@@ -125,7 +120,6 @@ export function useTetherDesktop() {
     localStorage.setItem(KEY_ACTIVE_HOST, hostId);
     const savedSession = localStorage.getItem(activeSessionStorageKey(hostId));
     if (savedSession) setActiveSessionId(savedSession);
-    setTerminalKey((value) => value + 1);
     setScreen('main');
   }, []);
 
@@ -134,54 +128,51 @@ export function useTetherDesktop() {
     setActiveSessionId(sessionId);
     localStorage.setItem(KEY_ACTIVE_HOST, hostId);
     localStorage.setItem(activeSessionStorageKey(hostId), sessionId);
-    setTerminalKey((value) => value + 1);
     setScreen('main');
   }, []);
 
   const newSession = useCallback(() => {
     if (!activeHostId) return;
     const ids = sessions.filter((row) => row.hostId === activeHostId).map((row) => row.id);
-    selectSession(activeHostId, nextTermId(ids));
+    void coreNextTermId(ids).then((nextId) => selectSession(activeHostId, nextId));
   }, [activeHostId, sessions, selectSession]);
 
   const killSessionById = useCallback(
     async (hostId: string, sessionId: string) => {
-      const profile = hostsRef.current.find((host) => host.id === hostId);
-      if (!profile) return;
       try {
-        await killSession(clientFor(profile), sessionId);
+        const switchTo = await coreSessionsKill({
+          hostId,
+          sessionId,
+          activeHostId: activeHostIdRef.current,
+          activeSessionId: activeSessionIdRef.current,
+          drawerSessions: sessionsRef.current.map((row) => ({
+            hostId: row.hostId,
+            id: row.id,
+          })),
+        });
+        await coreCacheDelete(sessionKey(hostId, sessionId));
+        if (switchTo !== null && switchTo !== undefined) {
+          selectSession(hostId, switchTo);
+        }
       } catch {
         // refresh either way
       }
-      if (hostId === activeHostId && sessionId === activeSessionId) {
-        const remaining = sessions
-          .filter((row) => row.hostId === hostId && row.id !== sessionId)
-          .map((row) => row.id);
-        selectSession(hostId, remaining[0] ?? 'term-1');
-      }
-      pollingRef.current?.restart();
+      await corePollingRestart();
     },
-    [activeHostId, activeSessionId, clientFor, sessions, selectSession],
+    [selectSession],
   );
 
-  const renameSessionById = useCallback(
-    async (hostId: string, sessionId: string, name: string) => {
-      const profile = hostsRef.current.find((host) => host.id === hostId);
-      if (!profile) return;
-      await renameSession(clientFor(profile), sessionId, name);
-      setSessions((previous) =>
-        previous.map((row) =>
-          row.hostId === hostId && row.id === sessionId ? { ...row, name: name || null } : row,
-        ),
-      );
-    },
-    [clientFor],
-  );
+  const renameSessionById = useCallback(async (hostId: string, sessionId: string, name: string) => {
+    await coreSessionsRename(hostId, sessionId, name);
+    setSessions((previous) =>
+      previous.map((row) =>
+        row.hostId === hostId && row.id === sessionId ? { ...row, name: name || null } : row,
+      ),
+    );
+  }, []);
 
   const retryHost = useCallback((hostId: string) => {
-    healthRef.current.set(hostId, initialHostHealth());
-    setHealthByHost((current) => ({ ...current, [hostId]: 'unknown' }));
-    pollingRef.current?.restart();
+    void coreHostRetry(hostId);
   }, []);
 
   const saveHost = useCallback(
@@ -193,61 +184,28 @@ export function useTetherDesktop() {
       password: string;
       confirmPassword?: string;
     }) => {
-      const client = createHostClient(
-        {
-          id: input.id ?? 'pending',
-          name: input.name,
-          color: '#89b4fa',
-          host: input.host,
-          port: input.port,
-          identityName: '',
-          order: 0,
-        },
-        input.password,
-      );
-      const result = await testConnection(client, input.password, input.confirmPassword ?? '');
-      if (!result.ok) throw new Error(result.msg);
-
-      let profile: HostProfile;
-      if (input.id) {
-        profile = await store.update(input.id, {
-          name: input.name,
-          host: input.host,
-          port: input.port,
-        });
-      } else {
-        profile = await store.create({
-          name: input.name,
-          color: '#89b4fa',
-          host: input.host,
-          port: input.port,
-          identityName: '',
-        });
-      }
-      await hostSecrets.set(profile.id, input.password);
+      const profile = await coreHostsSave(input);
       setPasswords((current) => ({ ...current, [profile.id]: input.password }));
-      const listed = await store.list();
+      const listed = await coreHostsList();
       setHosts(listed);
       setActiveHostId(profile.id);
       localStorage.setItem(KEY_ACTIVE_HOST, profile.id);
-      pollingRef.current?.restart();
       setScreen('main');
       setEditingHostId(null);
     },
-    [store],
+    [],
   );
 
   const removeHost = useCallback(
     async (hostId: string) => {
-      await store.remove(hostId);
-      setHosts(await store.list());
+      await coreHostsRemove(hostId);
+      setHosts(await coreHostsList());
       setPasswords((current) => {
         const next = { ...current };
         delete next[hostId];
         return next;
       });
       setSessions((current) => current.filter((row) => row.hostId !== hostId));
-      healthRef.current.delete(hostId);
       setHealthByHost((current) => {
         const next = { ...current };
         delete next[hostId];
@@ -257,10 +215,43 @@ export function useTetherDesktop() {
         const remaining = hostsRef.current.filter((host) => host.id !== hostId);
         setActiveHostId(remaining[0]?.id ?? null);
       }
-      pollingRef.current?.restart();
     },
-    [activeHostId, store],
+    [activeHostId],
   );
+
+  const updateHostIdentity = useCallback(
+    async (hostId: string, identity: { name: string; color: string }) => {
+      const profile = await coreHostsUpdateIdentity(hostId, identity);
+      setHosts(await coreHostsList());
+      return profile;
+    },
+    [],
+  );
+
+  const updateHostConnection = useCallback(
+    async (
+      hostId: string,
+      changes: Pick<HostProfile, 'host' | 'port'>,
+      replacementPassword?: string,
+    ) => {
+      await coreHostsUpdateConnection(hostId, {
+        host: changes.host,
+        port: changes.port,
+        replacementPassword,
+      });
+      if (replacementPassword) {
+        setPasswords((current) => ({ ...current, [hostId]: replacementPassword }));
+        await hostSecrets.set(hostId, replacementPassword);
+      }
+      setHosts(await coreHostsList());
+    },
+    [],
+  );
+
+  const updateHostPassword = useCallback(async (hostId: string, password: string) => {
+    await hostSecrets.set(hostId, password);
+    setPasswords((current) => ({ ...current, [hostId]: password }));
+  }, []);
 
   const handleWsFrame = useCallback(
     (hostId: string, sessionId: string, frame: FrameApplyResult) => {
@@ -274,6 +265,22 @@ export function useTetherDesktop() {
         );
       }
       if (frame.kind === 'activity' && frame.activity !== undefined) {
+        const previous = sessionsRef.current.find(
+          (row) => row.hostId === hostId && row.id === sessionId,
+        );
+        const isActive =
+          activeHostIdRef.current === hostId && activeSessionIdRef.current === sessionId;
+        void coreNotifyWaitingEdge(previous?.activity, frame.activity, isActive).then(
+          async (should) => {
+            if (!should) return;
+            if (localStorage.getItem('tether_notifications_enabled') === 'false') return;
+            const { sendOsNotification } = await import('./desktopNotifications');
+            await sendOsNotification(
+              previous ? sessionLabel(previous) : sessionId,
+              'Needs your input',
+            );
+          },
+        );
         setSessions((previous) =>
           previous.map((row) =>
             row.hostId === hostId && row.id === sessionId
@@ -294,6 +301,7 @@ export function useTetherDesktop() {
   return {
     ready,
     hosts,
+    passwords,
     sessions,
     healthByHost,
     activeHost,
@@ -303,9 +311,14 @@ export function useTetherDesktop() {
     activeSessionLabel,
     screen,
     editingHostId,
-    terminalKey,
+    gitOpen,
+    gitMode,
     setScreen,
     setEditingHostId,
+    setGitOpen,
+    setGitMode,
+    settingsHostId,
+    setSettingsHostId,
     selectHost,
     selectSession,
     newSession,
@@ -314,9 +327,10 @@ export function useTetherDesktop() {
     retryHost,
     saveHost,
     removeHost,
+    updateHostIdentity,
+    updateHostConnection,
+    updateHostPassword,
     handleWsFrame,
-    clientFor,
-    store,
   };
 }
 

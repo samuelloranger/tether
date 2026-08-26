@@ -1,17 +1,14 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
-import { useEffect, useRef } from 'react';
-import {
-  forgetCoreSession,
-  nextConnId,
-  openCoreSocket,
-  sendJson,
-  type TerminalSocket,
-} from './coreTransport';
-import { applyServerFrame, createFrameSink, type FrameApplyResult } from './frameHandler';
+import { useEffect, useRef, useState } from 'react';
+import { sendJson, type TerminalSocket } from './coreTransport';
+import type { FrameApplyResult } from './frameHandler';
+import { setPasteListener } from './pasteBus';
 import type { UI_THEMES } from './preferences';
-import { createReplayGate } from './replayGate';
+import { bindTerminalSession } from './terminalBind';
+import { TerminalFindBar } from './terminalSearch';
 
 import '@xterm/xterm/css/xterm.css';
 
@@ -20,6 +17,7 @@ export interface TerminalPaneProps {
   password: string;
   sessionId: string;
   hostId: string;
+  interactive: boolean;
   terminalTheme: (typeof UI_THEMES)[keyof typeof UI_THEMES]['terminal'];
   fontFamily: string;
   fontSize?: number;
@@ -27,26 +25,26 @@ export interface TerminalPaneProps {
   onDisconnected: () => void;
 }
 
-function mountTerminal(
-  container: HTMLElement,
-  terminalTheme: TerminalPaneProps['terminalTheme'],
-  fontFamily: string,
-  fontSize: number,
-): {
+const BOOT_THEME = { background: '#1e1e2e', foreground: '#cdd6f4', cursor: '#f5e0dc' };
+
+function mountTerminal(container: HTMLElement): {
   term: Terminal;
   fit: FitAddon;
+  search: SearchAddon;
   dispose: () => void;
 } {
   const term = new Terminal({
     cursorBlink: true,
-    fontFamily: `${fontFamily}, ui-monospace, monospace`,
-    fontSize,
-    theme: terminalTheme,
+    fontFamily: 'monospace',
+    fontSize: 14,
+    theme: BOOT_THEME,
     allowProposedApi: true,
     scrollback: 1000,
   });
   const fit = new FitAddon();
+  const search = new SearchAddon();
   term.loadAddon(fit);
+  term.loadAddon(search);
   term.open(container);
   fit.fit();
   try {
@@ -54,121 +52,104 @@ function mountTerminal(
   } catch {
     // Software renderer fallback.
   }
-  return { term, fit, dispose: () => term.dispose() };
+  return { term, fit, search, dispose: () => term.dispose() };
 }
 
-function readDims(fit: FitAddon): { cols: number; rows: number } {
-  const dims = fit.proposeDimensions();
-  return { cols: dims?.cols ?? 80, rows: dims?.rows ?? 24 };
-}
-
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: one effect owns connect, replay gate, and resize
-export function TerminalPane(props: TerminalPaneProps) {
+function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const getSocketRef = useRef<(() => TerminalSocket | null) | null>(null);
   const onFrameRef = useRef(props.onFrame);
   const onDisconnectedRef = useRef(props.onDisconnected);
   onFrameRef.current = props.onFrame;
   onDisconnectedRef.current = props.onDisconnected;
+  const [search, setSearch] = useState<SearchAddon | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
 
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return undefined;
-
-    // Tied to this xterm instance — must not survive effect re-runs or session
-    // switches. Log ids are global on the server, so a stale cursor drops another
-    // session's replay as "already applied".
-    let lastAppliedId = 0;
-
-    const { term, fit, dispose } = mountTerminal(
-      container,
-      props.terminalTheme,
-      props.fontFamily,
-      props.fontSize ?? 14,
-    );
-    // writeDepth > 0 means xterm is parsing SERVER output right now, so
-    // anything it emits on onData in that window is a parser auto-reply
-    // rather than the user typing.
-    let writeDepth = 0;
-    const sink = createFrameSink(term, {
-      beginWrite: () => {
-        writeDepth += 1;
-      },
-      endWrite: () => {
-        writeDepth = Math.max(0, writeDepth - 1);
-      },
+    const { term, fit, search: searchAddon, dispose } = mountTerminal(container);
+    termRef.current = term;
+    fitRef.current = fit;
+    setSearch(searchAddon);
+    const bound = bindTerminalSession({
+      term,
+      fit,
+      search: searchAddon,
+      hostId: props.hostId,
+      sessionId: props.sessionId,
+      wsOrigin: props.wsOrigin,
+      password: props.password,
+      isInteractive: () => interactiveRef.current,
+      onFrame: (hostId, sessionId, frame) => onFrameRef.current(hostId, sessionId, frame),
+      onDisconnected: () => onDisconnectedRef.current(),
+      onOpenFind: () => setFindOpen(true),
     });
-    const replay = createReplayGate();
-    let socket: TerminalSocket | null = null;
-    let closed = false;
-
-    replay.onConnect();
-
-    const onClose = () => {
-      if (closed) return;
-      closed = true;
-      onDisconnectedRef.current();
+    getSocketRef.current = bound.socket;
+    return () => {
+      bound.dispose();
+      getSocketRef.current = null;
+      termRef.current = null;
+      fitRef.current = null;
+      setSearch(null);
+      dispose();
     };
+  }, [props.sessionId, props.hostId, props.wsOrigin, props.password, interactiveRef]);
 
-    fit.fit();
-    const { cols, rows } = readDims(fit);
-    void openCoreSocket(
-      nextConnId(),
-      props.wsOrigin,
-      props.password,
-      { sessionId: props.sessionId, cols, rows },
-      {
-        onOpen: () => {},
-        onMessage: (raw) => {
-          const result = applyServerFrame(sink, raw, lastAppliedId);
-          lastAppliedId = result.lastAppliedId;
-          if (result.kind === 'output') replay.onOutput();
-          if (result.kind === 'reset') replay.onReset();
-          onFrameRef.current(props.hostId, props.sessionId, result);
-        },
-        onClose,
-      },
-    ).then((s) => {
-      if (closed) {
-        s.close();
-        return;
-      }
-      socket = s;
-    });
+  return { hostRef, termRef, fitRef, getSocketRef, search, findOpen, setFindOpen };
+}
 
-    term.onData((text) => {
-      // Suppress ONLY auto-replies to queries embedded in replayed scrollback.
-      // User keystrokes always go through: gating them on output activity made
-      // the terminal silently swallow typing during any busy output.
-      const isAutoReply = writeDepth > 0;
-      if (isAutoReply && replay.isReplaying()) return;
+export function TerminalPane(props: TerminalPaneProps) {
+  const interactiveRef = useRef(props.interactive);
+  interactiveRef.current = props.interactive;
+  const { hostRef, termRef, fitRef, getSocketRef, search, findOpen, setFindOpen } =
+    useTerminalMount(props, interactiveRef);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.theme = props.terminalTheme;
+    term.options.fontFamily = `${props.fontFamily}, ui-monospace, monospace`;
+    term.options.fontSize = props.fontSize ?? 14;
+    fitRef.current?.fit();
+  }, [props.terminalTheme, props.fontFamily, props.fontSize, termRef, fitRef]);
+
+  // Sprint D's paste bridge, gated to the active tab: every resident session
+  // keeps a live socket, but only the focused one may receive a paste.
+  useEffect(() => {
+    if (!props.interactive) return undefined;
+    setPasteListener((text) => {
+      const socket = getSocketRef.current?.() ?? null;
       if (socket) sendJson(socket, { type: 'input', text });
     });
+    return () => setPasteListener(null);
+  }, [props.interactive, getSocketRef]);
 
-    const observer = new ResizeObserver(() => {
+  useEffect(() => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    const socket = getSocketRef.current?.() ?? null;
+    if (!term || !fit) return;
+    if (props.interactive) {
+      term.focus();
       fit.fit();
-      if (!socket) return;
-      const next = readDims(fit);
-      sendJson(socket, { type: 'resize', cols: next.cols, rows: next.rows });
-    });
-    observer.observe(container);
+      const next = fit.proposeDimensions();
+      if (socket)
+        sendJson(socket, { type: 'resize', cols: next?.cols ?? 80, rows: next?.rows ?? 24 });
+    } else {
+      term.blur();
+      setFindOpen(false);
+    }
+  }, [props.interactive, termRef, fitRef, getSocketRef, setFindOpen]);
 
-    return () => {
-      closed = true;
-      replay.dispose();
-      observer.disconnect();
-      socket?.close();
-      dispose();
-      void forgetCoreSession(props.sessionId);
-    };
-  }, [
-    props.sessionId,
-    props.hostId,
-    props.wsOrigin,
-    props.password,
-    props.terminalTheme,
-    props.fontFamily,
-    props.fontSize,
-  ]);
-
-  return <div className="terminal-host" ref={hostRef} />;
+  return (
+    <div className={`resident-pane${props.interactive ? ' active' : ' inactive'}`}>
+      {props.interactive && findOpen ? (
+        <TerminalFindBar search={search} onClose={() => setFindOpen(false)} />
+      ) : null}
+      <div className="terminal-host" ref={hostRef} />
+    </div>
+  );
 }
