@@ -83,7 +83,6 @@ struct RootView: View {
       )
       #endif
 
-      presentationHosts
     }
     // The terminal is the app's main surface, so the window behind it carries the
     // terminal's colour. Anything the terminal does not cover — the home
@@ -95,84 +94,69 @@ struct RootView: View {
     // the terminal to a strip at the top.
     .ignoresSafeArea(.keyboard, edges: .bottom)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
-  }
-
-  /// Every modal, each on its own view.
-  ///
-  /// SwiftUI keeps ONE presentation slot per view, so six presentation
-  /// modifiers chained onto the same ZStack meant the ones further down the
-  /// chain silently never opened. That is why the overflow (…) button appeared
-  /// dead while the gear beside it worked: the settings sheet held the slot and
-  /// the confirmation dialog, registered after it, had nowhere to go. Siblings
-  /// in a ZStack are separate views, so each gets its own slot.
-  ///
-  /// The hosts are zero-size, so they cannot intercept a touch. They must NOT
-  /// carry `allowsHitTesting(false)`: SwiftUI passes that into the presented
-  /// content, which left the rename alert on screen with dead buttons.
-  @ViewBuilder
-  private var presentationHosts: some View {
-    ZStack {
-      anchor.sheet(isPresented: $showSettings, onDismiss: { settingsHostId = nil }) {
-        ConfigSettingsView(
+    // Chained on the ZStack, not hung off zero-size sibling hosts. The hosts
+    // were an attempt at the dead … button — SwiftUI keeps one presentation slot
+    // per view, so I suspected the sixth modifier was losing it — and they did
+    // not fix it; replacing the confirmationDialog with a Menu did. They cost
+    // all 21 of the app's AttributeGraph dependency cycles, measured by removing
+    // them (21 → 0), so with five presentations left and each verified to open,
+    // they are gone.
+    .sheet(isPresented: $showSettings, onDismiss: { settingsHostId = nil }) {
+      ConfigSettingsView(
+        store: store,
+        preferences: preferences,
+        onAddHost: {
+          showSettings = false
+          showPairing = true
+        },
+        onDismiss: {
+          settingsHostId = nil
+          showSettings = false
+        },
+        initialHostId: settingsHostId
+      )
+      // Force a fresh NavigationPath when opening for a specific host (or not).
+      .id(settingsHostId ?? "settings-root")
+    }
+    .sheet(isPresented: $showGit) {
+      GitDrawerView(store: store, onDismiss: { showGit = false })
+        .presentationDetents([.large, .medium])
+    }
+    .sheet(item: $passwordPromptHostId) { hostId in
+      NavigationStack {
+        HostPasswordView(
           store: store,
-          preferences: preferences,
-          onAddHost: {
-            showSettings = false
-            showPairing = true
-          },
-          onDismiss: {
-            settingsHostId = nil
-            showSettings = false
-          },
-          initialHostId: settingsHostId
+          hostId: hostId,
+          hostLabel: store.hosts.first(where: { $0.id == hostId })?.name ?? hostId,
+          onDone: { passwordPromptHostId = nil }
         )
-        // Force a fresh NavigationPath when opening for a specific host (or not).
-        .id(settingsHostId ?? "settings-root")
+        .toolbar {
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { passwordPromptHostId = nil }
+          }
+        }
       }
-      anchor.sheet(isPresented: $showGit) {
-        GitDrawerView(store: store, onDismiss: { showGit = false })
-          .presentationDetents([.large, .medium])
-      }
-      anchor.sheet(item: $passwordPromptHostId) { hostId in
-        NavigationStack {
-          HostPasswordView(
-            store: store,
-            hostId: hostId,
-            hostLabel: store.hosts.first(where: { $0.id == hostId })?.name ?? hostId,
-            onDone: { passwordPromptHostId = nil }
-          )
+    }
+    .sheet(isPresented: $showPairing) {
+      NavigationStack {
+        PairingView(store: store)
           .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-              Button("Cancel") { passwordPromptHostId = nil }
+              Button("Cancel") { showPairing = false }
             }
           }
+      }
+    }
+    .alert("Rename session", isPresented: $showRename) {
+      TextField("Name", text: $renameText)
+      Button("Save") {
+        guard let id = store.activeSessionId else { return }
+        Task {
+          await store.renameSession(id: id, name: renameText)
         }
       }
-      anchor.sheet(isPresented: $showPairing) {
-        NavigationStack {
-          PairingView(store: store)
-            .toolbar {
-              ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { showPairing = false }
-              }
-            }
-        }
-      }
-      anchor.alert("Rename session", isPresented: $showRename) {
-        TextField("Name", text: $renameText)
-        Button("Save") {
-          guard let id = store.activeSessionId else { return }
-          Task {
-            await store.renameSession(id: id, name: renameText)
-          }
-        }
-        Button("Cancel", role: .cancel) {}
-      }
-      }
-  }
-
-  private var anchor: some View {
-    Color.clear.frame(width: 0, height: 0)
+      Button("Cancel", role: .cancel) {}
+    }
   }
 
   /// The … menu's items.
