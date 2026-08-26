@@ -25,7 +25,7 @@ CURRENT_PROJECT_VERSION = 900000 + github.run_number
 
 That puts every beta build in a `9xxxxx` band that release.yml's counter cannot reach, stays monotonic, and is obvious in ASC as "this came from the beta lane."
 
-`MARKETING_VERSION` defaults to `apps/mobile/app.json` → `.expo.version` (so the beta tracks the shipping version line). Override per dispatch with the `version` input. Neither value is written back into `project.pbxproj` or `app.json`; both are passed as `xcodebuild` build settings.
+`MARKETING_VERSION` defaults to **3.0.0**. The native client has its own 3.x line, deliberately above the Expo client's 2.8.x, so the two codebases never interleave versions on the shared App Store Connect record even though they publish to the same app. Override per dispatch with the `version` input. The build number is still passed as an `xcodebuild` build setting and never written back into `app.json`; `project.pbxproj` carries `MARKETING_VERSION = 3.0.0` so a local Xcode build agrees with CI.
 
 ## How to run
 
@@ -33,7 +33,7 @@ That puts every beta build in a `9xxxxx` band that release.yml's counter cannot 
 2. **Run workflow**.
 3. Branch: the rewrite branch that has this workflow (today: `feat/ios-beta-pipeline` / wherever `beta.yml` lives).
 4. **scope** = `testflight`.
-5. **version** (optional): leave empty to inherit `apps/mobile/app.json`, or set e.g. `2.8.12`.
+5. **version** (optional): defaults to `3.0.0`. Set it only to publish a different 3.x beta, e.g. `3.0.1`. Do not set it to a 2.8.x value — that would put a native build into the Expo client's version train.
 
 `scope=ios` still builds an unsigned simulator binary only. Push events never enter the TestFlight path.
 

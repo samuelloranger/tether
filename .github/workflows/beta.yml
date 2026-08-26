@@ -19,10 +19,11 @@ on:
         options: [all, core, desktop, ios, testflight]
       version:
         description: >-
-          Marketing version for TestFlight (scope=testflight). Empty = read
-          apps/mobile/app.json .expo.version so the beta tracks the shipping line.
+          Marketing version for TestFlight (scope=testflight). The native client
+          has its own 3.x line, deliberately above the Expo client's 2.8.x so the
+          two never interleave on the shared App Store Connect record.
         type: string
-        default: ''
+        default: '3.0.0'
   # GitHub only exposes workflow_dispatch for workflows that exist on the
   # DEFAULT branch, and this one lives on the rewrite branch. A push trigger
   # runs from the branch's own definition instead, which is how the rewrite
@@ -277,11 +278,9 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          if [ -n "$VERSION_INPUT" ]; then
-            V="$VERSION_INPUT"
-          else
-            V="$(jq -r '.expo.version' apps/mobile/app.json)"
-          fi
+          # Falls back rather than reading apps/mobile/app.json: the native client
+          # tracks its own 3.x line, not the Expo client's shipping version.
+          V="${VERSION_INPUT:-3.0.0}"
           B=$((900000 + RUN_NUMBER))
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "build=$B" >> "$GITHUB_OUTPUT"
