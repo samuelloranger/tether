@@ -31,7 +31,9 @@ async fn workspace_server() -> (tempfile::TempDir, Server, String) {
         .await;
     assert_eq!(status, 200, "session start failed: {body}");
     eventually("the session to be running", || async {
-        let (_, body) = server.exec(&client.get("/api/sessions", BTreeMap::new())).await;
+        let (_, body) = server
+            .exec(&client.get("/api/sessions", BTreeMap::new()))
+            .await;
         let found = body.as_array()?.iter().find(|s| s["id"] == "w1")?.clone();
         (found["status"] == "running").then_some(())
     })
@@ -67,7 +69,10 @@ async fn lists_a_directory() {
     let first_file = kinds.iter().position(|k| *k == "file");
     let last_dir = kinds.iter().rposition(|k| *k == "dir");
     if let (Some(first_file), Some(last_dir)) = (first_file, last_dir) {
-        assert!(last_dir < first_file, "directories are not listed first: {kinds:?}");
+        assert!(
+            last_dir < first_file,
+            "directories are not listed first: {kinds:?}"
+        );
     }
 }
 
@@ -93,7 +98,10 @@ async fn a_directory_past_the_page_cap_still_shows_its_earliest_names() {
         ))
         .await;
     assert_eq!(status, 200, "dir listing failed: {body}");
-    assert_eq!(body["truncated"], true, "a 2101-entry dir should report truncated");
+    assert_eq!(
+        body["truncated"], true,
+        "a 2101-entry dir should report truncated"
+    );
     let names: Vec<&str> = body["entries"]
         .as_array()
         .expect("entries")

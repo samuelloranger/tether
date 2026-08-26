@@ -17,11 +17,15 @@ use tether_core::store::ReplayStore;
 async fn rejects_a_wrong_password_and_accepts_the_paired_one() {
     let server = Server::start().await;
 
-    let (status, _) = server.exec(&server.client().get("/api/health", server.auth())).await;
+    let (status, _) = server
+        .exec(&server.client().get("/api/health", server.auth()))
+        .await;
     assert_eq!(status, 200, "the paired password should be accepted");
 
     let bad = server.client_with("not-the-password");
-    let (status, _) = server.exec(&bad.get("/api/health", bad.auth_header())).await;
+    let (status, _) = server
+        .exec(&bad.get("/api/health", bad.auth_header()))
+        .await;
     assert_eq!(status, 401, "a wrong password must be refused");
 }
 
@@ -55,12 +59,10 @@ async fn starts_lists_renames_and_kills_a_session() {
     assert_eq!(body["ok"], true);
 
     let listed = eventually("the session to appear as running", || async {
-        let (_, body) = server.exec(&client.get("/api/sessions", server.auth())).await;
-        let found = body
-            .as_array()?
-            .iter()
-            .find(|s| s["id"] == "s1")?
-            .clone();
+        let (_, body) = server
+            .exec(&client.get("/api/sessions", server.auth()))
+            .await;
+        let found = body.as_array()?.iter().find(|s| s["id"] == "s1")?.clone();
         (found["status"] == "running").then_some(found)
     })
     .await;
@@ -75,7 +77,9 @@ async fn starts_lists_renames_and_kills_a_session() {
         .await;
     assert_eq!(status, 200);
     let renamed = eventually("the rename to be listed", || async {
-        let (_, body) = server.exec(&client.get("/api/sessions", server.auth())).await;
+        let (_, body) = server
+            .exec(&client.get("/api/sessions", server.auth()))
+            .await;
         let found = body.as_array()?.iter().find(|s| s["id"] == "s1")?.clone();
         (found["name"] == "renamed").then_some(found)
     })

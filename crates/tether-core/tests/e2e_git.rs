@@ -39,7 +39,9 @@ async fn repo_server() -> (tempfile::TempDir, Server, String) {
         .await;
     assert_eq!(status, 200, "session start failed: {body}");
     eventually("the session to be running", || async {
-        let (_, body) = server.exec(&client.get("/api/sessions", BTreeMap::new())).await;
+        let (_, body) = server
+            .exec(&client.get("/api/sessions", BTreeMap::new()))
+            .await;
         let found = body.as_array()?.iter().find(|s| s["id"] == "g1")?.clone();
         (found["status"] == "running").then_some(())
     })
@@ -71,7 +73,12 @@ async fn reports_status_and_diff_for_a_working_tree_change() {
     );
 
     let (status, body) = server
-        .exec(&git_api::diff_request(&client, &session, Some("tracked.txt"), None))
+        .exec(&git_api::diff_request(
+            &client,
+            &session,
+            Some("tracked.txt"),
+            None,
+        ))
         .await;
     let payload = git_api::parse_diff_payload(status, &body).expect("diff parses");
     assert!(
@@ -85,7 +92,11 @@ async fn reports_status_and_diff_for_a_working_tree_change() {
 async fn stages_unstages_and_commits() {
     let (repo, server, session) = repo_server().await;
     let client = server.client();
-    fs::write(repo.path().join("tracked.txt"), "one\nstaged-change\nthree\n").unwrap();
+    fs::write(
+        repo.path().join("tracked.txt"),
+        "one\nstaged-change\nthree\n",
+    )
+    .unwrap();
 
     let (status, body) = server
         .exec(&git_api::stage_request(&client, &session, "tracked.txt"))
@@ -121,7 +132,12 @@ async fn stages_unstages_and_commits() {
     git_api::parse_ok_response(status, &body).expect("stage-all");
 
     let (status, body) = server
-        .exec(&git_api::commit_request(&client, &session, "e2e commit", false))
+        .exec(&git_api::commit_request(
+            &client,
+            &session,
+            "e2e commit",
+            false,
+        ))
         .await;
     git_api::parse_ok_response(status, &body).expect("commit");
 
@@ -138,7 +154,9 @@ async fn stages_unstages_and_commits() {
     // The commit's own diff must be retrievable by sha — that is what Review shows.
     let sha = log.first().expect("a commit").sha.clone();
     let (status, body) = server
-        .exec(&git_api::git_commit_diff_request(&client, &session, &sha, None))
+        .exec(&git_api::git_commit_diff_request(
+            &client, &session, &sha, None,
+        ))
         .await;
     let payload = git_api::parse_diff_payload(status, &body).expect("commit diff parses");
     assert!(
@@ -192,13 +210,23 @@ async fn stages_and_unstages_a_single_hunk() {
     .unwrap();
 
     let (status, body) = server
-        .exec(&git_api::stage_hunk_request(&client, &session, "tracked.txt", 0))
+        .exec(&git_api::stage_hunk_request(
+            &client,
+            &session,
+            "tracked.txt",
+            0,
+        ))
         .await;
     git_api::parse_ok_response(status, &body)
         .unwrap_or_else(|e| panic!("stage-hunk failed: {e} / {body}"));
 
     let (status, body) = server
-        .exec(&git_api::unstage_hunk_request(&client, &session, "tracked.txt", 0))
+        .exec(&git_api::unstage_hunk_request(
+            &client,
+            &session,
+            "tracked.txt",
+            0,
+        ))
         .await;
     git_api::parse_ok_response(status, &body)
         .unwrap_or_else(|e| panic!("unstage-hunk failed: {e} / {body}"));
@@ -210,9 +238,7 @@ async fn stages_and_unstages_a_single_hunk() {
 async fn push_without_a_remote_reports_an_error() {
     let (_repo, server, session) = repo_server().await;
     let client = server.client();
-    let (status, body) = server
-        .exec(&git_api::push_request(&client, &session))
-        .await;
+    let (status, body) = server.exec(&git_api::push_request(&client, &session)).await;
     let result = git_api::parse_ok_response(status, &body);
     assert!(
         result.is_err() || body.get("ok") == Some(&json!(false)),

@@ -16,7 +16,9 @@ use tether_core::server_config::{
 async fn reads_the_config_including_its_read_only_fields() {
     let server = Server::start().await;
     let client = server.client();
-    let (status, body) = server.exec(&server_config::get_config_request(&client)).await;
+    let (status, body) = server
+        .exec(&server_config::get_config_request(&client))
+        .await;
     let config = server_config::parse_config_response(status, &body)
         .unwrap_or_else(|e| panic!("config did not parse: {e} / {body}"));
 
@@ -30,7 +32,10 @@ async fn reads_the_config_including_its_read_only_fields() {
     );
     // GET reports these; PATCH must not accept them.
     assert_eq!(config.push_devices, 0, "a fresh server has no push devices");
-    assert!(body.get("tls").is_some(), "the TLS report is missing from {body}");
+    assert!(
+        body.get("tls").is_some(),
+        "the TLS report is missing from {body}"
+    );
 }
 
 #[tokio::test]
@@ -59,9 +64,14 @@ async fn patches_settings_and_persists_them() {
         .await;
     assert_eq!(status, 200, "patch failed: {body}");
 
-    let (status, body) = server.exec(&server_config::get_config_request(&client)).await;
+    let (status, body) = server
+        .exec(&server_config::get_config_request(&client))
+        .await;
     let config = server_config::parse_config_response(status, &body).expect("config parses");
-    assert!(!config.triggers.waiting, "the waiting trigger did not persist");
+    assert!(
+        !config.triggers.waiting,
+        "the waiting trigger did not persist"
+    );
     assert_eq!(config.identity.name, "e2e-host");
     assert_eq!(config.session.scrollback_rows, 4321);
     assert_eq!(config.long_job_seconds, 99);
@@ -73,23 +83,32 @@ async fn patches_settings_and_persists_them() {
 async fn refuses_an_invalid_patch_without_applying_any_of_it() {
     let server = Server::start().await;
     let client = server.client();
-    let (_, before) = server.exec(&server_config::get_config_request(&client)).await;
+    let (_, before) = server
+        .exec(&server_config::get_config_request(&client))
+        .await;
 
     let (status, body) = server
-        .exec(&client.patch(
-            "/api/config",
-            BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]),
-            // An empty defaultCwd violates `min(1)`; the identity change rides along.
-            Some(
-                json!({ "identity": { "name": "should-not-stick" },
+        .exec(
+            &client.patch(
+                "/api/config",
+                BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]),
+                // An empty defaultCwd violates `min(1)`; the identity change rides along.
+                Some(
+                    json!({ "identity": { "name": "should-not-stick" },
                         "session": { "defaultCwd": "" } })
-                .to_string(),
+                    .to_string(),
+                ),
             ),
-        ))
+        )
         .await;
-    assert!(status >= 400, "an invalid patch was accepted: {status} {body}");
+    assert!(
+        status >= 400,
+        "an invalid patch was accepted: {status} {body}"
+    );
 
-    let (_, after) = server.exec(&server_config::get_config_request(&client)).await;
+    let (_, after) = server
+        .exec(&server_config::get_config_request(&client))
+        .await;
     assert_eq!(
         before["identity"], after["identity"],
         "a rejected patch still changed the identity"
@@ -120,11 +139,15 @@ async fn changes_the_password_and_invalidates_the_old_one() {
     server_config::parse_admin_ok(status, &body)
         .unwrap_or_else(|e| panic!("password change failed: {e} / {body}"));
 
-    let (status, _) = server.exec(&client.get("/api/health", BTreeMap::new())).await;
+    let (status, _) = server
+        .exec(&client.get("/api/health", BTreeMap::new()))
+        .await;
     assert_eq!(status, 401, "the old password still authenticates");
 
     let rotated = server.client_with("second-password");
-    let (status, _) = server.exec(&rotated.get("/api/health", BTreeMap::new())).await;
+    let (status, _) = server
+        .exec(&rotated.get("/api/health", BTreeMap::new()))
+        .await;
     assert_eq!(status, 200, "the new password does not authenticate");
 }
 
@@ -139,14 +162,22 @@ async fn destructive_admin_actions_refuse_a_wrong_password() {
     let (status, body) = server
         .exec(&server_config::update_server_request(&client, "wrong"))
         .await;
-    assert!(status >= 400, "admin update accepted a wrong password: {status} {body}");
+    assert!(
+        status >= 400,
+        "admin update accepted a wrong password: {status} {body}"
+    );
 
     let (status, body) = server
         .exec(&server_config::restart_server_request(&client, "wrong"))
         .await;
-    assert!(status >= 400, "admin restart accepted a wrong password: {status} {body}");
+    assert!(
+        status >= 400,
+        "admin restart accepted a wrong password: {status} {body}"
+    );
 
-    let (status, _) = server.exec(&client.get("/api/health", BTreeMap::new())).await;
+    let (status, _) = server
+        .exec(&client.get("/api/health", BTreeMap::new()))
+        .await;
     assert_eq!(status, 200, "the server died during a refused admin action");
 }
 
@@ -162,7 +193,9 @@ async fn test_notification_explains_itself_with_no_devices_registered() {
     assert_eq!(status, 502, "unexpected status: {body}");
     assert_eq!(body["code"], "notification_delivery_failed");
     assert!(
-        body["error"].as_str().is_some_and(|e| e.contains("registered")),
+        body["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("registered")),
         "the error gives the user nothing to act on: {body}"
     );
 }

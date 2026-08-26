@@ -94,10 +94,9 @@ where
     }
 
     pub fn list(&self) -> Result<Vec<HostProfile>, HostStoreError> {
-        let profiles =
-            self.repair_duplicate_ids(parse_profiles(
-                self.storage.get_item(HOST_PROFILES_KEY)?.as_deref(),
-            ))?;
+        let profiles = self.repair_duplicate_ids(parse_profiles(
+            self.storage.get_item(HOST_PROFILES_KEY)?.as_deref(),
+        ))?;
         let Some(legacy_host) = self
             .storage
             .get_item(LEGACY_SERVER_IP_KEY)?
@@ -496,9 +495,7 @@ mod tests {
         // The iOS generator is a counter built at launch, so a second app run
         // starts back at `host-0`. A constant generator is that bug at its worst.
         let storage = MemoryStorage::default();
-        let store = HostStore::new(storage, MemorySecrets::default(), || {
-            "host-0".to_string()
-        });
+        let store = HostStore::new(storage, MemorySecrets::default(), || "host-0".to_string());
 
         let first = store
             .create(NewHostProfile {
@@ -526,7 +523,10 @@ mod tests {
         // are both keyed by this id, so a duplicate makes the newer host take
         // over the older one's password and cached sessions.
         let ids: Vec<String> = store.list().unwrap().into_iter().map(|p| p.id).collect();
-        assert_eq!(ids.iter().collect::<std::collections::HashSet<_>>().len(), 2);
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            2
+        );
     }
 
     #[test]

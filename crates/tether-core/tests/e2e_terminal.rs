@@ -34,7 +34,9 @@ async fn start_session(server: &Server, id: &str) {
         .await;
     assert_eq!(status, 200, "session start failed: {body}");
     eventually("the session to be running", || async {
-        let (_, body) = server.exec(&client.get("/api/sessions", BTreeMap::new())).await;
+        let (_, body) = server
+            .exec(&client.get("/api/sessions", BTreeMap::new()))
+            .await;
         let found = body.as_array()?.iter().find(|s| s["id"] == id)?.clone();
         (found["status"] == "running").then_some(())
     })
@@ -102,10 +104,7 @@ async fn serves_the_replay_log_over_http() {
 
     // A cursor past everything must return nothing, not the whole tail again.
     let (status, body) = server
-        .exec(&client.get(
-            "/api/sessions/log1/logs?sinceId=999999",
-            BTreeMap::new(),
-        ))
+        .exec(&client.get("/api/sessions/log1/logs?sinceId=999999", BTreeMap::new()))
         .await;
     assert_eq!(status, 200);
     assert_eq!(
@@ -131,13 +130,11 @@ async fn a_reconnect_does_not_replay_what_the_cursor_already_saw() {
     handle.send(ClientFrame::Input {
         text: "echo first-connection-mark''er\r".to_string(),
     });
-    let seen = collect_until(
-        &mut rx,
-        "first-connection-marker",
-        Duration::from_secs(15),
-    )
-    .await;
-    assert!(seen.contains("first-connection-marker"), "no output: {seen}");
+    let seen = collect_until(&mut rx, "first-connection-marker", Duration::from_secs(15)).await;
+    assert!(
+        seen.contains("first-connection-marker"),
+        "no output: {seen}"
+    );
     handle.close();
     let cursor = store.since_id("recon1");
     assert!(cursor > 0, "the cursor never advanced");
@@ -148,12 +145,7 @@ async fn a_reconnect_does_not_replay_what_the_cursor_already_saw() {
     let handle2 = open_session(config(&server, "recon1"), store.clone(), tx2)
         .await
         .expect("reopen");
-    let replayed = collect_until(
-        &mut rx2,
-        "first-connection-marker",
-        Duration::from_secs(3),
-    )
-    .await;
+    let replayed = collect_until(&mut rx2, "first-connection-marker", Duration::from_secs(3)).await;
     handle2.close();
     assert!(
         !replayed.contains("first-connection-marker"),
@@ -188,11 +180,20 @@ async fn a_session_survives_a_server_restart() {
 
     // The reattached session must still be running and still take input.
     let client = server.client();
-    eventually("the session to still be running after a restart", || async {
-        let (_, body) = server.exec(&client.get("/api/sessions", BTreeMap::new())).await;
-        let found = body.as_array()?.iter().find(|s| s["id"] == "survivor")?.clone();
-        (found["status"] == "running").then_some(())
-    })
+    eventually(
+        "the session to still be running after a restart",
+        || async {
+            let (_, body) = server
+                .exec(&client.get("/api/sessions", BTreeMap::new()))
+                .await;
+            let found = body
+                .as_array()?
+                .iter()
+                .find(|s| s["id"] == "survivor")?
+                .clone();
+            (found["status"] == "running").then_some(())
+        },
+    )
     .await;
 
     let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
@@ -226,7 +227,10 @@ async fn a_resize_reaches_the_shell() {
     // resize racing ahead of it gets overwritten by the 80 in the URL. Real
     // clients resize after the fit, which is what this wait reproduces.
     tokio::time::sleep(Duration::from_millis(1000)).await;
-    handle.send(ClientFrame::Resize { cols: 132, rows: 43 });
+    handle.send(ClientFrame::Resize {
+        cols: 132,
+        rows: 43,
+    });
     tokio::time::sleep(Duration::from_millis(500)).await;
     handle.send(ClientFrame::Input {
         text: "echo cols-is-$(tput cols)\r".to_string(),
@@ -258,7 +262,9 @@ async fn classifies_session_activity() {
     let _ = collect_until(&mut rx, "activity-marker", Duration::from_secs(15)).await;
 
     let activity = eventually("an activity classification", || async {
-        let (_, body) = server.exec(&client.get("/api/sessions", BTreeMap::new())).await;
+        let (_, body) = server
+            .exec(&client.get("/api/sessions", BTreeMap::new()))
+            .await;
         let found = body.as_array()?.iter().find(|s| s["id"] == "act1")?.clone();
         found["activity"].as_str().map(str::to_string)
     })
