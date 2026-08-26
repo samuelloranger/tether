@@ -36,6 +36,14 @@ public struct GitReviewView: View {
 
   private var isImage: Bool { binary && isImagePath(path) }
 
+  /// True when there is at least one add/remove line or a hunk header to show.
+  private var hasDiffContent: Bool {
+    lines.contains {
+      $0.kind == .add || $0.kind == .remove
+        || ($0.kind == .meta && $0.text.hasPrefix("@@"))
+    }
+  }
+
   public var body: some View {
     Group {
       if loading {
@@ -58,8 +66,8 @@ public struct GitReviewView: View {
         Text("Binary file")
           .foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else if lines.isEmpty {
-        Text("Empty diff")
+      } else if !hasDiffContent {
+        Text("No changes")
           .foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
@@ -70,7 +78,7 @@ public struct GitReviewView: View {
     .navigationTitle(path)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      if !binary && !lines.isEmpty {
+      if !binary && hasDiffContent {
         ToolbarItem(placement: .topBarTrailing) {
           Button(sideBySide ? "Unified" : "Side by side") {
             sideBySide.toggle()
@@ -130,6 +138,7 @@ public struct GitReviewView: View {
               .foregroundStyle(TetherColors.textSecondary)
               .padding(.horizontal, 12)
               .padding(.vertical, 6)
+              .frame(maxWidth: .infinity, alignment: .leading)
           }
           if sideBySide {
             SideBySideDiffView(lines: lines, path: path)
@@ -139,13 +148,20 @@ public struct GitReviewView: View {
               path: path,
               hunkIndices: hunkIndices,
               mode: mode,
+              minWidth: proxy.size.width,
               onToggleHunk: { hunk in
                 Task { await toggleHunk(hunk) }
               }
             )
           }
         }
-        .frame(minWidth: proxy.size.width, alignment: .leading)
+        // Bi-axis ScrollView centres undersized content; pin to top-leading and
+        // fill the viewport so short diffs are left-aligned edge-to-edge.
+        .frame(
+          minWidth: proxy.size.width,
+          minHeight: proxy.size.height,
+          alignment: .topLeading
+        )
         .padding(.vertical, 8)
       }
     }
@@ -170,7 +186,11 @@ public struct GitReviewView: View {
     lines = visible.lines
     hunkIndices = visible.hunkIndices
 
-    if popIfEmpty && lines.isEmpty && !binary {
+    let hasContent = visible.lines.contains {
+      $0.kind == .add || $0.kind == .remove
+        || ($0.kind == .meta && $0.text.hasPrefix("@@"))
+    }
+    if popIfEmpty && !hasContent && !binary {
       dismiss()
     }
   }
@@ -201,6 +221,7 @@ struct UnifiedDiffBody: View {
   var path: String
   var hunkIndices: [Int?]
   var mode: GitDiffMode?
+  var minWidth: CGFloat = 0
   var onToggleHunk: ((Int) -> Void)?
 
   private var language: CodeLanguage? { languageForPath(path) }
@@ -213,11 +234,12 @@ struct UnifiedDiffBody: View {
           hunkIndex: index < hunkIndices.count ? hunkIndices[index] : nil,
           mode: mode,
           language: language,
+          minWidth: minWidth,
           onToggleHunk: onToggleHunk
         )
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(minWidth: minWidth, maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -226,6 +248,7 @@ struct DiffLineRow: View {
   let hunkIndex: Int?
   let mode: GitDiffMode?
   let language: CodeLanguage?
+  var minWidth: CGFloat = 0
   let onToggleHunk: ((Int) -> Void)?
 
   private let hunkContextRegex = try! NSRegularExpression(
@@ -251,7 +274,7 @@ struct DiffLineRow: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 6)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .frame(minWidth: minWidth, maxWidth: .infinity, alignment: .leading)
       .background(TetherColors.surface)
     } else {
       HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -273,7 +296,7 @@ struct DiffLineRow: View {
       .font(.system(.caption, design: .monospaced))
       .padding(.horizontal, 8)
       .padding(.vertical, 1)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .frame(minWidth: minWidth, maxWidth: .infinity, alignment: .leading)
       .background(rowBackground)
     }
   }

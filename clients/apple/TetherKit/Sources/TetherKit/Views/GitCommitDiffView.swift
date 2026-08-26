@@ -55,11 +55,12 @@ public struct GitCommitDiffView: View {
                   path: "",
                   hunkIndices: Array(repeating: nil, count: lines.count),
                   mode: nil,
+                  minWidth: proxy.size.width,
                   onToggleHunk: nil
                 )
               }
             }
-            .frame(minWidth: proxy.size.width, alignment: .leading)
+            .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .topLeading)
             .padding(.vertical, 8)
           }
         }

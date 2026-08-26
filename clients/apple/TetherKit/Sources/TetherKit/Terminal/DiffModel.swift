@@ -156,11 +156,34 @@ public func pairDiffRows(_ lines: [DiffLine]) -> [SideBySideRow] {
   return rows
 }
 
+/// Unified-diff file path headers (`--- a/…`, `+++ b/…`, `/dev/null`).
+/// Body lines that merely start with `---`/`+++` (e.g. a removal of `---`) are
+/// NOT matched — those need the leading +/- marker plus content, with no
+/// required `a/`/`b/`/`/dev/null` form.
+func isUnifiedFilePathHeader(_ line: String) -> Bool {
+  let prefix: String
+  if line.hasPrefix("--- ") {
+    prefix = "--- "
+  } else if line.hasPrefix("+++ ") {
+    prefix = "+++ "
+  } else {
+    return false
+  }
+  let rest = String(line.dropFirst(prefix.count))
+  return rest.hasPrefix("a/")
+    || rest.hasPrefix("b/")
+    || rest == "/dev/null"
+    || rest.hasPrefix("\"a/")
+    || rest.hasPrefix("\"b/")
+}
+
 public func diffLineKind(_ line: String) -> DiffLineKind {
+  // `---` / `+++` path headers are classified in `parseDiffLines` by structural
+  // position (only between `diff --git` and the first `@@` of that file), not
+  // by a naive prefix match — otherwise a body line like `----` (deletion of
+  // `---`) would be swallowed as meta.
   if line.hasPrefix("diff --git")
     || line.hasPrefix("index ")
-    || line.hasPrefix("---")
-    || line.hasPrefix("+++")
     || line.hasPrefix("@@")
     || line.hasPrefix("new file mode")
     || line.hasPrefix("deleted file mode")
@@ -188,14 +211,34 @@ private let hunkStartRegex = try! NSRegularExpression(pattern: #"^@@ -\d"#)
 
 /// Walks a unified diff assigning old/new line numbers per hunk.
 /// Empty input yields `[]` — an empty string's split is `[""]`, which would
-/// otherwise become a degenerate context line rendering as "0 0".
+/// otherwise become a degenerate context line rendering as "0 0". Trailing
+/// empty segments from a final newline are skipped for the same reason.
 public func parseDiffLines(_ diff: String) -> [DiffLine] {
   if diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
   var oldLine = 0
   var newLine = 0
+  /// False while reading file-level headers; true after the first `@@` until
+  /// the next `diff --git` (multi-file patches reset).
+  var inHunkBody = false
   let parts = diff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-  return parts.map { text in
-    let kind = diffLineKind(text)
+  var result: [DiffLine] = []
+  result.reserveCapacity(parts.count)
+  for text in parts {
+    // Split artifact / blank — never a real unified-diff body line (those always
+    // carry a leading marker). Skipping prevents the stray "0 0" gutter row.
+    if text.isEmpty { continue }
+
+    if text.hasPrefix("diff --git") {
+      inHunkBody = false
+    }
+
+    let kind: DiffLineKind
+    if !inHunkBody && isUnifiedFilePathHeader(text) {
+      kind = .meta
+    } else {
+      kind = diffLineKind(text)
+    }
+
     if kind == .meta {
       let range = NSRange(text.startIndex..<text.endIndex, in: text)
       if let match = hunkHeaderRegex.firstMatch(in: text, range: range),
@@ -207,30 +250,34 @@ public func parseDiffLines(_ diff: String) -> [DiffLine] {
       {
         oldLine = old
         newLine = new
-        return DiffLine(text: text, kind: kind, content: text, oldLine: nil, newLine: nil)
+        inHunkBody = true
+        result.append(DiffLine(text: text, kind: kind, content: text, oldLine: nil, newLine: nil))
+        continue
       }
-      return DiffLine(text: text, kind: kind, content: text, oldLine: nil, newLine: nil)
+      result.append(DiffLine(text: text, kind: kind, content: text, oldLine: nil, newLine: nil))
+      continue
     }
     let content = String(text.dropFirst())
     switch kind {
     case .remove:
       let n = oldLine
       oldLine += 1
-      return DiffLine(text: text, kind: kind, content: content, oldLine: n, newLine: nil)
+      result.append(DiffLine(text: text, kind: kind, content: content, oldLine: n, newLine: nil))
     case .add:
       let n = newLine
       newLine += 1
-      return DiffLine(text: text, kind: kind, content: content, oldLine: nil, newLine: n)
+      result.append(DiffLine(text: text, kind: kind, content: content, oldLine: nil, newLine: n))
     case .context:
       let o = oldLine
       let n = newLine
       oldLine += 1
       newLine += 1
-      return DiffLine(text: text, kind: kind, content: content, oldLine: o, newLine: n)
+      result.append(DiffLine(text: text, kind: kind, content: content, oldLine: o, newLine: n))
     case .meta:
-      return DiffLine(text: text, kind: kind, content: text, oldLine: nil, newLine: nil)
+      result.append(DiffLine(text: text, kind: kind, content: text, oldLine: nil, newLine: nil))
     }
   }
+  return result
 }
 
 /// Ordinal hunk index for each parsed line (`nil` for non-header lines).
