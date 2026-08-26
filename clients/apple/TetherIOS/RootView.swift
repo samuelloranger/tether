@@ -33,7 +33,7 @@ struct RootView: View {
           onOverflow: { showOverflow = true }
         )
 
-        TerminalView(store: store)
+        TerminalView(store: store, preferences: preferences)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
 

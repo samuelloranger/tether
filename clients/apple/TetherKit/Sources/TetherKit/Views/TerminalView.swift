@@ -324,17 +324,23 @@ public final class TerminalInputTextView: UITextView {
 
 public struct TerminalView: View {
   @Bindable public var store: SessionStore
+  @Bindable public var preferences: AppPreferences
   @State private var ctrlArmed = false
   @State private var inputBuffer = ""
   @FocusState private var keyboardFocused: Bool
 
-  public init(store: SessionStore) {
+  public init(store: SessionStore, preferences: AppPreferences) {
     self.store = store
+    self.preferences = preferences
   }
 
   public var body: some View {
     VStack(spacing: 0) {
-      TetherSurfaceRepresentable(snapshot: $store.terminalSnapshot)
+      TetherSurfaceRepresentable(
+        snapshot: $store.terminalSnapshot,
+        fontName: preferences.terminalFont.postScriptName,
+        fontSize: preferences.terminalFontSize
+      )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         // Without this the Hide button is a one-way door: nothing else in the

@@ -41,6 +41,16 @@ public final class AppPreferences {
       case .courier: "Courier"
       }
     }
+
+    /// `UIFont(name:)` resolves PostScript names, not display names — passing
+    /// "SF Mono" silently falls back to the system font.
+    public var postScriptName: String {
+      switch self {
+      case .menlo: "Menlo-Regular"
+      case .sfMono: "SFMono-Regular"
+      case .courier: "CourierNewPSMT"
+      }
+    }
   }
 
   private enum Key {
