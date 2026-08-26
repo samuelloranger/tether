@@ -7,6 +7,7 @@ import UIKit
 /// Port of `apps/mobile/src/Dpad.tsx`. Position is owned by the parent so the
 /// pad can be dragged around the terminal surface.
 public struct DpadView: View {
+  public var size: CGFloat
   public var onArrow: (DPadDirection) -> Void
 
   @State private var thumb = CGSize.zero
@@ -17,7 +18,8 @@ public struct DpadView: View {
 
   private static let feedback = UIImpactFeedbackGenerator(style: .light)
 
-  public init(onArrow: @escaping (DPadDirection) -> Void) {
+  public init(size: CGFloat = DPadModel.buttonSize, onArrow: @escaping (DPadDirection) -> Void) {
+    self.size = size
     self.onArrow = onArrow
   }
 
@@ -27,7 +29,7 @@ public struct DpadView: View {
         .fill(TetherColors.surface)
       glyph
     }
-    .frame(width: DPadModel.buttonSize, height: DPadModel.buttonSize)
+    .frame(width: size, height: size)
     .contentShape(Rectangle())
     .gesture(padGesture)
     .accessibilityElement(children: .ignore)
@@ -64,7 +66,8 @@ public struct DpadView: View {
           gestureLive = true
           grantOrigin = DPadModel.grantOffset(
             locationX: value.startLocation.x,
-            locationY: value.startLocation.y
+            locationY: value.startLocation.y,
+            size: size
           )
         }
         let x = grantOrigin.x + value.translation.width

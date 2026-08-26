@@ -67,8 +67,16 @@ public enum DPadModel {
   }
 
   /// Touch location inside the puck as an offset from its center.
-  public static func grantOffset(locationX: CGFloat, locationY: CGFloat) -> CGPoint {
-    let center = buttonSize / 2
+  ///
+  /// `size` is passed in rather than read from `buttonSize`: the bar renders the
+  /// pad at the same height as its text keys, and a center computed from a
+  /// different size biases every drag by the difference.
+  public static func grantOffset(
+    locationX: CGFloat,
+    locationY: CGFloat,
+    size: CGFloat = buttonSize
+  ) -> CGPoint {
+    let center = size / 2
     return CGPoint(x: locationX - center, y: locationY - center)
   }
 

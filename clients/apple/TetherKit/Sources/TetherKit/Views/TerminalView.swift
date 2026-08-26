@@ -24,6 +24,10 @@ public struct TerminalAccessoryBar: View {
     self.onHideKeyboard = onHideKeyboard
   }
 
+  /// Every key in the bar is this tall, the D-pad included — a control that is
+  /// taller than its neighbours reads as a different kind of thing.
+  static let keySize: CGFloat = 40
+
   /// Key order matches `UTILITY_BAR_KEYS` in the RN client. There are no arrow
   /// keys: the D-pad is one square key in the row and covers all four
   /// directions, which is why four separate arrows would be redundant.
@@ -34,7 +38,7 @@ public struct TerminalAccessoryBar: View {
         accessoryButton("Tab") { send(ctrlArmed, base: "\t") }
         accessoryButton("Esc") { onKey("\u{1B}") }
         accessoryButton("/") { onKey("/") }
-        DpadView(onArrow: onArrow)
+        DpadView(size: Self.keySize, onArrow: onArrow)
         pasteButton
         accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
         accessoryButton("Del") { onKey("\u{1B}[3~") }
@@ -63,6 +67,7 @@ public struct TerminalAccessoryBar: View {
     .labelStyle(.iconOnly)
     .buttonBorderShape(.roundedRectangle(radius: 8))
     .tint(TetherColors.surface)
+    .frame(minWidth: Self.keySize, minHeight: Self.keySize)
   }
 
   private var ctrlButton: some View {
@@ -72,7 +77,7 @@ public struct TerminalAccessoryBar: View {
       Text(ctrlArmed.wrappedValue ? "Ctrl ✓" : "Ctrl")
         .font(.callout.weight(.medium))
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .frame(minWidth: Self.keySize, minHeight: Self.keySize)
         .background(ctrlArmed.wrappedValue ? TetherColors.accent : TetherColors.surface)
         .foregroundStyle(ctrlArmed.wrappedValue ? Color.black : TetherColors.textPrimary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -94,7 +99,7 @@ public struct TerminalAccessoryBar: View {
       }
       .font(.callout.weight(.medium))
       .padding(.horizontal, 10)
-      .padding(.vertical, 8)
+      .frame(minWidth: Self.keySize, minHeight: Self.keySize)
       .background(TetherColors.surface)
       .foregroundStyle(TetherColors.textPrimary)
       .clipShape(RoundedRectangle(cornerRadius: 8))
