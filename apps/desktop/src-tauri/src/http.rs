@@ -20,6 +20,7 @@ pub async fn execute(client: &Client, request: &HttpRequest) -> Result<HttpRespo
     let mut builder = match request.method {
         HttpMethod::Get => client.get(&request.url),
         HttpMethod::Post => client.post(&request.url),
+        HttpMethod::Patch => client.patch(&request.url),
     };
     for (name, value) in &request.headers {
         builder = builder.header(name, value);

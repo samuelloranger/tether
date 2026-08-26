@@ -5,7 +5,10 @@ import {
   coreHostsMigrate,
   coreHostsRemove,
   coreHostsSave,
+  coreHostsUpdateConnection,
+  coreHostsUpdateIdentity,
   coreNextTermId,
+  coreNotifyWaitingEdge,
   corePollingRestart,
   corePollingSetActive,
   corePollingStart,
@@ -29,7 +32,7 @@ import {
 
 export type { DrawerSession } from './types';
 
-type Screen = 'main' | 'hosts' | 'host-form' | 'settings';
+type Screen = 'main' | 'hosts' | 'host-form' | 'settings' | 'local-settings';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: desktop app state hook mirrors mobile session runtime scope
 export function useTetherDesktop() {
@@ -43,6 +46,7 @@ export function useTetherDesktop() {
   const [screen, setScreen] = useState<Screen>('main');
   const [editingHostId, setEditingHostId] = useState<string | null>(null);
   const [terminalKey, setTerminalKey] = useState(0);
+  const [settingsHostId, setSettingsHostId] = useState<string | null>(null);
 
   const activeHostIdRef = useRef<string | null>(null);
   const hostsRef = useRef<HostProfile[]>([]);
@@ -213,6 +217,40 @@ export function useTetherDesktop() {
     [activeHostId],
   );
 
+  const updateHostIdentity = useCallback(
+    async (hostId: string, identity: { name: string; color: string }) => {
+      const profile = await coreHostsUpdateIdentity(hostId, identity);
+      setHosts(await coreHostsList());
+      return profile;
+    },
+    [],
+  );
+
+  const updateHostConnection = useCallback(
+    async (
+      hostId: string,
+      changes: Pick<HostProfile, 'host' | 'port'>,
+      replacementPassword?: string,
+    ) => {
+      await coreHostsUpdateConnection(hostId, {
+        host: changes.host,
+        port: changes.port,
+        replacementPassword,
+      });
+      if (replacementPassword) {
+        setPasswords((current) => ({ ...current, [hostId]: replacementPassword }));
+        await hostSecrets.set(hostId, replacementPassword);
+      }
+      setHosts(await coreHostsList());
+    },
+    [],
+  );
+
+  const updateHostPassword = useCallback(async (hostId: string, password: string) => {
+    await hostSecrets.set(hostId, password);
+    setPasswords((current) => ({ ...current, [hostId]: password }));
+  }, []);
+
   const handleWsFrame = useCallback(
     (hostId: string, sessionId: string, frame: FrameApplyResult) => {
       if (frame.kind === 'title' && frame.title !== undefined) {
@@ -225,6 +263,22 @@ export function useTetherDesktop() {
         );
       }
       if (frame.kind === 'activity' && frame.activity !== undefined) {
+        const previous = sessionsRef.current.find(
+          (row) => row.hostId === hostId && row.id === sessionId,
+        );
+        const isActive =
+          activeHostIdRef.current === hostId && activeSessionIdRef.current === sessionId;
+        void coreNotifyWaitingEdge(previous?.activity, frame.activity, isActive).then(
+          async (should) => {
+            if (!should) return;
+            if (localStorage.getItem('tether_notifications_enabled') === 'false') return;
+            const { sendOsNotification } = await import('./desktopNotifications');
+            await sendOsNotification(
+              previous ? sessionLabel(previous) : sessionId,
+              'Needs your input',
+            );
+          },
+        );
         setSessions((previous) =>
           previous.map((row) =>
             row.hostId === hostId && row.id === sessionId
@@ -254,9 +308,11 @@ export function useTetherDesktop() {
     activeSessionLabel,
     screen,
     editingHostId,
+    settingsHostId,
     terminalKey,
     setScreen,
     setEditingHostId,
+    setSettingsHostId,
     selectHost,
     selectSession,
     newSession,
@@ -265,6 +321,9 @@ export function useTetherDesktop() {
     retryHost,
     saveHost,
     removeHost,
+    updateHostIdentity,
+    updateHostConnection,
+    updateHostPassword,
     handleWsFrame,
   };
 }

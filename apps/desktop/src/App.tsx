@@ -1,28 +1,105 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertModal } from './AlertModal';
+import { ensureNotificationPermission, sendOsNotification } from './desktopNotifications';
+import { checkForUpdates } from './desktopUpdater';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
-import { loadPreferences, UI_THEMES } from './preferences';
+import { OverflowMenu } from './OverflowMenu';
+import {
+  type AppPreferences,
+  loadPreferences,
+  resolveFlavor,
+  savePreferences,
+  sidebarLayout,
+  UI_THEMES,
+} from './preferences';
+import { ServerSettingsScreen } from './ServerSettingsScreen';
 import { SessionDrawer } from './SessionDrawer';
-import { SettingsScreen } from './SettingsScreen';
+import { KillConfirmModal, RenameModal, useSessionModals } from './SessionModals';
+import { LocalSettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
 import { TerminalPane } from './TerminalPane';
 import { wsOriginFor } from './types';
+import { useDeepLinks } from './useDeepLinks';
 import { useTetherDesktop } from './useTetherDesktop';
+
+function useMediaScheme(): 'light' | 'dark' {
+  const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
+    window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => setScheme(mq.matches ? 'light' : 'dark');
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return scheme;
+}
+
+function useWideLayout(): boolean {
+  const [wide, setWide] = useState(() => window.innerWidth >= 720);
+  useEffect(() => {
+    const onResize = () => setWide(window.innerWidth >= 720);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return wide;
+}
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
 export function App() {
   const app = useTetherDesktop();
-  const [prefs, setPrefs] = useState(loadPreferences);
-  const theme = UI_THEMES[prefs.theme];
+  const [prefs, setPrefs] = useState<AppPreferences>(loadPreferences);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const scheme = useMediaScheme();
+  const wide = useWideLayout();
+  const flavor = resolveFlavor(prefs.theme, scheme);
+  const theme = UI_THEMES[flavor];
+  const layout = sidebarLayout({
+    wide,
+    sidebarPinned: prefs.sidebarPinned,
+    drawerOpen,
+  });
+  const modals = useSessionModals();
+
+  useEffect(() => {
+    void ensureNotificationPermission();
+  }, []);
+
+  useDeepLinks({
+    ready: app.ready,
+    profiles: app.hosts,
+    onSession: app.selectSession,
+  });
 
   const editingHost = useMemo(
     () => app.hosts.find((host) => host.id === app.editingHostId) ?? null,
     [app.hosts, app.editingHostId],
   );
 
+  const settingsHost = useMemo(
+    () => app.hosts.find((host) => host.id === app.settingsHostId) ?? app.activeHost,
+    [app.hosts, app.settingsHostId, app.activeHost],
+  );
+
+  const shellStyle = {
+    background: theme.colors.background,
+    color: theme.colors.text,
+    ['--surface' as string]: theme.colors.surface,
+    ['--border' as string]: theme.colors.border,
+    ['--text-muted' as string]: theme.colors.textMuted,
+    ['--accent' as string]: theme.colors.accent,
+    ['--accent-text' as string]: theme.colors.accentText,
+    ['--danger' as string]: theme.colors.danger,
+    ['--success' as string]: theme.colors.success,
+    ['--warning' as string]: theme.colors.warning,
+    ['--overlay' as string]: theme.colors.overlay,
+  };
+
   if (!app.ready) {
     return (
-      <div className="app-shell" style={{ background: theme.background, color: theme.text }}>
+      <div className="app-shell" style={shellStyle}>
         <p className="muted boot-message">Loading…</p>
       </div>
     );
@@ -30,10 +107,7 @@ export function App() {
 
   if (app.hosts.length === 0 || app.screen === 'host-form') {
     return (
-      <div
-        className="app-shell centered"
-        style={{ background: theme.background, color: theme.text }}
-      >
+      <div className="app-shell centered" style={shellStyle}>
         <HostFormScreen
           editing={editingHost}
           onCancel={() => {
@@ -49,16 +123,14 @@ export function App() {
             await app.saveHost({ ...input, password });
           }}
         />
+        <AlertModal />
       </div>
     );
   }
 
   if (app.screen === 'hosts') {
     return (
-      <div
-        className="app-shell centered"
-        style={{ background: theme.background, color: theme.text }}
-      >
+      <div className="app-shell centered" style={shellStyle}>
         <HostsScreen
           hosts={app.hosts}
           healthByHost={app.healthByHost}
@@ -74,59 +146,116 @@ export function App() {
           onRemove={(hostId) => void app.removeHost(hostId)}
           onSelect={app.selectHost}
         />
+        <AlertModal />
       </div>
     );
   }
 
-  if (app.screen === 'settings') {
+  if (app.screen === 'local-settings') {
     return (
-      <div
-        className="app-shell centered"
-        style={{ background: theme.background, color: theme.text }}
-      >
-        <SettingsScreen
+      <div className="app-shell centered" style={shellStyle}>
+        <LocalSettingsScreen
+          prefs={prefs}
+          onPrefsChange={setPrefs}
+          onBack={() => app.setScreen('main')}
+        />
+        <AlertModal />
+      </div>
+    );
+  }
+
+  if (app.screen === 'settings' && settingsHost) {
+    return (
+      <div className="app-shell centered" style={shellStyle}>
+        <ServerSettingsScreen
+          host={settingsHost}
+          health={app.healthByHost[settingsHost.id] ?? 'unknown'}
           onBack={() => {
-            setPrefs(loadPreferences());
+            app.setSettingsHostId(null);
             app.setScreen('main');
           }}
+          onRetry={() => app.retryHost(settingsHost.id)}
+          onUnauthorized={() => {
+            app.setEditingHostId(settingsHost.id);
+            app.setScreen('host-form');
+          }}
+          onIdentitySaved={(identity) => {
+            void app.updateHostIdentity(settingsHost.id, identity);
+          }}
+          onPasswordChanged={async (password) => {
+            await app.updateHostPassword(settingsHost.id, password);
+          }}
+          onConnectionSaved={async (changes, replacementPassword) => {
+            await app.updateHostConnection(settingsHost.id, changes, replacementPassword);
+          }}
+          onRemoveHost={async () => {
+            await app.removeHost(settingsHost.id);
+          }}
         />
+        <AlertModal />
       </div>
     );
   }
 
   return (
-    <div
-      className="app-shell"
-      style={{
-        background: theme.background,
-        color: theme.text,
-        ['--surface' as string]: theme.surface,
-        ['--border' as string]: theme.border,
-        ['--text-muted' as string]: theme.textMuted,
-        ['--accent' as string]: theme.accent,
-        ['--danger' as string]: theme.danger,
-        ['--success' as string]: theme.success,
-        ['--warning' as string]: theme.warning,
-      }}
-    >
-      <SessionDrawer
-        hosts={app.hosts}
-        healthByHost={app.healthByHost}
-        sessions={app.sessions}
-        activeHostId={app.activeHostId}
-        activeSessionId={app.activeSessionId}
-        onSelect={app.selectSession}
-        onNew={app.newSession}
-        onKill={app.killSessionById}
-        onRename={app.renameSessionById}
-        onRetryHost={app.retryHost}
-        onReenterPassword={(hostId) => {
-          app.setEditingHostId(hostId);
-          app.setScreen('host-form');
-        }}
-        onOpenHosts={() => app.setScreen('hosts')}
-        onOpenSettings={() => app.setScreen('settings')}
-      />
+    <div className="app-shell" style={shellStyle}>
+      {layout.showMenuButton ? (
+        <button
+          type="button"
+          className="drawer-menu-button"
+          aria-label="Open sessions"
+          onClick={() => setDrawerOpen(true)}
+        >
+          ☰
+        </button>
+      ) : null}
+      {layout.visible ? (
+        <>
+          {!layout.docked ? (
+            <button
+              type="button"
+              className="drawer-scrim"
+              aria-label="Close sessions"
+              onClick={() => setDrawerOpen(false)}
+            />
+          ) : null}
+          <SessionDrawer
+            hosts={app.hosts}
+            healthByHost={app.healthByHost}
+            sessions={app.sessions}
+            activeHostId={app.activeHostId}
+            activeSessionId={app.activeSessionId}
+            docked={layout.docked}
+            showPin={wide}
+            sidebarPinned={prefs.sidebarPinned}
+            onTogglePin={() => {
+              const next = { ...prefs, sidebarPinned: !prefs.sidebarPinned };
+              savePreferences(next);
+              setPrefs(next);
+              if (prefs.sidebarPinned) setDrawerOpen(false);
+            }}
+            onSelect={(hostId, sessionId) => {
+              app.selectSession(hostId, sessionId);
+              if (!layout.docked) setDrawerOpen(false);
+            }}
+            onNew={app.newSession}
+            onRequestKill={modals.openKill}
+            onRequestRename={modals.openRename}
+            onRetryHost={app.retryHost}
+            onReenterPassword={(hostId) => {
+              app.setEditingHostId(hostId);
+              app.setScreen('host-form');
+            }}
+            onOpenHosts={() => app.setScreen('hosts')}
+            onOpenSettings={() => setOverflowOpen(true)}
+            onOpenHostSettings={(hostId) => {
+              app.setSettingsHostId(hostId);
+              app.setScreen('settings');
+            }}
+            onOpenLocalSettings={() => app.setScreen('local-settings')}
+          />
+        </>
+      ) : null}
       <main className="main-pane">
         {app.activeHost ? (
           <>
@@ -135,9 +264,16 @@ export function App() {
               <span className="terminal-host-label muted">
                 {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
               </span>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => setOverflowOpen(true)}
+              >
+                ⋯
+              </button>
             </header>
             <TerminalPane
-              key={`${app.terminalKey}:${prefs.theme}:${prefs.terminalFont}`}
+              key={`${app.terminalKey}:${flavor}:${prefs.terminalFont}`}
               hostId={app.activeHost.id}
               sessionId={app.activeSessionId}
               wsOrigin={wsOriginFor(app.activeHost)}
@@ -159,6 +295,76 @@ export function App() {
           </div>
         )}
       </main>
+
+      <RenameModal
+        visible={!!modals.rename}
+        value={modals.rename?.text ?? ''}
+        placeholder={modals.rename?.placeholder ?? ''}
+        onChange={modals.setRenameText}
+        onClose={modals.closeRename}
+        onSubmit={() => {
+          if (!modals.rename) return;
+          void app.renameSessionById(
+            modals.rename.hostId,
+            modals.rename.sessionId,
+            modals.rename.text.trim(),
+          );
+          modals.closeRename();
+        }}
+      />
+      <KillConfirmModal
+        visible={!!modals.kill}
+        sessionLabel={modals.kill?.label ?? ''}
+        onCancel={modals.closeKill}
+        onConfirm={() => {
+          if (!modals.kill) return;
+          void app.killSessionById(modals.kill.hostId, modals.kill.sessionId);
+          modals.closeKill();
+        }}
+      />
+      <OverflowMenu
+        visible={overflowOpen}
+        onClose={() => setOverflowOpen(false)}
+        onRename={() => {
+          setOverflowOpen(false);
+          if (!app.activeHost) return;
+          modals.openRename(
+            app.activeHost.id,
+            app.activeSessionId,
+            app.activeSessionLabel,
+            app.activeSessionLabel,
+          );
+        }}
+        onAppearance={() => {
+          setOverflowOpen(false);
+          app.setScreen('local-settings');
+        }}
+        notificationsEnabled={prefs.notificationsEnabled}
+        onToggleNotifications={() => {
+          const next = {
+            ...prefs,
+            notificationsEnabled: !prefs.notificationsEnabled,
+          };
+          savePreferences(next);
+          setPrefs(next);
+        }}
+        onTestNotification={() => {
+          setOverflowOpen(false);
+          void sendOsNotification('Tether', 'Test notification');
+        }}
+        onCheckUpdates={() => {
+          setOverflowOpen(false);
+          void checkForUpdates();
+        }}
+        onOpenSettings={() => {
+          setOverflowOpen(false);
+          if (app.activeHostId) {
+            app.setSettingsHostId(app.activeHostId);
+            app.setScreen('settings');
+          }
+        }}
+      />
+      <AlertModal />
     </div>
   );
 }

@@ -14,6 +14,10 @@ use crate::state::AppState;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -47,6 +51,18 @@ fn main() {
             commands::secrets::secure_clear_password,
             commands::secrets::secure_get_legacy_password,
             commands::secrets::secure_clear_legacy_password,
+            commands::config::core_config_get,
+            commands::config::core_config_patch,
+            commands::config::core_admin_change_password,
+            commands::config::core_admin_update,
+            commands::config::core_admin_restart,
+            commands::config::core_admin_test_notification,
+            commands::config::core_health_version,
+            commands::config::core_hosts_update_identity,
+            commands::config::core_hosts_update_connection,
+            commands::config::core_deep_link_resolve,
+            commands::config::core_notify_decide,
+            commands::config::core_notify_waiting_edge,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");
