@@ -12,8 +12,13 @@ bun install
 
 ```sh
 bun dev:server     # backend on :8085, watch mode
-bun dev:mobile     # Expo Metro bundler
+bun dev:desktop    # the Tauri desktop client (apps/desktop)
 ```
+
+The iOS client is a native Xcode project (`clients/apple`). It links the Rust
+core as a prebuilt XCFramework, so run `scripts/build-xcframework.sh` after any
+change under `crates/` — otherwise Xcode links the previous binary and your
+change is simply absent from the app.
 
 Source runs use a repo-local `apps/server/config/tether.db`, isolated from any installed binary. Override with `TETHER_DB_PATH`.
 
@@ -27,15 +32,30 @@ bun start:server   # runs the compiled binary
 ## Checks
 
 ```sh
-bun lint                          # Biome (server) + Expo lint (mobile)
-bun format                        # biome check --write (server)
-bun --cwd apps/server typecheck   # tsc --noEmit
+bun lint                            # Biome + typecheck every workspace
+bun format                          # biome check --write
+
+bun --cwd apps/server run test      # server suite (bun:test)
+bun --cwd apps/desktop run test     # desktop logic suite
+bun test scripts/                   # release tooling, incl. the updater manifest
+
+cd crates/tether-core && cargo test # the shared core, plus its e2e suites
+cd apps/desktop/src-tauri && cargo test
 ```
 
-There is no test runner; unit tests are plain scripts run with `bun run <file>.test.ts` (server) or `bun test` from a package dir, using a small custom `ok`/`eq` harness.
+Use `run test`, not a bare `bun test`: the built-in runner wins over the script
+name and silently drops the `--parallel` flag the scripts carry.
+
+The core's e2e suites spawn the **real compiled server**, one per test on its own
+port and temp database, so build it first with `bun build:server` — they assert
+the binary exists rather than falling back to a mock.
 
 ## Conventions
 
 - Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100.
 - SQLite uses `$name` named params. Schema changes append a new **versioned, idempotent** entry to the `migrations` array in `db.ts` — never edit an applied migration.
-- Mobile: read the exact Expo 57 docs (`https://docs.expo.dev/versions/v57.0.0/`) before writing Expo code.
+- Tests live next to what they test (`foo.ts` + `foo.test.ts`). New logic is
+  expected to come with them; keep pure logic in its own module so it is testable
+  without a PTY.
+- `apps/mobile` (the Expo app) is being retired — don't add to it. Android was
+  decommissioned after v2.8.12.

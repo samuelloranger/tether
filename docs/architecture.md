@@ -5,7 +5,15 @@ Tether is a Bun + TypeScript monorepo (Bun workspaces).
 ## Monorepo
 
 - `apps/server/` — Bun + Hono backend. Spawns PTYs, logs to SQLite, serves the API/WebSocket. Ships as a single compiled binary that is also the `tether` CLI.
-- `apps/mobile/` — Expo React Native app (iOS/Android). VT emulator, session drawer, LRU tab cache. Also the source of the **desktop** client: `apps/mobile/src-tauri` wraps the same UI in a [Tauri](https://tauri.app) window for Linux/Windows/macOS. No in-browser client (a browser can't send the password header on the WS upgrade).
+- `apps/desktop/` — the **desktop** client for Linux/Windows/macOS: a [Tauri](https://tauri.app) window over vite + [xterm.js](https://xtermjs.org), with the connection, replay, git and workspace logic in Rust.
+- `clients/apple/` — the **iOS** client, native Swift/SwiftUI (`TetherKit` + `TetherIOS`), linking the same Rust core through an XCFramework.
+- `crates/tether-core/` — the shared Rust core both native clients are built on: host profiles, health, WebSocket session + replay cursor, diff model, git and workspace requests. Plus `tether-proto` (wire types) and `tether-ffi` (the Swift bridge).
+- `apps/relay/` — a separate Bun service that routes encrypted push payloads to APNs. It cannot read them.
+- `apps/mobile/` — the Expo React Native app being retired. It was iOS + Android and, through `src-tauri`, the previous desktop client. Nothing in it is built by a release any more.
+
+There is no in-browser client: a browser can't attach the shared secret to the WebSocket upgrade.
+
+Android is no longer supported — builds were discontinued after v2.8.12.
 
 ## Server
 
@@ -14,8 +22,12 @@ Tether is a Bun + TypeScript monorepo (Bun workspaces).
 - **SQLite log cache:** every output chunk is written to `bun:sqlite` with an incrementing id, capped per session and pruned periodically.
 - **Auth:** a Hono middleware requires the shared password on all `/api/*` routes and the WS upgrade.
 
-## Mobile
+## Clients
 
-- Full VT emulator (`src/terminal.ts`) — grid + scrollback, cursor addressing, alt-screen.
-- Multiple sessions as drawer tabs; only the active tab holds a live socket + emulator; an LRU cache (cap 3) makes switching instant.
-- Diff-based input so dictation/swipe/autocomplete reach the PTY.
+Both native clients drive the same Rust core, so session handling, replay and the git/workspace views behave identically; only the shell around them differs.
+
+- **Transport:** the core opens the WebSocket itself and sends `Authorization: Bearer <token>`, which is what a browser cannot do.
+- **Sessions:** every session is a tab. Each resident session keeps its own live socket and keeps streaming in the background; input and clipboard are gated to the active one. An LRU cache makes switching instant, and an evicted session's shell keeps running — reattaching replays from the cursor.
+- **Replay cursor:** the client remembers the last row id it saw and sends it as `sinceId`, so a reconnect costs only what it missed.
+- **Terminal:** desktop renders with xterm.js in the Tauri webview; iOS renders natively. Both are fed by the same parsed output.
+- **Desktop updates:** the app checks on launch and installs a signed update in place. See [Desktop app](/desktop#updating).

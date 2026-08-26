@@ -1,8 +1,8 @@
 name: Release builds
 
 # scripts/release.sh pushes the tag vX.Y.Z, which starts this workflow. The
-# `draft` job opens a DRAFT release, the artifact jobs attach every desktop,
-# mobile, and server bundle to it, and only when all of them succeed does
+# `draft` job opens a DRAFT release, the artifact jobs attach every desktop, iOS
+# and server artifact to it, and only when all of them succeed does
 # `publish` take it out of draft. A failed build therefore can never become the
 # public `releases/latest` that install.sh and `tether update` resolve stable
 # asset names from (how v2.0.0 shipped with every desktop bundle broken).
@@ -17,7 +17,7 @@ name: Release builds
 # resolve the releases API, which never sees a tag that has no published release.
 #
 # Caches: tag runs can restore from the default branch only — not from sibling
-# tags. CI on main (cache-warm*) writes bun/rust/gradle into that scope; release
+# tags. CI on main (cache-warm) writes bun/rust into that scope; release
 # jobs restore them. rust-cache uses shared-key (stable across job names) and
 # cache-on-failure so a flaky asset upload does not discard a finished compile.
 on:
@@ -66,31 +66,11 @@ jobs:
           fi
           echo "id=$(gh release view "$TAG" --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
 
-  renderer:
-    needs: draft
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: latest
-      # Cache the bun package download store only — never node_modules (bun's
-      # link layout is absolute-path sensitive and breaks across runners).
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-install-${{ runner.os }}-
-      - run: bun install --frozen-lockfile
-      - name: Build native renderer bundle
-        working-directory: apps/mobile
-        run: bun run build:terminal-renderer
-
   # Builds apps/desktop — the native Tauri client (vite + xterm.js over
   # tether-core), which REPLACED the react-native-web app under apps/mobile.
-  # apps/mobile still ships iOS and Android below; its src-tauri is legacy and is
-  # no longer built by any release.
+  # Nothing in apps/mobile is built by a release any more: iOS ships from
+  # clients/apple, Android is decommissioned, and apps/mobile/src-tauri is
+  # legacy. The Expo app is on its way out of the tree entirely.
   #
   # apps/desktop deliberately keeps the OLD bundle identifier
   # (cloud.samlo.tether). The identifier is what names the webview data
@@ -100,8 +80,6 @@ jobs:
   # uninstall registry key, so a new identifier would install beside the old app
   # on Windows instead of upgrading it.
   #
-  # `needs: draft` only — no renderer: the RN WebView terminal bundle is an
-  # apps/mobile artifact, and apps/desktop imports xterm.js through vite.
   desktop:
     needs: draft
     if: github.event_name == 'push' || inputs.scope == 'desktop' || inputs.scope == 'all'
@@ -232,8 +210,7 @@ jobs:
           if-no-files-found: error
 
   # iOS = the native Swift client in clients/apple. It replaced the Expo iOS app
-  # at 3.0.0; apps/mobile is still the Android source below, and its iOS half is
-  # no longer published. Both uploaded to the same App Store Connect record
+  # at 3.0.0. Both have uploaded to the same App Store Connect record
   # (6800525706, bundle id com.samuelloranger.tether-mobile), so build numbers
   # must never repeat: github.run_number is monotonic per workflow and survives
   # re-runs of the same tag, which a commit count or timestamp would not. The
@@ -525,81 +502,6 @@ jobs:
           name: tether-ios-${{ github.sha }}
           path: build/export/*.ipa
 
-  android:
-    needs: [draft, renderer]
-    if: github.event_name == 'push' || inputs.scope == 'all'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-install-${{ runner.os }}-
-      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Install workspace deps
-        run: bun install --frozen-lockfile
-
-      - name: Pin app version to the release tag
-        if: github.event_name == 'push'
-        working-directory: apps/mobile
-        run: |
-          V="${TAG#v}"
-          jq --arg v "$V" '.expo.version = $v' app.json > app.json.tmp && mv app.json.tmp app.json
-
-      - name: Prebuild Android project
-        working-directory: apps/mobile
-        run: npx expo prebuild -p android --clean
-        env:
-          CI: 'true'
-
-      # After prebuild so the wrapper under android/ exists. `basic` = GitHub
-      # Actions cache only (no commercial provider). Force write on tag builds —
-      # the action defaults to read-only off the default branch, which would
-      # never populate a cache from release runs.
-      - uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-provider: basic
-          cache-read-only: false
-
-      # TODO(secrets): the release APK is currently signed with the PUBLIC React
-      # Native template debug keystore — this provides NO authenticity and blocks
-      # trusted in-place updates. It is a known gap, kept only because a real
-      # signing key is not yet provisioned. To close it: add repo secrets
-      # ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
-      # ANDROID_KEY_PASSWORD, decode the keystore into android/app before the
-      # build, and point the release signingConfig at it (in app/build.gradle,
-      # which `expo prebuild --clean` regenerates each run). Do NOT distribute
-      # this APK as release-signed until then.
-      # arm64-v8a only: phone APKs don't need armeabi-v7a/x86/x86_64, and
-      # building all four ABIs was ~4 min of CMake alone. Daemon allowed —
-      # setup-gradle manages it; --no-daemon was slowing cold CI starts.
-      - name: Build APK
-        working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
-
-      - name: Attach APK to release
-        if: github.event_name == 'push'
-        run: |
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
-            "tether.apk"
-          gh release upload "$TAG" "tether.apk" --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Upload APK workflow artifact
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: tether-android-${{ github.sha }}
-          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-
   server:
     needs: draft
     if: github.event_name == 'push' || inputs.scope == 'all'
@@ -690,7 +592,7 @@ jobs:
   # even if a build leg fails.
   publish:
     if: github.event_name == 'push'
-    needs: [desktop, ios, android, server]
+    needs: [desktop, ios, server]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

@@ -6,14 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY shell processes through detached *holder* processes, streams their output over WebSocket, and logs every byte to SQLite so clients can reconnect and replay missed output. Around that core it also serves git diff/stage/commit, a workspace file tree/viewer, file uploads, and HTML "presentations" (previews pushed from a coding agent to the client).
 
-iOS and Android come from one Expo React Native codebase (`apps/mobile`). The
-desktop client is **`apps/desktop`** — a separate Tauri app (vite + xterm.js over
-the `tether-core` Rust crate) that replaced the `react-native-web` desktop build
-that used to come out of `apps/mobile/src-tauri`. `release.yml`'s `desktop` job
-builds `apps/desktop`; `apps/mobile/src-tauri` is legacy and is built by nothing.
-It keeps the old bundle identifier (`cloud.samlo.tether`) on purpose, so an
-in-place update inherits the previous app's webview storage and its host
-profiles migrate.
+Clients are native and share one Rust core (`crates/tether-core`):
+
+- **`apps/desktop`** — Linux/Windows/macOS, a Tauri app (vite + xterm.js over the
+  core). It replaced the `react-native-web` desktop build from
+  `apps/mobile/src-tauri` and keeps the old bundle identifier
+  (`cloud.samlo.tether`) on purpose, so an in-place update inherits the previous
+  app's webview storage and its host profiles migrate.
+- **`clients/apple`** — iOS, native Swift/SwiftUI over the core through an
+  XCFramework (`scripts/build-xcframework.sh`).
+- **`apps/mobile`** — the Expo app, being retired. **Do not edit it.** Android was
+  decommissioned after v2.8.12 and its iOS half is no longer published;
+  `apps/mobile/src-tauri` is legacy and is built by nothing.
+
+`release.yml` builds exactly three things: `apps/desktop`, `clients/apple`, and
+the server binaries.
 
 ## Monorepo layout (Bun workspaces)
 

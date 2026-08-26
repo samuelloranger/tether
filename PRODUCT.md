@@ -21,7 +21,7 @@ Sessions survive client disconnect and server restart via detached holder proces
 ## Operating Context
 
 - Server binary/CLI on the host (`tether serve` / daemon); state in `~/.tether/`
-- Clients: Expo React Native (iOS/Android) and Tauri desktop from the same mobile codebase
+- Clients: native Swift on iOS and Tauri on Linux/Windows/macOS, both over one shared Rust core (`crates/tether-core`). Android is discontinued; the Expo app is being retired
 - Transport is typically LAN or tunnel (Tailscale / WireGuard / SSH); API password-authed, not end-to-end encrypted by default
 - Terminal is the primary work surface; drawer sessions, utility key bar (mobile), git/file/presentation overlays are secondary
 - Themes today: Catppuccin flavors (latte / frappe / macchiato / mocha) for chrome + terminal

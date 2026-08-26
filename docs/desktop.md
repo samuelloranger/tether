@@ -1,6 +1,6 @@
 # Desktop app
 
-Tether ships a native desktop client for **Linux, Windows, and macOS** alongside the iOS app. It's a [Tauri](https://tauri.app) application — a small native window wrapping the same terminal UI, with a Rust WebSocket bridge that carries the shared password in the `Authorization` header (a plain browser can't, which is why there's no in-browser client). It connects to your server exactly like the mobile app.
+Tether ships a native desktop client for **Linux, Windows, and macOS** alongside the iOS app. It's a [Tauri](https://tauri.app) application: a native window over [xterm.js](https://xtermjs.org), with the connection, replay, git and workspace logic in a Rust core it shares with the iOS client. The core opens the WebSocket itself and carries the shared secret in the `Authorization` header — a plain browser can't, which is why there's no in-browser client. It connects to your server exactly like the iOS app.
 
 ## Download & install
 
@@ -21,22 +21,24 @@ The macOS and Windows builds aren't code-signed yet, so the OS may warn on first
 
 ## Connecting
 
-Same as mobile: on the setup screen enter your server's **host/IP**, **port** (default `8085`), and **password**, then **Test connection** and **Save & connect**. The password is stored locally by the app. See [Getting started](/getting-started#_4-connect) for what each test result means, and [Security & networking](/security) — the password gates access but does not encrypt traffic, so run Tether behind a tunnel.
+Same as iOS: on the setup screen enter your server's **host/IP**, **port** (default `8085`), and **password**, then **Test connection** and **Save & connect**. The password is stored locally by the app. See [Getting started](/getting-started#_4-connect) for what each test result means, and [Security & networking](/security) — the password gates access but does not encrypt traffic, so run Tether behind a tunnel.
 
 ## Updating
 
-The app checks for a newer release on launch (and on demand via the **⋯** menu → **Check for updates**). What happens next depends on how you installed it:
+The app checks for a newer release on launch (and on demand via the **⋯** menu → **Check for updates**). It tells you the new version and what you're on, and installs it when you accept.
 
-- **AppImage, Windows, macOS** — self-update in place. You get a dialog with the new version and a live download progress bar; the app installs the signed update and restarts. Updates are verified against a bundled signing key, so a tampered download is rejected.
-- **`.deb` / `.rpm`** — these are owned by your package manager, so the app can't replace them itself. It tells you an update is available and links to the release to download the new package (`sudo apt install ./Tether_*.deb` / `sudo dnf install ./Tether-*.rpm`).
+Every build updates itself, and every download is verified against the bundled signing key before it is installed — a tampered or unsigned file is rejected rather than run.
 
-::: tip
-For hands-off updates on Linux, use the **AppImage** — it's the build that self-updates.
+- **AppImage, Windows, macOS** — replaced in place, then the app restarts.
+- **`.deb` / `.rpm`** — the new package is handed to your package manager, which asks for admin rights. The build knows which package format it came from, so it fetches that format rather than a generic one.
+
+::: tip Nothing to do on launch
+Updates are not silent: you always get the prompt first, and declining keeps you where you are until the next launch.
 :::
 
-## How it differs from mobile
+## How it differs from iOS
 
-The desktop app is the same terminal, retuned for a keyboard-and-mouse machine:
+The desktop app is the same terminal — same server, same Rust core — retuned for a keyboard-and-mouse machine:
 
 - **Docked session sidebar** — your terminals live in a permanent left sidebar instead of the slide-in drawer. Switch, create, rename, and kill from there; the active shell fills the rest of the window.
 - **Physical keyboard** — there's no on-screen key bar. Type straight into the terminal; arrows, `Tab`/`Shift+Tab`, `Esc`, `Home`/`End`, `Page Up`/`Down`, `Delete`, the function keys, and `Ctrl`/`Alt` combos are all sent to the shell as you'd expect.
@@ -44,4 +46,4 @@ The desktop app is the same terminal, retuned for a keyboard-and-mouse machine:
   - `Ctrl` / `Cmd` + `C` — copies the selection when there is one, otherwise sends `Ctrl-C` (SIGINT) to the shell.
   - `Ctrl` / `Cmd` + `V` — pastes the clipboard into the shell (bracketed paste when the program supports it).
 
-Everything else — persistent sessions, reconnect-and-replay, saved commands, transcript search — works identically across both apps, because it's all driven by the same server.
+Everything else — persistent sessions, reconnect-and-replay, saved commands, transcript search — works identically across both apps, because it's the same server and the same core underneath.
