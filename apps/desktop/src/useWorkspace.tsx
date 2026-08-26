@@ -15,7 +15,11 @@ export function useWorkspace({
   enabled: boolean;
 }) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const files = useWorkspaceFiles({ hostId, sessionId });
+  const files = useWorkspaceFiles({
+    hostId,
+    sessionId,
+    browseEnabled: workspaceOpen,
+  });
   const upload = useWorkspaceUpload({
     hostId,
     sessionIdRef: files.sessionIdRef,
@@ -24,8 +28,8 @@ export function useWorkspace({
   const presentations = usePresentations({ hostId, sessionId, baseUrl, enabled });
 
   const openFile = async (path: string, line?: number, column?: number) => {
-    await files.openFile(path, line, column);
-    setWorkspaceOpen(false);
+    const ok = await files.openFile(path, line, column);
+    if (ok) setWorkspaceOpen(false);
   };
 
   return {
@@ -39,6 +43,37 @@ export function useWorkspace({
 }
 
 export type WorkspaceState = ReturnType<typeof useWorkspace>;
+
+function WorkspaceTreeBody({ workspace }: { workspace: WorkspaceState }) {
+  if (workspace.rootError) {
+    return (
+      <div className="git-pane-message">
+        <p className="error">{workspace.rootError}</p>
+        <button type="button" className="linkish" onClick={() => workspace.reloadRoot()}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (workspace.rootLoading && workspace.tree.length === 0) {
+    return <p className="muted">Loading…</p>;
+  }
+  if (workspace.rootEmpty) {
+    return <p className="muted">Empty directory</p>;
+  }
+  if (workspace.tree.length === 0) {
+    return <p className="muted">No files to show.</p>;
+  }
+  return (
+    <FileTree
+      nodes={workspace.tree}
+      collapsedDirs={workspace.collapsedDirs}
+      onToggleDir={workspace.toggleDir}
+      onSelectFile={(path) => void workspace.openFile(path)}
+      onRetryDir={(path) => workspace.reloadDir(path)}
+    />
+  );
+}
 
 export function WorkspacePanel({ workspace }: { workspace: WorkspaceState }) {
   return (
@@ -82,19 +117,26 @@ export function WorkspacePanel({ workspace }: { workspace: WorkspaceState }) {
         </button>
         <span className="muted workspace-drop-hint">or drop a file on the window</span>
       </div>
-      {workspace.fileError && <p className="error">{workspace.fileError}</p>}
-      {workspace.uploadError && <p className="error">{workspace.uploadError}</p>}
+      {workspace.fileError ? (
+        <div className="git-pane-message">
+          <p className="error">{workspace.fileError}</p>
+          {workspace.openPath.trim() ? (
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => void workspace.openFile(workspace.openPath.trim())}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {workspace.uploadError ? <p className="error">{workspace.uploadError}</p> : null}
+      {workspace.rootTruncated ? (
+        <p className="muted">Listing truncated (2000-entry limit)</p>
+      ) : null}
       <div className="workspace-tree">
-        {workspace.tree.length === 0 ? (
-          <p className="muted">Opened files appear here.</p>
-        ) : (
-          <FileTree
-            nodes={workspace.tree}
-            collapsedDirs={workspace.collapsedDirs}
-            onToggleDir={workspace.toggleDir}
-            onSelectFile={(path) => void workspace.openFile(path)}
-          />
-        )}
+        <WorkspaceTreeBody workspace={workspace} />
       </div>
     </aside>
   );

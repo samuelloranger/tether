@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::AppHandle;
 use tether_core::file_tree::{build_file_tree, FileStat, FileTreeNode};
-use tether_core::host_client::HostClient;
+use tether_core::host_client::{encode_query_value, HostClient};
 use tether_core::host_store::HostSecrets;
 use tether_core::workspace::{
     parse_presentation_close, parse_presentations, parse_upload_response, parse_workspace_file,
@@ -58,6 +60,72 @@ pub struct WorkspaceFileView {
     pub line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub column: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceDirEntryView {
+    pub name: String,
+    pub kind: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceDirListingView {
+    pub path: String,
+    pub entries: Vec<WorkspaceDirEntryView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+}
+
+fn parse_workspace_dir(status: u16, body: &Value) -> Result<WorkspaceDirListingView, String> {
+    if status == 401 {
+        return Err("unauthorized".into());
+    }
+    if !(200..300).contains(&status) {
+        if let Some(error) = body.get("error").and_then(Value::as_str) {
+            if !error.is_empty() {
+                return Err(error.to_string());
+            }
+        }
+        return Err(format!("request failed ({status})"));
+    }
+    let path = body
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "could not decode server response".to_string())?;
+    let entries_value = body
+        .get("entries")
+        .ok_or_else(|| "could not decode server response".to_string())?;
+    let entries: Vec<WorkspaceDirEntryView> = serde_json::from_value(entries_value.clone())
+        .map_err(|_| "could not decode server response".to_string())?;
+    let truncated = body
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .filter(|value| *value)
+        .map(|_| true);
+    Ok(WorkspaceDirListingView {
+        path: path.to_string(),
+        entries,
+        truncated,
+    })
+}
+
+#[tauri::command]
+pub async fn core_workspace_dir(
+    app: AppHandle,
+    host_id: String,
+    session_id: String,
+    path: String,
+) -> Result<WorkspaceDirListingView, String> {
+    let profile = profile_for(&app, &host_id)?;
+    let client = client_for(&host_id, &profile.host, &profile.port)?;
+    let query = format!("path={}", encode_query_value(&path));
+    let request = client.get(
+        &format!("/api/sessions/{session_id}/dir?{query}"),
+        BTreeMap::new(),
+    );
+    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    parse_workspace_dir(response.status, &response.body)
 }
 
 #[tauri::command]

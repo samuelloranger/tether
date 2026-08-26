@@ -79,6 +79,7 @@ fn main() {
             commands::git::core_git_push,
             commands::git::core_diff_parse,
             commands::workspace::core_file_tree_build,
+            commands::workspace::core_workspace_dir,
             commands::workspace::core_workspace_file,
             commands::workspace::core_workspace_upload,
             commands::workspace::core_presentations_list,

@@ -7,6 +7,9 @@ type DiffLinesProps = {
   parsed: ParsedDiffView | null;
   path: string;
   emptyLabel?: string;
+  /** When set, replaces emptyLabel — a failed load must not read as empty. */
+  error?: string | null;
+  onRetry?: () => void;
   onHunkPress?: (hunkIndex: number) => void;
   hunkActionLabel?: string;
   sideBySide?: boolean;
@@ -78,10 +81,24 @@ export function DiffLines({
   parsed,
   path,
   emptyLabel = 'No changes in this file',
+  error,
+  onRetry,
   onHunkPress,
   hunkActionLabel,
   sideBySide = false,
 }: DiffLinesProps) {
+  if (error) {
+    return (
+      <div className="git-diff-empty">
+        <p className="error">{error}</p>
+        {onRetry ? (
+          <button type="button" className="linkish" onClick={onRetry}>
+            Retry
+          </button>
+        ) : null}
+      </div>
+    );
+  }
   if (!parsed || parsed.lines.length === 0) {
     return <div className="git-diff-empty muted">{emptyLabel}</div>;
   }

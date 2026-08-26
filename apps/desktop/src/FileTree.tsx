@@ -7,6 +7,7 @@ export function FileTree({
   collapsedDirs,
   onToggleDir,
   onSelectFile,
+  onRetryDir,
   showDiffStats = false,
 }: {
   nodes: FileTreeNode[];
@@ -15,6 +16,7 @@ export function FileTree({
   collapsedDirs: Set<string>;
   onToggleDir: (key: string) => void;
   onSelectFile: (path: string) => void;
+  onRetryDir?: (path: string) => void;
   showDiffStats?: boolean;
 }) {
   return (
@@ -23,6 +25,7 @@ export function FileTree({
         if (node.type === 'dir') {
           const collapseKey = collapseScope ? `${collapseScope}:${node.path}` : node.path;
           const collapsed = collapsedDirs.has(collapseKey);
+          const browse = node.browse;
           return (
             <div key={collapseKey} className="file-tree-dir">
               <button
@@ -39,15 +42,50 @@ export function FileTree({
                 <span className="file-tree-label muted">{node.name}</span>
               </button>
               {!collapsed && (
-                <FileTree
-                  nodes={node.children}
-                  depth={depth + 1}
-                  collapseScope={collapseScope}
-                  collapsedDirs={collapsedDirs}
-                  onToggleDir={onToggleDir}
-                  onSelectFile={onSelectFile}
-                  showDiffStats={showDiffStats}
-                />
+                <div className="file-tree-children">
+                  {browse?.loading ? (
+                    <p className="muted file-tree-status" style={{ paddingLeft: (depth + 1) * 16 }}>
+                      Loading…
+                    </p>
+                  ) : null}
+                  {browse?.error ? (
+                    <div className="file-tree-status" style={{ paddingLeft: (depth + 1) * 16 }}>
+                      <p className="error">{browse.error}</p>
+                      {onRetryDir ? (
+                        <button
+                          type="button"
+                          className="linkish"
+                          onClick={() => onRetryDir(node.path)}
+                        >
+                          Retry
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {!browse?.loading &&
+                  !browse?.error &&
+                  browse?.loaded &&
+                  node.children.length === 0 ? (
+                    <p className="muted file-tree-status" style={{ paddingLeft: (depth + 1) * 16 }}>
+                      Empty directory
+                    </p>
+                  ) : null}
+                  {browse?.truncated ? (
+                    <p className="muted file-tree-status" style={{ paddingLeft: (depth + 1) * 16 }}>
+                      Listing truncated (2000-entry limit)
+                    </p>
+                  ) : null}
+                  <FileTree
+                    nodes={node.children}
+                    depth={depth + 1}
+                    collapseScope={collapseScope}
+                    collapsedDirs={collapsedDirs}
+                    onToggleDir={onToggleDir}
+                    onSelectFile={onSelectFile}
+                    onRetryDir={onRetryDir}
+                    showDiffStats={showDiffStats}
+                  />
+                </div>
               )}
             </div>
           );

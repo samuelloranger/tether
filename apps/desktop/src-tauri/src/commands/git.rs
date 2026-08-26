@@ -81,6 +81,13 @@ pub async fn core_git_diff_file(
         return Ok(None);
     }
     if !(200..300).contains(&response.status) {
+        if let Ok(text) = std::str::from_utf8(&response.body) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+                if let Some(message) = value.get("error").and_then(|v| v.as_str()) {
+                    return Err(message.to_string());
+                }
+            }
+        }
         return Err(format!("diff file failed ({})", response.status));
     }
     Ok(Some(DiffFileBytes {

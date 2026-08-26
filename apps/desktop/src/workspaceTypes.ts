@@ -30,8 +30,23 @@ export interface FileStat {
   staged?: boolean;
 }
 
+/** Browse-mode extras on a directory row (lazy workspace listing). Absent for sync trees. */
+export type FileTreeDirBrowse = {
+  /** Children have been fetched (may be empty). */
+  loaded: boolean;
+  loading?: boolean;
+  error?: string;
+  truncated?: boolean;
+};
+
 export type FileTreeNode =
-  | { type: 'dir'; name: string; path: string; children: FileTreeNode[] }
+  | {
+      type: 'dir';
+      name: string;
+      path: string;
+      children: FileTreeNode[];
+      browse?: FileTreeDirBrowse;
+    }
   | { type: 'file'; name: string; path: string; file: FileStat };
 
 export function previewUrl(baseUrl: string, relative: string): string {

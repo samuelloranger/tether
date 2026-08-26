@@ -1,44 +1,175 @@
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open } from '@tauri-apps/plugin-dialog';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requestPaste } from './pasteBus';
-import { coreFileTreeBuild, coreWorkspaceFile, coreWorkspaceUpload } from './workspaceApi';
-import type { FileStat, FileTreeNode, FileView } from './workspaceTypes';
+import { coreWorkspaceDir, coreWorkspaceFile, coreWorkspaceUpload } from './workspaceApi';
+import {
+  createDirListingCache,
+  type DirLoadOk,
+  entriesToTreeNodes,
+  joinDirPath,
+} from './workspaceDirLogic';
+import type { FileTreeNode, FileView } from './workspaceTypes';
 import { shellQuote } from './workspaceTypes';
 
+function seedCollapsed(
+  prev: Set<string>,
+  parentPath: string,
+  entries: Array<{ name: string; kind: string }>,
+): Set<string> {
+  let changed = false;
+  const next = new Set(prev);
+  for (const entry of entries) {
+    if (entry.kind !== 'dir') continue;
+    const full = joinDirPath(parentPath, entry.name);
+    if (!next.has(full)) {
+      next.add(full);
+      changed = true;
+    }
+  }
+  return changed ? next : prev;
+}
+
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: browse cache + file open share one hook
 export function useWorkspaceFiles({
   hostId,
   sessionId,
+  browseEnabled = false,
 }: {
   hostId: string | null;
   sessionId: string;
+  browseEnabled?: boolean;
 }) {
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [openPath, setOpenPath] = useState('');
-  const [recentFiles, setRecentFiles] = useState<FileStat[]>([]);
-  const [tree, setTree] = useState<FileTreeNode[]>([]);
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
+  const [loadedByPath, setLoadedByPath] = useState<Map<string, DirLoadOk>>(() => new Map());
+  const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
+  const [errorByPath, setErrorByPath] = useState<Map<string, string>>(() => new Map());
+  const [rootListingPath, setRootListingPath] = useState('');
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
-  useEffect(() => {
-    void coreFileTreeBuild(recentFiles)
-      .then(setTree)
-      .catch(() => setTree([]));
-  }, [recentFiles]);
+  const cacheRef = useRef(
+    createDirListingCache((input) =>
+      coreWorkspaceDir(input).then((listing) => ({
+        path: listing.path,
+        entries: listing.entries,
+        ...(listing.truncated ? { truncated: true as const } : {}),
+      })),
+    ),
+  );
 
-  const rememberPath = useCallback((path: string) => {
-    setRecentFiles((prev) => {
-      if (prev.some((row) => row.path === path)) return prev;
-      return [...prev, { path, insertions: 0, deletions: 0, binary: false }];
-    });
+  const resetBrowse = useCallback(() => {
+    cacheRef.current.clear();
+    setLoadedByPath(new Map());
+    setLoadingPaths(new Set());
+    setErrorByPath(new Map());
+    setCollapsedDirs(new Set());
+    setRootListingPath('');
   }, []);
 
-  const openFile = useCallback(
-    async (path: string, line?: number, column?: number) => {
+  // hostId/sessionId intentionally trigger a browse reset when the active target changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are the reset trigger
+  useEffect(() => {
+    resetBrowse();
+  }, [hostId, sessionId, resetBrowse]);
+
+  const ensureLoaded = useCallback(
+    async (path: string) => {
       if (!hostId) return;
+      const openedFor = sessionIdRef.current;
+      const cached = cacheRef.current.peek(hostId, openedFor, path);
+      if (cached) {
+        setLoadedByPath((prev) => {
+          if (prev.get(path) === cached) return prev;
+          const next = new Map(prev);
+          next.set(path, cached);
+          return next;
+        });
+        setErrorByPath((prev) => {
+          if (!prev.has(path)) return prev;
+          const next = new Map(prev);
+          next.delete(path);
+          return next;
+        });
+        return;
+      }
+
+      setLoadingPaths((prev) => {
+        if (prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.add(path);
+        return next;
+      });
+      setErrorByPath((prev) => {
+        if (!prev.has(path)) return prev;
+        const next = new Map(prev);
+        next.delete(path);
+        return next;
+      });
+
+      const result = await cacheRef.current.load(hostId, openedFor, path);
+      if (sessionIdRef.current !== openedFor) return;
+
+      setLoadingPaths((prev) => {
+        if (!prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+
+      if (result.status === 'error') {
+        setErrorByPath((prev) => {
+          const next = new Map(prev);
+          next.set(path, result.message);
+          return next;
+        });
+        return;
+      }
+
+      const parentForChildren = path === '' ? result.path : path;
+      setLoadedByPath((prev) => {
+        const next = new Map(prev);
+        next.set(path, result);
+        return next;
+      });
+      setCollapsedDirs((prev) => seedCollapsed(prev, parentForChildren, result.entries));
+      if (path === '') setRootListingPath(result.path);
+    },
+    [hostId],
+  );
+
+  // sessionId reloads root after a session switch (ensureLoaded reads sessionIdRef).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the reload trigger
+  useEffect(() => {
+    if (!browseEnabled || !hostId) return;
+    void ensureLoaded('');
+  }, [browseEnabled, hostId, sessionId, ensureLoaded]);
+
+  const tree = useMemo((): FileTreeNode[] => {
+    const root = loadedByPath.get('');
+    if (!root) return [];
+    return entriesToTreeNodes(
+      rootListingPath,
+      root.entries,
+      loadedByPath,
+      loadingPaths,
+      errorByPath,
+    );
+  }, [loadedByPath, loadingPaths, errorByPath, rootListingPath]);
+
+  const rootListing = loadedByPath.get('');
+  const rootLoading = loadingPaths.has('');
+  const rootError = errorByPath.get('') ?? null;
+  const rootTruncated = rootListing?.truncated === true;
+  const rootEmpty = !!rootListing && !rootLoading && !rootError && rootListing.entries.length === 0;
+
+  const openFile = useCallback(
+    async (path: string, line?: number, column?: number): Promise<boolean> => {
+      if (!hostId) return false;
       const openedFor = sessionIdRef.current;
       setFileLoading(true);
       setFileError(null);
@@ -52,15 +183,16 @@ export function useWorkspaceFiles({
         });
         if (sessionIdRef.current === openedFor) {
           setFileView(file);
-          rememberPath(file.path);
         }
+        return true;
       } catch (error) {
-        setFileError(String(error));
+        setFileError(error instanceof Error ? error.message : String(error));
+        return false;
       } finally {
         setFileLoading(false);
       }
     },
-    [hostId, rememberPath],
+    [hostId],
   );
 
   const closeFile = useCallback(() => {
@@ -68,14 +200,21 @@ export function useWorkspaceFiles({
     setFileError(null);
   }, []);
 
-  const toggleDir = useCallback((key: string) => {
-    setCollapsedDirs((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
+  const toggleDir = useCallback(
+    (key: string) => {
+      setCollapsedDirs((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) {
+          next.delete(key);
+          void ensureLoaded(key);
+        } else {
+          next.add(key);
+        }
+        return next;
+      });
+    },
+    [ensureLoaded],
+  );
 
   return {
     fileView,
@@ -89,6 +228,12 @@ export function useWorkspaceFiles({
     collapsedDirs,
     toggleDir,
     sessionIdRef,
+    rootLoading,
+    rootError,
+    rootTruncated,
+    rootEmpty,
+    reloadRoot: () => void ensureLoaded(''),
+    reloadDir: (path: string) => void ensureLoaded(path),
   };
 }
 
@@ -119,7 +264,7 @@ export function useWorkspaceUpload({
           requestPaste(shellQuote(serverPath));
         }
       } catch (error) {
-        setUploadError(String(error));
+        setUploadError(error instanceof Error ? error.message : String(error));
       } finally {
         setUploading(false);
       }

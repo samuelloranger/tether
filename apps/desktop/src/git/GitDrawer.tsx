@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { CommitBox } from './CommitBox';
 import { DiffLines } from './DiffLines';
+import { GitPaneError } from './GitPaneError';
 import { GitTabBar } from './GitSectionHeader';
 import { formatRepoStatusLabel } from './gitApi';
 import { FileSectionList, HistoryList, ImageDiff } from './gitDrawerPanes';
+import { changesPaneContent, loadPaneContent } from './gitPanelState';
 import { useGitCommitForm } from './useGitCommitForm';
 import type { GitPanelState } from './useGitPanel';
 
@@ -58,6 +60,19 @@ export function GitDrawer({ panel, onClose }: GitDrawerProps) {
     : (panel.selectedPath ?? 'Working tree');
 
   const statusLabel = formatRepoStatusLabel(panel.repoStatus);
+  const changes = changesPaneContent(panel.error, panel.summary.files.length);
+  const historyPane = loadPaneContent(panel.error, panel.historyEntries !== null);
+  const diffHasContent = Boolean(
+    panel.diffParsed?.lines.length || panel.diffImage || panel.historyCommit?.parsed?.lines.length,
+  );
+  const diffPane = loadPaneContent(
+    panel.selectedPath || viewingCommit ? panel.error : null,
+    diffHasContent,
+  );
+  const errorShownInPane =
+    (tab === 'changes' && changes.type === 'error') ||
+    (tab === 'history' && historyPane.type === 'error') ||
+    diffPane.type === 'error';
 
   const startResize = (clientX: number) => {
     const startX = clientX;
@@ -119,15 +134,26 @@ export function GitDrawer({ panel, onClose }: GitDrawerProps) {
           if (next === 'changes') void panel.selectCommit(null);
         }}
       />
-      {panel.error ? <p className="error git-pane-message">{panel.error}</p> : null}
+      {panel.error && !errorShownInPane ? (
+        <p className="error git-pane-message">{panel.error}</p>
+      ) : null}
       <div className="git-drawer-body" ref={bodyRef}>
         <div className="git-drawer-left" style={{ width: leftWidth }}>
           {tab === 'history' ? (
-            <HistoryList
-              entries={panel.historyEntries}
-              onSelect={(entry) => void panel.selectCommit(entry)}
-            />
-          ) : panel.summary.files.length === 0 ? (
+            historyPane.type === 'error' ? (
+              <GitPaneError
+                message={historyPane.message}
+                onRetry={() => void panel.loadHistory()}
+              />
+            ) : (
+              <HistoryList
+                entries={panel.historyEntries}
+                onSelect={(entry) => void panel.selectCommit(entry)}
+              />
+            )
+          ) : changes.type === 'error' ? (
+            <GitPaneError message={changes.message} onRetry={() => void panel.refresh()} />
+          ) : changes.type === 'empty' ? (
             <p className="muted git-pane-message">No uncommitted changes</p>
           ) : (
             <>
@@ -197,6 +223,19 @@ export function GitDrawer({ panel, onClose }: GitDrawerProps) {
         <div className="git-drawer-right">
           {panel.diffLoading ? (
             <p className="muted git-pane-message">Loading diff…</p>
+          ) : diffPane.type === 'error' ? (
+            <GitPaneError
+              message={diffPane.message}
+              onRetry={() => {
+                if (viewingCommit && panel.historyCommit) {
+                  void panel.selectCommit(panel.historyCommit.entry);
+                } else if (panel.selectedPath) {
+                  panel.selectFile(panel.selectedPath, panel.diffMode ?? undefined);
+                } else {
+                  void panel.refresh();
+                }
+              }}
+            />
           ) : viewingCommit && panel.historyCommit ? (
             <DiffLines
               parsed={panel.historyCommit.parsed}

@@ -75,6 +75,8 @@ function useSettingsLoad(host: HostProfile, health: HostHealthStatus) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<SettingsMessage | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  // host.name refreshes the settings header when the profile is renamed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: host.name is a reload trigger
   useEffect(() => {
     if (health === 'unreachable' || health === 'unauthorized') return;
     setLoading(true);

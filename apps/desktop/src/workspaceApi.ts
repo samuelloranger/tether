@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { normalizeInvokeError } from './invokeError';
+import type { WorkspaceDirListing } from './workspaceDirLogic';
 import type { FileStat, FileTreeNode, FileView, Presentation } from './workspaceTypes';
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -12,6 +13,18 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
 
 export async function coreFileTreeBuild(files: FileStat[]): Promise<FileTreeNode[]> {
   return invoke<FileTreeNode[]>('core_file_tree_build', { files });
+}
+
+export async function coreWorkspaceDir(input: {
+  hostId: string;
+  sessionId: string;
+  path: string;
+}): Promise<WorkspaceDirListing> {
+  return invoke<WorkspaceDirListing>('core_workspace_dir', {
+    hostId: input.hostId,
+    sessionId: input.sessionId,
+    path: input.path,
+  });
 }
 
 export async function coreWorkspaceFile(input: {
