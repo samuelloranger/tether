@@ -9,6 +9,8 @@ public struct DiffFileStat: Codable, Equatable, Sendable, Identifiable {
   public var binary: Bool
   /// Index (staged) vs working-tree (unstaged). Absent on older servers.
   public var staged: Bool?
+  /// Whether the file is untracked. Absent on older servers.
+  public var untracked: Bool?
 
   public var id: String {
     "\(staged == true ? "S" : "U"):\(path)"
@@ -19,19 +21,25 @@ public struct DiffFileStat: Codable, Equatable, Sendable, Identifiable {
     insertions: Int,
     deletions: Int,
     binary: Bool,
-    staged: Bool? = nil
+    staged: Bool? = nil,
+    untracked: Bool? = nil
   ) {
     self.path = path
     self.insertions = insertions
     self.deletions = deletions
     self.binary = binary
     self.staged = staged
+    self.untracked = untracked
   }
 
-  /// Rough git-status letter for the row (server summary has no letter field).
+  /// git-status letter for the row.
+  ///
+  /// This was inferred from the counts, which marked any pure-addition edit to
+  /// a tracked file as "A" — the most common kind of edit there is. The server
+  /// now states whether the file is untracked.
   public var statusLetter: String {
     if binary { return "B" }
-    if insertions > 0 && deletions == 0 { return "A" }
+    if untracked == true { return "A" }
     if insertions == 0 && deletions > 0 { return "D" }
     return "M"
   }

@@ -70,7 +70,18 @@ test('debounces native worktree events and suppresses an identical summary', asy
     await waitFor(() => seen.length === 2);
     expect(seen).toEqual([
       { files: [] },
-      { files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false }] },
+      {
+        files: [
+          {
+            path: 'main.ts',
+            insertions: 1,
+            deletions: 1,
+            binary: false,
+            staged: false,
+            untracked: false,
+          },
+        ],
+      },
     ]);
 
     writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
@@ -105,7 +116,16 @@ test('kick schedules a refresh after an out-of-band index change', async () => {
     watch.kick();
     await waitFor(() => seen.length === 2);
     expect(seen[1]).toEqual({
-      files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: true }],
+      files: [
+        {
+          path: 'main.ts',
+          insertions: 1,
+          deletions: 1,
+          binary: false,
+          staged: true,
+          untracked: false,
+        },
+      ],
     });
     watch.dispose();
   });
@@ -135,7 +155,16 @@ test('retargets to a new repository and stops publishing the old root', async ()
       writeFileSync(path.join(second, 'main.ts'), 'export const answer = 43;\n');
       await waitFor(() => seen.length === 2);
       expect(seen[1]).toEqual({
-        files: [{ path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false }],
+        files: [
+          {
+            path: 'main.ts',
+            insertions: 1,
+            deletions: 1,
+            binary: false,
+            staged: false,
+            untracked: false,
+          },
+        ],
       });
       watch.dispose();
     });
@@ -182,8 +211,22 @@ test('captures changes that already existed before setRoot was first called', as
     expect(seen).toEqual([
       {
         files: [
-          { path: 'main.ts', insertions: 1, deletions: 1, binary: false, staged: false },
-          { path: 'fresh.ts', insertions: 1, deletions: 0, binary: false, staged: false },
+          {
+            path: 'main.ts',
+            insertions: 1,
+            deletions: 1,
+            binary: false,
+            staged: false,
+            untracked: false,
+          },
+          {
+            path: 'fresh.ts',
+            insertions: 1,
+            deletions: 0,
+            binary: false,
+            staged: false,
+            untracked: true,
+          },
         ],
       },
     ]);
