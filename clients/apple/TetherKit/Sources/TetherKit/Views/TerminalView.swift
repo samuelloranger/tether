@@ -432,11 +432,6 @@ public struct TerminalView: View {
       .focused($keyboardFocused)
     }
     .background(TetherColors.background)
-    // The whole stack has to ignore the inset, not just the surface inside it:
-    // an inner view ignoring the safe area still sits inside a parent that
-    // reserved it, which left the home-indicator strip painted background-black
-    // below the grid.
-    .ignoresSafeArea(.container, edges: .bottom)
     .onAppear {
       keyboardFocused = true
     }
