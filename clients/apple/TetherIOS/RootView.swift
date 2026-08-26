@@ -34,6 +34,8 @@ struct RootView: View {
           onOverflow: { showOverflow = true }
         )
 
+        PresentationBannerSlot(store: store, workspace: workspace)
+
         TerminalView(store: store, preferences: preferences)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       }

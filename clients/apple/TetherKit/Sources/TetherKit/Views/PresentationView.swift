@@ -13,15 +13,18 @@ public struct PresentationBannerView: View {
   public var label: String
   public var systemImage: String
   public var onPress: () -> Void
+  public var showsChrome: Bool
 
   public init(
     label: String,
     systemImage: String = "rectangle.on.rectangle",
-    onPress: @escaping () -> Void
+    onPress: @escaping () -> Void,
+    showsChrome: Bool = true
   ) {
     self.label = label
     self.systemImage = systemImage
     self.onPress = onPress
+    self.showsChrome = showsChrome
   }
 
   public var body: some View {
@@ -41,11 +44,16 @@ public struct PresentationBannerView: View {
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 6)
-      .background(TetherColors.surface)
+      // When this sits inside a wider header row, that row owns the background
+      // and the hairline; drawing them here left the surface stopping short of
+      // the close button, with a visible seam between the two.
+      .background(showsChrome ? TetherColors.surface : Color.clear)
       .overlay(alignment: .bottom) {
-        Rectangle()
-          .fill(TetherColors.textSecondary.opacity(0.25))
-          .frame(height: 1)
+        if showsChrome {
+          Rectangle()
+            .fill(TetherColors.textSecondary.opacity(0.25))
+            .frame(height: 1)
+        }
       }
     }
     .buttonStyle(.plain)
@@ -81,7 +89,8 @@ public struct PresentationPaneView: View {
         PresentationBannerView(
           label: "Back to \(backLabel)",
           systemImage: "terminal",
-          onPress: onBack
+          onPress: onBack,
+          showsChrome: false
         )
         if let onClose {
           Button(role: .destructive, action: onClose) {
@@ -90,8 +99,13 @@ public struct PresentationPaneView: View {
               .foregroundStyle(TetherColors.danger)
           }
           .accessibilityLabel("Close presentation")
-          .background(TetherColors.surface)
         }
+      }
+      .background(TetherColors.surface)
+      .overlay(alignment: .bottom) {
+        Rectangle()
+          .fill(TetherColors.textSecondary.opacity(0.25))
+          .frame(height: 1)
       }
       PresentationView(preview: preview, url: url)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

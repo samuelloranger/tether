@@ -2,8 +2,39 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Banner announcing a pushed preview for the active session.
+///
+/// Deliberately NOT part of WorkspaceChromeView: that is a ZStack overlay above
+/// the whole app, so a banner inside it drew on top of the title bar. This one
+/// belongs in the layout flow, directly under the title bar.
+public struct PresentationBannerSlot: View {
+  @Bindable public var store: SessionStore
+  @Bindable public var workspace: WorkspaceController
+
+  public init(store: SessionStore, workspace: WorkspaceController) {
+    self.store = store
+    self.workspace = workspace
+  }
+
+  public var body: some View {
+    if workspace.activePresentation == nil,
+       workspace.fileView == nil,
+       let sessionId = store.activeSessionId,
+       let preview = findSessionPreview(
+         presentations: workspace.presentations,
+         sessionId: sessionId
+       )
+    {
+      PresentationBannerView(
+        label: "Preview ready: \(preview.title)",
+        systemImage: "rectangle.on.rectangle",
+        onPress: { workspace.selectPresentation(id: preview.id) }
+      )
+    }
+  }
+}
+
 /// Overlay chrome for workspace file viewer, presentations, and uploads.
-/// Embed in RootView (do not edit RootView from this task — wire from outside).
 public struct WorkspaceChromeView: View {
   @Bindable public var store: SessionStore
   @Bindable public var workspace: WorkspaceController
@@ -17,25 +48,6 @@ public struct WorkspaceChromeView: View {
 
   public var body: some View {
     ZStack {
-      VStack(spacing: 0) {
-        if workspace.activePresentation == nil,
-           let sessionId = store.activeSessionId,
-           let preview = findSessionPreview(
-             presentations: workspace.presentations,
-             sessionId: sessionId
-           )
-        {
-          PresentationBannerView(
-            label: "Preview ready: \(preview.title)",
-            systemImage: "rectangle.on.rectangle",
-            onPress: { workspace.selectPresentation(id: preview.id) }
-          )
-        }
-
-        Spacer(minLength: 0)
-      }
-      .allowsHitTesting(workspace.activePresentation == nil && workspace.fileView == nil)
-
       if let file = workspace.fileView {
         FileViewerView(file: file, onBack: { workspace.closeFile() })
           .transition(.move(edge: .trailing))
