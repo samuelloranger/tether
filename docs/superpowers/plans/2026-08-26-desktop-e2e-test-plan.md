@@ -3,7 +3,15 @@
 **Goal:** prove every desktop feature works after the redesign, with tests that
 run on the macOS build host rather than in my head.
 
-**Status:** plan only. Nothing below is built or run yet.
+**Status:** L0-L2 built and green on the macOS build host (204 unit + 26 e2e +
+4 integration). L3 not attempted yet; L4 not started.
+
+**Revision, after reading the code:** L2 was going to drive the Tauri commands
+through `tauri::test::mock_builder`. It doesn't need to. The 62 commands are
+thin wrappers over `tether_core`'s request-builder / response-parser pairs, so
+testing core against a live server covers their substance with no GUI and no JS
+toolchain — which is what lets the suite run on a Mac that has cargo but no
+node. What that leaves uncovered is named at the bottom of this file.
 
 ## Two constraints that shape everything
 
@@ -139,3 +147,29 @@ machine changes.
 - The commands that mutate a real machine — admin update, restart, password
   change, git push, discard — only ever run against a scratch server and a
   throwaway repo.
+
+
+## What L2 actually covers, and what it does not
+
+Built as `crates/tether-core/tests/e2e_*.rs` over `tests/support/mod.rs`, which
+spawns a real `tether` binary per test on an ephemeral port with its own temp
+database. Real HTTP, real WebSocket, real PTYs, real git repos.
+
+Not covered by it, and still only reachable from L3 or by hand:
+
+- The Tauri glue itself: `client_for`'s keyring read, the `core-message-<id>` /
+  `core-closed-<id>` event names, the session and connection maps in state.
+- Every rendering question, which is the whole of the redesign.
+- The native plugin surface: updater, notifications, deep links, dialogs.
+
+## Findings from running it
+
+- The holder starts its shell in `session.defaultCwd`, not the server's cwd.
+  Git and workspace routes resolve from the shell's live cwd, so a test has to
+  set that setting before the session exists.
+- A resize sent immediately after connect is overwritten by the dimensions in
+  the WebSocket URL, because subscribe writes those in. Latent — real clients
+  resize after their fit — but a fast enough client would stick at the URL size.
+- Four tests were matching the shell's echo of the command line instead of its
+  output, so they would have passed with the shell never running. macOS caught
+  it. Needles are now split with `''`.
