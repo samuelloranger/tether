@@ -59,9 +59,10 @@ public final class SessionStore {
   /// packed TGRD grids come back out; this is what turns a byte stream into
   /// something the CoreText surface can draw.
   @ObservationIgnored private var emulator: FfiTerminalEmulator?
-  /// Which session `emulator` holds the scrollback for. A reconnect to the SAME
-  /// session must reuse it; only a different session earns a fresh one.
-  @ObservationIgnored private var emulatorSessionId: String?
+  /// Which session `emulator` holds the scrollback for, as a HOST-QUALIFIED key.
+  /// A reconnect to the same session must reuse it; only a different session
+  /// earns a fresh one. See `terminalKey` for why the host has to be in it.
+  @ObservationIgnored private var emulatorKey: String?
   /// One source of truth for the grid size: the socket, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
   private var terminalCols: UInt16 = 80
@@ -307,7 +308,7 @@ public final class SessionStore {
     guard let client = await activeClient() else { return }
     do {
       try await client.killSession(id: id)
-      replayStore.forget(sessionId: id)
+      replayStore.forget(sessionId: terminalKey(id))
       if activeSessionId == id {
         sendFocus(focused: false)
         releaseTerminal()
@@ -590,6 +591,20 @@ public final class SessionStore {
     }
   }
 
+  /// A cache key that includes the host.
+  ///
+  /// Session ids are only unique PER HOST — two servers both call their first
+  /// session `default` — so anything remembered per session has to carry the
+  /// host too. Keyed on the bare id, switching between two hosts whose sessions
+  /// share an id looked like reconnecting to the same session: the emulator and
+  /// its scrollback were reused, so the title bar showed the new host while the
+  /// terminal showed the old host's output, and the replay cursor from one host
+  /// was sent to the other — which can silently skip history rather than just
+  /// showing the wrong thing.
+  private func terminalKey(_ sessionId: String, hostId: String? = nil) -> String {
+    "\(hostId ?? activeHostId ?? "-"):\(sessionId)"
+  }
+
   private func connectTerminal(sessionId: String) async {
     disconnectTerminal()
     guard let client = await activeClient() else { return }
@@ -598,13 +613,14 @@ public final class SessionStore {
     // newest applied frame means the server replays only what arrived since, and
     // everything before it is gone for good. Reuse the emulator when reconnecting
     // the same session so `sinceId` resumes into the history it belongs to.
-    if emulatorSessionId != sessionId || emulator == nil {
+    let key = terminalKey(sessionId)
+    if emulatorKey != key || emulator == nil {
       emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
-      emulatorSessionId = sessionId
+      emulatorKey = key
       terminalSnapshot = nil
     }
     lastRenderedGeneration = nil
-    let sinceId = replayStore.sinceId(sessionId: sessionId)
+    let sinceId = replayStore.sinceId(sessionId: key)
     do {
       let task = try await client.openWebSocket(
         sessionId: sessionId, sinceId: sinceId,
@@ -634,7 +650,7 @@ public final class SessionStore {
   private func releaseTerminal() {
     disconnectTerminal()
     emulator = nil
-    emulatorSessionId = nil
+    emulatorKey = nil
     terminalSnapshot = nil
     lastRenderedGeneration = nil
   }
@@ -709,7 +725,9 @@ public final class SessionStore {
       // already applied. Discarding that answer and feeding anyway makes a
       // repeated frame reach the parser twice, which renders as doubled
       // characters ("abc" typed, "aabbcc" on screen).
-      if let id = json["id"] as? UInt64, !replayStore.acceptOutput(sessionId: sessionId, id: id) {
+      if let id = json["id"] as? UInt64,
+        !replayStore.acceptOutput(sessionId: terminalKey(sessionId), id: id)
+      {
         return
       }
       if let chunk = json["chunk"] as? String, let bytes = chunk.data(using: .utf8) {
@@ -717,12 +735,12 @@ public final class SessionStore {
         refreshTerminalSnapshot()
       }
     case "reset":
-      replayStore.reset(sessionId: sessionId)
+      replayStore.reset(sessionId: terminalKey(sessionId))
       // A reset means the client's history has a hole; rebuild the grid rather
       // than letting the old contents linger under the replayed tail. This is the
       // one case where a same-session rebuild is right.
       emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
-      emulatorSessionId = sessionId
+      emulatorKey = terminalKey(sessionId)
       lastRenderedGeneration = nil
       terminalSnapshot = nil
     case "ping":
