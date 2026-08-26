@@ -576,7 +576,11 @@ public struct TerminalView: View {
       let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
       let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
     else { return 0 }
-    return max(0, window.bounds.maxY - end.minY)
+    // The container's bottom inset is ALREADY reserved by the layout, and this
+    // padding is applied inside it. Without subtracting it the two stack and
+    // leave a dead band the height of the home indicator between the last
+    // terminal row and the key bar.
+    return max(0, window.bounds.maxY - end.minY - window.safeAreaInsets.bottom)
   }
 
   /// Nothing to stream: either no server is paired, or none is open.
