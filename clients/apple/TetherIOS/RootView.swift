@@ -20,6 +20,14 @@ struct RootView: View {
 
   var body: some View {
     ZStack {
+      // The backdrop, as the ZStack's FIRST child rather than a .background()
+      // modifier. As a modifier it did not reach the home-indicator strip even
+      // with ignoresSafeArea, so the window's own darker fill showed through
+      // there and read as a band under the key bar. Measured: (11,11,18) under
+      // the scrim instead of (20,20,30).
+      TetherColors.terminalBackground
+        .ignoresSafeArea()
+
       VStack(spacing: 0) {
         TerminalTitleBar(
           store: store,
@@ -74,10 +82,6 @@ struct RootView: View {
     // terminal's colour. Anything the terminal does not cover — the home
     // indicator strip below the key bar — then matches instead of showing as a
     // darker band.
-    // The COLOUR ignores the safe area while the content still respects it.
-    // Plain .background() stopped at the home-indicator inset, leaving the
-    // window's own darker backdrop showing as a band along the bottom edge.
-    .background(TetherColors.terminalBackground.ignoresSafeArea())
     // The terminal measures the keyboard itself and applies its own bottom
     // inset. This has to sit at the ROOT: applied further in, the parent still
     // got SwiftUI's automatic avoidance and the two insets stacked, collapsing
