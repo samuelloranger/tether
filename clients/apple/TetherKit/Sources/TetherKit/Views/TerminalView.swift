@@ -573,11 +573,9 @@ public struct TerminalView: View {
           onOpenURL: { url in UIApplication.shared.open(url) },
           onMouseBytes: { store.sendInput($0) }
         )
-        // A small gutter, applied to the frame rather than the drawing: the grid
-        // draws from (0,0) and cell hit-testing is relative to the same origin,
-        // so insetting the view keeps rendering and touch in agreement. Costs
-        // about two columns and stops the prompt sitting on the screen edge.
-        .padding(.horizontal, 6)
+        // No inset. The gutter that used to be here cost two columns and, being
+        // a different colour from the grid, was itself half of the frame the
+        // terminal appeared to sit inside.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Must match TetherSurfaceView's own backgroundColor. Any area the grid
         // does not cover — the remainder below the last whole row, and the
