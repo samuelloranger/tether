@@ -109,8 +109,17 @@ public struct PresentationPaneView: View {
       }
       PresentationView(preview: preview, url: url)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The page owns everything below the header, home-indicator strip
+        // included. A chrome colour down there is a different colour from
+        // whatever the page paints, so it reads as a black bar under the
+        // content — and the page's colour is arbitrary, so no chrome colour can
+        // ever match it. WebKit re-adds the safe-area inset to its own scroll
+        // view, so nothing ends up stranded under the indicator.
+        .ignoresSafeArea(.container, edges: .bottom)
     }
-    .background(TetherColors.background)
+    // ignoresSafeAreaEdges defaults to .all — that default is what painted the
+    // strip in the first place.
+    .background(TetherColors.background, ignoresSafeAreaEdges: [])
   }
 }
 
@@ -149,6 +158,12 @@ private func makePresentationWebView() -> WKWebView {
   config.userContentController = WKUserContentController()
   let webView = WKWebView(frame: .zero, configuration: config)
   webView.allowsBackForwardNavigationGestures = false
+  #if os(iOS)
+  // The view reaches the screen's bottom edge on purpose, so WebKit has to be
+  // the one adding the safe-area inset back — .automatic does not, outside a
+  // scroll-view-in-navigation context.
+  webView.scrollView.contentInsetAdjustmentBehavior = .always
+  #endif
   return webView
 }
 
