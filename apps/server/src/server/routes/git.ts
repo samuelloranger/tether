@@ -17,7 +17,7 @@ import {
   unstageHunk,
   unstagePath,
 } from '../gitOps';
-import { resolveGitRoot } from '../gitRoot';
+import { GitRootError, resolveGitRoot } from '../gitRoot';
 import { readRepoStatus } from '../gitStatus';
 import { getLiveCwd } from '../liveCwd';
 import { kickSessionGitWatch } from '../pty';
@@ -34,10 +34,20 @@ function gitRootFor(c: Context, id: string): { root: string } | { response: Resp
     return {
       response: c.json({ error: 'waiting for shell to report its working directory' }, 409),
     };
-  return { root: resolveGitRoot(cwd) };
+  try {
+    return { root: resolveGitRoot(cwd) };
+  } catch (error) {
+    if (error instanceof GitRootError) {
+      return { response: c.json({ error: error.message }, error.status) };
+    }
+    throw error;
+  }
 }
 
 function handleGitError(c: Context, error: unknown): Response {
+  if (error instanceof GitRootError) {
+    return c.json({ error: error.message }, error.status);
+  }
   if (error instanceof GitOpsError || error instanceof GitDiffError) {
     return c.json({ error: error.message }, error.status);
   }
@@ -52,8 +62,7 @@ gitRoutes.get('/api/sessions/:id/diff/summary', (c) => {
   try {
     return c.json(readDiffSummary(resolveGitRoot(cwd)));
   } catch (error) {
-    if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
-    throw error;
+    return handleGitError(c, error);
   }
 });
 
@@ -67,8 +76,7 @@ gitRoutes.get('/api/sessions/:id/diff', async (c) => {
     const mode = modeParam === 'staged' || modeParam === 'unstaged' ? modeParam : 'head';
     return c.json(await readDiff(resolveGitRoot(cwd), c.req.query('path'), mode));
   } catch (error) {
-    if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
-    throw error;
+    return handleGitError(c, error);
   }
 });
 
@@ -92,8 +100,7 @@ gitRoutes.get('/api/sessions/:id/diff/file', (c) => {
       headers: { 'Content-Type': previewMime(requestedPath), 'Cache-Control': 'no-store' },
     });
   } catch (error) {
-    if (error instanceof GitDiffError) return c.json({ error: error.message }, error.status);
-    throw error;
+    return handleGitError(c, error);
   }
 });
 
