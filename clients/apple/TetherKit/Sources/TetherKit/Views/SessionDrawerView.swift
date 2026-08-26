@@ -167,14 +167,19 @@ private struct HostDrawerSection: View {
   @ViewBuilder
   private var statusView: some View {
     switch health {
+    // A plain state is a dot, matching the title bar and the session rows below
+    // — three spellings of "reachable" in one panel was one too many. A state
+    // you can DO something about keeps its words, because the label is the fix
+    // rather than a status.
     case .unknown:
-      Text("connecting…")
-        .font(.caption)
-        .foregroundStyle(TetherColors.textSecondary)
+      ProgressView()
+        .controlSize(.mini)
+        .accessibilityLabel("Connecting")
     case .reachable:
-      Text("online")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.green)
+      Circle()
+        .fill(TetherColors.success)
+        .frame(width: 7, height: 7)
+        .accessibilityLabel("Connected")
     case .unreachable:
       Button("Retry", action: onRetryHost)
         .font(.caption.weight(.semibold))
