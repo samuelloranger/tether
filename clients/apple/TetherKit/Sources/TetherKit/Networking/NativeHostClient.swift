@@ -162,10 +162,19 @@ public actor NativeHostClient {
     let (data, response) = try await session.data(for: request)
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
-    guard let decoded = try? JSONDecoder().decode(RemoteSession.self, from: data) else {
+    // The server wraps this one: { ok, session }. Decoding RemoteSession
+    // straight from the body always failed, and it failed AFTER the session
+    // had been created — so the tap started a session the app then refused to
+    // switch to.
+    guard let decoded = try? JSONDecoder().decode(StartSessionResponse.self, from: data) else {
       throw HostClientError.decodeFailed
     }
-    return decoded
+    return decoded.session
+  }
+
+  private struct StartSessionResponse: Decodable {
+    var ok: Bool
+    var session: RemoteSession
   }
 
   public func killSession(id: String) async throws {
