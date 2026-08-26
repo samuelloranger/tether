@@ -6,6 +6,7 @@
 
 pub mod connection_test;
 pub mod deep_link;
+pub mod file_tree;
 pub mod host_client;
 pub mod host_health;
 pub mod host_polling;
@@ -23,3 +24,4 @@ pub mod store;
 pub mod terminal;
 pub mod terminal_session_logic;
 pub mod tether_app_actions;
+pub mod workspace;
