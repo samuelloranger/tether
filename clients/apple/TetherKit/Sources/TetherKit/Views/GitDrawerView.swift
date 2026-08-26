@@ -256,6 +256,10 @@ public struct GitDrawerView: View {
           .font(.subheadline.monospaced())
           .foregroundStyle(TetherColors.textPrimary)
           .lineLimit(1)
+          // Truncate the MIDDLE. Tail truncation ate the filename — the one part
+          // that tells you which file this row is — and left a run of directories
+          // that several rows share.
+          .truncationMode(.middle)
 
         Spacer(minLength: 8)
 
