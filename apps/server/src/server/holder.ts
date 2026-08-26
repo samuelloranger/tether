@@ -86,7 +86,12 @@ function killHolderPty(proc: HolderProc): void {
   }, 1000);
 }
 
-function applyHolderFrame(proc: HolderProc, msg: HolderMessage | null, killPty: () => void): void {
+function applyHolderFrame(
+  proc: HolderProc,
+  msg: HolderMessage | null,
+  killPty: () => void,
+  buf?: HolderBuffer,
+): void {
   if (!msg) return;
   try {
     if (msg.type === 'input' && proc.terminal) {
@@ -95,6 +100,11 @@ function applyHolderFrame(proc: HolderProc, msg: HolderMessage | null, killPty: 
       proc.terminal.resize(msg.cols, msg.rows);
     } else if (msg.type === 'kill') {
       killPty();
+    } else if (msg.type === 'cwdRequest') {
+      // Answer from the kernel, not from a remembered value: the point of the
+      // request is that the shell may have `cd`-ed since anyone last looked.
+      const cwd = getProcessCwd(proc.pid);
+      if (cwd && buf?.client) buf.client.write(encodeHolderCwd(cwd));
     }
   } catch {}
 }
@@ -142,12 +152,12 @@ function readHolderInput(
     buf.lineBuf += chunk.toString('utf8');
     const { lines, rest } = takeLegacyLines(buf.lineBuf);
     buf.lineBuf = rest;
-    for (const line of lines) applyHolderFrame(proc, decodeLegacyHolderLine(line), killPty);
+    for (const line of lines) applyHolderFrame(proc, decodeLegacyHolderLine(line), killPty, buf);
     return;
   }
   try {
     for (const frame of buf.decoder.push(new Uint8Array(chunk))) {
-      applyHolderFrame(proc, decodeHolderFrame(frame), killPty);
+      applyHolderFrame(proc, decodeHolderFrame(frame), killPty, buf);
     }
   } catch {
     // Desynced stream: there is no honest resync point. Drop the link and let

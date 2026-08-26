@@ -10,6 +10,7 @@ import { GitWatch } from './gitWatch';
 import {
   decodeHolderFrame,
   decodeLegacyHolderLine,
+  encodeHolderCwdRequest,
   encodeHolderInput,
   encodeHolderKill,
   encodeHolderResize,
@@ -125,6 +126,14 @@ type HolderLink = {
   outQueue: HolderMessage[];
   dialectTimer: ReturnType<typeof setTimeout> | null;
   sock: Socket | null;
+  /** Resolvers waiting on the next CWD frame — see `refreshLiveCwd`. */
+  cwdWaiters: ((cwd: string | null) => void)[];
+  /**
+   * Set once a CWDREQ went unanswered, so a pre-v2 holder — which has never
+   * heard of the frame and will never reply — is asked once and then left alone
+   * instead of costing every git request the full timeout.
+   */
+  cwdRequestUnanswered: boolean;
 };
 
 /** How long to wait for a holder's first byte before assuming the old dialect. */
@@ -141,6 +150,8 @@ function newHolderLink(): HolderLink {
     outQueue: [],
     dialectTimer: null,
     sock: null,
+    cwdWaiters: [],
+    cwdRequestUnanswered: false,
   };
 }
 
@@ -154,6 +165,7 @@ function writeHolderMessage(link: HolderLink, msg: HolderMessage): void {
   if (msg.type === 'input') link.sock.write(encodeHolderInput(msg.data));
   else if (msg.type === 'resize') link.sock.write(encodeHolderResize(msg.cols, msg.rows));
   else if (msg.type === 'kill') link.sock.write(encodeHolderKill());
+  else if (msg.type === 'cwdRequest') link.sock.write(encodeHolderCwdRequest());
 }
 
 function settleDialect(link: HolderLink, dialect: HolderDialect): void {
@@ -217,6 +229,10 @@ function handleHolderMessage(id: string, msg: HolderMessage | null, link: Holder
     const text = link.decoder.decode(msg.data, { stream: true });
     if (text) link.pendingOutput.push(text);
   } else if (msg.type === 'cwd') {
+    link.cwdRequestUnanswered = false;
+    const waiters = link.cwdWaiters;
+    link.cwdWaiters = [];
+    for (const resolve of waiters) resolve(msg.cwd);
     // A holder-reported cwd (spawn time, or a fresh kernel read on every new
     // client attach) — arms git watching without waiting on an OSC 7 prompt
     // redraw, which may be a long time coming (or never, mid-TUI).
@@ -362,6 +378,47 @@ export function sendHolderResize(id: string, cols: number, rows: number): boolea
 }
 
 /** Asks the holder to take its PTY down. */
+/**
+ * Asks the holder to re-read its shell's cwd from the kernel, and waits briefly
+ * for the answer.
+ *
+ * The live cwd otherwise only moves when the prompt emits OSC 7 or when a client
+ * attaches, so a shell with a custom `PS1` left the git and file features
+ * looking at the directory the session started in no matter where the user went.
+ *
+ * Deliberately best-effort. It resolves false rather than throwing when there is
+ * no holder, when the holder speaks the pre-v2 dialect (which cannot express the
+ * request), or when the answer does not arrive in time — the caller then uses
+ * the cwd it already had, which is exactly the old behaviour. The point is to be
+ * right more often, not to add a way for a diff request to fail.
+ */
+export async function refreshLiveCwd(id: string, timeoutMs = 250): Promise<boolean> {
+  const link = instances.get(id)?.link;
+  if (!link || link.exited || link.cwdRequestUnanswered) return false;
+  if (link.dialect === 'legacy') return false;
+  if (!sendHolderMessage(id, { type: 'cwdRequest' })) return false;
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      // Remember the silence: this is how a legacy holder that never sent HELLO
+      // stops costing 250ms on every request.
+      link.cwdRequestUnanswered = true;
+      link.cwdWaiters = link.cwdWaiters.filter((waiter) => waiter !== onCwd);
+      resolve(false);
+    }, timeoutMs);
+    const onCwd = (cwd: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(cwd !== null);
+    };
+    link.cwdWaiters.push(onCwd);
+  });
+}
+
 export function sendHolderKill(id: string): boolean {
   return sendHolderMessage(id, { type: 'kill' });
 }

@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { decodeHolderFrame, HOLDER_PROTO_VERSION, type HolderMessage } from './holderFrame';
-import { getLiveCwd, recordChunk } from './liveCwd';
+import { clearLiveCwd, getLiveCwd, recordChunk } from './liveCwd';
 import { FrameDecoder } from './proto/frame';
 import {
   killSession,
@@ -14,6 +14,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { refreshLiveCwd } from './ptyHolder';
 
 async function waitFor(condition: () => boolean, timeout = 3_000) {
   const deadline = Date.now() + timeout;
@@ -160,4 +161,34 @@ test('starts watching when a repository is initialized without changing cwd', as
     killSession(id);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('refreshLiveCwd re-reads the shell cwd with no OSC 7 prompt involved', async () => {
+  // The gap this closes: a shell whose prompt does not emit OSC 7 left the live
+  // cwd stuck wherever the session started, so the git and file routes answered
+  // about the wrong directory. Clearing the recorded value simulates exactly
+  // that shell — the process really is in `root`, and nothing has reported it.
+  const id = 'refresh-live-cwd';
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'tether-refresh-cwd-')));
+  let unsubscribe = () => {};
+  try {
+    await startSession(id, 'bash');
+    unsubscribe = subscribeToSession(id, () => {}, 80, 24);
+    writeToSession(id, `cd -- ${JSON.stringify(root)}\n`);
+    await waitFor(() => getLiveCwd(id) === root);
+
+    clearLiveCwd(id);
+    expect(getLiveCwd(id)).toBeNull();
+
+    expect(await refreshLiveCwd(id)).toBe(true);
+    expect(getLiveCwd(id)).toBe(root);
+  } finally {
+    unsubscribe();
+    killSession(id);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('refreshLiveCwd reports failure instead of throwing when there is no holder', async () => {
+  expect(await refreshLiveCwd('no-such-session-for-cwd-refresh')).toBe(false);
 });

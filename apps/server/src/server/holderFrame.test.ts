@@ -3,6 +3,7 @@ import {
   decodeHolderFrame,
   decodeLegacyHolderLine,
   encodeHolderCwd,
+  encodeHolderCwdRequest,
   encodeHolderExit,
   encodeHolderHello,
   encodeHolderInput,
@@ -185,4 +186,15 @@ describe('legacy dialect', () => {
     expect(takeLegacyLines('')).toEqual({ lines: [], rest: '' });
     expect(takeLegacyLines('\n\n')).toEqual({ lines: [], rest: '' });
   });
+});
+
+test('CWDREQ round-trips and carries no payload', () => {
+  const decoded = decode(encodeHolderCwdRequest());
+  expect(decoded).toEqual({ type: 'cwdRequest' });
+});
+
+test('the legacy dialect cannot express a cwd request', () => {
+  // A pre-v2 holder has never heard of the frame, so there is nothing to send
+  // it — the caller must treat "no answer" as normal rather than as a failure.
+  expect(encodeLegacyHolderFrame({ type: 'cwdRequest' })).toBeNull();
 });

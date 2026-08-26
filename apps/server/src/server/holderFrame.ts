@@ -10,7 +10,8 @@
  * holder is a detached process on the hottest path in the system, and these six
  * frames are a byte count and two integers. Nothing here needs a schema.
  *
- *   server -> holder:  INPUT (raw bytes) · RESIZE (u16 cols, u16 rows) · KILL
+ *   server -> holder:  INPUT (raw bytes) · RESIZE (u16 cols, u16 rows) · KILL ·
+ *                      CWDREQ (empty)
  *   holder -> server:  HELLO (u8 version) · OUTPUT (raw bytes) ·
  *                      EXIT (empty | i32 code) · CWD (utf-8 path)
  *
@@ -41,6 +42,20 @@ export const HolderKind = {
   OUTPUT: 5,
   EXIT: 6,
   CWD: 7,
+  /**
+   * "Read your shell's cwd from the kernel and answer with CWD."
+   *
+   * The live cwd used to move only on an OSC 7 report from the prompt, or on the
+   * kernel read a holder does when a client attaches. A shell whose prompt does
+   * not emit OSC 7 therefore left the git and file features pinned to the
+   * directory the session started in, however much the user `cd`-ed. Asking is
+   * cheap — a unix-socket round trip and one `/proc` read — and unlike OSC 7 it
+   * works mid-TUI, with no cooperation from the shell.
+   *
+   * A pre-v2 holder has never heard of this kind and simply ignores it, which is
+   * why the caller must not require an answer.
+   */
+  CWDREQ: 8,
 } as const;
 
 /** `{` — the first byte of every legacy newline-JSON frame, and of no binary one. */
@@ -60,7 +75,8 @@ export type HolderMessage =
   | { type: 'hello'; version: number }
   | { type: 'output'; data: Uint8Array }
   | { type: 'exit'; exitCode?: number }
-  | { type: 'cwd'; cwd: string };
+  | { type: 'cwd'; cwd: string }
+  | { type: 'cwdRequest' };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
@@ -101,6 +117,10 @@ export function encodeHolderCwd(cwd: string): Bytes {
   return encodeFrame(HolderKind.CWD, encoder.encode(cwd));
 }
 
+export function encodeHolderCwdRequest(): Bytes {
+  return encodeFrame(HolderKind.CWDREQ);
+}
+
 /** Decodes one framed holder message. Unknown kinds decode to null (forward
  *  compatibility: a newer peer may send kinds this build has never heard of). */
 export function decodeHolderFrame(frame: DecodedFrame): HolderMessage | null {
@@ -124,6 +144,8 @@ export function decodeHolderFrame(frame: DecodedFrame): HolderMessage | null {
         : { type: 'exit' };
     case HolderKind.CWD:
       return { type: 'cwd', cwd: decoder.decode(frame.payload) };
+    case HolderKind.CWDREQ:
+      return { type: 'cwdRequest' };
     default:
       return null;
   }
