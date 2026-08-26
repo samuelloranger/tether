@@ -156,10 +156,8 @@ struct RootView: View {
 
   private func openDrawer() {
     Task {
-      // Refresh BEFORE showing, so the panel does not animate in and then
-      // reflow as rows arrive.
       await store.refreshDrawer()
-      withAnimation(.easeOut(duration: 0.22)) { drawerOpen = true }
+      drawerOpen = true
     }
   }
 }
