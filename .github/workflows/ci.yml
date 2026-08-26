@@ -86,8 +86,16 @@ jobs:
           restore-keys: |
             cargo-core-${{ runner.os }}-
 
+      # The e2e suites under crates/tether-core/tests spawn the REAL compiled
+      # server, one per test on its own port and temp DB. They assert the binary
+      # exists rather than degrading to a mock, so without this step `cargo test`
+      # fails seven tests with "server binary missing" — which is exactly what it
+      # did here.
+      - name: Build the server binary (the core e2e suites spawn it)
+        run: bun run build:server
+
       - name: Core tests (rust)
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
         working-directory: crates/tether-core
 
