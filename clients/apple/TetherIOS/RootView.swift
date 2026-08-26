@@ -100,8 +100,9 @@ struct RootView: View {
   /// the confirmation dialog, registered after it, had nowhere to go. Siblings
   /// in a ZStack are separate views, so each gets its own slot.
   ///
-  /// The hosts are zero-size and non-interactive; they exist only to own a
-  /// presentation.
+  /// The hosts are zero-size, so they cannot intercept a touch. They must NOT
+  /// carry `allowsHitTesting(false)`: SwiftUI passes that into the presented
+  /// content, which left the rename alert on screen with dead buttons.
   @ViewBuilder
   private var presentationHosts: some View {
     ZStack {
@@ -162,7 +163,6 @@ struct RootView: View {
         Button("Cancel", role: .cancel) {}
       }
       }
-    .allowsHitTesting(false)
   }
 
   private var anchor: some View {
