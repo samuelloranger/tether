@@ -18,6 +18,16 @@ public enum SessionResume {
     return available.first
   }
 
+  /// The sessions a cold launch is allowed to open.
+  ///
+  /// Running only. `/api/sessions` lists stopped sessions too, and opening the
+  /// socket for an id calls `startSession` on the server — so restoring onto a
+  /// stopped row would spawn a fresh shell under it and resurrect a terminal the
+  /// user had deliberately killed. Launching the app must never start anything.
+  public static func restorable(_ sessions: [(id: String, status: String)]) -> [String] {
+    sessions.filter { $0.status == "running" }.map(\.id)
+  }
+
   /// Which host a cold launch should open, under the same rule: the remembered
   /// one while it still exists, otherwise the first paired host.
   public static func pickHost(remembered: String?, available: [String]) -> String? {

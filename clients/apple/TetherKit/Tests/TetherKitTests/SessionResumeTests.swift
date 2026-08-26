@@ -27,3 +27,24 @@ final class SessionResumeTests: XCTestCase {
     XCTAssertNil(SessionResume.pickHost(remembered: nil, available: []))
   }
 }
+
+extension SessionResumeTests {
+  /// Opening a session's socket makes the server start it, so restoring onto a
+  /// stopped one would resurrect a shell the user killed.
+  func test_a_cold_launch_never_restores_a_stopped_session() {
+    let listed = [("main", "stopped"), ("build", "running")]
+    XCTAssertEqual(SessionResume.restorable(listed), ["build"])
+    XCTAssertEqual(
+      SessionResume.pick(remembered: "main", available: SessionResume.restorable(listed)),
+      "build"
+    )
+  }
+
+  func test_a_host_whose_sessions_are_all_stopped_restores_nothing() {
+    let listed = [("main", "stopped"), ("build", "exited")]
+    XCTAssertTrue(SessionResume.restorable(listed).isEmpty)
+    XCTAssertNil(
+      SessionResume.pick(remembered: "main", available: SessionResume.restorable(listed))
+    )
+  }
+}

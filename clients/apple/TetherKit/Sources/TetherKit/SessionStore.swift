@@ -278,7 +278,7 @@ public final class SessionStore {
     guard
       let id = SessionResume.pick(
         remembered: ResumeMemory.rememberedSession(forHost: hostId),
-        available: sessions.map(\.id)
+        available: SessionResume.restorable(sessions.map { ($0.id, $0.status) })
       )
     else { return }
     activeSessionId = id
@@ -323,6 +323,8 @@ public final class SessionStore {
 
   public func startSession(named id: String) async {
     guard let client = await activeClient() else { return }
+    // Explicit, so the cold-launch restore is spent — see `selectSession`.
+    hasRestoredSession = true
     do {
       _ = try await client.startSession(id: id)
       await refreshSessions()
@@ -447,6 +449,12 @@ public final class SessionStore {
   }
 
   public func selectSession(hostId: String, sessionId: String) async {
+    // The user has chosen a terminal, so the cold-launch restore has no more
+    // work to do. Without this the latch could still be unspent — a launch whose
+    // first fetch returned nothing never spends it — and killing this session
+    // later would let the poll open another one, which is the "I closed that and
+    // it came back" behaviour the latch exists to prevent.
+    hasRestoredSession = true
     if activeSessionId != sessionId || activeHostId != hostId {
       sendFocus(focused: false)
     }
