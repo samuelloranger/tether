@@ -16,6 +16,9 @@ public final class SessionStore {
   public var errorMessage: String?
   public var isLoading = false
   public var isPairing = false
+  /// Whether the last probe reached a server, so the UI can confirm a success
+  /// rather than leaving the button looking inert.
+  public var probeSucceeded = false
   public var pairingNeedsSetup = false
   /// Whether the app scene is foreground — gates `{type:focus}` and resume.
   public private(set) var isAppActive = true
@@ -121,10 +124,15 @@ public final class SessionStore {
     isPairing = true
     pairingNeedsSetup = false
     errorMessage = nil
+    // Without this the flag stayed true after the first probe, so any UI gated
+    // on it could never leave the probing state.
+    defer { isPairing = false }
     do {
       let status = try await unauthenticatedStatus(host: host, port: port)
       pairingNeedsSetup = status.needsSetup
+      probeSucceeded = true
     } catch {
+      probeSucceeded = false
       errorMessage = error.localizedDescription
     }
   }
@@ -652,7 +660,11 @@ public final class SessionStore {
     guard let url = URL(string: "http://\(host):\(port)/api/status") else {
       throw HostClientError.invalidURL
     }
-    let (data, response) = try await URLSession.shared.data(from: url)
+    // A bounded timeout matters here: URLSession's 60s default made a blocked or
+    // unroutable host look like a dead button rather than a failure.
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 10
+    let (data, response) = try await URLSession.shared.data(for: request)
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
     guard let decoded = try? JSONDecoder().decode(ServerStatus.self, from: data) else {

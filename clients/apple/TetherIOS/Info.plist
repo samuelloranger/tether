@@ -31,6 +31,20 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Tether connects to your own server on your local network or private tunnel.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- A tether server is the user's own machine, reached over LAN, Tailscale or
+		     WireGuard, and its TLS certificate is self-signed and pinned by the client.
+		     ATS can validate neither, so it has to be stood down for this app. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIBackgroundModes</key>

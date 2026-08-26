@@ -7,6 +7,7 @@ public enum TetherColors {
   public static let textPrimary = Color.white.opacity(0.92)
   public static let textSecondary = Color.white.opacity(0.55)
   public static let danger = Color(red: 0.95, green: 0.45, blue: 0.45)
+  public static let success = Color(red: 0.65, green: 0.89, blue: 0.63)
 }
 
 public extension Color {

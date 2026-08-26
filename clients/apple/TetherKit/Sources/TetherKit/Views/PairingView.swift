@@ -21,10 +21,36 @@ public struct PairingView: View {
           .keyboardType(.URL)
         TextField("Port", text: $port)
           .keyboardType(.numberPad)
-        Button("Probe server") {
+        Button {
           Task { await store.beginPairing(host: host, port: port) }
+        } label: {
+          HStack {
+            Text("Probe server")
+            if store.isPairing {
+              Spacer()
+              ProgressView()
+            }
+          }
         }
-        .disabled(host.isEmpty)
+        .disabled(host.isEmpty || store.isPairing)
+
+        // A probe that fails silently is indistinguishable from a dead button,
+        // which is exactly how the first TestFlight build read. Always say what
+        // happened.
+        if store.isPairing {
+          Text("Contacting \(host):\(port)…").foregroundStyle(TetherColors.textSecondary)
+        } else if store.probeSucceeded {
+          Label(
+            store.pairingNeedsSetup
+              ? "Reached the server — it has no password yet. Choose one below."
+              : "Reached the server — enter its existing password below.",
+            systemImage: "checkmark.circle"
+          )
+          .foregroundStyle(TetherColors.success)
+        } else if store.errorMessage != nil {
+          Label("Could not reach \(host):\(port).", systemImage: "exclamationmark.triangle")
+            .foregroundStyle(TetherColors.danger)
+        }
       }
 
       Section(store.pairingNeedsSetup ? "Create password" : "Enter password") {
@@ -57,5 +83,7 @@ public struct PairingView: View {
       }
     }
     .navigationTitle("Add host")
+    .onChange(of: host) { store.probeSucceeded = false }
+    .onChange(of: port) { store.probeSucceeded = false }
   }
 }
