@@ -8,6 +8,9 @@ public enum TetherColors {
   public static let textSecondary = Color.white.opacity(0.55)
   public static let danger = Color(red: 0.95, green: 0.45, blue: 0.45)
   public static let success = Color(red: 0.65, green: 0.89, blue: 0.63)
+  /// Kept in step with TetherSurfaceView.backgroundColor so the SwiftUI backing
+  /// behind the grid is indistinguishable from the grid itself.
+  public static let terminalBackground = Color(red: 0.12, green: 0.12, blue: 0.18)
 }
 
 public extension Color {

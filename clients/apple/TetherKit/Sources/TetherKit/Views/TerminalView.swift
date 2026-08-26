@@ -392,7 +392,11 @@ public struct TerminalView: View {
           onMouseBytes: { store.sendInput($0) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        // Must match TetherSurfaceView's own backgroundColor. Any area the grid
+        // does not cover — the remainder below the last whole row, and the
+        // home-indicator inset — shows this through, and Color.black read as a
+        // dead strip against the terminal's navy.
+        .background(TetherColors.terminalBackground)
 
         if scrollOffsetFromBottom > 0 {
           ScrollPositionIndicator(offset: scrollOffsetFromBottom)
@@ -406,9 +410,6 @@ public struct TerminalView: View {
 
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      // Without this the home-indicator inset is left as a dead near-black
-      // strip below the grid.
-      .ignoresSafeArea(.container, edges: .bottom)
 
       TerminalInputBridge(
         text: $inputBuffer,
@@ -431,6 +432,11 @@ public struct TerminalView: View {
       .focused($keyboardFocused)
     }
     .background(TetherColors.background)
+    // The whole stack has to ignore the inset, not just the surface inside it:
+    // an inner view ignoring the safe area still sits inside a parent that
+    // reserved it, which left the home-indicator strip painted background-black
+    // below the grid.
+    .ignoresSafeArea(.container, edges: .bottom)
     .onAppear {
       keyboardFocused = true
     }
