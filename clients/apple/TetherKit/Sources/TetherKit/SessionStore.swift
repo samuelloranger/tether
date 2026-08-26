@@ -66,6 +66,9 @@ public final class SessionStore {
   }
 
   public func bootstrap() async {
+    #if DEBUG
+    await seedDebugHostIfRequested()
+    #endif
     do {
       hosts = try hostStore.list()
       for host in hosts {
@@ -79,6 +82,44 @@ public final class SessionStore {
       errorMessage = error.localizedDescription
     }
   }
+
+  #if DEBUG
+  /// Pairs a host from the launch environment, for driving the simulator.
+  ///
+  /// iOS refuses synthetic taps and keystrokes in a SecureField, so a scripted
+  /// design or E2E pass could never get past the password on the pairing screen
+  /// without a human at the keyboard. This lets the harness pass credentials in
+  /// directly:
+  ///
+  ///   xcrun simctl launch --console booted <bundle> \
+  ///     -TETHER_DEBUG_HOST 192.168.1.10 -TETHER_DEBUG_PORT 8097 \
+  ///     -TETHER_DEBUG_PASSWORD hunter2
+  ///
+  /// DEBUG only, so it cannot exist in a Release build — which is what every
+  /// TestFlight and App Store archive is. It also does nothing unless all three
+  /// values are present, and it skips a host that is already paired.
+  private func seedDebugHostIfRequested() async {
+    let env = ProcessInfo.processInfo
+    guard
+      let host = env.environment["TETHER_DEBUG_HOST"]
+        ?? UserDefaults.standard.string(forKey: "TETHER_DEBUG_HOST"),
+      let password = env.environment["TETHER_DEBUG_PASSWORD"]
+        ?? UserDefaults.standard.string(forKey: "TETHER_DEBUG_PASSWORD"),
+      !host.isEmpty, !password.isEmpty
+    else { return }
+    let port = env.environment["TETHER_DEBUG_PORT"]
+      ?? UserDefaults.standard.string(forKey: "TETHER_DEBUG_PORT") ?? "8085"
+
+    let existing = (try? hostStore.list()) ?? []
+    if existing.contains(where: { $0.host == host && $0.port == port }) { return }
+    do {
+      _ = try await createHost(name: "", host: host, port: port, password: password)
+      print("[TETHER_DEBUG] paired \(host):\(port)")
+    } catch {
+      print("[TETHER_DEBUG] seed failed: \(error.localizedDescription)")
+    }
+  }
+  #endif
 
   public func reloadHosts() {
     do {
