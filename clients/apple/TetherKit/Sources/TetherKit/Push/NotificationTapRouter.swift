@@ -47,7 +47,12 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
 
   /// Prefer `link` (written by the NSE after decrypt, or by cleartext pushes).
   /// Only `tether://` URLs are accepted — the payload is server-influenced.
-  public static func link(from userInfo: [AnyHashable: Any]) -> String? {
+  ///
+  /// `nonisolated` because it is a pure parser: it reads a dictionary and
+  /// returns a string. The class is `@MainActor` for the delegate callbacks,
+  /// and inheriting that here made the one piece of logic worth testing
+  /// callable only from the main actor.
+  public nonisolated static func link(from userInfo: [AnyHashable: Any]) -> String? {
     if let link = userInfo["link"] as? String, link.hasPrefix("tether://") {
       return link
     }
