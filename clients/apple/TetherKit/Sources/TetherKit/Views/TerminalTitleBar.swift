@@ -82,7 +82,7 @@ public struct TerminalTitleBar: View {
   }
 
   private var sessionTitle: String {
-    store.activeSession?.displayTitle ?? "Tether"
+    store.activeSession?.displayTitle ?? store.lastKnownSessionTitle ?? "Tether"
   }
 
   private var subtitle: String {
@@ -98,39 +98,48 @@ public struct TerminalTitleBar: View {
 private struct ConnectionBadge: View {
   let status: SessionStore.ConnectionStatus
 
+  /// A dot, not a word.
+  ///
+  /// The label ("online" / "offline" / "connecting") cost roughly a fifth of the
+  /// bar's width and pushed the session title into truncation, and the title is
+  /// the thing the reader actually needs — you can only be looking at one
+  /// session, and its name tells you which. Colour carries the state at a
+  /// glance; a spinner replaces the dot while connecting, because "in progress"
+  /// is the one state a static colour cannot express. The words survive for
+  /// VoiceOver, which is where they were doing real work.
   var body: some View {
-    HStack(spacing: 4) {
+    Group {
       if status == .connecting {
         ProgressView()
           .controlSize(.mini)
+      } else {
+        Circle()
+          .fill(tint)
+          .frame(width: 8, height: 8)
+          .overlay(
+            Circle().stroke(tint.opacity(0.35), lineWidth: 3).blur(radius: 1)
+          )
       }
-      Text(label)
-        .font(.caption2.weight(.semibold))
     }
-    .padding(.horizontal, 8)
-    .padding(.vertical, 4)
-    .background(background)
-    .clipShape(Capsule())
+    .frame(width: 14, height: 14)
     .accessibilityLabel(label)
   }
 
   private var label: String {
     switch status {
-    case .online: "online"
-    case .connecting: "connecting"
-    case .offline: "offline"
-    case .authFailed: "auth"
+    case .online: "Connected"
+    case .connecting: "Connecting"
+    case .offline: "Offline"
+    case .authFailed: "Password rejected"
     }
   }
 
-  private var background: Color {
+  private var tint: Color {
     switch status {
-    case .online:
-      Color.green.opacity(0.18)
-    case .connecting:
-      Color.orange.opacity(0.18)
-    case .offline, .authFailed:
-      Color.red.opacity(0.18)
+    case .online: TetherColors.success
+    case .connecting: Color.orange
+    case .offline: TetherColors.textSecondary
+    case .authFailed: TetherColors.danger
     }
   }
 }

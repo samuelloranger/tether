@@ -6,6 +6,13 @@ import TetherFFIBindings
 @MainActor
 public final class SessionStore {
   public private(set) var hosts: [HostProfileModel] = []
+  /// Last title we saw for the active session.
+  ///
+  /// When health drops, the session list goes away and activeSession becomes
+  /// nil, so the title bar fell back to "Tether" — the reader lost the name of
+  /// the session whose output is still on screen, which tells them nothing and
+  /// looks like the app forgot where it was.
+  public private(set) var lastKnownSessionTitle: String?
   public private(set) var sessions: [RemoteSession] = []
   /// Sessions keyed by host id — populated by `refreshDrawer()` for the slide-over.
   public private(set) var sessionsByHost: [String: [RemoteSession]] = [:]
@@ -78,6 +85,7 @@ public final class SessionStore {
         activeHostId = hosts.first?.id
       }
       startPolling()
+      rememberSessionTitle()
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -208,6 +216,7 @@ public final class SessionStore {
   public func refreshSessions() async {
     guard let hostId = activeHostId else { return }
     await refreshHost(hostId: hostId)
+    rememberSessionTitle()
   }
 
   /// Refreshes every host's session list and health for the session drawer.
@@ -410,6 +419,14 @@ public final class SessionStore {
   /// Positive `lines` moves into history (older output); negative toward the
   /// live bottom. Lives next to `updateGrid` because `emulator` is private —
   /// an extension in another file cannot reach it.
+  /// Remembers the active session's title so a dropped connection does not erase
+  /// it from the title bar.
+  private func rememberSessionTitle() {
+    if let title = activeSession?.displayTitle, !title.isEmpty {
+      lastKnownSessionTitle = title
+    }
+  }
+
   public func scrollViewport(lines: Int32) {
     guard lines != 0 else { return }
     emulator?.scrollViewport(lines: lines)
