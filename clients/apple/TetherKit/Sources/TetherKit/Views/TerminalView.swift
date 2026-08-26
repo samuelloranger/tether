@@ -79,7 +79,7 @@ public struct TerminalAccessoryBar: View {
         .padding(.horizontal, 10)
         .frame(minWidth: Self.keySize, minHeight: Self.keySize)
         .background(ctrlArmed.wrappedValue ? TetherColors.accent : TetherColors.surface)
-        .foregroundStyle(ctrlArmed.wrappedValue ? Color.black : TetherColors.textPrimary)
+        .foregroundStyle(ctrlArmed.wrappedValue ? TetherColors.onAccent : TetherColors.textPrimary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     .buttonStyle(.plain)
@@ -461,7 +461,7 @@ public struct TerminalView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(TetherColors.accent)
-            .foregroundStyle(Color.black)
+            .foregroundStyle(TetherColors.onAccent)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
