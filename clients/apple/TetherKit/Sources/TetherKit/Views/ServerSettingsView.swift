@@ -156,7 +156,10 @@ public struct ServerSettingsView: View {
       Text("Shown on every client and used in notifications.")
         .font(.caption)
         .foregroundStyle(TetherColors.textSecondary)
-      HStack(spacing: 12) {
+      // Spacing 0: the 44pt targets already leave 22pt of air between the
+      // 22pt swatches. Keeping the old 12pt gap on top of them spread the row
+      // out until the colours stopped reading as one control.
+      HStack(spacing: 0) {
         ForEach(Self.hostColors, id: \.self) { color in
           Button {
             updateDraft { $0.identity.color = color }
