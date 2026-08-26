@@ -8,6 +8,7 @@ public struct TerminalAccessoryBar: View {
   public var showDpad: Binding<Bool>
   public var onKey: (String) -> Void
   public var onPaste: (String) -> Void
+  public var onArrow: (DPadDirection) -> Void
   public var onHideKeyboard: () -> Void
 
   public init(
@@ -15,16 +16,42 @@ public struct TerminalAccessoryBar: View {
     showDpad: Binding<Bool> = .constant(false),
     onKey: @escaping (String) -> Void,
     onPaste: @escaping (String) -> Void,
+    onArrow: @escaping (DPadDirection) -> Void,
     onHideKeyboard: @escaping () -> Void
   ) {
     self.ctrlArmed = ctrlArmed
     self.showDpad = showDpad
     self.onKey = onKey
     self.onPaste = onPaste
+    self.onArrow = onArrow
     self.onHideKeyboard = onHideKeyboard
   }
 
+  /// Height of the key row, and of the docked D-pad row when it is showing.
+  /// `inputAccessoryView` needs a concrete height, so these are shared with the
+  /// text view rather than left to intrinsic sizing.
+  public static let keyRowHeight: CGFloat = 52
+  public static let dpadRowHeight: CGFloat = DPadModel.buttonSize + 24
+
+  public static func height(showDpad: Bool) -> CGFloat {
+    showDpad ? keyRowHeight + dpadRowHeight : keyRowHeight
+  }
+
   public var body: some View {
+    VStack(spacing: 0) {
+      keyRow
+      if showDpad.wrappedValue {
+        // Docked rather than floating: a pad that hovers over the terminal
+        // covers the output you are steering through.
+        DpadView(onArrow: onArrow)
+          .frame(height: Self.dpadRowHeight)
+          .frame(maxWidth: .infinity)
+      }
+    }
+    .background(.ultraThinMaterial)
+  }
+
+  private var keyRow: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
         ctrlButton
@@ -47,7 +74,7 @@ public struct TerminalAccessoryBar: View {
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
     }
-    .background(.ultraThinMaterial)
+    .frame(height: Self.keyRowHeight)
   }
 
   private var dpadToggle: some View {
@@ -132,17 +159,20 @@ public struct TerminalAccessoryBar: View {
 public struct TerminalInputBridge: UIViewRepresentable {
   @Binding public var text: String
   public var accessory: AnyView
+  public var accessoryHeight: CGFloat
   public var onSubmitBytes: (String) -> Void
   public var isFocused: Binding<Bool>
 
   public init(
     text: Binding<String>,
     accessory: AnyView,
+    accessoryHeight: CGFloat,
     onSubmitBytes: @escaping (String) -> Void,
     isFocused: Binding<Bool>
   ) {
     _text = text
     self.accessory = accessory
+    self.accessoryHeight = accessoryHeight
     self.onSubmitBytes = onSubmitBytes
     self.isFocused = isFocused
   }
@@ -162,6 +192,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.textColor = .clear
     view.tintColor = .clear
     view.accessoryHosting.rootView = accessory
+    view.accessoryHeight = accessoryHeight
     // 0x7F (DEL) is what terminals and readline expect from backspace.
     view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
     view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
@@ -170,6 +201,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
 
   public func updateUIView(_ uiView: TerminalInputTextView, context: Context) {
     uiView.accessoryHosting.rootView = accessory
+    uiView.accessoryHeight = accessoryHeight
     if uiView.text != text {
       uiView.text = text
     }
@@ -320,10 +352,21 @@ public final class TerminalInputTextView: UITextView {
   /// the accessory, which UIKit does often.
   private lazy var accessoryContainer: UIView = {
     let view = accessoryHosting.view!
-    view.frame.size.height = 52
+    view.frame.size.height = accessoryHeight
     view.backgroundColor = .clear
     return view
   }()
+
+  /// `inputAccessoryView` is laid out by UIKit from a concrete frame, so the
+  /// height has to be set explicitly and the input views reloaded when the
+  /// docked D-pad appears or disappears.
+  var accessoryHeight: CGFloat = 52 {
+    didSet {
+      guard accessoryHeight != oldValue else { return }
+      accessoryContainer.frame.size.height = accessoryHeight
+      reloadInputViews()
+    }
+  }
 
   private var assignedAccessoryView: UIView?
 
@@ -349,7 +392,6 @@ public struct TerminalView: View {
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
   @State private var selectionText: String?
-  @State private var dpadPosition = CGPoint(x: 72, y: 220)
   @FocusState private var keyboardFocused: Bool
 
   public init(store: SessionStore, preferences: AppPreferences) {
@@ -387,11 +429,6 @@ public struct TerminalView: View {
           selectionChrome(text: selectionText)
         }
 
-        if preferences.showDpad {
-          FloatingDpad(position: $dpadPosition) { dir in
-            store.sendInput(dir.escapeSequence)
-          }
-        }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -403,9 +440,11 @@ public struct TerminalView: View {
             showDpad: $preferences.showDpad,
             onKey: { store.sendInput($0) },
             onPaste: { store.sendInput($0) },
+            onArrow: { store.sendInput($0.escapeSequence) },
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
+        accessoryHeight: TerminalAccessoryBar.height(showDpad: preferences.showDpad),
         onSubmitBytes: submit,
         isFocused: Binding(
           get: { keyboardFocused },
