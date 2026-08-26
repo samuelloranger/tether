@@ -116,6 +116,14 @@ public struct HostSettingsView: View {
   public var body: some View {
     Form {
       if let host {
+        Section {
+          NavigationLink {
+            ServerSettingsView(store: store, hostId: hostId)
+          } label: {
+            Label("Server settings", systemImage: "server.rack")
+          }
+        }
+
         Section("Connection") {
           LabeledContent("Host", value: host.host)
           LabeledContent("Port", value: host.port)
