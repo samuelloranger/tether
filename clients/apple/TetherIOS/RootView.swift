@@ -65,7 +65,7 @@ struct RootView: View {
     }
     .background(TetherColors.background)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
-    .sheet(isPresented: $showSettings) {
+    .sheet(isPresented: $showSettings, onDismiss: { settingsHostId = nil }) {
       ConfigSettingsView(
         store: store,
         preferences: preferences,
@@ -79,6 +79,8 @@ struct RootView: View {
         },
         initialHostId: settingsHostId
       )
+      // Force a fresh NavigationPath when opening for a specific host (or not).
+      .id(settingsHostId ?? "settings-root")
     }
     .sheet(isPresented: $showGit) {
       GitDrawerView(store: store, onDismiss: { showGit = false })

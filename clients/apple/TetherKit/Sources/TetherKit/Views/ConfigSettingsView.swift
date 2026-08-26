@@ -6,7 +6,7 @@ public struct ConfigSettingsView: View {
   public var onAddHost: () -> Void
   public var onDismiss: () -> Void
   public var initialHostId: String?
-  @State private var path = NavigationPath()
+  @State private var path: NavigationPath
 
   public init(
     store: SessionStore,
@@ -20,6 +20,13 @@ public struct ConfigSettingsView: View {
     self.onAddHost = onAddHost
     self.onDismiss = onDismiss
     self.initialHostId = initialHostId
+    // Seed the stack so a non-nil host id lands on HostSettingsView immediately.
+    // onAppear-append is racy with NavigationStack's first layout pass.
+    var initial = NavigationPath()
+    if let initialHostId {
+      initial.append(initialHostId)
+    }
+    _path = State(initialValue: initial)
   }
 
   public var body: some View {
@@ -88,11 +95,6 @@ public struct ConfigSettingsView: View {
       }
       .navigationDestination(for: String.self) { hostId in
         HostSettingsView(store: store, hostId: hostId)
-      }
-      .onAppear {
-        if let initialHostId, path.isEmpty {
-          path.append(initialHostId)
-        }
       }
     }
   }
