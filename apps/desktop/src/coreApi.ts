@@ -1,6 +1,18 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { normalizeInvokeError } from './invokeError';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
+
+/// Every core command goes through here so a failure arrives as an Error with
+/// the Rust message intact. Tauri rejects with a bare string, which the UI's
+/// `err instanceof Error` checks silently discarded.
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await tauriInvoke<T>(command, args);
+  } catch (error) {
+    throw normalizeInvokeError(error);
+  }
+}
 
 export async function coreHostsMigrate(profilesJson: string | null): Promise<HostProfile[]> {
   return invoke<HostProfile[]>('core_hosts_migrate', {
