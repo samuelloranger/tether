@@ -280,7 +280,14 @@ public final class SessionStore {
   }
 
   /// `{ type: "focus", focused }` — server suppresses push while focused is true.
+  /// Last value actually sent on the current socket, so a repeat is dropped.
+  /// scenePhase reports .inactive and then .background for one transition, and
+  /// both mean the same thing here.
+  private var lastFocusSent: Bool?
+
   public func sendFocus(focused: Bool) {
+    guard lastFocusSent != focused else { return }
+    lastFocusSent = focused
     guard socketIsOpen, let socket else { return }
     guard
       let payload = try? JSONSerialization.data(
@@ -526,6 +533,7 @@ public final class SessionStore {
   }
 
   private func disconnectTerminal() {
+    defer { lastFocusSent = nil }
     // Order matters: sendFocus needs the socket, so the frame has to go out
     // before it is torn down. Switching sessions otherwise left the server
     // believing the old one was still on screen, and suppressing its pushes.
