@@ -169,6 +169,9 @@ public struct ServerSettingsView: View {
                   Circle().strokeBorder(TetherColors.textPrimary, lineWidth: 2)
                 }
               }
+              // The swatch stays 22pt — a row of 44pt dots would read as
+              // buttons rather than as colours — but its target does not.
+              .tapTarget()
           }
           .buttonStyle(.plain)
           .disabled(readOnly)

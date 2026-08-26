@@ -65,8 +65,7 @@ public struct TerminalTitleBar<Overflow: View>: View {
         } label: {
           Image(systemName: "ellipsis")
             .font(.body.weight(.semibold))
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
+            .tapTarget()
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Terminal menu")
@@ -78,15 +77,11 @@ public struct TerminalTitleBar<Overflow: View>: View {
     .background(TetherColors.surface)
   }
 
-  /// A 44pt-square tap target, which is Apple's minimum and was the problem:
-  /// these were 32pt frames (36 for the drawer), so a third of each button's
-  /// area was dead. `ellipsis` was the worst of them — it sits at the trailing
-  /// edge, where a thumb naturally lands slightly outside the frame, and its
-  /// glyph is a thin horizontal strip that gives no clue where the target ends.
-  ///
-  /// `contentShape` is the other half. A `Button` hit-tests its label, and an
-  /// `Image` inside a larger frame leaves that frame transparent — so even the
-  /// 32pt box was not fully live. The rectangle makes the whole square hittable.
+  /// An icon on a 44pt target — see `tapTarget()`. These were 32pt frames (36
+  /// for the drawer), so a third of each button's area was dead. `ellipsis` was
+  /// the worst of them: it sits at the trailing edge, where a thumb naturally
+  /// lands slightly outside the frame, and its glyph is a thin horizontal strip
+  /// that gives no clue where the target ends.
   private func iconButton(
     _ systemName: String,
     label: String,
@@ -95,8 +90,7 @@ public struct TerminalTitleBar<Overflow: View>: View {
     Button(action: action) {
       Image(systemName: systemName)
         .font(.body.weight(.semibold))
-        .frame(width: 44, height: 44)
-        .contentShape(Rectangle())
+        .tapTarget()
     }
     .buttonStyle(.plain)
     .accessibilityLabel(label)

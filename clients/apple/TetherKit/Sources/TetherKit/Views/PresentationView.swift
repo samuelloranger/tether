@@ -95,8 +95,8 @@ public struct PresentationPaneView: View {
         if let onClose {
           Button(role: .destructive, action: onClose) {
             Image(systemName: "xmark")
-              .frame(width: 36, height: 36)
               .foregroundStyle(TetherColors.danger)
+              .tapTarget()
           }
           .accessibilityLabel("Close presentation")
         }

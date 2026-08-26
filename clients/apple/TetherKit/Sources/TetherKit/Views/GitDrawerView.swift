@@ -164,7 +164,7 @@ public struct GitDrawerView: View {
       }
       Button(action: onDismiss) {
         Image(systemName: "xmark")
-          .frame(width: 32, height: 32)
+          .tapTarget()
       }
       .accessibilityLabel("Close git")
     }
@@ -306,6 +306,24 @@ public struct GitDrawerView: View {
   }
 
   private var commitBar: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      // Say WHY the button is inert. A disabled prominent button on a dark
+      // theme is a dark pill with a grey label — indistinguishable from an
+      // enabled one, and silent about what is missing. Naming the next action
+      // turns a dead end into an instruction.
+      if let blocker = commitBlocker {
+        Text(blocker)
+          .font(.caption)
+          .foregroundStyle(TetherColors.textSecondary)
+      }
+
+      commitControls
+    }
+    .padding(16)
+    .background(TetherColors.surface)
+  }
+
+  private var commitControls: some View {
     HStack(alignment: .bottom, spacing: 10) {
       TextField("Commit message", text: $commitMessage, axis: .vertical)
         .lineLimit(1...4)
@@ -328,7 +346,7 @@ public struct GitDrawerView: View {
         Image(systemName: "ellipsis.circle")
           .font(.title3)
           .foregroundStyle(TetherColors.accent)
-          .frame(width: 36, height: 36)
+          .tapTarget()
       }
       .accessibilityLabel("More git actions")
 
@@ -343,18 +361,38 @@ public struct GitDrawerView: View {
             .fontWeight(.semibold)
         }
       }
-      .buttonStyle(.borderedProminent)
-      .tint(TetherColors.accent)
+      // Painted rather than `.borderedProminent`, so the disabled state is a
+      // deliberate colour instead of the system's dimmed tint — which on this
+      // palette landed on almost exactly the enabled fill.
+      .buttonStyle(.plain)
+      .padding(.horizontal, 18)
+      .frame(minHeight: 44)
+      .background(canCommit ? TetherColors.accent : TetherColors.background)
+      .foregroundStyle(canCommit ? TetherColors.onAccent : TetherColors.textSecondary)
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .overlay {
+        if !canCommit {
+          RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(TetherColors.textSecondary.opacity(0.3), lineWidth: 1)
+        }
+      }
       .disabled(!canCommit)
     }
-    .padding(16)
-    .background(TetherColors.surface)
   }
 
-  private var canCommit: Bool {
-    !committing
-      && !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && !groups.staged.isEmpty
+  // `commitBlocker` reports nothing while a commit is in flight — there is a
+  // spinner in the button saying so, and a caption repeating it would be noise —
+  // so the in-flight guard has to live here, not there.
+  private var canCommit: Bool { !committing && commitBlocker == nil }
+
+  /// What is stopping a commit, in the order the user has to fix it.
+  private var commitBlocker: String? {
+    if committing { return nil }
+    if groups.staged.isEmpty { return "Stage a change to commit it." }
+    if commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return "Write a message to commit."
+    }
+    return nil
   }
 
   private func letterColor(_ letter: String) -> Color {

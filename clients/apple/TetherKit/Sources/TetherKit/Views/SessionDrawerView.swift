@@ -30,7 +30,7 @@ public struct SessionDrawerView: View {
         Spacer()
         Button(action: onClose) {
           Image(systemName: "xmark")
-            .frame(width: 32, height: 32)
+            .tapTarget()
         }
         .accessibilityLabel("Close session list")
       }
@@ -239,7 +239,7 @@ private struct SessionDrawerRow: View {
       } label: {
         Image(systemName: "xmark")
           .foregroundStyle(TetherColors.danger)
-          .frame(width: 36, height: 36)
+          .tapTarget()
       }
       .accessibilityLabel("Kill terminal")
     }
