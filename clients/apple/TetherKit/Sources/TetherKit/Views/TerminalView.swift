@@ -47,6 +47,9 @@ public struct TerminalAccessoryBar: View {
   /// Every key in the bar is this tall, the D-pad included — a control that is
   /// taller than its neighbours reads as a different kind of thing.
   static let keySize: CGFloat = 40
+  /// Height the bar occupies when docked. The terminal reserves this so its last
+  /// rows are not hidden underneath.
+  public static let barHeight: CGFloat = 52
 
   /// Key order matches `UTILITY_BAR_KEYS` in the RN client. There are no arrow
   /// keys: the D-pad is one square key in the row and covers all four
@@ -363,7 +366,7 @@ public final class TerminalInputTextView: UITextView {
   /// the accessory, which UIKit does often.
   private lazy var accessoryContainer: UIView = {
     let view = accessoryHosting.view!
-    view.frame.size.height = 52
+    view.frame.size.height = TerminalAccessoryBar.barHeight
     view.backgroundColor = .clear
     return view
   }()
@@ -576,7 +579,11 @@ public struct TerminalView: View {
     // startup screen and with the sidebar open, the two states where the key bar
     // is not there to cover it.
     .background(TetherColors.terminalBackground)
-    .padding(.bottom, keyboardInset)
+    // The bar is an inputAccessoryView: it floats above the app, and it stays
+    // docked when the keyboard is down. Padding by the keyboard alone left the
+    // last terminal rows underneath it, because keyboardWillHide zeroes the
+    // inset while the bar is still on screen. Reserve whichever is taller.
+    .padding(.bottom, max(keyboardInset, accessoryVisible ? TerminalAccessoryBar.barHeight : 0))
     // keyboardWillChangeFrame already carries the END frame, so go straight to the
     // final height. Animating this padding would walk the view through
     // intermediate heights, and every one of those is a grid size the surface
