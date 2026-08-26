@@ -597,6 +597,8 @@ button.linkish {
   list-style: none;
   margin: 0;
   padding: 0.5rem;
+}
+
 .main-body {
   flex: 1;
   min-height: 0;
@@ -804,6 +806,8 @@ button.linkish {
 
 .tok-comment {
   color: #6c7086;
+}
+
 .workspace-drop-hint {
   font-size: 0.75rem;
 }
@@ -942,6 +946,8 @@ button.linkish {
   place-items: center;
   background: color-mix(in srgb, var(--background, #11111b) 55%, transparent);
   z-index: 3;
+}
+
 /* Sprint E — modals, overflow, settings, sidebar pin */
 .modal-backdrop {
   position: fixed;
@@ -1050,6 +1056,12 @@ button.destructive {
   border-radius: 0;
   background: var(--overlay, #08090c66);
   cursor: default;
+}
+
+.terminal-toolbar.with-menu {
+  /* The menu button is position:fixed at the top-left, so the toolbar has to
+     leave room or it sits on top of the session title. */
+  padding-left: 3.25rem;
 }
 
 .drawer-menu-button {

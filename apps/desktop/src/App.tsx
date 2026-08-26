@@ -273,7 +273,7 @@ export function App() {
       <main className="main-pane">
         {app.activeHost ? (
           <>
-            <header className="terminal-toolbar">
+            <header className={`terminal-toolbar${layout.showMenuButton ? ' with-menu' : ''}`}>
               <span className="terminal-label">{app.activeSessionLabel}</span>
               <span className="terminal-host-label muted">
                 {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
