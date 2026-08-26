@@ -77,6 +77,8 @@ struct RootView: View {
         }
       )
       #endif
+
+      presentationHosts
     }
     // The terminal is the app's main surface, so the window behind it carries the
     // terminal's colour. Anything the terminal does not cover — the home
@@ -88,81 +90,103 @@ struct RootView: View {
     // the terminal to a strip at the top.
     .ignoresSafeArea(.keyboard, edges: .bottom)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
-    .sheet(isPresented: $showSettings, onDismiss: { settingsHostId = nil }) {
-      ConfigSettingsView(
-        store: store,
-        preferences: preferences,
-        onAddHost: {
-          showSettings = false
-          showPairing = true
-        },
-        onDismiss: {
-          settingsHostId = nil
-          showSettings = false
-        },
-        initialHostId: settingsHostId
-      )
-      // Force a fresh NavigationPath when opening for a specific host (or not).
-      .id(settingsHostId ?? "settings-root")
-    }
-    .sheet(isPresented: $showGit) {
-      GitDrawerView(store: store, onDismiss: { showGit = false })
-        .presentationDetents([.large, .medium])
-    }
-    .sheet(item: $passwordPromptHostId) { hostId in
-      NavigationStack {
-        HostPasswordView(
+  }
+
+  /// Every modal, each on its own view.
+  ///
+  /// SwiftUI keeps ONE presentation slot per view, so six presentation
+  /// modifiers chained onto the same ZStack meant the ones further down the
+  /// chain silently never opened. That is why the overflow (…) button appeared
+  /// dead while the gear beside it worked: the settings sheet held the slot and
+  /// the confirmation dialog, registered after it, had nowhere to go. Siblings
+  /// in a ZStack are separate views, so each gets its own slot.
+  ///
+  /// The hosts are zero-size and non-interactive; they exist only to own a
+  /// presentation.
+  @ViewBuilder
+  private var presentationHosts: some View {
+    ZStack {
+      anchor.sheet(isPresented: $showSettings, onDismiss: { settingsHostId = nil }) {
+        ConfigSettingsView(
           store: store,
-          hostId: hostId,
-          hostLabel: store.hosts.first(where: { $0.id == hostId })?.name ?? hostId,
-          onDone: { passwordPromptHostId = nil }
+          preferences: preferences,
+          onAddHost: {
+            showSettings = false
+            showPairing = true
+          },
+          onDismiss: {
+            settingsHostId = nil
+            showSettings = false
+          },
+          initialHostId: settingsHostId
         )
-        .toolbar {
-          ToolbarItem(placement: .cancellationAction) {
-            Button("Cancel") { passwordPromptHostId = nil }
-          }
-        }
+        // Force a fresh NavigationPath when opening for a specific host (or not).
+        .id(settingsHostId ?? "settings-root")
       }
-    }
-    .sheet(isPresented: $showPairing) {
-      NavigationStack {
-        PairingView(store: store)
+      anchor.sheet(isPresented: $showGit) {
+        GitDrawerView(store: store, onDismiss: { showGit = false })
+          .presentationDetents([.large, .medium])
+      }
+      anchor.sheet(item: $passwordPromptHostId) { hostId in
+        NavigationStack {
+          HostPasswordView(
+            store: store,
+            hostId: hostId,
+            hostLabel: store.hosts.first(where: { $0.id == hostId })?.name ?? hostId,
+            onDone: { passwordPromptHostId = nil }
+          )
           .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-              Button("Cancel") { showPairing = false }
+              Button("Cancel") { passwordPromptHostId = nil }
             }
           }
-      }
-    }
-    .confirmationDialog("Terminal", isPresented: $showOverflow, titleVisibility: .visible) {
-      if store.activeSessionId != nil {
-        Button("Rename session") {
-          renameText = store.activeSession?.name ?? store.activeSessionId ?? ""
-          showRename = true
         }
-        Button("Kill session", role: .destructive) {
-          if let id = store.activeSessionId {
-            Task { await store.killSession(id: id) }
+      }
+      anchor.sheet(isPresented: $showPairing) {
+        NavigationStack {
+          PairingView(store: store)
+            .toolbar {
+              ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { showPairing = false }
+              }
+            }
+        }
+      }
+      anchor.confirmationDialog("Terminal", isPresented: $showOverflow, titleVisibility: .visible) {
+        if store.activeSessionId != nil {
+          Button("Rename session") {
+            renameText = store.activeSession?.name ?? store.activeSessionId ?? ""
+            showRename = true
+          }
+          Button("Kill session", role: .destructive) {
+            if let id = store.activeSessionId {
+              Task { await store.killSession(id: id) }
+            }
           }
         }
-      }
-      if store.activeSessionId != nil {
-        Button("Open file…") { workspace.showOpenFileSheet = true }
-        Button("Upload file…") { workspace.showFileImporter = true }
-        Button("Upload photo…") { workspace.showPhotosPicker = true }
-      }
-      Button("Cancel", role: .cancel) {}
-    }
-    .alert("Rename session", isPresented: $showRename) {
-      TextField("Name", text: $renameText)
-      Button("Save") {
-        guard let id = store.activeSessionId else { return }
-        Task {
-          await store.renameSession(id: id, name: renameText)
+        if store.activeSessionId != nil {
+          Button("Open file…") { workspace.showOpenFileSheet = true }
+          Button("Upload file…") { workspace.showFileImporter = true }
+          Button("Upload photo…") { workspace.showPhotosPicker = true }
         }
+        Button("Cancel", role: .cancel) {}
       }
-      Button("Cancel", role: .cancel) {}
-    }
+      anchor.alert("Rename session", isPresented: $showRename) {
+        TextField("Name", text: $renameText)
+        Button("Save") {
+          guard let id = store.activeSessionId else { return }
+          Task {
+            await store.renameSession(id: id, name: renameText)
+          }
+        }
+        Button("Cancel", role: .cancel) {}
+      }
+      }
+    .allowsHitTesting(false)
+  }
+
+  private var anchor: some View {
+    Color.clear.frame(width: 0, height: 0)
   }
 
   private func openDrawer() {
