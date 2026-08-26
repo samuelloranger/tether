@@ -46,18 +46,27 @@ public struct WorkspaceChromeView: View {
     self.workspace = workspace
   }
 
+  /// Full-screen viewer when content, a load failure, or an in-flight open is
+  /// active — not while the path sheet is up (that sheet owns the error text).
+  private var showsFileViewer: Bool {
+    if workspace.showOpenFileSheet { return false }
+    return workspace.fileView != nil
+      || workspace.fileError != nil
+      || workspace.fileLoading
+  }
+
   public var body: some View {
     ZStack {
-      if let file = workspace.fileView {
-        FileViewerView(file: file, onBack: { workspace.closeFile() })
-          .transition(.move(edge: .trailing))
-      }
-
-      if workspace.fileLoading {
-        ProgressView()
-          .tint(TetherColors.accent)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(TetherColors.background.opacity(0.55))
+      if showsFileViewer {
+        FileViewerView(
+          file: workspace.fileView,
+          loadError: workspace.fileError,
+          loading: workspace.fileLoading && workspace.fileView == nil,
+          onRetry: { Task { await workspace.retryOpenFile(store: store) } },
+          onBack: { workspace.closeFile() },
+          pathLabel: workspace.lastOpenPath
+        )
+        .transition(.move(edge: .trailing))
       }
 
       if let preview = workspace.activePresentation,
@@ -113,17 +122,6 @@ public struct WorkspaceChromeView: View {
       Button("OK", role: .cancel) { workspace.uploadError = nil }
     } message: {
       Text(workspace.uploadError ?? "")
-    }
-    .alert(
-      "Could not open file",
-      isPresented: Binding(
-        get: { workspace.fileError != nil && workspace.fileView == nil && !workspace.showOpenFileSheet },
-        set: { if !$0 { workspace.fileError = nil } }
-      )
-    ) {
-      Button("OK", role: .cancel) { workspace.fileError = nil }
-    } message: {
-      Text(workspace.fileError ?? "")
     }
   }
 

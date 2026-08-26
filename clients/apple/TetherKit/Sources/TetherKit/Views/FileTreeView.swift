@@ -8,6 +8,10 @@ public struct FileTreeView: View {
   public var onToggleDir: (String) -> Void
   public var onSelectFile: (String) -> Void
   public var showDiffStats: Bool
+  /// Why the last load failed, if it did. Distinct from an empty tree:
+  /// "nothing changed" and "could not look" must not share a view.
+  public var loadError: String?
+  public var onRetry: (() -> Void)?
 
   public init(
     nodes: [FileTreeNode],
@@ -15,7 +19,9 @@ public struct FileTreeView: View {
     collapsedDirs: Set<String>,
     onToggleDir: @escaping (String) -> Void,
     onSelectFile: @escaping (String) -> Void,
-    showDiffStats: Bool = true
+    showDiffStats: Bool = true,
+    loadError: String? = nil,
+    onRetry: (() -> Void)? = nil
   ) {
     self.nodes = nodes
     self.depth = depth
@@ -23,17 +29,42 @@ public struct FileTreeView: View {
     self.onToggleDir = onToggleDir
     self.onSelectFile = onSelectFile
     self.showDiffStats = showDiffStats
+    self.loadError = loadError
+    self.onRetry = onRetry
   }
 
   public var body: some View {
-    ForEach(nodes) { node in
-      switch node {
-      case let .dir(name, path, children):
-        dirRow(name: name, path: path, children: children)
-      case let .file(name, path, file):
-        fileRow(name: name, path: path, file: file)
+    if let loadError {
+      failureBody(loadError)
+    } else {
+      ForEach(nodes) { node in
+        switch node {
+        case let .dir(name, path, children):
+          dirRow(name: name, path: path, children: children)
+        case let .file(name, path, file):
+          fileRow(name: name, path: path, file: file)
+        }
       }
     }
+  }
+
+  private func failureBody(_ message: String) -> some View {
+    VStack(spacing: 10) {
+      Image(systemName: "exclamationmark.triangle")
+        .font(.title2)
+        .foregroundStyle(TetherColors.textSecondary)
+      Text(message)
+        .font(.callout)
+        .multilineTextAlignment(.center)
+        .foregroundStyle(TetherColors.textSecondary)
+      if let onRetry {
+        Button("Try again", action: onRetry)
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(TetherColors.accent)
+      }
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   @ViewBuilder

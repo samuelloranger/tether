@@ -25,5 +25,10 @@ let package = Package(
       dependencies: ["TetherFFIBindings"],
       path: "Sources/TetherKit"
     ),
+    .testTarget(
+      name: "TetherKitTests",
+      dependencies: ["TetherKit"],
+      path: "Tests/TetherKitTests"
+    ),
   ]
 )

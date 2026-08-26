@@ -73,8 +73,12 @@ public enum WorkspaceClientError: Error, LocalizedError, Sendable {
   case unauthorized
   case httpStatus(Int)
   case decodeFailed
-  /// Server JSON `{ error: "…" }` — prefer this over a bare status code.
-  case serverMessage(String)
+  /// A non-2xx reply whose body carried the server's own `{"error": …}` text.
+  ///
+  /// Discarding that text is how `file not found` reached the user as
+  /// "Server returned HTTP 404". The server already says something useful;
+  /// relay it — same shape as `HostClientError.server`.
+  case server(status: Int, message: String)
 
   public var errorDescription: String? {
     switch self {
@@ -88,14 +92,10 @@ public enum WorkspaceClientError: Error, LocalizedError, Sendable {
       "Server returned HTTP \(code)"
     case .decodeFailed:
       "Could not decode server response"
-    case let .serverMessage(message):
+    case let .server(_, message):
       message
     }
   }
-}
-
-private struct APIErrorBody: Decodable {
-  var error: String?
 }
 
 // MARK: - Pure helpers (mirrors apps/mobile presentations.ts / fileView.ts / shell.ts)
@@ -287,7 +287,10 @@ extension NativeHostClient {
       throw WorkspaceClientError.decodeFailed
     }
     guard decoded.ok, let path = decoded.path else {
-      throw WorkspaceClientError.serverMessage(decoded.error ?? "upload failed")
+      throw WorkspaceClientError.server(
+        status: status,
+        message: decoded.error ?? "upload failed"
+      )
     }
     return path
   }
@@ -349,15 +352,18 @@ extension NativeHostClient {
   ) async throws -> T {
     let (data, response) = try await URLSession.shared.data(for: request)
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-    guard status != 401 else { throw WorkspaceClientError.unauthorized }
     guard (200..<300).contains(status) else {
-      if let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
-         let message = body.error,
-         !message.isEmpty
-      {
-        throw WorkspaceClientError.serverMessage(message)
+      // Same reader as the git/host path — one place that knows `{"error":…}`.
+      switch hostClientError(status: status, data: data) {
+      case let .server(code, message):
+        throw WorkspaceClientError.server(status: code, message: message)
+      case .unauthorized:
+        throw WorkspaceClientError.unauthorized
+      case let .httpStatus(code):
+        throw WorkspaceClientError.httpStatus(code)
+      default:
+        throw WorkspaceClientError.httpStatus(status)
       }
-      throw WorkspaceClientError.httpStatus(status)
     }
     guard let decoded = try? JSONDecoder().decode(type, from: data) else {
       throw WorkspaceClientError.decodeFailed

@@ -21,21 +21,34 @@ extension SessionStore {
     line: Int? = nil,
     column: Int? = nil
   ) async -> WorkspaceFileView? {
-    guard let sessionId = activeSessionId, let client = makeWorkspaceClient() else {
-      return nil
-    }
     do {
-      let body = try await client.fetchWorkspaceFile(sessionId: sessionId, path: path)
-      return WorkspaceFileView(
-        path: body.path,
-        content: body.content,
-        line: line,
-        column: column
-      )
+      return try await fetchWorkspaceFile(path: path, line: line, column: column)
     } catch {
       errorMessage = error.localizedDescription
       return nil
     }
+  }
+
+  /// Throwing variant, for callers that must tell "file is empty" from "could not
+  /// look".
+  ///
+  /// `loadWorkspaceFile` answers `nil` for both, and the viewer / open-file
+  /// sheet treated that like a soft miss — so a server reply of `path is a
+  /// directory` or `file not found` never reached the screen as itself.
+  public func fetchWorkspaceFile(
+    path: String,
+    line: Int? = nil,
+    column: Int? = nil
+  ) async throws -> WorkspaceFileView {
+    guard let sessionId = activeSessionId else { throw WorkspaceLoadError.noSession }
+    guard let client = makeWorkspaceClient() else { throw WorkspaceLoadError.noCredentials }
+    let body = try await client.fetchWorkspaceFile(sessionId: sessionId, path: path)
+    return WorkspaceFileView(
+      path: body.path,
+      content: body.content,
+      line: line,
+      column: column
+    )
   }
 
   /// Uploads bytes and pastes the server path into the active terminal (quoted).
@@ -99,7 +112,11 @@ extension SessionStore {
 public final class WorkspaceController {
   public var fileView: WorkspaceFileView?
   public var fileLoading = false
+  /// Why the last open failed, if it did. Distinct from a missing fileView:
+  /// "nothing to show" and "could not look" must not share a path.
   public var fileError: String?
+  /// Path of the last open attempt — needed so "Try again" can re-request.
+  public var lastOpenPath: String?
 
   public var presentations: [Presentation] = []
   public var activePresentationId: String?
@@ -114,6 +131,8 @@ public final class WorkspaceController {
   @ObservationIgnored private var seenPresentationIds = Set<String>()
   @ObservationIgnored private var presentationsPrimed = false
   @ObservationIgnored private var pollTask: Task<Void, Never>?
+  @ObservationIgnored private var lastOpenLine: Int?
+  @ObservationIgnored private var lastOpenColumn: Int?
 
   public init() {}
 
@@ -128,20 +147,32 @@ public final class WorkspaceController {
     line: Int? = nil,
     column: Int? = nil
   ) async {
+    lastOpenPath = path
+    lastOpenLine = line
+    lastOpenColumn = column
     fileLoading = true
     fileError = nil
     defer { fileLoading = false }
-    if let view = await store.loadWorkspaceFile(path: path, line: line, column: column) {
-      fileView = view
-    } else {
-      fileError = store.errorMessage ?? "Could not open file"
+    do {
+      fileView = try await store.fetchWorkspaceFile(path: path, line: line, column: column)
+      fileError = nil
+    } catch {
+      fileError = error.localizedDescription
       fileView = nil
     }
+  }
+
+  public func retryOpenFile(store: SessionStore) async {
+    guard let path = lastOpenPath else { return }
+    await openFile(store: store, path: path, line: lastOpenLine, column: lastOpenColumn)
   }
 
   public func closeFile() {
     fileView = nil
     fileError = nil
+    lastOpenPath = nil
+    lastOpenLine = nil
+    lastOpenColumn = nil
   }
 
   public func selectPresentation(id: String) {
@@ -227,6 +258,19 @@ public final class WorkspaceController {
     )
     if path == nil {
       uploadError = store.errorMessage ?? "Upload failed"
+    }
+  }
+}
+
+/// Why a workspace open has nothing to show, when the reason is not the server's.
+public enum WorkspaceLoadError: LocalizedError {
+  case noSession
+  case noCredentials
+
+  public var errorDescription: String? {
+    switch self {
+    case .noSession: "Open a terminal to open a file."
+    case .noCredentials: "This server needs its password again."
     }
   }
 }
