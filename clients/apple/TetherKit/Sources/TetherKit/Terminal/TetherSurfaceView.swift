@@ -75,6 +75,17 @@ public final class TetherSurfaceView: UIView {
     installGestures()
   }
 
+  public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    let hit = super.hitTest(point, with: event)
+    NSLog("[GESTPROBE] hitTest \(point) -> \(String(describing: hit.map { type(of: $0) })) bounds=\(bounds)")
+    return hit
+  }
+
+  public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+    NSLog("[GESTPROBE] touchesBegan")
+    super.touchesBegan(touches, with: event)
+  }
+
   private func installGestures() {
     NSLog("[GESTPROBE] installGestures called, uie=\(isUserInteractionEnabled)")
     let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
