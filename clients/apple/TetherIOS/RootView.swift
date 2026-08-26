@@ -10,6 +10,7 @@ struct RootView: View {
   @State private var showGit = false
   @State private var showPairing = false
   @State private var showOverflow = false
+  @State private var workspace = WorkspaceController()
   @State private var showRename = false
   @State private var renameText = ""
   @State private var settingsHostId: String?
@@ -38,6 +39,8 @@ struct RootView: View {
       }
 
       #if canImport(UIKit)
+      WorkspaceChromeView(store: store, workspace: workspace)
+
       SessionDrawerOverlay(
         isPresented: $drawerOpen,
         store: store,
@@ -117,6 +120,11 @@ struct RootView: View {
             Task { await store.killSession(id: id) }
           }
         }
+      }
+      if store.activeSessionId != nil {
+        Button("Open file…") { workspace.showOpenFileSheet = true }
+        Button("Upload file…") { workspace.showFileImporter = true }
+        Button("Upload photo…") { workspace.showPhotosPicker = true }
       }
       Button("Cancel", role: .cancel) {}
     }
