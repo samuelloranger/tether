@@ -530,7 +530,7 @@ public struct TerminalView: View {
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
-        showsAccessory: placeholderReason == nil && !overlayPresented,
+        showsAccessory: placeholderReason == nil,
         onSubmitBytes: submit,
         isFocused: Binding(
           get: { keyboardFocused },
@@ -556,6 +556,13 @@ public struct TerminalView: View {
       NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
     ) { _ in
       keyboardInset = 0
+    }
+    // Opening the session list puts the keyboard away — which is what a reader
+    // expects, and it takes the key bar with it. Swapping the accessory out
+    // mid-animation instead made the keyboard window re-animate under the
+    // drawer: the panel appeared to slide downward and then vanish abruptly.
+    .onChange(of: overlayPresented) { _, presented in
+      if presented { keyboardFocused = false }
     }
     .onAppear {
       // Only claim the keyboard when there is a session to type into. Focusing
