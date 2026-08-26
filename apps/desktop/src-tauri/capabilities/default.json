@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Core permissions for the native Tether desktop window.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }
