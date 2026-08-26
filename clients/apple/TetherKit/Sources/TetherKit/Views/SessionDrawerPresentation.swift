@@ -59,6 +59,11 @@ public struct SessionDrawerOverlay: View {
         .frame(width: 20)
         .frame(maxHeight: .infinity, alignment: .leading)
     }
+    // Without this the ZStack shrinks to its only child when the drawer is
+    // closed — a 20pt column — and the parent ZStack centres it, putting an
+    // invisible touch-swallowing strip down the middle of the terminal and
+    // leaving the edge recogniser nowhere near the edge.
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .animation(.easeOut(duration: 0.22), value: isPresented)
   }
 
@@ -77,8 +82,8 @@ public struct SessionDrawerOverlay: View {
 private struct LeadingEdgeSwipeHandle: UIViewRepresentable {
   var onSwipe: () -> Void
 
-  func makeUIView(context: Context) -> UIView {
-    let view = UIView()
+  func makeUIView(context: Context) -> EdgeHandleView {
+    let view = EdgeHandleView()
     view.backgroundColor = .clear
     let recognizer = UIScreenEdgePanGestureRecognizer(
       target: context.coordinator,
@@ -89,12 +94,25 @@ private struct LeadingEdgeSwipeHandle: UIViewRepresentable {
     return view
   }
 
-  func updateUIView(_ uiView: UIView, context: Context) {
+  func updateUIView(_ uiView: EdgeHandleView, context: Context) {
     context.coordinator.onSwipe = onSwipe
   }
 
   func makeCoordinator() -> Coordinator {
     Coordinator(onSwipe: onSwipe)
+  }
+
+  /// Claims a touch only when it starts within the screen-edge band the
+  /// recogniser can actually act on. A plain UIView would swallow every touch
+  /// inside its bounds and never hand it back to the terminal underneath.
+  final class EdgeHandleView: UIView {
+    static let edgeBand: CGFloat = 20
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+      guard super.point(inside: point, with: event) else { return false }
+      let originX = convert(CGPoint.zero, to: window).x
+      return originX + point.x <= Self.edgeBand
+    }
   }
 
   final class Coordinator: NSObject {
