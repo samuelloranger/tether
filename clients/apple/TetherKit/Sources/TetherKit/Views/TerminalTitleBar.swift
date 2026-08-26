@@ -1,12 +1,19 @@
 import SwiftUI
 
-public struct TerminalTitleBar: View {
+public struct TerminalTitleBar<Overflow: View>: View {
   @Bindable public var store: SessionStore
   public var onOpenDrawer: () -> Void
   public var onNewSession: () -> Void
   public var onGit: () -> Void
   public var onSettings: () -> Void
-  public var onOverflow: () -> Void
+  /// The … menu's items, supplied by the caller.
+  ///
+  /// This was a plain action that set a flag for a `confirmationDialog`, and the
+  /// dialog never presented — so the button read as a dead spot no amount of
+  /// tap-target work could fix. A `Menu` presents itself from the button, with
+  /// no presentation state to lose, and an anchored menu is the iOS idiom for an
+  /// overflow control anyway.
+  @ViewBuilder public var overflow: () -> Overflow
 
   public init(
     store: SessionStore,
@@ -14,14 +21,14 @@ public struct TerminalTitleBar: View {
     onNewSession: @escaping () -> Void,
     onGit: @escaping () -> Void,
     onSettings: @escaping () -> Void,
-    onOverflow: @escaping () -> Void
+    @ViewBuilder overflow: @escaping () -> Overflow
   ) {
     self.store = store
     self.onOpenDrawer = onOpenDrawer
     self.onNewSession = onNewSession
     self.onGit = onGit
     self.onSettings = onSettings
-    self.onOverflow = onOverflow
+    self.overflow = overflow
   }
 
   public var body: some View {
@@ -53,7 +60,16 @@ public struct TerminalTitleBar: View {
         iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
           .disabled(store.activeSessionId == nil)
         iconButton("gearshape", label: "Settings", action: onSettings)
-        iconButton("ellipsis", label: "Terminal menu", action: onOverflow)
+        Menu {
+          overflow()
+        } label: {
+          Image(systemName: "ellipsis")
+            .font(.body.weight(.semibold))
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Terminal menu")
       }
     }
     .foregroundStyle(TetherColors.textPrimary)

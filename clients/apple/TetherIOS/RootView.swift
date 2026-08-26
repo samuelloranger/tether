@@ -9,7 +9,6 @@ struct RootView: View {
   @State private var showSettings = false
   @State private var showGit = false
   @State private var showPairing = false
-  @State private var showOverflow = false
   @State private var workspace = WorkspaceController()
   @State private var showRename = false
   @State private var renameText = ""
@@ -39,7 +38,7 @@ struct RootView: View {
           },
           onGit: { showGit = true },
           onSettings: { showSettings = true },
-          onOverflow: { showOverflow = true }
+          overflow: { overflowItems }
         )
 
         PresentationBannerSlot(store: store, workspace: workspace)
@@ -152,25 +151,6 @@ struct RootView: View {
             }
         }
       }
-      anchor.confirmationDialog("Terminal", isPresented: $showOverflow, titleVisibility: .visible) {
-        if store.activeSessionId != nil {
-          Button("Rename session") {
-            renameText = store.activeSession?.name ?? store.activeSessionId ?? ""
-            showRename = true
-          }
-          Button("Kill session", role: .destructive) {
-            if let id = store.activeSessionId {
-              Task { await store.killSession(id: id) }
-            }
-          }
-        }
-        if store.activeSessionId != nil {
-          Button("Open file…") { workspace.showOpenFileSheet = true }
-          Button("Upload file…") { workspace.showFileImporter = true }
-          Button("Upload photo…") { workspace.showPhotosPicker = true }
-        }
-        Button("Cancel", role: .cancel) {}
-      }
       anchor.alert("Rename session", isPresented: $showRename) {
         TextField("Name", text: $renameText)
         Button("Save") {
@@ -187,6 +167,54 @@ struct RootView: View {
 
   private var anchor: some View {
     Color.clear.frame(width: 0, height: 0)
+  }
+
+  /// The … menu's items.
+  ///
+  /// Same actions the confirmation dialog carried, minus the dialog: a Menu
+  /// builds these itself when tapped, so there is no flag to set and nothing
+  /// that can fail to present.
+  @ViewBuilder
+  private var overflowItems: some View {
+    if store.activeSessionId != nil {
+      Button {
+        renameText = store.activeSession?.name ?? store.activeSessionId ?? ""
+        showRename = true
+      } label: {
+        Label("Rename session", systemImage: "pencil")
+      }
+      Button {
+        workspace.showOpenFileSheet = true
+      } label: {
+        Label("Open file…", systemImage: "doc.text")
+      }
+      Button {
+        workspace.showFileImporter = true
+      } label: {
+        Label("Upload file…", systemImage: "arrow.up.doc")
+      }
+      Button {
+        workspace.showPhotosPicker = true
+      } label: {
+        Label("Upload photo…", systemImage: "photo")
+      }
+      Divider()
+      Button(role: .destructive) {
+        if let id = store.activeSessionId {
+          Task { await store.killSession(id: id) }
+        }
+      } label: {
+        Label("Kill session", systemImage: "xmark.circle")
+      }
+      Divider()
+    }
+    // Always present, so the menu is never empty — an empty Menu renders as a
+    // disabled control, which would read as the same dead button this replaced.
+    Button {
+      Task { await store.newTerminal() }
+    } label: {
+      Label("New terminal", systemImage: "plus")
+    }
   }
 
   private func openDrawer() {
