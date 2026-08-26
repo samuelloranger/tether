@@ -38,3 +38,26 @@ The XCFramework and Swift binding paths are fixed contracts — do not relocate 
 - **TetherIOS** is the app shell: NavigationSplitView (hosts + sessions drawer, terminal detail), deep links (`tether://session/<id>?host=<identityName>`), native keyboard.
 
 Session REST/WebSocket transport currently lives in `NativeHostClient` (shell layer) until tether-ffi exports full session/terminal APIs. Replay cursors use `FfiReplayStore` from the core.
+
+## Running the TetherKit tests
+
+```sh
+cd clients/apple/TetherKit
+xcodebuild test -scheme TetherKit -destination "id=<simulator-udid>"
+```
+
+`swift test` does **not** work here, and its failure is misleading — it
+reports dozens of `cannot find 'uniffi_tether_ffi_...' in scope` errors that
+look like broken bindings. The cause is that `swift test` builds for the host
+(macOS) while `Frameworks/TetherFFI.xcframework` carries iOS device and iOS
+simulator slices only, so the C symbols genuinely are not there. Give
+`xcodebuild` a simulator destination and they are.
+
+The suite covers the pure logic only — activity classification, resume
+decisions, the file-tree builder, notification link parsing. Anything touching
+Keychain, `URLSession`, or a live PTY needs a device or heavy fakes and is
+verified by driving the simulator instead.
+
+Before an app build, run `../../scripts/check-xcframework-fresh.sh`: TetherKit
+links `tether-ffi` as a SwiftPM `.binaryTarget`, so a change under `crates/`
+compiles, passes `cargo test`, builds the app — and is absent from it.
