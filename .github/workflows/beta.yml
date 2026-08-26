@@ -16,7 +16,13 @@ on:
         description: What to build
         type: choice
         default: all
-        options: [all, core, desktop, ios]
+        options: [all, core, desktop, ios, testflight]
+      version:
+        description: >-
+          Marketing version for TestFlight (scope=testflight). Empty = read
+          apps/mobile/app.json .expo.version so the beta tracks the shipping line.
+        type: string
+        default: ''
   # GitHub only exposes workflow_dispatch for workflows that exist on the
   # DEFAULT branch, and this one lives on the rewrite branch. A push trigger
   # runs from the branch's own definition instead, which is how the rewrite
@@ -177,6 +183,11 @@ jobs:
   # which is exactly why it lives here: a macOS runner is the only place the
   # XCFramework can be assembled and any Swift can be compiled.
   #
+  # scope=ios — unsigned simulator build (CI signal only).
+  # scope=testflight — signed device archive of clients/apple uploaded to the
+  #   SAME App Store Connect app as the shipping Expo client (6800525706).
+  #   Dispatch-only; never runs on push. Never touches a GitHub Release.
+  #
   # crates/tether-ffi and clients/apple land in later sprints. Rather than fail
   # a run for work that has not been written yet, each stage checks for its
   # inputs and reports plainly when it is not there. When the sprint lands, this
@@ -186,11 +197,11 @@ jobs:
     # OPT-IN ONLY. Deliberately NOT run on push, and not part of scope=all.
     # iOS is built on a real Mac locally (see scripts/build-xcframework.sh);
     # burning macOS runner minutes to rediscover what a local Xcode reports in
-    # seconds is the wrong trade. Dispatch with scope=ios when you want CI to
-    # confirm it independently.
+    # seconds is the wrong trade. Dispatch with scope=ios (simulator) or
+    # scope=testflight (signed upload) when you want CI to confirm it.
     if: |
       always() && (needs.core.result == 'success' || needs.core.result == 'skipped')
-      && inputs.scope == 'ios'
+      && (inputs.scope == 'ios' || inputs.scope == 'testflight')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -238,8 +249,10 @@ jobs:
         timeout-minutes: 30
         run: bash scripts/build-xcframework.sh
 
-      - name: Build the iOS app
-        if: steps.probe.outputs.app == 'true'
+      # Unsigned simulator build — scope=ios only. Unchanged from the original
+      # beta lane; signing and TestFlight live exclusively under scope=testflight.
+      - name: Build the iOS app (simulator)
+        if: inputs.scope == 'ios' && steps.probe.outputs.app == 'true'
         timeout-minutes: 30
         run: |
           set -euo pipefail
@@ -249,6 +262,132 @@ jobs:
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      # --- TestFlight lane (scope=testflight only; unreachable on push) ---
+      # Shares ASC app 6800525706 / bundle id com.samuelloranger.tether-mobile
+      # with release.yml. Signing mirrors release.yml's ios job exactly.
+      # Build number is 900000 + run_number so it never collides with
+      # release.yml's plain run_number counter on the same ASC record.
+
+      - name: Resolve version and build number
+        if: inputs.scope == 'testflight'
+        id: ver
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERSION_INPUT" ]; then
+            V="$VERSION_INPUT"
+          else
+            V="$(jq -r '.expo.version' apps/mobile/app.json)"
+          fi
+          B=$((900000 + RUN_NUMBER))
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "build=$B" >> "$GITHUB_OUTPUT"
+          echo "Building $V ($B)"
+
+      # altool discovers the key by ID under ~/.appstoreconnect/private_keys;
+      # xcodebuild wants an explicit path. Write it once, satisfy both.
+      - name: Install App Store Connect API key
+        if: inputs.scope == 'testflight'
+        env:
+          KEY_B64: ${{ secrets.APP_STORE_CONNECT_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$KEY_B64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+
+      - name: Build signed archive
+        if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
+        timeout-minutes: 45
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MARKETING_VERSION: ${{ steps.ver.outputs.version }}
+          CURRENT_PROJECT_VERSION: ${{ steps.ver.outputs.build }}
+        run: |
+          set -euo pipefail
+          xcodebuild -project clients/apple/Tether.xcodeproj \
+            -scheme TetherIOS \
+            -configuration Release -sdk iphoneos \
+            -archivePath build/TetherIOS.xcarchive archive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
+
+      - name: Export IPA
+        if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath build/TetherIOS.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+
+      - name: Validate build
+        if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          IPA="$(find build/export -name '*.ipa' | head -1)"
+          xcrun altool --validate-app -f "$IPA" -t ios \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      # continue-on-error: a rejected upload must not wipe the IPA artifact step
+      # below. Uploading still consumes a real build number on the live ASC
+      # record — treat every dispatch as permanent.
+      - name: Upload to TestFlight
+        if: inputs.scope == 'testflight' && steps.probe.outputs.app == 'true'
+        continue-on-error: true
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          IPA="$(find build/export -name '*.ipa' | head -1)"
+          xcrun altool --upload-app -f "$IPA" -t ios \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      - name: Upload TestFlight artifacts
+        if: always() && inputs.scope == 'testflight'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: beta-ios-testflight-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            build/export/*.ipa
+            build/TetherIOS.xcarchive
 
       - name: Not-yet-written stages
         if: steps.probe.outputs.ffi != 'true' || steps.probe.outputs.app != 'true'
