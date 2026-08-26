@@ -362,7 +362,20 @@ public final class SessionStore {
         withJSONObject: ["type": "focus", "focused": focused]),
       let frame = String(data: payload, encoding: .utf8)
     else { return }
-    socket.send(.string(frame)) { _ in }
+    // The error was discarded here. Whatever else is losing keystrokes (see the
+    // board task: ~5% of characters vanish under fast typing, while the same
+    // synthetic input into a native TextField in this app loses none), a
+    // swallowed send error guarantees the loss is silent — nothing on the
+    // client or the server records that a keystroke never left the device.
+    // Logged rather than surfaced: a transient send failure is not worth a
+    // banner, but it must not be invisible to the next person measuring this.
+    socket.send(.string(frame)) { error in
+      #if DEBUG
+      if let error {
+        print("[Tether] input send failed: \(error.localizedDescription)")
+      }
+      #endif
+    }
   }
 
   public func renameSession(id: String, name: String) async {
