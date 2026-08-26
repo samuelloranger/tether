@@ -4,6 +4,7 @@ public struct TerminalTitleBar: View {
   @Bindable public var store: SessionStore
   public var onOpenDrawer: () -> Void
   public var onNewSession: () -> Void
+  public var onGit: () -> Void
   public var onSettings: () -> Void
   public var onOverflow: () -> Void
 
@@ -11,12 +12,14 @@ public struct TerminalTitleBar: View {
     store: SessionStore,
     onOpenDrawer: @escaping () -> Void,
     onNewSession: @escaping () -> Void,
+    onGit: @escaping () -> Void,
     onSettings: @escaping () -> Void,
     onOverflow: @escaping () -> Void
   ) {
     self.store = store
     self.onOpenDrawer = onOpenDrawer
     self.onNewSession = onNewSession
+    self.onGit = onGit
     self.onSettings = onSettings
     self.onOverflow = onOverflow
   }
@@ -51,6 +54,13 @@ public struct TerminalTitleBar: View {
           .frame(width: 32, height: 32)
       }
       .accessibilityLabel("New terminal")
+
+      Button(action: onGit) {
+        Image(systemName: "arrow.triangle.branch")
+          .frame(width: 32, height: 32)
+      }
+      .accessibilityLabel("Git changes")
+      .disabled(store.activeSessionId == nil)
 
       Button(action: onSettings) {
         Image(systemName: "gearshape")

@@ -7,6 +7,7 @@ struct RootView: View {
 
   @State private var drawerOpen = false
   @State private var showSettings = false
+  @State private var showGit = false
   @State private var showPairing = false
   @State private var showOverflow = false
   @State private var showRename = false
@@ -27,6 +28,7 @@ struct RootView: View {
               await store.newTerminal()
             }
           },
+          onGit: { showGit = true },
           onSettings: { showSettings = true },
           onOverflow: { showOverflow = true }
         )
@@ -74,6 +76,10 @@ struct RootView: View {
         },
         initialHostId: settingsHostId
       )
+    }
+    .sheet(isPresented: $showGit) {
+      GitDrawerView(store: store, onDismiss: { showGit = false })
+        .presentationDetents([.large, .medium])
     }
     .sheet(item: $passwordPromptHostId) { hostId in
       NavigationStack {
