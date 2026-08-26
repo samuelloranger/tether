@@ -360,7 +360,15 @@ public final class SessionStore {
   }
 
   private func fetchSessions(for hostId: String) async -> [RemoteSession] {
-    guard let client = client(for: hostId) else { return [] }
+    guard let client = client(for: hostId) else {
+      // No usable password for this host. Returning early without touching
+      // health left it at `.unknown`, which the drawer renders as
+      // "connecting…" — so a host that could never connect looked identical to
+      // one about to succeed, forever. Report it as an auth failure, which is
+      // what it is, and which offers the user "Re-enter password".
+      updateHealth(for: hostId, status: 401)
+      return []
+    }
     do {
       let list = try await client.listSessions()
       let status = try await client.testConnection()
