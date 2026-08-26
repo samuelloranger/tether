@@ -74,7 +74,10 @@ struct RootView: View {
     // terminal's colour. Anything the terminal does not cover — the home
     // indicator strip below the key bar — then matches instead of showing as a
     // darker band.
-    .background(TetherColors.terminalBackground)
+    // The COLOUR ignores the safe area while the content still respects it.
+    // Plain .background() stopped at the home-indicator inset, leaving the
+    // window's own darker backdrop showing as a band along the bottom edge.
+    .background(TetherColors.terminalBackground.ignoresSafeArea())
     // The terminal measures the keyboard itself and applies its own bottom
     // inset. This has to sit at the ROOT: applied further in, the parent still
     // got SwiftUI's automatic avoidance and the two insets stacked, collapsing
