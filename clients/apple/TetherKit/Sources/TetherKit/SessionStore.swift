@@ -121,6 +121,14 @@ public final class SessionStore {
     let existing = (try? hostStore.list()) ?? []
     if existing.contains(where: { $0.host == host && $0.port == port }) { return }
     do {
+      // TOFU: a server with no password yet rejects every authenticated call,
+      // so the password has to be established first. `createHost` alone only
+      // ever worked against a server that was already paired once — against a
+      // fresh one it failed with 401, which made this look like an auth bug
+      // rather than a missing setup step.
+      if let status = try? await unauthenticatedStatus(host: host, port: port), status.needsSetup {
+        try await setupPassword(host: host, port: port, password: password)
+      }
       _ = try await createHost(name: "", host: host, port: port, password: password)
       print("[TETHER_DEBUG] paired \(host):\(port)")
     } catch {
