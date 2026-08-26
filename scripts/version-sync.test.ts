@@ -25,6 +25,20 @@ const VERSION_SOURCES: Record<string, () => string> = {
   'apps/desktop/src-tauri/Cargo.toml': () => cargoVersion('apps/desktop/src-tauri/Cargo.toml'),
 };
 
+const IOS_PROJECT = 'clients/apple/Tether.xcodeproj/project.pbxproj';
+
+/** Every MARKETING_VERSION in the Xcode project, which must all be the one value. */
+function marketingVersion(path: string): string {
+  const found = new Set(
+    [...readFileSync(path, 'utf8').matchAll(/MARKETING_VERSION = ([^;]+);/g)].map((m) =>
+      m[1].trim(),
+    ),
+  );
+  if (found.size === 0) throw new Error(`no MARKETING_VERSION in ${path}`);
+  if (found.size > 1) throw new Error(`${path} has mixed versions: ${[...found].join(', ')}`);
+  return [...found][0];
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: reading arbitrary manifest shapes
 function json(path: string): any {
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -49,4 +63,31 @@ describe('release versions', () => {
       expect(read()).toBe(root);
     });
   }
+
+  /**
+   * The native iOS client is allowed to run AHEAD of the repo version, and only
+   * ahead.
+   *
+   * It shares one App Store Connect record with the Expo client it replaces, and
+   * its line was deliberately started above that client's 2.8.x so the two never
+   * interleave there. release.sh bumps this file with the others, so they
+   * converge on the next release — but a value BEHIND the repo is the dangerous
+   * direction: it is the number TestFlight displays for a hand-built upload, and
+   * a duplicate (version, build) pair is rejected permanently.
+   */
+  test(`${IOS_PROJECT} is not behind the root version`, () => {
+    const ios = marketingVersion(IOS_PROJECT);
+    expect(ios).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(compareSemver(ios, root)).toBeGreaterThanOrEqual(0);
+  });
 });
+
+/** -1, 0 or 1. Both sides are asserted to be plain X.Y.Z before this is used. */
+function compareSemver(a: string, b: string): number {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1;
+  }
+  return 0;
+}

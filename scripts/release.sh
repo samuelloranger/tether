@@ -184,6 +184,13 @@ else
   echo "Updated apps/mobile/src-tauri/Cargo.toml"
   sed -i -E '0,/^version = "[^"]*"/s//version = "'"$TARGET_VERSION"'"/' apps/desktop/src-tauri/Cargo.toml
   echo "Updated apps/desktop/src-tauri/Cargo.toml"
+  # The native iOS client is what release.yml's `ios` job archives, and its
+  # marketing version lives in the Xcode project. CI overrides it on the command
+  # line for the build it uploads, but a project committed at an older number is
+  # what anyone building locally gets — and it is the number TestFlight shows.
+  sed -i -E 's/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = '"$TARGET_VERSION"';/g' \
+    clients/apple/Tether.xcodeproj/project.pbxproj
+  echo "Updated clients/apple/Tether.xcodeproj/project.pbxproj"
 fi
 
 # Regenerate Cargo.lock
@@ -212,6 +219,7 @@ VERSION_FILES=(
   apps/desktop/src-tauri/tauri.conf.json
   apps/desktop/src-tauri/Cargo.toml
   apps/desktop/src-tauri/Cargo.lock
+  clients/apple/Tether.xcodeproj/project.pbxproj
 )
 
 # Validation
