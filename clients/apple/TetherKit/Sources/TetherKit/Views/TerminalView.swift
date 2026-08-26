@@ -118,7 +118,13 @@ public struct TerminalAccessoryBar: View {
       .first
     else { return }
     let height = max(0, screen.bounds.maxY - frame.minY)
-    if abs(height - model.dockedHeight) > 0.5 { model.dockedHeight = height }
+    guard abs(height - model.dockedHeight) > 0.5 else { return }
+    // Deferred by one runloop turn on purpose. The terminal's padding reads this
+    // value, and the padding changes the layout that this GeometryReader is
+    // measuring — writing it inline is a dependency cycle, which AttributeGraph
+    // duly logged. Handing the write to the next turn keeps the measurement and
+    // breaks the loop.
+    DispatchQueue.main.async { model.dockedHeight = height }
   }
 
   /// The system paste control.
