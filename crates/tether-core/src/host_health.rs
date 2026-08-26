@@ -53,6 +53,16 @@ pub fn next_host_poll_delay(health: HostHealth, normal_interval_ms: u64) -> Opti
     }
 }
 
+/// Wire-stable label matching the TypeScript `HostHealthStatus` union.
+pub fn host_health_status_label(health: HostHealth) -> &'static str {
+    match health {
+        HostHealth::Unknown => "unknown",
+        HostHealth::Reachable => "reachable",
+        HostHealth::Unreachable { .. } => "unreachable",
+        HostHealth::Unauthorized => "unauthorized",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

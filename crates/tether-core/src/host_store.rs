@@ -145,6 +145,21 @@ where
         Ok(reread)
     }
 
+    /// Seed profiles from a raw JSON array when storage is empty (desktop
+    /// localStorage → file migration). Preserves ids and order.
+    pub fn seed_if_empty(&self, profiles_json: &str) -> Result<Vec<HostProfile>, HostStoreError> {
+        let existing = self.list()?;
+        if !existing.is_empty() {
+            return Ok(existing);
+        }
+        let seeded = parse_profiles(Some(profiles_json));
+        if seeded.is_empty() {
+            return Ok(existing);
+        }
+        self.write(&seeded)?;
+        self.list()
+    }
+
     pub fn create(&self, input: NewHostProfile) -> Result<HostProfile, HostStoreError> {
         let mut profiles = self.list()?;
         let profile = HostProfile {

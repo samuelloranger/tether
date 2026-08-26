@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
-import type { HostHealthStatus } from './hostHealth';
-import type { HostProfile } from './hostStore';
 import { sessionLabel } from './sessionLabel';
-import type { DrawerSession } from './useTetherDesktop';
+import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 
 interface SessionDrawerProps {
   hosts: HostProfile[];

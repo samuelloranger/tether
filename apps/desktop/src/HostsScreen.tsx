@@ -1,5 +1,4 @@
-import type { HostHealthStatus } from './hostHealth';
-import type { HostProfile } from './hostStore';
+import type { HostHealthStatus, HostProfile } from './types';
 
 const HEALTH_LABEL: Record<HostHealthStatus, string> = {
   unknown: 'Checking…',

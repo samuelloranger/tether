@@ -6,6 +6,7 @@ import { SessionDrawer } from './SessionDrawer';
 import { SettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
 import { TerminalPane } from './TerminalPane';
+import { wsOriginFor } from './types';
 import { useTetherDesktop } from './useTetherDesktop';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
@@ -93,8 +94,6 @@ export function App() {
     );
   }
 
-  const client = app.activeHost ? app.clientFor(app.activeHost) : null;
-
   return (
     <div
       className="app-shell"
@@ -129,7 +128,7 @@ export function App() {
         onOpenSettings={() => app.setScreen('settings')}
       />
       <main className="main-pane">
-        {client && app.activeHost ? (
+        {app.activeHost ? (
           <>
             <header className="terminal-toolbar">
               <span className="terminal-label">{app.activeSessionLabel}</span>
@@ -141,7 +140,7 @@ export function App() {
               key={`${app.terminalKey}:${prefs.theme}:${prefs.terminalFont}`}
               hostId={app.activeHost.id}
               sessionId={app.activeSessionId}
-              wsOrigin={client.wsOrigin}
+              wsOrigin={wsOriginFor(app.activeHost)}
               password={app.activePassword}
               terminalTheme={theme.terminal}
               fontFamily={prefs.terminalFont}
