@@ -275,6 +275,40 @@ export function App() {
           <>
             <header className={`terminal-toolbar${layout.showMenuButton ? ' with-menu' : ''}`}>
               <span className="terminal-label">{app.activeSessionLabel}</span>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => {
+                  app.setGitMode('drawer');
+                  app.setGitOpen(true);
+                }}
+              >
+                Git
+              </button>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => {
+                  app.setGitMode('review');
+                  app.setGitOpen(true);
+                }}
+              >
+                Review
+              </button>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => workspace.setWorkspaceOpen(true)}
+              >
+                Workspace
+              </button>
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => void workspace.pickAndUpload()}
+              >
+                Upload
+              </button>
               <span className="terminal-host-label muted">
                 {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
               </span>
