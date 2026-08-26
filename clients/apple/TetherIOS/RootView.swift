@@ -70,6 +70,11 @@ struct RootView: View {
       #endif
     }
     .background(TetherColors.background)
+    // The terminal measures the keyboard itself and applies its own bottom
+    // inset. This has to sit at the ROOT: applied further in, the parent still
+    // got SwiftUI's automatic avoidance and the two insets stacked, collapsing
+    // the terminal to a strip at the top.
+    .ignoresSafeArea(.keyboard, edges: .bottom)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .sheet(isPresented: $showSettings, onDismiss: { settingsHostId = nil }) {
       ConfigSettingsView(

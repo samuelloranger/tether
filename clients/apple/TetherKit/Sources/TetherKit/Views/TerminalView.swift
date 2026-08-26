@@ -464,6 +464,11 @@ public struct TerminalView: View {
           onOpenURL: { url in UIApplication.shared.open(url) },
           onMouseBytes: { store.sendInput($0) }
         )
+        // A small gutter, applied to the frame rather than the drawing: the grid
+        // draws from (0,0) and cell hit-testing is relative to the same origin,
+        // so insetting the view keeps rendering and touch in agreement. Costs
+        // about two columns and stops the prompt sitting on the screen edge.
+        .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Must match TetherSurfaceView's own backgroundColor. Any area the grid
         // does not cover — the remainder below the last whole row, and the
@@ -512,9 +517,6 @@ public struct TerminalView: View {
       }
     }
     .background(TetherColors.background)
-    // Own the keyboard inset explicitly, so SwiftUI cannot also apply one and
-    // double-count it.
-    .ignoresSafeArea(.keyboard, edges: .bottom)
     .padding(.bottom, keyboardInset)
     // keyboardWillChangeFrame already carries the END frame, so go straight to the
     // final height. Animating this padding would walk the view through
