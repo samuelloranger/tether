@@ -16,6 +16,10 @@ import UIKit
 @Observable
 public final class TerminalAccessoryModel {
   public var ctrlArmed = false
+  /// Drives the bar's own slide-out. UIKit's accessory dismissal only travels
+  /// the bar's height, which reads as a short hop; this carries it fully off the
+  /// bottom before UIKit removes the view.
+  public var visible = true
   public init() {}
 }
 
@@ -67,6 +71,11 @@ public struct TerminalAccessoryBar: View {
       .padding(.vertical, 8)
     }
     .background(.ultraThinMaterial)
+    // Slide the whole row clear of the bottom edge rather than letting UIKit
+    // nudge it by its own height.
+    .offset(y: model.visible ? 0 : Self.keySize * 2.4)
+    .opacity(model.visible ? 1 : 0)
+    .animation(.easeInOut(duration: 0.22), value: model.visible)
   }
 
 
@@ -442,7 +451,7 @@ struct TerminalPlaceholder: View {
       .padding(.top, 2)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(TetherColors.background)
+    .background(TetherColors.terminalBackground)
   }
 }
 
@@ -547,7 +556,7 @@ public struct TerminalView: View {
             onHideKeyboard: { keyboardFocused = false }
           )
         ),
-        showsAccessory: placeholderReason == nil && !overlayPresented,
+        showsAccessory: accessoryVisible,
         onSubmitBytes: submit,
         isFocused: Binding(
           get: { keyboardFocused },
@@ -573,6 +582,12 @@ public struct TerminalView: View {
       NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
     ) { _ in
       keyboardInset = 0
+    }
+    // Animate the bar out BEFORE UIKit removes it, so it leaves downward instead
+    // of blinking. Only the model is written here — no focus, no input views —
+    // so this cannot re-enter the update the way the earlier attempts did.
+    .onChange(of: accessoryVisible, initial: true) { _, shown in
+      accessory.visible = shown
     }
     .onAppear {
       // Only claim the keyboard when there is a session to type into. Focusing
@@ -623,6 +638,8 @@ public struct TerminalView: View {
     // terminal row and the key bar.
     return max(0, window.bounds.maxY - end.minY - window.safeAreaInsets.bottom)
   }
+
+  private var accessoryVisible: Bool { placeholderReason == nil && !overlayPresented }
 
   /// Nothing to stream: either no server is paired, or none is open.
   private var placeholderReason: TerminalPlaceholder.Reason? {
