@@ -14,6 +14,8 @@ use crate::state::AppState;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -47,6 +49,13 @@ fn main() {
             commands::secrets::secure_clear_password,
             commands::secrets::secure_get_legacy_password,
             commands::secrets::secure_clear_legacy_password,
+            commands::terminal::core_detect_links,
+            commands::terminal::core_osc52_decode,
+            commands::terminal::core_mouse_cell,
+            commands::terminal::core_mouse_encode,
+            commands::terminal::core_cache_touch,
+            commands::terminal::core_cache_delete,
+            commands::terminal::core_cache_ids,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tether desktop");

@@ -37,6 +37,10 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
         >
           <option value="dark">Dark</option>
           <option value="light">Light</option>
+          <option value="mocha">Catppuccin Mocha</option>
+          <option value="macchiato">Catppuccin Macchiato</option>
+          <option value="frappe">Catppuccin Frappé</option>
+          <option value="latte">Catppuccin Latte</option>
         </select>
       </label>
       <label>

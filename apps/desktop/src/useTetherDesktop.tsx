@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  coreCacheDelete,
   coreHostRetry,
   coreHostsList,
   coreHostsMigrate,
@@ -17,6 +18,7 @@ import {
 } from './coreApi';
 import type { FrameApplyResult } from './frameHandler';
 import { hostSecrets } from './secureConfig';
+import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
 import {
   activeSessionStorageKey,
@@ -42,7 +44,6 @@ export function useTetherDesktop() {
   const [activeSessionId, setActiveSessionId] = useState('term-1');
   const [screen, setScreen] = useState<Screen>('main');
   const [editingHostId, setEditingHostId] = useState<string | null>(null);
-  const [terminalKey, setTerminalKey] = useState(0);
 
   const activeHostIdRef = useRef<string | null>(null);
   const hostsRef = useRef<HostProfile[]>([]);
@@ -113,7 +114,6 @@ export function useTetherDesktop() {
     localStorage.setItem(KEY_ACTIVE_HOST, hostId);
     const savedSession = localStorage.getItem(activeSessionStorageKey(hostId));
     if (savedSession) setActiveSessionId(savedSession);
-    setTerminalKey((value) => value + 1);
     setScreen('main');
   }, []);
 
@@ -122,7 +122,6 @@ export function useTetherDesktop() {
     setActiveSessionId(sessionId);
     localStorage.setItem(KEY_ACTIVE_HOST, hostId);
     localStorage.setItem(activeSessionStorageKey(hostId), sessionId);
-    setTerminalKey((value) => value + 1);
     setScreen('main');
   }, []);
 
@@ -145,6 +144,7 @@ export function useTetherDesktop() {
             id: row.id,
           })),
         });
+        await coreCacheDelete(sessionKey(hostId, sessionId));
         if (switchTo !== null && switchTo !== undefined) {
           selectSession(hostId, switchTo);
         }
@@ -245,6 +245,7 @@ export function useTetherDesktop() {
   return {
     ready,
     hosts,
+    passwords,
     sessions,
     healthByHost,
     activeHost,
@@ -254,7 +255,6 @@ export function useTetherDesktop() {
     activeSessionLabel,
     screen,
     editingHostId,
-    terminalKey,
     setScreen,
     setEditingHostId,
     selectHost,

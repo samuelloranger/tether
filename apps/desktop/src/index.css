@@ -298,8 +298,66 @@ button.linkish {
   background: var(--surface, #1e1e2e);
 }
 
+.resident-terminals {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.resident-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 0;
+}
+
+.resident-pane.active {
+  z-index: 1;
+  visibility: visible;
+}
+
+.resident-pane.inactive {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.terminal-find-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--surface, #181825);
+  border-bottom: 1px solid var(--border, #313244);
+}
+
+.terminal-find-bar input {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-find-count {
+  font-size: 0.8rem;
+  color: var(--text-muted, #a6adc8);
+  min-width: 3.5rem;
+  text-align: right;
+}
+
 .terminal-host .xterm {
   height: 100%;
+}
+
+.terminal-host .xterm-viewport {
+  overflow-y: scroll !important;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--border, #45475a);
+  border-radius: 6px;
 }
 
 .empty-main {

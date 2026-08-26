@@ -108,6 +108,62 @@ export async function coreHostRetry(hostId: string): Promise<void> {
   await invoke('core_host_retry', { hostId });
 }
 
+export interface DetectedLinkSpan {
+  start: number;
+  end: number;
+  target:
+    | { kind: 'external'; url: string }
+    | { kind: 'file'; path: string; line?: number; column?: number };
+}
+
+export async function coreDetectLinks(
+  texts: string[],
+  wrapped: boolean[],
+): Promise<DetectedLinkSpan[][]> {
+  return invoke<DetectedLinkSpan[][]>('core_detect_links', { texts, wrapped });
+}
+
+export async function coreOsc52Decode(data: string): Promise<string | null> {
+  return invoke<string | null>('core_osc52_decode', { data });
+}
+
+export async function coreMouseCell(input: {
+  x: number;
+  y: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  cols: number;
+  rows: number;
+}): Promise<{ col: number; row: number }> {
+  return invoke<{ col: number; row: number }>('core_mouse_cell', { args: input });
+}
+
+export async function coreMouseEncode(input: {
+  kind: string;
+  col: number;
+  row: number;
+  mode: string;
+  sgr: boolean;
+  btn: number;
+  mods: number;
+}): Promise<string[]> {
+  return invoke<string[]>('core_mouse_encode', { args: input });
+}
+
+export async function coreCacheTouch(id: string): Promise<string | null> {
+  return invoke<string | null>('core_cache_touch', { id });
+}
+
+export async function coreCacheDelete(id: string): Promise<void> {
+  await invoke('core_cache_delete', { id });
+}
+
+export async function coreCacheIds(): Promise<string[]> {
+  return invoke<string[]>('core_cache_ids');
+}
+
 export function listenHostHealth(
   handler: (hostId: string, status: HostHealthStatus) => void,
 ): Promise<UnlistenFn> {

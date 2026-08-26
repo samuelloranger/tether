@@ -51,7 +51,7 @@ pub struct PixelRect {
     pub height: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellPos {
     pub col: u32,
     pub row: u32,
@@ -158,6 +158,30 @@ pub fn click_seqs(
         seqs.push(rel);
     }
     seqs
+}
+
+/// Encode one mouse action for the shell. `kind` is `press`, `release`, `motion`,
+/// `click`, or `wheel` (wheel is a press with `btn` 64/65).
+pub fn encode_mouse_kind(
+    kind: &str,
+    col: u32,
+    row: u32,
+    mode: MouseMode,
+    sgr: bool,
+    btn: u32,
+    mods: u32,
+) -> Vec<String> {
+    match kind {
+        "release" => release_seq(col, row, mode, sgr, btn, mods)
+            .into_iter()
+            .collect(),
+        "motion" => motion_seq(col, row, mode, sgr, btn, mods)
+            .into_iter()
+            .collect(),
+        "click" => click_seqs(col, row, mode, sgr, btn, mods),
+        "press" | "wheel" => vec![press_seq(col, row, sgr, btn, mods)],
+        _ => Vec::new(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -550,6 +574,14 @@ mod tests {
             Some("\x1b[<0;5;3m".into())
         );
         assert_eq!(press_seq(5, 3, true, 0, 0), "\x1b[<0;5;3M");
+        assert_eq!(
+            encode_mouse_kind("click", 5, 3, MouseMode::Normal, true, 0, 0),
+            vec!["\x1b[<0;5;3M".to_string(), "\x1b[<0;5;3m".to_string()]
+        );
+        assert_eq!(
+            encode_mouse_kind("wheel", 1, 1, MouseMode::Normal, true, 64, 0),
+            vec!["\x1b[<64;1;1M".to_string()]
+        );
     }
 
     #[test]

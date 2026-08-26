@@ -3,5 +3,11 @@
   "identifier": "default",
   "description": "Core permissions for the native Tether desktop window.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+    "permissions": [
+      "core:default",
+      "clipboard-manager:allow-read-text",
+      "clipboard-manager:allow-write-text",
+      "opener:allow-open-url",
+      "opener:allow-default-urls"
+    ]
 }

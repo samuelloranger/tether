@@ -2,11 +2,10 @@ import { useMemo, useState } from 'react';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
 import { loadPreferences, UI_THEMES } from './preferences';
+import { ResidentTerminals } from './ResidentTerminals';
 import { SessionDrawer } from './SessionDrawer';
 import { SettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
-import { TerminalPane } from './TerminalPane';
-import { wsOriginFor } from './types';
 import { useTetherDesktop } from './useTetherDesktop';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
@@ -136,18 +135,16 @@ export function App() {
                 {app.activeHost.name} · {app.activeHost.host}:{app.activeHost.port}
               </span>
             </header>
-            <TerminalPane
-              key={`${app.terminalKey}:${prefs.theme}:${prefs.terminalFont}`}
-              hostId={app.activeHost.id}
-              sessionId={app.activeSessionId}
-              wsOrigin={wsOriginFor(app.activeHost)}
-              password={app.activePassword}
+            <ResidentTerminals
+              hosts={app.hosts}
+              passwords={app.passwords}
+              sessions={app.sessions}
+              activeHostId={app.activeHostId}
+              activeSessionId={app.activeSessionId}
               terminalTheme={theme.terminal}
               fontFamily={prefs.terminalFont}
               onFrame={app.handleWsFrame}
-              onDisconnected={() => {
-                if (app.activeHostId) app.retryHost(app.activeHostId);
-              }}
+              onDisconnected={(hostId) => app.retryHost(hostId)}
             />
           </>
         ) : (

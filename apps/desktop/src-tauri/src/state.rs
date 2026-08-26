@@ -6,6 +6,7 @@ use tauri::AppHandle;
 use tether_core::host_health::HostHealth;
 use tether_core::host_polling::HostPolling;
 use tether_core::host_store::HostProfile;
+use tether_core::session_cache::SessionCache;
 
 use crate::http;
 use crate::storage::{new_host_store, DesktopHostStore};
@@ -32,6 +33,7 @@ pub struct AppState {
     pub active_host_id: Mutex<Option<String>>,
     pub poll_generation: AtomicU64,
     pub http: reqwest::Client,
+    pub session_cache: Mutex<SessionCache<()>>,
 }
 
 impl AppState {
@@ -44,6 +46,7 @@ impl AppState {
             active_host_id: Mutex::new(None),
             poll_generation: AtomicU64::new(0),
             http: http::http_client(),
+            session_cache: Mutex::new(SessionCache::default()),
         }
     }
 
