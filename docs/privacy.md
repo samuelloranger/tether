@@ -31,7 +31,7 @@ Tether only connects where you point it:
 
 ## Transport security
 
-Tether's own transport is **unencrypted** by default. The password controls access, not confidentiality — anyone able to observe the network between your client and your server can read the traffic. Run Tether over a private network or a tunnel (Tailscale, WireGuard, SSH). See [Security & networking](/security) for the details, because this matters more than anything else on this page.
+Tether serves TLS on `:8443` from a self-signed certificate that clients pin on first pairing — but it **also keeps a plaintext listener on `:8085`** so clients that predate TLS keep working, and a client on that port is readable by anyone observing the network. Because the certificate is self-signed, an unpinned first contact is also spoofable. So: run Tether over a private network or a tunnel (Tailscale, WireGuard, SSH), and close the plaintext port with `TETHER_TLS=only` once all your clients speak TLS. See [Security & networking](/security) — this matters more than anything else on this page.
 
 ## What Apple collects
 

@@ -236,3 +236,45 @@ a week of real work and answers most of the open questions.
 `apps/server/src/server/`. The `apps/relay` workspace is absent from the monorepo layout
 section. Both should be corrected independently of this work — they mislead agents
 reading the repo today.
+
+---
+
+## Amendment — UI direction (decided 2026-08-25)
+
+This document is an architecture spec and was silent on UI, so "rebuild the same
+experience" had become an unexamined default in the sprint plan. Decided
+explicitly:
+
+**Same information architecture, native interactions.**
+
+**Keep**, so nothing has to be relearned and the cutover stays boring: the
+concepts and their names (sessions, hosts, drawer, git review, file tree,
+presentations), the navigation between them, and the overall screen structure.
+A user moving to the new client should not have to look for anything.
+
+**Rebuild natively**, rather than porting the current implementation: keyboard
+handling, scrolling and its physics, text selection, window chrome, and
+gestures. These are where the old stack's compromises live.
+
+**Drop what only existed to work around the old stack.** Several current
+affordances are not product decisions, they are workarounds:
+
+- the **on-screen d-pad and custom key row** exist because a WebView terminal
+  inside React Native could not get real keyboard events. A native iOS text
+  input can, so re-evaluate rather than port. Keep whatever still earns its
+  place on a touch device (a session with no physical keyboard still needs
+  arrows and modifiers) — but decide that on the merits, not by inheritance.
+- the **custom titlebar** (`TitleBar.tsx`, `windowControls.ts`) exists because
+  `react-native-web` inside Tauri could not use the platform one. Use the
+  native titlebar unless there is a reason not to.
+- the **`react-native-web` shims** generally (`desktop*.ts`, the separate
+  desktop-keys path) have no successor by definition.
+
+**The rule when the two conflict:** an affordance that exists because of a
+constraint the rewrite removes is not parity, it is inherited debt. An
+affordance that exists because users need it is parity, and it stays.
+
+Explicitly NOT chosen: a full redesign. A rewrite that is also a redesign is the
+classic way for neither to land, and P3's whole argument — that it leaves the
+project better off even if everything after it stopped — depends on the swap
+being unremarkable to the person using it.

@@ -7,7 +7,9 @@ const inside = (root: string, value: string) =>
 
 export class WorkspaceFileError extends Error {
   constructor(
-    readonly status: 400 | 404 | 413 | 415,
+    // 409 is the directory-listing case: the path was swapped between the
+    // containment check and the read, so the result is discarded.
+    readonly status: 400 | 404 | 409 | 413 | 415,
     message: string,
   ) {
     super(message);

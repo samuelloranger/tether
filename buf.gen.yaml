@@ -1,0 +1,15 @@
+# Regenerates the TypeScript codec for the protocol v2 schema.
+#
+#   bun run gen:proto
+#
+# The output under apps/server/src/server/proto/gen/ is COMMITTED — CI never
+# runs protoc or buf. Rerun this only when crates/tether-proto/schema changes.
+version: v2
+inputs:
+  - directory: crates/tether-proto/schema
+plugins:
+  - remote: buf.build/bufbuild/es:v2.14.0
+    out: apps/server/src/server/proto/gen
+    opt:
+      - target=ts
+      - import_extension=none

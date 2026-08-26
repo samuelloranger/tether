@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getSetting, setSetting } from './db';
+import { logWarn } from './log';
 
 const nonNegativeInt = z.number().int().nonnegative();
 
@@ -50,7 +51,7 @@ function readTopLevel<K extends keyof Config>(key: K): Config[K] {
   try {
     return configSchema.shape[key].parse(JSON.parse(raw)) as Config[K];
   } catch {
-    console.warn(`Ignoring invalid stored config.${key}`);
+    logWarn(`Ignoring invalid stored config.${key}`);
     return structuredClone(DEFAULT_CONFIG[key]);
   }
 }
@@ -61,7 +62,7 @@ function readScalar<K extends 'longJobSeconds'>(key: K): Config[K] {
   try {
     return configSchema.shape[key].parse(JSON.parse(raw)) as Config[K];
   } catch {
-    console.warn(`Ignoring invalid stored config.${key}`);
+    logWarn(`Ignoring invalid stored config.${key}`);
     return DEFAULT_CONFIG[key];
   }
 }

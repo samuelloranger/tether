@@ -1,4 +1,5 @@
 import type { Config } from './config';
+import { logWarn } from './log';
 import type { NotificationContext, NotificationEvent } from './notifications';
 import { encryptPushContent, type PushContent } from './pushCrypto';
 import { listPushDevices, markPushDeviceUsed, removePushDevice } from './pushDevices';
@@ -118,7 +119,7 @@ export async function sendPush(
           fetcher,
         );
       } catch (error) {
-        console.warn('Push delivery failed:', error instanceof Error ? error.message : error);
+        logWarn('Push delivery failed:', error instanceof Error ? error.message : error);
       }
     }),
   );

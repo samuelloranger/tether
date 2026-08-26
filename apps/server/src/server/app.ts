@@ -10,6 +10,7 @@ import {
 import { authMiddleware } from './auth';
 import { getConfig } from './config';
 import { getAuthHash, setAuthHashIfUnset } from './db';
+import { logError, logInfo } from './log';
 import { sendTestPush } from './push';
 import { isValidSecretKey } from './pushCrypto';
 import { registerPushDevice, removePushDevice } from './pushDevices';
@@ -23,10 +24,23 @@ import {
 } from './routes/presentations';
 import { sessionsRoutes } from './routes/sessions';
 import { VERSION } from './runtime';
+import { getTlsReport, isSecureRequest } from './tlsRuntime';
 
 export { hasControlToken, presentationControlToken };
 
-const app = new Hono();
+/** Bindings come from Bun.serve's fetch wrapper in serve.ts (peer + server). */
+export type AppEnv = {
+  Bindings: {
+    peerAddress?: string;
+    // Bun.Server — kept loose so tests can pass { peerAddress } without a real server.
+    server?: object;
+  };
+  Variables: {
+    peerAddress: string;
+  };
+};
+
+const app = new Hono<AppEnv>();
 
 // A browser attaches an Origin header; a native RN/Tauri client does not. When
 // an Origin is present we require it to match the Host we were reached on, so a
@@ -42,8 +56,11 @@ function setupOriginOk(c: { req: { header(name: string): string | undefined } })
   }
 }
 
-function clientKey(c: Context): string {
-  return c.req.header('X-Forwarded-For') ?? c.req.header('X-Real-IP') ?? 'local';
+// Rate-limit key is the SOCKET peer, never a client-controlled header. When the
+// peer is unknown (tests without a real socket, rare Bun edge cases), every such
+// request shares one bucket — over-limiting is the safe direction.
+function clientKey(c: Context<AppEnv>): string {
+  return c.get('peerAddress') || 'unknown';
 }
 
 // API/WebSocket-only server (mobile client). CORS open for LAN access.
@@ -56,6 +73,12 @@ app.use(
   }),
 );
 
+app.use('*', async (c, next) => {
+  const fromEnv = c.env?.peerAddress;
+  c.set('peerAddress', typeof fromEnv === 'string' && fromEnv.length > 0 ? fromEnv : 'unknown');
+  await next();
+});
+
 // Health/root — liveness only, no data. Left open so `tether status` can probe it.
 app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
 
@@ -63,8 +86,25 @@ app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
 // pairing endpoints (/api/status, /api/setup), which the middleware exempts.
 app.use('/api/*', authMiddleware);
 
-// First-run pairing (unauthenticated): does the server need a password yet?
-app.get('/api/status', (c) => c.json({ needsSetup: getAuthHash() === null }));
+// First-run pairing (unauthenticated): does the server need a password yet, and
+// how should the client reach us?
+//
+// `tls.fingerprint` is what a client pins. Pinning on first contact is only as
+// good as that first contact, so two things matter here:
+//   - `secure` reports whether THIS response came over the TLS listener. It is
+//     derived from the socket, never from a header. A client must only pin a
+//     fingerprint it read over TLS, and must compare it against the certificate
+//     it actually saw on that connection — self-reported bytes over plaintext
+//     are a MITM's to rewrite, and are advisory discovery only.
+//   - A mismatch between the pinned value and the observed peer certificate is
+//     a hard failure, not a re-pair prompt.
+app.get('/api/status', (c) =>
+  c.json({
+    needsSetup: getAuthHash() === null,
+    secure: isSecureRequest(c.req.url),
+    tls: getTlsReport(),
+  }),
+);
 
 // First-run pairing (unauthenticated, one-time): set the password iff none exists.
 // TOFU — safe only on a trusted LAN/tunnel; self-locks once a hash is stored.
@@ -77,7 +117,9 @@ app.post('/api/setup', async (c) => {
   // does nothing and we report already_setup — no check-then-write window.
   const hash = await Bun.password.hash(password, { algorithm: 'argon2id' });
   if (!setAuthHashIfUnset(hash)) return c.json({ error: 'already_setup' }, 409);
-  return c.json({ ok: true });
+  // Echo the transport facts so a client can pair and pin in one round trip,
+  // under the same rule as /api/status: only pin what came over TLS.
+  return c.json({ ok: true, secure: isSecureRequest(c.req.url), tls: getTlsReport() });
 });
 
 // Lightweight authed reachability + password probe for the client's Test connection.
@@ -88,7 +130,8 @@ app.post('/api/admin/password', async (c) => {
   if (!(await changePassword(body.current, body.next, clientKey(c)))) {
     return c.json({ error: 'invalid current password or rate limited' }, 403);
   }
-  console.log(`Admin password changed at ${new Date().toISOString()}`);
+  // logInfo owns the timestamp prefix — do not embed another ISO stamp here.
+  logInfo('Admin password changed');
   return c.json({ ok: true });
 });
 
@@ -97,7 +140,7 @@ app.post('/api/admin/update', async (c) => {
   if (!(await requireCurrentPassword(body.current, clientKey(c)))) {
     return c.json({ error: 'invalid current password or rate limited' }, 403);
   }
-  console.log(`Admin update requested at ${new Date().toISOString()}`);
+  logInfo('Admin update requested');
   scheduleAdminCommand('update');
   return c.json({ ok: true, targetVersion: updateTargetVersion() });
 });
@@ -107,11 +150,10 @@ app.post('/api/admin/restart', async (c) => {
   if (!(await requireCurrentPassword(body.current, clientKey(c)))) {
     return c.json({ error: 'invalid current password or rate limited' }, 403);
   }
-  console.log(`Admin restart requested at ${new Date().toISOString()}`);
+  logInfo('Admin restart requested');
   scheduleAdminCommand('restart');
   return c.json({ ok: true });
 });
-
 app.post('/api/admin/test-notification', async (c) => {
   if (!allowAdminRequest(clientKey(c))) {
     return c.json({ ok: false, error: 'rate limited' }, 429);
@@ -122,7 +164,7 @@ app.post('/api/admin/test-notification', async (c) => {
     await sendTestPush(getConfig());
     return c.json({ ok: true });
   } catch (error) {
-    console.error('Test notification delivery failed:', error);
+    logError('Test notification delivery failed:', error);
     return c.json(
       {
         ok: false,

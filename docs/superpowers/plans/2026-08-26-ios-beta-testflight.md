@@ -1,0 +1,75 @@
+# iOS beta → TestFlight (native Swift client)
+
+> **Obsolete as a runbook — kept for the signing facts.** `.github/workflows/beta.yml`
+> was deleted on 2026-08-26; there is no `scope=testflight` lane to dispatch any
+> more, and the native Swift client currently has **no CI publish path** — it is
+> built and uploaded from the Mac by hand (`scripts/build-xcframework.sh`, then
+> Xcode). `release.yml`'s `ios` job still builds the *Expo* client, not this one.
+> Everything below about the shared App Store identity, the build-number rule and
+> the certificate cap still applies to whatever replaces it.
+
+Operator runbook for the `scope=testflight` lane that used to live in
+`.github/workflows/beta.yml`.
+
+## Shared app identity
+
+The native Swift app in `clients/apple` now uses the **same** App Store identity as the shipping Expo client:
+
+| | |
+|---|---|
+| Bundle id | `com.samuelloranger.tether-mobile` |
+| ASC app id | `6800525706` ("Tether Terminal") |
+
+Both codebases upload into **one** TestFlight. Testers see native beta builds alongside Expo shipping / release-lane builds in the same app listing. There is no separate ASC record for the rewrite.
+
+## Build-number band: `900000 + run_number`
+
+`release.yml` pins `CURRENT_PROJECT_VERSION` to `${{ github.run_number }}` for the Expo app. `beta.yml` has its **own** independent `run_number` counter that starts low. Copying that counter onto the same ASC record would collide immediately — ASC permanently rejects a duplicate `(version, build)` pair.
+
+The beta lane therefore sets:
+
+```text
+CURRENT_PROJECT_VERSION = 900000 + github.run_number
+```
+
+That puts every beta build in a `9xxxxx` band that release.yml's counter cannot reach, stays monotonic, and is obvious in ASC as "this came from the beta lane."
+
+`MARKETING_VERSION` defaults to **3.0.0**. The native client has its own 3.x line, deliberately above the Expo client's 2.8.x, so the two codebases never interleave versions on the shared App Store Connect record even though they publish to the same app. Override per dispatch with the `version` input. The build number is still passed as an `xcodebuild` build setting and never written back into `app.json`; `project.pbxproj` carries `MARKETING_VERSION = 3.0.0` so a local Xcode build agrees with CI.
+
+## How to run
+
+1. GitHub → **Actions** → **Beta (native rewrite)**.
+2. **Run workflow**.
+3. Branch: the rewrite branch that had this workflow (`feat/ios-beta-pipeline`, renamed to `feat/native-client-release-pipeline`). The workflow no longer exists on any branch.
+4. **scope** = `testflight`.
+5. **version** (optional): defaults to `3.0.0`. Set it only to publish a different 3.x beta, e.g. `3.0.1`. Do not set it to a 2.8.x value — that would put a native build into the Expo client's version train.
+
+`scope=ios` still builds an unsigned simulator binary only. Push events never enter the TestFlight path.
+
+## Secrets (all pre-existing; shared with `release.yml`)
+
+| Secret | Used for |
+|---|---|
+| `APP_STORE_CONNECT_KEY_P8_BASE64` | ASC API key `.p8` (base64), decoded to `~/.appstoreconnect/private_keys/` |
+| `APP_STORE_CONNECT_KEY_ID` | Key id for altool + xcodebuild `-authenticationKeyID` |
+| `APP_STORE_CONNECT_ISSUER_ID` | Issuer for altool + xcodebuild `-authenticationKeyIssuerID` |
+| `APPLE_TEAM_ID` | `DEVELOPMENT_TEAM` / ExportOptions `teamID` |
+
+No new secrets. Signing mirrors `release.yml`: automatic style + `-allowProvisioningUpdates`.
+
+## Artifacts
+
+On every `scope=testflight` run (including failed uploads), the workflow uploads:
+
+- the `.ipa` under `build/export/`
+- `build/TetherIOS.xcarchive`
+
+as workflow artifacts named `beta-ios-testflight-<sha>`.
+
+## RISKS
+
+**(a) Certificate minting.** `-allowProvisioningUpdates` creates signing assets on demand. This Apple account has previously hit the distribution-certificate cap that way. If signing starts failing with a cert-limit error, revoke unused certificates in the Apple Developer portal and re-run.
+
+**(b) Irreversible build numbers.** Every successful (and most attempted) uploads consume a real `(version, build)` on the **live** ASC app record. You cannot undo that. Prefer a deliberate dispatch over "just seeing if it works."
+
+**(c) Internal TestFlight groups.** Creating or changing an **INTERNAL** TestFlight group must be done in the App Store Connect **web UI**. The ASC API silently creates **EXTERNAL** groups instead, which is the wrong kind for private rewrite betas.

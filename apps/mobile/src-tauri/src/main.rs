@@ -114,6 +114,100 @@ fn ws_close(state: State<'_, Bridge>, conn_id: String) {
     }
 }
 
+// The core-backed transport. Unlike the `ws_*` bridge above — a dumb byte pipe
+// where TypeScript owns sinceId and hands it over as a URL parameter — here
+// `tether-core` owns the replay cursor and builds the URL itself. Frames are
+// re-emitted verbatim, so the WebView's parser sees exactly what the server
+// sent and needs no changes.
+#[derive(Default)]
+struct CoreBridge {
+    sessions: Mutex<HashMap<String, tether_core::session::SessionHandle>>,
+    replay: std::sync::Arc<tether_core::store::ReplayStore>,
+}
+
+#[tauri::command]
+async fn core_connect(
+    app: AppHandle,
+    conn_id: String,
+    base_ws_url: String,
+    password: String,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<tether_core::session::CoreEvent>();
+    let replay = app.state::<CoreBridge>().replay.clone();
+    let handle = tether_core::session::open_session(
+        tether_core::session::SessionConfig {
+            base_ws_url,
+            password,
+            session_id,
+            cols,
+            rows,
+        },
+        replay,
+        tx,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    app.state::<CoreBridge>()
+        .sessions
+        .lock()
+        .unwrap()
+        .insert(conn_id.clone(), handle);
+
+    // Events are scoped by conn_id, matching the ws_* bridge, so a superseded
+    // connection's late frames can't land on a newer socket.
+    let msg_evt = format!("core-message-{conn_id}");
+    let close_evt = format!("core-closed-{conn_id}");
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                tether_core::session::CoreEvent::Frame(text) => {
+                    let _ = app.emit(&msg_evt, text);
+                }
+                tether_core::session::CoreEvent::Closed => break,
+            }
+        }
+        app.state::<CoreBridge>()
+            .sessions
+            .lock()
+            .unwrap()
+            .remove(&conn_id);
+        let _ = app.emit(&close_evt, ());
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn core_send(bridge: State<CoreBridge>, conn_id: String, text: String) -> Result<(), String> {
+    let handle = bridge
+        .sessions
+        .lock()
+        .unwrap()
+        .get(&conn_id)
+        .cloned()
+        .ok_or_else(|| format!("no core session for {conn_id}"))?;
+    // The webview already serializes v1 client frames, so pass the text through
+    // rather than re-encoding it.
+    handle.send_raw(text);
+    Ok(())
+}
+
+#[tauri::command]
+fn core_close(bridge: State<CoreBridge>, conn_id: String) {
+    if let Some(handle) = bridge.sessions.lock().unwrap().remove(&conn_id) {
+        handle.close();
+    }
+}
+
+#[tauri::command]
+fn core_forget(bridge: State<CoreBridge>, session_id: String) {
+    bridge.replay.forget(&session_id);
+}
+
 // Whether this install can self-update. The Tauri updater can replace the
 // macOS/Windows bundles and the Linux AppImage, but NOT a package-managed
 // (.deb/.rpm) install — those must update via apt/dnf. On Linux we treat only an
@@ -150,7 +244,9 @@ fn secure_get_password(host_id: String) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn secure_set_password(host_id: String, password: String) -> Result<(), String> {
-    secure_entry(&host_id)?.set_password(&password).map_err(|e| e.to_string())
+    secure_entry(&host_id)?
+        .set_password(&password)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -189,7 +285,13 @@ fn secure_clear_legacy_password() -> Result<(), String> {
 #[tauri::command]
 fn send_os_notification(_app: AppHandle, title: String, body: String) -> Result<(), String> {
     let status = std::process::Command::new("notify-send")
-        .args(["--app-name=Tether", "--urgency=normal", "--expire-time=5000", &title, &body])
+        .args([
+            "--app-name=Tether",
+            "--urgency=normal",
+            "--expire-time=5000",
+            &title,
+            &body,
+        ])
         .status()
         .map_err(|e| e.to_string())?;
     if status.success() {
@@ -289,10 +391,15 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .manage(Bridge::default())
+        .manage(CoreBridge::default())
         .invoke_handler(tauri::generate_handler![
             ws_connect,
             ws_send,
             ws_close,
+            core_connect,
+            core_send,
+            core_close,
+            core_forget,
             is_updatable,
             secure_get_password,
             secure_set_password,

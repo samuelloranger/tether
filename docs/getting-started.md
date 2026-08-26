@@ -24,12 +24,11 @@ You can also set the password later from the phone the first time you connect (s
 
 ## 3. Install a client
 
-Pick the app for your device — both connect to the same server the same way. Every link here always resolves to the newest release:
+Pick the app for your device — both connect to the same server the same way. Every link here always resolves to the newest release. (Android is not supported; builds were discontinued after v2.8.12.)
 
 | Device | Get the latest |
 | --- | --- |
 | **iOS** | [TestFlight](https://testflight.apple.com/join/j7rPkfhq) — open the link on your iPhone |
-| **Android** | [Obtainium](https://github.com/ImranR98/Obtainium) (auto-updates) — or [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) |
 | **Desktop** (Linux / Windows / macOS) | see [Desktop app](/desktop) for the per-OS installer |
 
 - **iOS** — install [TestFlight](https://apps.apple.com/app/testflight/id899247664), then open the [public beta link](https://testflight.apple.com/join/j7rPkfhq). No Mac, no AltServer, and nothing to re-sign every week. New builds arrive automatically; each is testable for 90 days.

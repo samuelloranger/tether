@@ -1,6 +1,20 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 
+// A session's cwd can stop existing while the shell still sits in it — a
+// `git worktree remove`, an `rm -rf` of the current directory, a branch switch
+// that drops it. That is an ordinary state, not a server fault, so it carries
+// a status rather than escaping as a raw ENOENT and becoming a 500.
+export class GitRootError extends Error {
+  constructor(
+    readonly status: 404 | 409,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GitRootError';
+  }
+}
+
 export function findGitRoot(cwd: string): string | null {
   const result = spawnSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
@@ -23,5 +37,14 @@ export function resolveGitDir(root: string): string {
 // session's cwd can point at a different project between requests (the user
 // just `cd`'d), so nothing here is cached.
 export function resolveGitRoot(cwd: string): string {
-  return findGitRoot(cwd) ?? realpathSync(cwd);
+  const root = findGitRoot(cwd);
+  if (root) return root;
+  try {
+    return realpathSync(cwd);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      throw new GitRootError(409, 'working directory no longer exists');
+    }
+    throw error;
+  }
 }

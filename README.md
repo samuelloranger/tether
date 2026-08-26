@@ -9,7 +9,7 @@
   <a href="https://github.com/samuelloranger/tether/releases"><img src="https://img.shields.io/github/v/release/samuelloranger/tether" alt="Latest release" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/ci.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/release.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/release.yml/badge.svg" alt="Release builds" /></a>
-  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20Linux%20%7C%20Windows%20%7C%20macOS-blue" alt="Platforms: iOS, Android, Linux, Windows, macOS" />
+  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Linux%20%7C%20Windows%20%7C%20macOS-blue" alt="Platforms: iOS, Linux, Windows, macOS" />
   <a href="https://buymeacoffee.com/samlo122"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy me a coffee" /></a>
 </p>
 
@@ -27,7 +27,6 @@ Every link below always resolves to the **newest release** — no need to hunt t
 | Server binary | macOS Apple Silicon | [`tether-darwin-arm64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-arm64.tar.gz) |
 | Server binary | macOS Intel | [`tether-darwin-x64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-x64.tar.gz) |
 | **Mobile** | iOS | [TestFlight beta](https://testflight.apple.com/join/j7rPkfhq) (auto-updates) |
-| **Mobile** | Android | [Obtainium](#mobile-app-android) (auto-updates) · or [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) |
 | **Desktop** | Linux / Windows / macOS | see [Desktop app](#desktop-app-linux--windows--macos) below |
 
 Each `…/releases/latest/download/<file>` link is a permanent, one-click pointer to that file in whatever the current release is — safe to bookmark or share. (Desktop installers are versioned by the Tauri bundler, so they're picked per-file from the release page instead.)
@@ -51,7 +50,7 @@ tether serve | start | stop | restart | status | logs | present | set-password |
 - **Data** (sessions + password) lives in `~/.tether/config/tether.db`; override with `TETHER_DB_PATH`.
 - Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`, `TETHER_REPO_SLUG`.
 
-> **Security:** a password gates all access (set it on first install), but **traffic is unencrypted**. Run tether behind a tunnel (Tailscale / WireGuard / SSH) for encryption; keep it LAN-only otherwise.
+> **Security:** a password gates all access (set it on first install). The server serves TLS on `:8443` from a self-signed certificate clients pin on first pairing, alongside the plaintext `:8085` older clients use. The certificate is self-signed and CORS is open, so still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only.
 
 ## What you get
 
@@ -75,11 +74,9 @@ Native push notifications — the ones that arrive in Tether itself — require 
 
 Point the app at your server's IP and port on first launch.
 
-## Mobile app (Android)
+## Android
 
-Download [`tether.apk`](https://github.com/samuelloranger/tether/releases/latest/download/tether.apk) and install it (allow installs from your browser when prompted).
-
-For automatic updates, add this repo to [Obtainium](https://github.com/ImranR98/Obtainium): **Add App →** `https://github.com/samuelloranger/tether` — it tracks releases and updates the APK for you.
+Not supported. Android builds were discontinued after v2.8.12; `tether.apk` stays attached to the releases up to that version and is not updated. The Android APK was also signed with the public React Native debug keystore, so it never offered any authenticity guarantee.
 
 ## Desktop app (Linux / Windows / macOS)
 
@@ -94,7 +91,7 @@ A native [Tauri](https://tauri.app) client — the same terminal, tuned for keyb
 | macOS (Apple Silicon) | `Tether_*_aarch64.dmg` |
 | macOS (Intel) | `Tether_*_x64.dmg` |
 
-The app checks for updates on launch: the **AppImage, Windows, and macOS** builds self-update in place; **`.deb`/`.rpm`** installs are pointed to the new package to install via your package manager. See [the docs](https://samlo.cloud/tether/desktop) for details.
+The app checks for updates on launch and offers to install one when it finds it. Every format updates itself: the AppImage, Windows and macOS builds replace themselves in place, and `.deb`/`.rpm` installs hand the new package to your package manager, which asks for admin rights. See [the docs](https://samlo.cloud/tether/desktop) for details.
 
 ## Building the app from source
 
@@ -103,7 +100,6 @@ Expo SDK 57 — Expo Go is *not* supported; use a dev build:
 ```bash
 cd apps/mobile
 npx expo run:ios --device   # iOS (Mac + Xcode)
-npx expo run:android        # Android (device or emulator)
 ```
 
 ## Development

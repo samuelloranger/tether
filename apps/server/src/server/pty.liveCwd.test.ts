@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { getLiveCwd, recordChunk } from './liveCwd';
+import { decodeHolderFrame, HOLDER_PROTO_VERSION, type HolderMessage } from './holderFrame';
+import { clearLiveCwd, getLiveCwd, recordChunk } from './liveCwd';
+import { FrameDecoder } from './proto/frame';
 import {
   killSession,
   type Subscriber,
@@ -12,6 +14,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { refreshLiveCwd } from './ptyHolder';
 
 async function waitFor(condition: () => boolean, timeout = 3_000) {
   const deadline = Date.now() + timeout;
@@ -90,21 +93,17 @@ test("a fresh connection to an existing holder immediately learns the shell's cu
     // A brand new raw connection to the same holder socket — exactly what a
     // restarted server process does on reattach, bypassing pty.ts's own
     // instances Map (which already holds this session live in this test).
-    const frames: Array<{ t: string; d?: string }> = [];
-    let lineBuf = '';
+    const frames: HolderMessage[] = [];
+    const decoder = new FrameDecoder();
     raw = await new Promise<import('bun').Socket>((resolve, reject) => {
       Bun.connect({
         unix: sockPathFor(id),
         socket: {
           open: (sock) => resolve(sock),
           data: (_sock, buf) => {
-            lineBuf += buf.toString('utf8');
-            let nl = lineBuf.indexOf('\n');
-            while (nl !== -1) {
-              const line = lineBuf.slice(0, nl);
-              lineBuf = lineBuf.slice(nl + 1);
-              nl = lineBuf.indexOf('\n');
-              if (line) frames.push(JSON.parse(line));
+            for (const frame of decoder.push(new Uint8Array(buf))) {
+              const msg = decodeHolderFrame(frame);
+              if (msg) frames.push(msg);
             }
           },
           error: reject,
@@ -113,8 +112,12 @@ test("a fresh connection to an existing holder immediately learns the shell's cu
       });
     });
 
-    await waitFor(() => frames.some((f) => f.t === 'c'));
-    expect(frames.find((f) => f.t === 'c')?.d).toBe(root);
+    // HELLO first, so a reattaching server knows the dialect before it writes.
+    await waitFor(() => frames.some((f) => f.type === 'hello'));
+    expect(frames[0]).toEqual({ type: 'hello', version: HOLDER_PROTO_VERSION });
+    await waitFor(() => frames.some((f) => f.type === 'cwd'));
+    const cwdFrame = frames.find((f) => f.type === 'cwd');
+    expect(cwdFrame?.type === 'cwd' && cwdFrame.cwd).toBe(root);
   } finally {
     raw?.end();
     killSession(id);
@@ -158,4 +161,34 @@ test('starts watching when a repository is initialized without changing cwd', as
     killSession(id);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('refreshLiveCwd re-reads the shell cwd with no OSC 7 prompt involved', async () => {
+  // The gap this closes: a shell whose prompt does not emit OSC 7 left the live
+  // cwd stuck wherever the session started, so the git and file routes answered
+  // about the wrong directory. Clearing the recorded value simulates exactly
+  // that shell — the process really is in `root`, and nothing has reported it.
+  const id = 'refresh-live-cwd';
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'tether-refresh-cwd-')));
+  let unsubscribe = () => {};
+  try {
+    await startSession(id, 'bash');
+    unsubscribe = subscribeToSession(id, () => {}, 80, 24);
+    writeToSession(id, `cd -- ${JSON.stringify(root)}\n`);
+    await waitFor(() => getLiveCwd(id) === root);
+
+    clearLiveCwd(id);
+    expect(getLiveCwd(id)).toBeNull();
+
+    expect(await refreshLiveCwd(id)).toBe(true);
+    expect(getLiveCwd(id)).toBe(root);
+  } finally {
+    unsubscribe();
+    killSession(id);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('refreshLiveCwd reports failure instead of throwing when there is no holder', async () => {
+  expect(await refreshLiveCwd('no-such-session-for-cwd-refresh')).toBe(false);
 });

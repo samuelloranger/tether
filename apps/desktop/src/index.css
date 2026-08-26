@@ -1,0 +1,1818 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   AURORA — tether desktop
+   ══════════════════════════════════════════════════════════════════════════
+   One idea drives the palette: `--lit` is the colour of what the session you
+   are looking at is DOING. Working is amber, waiting is ember, quiet is cool.
+   The mark, the selected card, its edge light, the toolbar chip, the screen's
+   rim and the bloom behind it all read from that single variable, so switching
+   sessions re-tints the app. `litTheme.ts` computes it; App.tsx writes it onto
+   `.app-shell` along with the bloom alphas (--b1/--b2/--b3/--rim).
+
+   Every other colour comes from the active flavour via App.tsx (--surface,
+   --border, …). Nothing here hard-codes a palette value, so Catppuccin themes
+   keep working — only geometry and structure are fixed.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* fallbacks only — App.tsx always overrides these on .app-shell */
+  --background: #08080e;
+  --surface: #12121d;
+  --surface-raised: #191926;
+  --input: #0b0b13;
+  --text: #edeef6;
+  --text-muted: #9797ac;
+  --text-faint: #61617a;
+  --border: #232333;
+  --overlay: #08080ecc;
+  --selected: #191926;
+  --accent: #7c8cf8;
+  --accent-text: #08080e;
+  --success: #6ee7a8;
+  --warning: #f2b34c;
+  --danger: #ff7050;
+  --info: #7c8cf8;
+  --lit: #7c8cf8;
+  --b1: 0%;
+  --b2: 0%;
+  --b3: 0%;
+  --rim: 0%;
+
+  /* geometry */
+  --r-control: 8px;
+  --r-panel: 12px;
+  --r-screen: 12px;
+
+  --sans: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+
+  color-scheme: dark light;
+  color: var(--text);
+  background: var(--background);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  /* A DEFINITE height, not just a minimum. xterm's canvas has no intrinsic
+     height, so `.terminal-host { flex: 1 }` can only resolve against a parent
+     chain with a real height. With min-height alone the chain is
+     content-sized, flex:1 distributes nothing, and the terminal collapses to
+     zero height — it renders, but invisibly. */
+  height: 100%;
+}
+
+#root {
+  height: 100%;
+}
+
+/* ── typography primitives ─────────────────────────────────────────────── */
+
+/* The app's only section-heading device. Also the field-label device, so a
+   form and a git section read as the same system. */
+.eyebrow,
+.git-section-header,
+.settings-section > h2 {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Every machine value — address, sha, geometry, counts — is mono. */
+.mono,
+.terminal-label,
+.terminal-host-label,
+.git-file-name,
+.git-history-sha,
+.file-tree-label,
+.file-tree-stat,
+.panel-header-title,
+.hosts-row-meta,
+.drawer-session-meta {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+.success-msg {
+  margin: 0;
+  color: var(--success);
+  font-size: 12.5px;
+}
+
+.boot-message {
+  margin: auto;
+}
+
+/* ── controls ──────────────────────────────────────────────────────────── */
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* The primary action is accent-TINTED with an accent hairline, not an accent
+   slab. A solid fill read as a stock framework button next to the edge-lit card
+   and the state chip, which are the app's actual grammar. */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: var(--r-control);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  font-weight: 550;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: color-mix(in srgb, var(--accent) 92%, var(--text));
+}
+
+button.secondary {
+  height: 30px;
+  padding: 0 11px;
+  background: var(--surface-raised);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-raised) 78%, var(--text));
+  color: var(--text);
+}
+
+button.small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+button.linkish {
+  height: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+button.linkish:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--danger) 80%, #fff);
+}
+
+button.destructive {
+  background: color-mix(in srgb, var(--danger) 15%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: color-mix(in srgb, var(--danger) 80%, var(--text));
+}
+
+button.destructive:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 24%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+  color: color-mix(in srgb, var(--danger) 92%, var(--text));
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Keyboard users get a real ring; mouse users never see it. */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--lit) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-control);
+  background: none;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.icon-button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+input,
+select,
+textarea {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--input);
+  color: var(--text);
+  transition: border-color 120ms ease;
+}
+
+/* WebKitGTK paints the platform widget over our background unless `appearance`
+   is cleared, which put dark GTK pills on the light card — the Linux build is
+   the one that ships as an AppImage, so this is not a corner case. macOS WebKit
+   honoured the background either way. The chevron has to come back with it, in a
+   grey that carries on both a light and a dark surface since a data URI cannot
+   read our custom properties. */
+select {
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--lit) 60%, var(--border));
+}
+
+input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--lit);
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* the value inside a field is a machine value, not a label */
+label > input,
+label > select,
+label > textarea {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+/* ── app shell ─────────────────────────────────────────────────────────── */
+
+.app-shell {
+  display: flex;
+  height: 100%;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--text);
+}
+
+.app-shell.centered {
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 20px;
+  overflow: auto;
+}
+
+/* ── panel screens (connect, hosts, settings) ──────────────────────────── */
+
+.panel {
+  width: min(420px, 100%);
+  padding: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  display: grid;
+  gap: 0;
+  align-content: start;
+}
+
+.panel > h1 {
+  margin: 0 0 20px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.panel > label {
+  margin-bottom: 16px;
+}
+
+.panel > button {
+  margin-top: 6px;
+}
+
+.panel > .error,
+.panel > .hint,
+.panel > .success-msg {
+  margin-bottom: 14px;
+}
+
+.back-link {
+  justify-self: start;
+  margin-bottom: 18px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.hosts-panel,
+.settings-panel,
+.host-form-panel,
+.server-settings {
+  width: min(560px, 100%);
+}
+
+.server-settings {
+  max-height: calc(100vh - 80px);
+  overflow: auto;
+}
+
+.hosts-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.hosts-header > h1 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.hosts-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.hosts-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.hosts-row-main {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  text-align: left;
+  padding: 11px 4px;
+  background: none;
+  border: 0;
+  color: var(--text);
+}
+
+.hosts-row-main:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+.hosts-row-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hosts-row-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-section > h2 {
+  margin: 0;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-form {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--background);
+}
+
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.color-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid transparent;
+}
+
+.color-swatch.selected {
+  border-color: var(--text);
+}
+
+/* ══ SIDEBAR ══════════════════════════════════════════════════════════════ */
+
+.session-drawer {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.drawer-toolbar {
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* the mark wears the current session's state, same as everything else */
+.drawer-mark {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--lit) 92%, #fff),
+    color-mix(in srgb, var(--lit) 62%, #000)
+  );
+  box-shadow: 0 0 12px -3px color-mix(in srgb, var(--lit) 55%, transparent);
+}
+
+.drawer-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.drawer-toolbar-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.drawer-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px;
+}
+
+.drawer-host-section {
+  padding: 0;
+}
+
+/* host header: name, session count, state word. No pill badges. */
+.drawer-host-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 6px 7px;
+}
+
+.drawer-host-name {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
+.drawer-host-name:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.drawer-host-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.drawer-host-status {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--text-faint);
+}
+
+.drawer-host-status.online {
+  color: var(--text-faint);
+}
+
+/* Retry / Re-enter password occupy the slot the state word would — any of the
+   three is the row's trailing element, so all of them right-align. The host
+   name is also a .linkish and must NOT be pushed. */
+.drawer-host-header > .linkish {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.drawer-host-header > .drawer-host-name {
+  margin-left: 0;
+}
+
+.drawer-toolbar-actions .icon-button svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.drawer-empty {
+  padding: 4px 6px 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* ── session rows ──────────────────────────────────────────────────────── */
+
+.drawer-session-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  border-radius: 9px;
+  color: var(--text-muted);
+  transition: background 120ms ease;
+}
+
+.drawer-session-row:hover {
+  background: var(--surface-raised);
+}
+
+/* A shell that WANTS you tints its own row even when it is not selected —
+   the one thing allowed to pull your eye away from where you are. */
+.drawer-session-row.wants {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.drawer-session-row.wants:hover {
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+}
+
+/* THE LIT SESSION: raised, edge-lit and bloomed in its own state colour. */
+.drawer-session-row.active {
+  color: var(--text);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--lit) 14%, var(--surface-raised)) 0%,
+    color-mix(in srgb, var(--lit) 5%, var(--surface-raised)) 100%
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--lit) 30%, transparent),
+    0 6px 22px -8px color-mix(in srgb, var(--lit) 45%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 7%);
+}
+
+.drawer-session-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--lit);
+  box-shadow: 0 0 8px 0 var(--lit);
+}
+
+.drawer-session-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px 0 12px;
+  background: none;
+  border: 0;
+  border-radius: 9px;
+  color: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
+.drawer-session-main:hover:not(:disabled) {
+  background: none;
+  color: inherit;
+}
+
+.drawer-session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.drawer-session-row.active .drawer-session-title {
+  font-weight: 600;
+}
+
+.drawer-session-meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* Row actions stay hidden until the row is hovered or holds focus, so eight
+   sessions are not eight rows of icons. */
+.drawer-session-row > .icon-button {
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.drawer-session-row:hover > .icon-button,
+.drawer-session-row:focus-within > .icon-button {
+  opacity: 1;
+}
+
+.activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+
+.dot-working {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 16%, transparent);
+}
+
+.dot-waiting {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.dot-idle {
+  background: color-mix(in srgb, var(--text-faint) 70%, transparent);
+}
+
+.dot-stopped {
+  background: color-mix(in srgb, var(--text-faint) 45%, transparent);
+}
+
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  margin: 0 4px;
+}
+
+.drawer-footer {
+  flex-shrink: 0;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.drawer-footer button {
+  width: 100%;
+  height: 36px;
+  background: var(--surface-raised);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.drawer-footer button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-raised) 78%, var(--text));
+  color: var(--text);
+}
+
+.drawer-footer .kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ══ MAIN PANE ════════════════════════════════════════════════════════════ */
+
+.main-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Atmosphere: one soft bloom in the session's colour. Multi-stop so there is
+   no banding edge, and scoped to the main pane — it belongs to the screen, not
+   to the chrome. Zero-alpha when nothing is running, so it costs nothing. */
+.main-pane::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    130% 80% at 55% -10%,
+    color-mix(in srgb, var(--lit) var(--b1), transparent) 0%,
+    color-mix(in srgb, var(--lit) var(--b2), transparent) 32%,
+    color-mix(in srgb, var(--lit) var(--b3), transparent) 55%,
+    transparent 78%
+  );
+}
+
+.main-pane > * {
+  position: relative;
+  z-index: 1;
+}
+
+.empty-main {
+  margin: auto;
+  text-align: center;
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+/* ── toolbar ───────────────────────────────────────────────────────────── */
+
+.terminal-toolbar {
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-toolbar.with-menu {
+  /* The menu button is position:fixed at the top-left, so the toolbar has to
+     leave room or it sits on top of the session title. */
+  padding-left: 52px;
+}
+
+.terminal-label {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the state word travels with the session name */
+.session-state {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--lit);
+  background: color-mix(in srgb, var(--lit) 12%, transparent);
+}
+
+/* one segmented control, not four floating pills */
+.toolbar-actions {
+  display: flex;
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-raised) 55%, transparent);
+}
+
+.toolbar-actions > button {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.toolbar-actions > button:last-child {
+  border-right: 0;
+}
+
+.toolbar-actions > button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.terminal-host-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.drawer-menu-button {
+  position: fixed;
+  top: 11px;
+  left: 12px;
+  z-index: 20;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* ── the screen ────────────────────────────────────────────────────────── */
+
+.main-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.terminal-stack {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+}
+
+/* The screen: edge-lit in the session's colour and seated on a real shadow, so
+   it reads as a display inset into the chrome rather than a differently
+   coloured div. It owns the radius; the pane layer inside it just stacks the
+   resident terminals. */
+.screen {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-screen);
+  overflow: hidden;
+  background: var(--input);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--lit) 18%, transparent),
+    0 -2px 40px -12px color-mix(in srgb, var(--lit) var(--rim), transparent),
+    0 18px 40px -20px rgb(0 0 0 / 55%),
+    inset 0 1px 0 rgb(255 255 255 / 6%);
+}
+
+.resident-terminals {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.resident-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 0;
+}
+
+.resident-pane.active {
+  z-index: 1;
+  visibility: visible;
+}
+
+.resident-pane.inactive {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 0 8px 14px;
+  /* The emulator paints its own background inside this padding, so anything but
+     the terminal's colour here shows as a strip down the left edge. In a dark
+     flavour `--input` was near enough to hide it; in a light one it was not. */
+  background: var(--term-bg);
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+.terminal-host .xterm-viewport {
+  overflow-y: scroll !important;
+  background: transparent !important;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-faint) 45%, transparent);
+  border-radius: 999px;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-faint) 70%, transparent);
+}
+
+/* A floor for the screen: what this session is and where. Real values only —
+   geometry comes from xterm, the rest from /api/sessions. */
+.status-strip {
+  flex-shrink: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--background) 60%, var(--input));
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-strip .strip-primary {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-strip .strip-state {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--lit);
+}
+
+.terminal-find-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.terminal-find-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+}
+
+.terminal-find-count {
+  min-width: 56px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── overlays over the screen ──────────────────────────────────────────── */
+
+.workspace-cover {
+  position: absolute;
+  inset: 14px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-screen);
+  background: color-mix(in srgb, var(--background) 62%, transparent);
+}
+
+/* Above the git panel (5). Opening a file while git was open used to render the
+   viewer underneath it, so the click looked like it had done nothing. App.tsx
+   also stops rendering git while a file is up; this keeps the stacking honest if
+   that ever changes. */
+.file-viewer,
+.presentation-view {
+  position: absolute;
+  inset: 14px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-screen);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--background);
+}
+
+.panel-header {
+  flex-shrink: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.panel-header-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+.code-highlight {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.code-line {
+  min-height: 1.6em;
+}
+
+.presentation-banner {
+  flex-shrink: 0;
+  width: 100%;
+  height: 34px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--lit) 12%, var(--surface));
+  color: var(--lit);
+  text-align: left;
+}
+
+.presentation-banner:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--lit) 18%, var(--surface));
+}
+
+.presentation-banner-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presentation-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+/* ══ WORKSPACE PANEL ══════════════════════════════════════════════════════ */
+
+.workspace-panel {
+  width: 284px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 12px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow: auto;
+}
+
+.workspace-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-open-form {
+  display: flex;
+  gap: 6px;
+}
+
+.workspace-open-form input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+}
+
+.workspace-actions {
+  display: grid;
+  gap: 4px;
+}
+
+.workspace-drop-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.workspace-tree {
+  flex: 1;
+  overflow: auto;
+}
+
+.file-tree-dir,
+.file-tree-children {
+  display: grid;
+}
+
+.file-tree-dir-row,
+.file-tree-file-row {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.file-tree-dir-row:hover:not(:disabled),
+.file-tree-file-row:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.file-tree-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-chevron,
+.file-tree-folder {
+  width: 13px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.file-tree-status,
+.file-tree-stat {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.file-tree-add {
+  color: var(--success);
+}
+
+.file-tree-del {
+  color: var(--danger);
+}
+
+/* ══ GIT ══════════════════════════════════════════════════════════════════ */
+
+.git-drawer,
+.git-review {
+  position: absolute;
+  inset: 14px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 24px 60px -24px rgb(0 0 0 / 60%);
+}
+
+.git-drawer-header {
+  flex-shrink: 0;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-drawer-title-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.git-drawer-header-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.git-tab-bar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-tab-bar > button,
+.git-tab-bar > button.tab {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.git-tab-bar > button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.git-tab-bar > button.active {
+  background: color-mix(in srgb, var(--lit) 16%, transparent);
+  color: var(--lit);
+}
+
+.git-drawer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.git-drawer-left {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.git-drawer-file-scroll,
+.git-review-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px 12px;
+}
+
+.git-drawer-splitter {
+  width: 5px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.git-drawer-splitter:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--lit) 35%, transparent);
+}
+
+.git-drawer-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.git-pane-message {
+  margin: 0;
+  padding: 14px;
+  color: var(--text-muted);
+}
+
+.git-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+
+.git-section-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.git-file-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+}
+
+.git-file-row:hover {
+  background: var(--surface-raised);
+}
+
+.git-file-main {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.git-file-main:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+.git-file-name {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+/* The directory is the disposable half: it ellipsises away under pressure while
+   the file name keeps its full width, because the name is what tells you which
+   file you are about to stage or discard. */
+.git-file-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+}
+
+.git-file-base {
+  flex: 0 0 auto;
+}
+
+.git-file-stats {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.git-commit-box {
+  flex-shrink: 0;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.git-commit-input {
+  width: 100%;
+  height: auto;
+  min-height: 60px;
+  max-height: 140px;
+  padding: 9px 11px;
+  resize: vertical;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.git-commit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.git-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+}
+
+.git-history-row {
+  width: 100%;
+  height: auto;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-muted);
+}
+
+.git-history-row:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.git-history-sha {
+  font-size: 11px;
+  color: var(--lit);
+}
+
+.git-history-subject {
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.git-history-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ── diff ──────────────────────────────────────────────────────────────── */
+
+.git-diff-scroll {
+  flex: 1;
+  overflow: auto;
+  text-align: left;
+}
+
+.git-diff-body {
+  display: inline-block;
+  min-width: 100%;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+}
+
+.git-diff-empty {
+  padding: 16px 14px;
+  color: var(--text-faint);
+}
+
+.git-diff-row,
+.git-diff-hunk,
+.git-sbs-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 100%;
+}
+
+.git-diff-hunk {
+  gap: 12px;
+  padding: 3px 8px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, var(--background));
+  color: var(--text-faint);
+}
+
+.git-diff-gutter {
+  flex-shrink: 0;
+  min-width: 46px;
+  text-align: right;
+  padding: 0 8px;
+  color: color-mix(in srgb, var(--text-faint) 75%, transparent);
+  user-select: none;
+}
+
+.git-diff-marker {
+  width: 1ch;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.git-diff-code {
+  flex: 1;
+  padding-right: 16px;
+}
+
+.git-diff-add {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+}
+
+.git-diff-remove {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+
+.git-sbs-body .git-sbs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.git-sbs-cell {
+  display: flex;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.git-sbs-empty {
+  background: color-mix(in srgb, var(--background) 55%, transparent);
+}
+
+.git-sbs-span {
+  grid-column: 1 / -1;
+}
+
+.git-image-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.git-image-diff img {
+  max-width: 100%;
+  height: auto;
+  background: #000;
+}
+
+.git-review-file {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.git-review-file-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.git-review-mode {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--lit);
+}
+
+/* syntax tokens — held to the flavour's own palette */
+.tok-keyword {
+  color: color-mix(in srgb, var(--info) 88%, #fff);
+}
+
+.tok-string {
+  color: var(--success);
+}
+
+.tok-number {
+  color: var(--warning);
+}
+
+.tok-comment {
+  color: var(--text-faint);
+}
+
+/* ══ MODALS ═══════════════════════════════════════════════════════════════ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+}
+
+.modal-scrim {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--overlay);
+  cursor: default;
+}
+
+.modal-scrim:hover:not(:disabled) {
+  background: var(--overlay);
+}
+
+.modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(400px, 90vw);
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  box-shadow: 0 30px 70px -30px rgb(0 0 0 / 70%);
+  display: grid;
+  gap: 14px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.modal-body {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.modal-input {
+  width: 100%;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.overflow-backdrop {
+  align-items: start;
+  justify-items: end;
+  padding: 56px 14px 14px;
+}
+
+/* The sidebar's trigger sits on the left, so its menu must too — a panel that
+   opens across the window from the button that opened it reads as a different
+   menu entirely. */
+.overflow-backdrop.align-start {
+  justify-items: start;
+}
+
+.overflow-panel {
+  position: relative;
+  z-index: 1;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px -24px rgb(0 0 0 / 70%);
+  display: grid;
+  gap: 1px;
+}
+
+.overflow-row {
+  height: 34px;
+  justify-content: flex-start;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-muted);
+  text-align: left;
+  font-weight: 500;
+}
+
+.overflow-row:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+/* ── drawer as overlay (narrow windows) ────────────────────────────────── */
+
+.session-drawer.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 30;
+  box-shadow: 12px 0 40px -12px rgb(0 0 0 / 55%);
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--overlay);
+  cursor: default;
+}
+
+.drawer-scrim:hover:not(:disabled) {
+  background: var(--overlay);
+}
+
+/* ── motion ────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

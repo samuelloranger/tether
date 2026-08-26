@@ -1,0 +1,20 @@
+[package]
+name = "tether-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "UniFFI facade over tether-core for iOS"
+publish = false
+
+[lib]
+name = "tether_ffi"
+crate-type = ["lib", "staticlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+tether-core = { path = "../tether-core", features = ["terminal-parser"] }
+thiserror = "2"
+# Bindgen binary and runtime must share this exact version — see scripts/build-xcframework.sh.
+uniffi = { version = "=0.28.3", features = ["cli"] }

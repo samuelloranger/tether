@@ -2,6 +2,7 @@ import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { getSession, listSessions, renameSession } from '../db';
 import { getLiveCwd } from '../liveCwd';
+import { logError, logInfo, logWarn } from '../log';
 import {
   type FocusSubscriber,
   getActiveSession,
@@ -16,11 +17,12 @@ import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '../replayPlan';
 import { getReplayLogs } from '../replayRead';
 import { getActivity } from '../sessionActivity';
 import { autoTitle, getOscTitle } from '../sessionTitle';
+import { codecFor, type TerminalCodec, type WireData } from './terminalCodec';
 
 export const sessionsRoutes = new Hono();
 
 type WsSink = {
-  send: (data: string) => void;
+  send: (data: WireData) => void;
   close: () => void;
   raw?: { getBufferedAmount?: () => number };
 };
@@ -32,12 +34,16 @@ type WsSessionState = {
   keepAlive: ReturnType<typeof setInterval> | null;
 };
 
-function ptySubscriber(ws: WsSink): FocusSubscriber {
+function ptySubscriber(ws: WsSink, codec: TerminalCodec, sessionId: string): FocusSubscriber {
   const onData: FocusSubscriber = (data) => {
     // ponytail: no queueing for slow clients — if the socket's send
-    // buffer blows past 4MB, close it; reconnect replays via sinceId.
+    // buffer blows past 4MB, close it; reconnect replays from the cursor.
     const raw = ws.raw as { getBufferedAmount?: () => number } | undefined;
-    if (raw?.getBufferedAmount && raw.getBufferedAmount() > 4_000_000) {
+    const buffered = raw?.getBufferedAmount?.();
+    if (buffered !== undefined && buffered > 4_000_000) {
+      logWarn(
+        `WebSocket backpressure: closing session "${sessionId}" (bufferedAmount=${buffered})`,
+      );
       try {
         ws.close();
       } catch {}
@@ -45,16 +51,19 @@ function ptySubscriber(ws: WsSink): FocusSubscriber {
     }
     try {
       if (data.type === 'output') {
-        ws.send(JSON.stringify({ type: 'output', chunk: data.chunk, id: data.id }));
+        ws.send(codec.liveOutput(data.chunk, data.id));
       } else if (data.type === 'exit') {
-        ws.send(JSON.stringify({ type: 'exit', exitCode: data.exitCode }));
+        ws.send(codec.exit(data.exitCode));
       } else if (data.type === 'diff') {
-        ws.send(JSON.stringify({ type: 'diff', summary: data.summary, status: data.status }));
+        ws.send(codec.diff(data.summary, data.status));
       } else if (data.type === 'activity') {
-        ws.send(JSON.stringify({ type: 'activity', activity: data.activity }));
+        ws.send(codec.activity(data.activity));
+      } else if (data.type === 'title') {
+        const frame = codec.title(data.title);
+        if (frame !== null) ws.send(frame);
       }
     } catch (wsErr) {
-      console.warn('WebSocket send error during PTY broadcast:', wsErr);
+      logWarn('WebSocket send error during PTY broadcast:', wsErr);
     }
   };
   onData.focused = true;
@@ -68,6 +77,7 @@ async function hydrateTerminalSocket(
   cols: number,
   rows: number,
   state: WsSessionState,
+  codec: TerminalCodec,
 ): Promise<void> {
   try {
     // Ensure the PTY process is active (auto-start or holder reattach).
@@ -77,7 +87,7 @@ async function hydrateTerminalSocket(
 
     // Bound the catch-up by bytes. A row-capped scrollback is not a size cap
     // (one TUI repaint frame can be >100 KB), and an unbounded replay kills
-    // the client mid-stream — it reconnects with a barely advanced sinceId
+    // the client mid-stream — it reconnects with a barely advanced position
     // and the next replay is bigger still.
     const plan = getReplayLogs(sessionId, sinceId, REPLAY_BYTE_BUDGET);
     const missedLogs = plan.logs;
@@ -87,18 +97,18 @@ async function hydrateTerminalSocket(
     const sess = getSession(sessionId);
     const pruned = sinceId > 0 && sess !== null && sinceId < sess.pruned_before;
     if (pruned || plan.reset) {
-      ws.send(JSON.stringify({ type: 'reset' }));
+      ws.send(codec.reset());
     }
 
-    console.log(
+    logInfo(
       `Streaming ${missedLogs.length} missed logs (${plan.bytes} bytes) to client...` +
         (plan.reset ? ' [trimmed to byte budget, sent reset]' : ''),
     );
     for (const frame of replayOutputFrames(missedLogs)) {
       try {
-        ws.send(JSON.stringify(frame));
+        ws.send(codec.replayOutput(frame));
       } catch (sendErr) {
-        console.error(`Failed to send replay through log ${frame.id} to client:`, sendErr);
+        logError(`Failed to send replay through log ${frame.id} to client:`, sendErr);
         return;
       }
     }
@@ -112,10 +122,10 @@ async function hydrateTerminalSocket(
     // the no-op and no exit will ever arrive — tell the client now so it
     // doesn't render a dead terminal as live.
     if (!getActiveSession(sessionId)) {
-      ws.send(JSON.stringify({ type: 'exit' }));
+      ws.send(codec.exit());
     }
   } catch (err) {
-    console.error('Error inside settled WebSocket init:', err);
+    logError('Error inside settled WebSocket init:', err);
   }
 }
 
@@ -126,18 +136,19 @@ function openTerminalSocket(
   cols: number,
   rows: number,
   state: WsSessionState,
+  codec: TerminalCodec,
 ): void {
-  console.log(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
+  logInfo(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
   // 20s < the client's 30s watchdog, so a quiet session never trips it.
   state.keepAlive = setInterval(() => {
     try {
-      ws.send(JSON.stringify({ type: 'ping' }));
+      ws.send(codec.ping());
     } catch {}
   }, 20_000);
-  state.onData = ptySubscriber(ws);
+  state.onData = ptySubscriber(ws, codec, sessionId);
   // Yield execution to let Hono/Bun complete the protocol upgrade before writing
   setTimeout(() => {
-    void hydrateTerminalSocket(ws, sessionId, sinceId, cols, rows, state);
+    void hydrateTerminalSocket(ws, sessionId, sinceId, cols, rows, state, codec);
   }, 30);
 }
 
@@ -145,25 +156,31 @@ function handleTerminalWsMessage(
   event: { data: unknown },
   sessionId: string,
   onData: FocusSubscriber,
+  codec: TerminalCodec,
 ): void {
   try {
-    const msg = JSON.parse(event.data as string);
-    if (msg.type === 'input' && typeof msg.text === 'string') {
-      writeToSession(sessionId, msg.text);
-    } else if (msg.type === 'resize') {
-      resizeSession(sessionId, onData, Number(msg.cols), Number(msg.rows));
-    } else if (msg.type === 'focus' && typeof msg.focused === 'boolean') {
-      onData.focused = msg.focused;
-      setSessionFocus(sessionId, onData, msg.focused);
+    for (const msg of codec.decode(event.data)) {
+      if (msg.type === 'input') {
+        writeToSession(sessionId, msg.text);
+      } else if (msg.type === 'resize') {
+        resizeSession(sessionId, onData, msg.cols, msg.rows);
+      } else if (msg.type === 'focus') {
+        onData.focused = msg.focused;
+        setSessionFocus(sessionId, onData, msg.focused);
+      }
     }
   } catch (e) {
-    console.error('Failed to handle incoming WebSocket message:', e);
+    logError('Failed to handle incoming WebSocket message:', e);
   }
 }
 
 function createTerminalWsHandlers(c: Context) {
   const sessionId = c.req.query('sessionId') || 'default';
-  const sinceId = Number(c.req.query('sinceId') || 0);
+  const codec = codecFor(c.req.query('proto') ?? null, sessionId);
+  const sinceId = codec.replayFrom(
+    { sinceId: c.req.query('sinceId') ?? null, cursor: c.req.query('cursor') ?? null },
+    sessionId,
+  );
   const cols = Number(c.req.query('cols') || 80);
   const rows = Number(c.req.query('rows') || 24);
   const state: WsSessionState = {
@@ -174,13 +191,13 @@ function createTerminalWsHandlers(c: Context) {
   };
   return {
     onOpen(_event: unknown, ws: WsSink) {
-      openTerminalSocket(ws, sessionId, sinceId, cols, rows, state);
+      openTerminalSocket(ws, sessionId, sinceId, cols, rows, state, codec);
     },
     onMessage(event: { data: unknown }, _ws: unknown) {
-      handleTerminalWsMessage(event, sessionId, state.onData);
+      handleTerminalWsMessage(event, sessionId, state.onData, codec);
     },
     onClose() {
-      console.log(`WebSocket closed for session "${sessionId}"`);
+      logInfo(`WebSocket closed for session "${sessionId}"`);
       state.closed = true;
       if (state.keepAlive) clearInterval(state.keepAlive);
       state.unsubscribe();

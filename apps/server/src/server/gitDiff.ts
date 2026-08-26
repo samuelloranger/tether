@@ -36,6 +36,10 @@ export interface DiffFileStat {
   // Index (staged) vs working-tree (unstaged) side. A partially staged file
   // appears twice, once per side. Absent on older payloads.
   staged?: boolean;
+  // Whether the file is untracked. A client cannot infer this from the counts
+  // — an ordinary edit that only appends lines looks exactly like a new file —
+  // so the status letter needs it stated. Absent on older payloads.
+  untracked?: boolean;
 }
 
 export interface DiffSummary {
@@ -173,14 +177,17 @@ export function readDiffSummary(root: string): DiffSummary {
   const staged = parseNumstatZ(runGit(root, ['diff', '--cached', '--numstat', '-z'])).map((r) => ({
     ...pick(r),
     staged: true,
+    untracked: false,
   }));
   const unstaged = parseNumstatZ(runGit(root, ['diff', '--numstat', '-z'])).map((r) => ({
     ...pick(r),
     staged: false,
+    untracked: false,
   }));
   const untracked = listUntrackedFiles(root).map((p) => ({
     ...untrackedNumstat(root, p),
     staged: false,
+    untracked: true,
   }));
   return { files: [...staged, ...unstaged, ...untracked] };
 }
@@ -325,8 +332,16 @@ export async function readDiffSummaryAsync(root: string): Promise<DiffSummary> {
     runGitTextAsync(root, ['diff', '--numstat', '-z']),
     runGitTextAsync(root, ['ls-files', '--others', '--exclude-standard', '-z']),
   ]);
-  const staged = parseNumstatZ(stagedOut).map((r) => ({ ...pick(r), staged: true }));
-  const unstaged = parseNumstatZ(unstagedOut).map((r) => ({ ...pick(r), staged: false }));
+  const staged = parseNumstatZ(stagedOut).map((r) => ({
+    ...pick(r),
+    staged: true,
+    untracked: false,
+  }));
+  const unstaged = parseNumstatZ(unstagedOut).map((r) => ({
+    ...pick(r),
+    staged: false,
+    untracked: false,
+  }));
   const untrackedPaths = untrackedOut.split('\0').filter(Boolean);
   const untracked = await mapBounded(
     untrackedPaths,
@@ -344,6 +359,7 @@ export async function readDiffSummaryAsync(root: string): Promise<DiffSummary> {
         deletions: record?.deletions ?? 0,
         binary: record?.binary ?? false,
         staged: false,
+        untracked: true,
       };
     },
   );

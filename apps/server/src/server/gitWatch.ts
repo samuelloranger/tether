@@ -16,6 +16,8 @@ import {
 } from './gitDiff';
 import { resolveGitDir } from './gitRoot';
 import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './gitStatus';
+import { shouldSkipWatchDirName } from './gitWatchIgnore';
+import { logWarn } from './log';
 
 // Directories git itself never has to look inside of when diffing/statusing —
 // the working-tree half of the watch skips these instead of handing the bare
@@ -53,13 +55,8 @@ async function listIgnoredDirs(root: string): Promise<Set<string>> {
   );
 }
 
-function isReadableDirectory(dir: string): boolean {
-  try {
-    accessSync(dir, constants.R_OK | constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
+function isEacces(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException).code === 'EACCES';
 }
 
 // Hard ceiling on watched directories. Ignore-pruning plus the nested-repo
@@ -95,6 +92,8 @@ export class GitWatch {
   private handles: FSWatcher[] = [];
   private watchedDirs = new Set<string>();
   private ignoredDirs = new Set<string>();
+  // Root-owned docker volumes etc. fail every time — remember and stop retrying.
+  private inaccessibleDirs = new Set<string>();
   private timer?: ReturnType<typeof setTimeout>;
   private lastSummary: DiffSummary | null = null;
   private lastStatus: RepoStatus | null = null;
@@ -174,7 +173,7 @@ export class GitWatch {
     try {
       this.addHandle(watch(resolveGitDir(root), { recursive: true }, this.schedule));
     } catch (err) {
-      console.warn(`tether: could not watch git dir for "${root}":`, err);
+      logWarn(`tether: could not watch git dir for "${root}":`, err);
     }
     this.refresh();
     this.queue = [root];
@@ -194,7 +193,7 @@ export class GitWatch {
       return;
     }
     if (this.truncated) {
-      console.warn(
+      logWarn(
         `tether: "${root}" has more than ${this.maxWatchedDirs} directories to watch; ` +
           'working-tree changes below the watched subset will only appear on the next git event.',
       );
@@ -220,18 +219,20 @@ export class GitWatch {
       this.queue = [];
       return;
     }
-    if (!isReadableDirectory(dir)) return;
+    if (this.inaccessibleDirs.has(dir)) return;
+    if (!this.ensureReadable(dir)) return;
     this.watchDir(root, dir);
     let names: string[];
     try {
       names = readdirSync(dir);
-    } catch {
+    } catch (err) {
+      if (isEacces(err)) this.inaccessibleDirs.add(dir);
       return;
     }
     for (const name of names) {
-      if (name === '.git') continue;
+      if (shouldSkipWatchDirName(name)) continue;
       const child = path.join(dir, name);
-      if (this.ignoredDirs.has(child)) continue;
+      if (this.ignoredDirs.has(child) || this.inaccessibleDirs.has(child)) continue;
       let isDir = false;
       try {
         isDir = statSync(child).isDirectory();
@@ -251,8 +252,18 @@ export class GitWatch {
     }
   }
 
+  private ensureReadable(dir: string): boolean {
+    try {
+      accessSync(dir, constants.R_OK | constants.X_OK);
+      return true;
+    } catch (err) {
+      if (isEacces(err)) this.inaccessibleDirs.add(dir);
+      return false;
+    }
+  }
+
   private watchDir(root: string, dir: string) {
-    if (this.watchedDirs.has(dir)) return;
+    if (this.watchedDirs.has(dir) || this.inaccessibleDirs.has(dir)) return;
     this.watchedDirs.add(dir);
     try {
       const handle = watch(dir, { recursive: false }, (_event, filename) => {
@@ -260,8 +271,9 @@ export class GitWatch {
         if (!filename) return;
         // A newly created subdirectory needs its own watch — non-recursive
         // watches don't pick up anything below the directory they're on.
+        if (shouldSkipWatchDirName(filename)) return;
         const child = path.join(dir, filename);
-        if (child === path.join(root, '.git') || this.ignoredDirs.has(child)) return;
+        if (this.ignoredDirs.has(child) || this.inaccessibleDirs.has(child)) return;
         let isDir: boolean;
         try {
           isDir = statSync(child).isDirectory();
@@ -279,7 +291,8 @@ export class GitWatch {
       });
       this.addHandle(handle);
     } catch (err) {
-      console.warn(`tether: could not watch "${dir}" for git changes:`, err);
+      if (isEacces(err)) this.inaccessibleDirs.add(dir);
+      logWarn(`tether: could not watch "${dir}" for git changes:`, err);
     }
   }
 
@@ -360,7 +373,7 @@ export class GitWatch {
     this.handles.push(handle);
     handle.on('error', (err) => {
       if (this.disposed) return;
-      console.warn(`tether: git watch for "${this.root}" died:`, err);
+      logWarn(`tether: git watch for "${this.root}" died:`, err);
       this.closeHandles();
       this.root = null;
       this.lastSummary = null;

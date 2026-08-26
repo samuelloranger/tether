@@ -3,20 +3,30 @@ import path from 'node:path';
 import { Hono } from 'hono';
 import { getSession } from '../db';
 import { resolveGitRoot } from '../gitRoot';
-import { getLiveCwd } from '../liveCwd';
 import { UPLOADS_DIR } from '../paths';
 import { resolveUploadPath } from '../upload';
+import { readWorkspaceDir } from '../workspaceDir';
 import { readWorkspaceFile, WorkspaceFileError } from '../workspaceFile';
+import { resolveSessionCwd } from './sessionCwd';
 
 export const filesRoutes = new Hono();
 
-filesRoutes.get('/api/sessions/:id/file', (c) => {
-  const session = getSession(c.req.param('id'));
-  if (!session) return c.json({ error: 'session not found' }, 404);
-  const cwd = getLiveCwd(c.req.param('id'));
-  if (!cwd) return c.json({ error: 'waiting for shell to report its working directory' }, 409);
+filesRoutes.get('/api/sessions/:id/file', async (c) => {
+  const resolved = await resolveSessionCwd(c, c.req.param('id'));
+  if ('response' in resolved) return resolved.response;
   try {
-    return c.json(readWorkspaceFile(resolveGitRoot(cwd), c.req.query('path') ?? '', cwd));
+    return c.json(readWorkspaceFile(resolved.root, c.req.query('path') ?? '', resolved.cwd));
+  } catch (error) {
+    if (error instanceof WorkspaceFileError) return c.json({ error: error.message }, error.status);
+    throw error;
+  }
+});
+
+filesRoutes.get('/api/sessions/:id/dir', async (c) => {
+  const resolved = await resolveSessionCwd(c, c.req.param('id'));
+  if ('response' in resolved) return resolved.response;
+  try {
+    return c.json(readWorkspaceDir(resolved.root, c.req.query('path') ?? '', resolved.cwd));
   } catch (error) {
     if (error instanceof WorkspaceFileError) return c.json({ error: error.message }, error.status);
     throw error;
