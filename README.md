@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/mobile/assets/icon.png" width="96" alt="Tether icon" />
+  <img src="icon.png" width="96" alt="Tether icon" />
 </p>
 
 <h1 align="center">Tether</h1>
@@ -95,30 +95,38 @@ The app checks for updates on launch and offers to install one when it finds it.
 
 ## Building the app from source
 
-Expo SDK 57 — Expo Go is *not* supported; use a dev build:
+iOS needs a Mac + Xcode. From the repo root:
 
 ```bash
-cd apps/mobile
-npx expo run:ios --device   # iOS (Mac + Xcode)
+bash scripts/build-xcframework.sh
+xcodebuild -project clients/apple/Tether.xcodeproj \
+  -scheme TetherIOS \
+  -destination 'generic/platform=iOS Simulator' \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
 ```
+
+Desktop: `bun dev:desktop` (or `bun --cwd apps/desktop run tauri:build`).
 
 ## Development
 
-Bun-workspaces monorepo: `apps/server` (Bun + Hono + bun:sqlite) and `apps/mobile` (Expo RN).
+Bun-workspaces monorepo: `apps/server` (Bun + Hono + bun:sqlite), `apps/desktop` (Tauri), `apps/relay`, plus `clients/apple` (native iOS) and `crates/`.
 
 ```bash
 bun install          # link all workspaces
 bun dev:server       # backend on :8085, watch mode
-bun dev:mobile       # Expo Metro bundler
-bun lint             # Biome (server) + Expo lint (mobile)
-bun format           # biome check --write (server)
+bun dev:desktop      # Tauri desktop client
+bun lint             # Biome + server/desktop typecheck
+bun format           # biome check --write
 ```
 
-Tests are plain assert scripts:
+Tests:
 
 ```bash
-cd apps/server && TETHER_DB_PATH=/tmp/tether-test.db bun run src/server/db.test.ts
-cd apps/mobile && bun run src/terminal.test.ts
+bun --cwd apps/server run test
+bun --cwd apps/desktop run test
+bun test scripts/
 ```
 
 See `CLAUDE.md` for architecture notes (data flow, holder processes, conventions).

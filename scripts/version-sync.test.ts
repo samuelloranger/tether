@@ -14,11 +14,6 @@ import { readFileSync } from 'node:fs';
 const VERSION_SOURCES: Record<string, () => string> = {
   'package.json': () => json('package.json').version,
   'apps/server/package.json': () => json('apps/server/package.json').version,
-  'apps/mobile/package.json': () => json('apps/mobile/package.json').version,
-  'apps/mobile/app.json': () => json('apps/mobile/app.json').expo.version,
-  'apps/mobile/src-tauri/tauri.conf.json': () =>
-    json('apps/mobile/src-tauri/tauri.conf.json').version,
-  'apps/mobile/src-tauri/Cargo.toml': () => cargoVersion('apps/mobile/src-tauri/Cargo.toml'),
   'apps/desktop/package.json': () => json('apps/desktop/package.json').version,
   'apps/desktop/src-tauri/tauri.conf.json': () =>
     json('apps/desktop/src-tauri/tauri.conf.json').version,
@@ -65,29 +60,12 @@ describe('release versions', () => {
   }
 
   /**
-   * The native iOS client is allowed to run AHEAD of the repo version, and only
-   * ahead.
-   *
-   * It shares one App Store Connect record with the Expo client it replaces, and
-   * its line was deliberately started above that client's 2.8.x so the two never
-   * interleave there. release.sh bumps this file with the others, so they
-   * converge on the next release — but a value BEHIND the repo is the dangerous
-   * direction: it is the number TestFlight displays for a hand-built upload, and
-   * a duplicate (version, build) pair is rejected permanently.
+   * The native iOS client's MARKETING_VERSION must match the repo version.
+   * release.sh bumps the Xcode project with the others; a value behind the repo
+   * is the dangerous direction (TestFlight rejects duplicate version/build pairs).
    */
-  test(`${IOS_PROJECT} is not behind the root version`, () => {
-    const ios = marketingVersion(IOS_PROJECT);
-    expect(ios).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(compareSemver(ios, root)).toBeGreaterThanOrEqual(0);
+  test(`${IOS_PROJECT} matches the root version`, () => {
+    expect(marketingVersion(IOS_PROJECT)).toBe(root);
   });
 });
 
-/** -1, 0 or 1. Both sides are asserted to be plain X.Y.Z before this is used. */
-function compareSemver(a: string, b: string): number {
-  const left = a.split('.').map(Number);
-  const right = b.split('.').map(Number);
-  for (let i = 0; i < 3; i += 1) {
-    if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1;
-  }
-  return 0;
-}

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 
 // Server-side RepoStatus + pure helpers. Client mirror:
-// apps/mobile/src/gitStatusModel.ts (parseRepoStatus / canPushHead live there).
+// parseRepoStatus / canPushHead live in tether-core (git_status).
 // Keep formatRepoStatusLabel / canRewriteHead semantics identical when changing either.
 export interface RepoStatus {
   branch: string;

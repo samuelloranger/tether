@@ -21,7 +21,7 @@ Sessions survive client disconnect and server restart via detached holder proces
 ## Operating Context
 
 - Server binary/CLI on the host (`tether serve` / daemon); state in `~/.tether/`
-- Clients: native Swift on iOS and Tauri on Linux/Windows/macOS, both over one shared Rust core (`crates/tether-core`). Android is discontinued; the Expo app is being retired
+- Clients: native Swift on iOS and Tauri on Linux/Windows/macOS, both over one shared Rust core (`crates/tether-core`). Android is discontinued.
 - Transport is typically LAN or tunnel (Tailscale / WireGuard / SSH); API password-authed, not end-to-end encrypted by default
 - Terminal is the primary work surface; drawer sessions, utility key bar (mobile), git/file/presentation overlays are secondary
 - Themes today: Catppuccin flavors (latte / frappe / macchiato / mocha) for chrome + terminal
@@ -32,7 +32,7 @@ Sessions survive client disconnect and server restart via detached holder proces
 - Multi-host drawer; per-host auth and health
 - Git diff/stage/commit, file tree/viewer, uploads, presentations
 - Appearance: theme preference + terminal font
-- Native + desktop share one RN codebase; design language must work on phone (thumb, soft keyboard, utility bar) and desktop (sidebar, window chrome)
+- Native iOS + desktop share one Rust core; design language must work on phone (thumb, soft keyboard, utility bar) and desktop (sidebar, window chrome)
 - Open: whether chrome and terminal palettes stay coupled or split
 
 ## Brand Commitments
@@ -44,9 +44,9 @@ Sessions survive client disconnect and server restart via detached holder proces
 
 ## Evidence on Hand
 
-- Code and docs in this repo (`CLAUDE.md`, `apps/mobile`, `apps/server`, `docs/`)
-- Live UI: Catppuccin-themed RN client (config, terminal, drawer, utility bar, settings)
-- No separate marketing site or brand kit in-repo
+- Code and docs in this repo (`CLAUDE.md`, `apps/desktop`, `clients/apple`, `apps/server`, `docs/`)
+- Live UI: native iOS + Tauri desktop clients
+- No separate marketing site or brand kit in-repo (`icon.png` at repo root)
 - Do not fabricate customers, benchmarks, or usage stats
 
 ## Product Principles

@@ -98,7 +98,7 @@ if [ "$DRY_RUN" = false ]; then
 fi
 
 # Detect current version
-CURRENT_VERSION=$(jq -r .version apps/mobile/package.json)
+CURRENT_VERSION=$(jq -r .version package.json)
 echo "Current version: $CURRENT_VERSION"
 
 # Parse SemVer parts
@@ -165,9 +165,6 @@ update_json() {
 
 update_json "package.json" ".version = \$v"
 update_json "apps/server/package.json" ".version = \$v"
-update_json "apps/mobile/package.json" ".version = \$v"
-update_json "apps/mobile/src-tauri/tauri.conf.json" ".version = \$v"
-update_json "apps/mobile/app.json" ".expo.version = \$v"
 # apps/desktop is the shipping desktop client (release.yml's `desktop` job). Its
 # version is what the updater compares against latest.json, so leaving it behind
 # makes every install think an update is permanently available: the manifest
@@ -176,12 +173,10 @@ update_json "apps/mobile/app.json" ".expo.version = \$v"
 update_json "apps/desktop/package.json" ".version = \$v"
 update_json "apps/desktop/src-tauri/tauri.conf.json" ".version = \$v"
 
-# Update Cargo.toml
+# Update Cargo.toml / Xcode marketing version
 if [ "$DRY_RUN" = true ]; then
-  echo "[dry-run] Would update Cargo.toml to version $TARGET_VERSION"
+  echo "[dry-run] Would update Cargo.toml / Xcode to version $TARGET_VERSION"
 else
-  sed -i -E 's/^version = "[^"]*"/version = "'"$TARGET_VERSION"'"/' apps/mobile/src-tauri/Cargo.toml
-  echo "Updated apps/mobile/src-tauri/Cargo.toml"
   sed -i -E '0,/^version = "[^"]*"/s//version = "'"$TARGET_VERSION"'"/' apps/desktop/src-tauri/Cargo.toml
   echo "Updated apps/desktop/src-tauri/Cargo.toml"
   # The native iOS client is what release.yml's `ios` job archives, and its
@@ -198,8 +193,6 @@ if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would run cargo check to update Cargo.lock"
 else
   echo "Regenerating Cargo.lock..."
-  cargo check --manifest-path apps/mobile/src-tauri/Cargo.toml > /dev/null 2>&1
-  echo "Updated apps/mobile/src-tauri/Cargo.lock"
   cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml > /dev/null 2>&1
   echo "Updated apps/desktop/src-tauri/Cargo.lock"
 fi
@@ -210,11 +203,6 @@ fi
 VERSION_FILES=(
   package.json
   apps/server/package.json
-  apps/mobile/package.json
-  apps/mobile/app.json
-  apps/mobile/src-tauri/tauri.conf.json
-  apps/mobile/src-tauri/Cargo.toml
-  apps/mobile/src-tauri/Cargo.lock
   apps/desktop/package.json
   apps/desktop/src-tauri/tauri.conf.json
   apps/desktop/src-tauri/Cargo.toml

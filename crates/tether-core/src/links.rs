@@ -261,9 +261,9 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_file_target("apps/mobile/src/App.tsx:42:9"),
+            parse_file_target("apps/desktop/src/App.tsx:42:9"),
             Some(LinkTarget::File {
-                path: "apps/mobile/src/App.tsx".into(),
+                path: "apps/desktop/src/App.tsx".into(),
                 line: Some(42),
                 column: Some(9),
             })
