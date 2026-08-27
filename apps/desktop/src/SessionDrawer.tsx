@@ -24,6 +24,26 @@ interface SessionDrawerProps {
   onOpenHostSettings: (hostId: string) => void;
 }
 
+// The app icon's glyph at toolbar size: the prompt chevron and the cursor
+// block, in the icon's own green and indigo. Drawn rather than imported so it
+// stays crisp at 20px and needs no asset pipeline. The icon's dark tile is
+// dropped — the drawer is already that colour — and the glyph grown to fill the
+// space the tile used to take, or it reads as a speck next to the wordmark.
+function TetherMark() {
+  return (
+    <svg className="drawer-mark" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4.8 6.6 10.6 12l-5.8 5.4"
+        stroke="#37de9f"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x="14.6" y="4.9" width="5.6" height="14.2" rx="2.8" fill="#686dfe" />
+    </svg>
+  );
+}
+
 function PinIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -163,7 +183,7 @@ export function SessionDrawer({
   return (
     <aside className={`session-drawer${docked ? ' docked' : ' overlay'}`}>
       <header className="drawer-toolbar">
-        <span className="drawer-mark" aria-hidden />
+        <TetherMark />
         <span className="drawer-title">Tether</span>
         <div className="drawer-toolbar-actions">
           {showPin ? (

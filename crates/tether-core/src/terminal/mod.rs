@@ -52,6 +52,12 @@ pub trait TerminalParser {
     /// screen (`lines < 0`). No-op on the alternate screen.
     fn scroll_viewport(&mut self, lines: i32);
 
+    /// Whether the program has enabled bracketed paste (DECSET 2004). A paste
+    /// must then be wrapped in `ESC[200~` / `ESC[201~` so the program can tell
+    /// pasted text from typing — without it, shells run every newline in the
+    /// clipboard as a command.
+    fn bracketed_paste(&self) -> bool;
+
     /// Monotonic counter over visible-grid changes. Unchanged when a feed leaves
     /// the viewport identical — the iOS shell uses this to skip redraws.
     fn generation(&self) -> u64;

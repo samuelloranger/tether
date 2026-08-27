@@ -199,6 +199,27 @@ pub struct CtrlRewrite {
     pub consumed: bool,
 }
 
+/// The `ESC[200~` / `ESC[201~` pair that fences a bracketed paste.
+pub const PASTE_START: &str = "\u{1B}[200~";
+pub const PASTE_END: &str = "\u{1B}[201~";
+
+/// Bytes to send for a paste, fenced when the program has bracketed paste on.
+///
+/// The clipboard is untrusted. Text carrying its own `ESC[201~` would close the
+/// fence early, and everything after it would arrive as typing — the next
+/// newline then runs as Enter, so a copied snippet could execute the rest of
+/// itself. xterm strips the markers out of pasted data for exactly this reason;
+/// do the same, and strip them whether or not the fence goes on, since outside
+/// a paste they mean nothing to the program either.
+pub fn paste_payload(text: &str, bracketed: bool) -> String {
+    let clean = text.replace(PASTE_START, "").replace(PASTE_END, "");
+    if bracketed {
+        format!("{PASTE_START}{clean}{PASTE_END}")
+    } else {
+        clean
+    }
+}
+
 pub fn apply_ctrl_modifier(armed: bool, bytes: &str) -> CtrlRewrite {
     if !armed || bytes.is_empty() {
         return CtrlRewrite {
@@ -427,6 +448,26 @@ impl KittyNotifications {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paste_payload_fences_only_when_the_program_asked() {
+        assert_eq!(
+            paste_payload("ls -la", true),
+            "\u{1B}[200~ls -la\u{1B}[201~"
+        );
+        assert_eq!(paste_payload("ls -la", false), "ls -la");
+    }
+
+    #[test]
+    fn paste_payload_strips_embedded_markers() {
+        let hostile = "echo safe\u{1B}[201~\nrm -rf /\n";
+        assert_eq!(
+            paste_payload(hostile, true),
+            "\u{1B}[200~echo safe\nrm -rf /\n\u{1B}[201~"
+        );
+        // ...and outside a fence they are still meaningless noise.
+        assert_eq!(paste_payload(hostile, false), "echo safe\nrm -rf /\n");
+    }
+
     use super::*;
 
     #[test]

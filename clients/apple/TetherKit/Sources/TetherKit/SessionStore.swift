@@ -518,6 +518,19 @@ public final class SessionStore {
     sendInput(String(decoding: bytes, as: UTF8.self))
   }
 
+  /// Sends clipboard text as a paste rather than as typing.
+  ///
+  /// The emulator knows whether the program has bracketed paste on (DECSET
+  /// 2004) and builds the payload: fenced in `ESC[200~`/`ESC[201~` when it
+  /// does, with the clipboard's own fence markers stripped either way. Without
+  /// the fence a shell treats every newline in the clipboard as Enter and runs
+  /// the lines one by one, and editors lose the "this was pasted" signal they
+  /// use to skip auto-indent.
+  public func sendPaste(_ text: String) {
+    guard !text.isEmpty else { return }
+    sendInput(emulator?.pastePayload(text: text) ?? text)
+  }
+
   public func sendRawKey(_ bytes: [UInt8]) {
     sendInput(bytes: bytes)
   }
