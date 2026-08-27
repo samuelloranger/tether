@@ -2,8 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   clearActivity,
   getActivity,
+  isAgentDriven,
   recordInput,
   recordOutput,
+  recordOutputEvent,
+  recordSignal,
   SILENCE_MS,
   scanChunk,
 } from './sessionActivity';
@@ -189,5 +192,67 @@ describe('done state', () => {
     expect(getActivity('d2', T0 + SILENCE_MS)).toBe('done');
     recordOutput('d2', '\nsam@box ~ $ ', T0 + SILENCE_MS + 1);
     expect(getActivity('d2', T0 + SILENCE_MS * 3)).toBe('idle');
+  });
+});
+
+describe('recordSignal', () => {
+  afterEach(() => {
+    clearActivity('s1');
+    clearActivity('s2');
+    clearActivity('s3');
+  });
+
+  test('a signal sets the state and reports the transition', () => {
+    recordOutput('s1', 'work\n', T0);
+    expect(recordSignal('s1', 'done', T0 + 10)).toBe('done');
+    expect(getActivity('s1', T0 + 20)).toBe('done');
+  });
+
+  test('a signal for the same state is not a transition', () => {
+    recordSignal('s1', 'done', T0);
+    expect(recordSignal('s1', 'done', T0 + 10)).toBeNull();
+  });
+
+  test('once a session has signalled, a bell no longer forces waiting', () => {
+    recordSignal('s2', 'done', T0);
+    recordOutput('s2', '\x07', T0 + 10);
+    expect(getActivity('s2', T0 + 20)).toBe('done');
+  });
+
+  test('once a session has signalled, silence stops being read as a question', () => {
+    recordOutput('s3', 'Continue? ', T0);
+    recordSignal('s3', 'working', T0 + 1);
+    expect(getActivity('s3', T0 + SILENCE_MS * 2)).toBe('working');
+  });
+
+  test('real output from an agent-driven session still means working', () => {
+    recordSignal('s1', 'done', T0);
+    expect(recordOutput('s1', 'more output\n', T0 + 10)).toBe('working');
+  });
+
+  test('a signalled waiting never decays', () => {
+    recordSignal('s2', 'waiting', T0);
+    expect(getActivity('s2', T0 + SILENCE_MS * 4)).toBe('waiting');
+  });
+
+  test('a shell prompt releases the latch, so the session can go quiet again', () => {
+    recordSignal('s3', 'done', T0);
+    expect(isAgentDriven('s3')).toBe(true);
+    recordOutput('s3', '\nsam@box ~ $ ', T0 + 10);
+    expect(getActivity('s3', T0 + SILENCE_MS * 2)).toBe('idle');
+    expect(isAgentDriven('s3')).toBe(false);
+  });
+
+  test('an agent-driven session stops raising its duplicate OSC push', () => {
+    // The whole bug: Claude Code emits OSC 777 when it FINISHES, and
+    // ptyHolder turns any notify payload into an oscNotify push. Once the
+    // program has its own signal channel that push is a duplicate of the
+    // signal, and it is the one the user actually complained about.
+    const before = recordOutputEvent('s1', '\x1b]777;notify;Claude;Finished\x07', T0);
+    expect(before.notify).not.toBeNull();
+    clearActivity('s1');
+    recordSignal('s1', 'done', T0);
+    const after = recordOutputEvent('s1', '\x1b]777;notify;Claude;Finished\x07', T0 + 10);
+    expect(after.notify).toBeNull();
   });
 });

@@ -236,7 +236,8 @@ export function recordOutputEvent(
   if (scan.tail) st.tail = scan.tail;
   // Strongest signal wins; explicit attention beats prompt marks beats plain output.
   let activity: Activity | null;
-  if (scan.bell || scan.notify) activity = transition(st, 'waiting', now, 'osc');
+  if ((scan.bell || scan.notify) && !st.agentDriven)
+    activity = transition(st, 'waiting', now, 'osc');
   else if (scan.promptMark === 'A') activity = transition(st, 'idle', now);
   else if (scan.promptMark === 'C') activity = transition(st, 'working', now);
   else if (scan.tail === null)
@@ -246,8 +247,12 @@ export function recordOutputEvent(
   // initial frame.
   else activity = transition(st, 'working', now) ?? (fresh ? st.activity : null);
   return {
+    // An agent that signals has a better channel than its own OSC stream, and
+    // ptyHolder turns any notify payload into a push. Passing it through would
+    // deliver the completion alarm this change exists to remove, alongside the
+    // signal's own (default-silent) one.
+    notify: st.agentDriven ? null : scan.notify,
     activity,
-    notify: scan.notify,
     longJob:
       previousActivity === 'working' &&
       (activity === 'idle' || activity === 'waiting') &&
@@ -261,6 +266,34 @@ export function recordInput(id: string, now = Date.now()): Activity | null {
   if (!st) return null;
   if (st.activity !== 'waiting') return null;
   return transition(st, 'working', now);
+}
+
+/**
+ * The states a program may claim for itself. `idle` is missing on purpose: it
+ * describes a shell prompt, which is the server's observation to make, not the
+ * program's claim — and it is the observation that releases the latch.
+ */
+export type SignalState = 'working' | 'waiting' | 'done';
+
+/**
+ * A program declaring its own state, through `/control/signal`.
+ *
+ * This latches the session as agent-driven, and from then on the byte
+ * heuristics stop guessing for it. Mixing the two sources produces flapping:
+ * Claude Code emits the same OSC 777 when it finishes as when it asks, so the
+ * scanner would immediately re-classify a signalled `done` as `waiting`, which
+ * is exactly the confusion the signal exists to remove. The latch is released
+ * when the session reaches a shell prompt — see `releaseToIdle`.
+ */
+export function recordSignal(id: string, state: SignalState, now = Date.now()): Activity | null {
+  const st = getState(id, now);
+  st.agentDriven = true;
+  return transition(st, state, now, state === 'waiting' ? 'signal' : null);
+}
+
+/** Whether this session is currently speaking for itself. */
+export function isAgentDriven(id: string): boolean {
+  return stateBySession.get(id)?.agentDriven ?? false;
 }
 
 // Read the current classification. Applies the silence heuristics lazily —
