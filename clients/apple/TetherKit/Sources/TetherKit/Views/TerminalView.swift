@@ -607,7 +607,9 @@ public struct TerminalView: View {
           onTap: { keyboardFocused = true },
           onSelectionText: { text in selectionText = text },
           onOpenURL: { url in UIApplication.shared.open(url) },
-          onMouseBytes: { store.sendInput($0) }
+          onMouseBytes: { store.sendInput($0) },
+          mouseMode: store.terminalMouseMode,
+          mouseSgr: store.terminalMouseSgr
         )
         // No inset. The gutter that used to be here cost two columns and, being
         // a different colour from the grid, was itself half of the frame the
