@@ -15,6 +15,7 @@ public struct DpadView: View {
   @State private var grantOrigin = CGPoint.zero
   @State private var gestureLive = false
   @State private var repeatTask: Task<Void, Never>?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private static let feedback = UIImpactFeedbackGenerator(style: .light)
 
@@ -109,7 +110,10 @@ public struct DpadView: View {
     active = nil
     grantOrigin = .zero
     gestureLive = false
-    withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
+    // The thumb springs back to centre — the one place in the app a spring is
+    // right, because the glyph is a physical thing the finger just let go of.
+    // Reduce Motion returns it without the travel.
+    withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.7)) {
       thumb = .zero
     }
   }

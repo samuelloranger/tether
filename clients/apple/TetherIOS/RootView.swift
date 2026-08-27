@@ -38,22 +38,10 @@ struct RootView: View {
         .ignoresSafeArea()
 
       // Atmospheric bloom — the active session's heat colour, soft and inset so
-      // it belongs to the screen rather than washing the whole chrome.
-      if litChrome.state != .none {
-        RadialGradient(
-          colors: [
-            litChrome.color.opacity(litChrome.bloom.b1),
-            litChrome.color.opacity(litChrome.bloom.b2),
-            litChrome.color.opacity(litChrome.bloom.b3),
-            .clear,
-          ],
-          center: .init(x: 0.72, y: 0.28),
-          startRadius: 20,
-          endRadius: 420
-        )
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-      }
+      // it belongs to the screen rather than washing the whole chrome. The
+      // crossfade between heats, and the single swell on entering `waiting`,
+      // live in the layer itself.
+      LitBloomLayer(chrome: litChrome)
 
       VStack(spacing: 0) {
         TerminalTitleBar(

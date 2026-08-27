@@ -117,6 +117,7 @@ private struct HostDrawerSection: View {
   let onRetryHost: () -> Void
   let onReenterPassword: (String) -> Void
   let onHostSettings: (String) -> Void
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -138,6 +139,8 @@ private struct HostDrawerSection: View {
             .foregroundStyle(TetherColors.textSecondary)
         }
         statusView
+          .id(healthKey)
+          .transition(.opacity)
         Spacer()
         Button {
           onHostSettings(host.id)
@@ -164,8 +167,17 @@ private struct HostDrawerSection: View {
             onSelect: { onSelectSession(host.id, session.id) },
             onKill: { onKillSession(session.id) }
           )
+          // A killed session is gone the moment the server says so, and a new
+          // terminal appears the same way. Fading the row, and letting the rest
+          // of the list close the gap, keeps the reader's place in a list where
+          // every row looks like its neighbours.
+          .transition(.opacity)
         }
       }
+      .animation(
+        TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion),
+        value: sessions.map(\.id)
+      )
       .padding(.leading, 12)
       .overlay(alignment: .leading) {
         Rectangle()
@@ -174,9 +186,25 @@ private struct HostDrawerSection: View {
       }
     }
     .opacity(isUnavailable ? 0.55 : 1)
+    // Keyed coarsely on purpose: `unreachable` carries a failure count that
+    // ticks up every poll, and animating on the raw value would re-run the
+    // crossfade on a host that has not changed state at all.
+    .animation(
+      TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion),
+      value: healthKey
+    )
   }
 
   private var isUnavailable: Bool { health.isUnavailable }
+
+  private var healthKey: String {
+    switch health {
+    case .unknown: "unknown"
+    case .reachable: "reachable"
+    case .unreachable: "unreachable"
+    case .unauthorized: "unauthorized"
+    }
+  }
 
   @ViewBuilder
   private var statusView: some View {
@@ -218,6 +246,7 @@ private struct SessionDrawerRow: View {
   let onSelect: () -> Void
   let onKill: () -> Void
   @State private var confirmKill = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var wantsAttention: Bool {
     !active && SessionActivityLogic.dotKey(
@@ -281,6 +310,13 @@ private struct SessionDrawerRow: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
+    // Selection moves between rows: the outgoing row lets go of its fill and
+    // rim over the same beat the incoming one takes them on, so the highlight
+    // reads as one thing travelling rather than two rows blinking.
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: active)
+    // A row's own heat follows the chrome's curve, so the drawer and the bloom
+    // can never disagree about how fast a session went quiet.
+    .animation(TetherMotion.heat(to: rowLit.state, reduceMotion: reduceMotion), value: rowLit)
     .confirmationDialog(
       "Kill this terminal?",
       isPresented: $confirmKill,

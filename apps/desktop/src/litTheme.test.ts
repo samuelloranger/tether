@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { litColor, litStateFor, litVars } from './litTheme';
+import { ARRIVAL_MS, litColor, litStateFor, litVars, shouldAnnounceArrival } from './litTheme';
 import { UI_THEMES } from './preferences';
 
 const dark = UI_THEMES['default-dark'];
@@ -73,5 +73,34 @@ describe('litVars', () => {
     const idle = pct(litVars(dark, 'idle')['--b1']);
     expect(idle).toBeLessThan(pct(litVars(dark, 'waiting')['--b1']));
     expect(idle).toBeGreaterThan(0);
+  });
+});
+
+describe('shouldAnnounceArrival', () => {
+  it('fires when a shell stops to ask for input', () => {
+    expect(shouldAnnounceArrival('working', 'waiting', true)).toBe(true);
+    expect(shouldAnnounceArrival('idle', 'waiting', true)).toBe(true);
+    expect(shouldAnnounceArrival('none', 'waiting', true)).toBe(true);
+  });
+
+  // The drawer re-reports state on every poll; a swell per poll is a strobe.
+  it('does not re-announce a session that is already waiting', () => {
+    expect(shouldAnnounceArrival('waiting', 'waiting', true)).toBe(false);
+  });
+
+  // The app boots with no sessions, so the first poll turns `none` into
+  // whatever the session already was. Nothing happened; loading finished.
+  it('stays quiet while the app is still hydrating', () => {
+    expect(shouldAnnounceArrival('none', 'waiting', false)).toBe(false);
+  });
+
+  it('stays quiet for every other transition', () => {
+    expect(shouldAnnounceArrival('waiting', 'working', true)).toBe(false);
+    expect(shouldAnnounceArrival('idle', 'working', true)).toBe(false);
+    expect(shouldAnnounceArrival('working', 'none', true)).toBe(false);
+  });
+
+  it('outlives the keyframe it accompanies', () => {
+    expect(ARRIVAL_MS).toBeGreaterThan(720);
   });
 });

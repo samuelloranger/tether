@@ -12,6 +12,8 @@ public struct SessionDrawerOverlay: View {
   public var onReenterPassword: (String) -> Void
   public var onHostSettings: (String) -> Void
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   public init(
     isPresented: Binding<Bool>,
     store: SessionStore,
@@ -52,7 +54,11 @@ public struct SessionDrawerOverlay: View {
         )
         .frame(width: drawerWidth)
         .frame(maxHeight: .infinity)
-        .transition(.move(edge: .leading))
+        // The drawer comes from the edge it lives on, so the gesture that opens
+        // it and the animation that answers are the same movement. Reduce
+        // Motion gets the crossfade instead — the panel is 264pt of travel,
+        // which is exactly the kind of slide that setting is asking about.
+        .transition(reduceMotion ? .opacity : .move(edge: .leading))
       }
 
       LeadingEdgeSwipeHandle(onSwipe: open)
@@ -64,7 +70,12 @@ public struct SessionDrawerOverlay: View {
     // invisible touch-swallowing strip down the middle of the terminal and
     // leaving the edge recogniser nowhere near the edge.
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    .animation(.easeOut(duration: 0.22), value: isPresented)
+    // Exits faster than it enters: dismissing is a decision already made, and
+    // waiting for the panel to leave is waiting for the terminal to come back.
+    .animation(
+      TetherMotion.ui(isPresented ? TetherMotion.overlay : TetherMotion.state, reduceMotion: reduceMotion),
+      value: isPresented
+    )
   }
 
   private func open() {

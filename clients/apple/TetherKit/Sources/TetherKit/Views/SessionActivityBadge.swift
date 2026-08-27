@@ -24,17 +24,29 @@ public struct SessionActivityBadge: View {
     SessionActivityLogic.dotKey(status: status, activity: activity, live: live)
   }
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   public var body: some View {
     HStack(spacing: 6) {
       Circle()
         .fill(SessionActivityLogic.color(for: key))
         .frame(width: 8, height: 8)
+        .id(key)
+        .transition(.opacity)
         .accessibilityHidden(true)
       if showWaitingLabel, key == .waiting {
         Text("waiting")
           .font(.caption2)
           .foregroundStyle(TetherColors.heatWaiting)
+          // The word arrives with the dot's colour rather than after it: the
+          // row is answering one question — does this shell need me — and two
+          // separately-timed answers read as two events.
+          .transition(.opacity)
       }
     }
+    .animation(
+      TetherMotion.heat(to: LitTheme.state(for: key), reduceMotion: reduceMotion),
+      value: key
+    )
   }
 }

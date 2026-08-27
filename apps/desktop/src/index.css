@@ -13,6 +13,41 @@
    keep working — only geometry and structure are fixed.
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* ── the heat, as an animatable type ───────────────────────────────────────
+   Registering these makes the app's whole tint INTERPOLATABLE. Unregistered
+   custom properties are strings, so `--lit` used to jump from amber to ember on
+   one frame and take the bloom, the rim, the card, the chip, the mark and the
+   dots with it — six surfaces cutting at once. Typed, a single transition on
+   `.app-shell` crossfades every one of them from one declaration.
+
+   A webview without @property support ignores this block and keeps today's
+   instant switch. Nothing else depends on it. */
+@property --lit {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #7c8cf8;
+}
+@property --b1 {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+@property --b2 {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+@property --b3 {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+@property --rim {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
 :root {
   /* fallbacks only — App.tsx always overrides these on .app-shell */
   --background: #08080e;
@@ -41,6 +76,18 @@
   --r-control: 8px;
   --r-panel: 12px;
   --r-screen: 12px;
+
+  /* motion — see the block at the foot of this file.
+     Heat rises fast and cools slow; everything else is short enough to land
+     before the shell's own echo does. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-press: 90ms;
+  --t-fast: 140ms;
+  --t-state: 200ms;
+  --t-overlay: 260ms;
+  --heat-in: 260ms;
+  --heat-wait: 340ms;
+  --heat-out: 700ms;
 
   --sans: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
   --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
@@ -160,9 +207,20 @@ button {
   font-size: 12.5px;
   cursor: pointer;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out),
+    transform var(--t-press) var(--ease-out),
+    opacity var(--t-fast) var(--ease-out);
+}
+
+/* Every control in the app is a <button>, and none of them had a pressed state
+   — the hover tint was the only sign a click had registered, and on a trackpad
+   that tint is already there before the finger goes down. One pixel is enough
+   to feel; more would read as a toy. */
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  transition-duration: var(--t-press);
 }
 
 button:hover:not(:disabled) {
@@ -334,6 +392,32 @@ label > textarea {
   min-height: 100vh;
   background: var(--background);
   color: var(--text);
+
+  /* THE app's motion. One transition, on the five properties every tinted
+     surface reads from, so the bloom, the screen rim, the selected card and its
+     edge light, the toolbar chip, the mark and the dots all arrive together.
+     Duration comes from the state being ENTERED — see below. */
+  --heat: var(--heat-out);
+  transition:
+    --lit var(--heat) var(--ease-out),
+    --b1 var(--heat) var(--ease-out),
+    --b2 var(--heat) var(--ease-out),
+    --b3 var(--heat) var(--ease-out),
+    --rim var(--heat) var(--ease-out);
+}
+
+/* Heat rises fast and cools slowly. A shell that just started working, or that
+   just stopped to ask you something, is news and arrives quickly; a shell going
+   quiet is not, and is allowed to fade. Symmetric durations would make the two
+   read as the same event. The attribute carries the state being entered, and a
+   transition takes its timing from the after-change style, so this is the whole
+   mechanism. */
+.app-shell[data-lit='working'] {
+  --heat: var(--heat-in);
+}
+
+.app-shell[data-lit='waiting'] {
+  --heat: var(--heat-wait);
 }
 
 .app-shell.centered {
@@ -626,7 +710,33 @@ label > textarea {
   height: 40px;
   border-radius: 9px;
   color: var(--text-muted);
-  transition: background 120ms ease;
+  /* Selection used to swap four things at once — fill, edge light, shadow and
+     text — on the frame the click landed. Moving them together over one beat
+     makes the highlight read as one thing travelling between rows. */
+  transition:
+    background var(--t-state) var(--ease-out),
+    box-shadow var(--t-state) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+
+/* The rail is on EVERY row, collapsed. It grows out of the row's middle when
+   the row is selected, so the light travels down the list instead of blinking
+   out of one row and into another. */
+.drawer-session-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--lit);
+  box-shadow: 0 0 8px 0 var(--lit);
+  transform: scaleY(0);
+  opacity: 0;
+  transition:
+    transform var(--t-state) var(--ease-out),
+    opacity var(--t-fast) var(--ease-out);
 }
 
 .drawer-session-row:hover {
@@ -658,15 +768,8 @@ label > textarea {
 }
 
 .drawer-session-row.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--lit);
-  box-shadow: 0 0 8px 0 var(--lit);
+  transform: scaleY(1);
+  opacity: 1;
 }
 
 .drawer-session-main {
@@ -727,6 +830,11 @@ label > textarea {
   border-radius: 999px;
   flex-shrink: 0;
   background: var(--text-faint);
+  /* The dot answers the drawer's only question — which shell needs me — so it
+     changes on the chrome's own curve rather than cutting. */
+  transition:
+    background var(--t-state) var(--ease-out),
+    box-shadow var(--t-state) var(--ease-out);
 }
 
 .dot-working {
@@ -805,6 +913,32 @@ label > textarea {
     color-mix(in srgb, var(--lit) var(--b3), transparent) 55%,
     transparent 78%
   );
+}
+
+/* The one authored moment in the app: a single swell of the same bloom, once,
+   when a session stops and asks you something. Its own layer rather than a
+   brighter `--b1`, so the resting atmosphere is untouched and the flare is pure
+   opacity on a gradient that is already composited. It never loops, and it
+   fires on ENTERING waiting — a drawer refresh that re-reports the same state
+   must not re-announce it. */
+.main-pane::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  background: radial-gradient(
+    130% 80% at 55% -10%,
+    color-mix(in srgb, var(--lit) 11%, transparent) 0%,
+    color-mix(in srgb, var(--lit) 5%, transparent) 32%,
+    color-mix(in srgb, var(--lit) 2%, transparent) 55%,
+    transparent 78%
+  );
+}
+
+.app-shell[data-arriving='waiting'] .main-pane::after {
+  animation: heat-arrive 720ms var(--ease-out) 1;
 }
 
 .main-pane > * {
@@ -1067,6 +1201,7 @@ label > textarea {
 .workspace-cover {
   position: absolute;
   inset: 14px;
+  animation: scrim-in var(--t-state) ease-out;
   z-index: 3;
   display: grid;
   place-items: center;
@@ -1082,6 +1217,10 @@ label > textarea {
 .presentation-view {
   position: absolute;
   inset: 14px;
+  /* These cover the terminal completely, so they announce themselves — but
+     from inside the screen's own bounds, not from off-window: the terminal is
+     still there underneath and the reader is coming straight back to it. */
+  animation: cover-in var(--t-overlay) var(--ease-out);
   z-index: 6;
   display: flex;
   flex-direction: column;
@@ -1682,6 +1821,7 @@ label > textarea {
 .modal-scrim {
   position: absolute;
   inset: 0;
+  animation: scrim-in var(--t-state) ease-out;
   height: auto;
   padding: 0;
   border: 0;
@@ -1694,9 +1834,19 @@ label > textarea {
   background: var(--overlay);
 }
 
+/* A full-window scrim is a click target, not a control: pressing it must not
+   nudge the whole overlay. */
+.modal-scrim:active:not(:disabled),
+.drawer-scrim:active:not(:disabled) {
+  transform: none;
+}
+
 .modal-card {
   position: relative;
   z-index: 1;
+  /* Rises the distance of its own shadow. A dialog that arrives from nowhere
+     reads as a screenshot pasted over the app. */
+  animation: card-in 220ms var(--ease-out);
   width: min(400px, 90vw);
   padding: 22px;
   border: 1px solid var(--border);
@@ -1744,9 +1894,18 @@ label > textarea {
   justify-items: start;
 }
 
+.overflow-backdrop.align-start .overflow-panel {
+  transform-origin: top left;
+}
+
 .overflow-panel {
   position: relative;
   z-index: 1;
+  transform-origin: top right;
+  /* A menu is the one overlay that must feel instantaneous — it is the answer
+     to a click on a control an inch away. Half the dialog's time, and it grows
+     from the corner it is anchored to. */
+  animation: menu-in var(--t-fast) var(--ease-out);
   min-width: 232px;
   padding: 6px;
   border: 1px solid var(--border);
@@ -1783,12 +1942,18 @@ label > textarea {
   bottom: 0;
   z-index: 30;
   box-shadow: 12px 0 40px -12px rgb(0 0 0 / 55%);
+  /* Comes from the edge it lives on, so the ☰ that opens it and the panel that
+     answers are one movement. Only the overlay drawer animates — the docked one
+     is furniture, and furniture does not slide in every time the window is
+     wide. */
+  animation: drawer-in var(--t-overlay) var(--ease-out);
 }
 
 .drawer-scrim {
   position: fixed;
   inset: 0;
   z-index: 25;
+  animation: scrim-in var(--t-overlay) ease-out;
   height: auto;
   padding: 0;
   border: 0;
@@ -1801,13 +1966,155 @@ label > textarea {
   background: var(--overlay);
 }
 
-/* ── motion ────────────────────────────────────────────────────────────── */
+/* ══ motion ════════════════════════════════════════════════════════════════
+   The whole language, in one place.
 
+   THESIS — heat rises fast, cools slow. `--lit` and the bloom alphas are
+   registered above as animatable types, so one transition on `.app-shell`
+   crossfades every tinted surface at once, and the duration comes from the
+   state being entered: 260ms into working, 340ms into waiting, 700ms back down
+   to quiet. Asymmetry is the point — a shell waking up and a shell going quiet
+   are not the same event.
+
+   ONE AUTHORED MOMENT — a single swell of the bloom when a session enters
+   `waiting`. Fires on entry only, never loops, and is the only thing in the app
+   that moves without the user causing it.
+
+   SUPPORTING SCALE — 90ms press, 140ms hover and menus, 200ms state, 260ms
+   overlays. Exponential ease-out, no springs: an overshoot on a status colour
+   reads as a second state change.
+
+   NEVER ANIMATED — the screen's size, the find bar's arrival, the presentation
+   banner. Anything that changes the terminal's box makes xterm refit and the
+   PTY re-report its grid, and a resize walked over 200ms is 12 grid sizes the
+   shell has to honour.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes heat-arrive {
+  0% {
+    opacity: 0;
+  }
+  24% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes cover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.994);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Reduce Motion is a path, not a fallback.
+   Everything that TRAVELS is removed — the drawer's slide, the card's rise, the
+   menu's grow, the press, the rail's growth, and the waiting swell outright.
+   What survives is what carries meaning without moving: the heat still
+   crossfades between colours, overlays still fade in, the pressed control still
+   changes colour. A colour change is feedback, not motion. Transitions are
+   shortened as well, because a user who asks for less movement is rarely asking
+   for a longer wait. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition: none !important;
+  /* Shortened at the TOKENS, not with a universal rule. `transition-property`
+     initialises to `all`, so setting a duration on `*` would hand a 140ms
+     transition to every element that has none — including ones whose layout
+     changes, which is new motion invented for the user who asked for less of
+     it, and intermediate geometry for the terminal to refit against. Every
+     transition in this file reads these, so redefining them here reaches
+     exactly the authored ones and nothing else. */
+  :root {
+    --t-press: 90ms;
+    --t-fast: 120ms;
+    --t-state: 120ms;
+    --t-overlay: 120ms;
+    --heat-in: 120ms;
+    --heat-wait: 120ms;
+    --heat-out: 120ms;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+
+  /* Travel out; fade in its place, at the same timing so the pacing of the app
+     does not change. */
+  .session-drawer.overlay {
+    animation: scrim-in var(--t-overlay) ease-out !important;
+  }
+
+  .modal-card {
+    animation: scrim-in var(--t-state) ease-out !important;
+  }
+
+  .overflow-panel {
+    animation: scrim-in var(--t-fast) ease-out !important;
+  }
+
+  .file-viewer,
+  .presentation-view {
+    animation: scrim-in var(--t-overlay) ease-out !important;
+  }
+
+  /* An unrequested flare of the whole window is exactly what this setting is
+     asking the app not to do. Not shortened — removed. */
+  .app-shell[data-arriving='waiting'] .main-pane::after {
     animation: none !important;
+    opacity: 0 !important;
+  }
+
+  /* The rail still appears on the selected row; it stops growing into place. */
+  .drawer-session-row::before {
+    transition-property: opacity !important;
+  }
+
+  button:active:not(:disabled) {
+    transform: none;
   }
 }
