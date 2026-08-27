@@ -8,6 +8,7 @@ public enum SessionActivityDot: String, Equatable, Sendable {
   case stopped
   case waiting
   case working
+  case done
   case idle
 }
 
@@ -26,6 +27,7 @@ public enum SessionActivityLogic {
     switch activity {
     case "waiting": return .waiting
     case "working": return .working
+    case "done": return .done
     case "idle": return .idle
     default: return live ? .working : .idle
     }
@@ -36,6 +38,7 @@ public enum SessionActivityLogic {
     case .stopped: return "stopped"
     case .waiting: return "needs input"
     case .working: return "working"
+    case .done: return "finished"
     case .idle: return "idle"
     }
   }
@@ -78,6 +81,8 @@ public enum SessionActivityLogic {
       TetherColors.heatWaiting
     case .working:
       TetherColors.heatWorking
+    case .done:
+      TetherColors.heatDone
     case .idle:
       TetherColors.heatCool
     }

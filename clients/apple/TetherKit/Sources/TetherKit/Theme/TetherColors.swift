@@ -36,6 +36,7 @@ public enum TetherColors {
   /// state words stay legible on white.
   public static let heatWorking = dynamic(dark: 0xF2_B3_4C, light: 0x8A_5A_00)
   public static let heatWaiting = dynamic(dark: 0xFF_70_50, light: 0xC4_38_1C)
+  public static let heatDone = dynamic(dark: 0x6E_E7_A8, light: 0x1C_7A_4F)
   public static let heatCool = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
 
   /// Deliberately NOT dynamic. Backing behind the terminal grid; must stay in

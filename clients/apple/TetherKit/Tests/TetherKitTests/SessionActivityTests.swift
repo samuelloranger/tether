@@ -79,4 +79,22 @@ final class SessionActivityTests: XCTestCase {
     XCTAssertFalse(SessionActivityLogic.isRecentlyActive(lastOutputAt: nil))
     XCTAssertFalse(SessionActivityLogic.isRecentlyActive(lastOutputAt: ""))
   }
+
+  func test_done_is_its_own_dot_not_idle() {
+    XCTAssertEqual(
+      SessionActivityLogic.dotKey(status: "running", activity: "done", live: false),
+      .done
+    )
+  }
+
+  func test_done_reads_as_finished() {
+    XCTAssertEqual(SessionActivityLogic.label(.done), "finished")
+  }
+
+  func test_a_stopped_shell_is_still_stopped() {
+    XCTAssertEqual(
+      SessionActivityLogic.dotKey(status: "stopped", activity: "done", live: true),
+      .stopped
+    )
+  }
 }
