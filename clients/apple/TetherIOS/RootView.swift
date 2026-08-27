@@ -84,7 +84,10 @@ struct RootView: View {
             || workspace.activePresentation != nil
             || workspace.fileView != nil
             || workspace.fileError != nil
-            || workspace.fileLoading
+            || workspace.fileLoading,
+          onOpenFile: { path, line, column in
+            Task { await workspace.openFile(store: store, path: path, line: line, column: column) }
+          }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }

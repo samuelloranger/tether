@@ -114,3 +114,48 @@ pub fn core_cache_ids(state: State<SharedState>) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
+
+/// Open an http(s) URL in the system browser.
+///
+/// On Linux AppImage builds the opener plugin would spawn `xdg-open` with the
+/// runtime's injected library paths, which crash the browser while still
+/// reporting success. Strip those vars before spawning, matching the old
+/// mobile Tauri shell.
+#[tauri::command]
+pub fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) urls can be opened".into());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::{Command, Stdio};
+        const APPIMAGE_VARS: [&str; 10] = [
+            "APPDIR",
+            "APPIMAGE",
+            "LD_LIBRARY_PATH",
+            "LD_PRELOAD",
+            "GDK_PIXBUF_MODULE_FILE",
+            "GDK_PIXBUF_MODULEDIR",
+            "GIO_MODULE_DIR",
+            "GST_PLUGIN_SYSTEM_PATH",
+            "GST_PLUGIN_SYSTEM_PATH_1_0",
+            "GTK_PATH",
+        ];
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if std::env::var_os("APPIMAGE").is_some() {
+            for var in APPIMAGE_VARS {
+                cmd.env_remove(var);
+            }
+        }
+        cmd.spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|e| e.to_string())
+    }
+}

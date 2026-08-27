@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
 import { ensureNotificationPermission } from './desktopNotifications';
 import { FileViewer } from './FileViewer';
+import { setFileOpenListener } from './fileOpenBus';
 import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
@@ -76,6 +77,14 @@ export function App() {
     baseUrl: httpBase,
     enabled: app.ready && app.screen === 'main' && !!app.activeHost,
   });
+  const openFileRef = useRef(workspace.openFile);
+  openFileRef.current = workspace.openFile;
+  useEffect(() => {
+    setFileOpenListener((path, line, column) => {
+      void openFileRef.current(path, line, column);
+    });
+    return () => setFileOpenListener(null);
+  }, []);
   const scheme = useMediaScheme();
   const wide = useWideLayout();
   const flavor = resolveFlavor(prefs.theme, scheme);

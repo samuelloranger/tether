@@ -11,6 +11,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var onTap: () -> Void
   public var onSelectionText: (String?) -> Void
   public var onOpenURL: (URL) -> Void
+  public var onOpenFile: (String, Int?, Int?) -> Void
   public var onMouseBytes: (String) -> Void
   public var mouseMode: MouseMode
   public var mouseSgr: Bool
@@ -24,6 +25,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     onTap: @escaping () -> Void = {},
     onSelectionText: @escaping (String?) -> Void = { _ in },
     onOpenURL: @escaping (URL) -> Void = { _ in },
+    onOpenFile: @escaping (String, Int?, Int?) -> Void = { _, _, _ in },
     onMouseBytes: @escaping (String) -> Void = { _ in },
     mouseMode: MouseMode = .off,
     mouseSgr: Bool = true
@@ -36,6 +38,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.onTap = onTap
     self.onSelectionText = onSelectionText
     self.onOpenURL = onOpenURL
+    self.onOpenFile = onOpenFile
     self.onMouseBytes = onMouseBytes
     self.mouseMode = mouseMode
     self.mouseSgr = mouseSgr
@@ -88,9 +91,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
         if let url = URL(string: urlString) {
           coordinator.parent.onOpenURL(url)
         }
-      case .file:
-        // Workspace file open is owned by the files agent — surface URL-style only.
-        break
+      case let .file(path, line, column):
+        coordinator.parent.onOpenFile(path, line, column)
       }
     }
     view.onMouseBytes = { bytes in coordinator.parent.onMouseBytes(bytes) }

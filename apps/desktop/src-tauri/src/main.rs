@@ -60,6 +60,7 @@ fn main() {
             commands::terminal::core_cache_touch,
             commands::terminal::core_cache_delete,
             commands::terminal::core_cache_ids,
+            commands::terminal::open_external,
             commands::git::core_git_summary,
             commands::git::core_git_diff,
             commands::git::core_git_diff_file,
