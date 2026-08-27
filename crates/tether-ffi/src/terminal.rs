@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use tether_core::pty_input::paste_payload;
 use tether_core::terminal::{AlacrittyParser, TerminalParser, TerminalSnapshot};
 
 use crate::grid_snapshot::{encode_grid_snapshot, GridCell, GridSnapshotHeader};
@@ -35,11 +36,16 @@ impl FfiTerminalEmulator {
             .scroll_viewport(lines);
     }
 
-    /// True while the program has DECSET 2004 on — the shell wraps a paste in
-    /// `ESC[200~`/`ESC[201~` so a multi-line clipboard is not executed line by
-    /// line.
-    pub fn bracketed_paste(&self) -> bool {
-        self.inner.lock().expect("terminal lock").bracketed_paste()
+    /// The bytes to send for a paste of `text`.
+    ///
+    /// Fenced in `ESC[200~`/`ESC[201~` when the program has DECSET 2004 on, so a
+    /// multi-line clipboard is not executed line by line. Callers get the
+    /// payload rather than the flag on purpose: the clipboard's own fence
+    /// markers have to be stripped, and a caller holding only the flag would
+    /// have to remember to do it.
+    pub fn paste_payload(&self, text: String) -> String {
+        let bracketed = self.inner.lock().expect("terminal lock").bracketed_paste();
+        paste_payload(&text, bracketed)
     }
 
     pub fn generation(&self) -> u64 {
@@ -93,11 +99,14 @@ mod tests {
     }
 
     #[test]
-    fn bracketed_paste_is_reported_across_the_ffi() {
+    fn paste_payload_follows_the_programs_mode() {
         let emulator = FfiTerminalEmulator::new(20, 5);
-        assert!(!emulator.bracketed_paste());
+        assert_eq!(emulator.paste_payload("hi".into()), "hi");
         emulator.feed(b"\x1b[?2004h".to_vec());
-        assert!(emulator.bracketed_paste());
+        assert_eq!(
+            emulator.paste_payload("hi".into()),
+            "\u{1B}[200~hi\u{1B}[201~"
+        );
     }
 
     #[test]

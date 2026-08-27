@@ -520,17 +520,15 @@ public final class SessionStore {
 
   /// Sends clipboard text as a paste rather than as typing.
   ///
-  /// When the program has bracketed paste on (DECSET 2004) the text is wrapped
-  /// in `ESC[200~`/`ESC[201~`. Without the wrapper a shell treats every newline
-  /// in the clipboard as Enter and runs the lines one by one, and editors lose
-  /// the "this was pasted" signal they use to skip auto-indent.
+  /// The emulator knows whether the program has bracketed paste on (DECSET
+  /// 2004) and builds the payload: fenced in `ESC[200~`/`ESC[201~` when it
+  /// does, with the clipboard's own fence markers stripped either way. Without
+  /// the fence a shell treats every newline in the clipboard as Enter and runs
+  /// the lines one by one, and editors lose the "this was pasted" signal they
+  /// use to skip auto-indent.
   public func sendPaste(_ text: String) {
     guard !text.isEmpty else { return }
-    guard emulator?.bracketedPaste() == true else {
-      sendInput(text)
-      return
-    }
-    sendInput("\u{1B}[200~" + text + "\u{1B}[201~")
+    sendInput(emulator?.pastePayload(text: text) ?? text)
   }
 
   public func sendRawKey(_ bytes: [UInt8]) {
