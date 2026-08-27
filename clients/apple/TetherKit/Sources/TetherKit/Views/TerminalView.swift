@@ -280,7 +280,21 @@ public struct TerminalInputBridge: UIViewRepresentable {
     }
 
     public func textViewDidEndEditing(_ textView: UITextView) {
-      isFocused.wrappedValue = false
+      // `updateUIView` can arrive here synchronously from
+      // `resignFirstResponder()`. Writing the binding in that callback re-enters
+      // SwiftUI while it is still updating this representable and UIKit is
+      // tearing down the input accessory view. If SwiftUI already requested the
+      // resignation there is nothing to synchronize. Otherwise defer the UIKit-
+      // initiated focus loss until both stacks have unwound.
+      guard isFocused.wrappedValue else { return }
+      DispatchQueue.main.async { [weak textView, isFocused] in
+        guard
+          let textView,
+          !textView.isFirstResponder,
+          isFocused.wrappedValue
+        else { return }
+        isFocused.wrappedValue = false
+      }
     }
   }
 }
@@ -535,7 +549,11 @@ public struct TerminalView: View {
   /// rows. Shrinking the view also makes TetherSurfaceView.reportGridSize fire,
   /// so the PTY learns the new row count.
   @State private var keyboardInset: CGFloat = 0
-  @FocusState private var keyboardFocused: Bool
+  // UIKit is the single owner of first-responder changes through
+  // TerminalInputBridge. Combining this binding with SwiftUI's `.focused`
+  // modifier created two focus controllers that could both resign the text view
+  // and feed state back while its inputAccessoryView was being removed.
+  @State private var keyboardFocused = false
 
   public init(
     store: SessionStore,
@@ -625,7 +643,6 @@ public struct TerminalView: View {
         )
       )
       .frame(height: 1)
-      .focused($keyboardFocused)
     }
     // The terminal's own colour, not the chrome colour. .background() bleeds into
     // the safe area by default, so this painted #11111b over the window backdrop
