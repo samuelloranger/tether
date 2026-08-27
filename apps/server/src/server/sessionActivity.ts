@@ -7,7 +7,24 @@ import { getConfig } from './config';
 // sequences) plus a per-session in-memory store. Nothing here persists —
 // state is advisory and rebuilds within seconds of output after a restart.
 
-export type Activity = 'working' | 'waiting' | 'idle';
+/**
+ * `waiting` and `done` are deliberately separate. `waiting` means BLOCKED —
+ * a program that cannot proceed without an answer, and the only state allowed
+ * to pull attention away from whatever you are looking at. `done` means a piece
+ * of work completed and the output is worth a look. `idle` is neither: a bare
+ * shell prompt where nothing has happened at all.
+ */
+export type Activity = 'working' | 'waiting' | 'done' | 'idle';
+
+/**
+ * Where a `waiting` came from, which decides whether it may decay.
+ *
+ * `osc` is a guess — a bell or an OSC 9/777 notification, which agents send on
+ * completion just as readily as on a question. `tail` is a guess with evidence:
+ * the last visible line actually looks like a prompt. `signal` is not a guess
+ * at all: the program said so through `/control/signal`.
+ */
+export type WaitingSource = 'signal' | 'osc' | 'tail';
 
 // How long output must be silent before the tail-line heuristics run. Below
 // this, a busy program that pauses between lines would flap.
@@ -154,6 +171,8 @@ interface SessionActivityState {
   lastOutputAt: number;
   tail: string;
   residual: string;
+  waitingSource: WaitingSource | null;
+  agentDriven: boolean;
 }
 
 const stateBySession = new Map<string, SessionActivityState>();
@@ -161,16 +180,30 @@ const stateBySession = new Map<string, SessionActivityState>();
 function getState(id: string, now: number): SessionActivityState {
   let st = stateBySession.get(id);
   if (!st) {
-    st = { activity: 'working', since: now, lastOutputAt: now, tail: '', residual: '' };
+    st = {
+      activity: 'working',
+      since: now,
+      lastOutputAt: now,
+      tail: '',
+      residual: '',
+      waitingSource: null,
+      agentDriven: false,
+    };
     stateBySession.set(id, st);
   }
   return st;
 }
 
-function transition(st: SessionActivityState, next: Activity, now: number): Activity | null {
+function transition(
+  st: SessionActivityState,
+  next: Activity,
+  now: number,
+  source: WaitingSource | null = null,
+): Activity | null {
   if (st.activity === next) return null;
   st.activity = next;
   st.since = now;
+  st.waitingSource = next === 'waiting' ? source : null;
   return next;
 }
 
@@ -203,7 +236,7 @@ export function recordOutputEvent(
   if (scan.tail) st.tail = scan.tail;
   // Strongest signal wins; explicit attention beats prompt marks beats plain output.
   let activity: Activity | null;
-  if (scan.bell || scan.notify) activity = transition(st, 'waiting', now);
+  if (scan.bell || scan.notify) activity = transition(st, 'waiting', now, 'osc');
   else if (scan.promptMark === 'A') activity = transition(st, 'idle', now);
   else if (scan.promptMark === 'C') activity = transition(st, 'working', now);
   else if (scan.tail === null)
@@ -232,17 +265,40 @@ export function recordInput(id: string, now = Date.now()): Activity | null {
 
 // Read the current classification. Applies the silence heuristics lazily —
 // the 4s client poll of /api/sessions is the clock, so no server-side timer.
-// A heuristic reclassification is committed to the stored state so that
-// recordInput can clear a heuristic `waiting` and the next real output
-// broadcasts a proper `working` transition.
+//
+// This mutates on read, and its ONLY caller is the session-list route, so a
+// decay is never broadcast over the WebSocket: an attached client learns of it
+// on its next poll, up to 4s later. That is deliberate — the alternative is a
+// timer per session for a change nobody is waiting on.
 export function getActivity(id: string, now = Date.now()): Activity | null {
   const st = stateBySession.get(id);
   if (!st) return null;
-  if (st.activity === 'working' && now - st.lastOutputAt >= getConfig().session.silenceMs) {
-    if (WAITING_RE.test(st.tail)) transition(st, 'waiting', now);
-    else if (PROMPT_RE.test(st.tail)) transition(st, 'idle', now);
+  if (now - st.lastOutputAt < getConfig().session.silenceMs) return st.activity;
+  if (st.activity === 'working') {
+    // An agent speaks for itself, so its silence is not evidence of a question.
+    if (!st.agentDriven && WAITING_RE.test(st.tail)) transition(st, 'waiting', now, 'tail');
+    else if (PROMPT_RE.test(st.tail)) releaseToIdle(st, now);
+  } else if (st.activity === 'waiting' && st.waitingSource === 'osc') {
+    // A bell or an OSC notification is not evidence of a question — agents fire
+    // the same sequence when they finish. If the screen is not actually asking
+    // anything after the silence window, this was a completion, and leaving it
+    // lit as an alarm is the bug this whole change exists to fix.
+    if (!WAITING_RE.test(st.tail)) transition(st, 'done', now);
+  } else if (st.activity === 'done' && PROMPT_RE.test(st.tail)) {
+    releaseToIdle(st, now);
   }
   return st.activity;
+}
+
+/**
+ * A bare shell prompt is the one unambiguous signal that whatever was running
+ * has exited — including the agent. So this is also where the agent-driven
+ * latch is released: without it, quitting Claude Code would leave the session
+ * permanently exempt from the heuristics, stuck on whatever state it died in.
+ */
+function releaseToIdle(st: SessionActivityState, now: number): void {
+  st.agentDriven = false;
+  transition(st, 'idle', now);
 }
 
 export function clearActivity(id: string): void {

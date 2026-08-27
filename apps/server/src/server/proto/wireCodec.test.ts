@@ -58,7 +58,7 @@ describe('protocol v2 server -> client frames', () => {
   });
 
   test('activity round-trips every value', () => {
-    for (const activity of ['working', 'waiting', 'idle'] as const) {
+    for (const activity of ['working', 'waiting', 'idle', 'done'] as const) {
       const frame = one(encodeActivityFrame(activity));
       expect(frame.kind).toBe(FrameKind.ACTIVITY);
       expect(decodeActivityFrame(frame.payload)).toBe(activity);

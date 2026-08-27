@@ -149,3 +149,45 @@ describe('activity state machine', () => {
     expect(getActivity('s', T0)).toBeNull();
   });
 });
+
+describe('done state', () => {
+  afterEach(() => {
+    clearActivity('d1');
+    clearActivity('d2');
+    clearActivity('d3');
+  });
+
+  test('an OSC-sourced waiting settles to done once it is quiet and asks nothing', () => {
+    recordOutput('d1', 'building\n', T0);
+    recordOutput('d1', '\x1b]777;notify;Claude;Finished\x07', T0 + 100);
+    expect(getActivity('d1', T0 + 200)).toBe('waiting');
+    expect(getActivity('d1', T0 + 100 + SILENCE_MS)).toBe('done');
+  });
+
+  test('an OSC-sourced waiting that DOES ask something stays waiting', () => {
+    recordOutput('d2', 'Do you want to proceed?\x07', T0);
+    expect(getActivity('d2', T0 + SILENCE_MS)).toBe('waiting');
+  });
+
+  test('a tail-sourced waiting never decays', () => {
+    recordOutput('d3', 'Continue? ', T0);
+    expect(getActivity('d3', T0 + SILENCE_MS)).toBe('waiting');
+    expect(getActivity('d3', T0 + SILENCE_MS * 4)).toBe('waiting');
+  });
+
+  test('typing does not disturb a done session, but its echo does', () => {
+    recordOutput('d1', 'x\x07', T0);
+    expect(getActivity('d1', T0 + SILENCE_MS)).toBe('done');
+    // recordInput only answers a `waiting`. A finished session is not a
+    // question, so there is nothing for a keystroke to answer.
+    expect(recordInput('d1', T0 + SILENCE_MS + 1)).toBeNull();
+    expect(recordOutput('d1', 'x', T0 + SILENCE_MS + 2)).toBe('working');
+  });
+
+  test('a done session that reaches a shell prompt goes idle', () => {
+    recordOutput('d2', 'x\x07', T0);
+    expect(getActivity('d2', T0 + SILENCE_MS)).toBe('done');
+    recordOutput('d2', '\nsam@box ~ $ ', T0 + SILENCE_MS + 1);
+    expect(getActivity('d2', T0 + SILENCE_MS * 3)).toBe('idle');
+  });
+});
