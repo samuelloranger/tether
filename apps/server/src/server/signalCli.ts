@@ -83,8 +83,23 @@ export async function runSignal(args: SignalArgs, deps: SignalDeps): Promise<voi
  * and those are exactly the two things the OSC 777 stream cannot tell apart.
  */
 export function claudeHookSnippet(): string {
-  const hook = (state: 'waiting' | 'done') => [
+  const hook = (state: SignalState) => [
     { hooks: [{ type: 'command', command: `tether signal ${state}` }] },
   ];
-  return JSON.stringify({ hooks: { Notification: hook('waiting'), Stop: hook('done') } }, null, 2);
+  return JSON.stringify(
+    {
+      hooks: {
+        // The prompt-submit hook is not decoration: an agent-driven session
+        // ignores its own output, so this is what re-lights it the instant you
+        // send a turn. A keystroke also ends a `done`, which is the fallback
+        // for configs written before this hook existed — but that only fires
+        // for input typed through Tether, so wire all three.
+        UserPromptSubmit: hook('working'),
+        Notification: hook('waiting'),
+        Stop: hook('done'),
+      },
+    },
+    null,
+    2,
+  );
 }

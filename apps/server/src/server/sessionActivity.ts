@@ -242,9 +242,16 @@ export function recordOutputEvent(
   else if (scan.promptMark === 'C') activity = transition(st, 'working', now);
   else if (scan.tail === null)
     activity = fresh ? st.activity : null; // pure escape chunk — no evidence
-  // Plain visible output = the program is doing something. A fresh session
-  // reports its first classification even without a change, so clients get an
-  // initial frame.
+  // Plain visible output = the program is doing something — UNLESS the session
+  // speaks for itself. A full-screen agent redraws its interface constantly,
+  // including once more right after its own "I finished" signal, so treating
+  // that redraw as work undoes the signal a few milliseconds after it lands and
+  // the session never looks finished for longer than one frame. An agent-driven
+  // session goes back to `working` when it says so (its prompt-submit hook), or
+  // when a shell prompt releases the latch.
+  else if (st.agentDriven) activity = null;
+  // A fresh session reports its first classification even without a change, so
+  // clients get an initial frame.
   else activity = transition(st, 'working', now) ?? (fresh ? st.activity : null);
   return {
     // An agent that signals has a better channel than its own OSC stream, and
@@ -264,7 +271,13 @@ export function recordOutputEvent(
 export function recordInput(id: string, now = Date.now()): Activity | null {
   const st = stateBySession.get(id);
   if (!st) return null;
-  if (st.activity !== 'waiting') return null;
+  // A keystroke answers a `waiting`, and it also ends a `done`: you are typing
+  // the next thing, so the last thing is over. That second case is what keeps a
+  // two-hook config working — an agent-driven session ignores its own output,
+  // so without this nothing would leave `done` until the agent signalled again,
+  // and anyone who pasted the Notification/Stop pair before `UserPromptSubmit`
+  // existed would watch a whole turn run while the tab claimed to be finished.
+  if (st.activity !== 'waiting' && st.activity !== 'done') return null;
   return transition(st, 'working', now);
 }
 
@@ -317,7 +330,11 @@ export function getActivity(id: string, now = Date.now()): Activity | null {
     // anything after the silence window, this was a completion, and leaving it
     // lit as an alarm is the bug this whole change exists to fix.
     if (!WAITING_RE.test(st.tail)) transition(st, 'done', now);
-  } else if (st.activity === 'done' && PROMPT_RE.test(st.tail)) {
+  } else if (PROMPT_RE.test(st.tail)) {
+    // `done`, or a `waiting` the OSC decay above did not claim — including one
+    // a program declared. An agent killed while it was blocked leaves its shell
+    // sitting at a prompt: without this the tab stays urgent forever and, being
+    // still latched, swallows every later notification.
     releaseToIdle(st, now);
   }
   return st.activity;
