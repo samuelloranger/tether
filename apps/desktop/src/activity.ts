@@ -1,6 +1,6 @@
-export type SessionActivity = 'working' | 'waiting' | 'idle';
+export type SessionActivity = 'working' | 'waiting' | 'done' | 'idle';
 
-export type DotKey = 'stopped' | 'waiting' | 'working' | 'idle';
+export type DotKey = 'stopped' | 'waiting' | 'working' | 'done' | 'idle';
 
 export function activityDotKey(
   status: 'running' | 'stopped',
@@ -10,6 +10,7 @@ export function activityDotKey(
   if (status === 'stopped') return 'stopped';
   if (activity === 'waiting') return 'waiting';
   if (activity === 'working') return 'working';
+  if (activity === 'done') return 'done';
   if (activity === 'idle') return 'idle';
   return live ? 'working' : 'idle';
 }
@@ -22,6 +23,8 @@ export function activityLabel(key: DotKey): string {
       return 'needs input';
     case 'working':
       return 'working';
+    case 'done':
+      return 'finished';
     case 'idle':
       return 'idle';
   }

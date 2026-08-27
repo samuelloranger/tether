@@ -201,6 +201,7 @@ function DraftForm({
         {(
           [
             ['waiting', 'Agent needs input'],
+            ['done', 'Agent finishes a turn'],
             ['oscNotify', 'Alerts from programs'],
             ['exit', 'Session ends'],
             ['longJob', 'Long command finishes'],

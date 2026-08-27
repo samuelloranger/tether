@@ -104,3 +104,24 @@ describe('shouldAnnounceArrival', () => {
     expect(ARRIVAL_MS).toBeGreaterThan(720);
   });
 });
+
+describe('the done state', () => {
+  it('carries through to its own lit state', () => {
+    expect(litStateFor('done')).toBe('done');
+  });
+
+  it('wears the success colour, not the ember one', () => {
+    expect(litColor(dark, 'done')).toBe(dark.colors.success);
+    expect(litColor(dark, 'done')).not.toBe(dark.heat.waiting);
+  });
+
+  it('glows quieter than a shell that is blocked', () => {
+    expect(Number.parseFloat(litVars(dark, 'done')['--rim'])).toBeLessThan(
+      Number.parseFloat(litVars(dark, 'waiting')['--rim']),
+    );
+  });
+
+  it('does not fire the arrival swell — finishing is not an alarm', () => {
+    expect(shouldAnnounceArrival('working', 'done', true)).toBe(false);
+  });
+});

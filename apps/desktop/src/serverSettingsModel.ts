@@ -1,7 +1,13 @@
 export type ServerConfig = {
   push: { enabled: boolean };
   pushDevices: number;
-  triggers: { waiting: boolean; oscNotify: boolean; exit: boolean; longJob: boolean };
+  triggers: {
+    waiting: boolean;
+    done: boolean;
+    oscNotify: boolean;
+    exit: boolean;
+    longJob: boolean;
+  };
   longJobSeconds: number;
   identity: { name: string; color: string };
   session: { defaultShell: string; defaultCwd: string; scrollbackRows: number; silenceMs: number };

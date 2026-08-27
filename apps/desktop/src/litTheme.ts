@@ -9,7 +9,7 @@ import type { DrawerSession } from './types';
  * `none` is not "idle": a stopped session, or no session at all, must not tint
  * the app warm or cool — a dead shell that keeps glowing reads as a live one.
  */
-export type LitState = 'working' | 'waiting' | 'idle' | 'none';
+export type LitState = 'working' | 'waiting' | 'done' | 'idle' | 'none';
 
 /**
  * The session the chrome is currently wearing, classified exactly as the drawer
@@ -36,6 +36,8 @@ export function litStateFor(dot: DotKey | null): LitState {
       return 'working';
     case 'waiting':
       return 'waiting';
+    case 'done':
+      return 'done';
     case 'idle':
       return 'idle';
     default:
@@ -54,6 +56,9 @@ export function litStateFor(dot: DotKey | null): LitState {
 const BLOOM: Record<LitState, { b1: string; b2: string; b3: string; rim: string }> = {
   working: { b1: '13%', b2: '6%', b3: '2%', rim: '55%' },
   waiting: { b1: '9%', b2: '4%', b3: '1.5%', rim: '46%' },
+  // Between waiting and idle: warmer than a shell that is merely alive, quieter
+  // than one that is blocked. Finishing is worth noticing and nothing more.
+  done: { b1: '8%', b2: '3.5%', b3: '1.2%', rim: '36%' },
   idle: { b1: '7%', b2: '3%', b3: '1%', rim: '30%' },
   none: { b1: '0%', b2: '0%', b3: '0%', rim: '0%' },
 };
@@ -64,6 +69,8 @@ export function litColor(theme: UiTheme, state: LitState): string {
       return theme.heat.working;
     case 'waiting':
       return theme.heat.waiting;
+    case 'done':
+      return theme.heat.done;
     case 'idle':
       return theme.heat.cool;
     case 'none':
