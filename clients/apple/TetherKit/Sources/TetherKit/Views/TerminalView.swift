@@ -57,6 +57,10 @@ public struct TerminalAccessoryBar: View {
   /// taller than its neighbours reads as a different kind of thing.
   static let keySize: CGFloat = 40
   static let barVerticalPadding: CGFloat = 8
+  /// How far above the screen's bottom edge UIKit docks the bar when the
+  /// keyboard is down. Not the home-indicator inset (34pt) — UIKit uses its own,
+  /// smaller gap, and the terminal has to reserve the difference.
+  static let dockedGap: CGFloat = 15
   /// First-frame fallback before GeometryReader reports the real docked height.
   /// Derived from key + padding so it cannot drift from the row's layout again.
   public static let barHeight: CGFloat = keySize + barVerticalPadding * 2
@@ -116,7 +120,16 @@ public struct TerminalAccessoryBar: View {
       .compactMap({ ($0 as? UIWindowScene)?.screen })
       .first
     else { return }
+    // While the keyboard window tears down it hands out frames that start ABOVE
+    // the screen (minY < 0), and `screen.maxY - minY` then reads as taller than
+    // the display. The old code believed one: a final -17 frame reported a 949pt
+    // bar on a 932pt screen, the terminal reserved 915pt of bottom padding, and
+    // the whole VStack — title bar included — was squeezed off screen with no
+    // later frame to correct it. A bar cannot start off the top of the screen
+    // nor be taller than the screen, so those frames are dismissal artefacts.
+    guard frame.minY >= 0 else { return }
     let height = max(0, screen.bounds.maxY - frame.minY)
+    guard height <= screen.bounds.height else { return }
     guard abs(height - model.dockedHeight) > 0.5 else { return }
     // Deferred by one runloop turn on purpose. The terminal's padding reads this
     // value, and the padding changes the layout that this GeometryReader is
@@ -740,9 +753,18 @@ public struct TerminalView: View {
   /// Falls back to the constant only for the first frame, before the bar has
   /// laid out and measured itself.
   private var accessoryReserve: CGFloat {
+    let inset = Self.bottomSafeInset()
+    // The bar always covers at least itself plus the gap UIKit docks it above
+    // the screen edge, and it can never cover more than the keyboard plus that.
+    // Both ends matter: the measurement is taken in the keyboard's own window,
+    // which reports garbage while that window is being torn down, and a single
+    // believed outlier (949pt on a 932pt screen) once padded the whole VStack —
+    // title bar included — off the display with no later frame to correct it.
+    let floor = TerminalAccessoryBar.barHeight + TerminalAccessoryBar.dockedGap
+    let ceiling = keyboardInset + floor
     let measured = accessory.dockedHeight
-    guard measured > 0 else { return TerminalAccessoryBar.barHeight }
-    return max(0, measured - Self.bottomSafeInset())
+    guard measured > 0 else { return max(0, floor - inset) }
+    return max(0, max(floor, min(measured, ceiling)) - inset)
   }
 
   private static func bottomSafeInset() -> CGFloat {
