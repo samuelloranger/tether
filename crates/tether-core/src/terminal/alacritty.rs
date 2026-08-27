@@ -215,6 +215,10 @@ impl TerminalParser for AlacrittyParser {
         self.maybe_bump_generation(before);
     }
 
+    fn bracketed_paste(&self) -> bool {
+        self.term.mode().contains(TermMode::BRACKETED_PASTE)
+    }
+
     fn generation(&self) -> u64 {
         self.generation
     }
@@ -421,6 +425,16 @@ mod tests {
             .collect::<String>()
             .trim_end()
             .to_string()
+    }
+
+    #[test]
+    fn bracketed_paste_tracks_decset_2004() {
+        let mut parser = AlacrittyParser::new(20, 5);
+        assert!(!parser.bracketed_paste());
+        parser.feed(b"\x1b[?2004h");
+        assert!(parser.bracketed_paste());
+        parser.feed(b"\x1b[?2004l");
+        assert!(!parser.bracketed_paste());
     }
 
     #[test]

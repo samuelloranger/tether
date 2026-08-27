@@ -35,6 +35,13 @@ impl FfiTerminalEmulator {
             .scroll_viewport(lines);
     }
 
+    /// True while the program has DECSET 2004 on — the shell wraps a paste in
+    /// `ESC[200~`/`ESC[201~` so a multi-line clipboard is not executed line by
+    /// line.
+    pub fn bracketed_paste(&self) -> bool {
+        self.inner.lock().expect("terminal lock").bracketed_paste()
+    }
+
     pub fn generation(&self) -> u64 {
         self.inner.lock().expect("terminal lock").generation()
     }
@@ -83,6 +90,14 @@ mod tests {
         assert_eq!(cells[0].codepoint, b'H' as u32);
         assert_eq!(cells[0].attrs & GRID_ATTR_BOLD, GRID_ATTR_BOLD);
         assert_eq!(cells[1].codepoint, b'i' as u32);
+    }
+
+    #[test]
+    fn bracketed_paste_is_reported_across_the_ffi() {
+        let emulator = FfiTerminalEmulator::new(20, 5);
+        assert!(!emulator.bracketed_paste());
+        emulator.feed(b"\x1b[?2004h".to_vec());
+        assert!(emulator.bracketed_paste());
     }
 
     #[test]
