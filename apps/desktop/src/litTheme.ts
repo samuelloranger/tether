@@ -72,6 +72,25 @@ export function litColor(theme: UiTheme, state: LitState): string {
 }
 
 /**
+ * How long the arrival swell is on screen, matching the `heat-arrive` keyframe
+ * in `index.css` plus a little slack so the attribute outlives the animation
+ * rather than cutting it off.
+ */
+export const ARRIVAL_MS = 800;
+
+/**
+ * Whether moving from `prev` to `next` should fire the app's one authored
+ * moment: the single swell of the bloom when a shell stops and asks for input.
+ *
+ * On ENTERING waiting only. The drawer re-reports session state on every poll,
+ * and a swell per poll would turn the one thing in the app allowed to move on
+ * its own into a strobe.
+ */
+export function shouldAnnounceArrival(prev: LitState, next: LitState): boolean {
+  return next === 'waiting' && prev !== 'waiting';
+}
+
+/**
  * The CSS custom properties the whole visual language reads from. Everything
  * tinted in `index.css` — the mark, the selected card, its edge light, the
  * toolbar chip, the screen rim, the atmospheric bloom — resolves through these,

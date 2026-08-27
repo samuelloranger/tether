@@ -29,6 +29,7 @@ import { hostSecrets } from './secureConfig';
 import { TerminalToolbar } from './TerminalToolbar';
 import { httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
+import { useShellChrome } from './useHeatArrival';
 import { useLaunchUpdateCheck } from './useLaunchUpdateCheck';
 import { useTetherDesktop } from './useTetherDesktop';
 import { useWindowTheme } from './useWindowTheme';
@@ -134,15 +135,15 @@ export function App() {
     workspace.fileView || workspace.fileLoading || workspace.activePresentation,
   );
 
-  const shellStyle = {
+  const shellProps = useShellChrome(litState, {
     ...shellVars(theme, litState),
     background: theme.colors.background,
     color: theme.colors.text,
-  };
+  });
 
   if (!app.ready) {
     return (
-      <div className="app-shell" style={shellStyle}>
+      <div className="app-shell" {...shellProps}>
         <p className="muted boot-message">Loading…</p>
       </div>
     );
@@ -150,7 +151,7 @@ export function App() {
 
   if (app.hosts.length === 0 || app.screen === 'host-form') {
     return (
-      <div className="app-shell centered" style={shellStyle}>
+      <div className="app-shell centered" {...shellProps}>
         <HostFormScreen
           editing={editingHost}
           onCancel={() => {
@@ -173,7 +174,7 @@ export function App() {
 
   if (app.screen === 'hosts') {
     return (
-      <div className="app-shell centered" style={shellStyle}>
+      <div className="app-shell centered" {...shellProps}>
         <HostsScreen
           hosts={app.hosts}
           healthByHost={app.healthByHost}
@@ -196,7 +197,7 @@ export function App() {
 
   if (app.screen === 'local-settings') {
     return (
-      <div className="app-shell centered" style={shellStyle}>
+      <div className="app-shell centered" {...shellProps}>
         <LocalSettingsScreen
           prefs={prefs}
           onPrefsChange={setPrefs}
@@ -209,7 +210,7 @@ export function App() {
 
   if (app.screen === 'settings' && settingsHost) {
     return (
-      <div className="app-shell centered" style={shellStyle}>
+      <div className="app-shell centered" {...shellProps}>
         <ServerSettingsScreen
           host={settingsHost}
           health={app.healthByHost[settingsHost.id] ?? 'unknown'}
@@ -241,7 +242,7 @@ export function App() {
   }
 
   return (
-    <div className="app-shell" style={shellStyle}>
+    <div className="app-shell" {...shellProps}>
       {layout.showMenuButton ? (
         <button
           type="button"
