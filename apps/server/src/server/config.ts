@@ -12,6 +12,13 @@ export const configSchema = z
     push: z.object({ enabled: z.boolean() }),
     triggers: z.object({
       waiting: z.boolean(),
+      // `.default(false)` rather than a bare boolean, and not for style: every
+      // stored `config.triggers` row predates this key, and `readTopLevel`
+      // reacts to a parse failure by discarding the WHOLE section for defaults.
+      // A required key would silently flip a user's `waiting: false` back on.
+      // The default makes the key optional on input while the parsed type stays
+      // `boolean`, so nothing downstream changes.
+      done: z.boolean().default(false),
       oscNotify: z.boolean(),
       exit: z.boolean(),
       longJob: z.boolean(),
@@ -32,7 +39,7 @@ export type ConfigPatch = { [K in keyof Config]?: Partial<Config[K]> };
 
 export const DEFAULT_CONFIG: Config = {
   push: { enabled: false },
-  triggers: { waiting: true, oscNotify: true, exit: true, longJob: true },
+  triggers: { waiting: true, done: false, oscNotify: true, exit: true, longJob: true },
   longJobSeconds: 300,
   identity: { name: process.env.HOSTNAME || 'Tether', color: '#89b4fa' },
   session: {

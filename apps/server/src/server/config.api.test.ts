@@ -25,7 +25,13 @@ test('GET and PATCH /api/config are authenticated and merged', async () => {
     expect(patched.status).toBe(200);
     const body = await patched.json();
     expect(body.push).toEqual({ enabled: true });
-    expect(body.triggers).toEqual({ waiting: true, oscNotify: true, exit: false, longJob: true });
+    expect(body.triggers).toEqual({
+      waiting: true,
+      done: false,
+      oscNotify: true,
+      exit: false,
+      longJob: true,
+    });
     const fetched = await app.request('/api/config', { headers: AUTH });
     expect((await fetched.json()).push.enabled).toBe(true);
   } finally {
