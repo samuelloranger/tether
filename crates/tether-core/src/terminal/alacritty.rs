@@ -284,7 +284,9 @@ fn clear_spurious_wraplines(term: &mut Term<VoidListener>) {
             continue;
         }
         if row_is_visually_blank(&term.grid()[line]) {
-            term.grid_mut()[line][last_col].flags.remove(Flags::WRAPLINE);
+            term.grid_mut()[line][last_col]
+                .flags
+                .remove(Flags::WRAPLINE);
         }
     }
 }
