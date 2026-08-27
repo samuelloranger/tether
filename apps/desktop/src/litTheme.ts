@@ -85,9 +85,16 @@ export const ARRIVAL_MS = 800;
  * On ENTERING waiting only. The drawer re-reports session state on every poll,
  * and a swell per poll would turn the one thing in the app allowed to move on
  * its own into a strobe.
+ *
+ * `settled` is what keeps startup quiet. The app boots with no sessions loaded,
+ * so the chrome is `none` until the first poll answers — and a session that was
+ * already waiting when you opened the app arrives as a `none → waiting` change
+ * that is indistinguishable, here, from a shell that just stopped to ask you
+ * something. It is not one: nothing happened, the app merely finished loading.
+ * So the swell waits until the chrome has shown one live state.
  */
-export function shouldAnnounceArrival(prev: LitState, next: LitState): boolean {
-  return next === 'waiting' && prev !== 'waiting';
+export function shouldAnnounceArrival(prev: LitState, next: LitState, settled: boolean): boolean {
+  return settled && next === 'waiting' && prev !== 'waiting';
 }
 
 /**

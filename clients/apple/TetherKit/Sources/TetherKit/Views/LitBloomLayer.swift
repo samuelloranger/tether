@@ -18,6 +18,8 @@ public struct LitBloomLayer: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var pulse: Double = 0
+  /// Whether the chrome has shown a live state yet — see `TetherMotion.pulses`.
+  @State private var settled: Bool = false
 
   public init(chrome: LitChrome) {
     self.chrome = chrome
@@ -47,13 +49,33 @@ public struct LitBloomLayer: View {
     .ignoresSafeArea()
     .allowsHitTesting(false)
     .animation(TetherMotion.heat(to: chrome.state, reduceMotion: reduceMotion), value: chrome.state)
-    .onChange(of: chrome.state) { old, new in
-      guard TetherMotion.pulses(from: old, to: new, reduceMotion: reduceMotion) else { return }
+    .onChange(of: chrome.state, initial: true) { old, new in
+      let wasSettled = settled
+      if new != .none { settled = true }
+
+      guard TetherMotion.pulses(
+        from: old,
+        to: new,
+        settled: wasSettled,
+        reduceMotion: reduceMotion
+      ) else {
+        // Answer a prompt quickly and the session leaves `waiting` while the
+        // swell is still on screen. The bloom has already crossfaded to the new
+        // state's colour by then, so the leftover brightness is a state that is
+        // over — take it back rather than letting it finish its own fall.
+        if pulse != 0 {
+          withAnimation(.easeOut(duration: TetherMotion.pulseCancel)) { pulse = 0 }
+        }
+        return
+      }
+
       withAnimation(TetherMotion.decelerate(TetherMotion.pulseRise)) {
         pulse = 1
       } completion: {
-        withAnimation(.easeOut(duration: TetherMotion.pulseFall)) {
-          pulse = 0
+        // Only the swell that is still current gets to fade itself out; a later
+        // state change has already taken the brightness back above.
+        if chrome.state == .waiting {
+          withAnimation(.easeOut(duration: TetherMotion.pulseFall)) { pulse = 0 }
         }
       }
     }

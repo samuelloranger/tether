@@ -6,20 +6,25 @@ import { ARRIVAL_MS, type LitState, shouldAnnounceArrival } from './litTheme';
  * Drives `data-arriving` on the app shell: the state the chrome has just
  * ENTERED, for as long as the swell runs, and null otherwise.
  *
- * The ref starts at the state the app mounts with, so opening the app onto a
- * session that is already waiting does not fire the animation — a swell on
- * launch would be page-load choreography, which this app does not do. It only
- * fires on a change the user is present for.
+ * Two things keep launch quiet. The ref starts at the state the app mounts
+ * with, and `settled` withholds the swell until the chrome has shown one live
+ * state — the app boots with an empty session list, so every session arrives as
+ * `none → something` once polling answers, and a session that was already
+ * waiting when you opened the app would otherwise announce itself as though it
+ * had just stopped to ask you a question.
  */
 export function useHeatArrival(state: LitState): LitState | null {
   const previous = useRef<LitState>(state);
+  const settled = useRef(state !== 'none');
   const [arriving, setArriving] = useState<LitState | null>(null);
 
   useEffect(() => {
     const before = previous.current;
     previous.current = state;
+    const wasSettled = settled.current;
+    if (state !== 'none') settled.current = true;
 
-    if (!shouldAnnounceArrival(before, state)) {
+    if (!shouldAnnounceArrival(before, state, wasSettled)) {
       // Leaving waiting mid-swell has to clear the flag itself: the cleanup
       // below cancels the timer that would otherwise have done it, and a stuck
       // attribute would replay the animation on the next unrelated re-render.

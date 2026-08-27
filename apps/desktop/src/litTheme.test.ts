@@ -78,20 +78,26 @@ describe('litVars', () => {
 
 describe('shouldAnnounceArrival', () => {
   it('fires when a shell stops to ask for input', () => {
-    expect(shouldAnnounceArrival('working', 'waiting')).toBe(true);
-    expect(shouldAnnounceArrival('idle', 'waiting')).toBe(true);
-    expect(shouldAnnounceArrival('none', 'waiting')).toBe(true);
+    expect(shouldAnnounceArrival('working', 'waiting', true)).toBe(true);
+    expect(shouldAnnounceArrival('idle', 'waiting', true)).toBe(true);
+    expect(shouldAnnounceArrival('none', 'waiting', true)).toBe(true);
   });
 
   // The drawer re-reports state on every poll; a swell per poll is a strobe.
   it('does not re-announce a session that is already waiting', () => {
-    expect(shouldAnnounceArrival('waiting', 'waiting')).toBe(false);
+    expect(shouldAnnounceArrival('waiting', 'waiting', true)).toBe(false);
+  });
+
+  // The app boots with no sessions, so the first poll turns `none` into
+  // whatever the session already was. Nothing happened; loading finished.
+  it('stays quiet while the app is still hydrating', () => {
+    expect(shouldAnnounceArrival('none', 'waiting', false)).toBe(false);
   });
 
   it('stays quiet for every other transition', () => {
-    expect(shouldAnnounceArrival('waiting', 'working')).toBe(false);
-    expect(shouldAnnounceArrival('idle', 'working')).toBe(false);
-    expect(shouldAnnounceArrival('working', 'none')).toBe(false);
+    expect(shouldAnnounceArrival('waiting', 'working', true)).toBe(false);
+    expect(shouldAnnounceArrival('idle', 'working', true)).toBe(false);
+    expect(shouldAnnounceArrival('working', 'none', true)).toBe(false);
   });
 
   it('outlives the keyframe it accompanies', () => {

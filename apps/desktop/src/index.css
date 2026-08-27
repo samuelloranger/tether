@@ -2062,11 +2062,25 @@ label > textarea {
    shortened as well, because a user who asks for less movement is rarely asking
    for a longer wait. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition-duration: var(--t-fast) !important;
-    scroll-behavior: auto !important;
+  /* Shortened at the TOKENS, not with a universal rule. `transition-property`
+     initialises to `all`, so setting a duration on `*` would hand a 140ms
+     transition to every element that has none — including ones whose layout
+     changes, which is new motion invented for the user who asked for less of
+     it, and intermediate geometry for the terminal to refit against. Every
+     transition in this file reads these, so redefining them here reaches
+     exactly the authored ones and nothing else. */
+  :root {
+    --t-press: 90ms;
+    --t-fast: 120ms;
+    --t-state: 120ms;
+    --t-overlay: 120ms;
+    --heat-in: 120ms;
+    --heat-wait: 120ms;
+    --heat-out: 120ms;
+  }
+
+  html {
+    scroll-behavior: auto;
   }
 
   /* Travel out; fade in its place, at the same timing so the pacing of the app

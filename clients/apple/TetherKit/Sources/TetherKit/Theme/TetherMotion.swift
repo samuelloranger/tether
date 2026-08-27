@@ -63,9 +63,26 @@ public enum TetherMotion {
   /// state cannot pulse again, and never under Reduce Motion — a change in
   /// brightness that the user did not cause is exactly what that setting is
   /// asking the app not to do.
-  public static func pulses(from old: LitState, to new: LitState, reduceMotion: Bool) -> Bool {
-    !reduceMotion && new == .waiting && old != .waiting
+  ///
+  /// `settled` is what keeps launch quiet. The store has no sessions until the
+  /// first fetch answers, so the chrome starts at `none` and every session
+  /// arrives as a change — and a session that was already waiting when the app
+  /// opened would announce itself as though it had just stopped to ask a
+  /// question. Nothing happened; loading finished. The swell waits until the
+  /// chrome has shown one live state.
+  public static func pulses(
+    from old: LitState,
+    to new: LitState,
+    settled: Bool,
+    reduceMotion: Bool
+  ) -> Bool {
+    settled && !reduceMotion && new == .waiting && old != .waiting
   }
+
+  /// How fast a swell interrupted by the session moving on gets out of the way.
+  /// Short: the chrome underneath has already changed colour, and the leftover
+  /// brightness belongs to a state that is over.
+  public static let pulseCancel: Double = 0.2
 
   /// Swell up, then let go. Up is faster than down for the same reason ignite
   /// is faster than cool.
