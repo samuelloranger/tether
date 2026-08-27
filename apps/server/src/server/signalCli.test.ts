@@ -92,10 +92,13 @@ describe('runSignal', () => {
 });
 
 describe('claudeHookSnippet', () => {
-  test('maps the two distinct hook events to the two distinct states', () => {
+  test('maps each distinct hook event to its own state', () => {
     const snippet = JSON.parse(claudeHookSnippet());
     expect(JSON.stringify(snippet.hooks.Notification)).toContain('tether signal waiting');
     expect(JSON.stringify(snippet.hooks.Stop)).toContain('tether signal done');
+    // Without this one an agent-driven session can never return to `working`:
+    // the byte heuristics no longer move it, so nothing else would.
+    expect(JSON.stringify(snippet.hooks.UserPromptSubmit)).toContain('tether signal working');
   });
 
   test('is pure JSON a user can paste', () => {

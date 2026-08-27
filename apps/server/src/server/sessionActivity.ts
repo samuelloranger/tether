@@ -242,9 +242,16 @@ export function recordOutputEvent(
   else if (scan.promptMark === 'C') activity = transition(st, 'working', now);
   else if (scan.tail === null)
     activity = fresh ? st.activity : null; // pure escape chunk — no evidence
-  // Plain visible output = the program is doing something. A fresh session
-  // reports its first classification even without a change, so clients get an
-  // initial frame.
+  // Plain visible output = the program is doing something — UNLESS the session
+  // speaks for itself. A full-screen agent redraws its interface constantly,
+  // including once more right after its own "I finished" signal, so treating
+  // that redraw as work undoes the signal a few milliseconds after it lands and
+  // the session never looks finished for longer than one frame. An agent-driven
+  // session goes back to `working` when it says so (its prompt-submit hook), or
+  // when a shell prompt releases the latch.
+  else if (st.agentDriven) activity = null;
+  // A fresh session reports its first classification even without a change, so
+  // clients get an initial frame.
   else activity = transition(st, 'working', now) ?? (fresh ? st.activity : null);
   return {
     // An agent that signals has a better channel than its own OSC stream, and

@@ -81,10 +81,13 @@ default. A program can override the guesswork with
 `tether signal <working|waiting|done>` (`TETHER_SESSION_ID` is exported into
 every session; the CLI posts to `/control/signal` with the present-control
 token). A session that has signalled is *agent-driven*: the byte heuristics stop
-guessing for it and its duplicate OSC push is suppressed, until it reaches a
-shell prompt, which releases the latch. `tether signal hooks` prints the Claude
-Code configuration mapping its `Notification` hook to `waiting` and its `Stop`
-hook to `done`.
+guessing for it, its duplicate OSC push is suppressed, and — because a
+full-screen agent redraws constantly, including right after its own "finished"
+signal — plain output no longer drags it back to `working`. The latch holds
+until a shell prompt releases it. `tether signal hooks` prints the Claude Code
+configuration, which needs **three** hooks: `UserPromptSubmit` → `working`,
+`Notification` → `waiting`, `Stop` → `done`. The first is not optional — with
+the heuristics disabled, nothing else ever returns the session to `working`.
 
 Because the holder is a separate detached process, **the shell survives both client disconnects and server restarts** — `reattachHolders()` re-adopts live sockets on boot. Killing is explicit (`POST /api/sessions/kill`).
 

@@ -225,9 +225,28 @@ describe('recordSignal', () => {
     expect(getActivity('s3', T0 + SILENCE_MS * 2)).toBe('working');
   });
 
-  test('real output from an agent-driven session still means working', () => {
+  test('output does NOT undo an agent-driven session own state', () => {
+    // The whole point of the latch. A full-screen agent redraws constantly —
+    // including right after its own Stop hook — so if a redraw counted as work
+    // the `done` it just signalled would survive about one frame.
     recordSignal('s1', 'done', T0);
-    expect(recordOutput('s1', 'more output\n', T0 + 10)).toBe('working');
+    expect(recordOutput('s1', 'more output\n', T0 + 10)).toBeNull();
+    expect(getActivity('s1', T0 + 20)).toBe('done');
+  });
+
+  test('a real Claude Code TUI redraw does not clobber a signalled done', () => {
+    // Captured verbatim from a live session terminal_logs row.
+    const frame =
+      '\x1b[?25l\x1b[2D\x1b[5B\r\x1b[9A\x1b[38;2;153;153;153m\u25cf\x1b[3G\x1b[39m' +
+      '\x1b[1mBash\x1b[22m(ls)\r\n\x1b[2C\x1b[5A\x1b[?25h';
+    recordSignal('s2', 'done', T0);
+    recordOutput('s2', frame, T0 + 50);
+    expect(getActivity('s2', T0 + 60)).toBe('done');
+  });
+
+  test('the prompt-submit hook is what re-lights it', () => {
+    recordSignal('s3', 'done', T0);
+    expect(recordSignal('s3', 'working', T0 + 10)).toBe('working');
   });
 
   test('a signalled waiting never decays', () => {

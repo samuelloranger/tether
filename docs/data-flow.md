@@ -27,8 +27,12 @@ client sees it on its next poll rather than as a frame.
 
 A program can skip the guessing entirely: `tether signal <state>` posts to
 `/control/signal` and the session becomes *agent-driven*, which disables the
-heuristics and suppresses its now-duplicate OSC push until the session reaches a
-shell prompt.
+heuristics, suppresses its now-duplicate OSC push, and stops plain output from
+overriding the state the program declared — a full-screen agent redraws its
+interface constantly, so otherwise a single frame would undo the `done` it just
+signalled. The latch holds until the session reaches a shell prompt. Because
+nothing else moves an agent-driven session, the program must also signal
+`working` when it starts a turn; `tether signal hooks` wires all three.
 
 ## Holder protocol
 

@@ -83,8 +83,22 @@ export async function runSignal(args: SignalArgs, deps: SignalDeps): Promise<voi
  * and those are exactly the two things the OSC 777 stream cannot tell apart.
  */
 export function claudeHookSnippet(): string {
-  const hook = (state: 'waiting' | 'done') => [
+  const hook = (state: SignalState) => [
     { hooks: [{ type: 'command', command: `tether signal ${state}` }] },
   ];
-  return JSON.stringify({ hooks: { Notification: hook('waiting'), Stop: hook('done') } }, null, 2);
+  return JSON.stringify(
+    {
+      hooks: {
+        // All three are needed, not just the two interesting ones. Once a
+        // session is agent-driven the byte heuristics stop moving it, so
+        // nothing else will ever put it back to `working` — the prompt-submit
+        // hook is what re-lights it when you send the next turn.
+        UserPromptSubmit: hook('working'),
+        Notification: hook('waiting'),
+        Stop: hook('done'),
+      },
+    },
+    null,
+    2,
+  );
 }
