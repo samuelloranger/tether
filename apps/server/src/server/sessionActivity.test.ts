@@ -242,6 +242,36 @@ describe('recordSignal', () => {
     expect(getActivity('s2', T0 + 60)).toBe('done');
   });
 
+  test('a three-hook session stays finished while you compose', () => {
+    // The reported bug: typing the first character of the next message flipped
+    // the tab to working before anything was running.
+    recordSignal('s1', 'working', T0);
+    recordSignal('s1', 'done', T0 + 10);
+    expect(recordInput('s1', T0 + 20)).toBeNull();
+    expect(getActivity('s1', T0 + 21)).toBe('done');
+    // ...and the submit hook is what actually re-lights it.
+    expect(recordSignal('s1', 'working', T0 + 30)).toBe('working');
+  });
+
+  test('a keystroke still answers a waiting even on a three-hook session', () => {
+    // Never gated. Output is ignored for an agent-driven session, so if typing
+    // `y` at a permission prompt did not clear the block, nothing would until
+    // the next hook — a blocked tab with no exit.
+    recordSignal('s2', 'working', T0);
+    recordSignal('s2', 'waiting', T0 + 10);
+    expect(recordInput('s2', T0 + 20)).toBe('working');
+  });
+
+  test('a shell prompt clears the working-signal memory with the latch', () => {
+    // The next program in this shell may be a two-hook agent; it must inherit
+    // a live fallback, not a dead one.
+    recordSignal('s3', 'working', T0);
+    recordOutput('s3', '\nsam@box ~ $ ', T0 + 10);
+    expect(getActivity('s3', T0 + SILENCE_MS * 2)).toBe('idle');
+    recordSignal('s3', 'done', T0 + SILENCE_MS * 3);
+    expect(recordInput('s3', T0 + SILENCE_MS * 3 + 1)).toBe('working');
+  });
+
   test('a two-hook config still recovers: typing ends a done', () => {
     // Anyone who pasted the Notification/Stop pair before UserPromptSubmit
     // existed has no hook that says `working`. An agent-driven session ignores
