@@ -23,6 +23,7 @@ import {
   presentationsRoutes,
 } from './routes/presentations';
 import { sessionsRoutes } from './routes/sessions';
+import { signalRoutes } from './routes/signal';
 import { VERSION } from './runtime';
 import { getTlsReport, isSecureRequest } from './tlsRuntime';
 
@@ -210,5 +211,6 @@ app.route('/', configRoutes);
 app.route('/', filesRoutes);
 app.route('/', gitRoutes);
 app.route('/', sessionsRoutes);
+app.route('/', signalRoutes);
 
 export { app };

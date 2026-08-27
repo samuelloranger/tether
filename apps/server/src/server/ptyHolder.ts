@@ -91,7 +91,7 @@ function sessionFocused(id: string): boolean {
   return [...(instances.get(id)?.subscribers ?? [])].some((sub) => sub.focused === true);
 }
 
-function notify(id: string, event: NotificationEvent): void {
+export function notify(id: string, event: NotificationEvent): void {
   if (sessionFocused(id)) return;
   const session = getSession(id);
   const ctx = {
