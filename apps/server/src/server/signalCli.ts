@@ -89,10 +89,11 @@ export function claudeHookSnippet(): string {
   return JSON.stringify(
     {
       hooks: {
-        // All three are needed, not just the two interesting ones. Once a
-        // session is agent-driven the byte heuristics stop moving it, so
-        // nothing else will ever put it back to `working` — the prompt-submit
-        // hook is what re-lights it when you send the next turn.
+        // The prompt-submit hook is not decoration: an agent-driven session
+        // ignores its own output, so this is what re-lights it the instant you
+        // send a turn. A keystroke also ends a `done`, which is the fallback
+        // for configs written before this hook existed — but that only fires
+        // for input typed through Tether, so wire all three.
         UserPromptSubmit: hook('working'),
         Notification: hook('waiting'),
         Stop: hook('done'),

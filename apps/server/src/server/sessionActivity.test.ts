@@ -178,13 +178,11 @@ describe('done state', () => {
     expect(getActivity('d3', T0 + SILENCE_MS * 4)).toBe('waiting');
   });
 
-  test('typing does not disturb a done session, but its echo does', () => {
+  test('typing ends a done session — you are starting the next thing', () => {
     recordOutput('d1', 'x\x07', T0);
     expect(getActivity('d1', T0 + SILENCE_MS)).toBe('done');
-    // recordInput only answers a `waiting`. A finished session is not a
-    // question, so there is nothing for a keystroke to answer.
-    expect(recordInput('d1', T0 + SILENCE_MS + 1)).toBeNull();
-    expect(recordOutput('d1', 'x', T0 + SILENCE_MS + 2)).toBe('working');
+    expect(recordInput('d1', T0 + SILENCE_MS + 1)).toBe('working');
+    expect(getActivity('d1', T0 + SILENCE_MS + 2)).toBe('working');
   });
 
   test('a done session that reaches a shell prompt goes idle', () => {
@@ -242,6 +240,26 @@ describe('recordSignal', () => {
     recordSignal('s2', 'done', T0);
     recordOutput('s2', frame, T0 + 50);
     expect(getActivity('s2', T0 + 60)).toBe('done');
+  });
+
+  test('a two-hook config still recovers: typing ends a done', () => {
+    // Anyone who pasted the Notification/Stop pair before UserPromptSubmit
+    // existed has no hook that says `working`. An agent-driven session ignores
+    // its own output, so a keystroke has to be what ends the previous turn —
+    // otherwise the whole next turn runs while the tab claims to be finished.
+    recordSignal('s1', 'done', T0);
+    expect(recordInput('s1', T0 + 10)).toBe('working');
+    recordOutput('s1', 'working on it\n', T0 + 20);
+    expect(getActivity('s1', T0 + 21)).toBe('working');
+  });
+
+  test('a shell prompt releases a signalled waiting, not just a done', () => {
+    // An agent killed while blocked leaves its shell at a prompt. Without a
+    // release the tab stays urgent forever and swallows later notifications.
+    recordSignal('s2', 'waiting', T0);
+    recordOutput('s2', '\nsam@box ~ $ ', T0 + 10);
+    expect(getActivity('s2', T0 + SILENCE_MS * 2)).toBe('idle');
+    expect(isAgentDriven('s2')).toBe(false);
   });
 
   test('the prompt-submit hook is what re-lights it', () => {
