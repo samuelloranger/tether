@@ -29,4 +29,8 @@ item and decrypts AES-256-GCM (`nonce[12] ‖ ciphertext ‖ tag[16]`).
 
 App Store / TestFlight builds need a provisioning profile that covers the
 extension bundle id as well as the app. Automatic signing handles this in
-Xcode; the release workflow's manual profile must include the NSE.
+Xcode; the release workflow's manual path installs both profiles and passes
+target-specific user settings (`APP_PROVISIONING_PROFILE_SPECIFIER` /
+`NSE_PROVISIONING_PROFILE_SPECIFIER`) — never a global
+`PROVISIONING_PROFILE_SPECIFIER` on the `xcodebuild` command line, which would
+override every target.
