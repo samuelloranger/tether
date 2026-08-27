@@ -9,11 +9,10 @@ Tether is a Bun + TypeScript monorepo (Bun workspaces).
 - `clients/apple/` — the **iOS** client, native Swift/SwiftUI (`TetherKit` + `TetherIOS`), linking the same Rust core through an XCFramework.
 - `crates/tether-core/` — the shared Rust core both native clients are built on: host profiles, health, WebSocket session + replay cursor, diff model, git and workspace requests. Plus `tether-proto` (wire types) and `tether-ffi` (the Swift bridge).
 - `apps/relay/` — a separate Bun service that routes encrypted push payloads to APNs. It cannot read them.
-- `apps/mobile/` — the Expo React Native app being retired. It was iOS + Android and, through `src-tauri`, the previous desktop client. Nothing in it is built by a release any more.
 
 There is no in-browser client: a browser can't attach the shared secret to the WebSocket upgrade.
 
-Android is no longer supported — builds were discontinued after v2.8.12.
+Android is no longer supported — builds were discontinued after v2.8.12. The Expo/RN client has been removed from the tree.
 
 ## Server
 

@@ -6,7 +6,7 @@
 	<string>production</string>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)$(CFBundleIdentifier)</string>
+		<string>$(AppIdentifierPrefix)com.samuelloranger.tether-mobile</string>
 	</array>
 </dict>
 </plist>

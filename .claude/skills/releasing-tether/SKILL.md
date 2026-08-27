@@ -59,14 +59,12 @@ Do not hand-upload the missing asset and publish manually. That reintroduces the
 |---|---|
 | Push rejected, "remote has diverged" | Something landed on origin since your last pull. `release.sh` rebases onto `origin/$BRANCH` before the bump; if you still see this, fetch/rebase manually and re-run. (The old altstore-bot-to-main race is gone — the manifest now publishes to samlo.cloud.) |
 | Interactive prompt errors out | No TTY (agent shell, CI). Pass `--patch`/`--minor`/`--major` or an explicit version — the script refuses rather than hanging. |
-| Release aborts on formatting | `bun format` touched real source. Commit that separately; a release commit may only contain the 7 version files. |
-| iOS build fails on Xcode | Check the resolved `expo-modules-jsi` version. Never bump Expo as part of a release — do it in its own PR with a real iOS archive. |
+| Release aborts on formatting | `bun format` touched real source. Commit that separately; a release commit may only contain the version files listed below. |
+| iOS archive fails on NSE signing | Manual signing needs `IOS_NSE_PROVISIONING_PROFILE_BASE64` for `com.samuelloranger.tether-mobile.TetherNotificationService` as well as the app profile. |
 | Sessions die instantly after install | Unrelated to release — Bun < 1.3.14 has no `proc.terminal`. |
-
-The Android APK is signed with the **public** React Native debug keystore (see the TODO in `release.yml`). It provides no authenticity and cannot be trusted for in-place updates. Don't present it as a signed build.
 
 ## Version Files (all bumped by the script)
 
-`package.json`, `apps/server/package.json`, `apps/mobile/package.json`, `apps/mobile/app.json`, `apps/mobile/src-tauri/tauri.conf.json`, `apps/mobile/src-tauri/Cargo.toml`, `apps/mobile/src-tauri/Cargo.lock`
+`package.json`, `apps/server/package.json`, `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/src-tauri/Cargo.lock`, `clients/apple/Tether.xcodeproj/project.pbxproj`
 
-`apps/mobile/package.json` is the source of truth the script reads the current version from.
+Root `package.json` is the source of truth the script reads the current version from.

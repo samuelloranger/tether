@@ -4,7 +4,7 @@
 
 **Tether** runs long-running terminal agents (`claude-code`, builds, interactive bash) persistently on your server. It solves iOS aggressively backgrounding connections (which drops WebSSH-style sessions and interrupts running agents): the shell lives in a detached holder process on the server and keeps running across client disconnects **and** server restarts.
 
-This package is the **server only** — an API/WebSocket backend with no web UI. The client is the Expo React Native app in [`apps/mobile`](../mobile).
+This package is the **server only** — an API/WebSocket backend with no web UI. Clients are the native iOS app in [`clients/apple`](../../clients/apple) and the Tauri desktop app in [`apps/desktop`](../desktop).
 
 ---
 

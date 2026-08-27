@@ -57,5 +57,5 @@ the binary exists rather than falling back to a mock.
 - Tests live next to what they test (`foo.ts` + `foo.test.ts`). New logic is
   expected to come with them; keep pure logic in its own module so it is testable
   without a PTY.
-- `apps/mobile` (the Expo app) is being retired — don't add to it. Android was
-  decommissioned after v2.8.12.
+- Runtime state lives in `~/.tether/` (`config/tether.db`, `holders/`, pid, log).
+  `TETHER_DB_PATH` overrides the DB.

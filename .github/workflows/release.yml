@@ -67,10 +67,7 @@ jobs:
           echo "id=$(gh release view "$TAG" --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
 
   # Builds apps/desktop — the native Tauri client (vite + xterm.js over
-  # tether-core), which REPLACED the react-native-web app under apps/mobile.
-  # Nothing in apps/mobile is built by a release any more: iOS ships from
-  # clients/apple, Android is decommissioned, and apps/mobile/src-tauri is
-  # legacy. The Expo app is on its way out of the tree entirely.
+  # tether-core). iOS ships from clients/apple; Android is decommissioned.
   #
   # apps/desktop deliberately keeps the OLD bundle identifier
   # (cloud.samlo.tether). The identifier is what names the webview data
@@ -301,6 +298,10 @@ jobs:
       #   IOS_PROVISIONING_PROFILE_BASE64
       #                              App Store profile for
       #                              com.samuelloranger.tether-mobile, base64
+      #   IOS_NSE_PROVISIONING_PROFILE_BASE64
+      #                              App Store profile for
+      #                              com.samuelloranger.tether-mobile.TetherNotificationService,
+      #                              base64 (required once the NSE ships in the archive)
       - name: Detect signing mode
         id: signing
         env:
@@ -322,6 +323,7 @@ jobs:
           CERT_B64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
           PROFILE_B64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          NSE_PROFILE_B64: ${{ secrets.IOS_NSE_PROVISIONING_PROFILE_BASE64 }}
         run: |
           set -euo pipefail
           # A throwaway keychain, not the login one: it is deleted in a later
@@ -344,19 +346,27 @@ jobs:
           # and replacing the default breaks other tooling on the runner.
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
 
-          PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
-          mkdir -p "$PROFILES"
-          printf '%s' "$PROFILE_B64" | base64 --decode > /tmp/profile.mobileprovision
-          # The profile's own name is what PROVISIONING_PROFILE_SPECIFIER wants,
-          # and its UUID is the filename Xcode looks for. Read both out of the
-          # profile rather than hard-coding them, so rotating it needs no edit here.
-          security cms -D -i /tmp/profile.mobileprovision > /tmp/profile.plist
-          UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)"
-          NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist)"
-          cp /tmp/profile.mobileprovision "$PROFILES/$UUID.mobileprovision"
-          rm -f /tmp/profile.plist /tmp/profile.mobileprovision
-          echo "PROVISIONING_PROFILE_SPECIFIER=$NAME" >> "$GITHUB_ENV"
-          echo "Installed profile '$NAME' ($UUID)"
+          install_profile() {
+            local b64="$1"
+            local env_key="$2"
+            PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+            mkdir -p "$PROFILES"
+            printf '%s' "$b64" | base64 --decode > /tmp/profile.mobileprovision
+            security cms -D -i /tmp/profile.mobileprovision > /tmp/profile.plist
+            UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)"
+            NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist)"
+            cp /tmp/profile.mobileprovision "$PROFILES/$UUID.mobileprovision"
+            rm -f /tmp/profile.plist /tmp/profile.mobileprovision
+            echo "${env_key}=$NAME" >> "$GITHUB_ENV"
+            echo "Installed profile '$NAME' ($UUID) → $env_key"
+          }
+
+          install_profile "$PROFILE_B64" APP_PROVISIONING_PROFILE_SPECIFIER
+          if [ -n "${NSE_PROFILE_B64:-}" ]; then
+            install_profile "$NSE_PROFILE_B64" NSE_PROVISIONING_PROFILE_SPECIFIER
+          else
+            echo '::warning::IOS_NSE_PROVISIONING_PROFILE_BASE64 unset — archive will fail once the Notification Service Extension is required.'
+          fi
           security find-identity -v -p codesigning "$KEYCHAIN" | sed 's/([0-9A-F]*)/(…)/'
 
       - name: Build signed archive
@@ -374,6 +384,11 @@ jobs:
           # that flag is what lets Xcode create a certificate, so withholding it
           # is the fix rather than an optimisation. Automatic keeps both, and
           # keeps the cost that comes with them.
+          #
+          # Never pass PROVISIONING_PROFILE_SPECIFIER on the xcodebuild command
+          # line: that setting applies to EVERY target and would force the NSE
+          # to the app's profile. Each target expands its own user-defined
+          # variable instead (APP_… / NSE_…).
           if [ "$SIGN_MODE" = manual ]; then
             xcodebuild -project clients/apple/Tether.xcodeproj \
               -scheme TetherIOS \
@@ -382,7 +397,8 @@ jobs:
               DEVELOPMENT_TEAM="$TEAM_ID" \
               CODE_SIGN_STYLE=Manual \
               CODE_SIGN_IDENTITY="Apple Distribution" \
-              PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER" \
+              APP_PROVISIONING_PROFILE_SPECIFIER="$APP_PROVISIONING_PROFILE_SPECIFIER" \
+              NSE_PROVISIONING_PROFILE_SPECIFIER="${NSE_PROVISIONING_PROFILE_SPECIFIER:-}" \
               MARKETING_VERSION="$MARKETING_VERSION" \
               CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
           else
@@ -407,12 +423,17 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           SIGN_MODE: ${{ steps.signing.outputs.mode }}
           BUNDLE_ID: com.samuelloranger.tether-mobile
+          NSE_BUNDLE_ID: com.samuelloranger.tether-mobile.TetherNotificationService
         run: |
           set -euo pipefail
           # The export has to agree with how the archive was signed, or it
           # re-resolves the identity and can mint a certificate at THIS step
           # instead — the same cap, one stage later.
           if [ "$SIGN_MODE" = manual ]; then
+            NSE_PROFILE_ENTRY=""
+            if [ -n "${NSE_PROVISIONING_PROFILE_SPECIFIER:-}" ]; then
+              NSE_PROFILE_ENTRY="<key>$NSE_BUNDLE_ID</key><string>$NSE_PROVISIONING_PROFILE_SPECIFIER</string>"
+            fi
             cat > ExportOptions.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -423,7 +444,8 @@ jobs:
             <key>signingStyle</key><string>manual</string>
             <key>provisioningProfiles</key>
             <dict>
-              <key>$BUNDLE_ID</key><string>$PROVISIONING_PROFILE_SPECIFIER</string>
+              <key>$BUNDLE_ID</key><string>$APP_PROVISIONING_PROFILE_SPECIFIER</string>
+              $NSE_PROFILE_ENTRY
             </dict>
             <key>uploadSymbols</key><true/>
             <key>destination</key><string>export</string>

@@ -1,32 +1,36 @@
-# Notification Service Extension plan
+# Notification Service Extension
 
-Deferred: needs a new Xcode target (`TetherNotificationService`) and a physical device. Port from `apps/mobile/ios-nse/NotificationService.swift`.
+Decrypts APNs payloads on-device before display. The relay only ever sees
+ciphertext (`e`); plaintext title/body exist only here.
 
-## What it does
+## Layout
 
-APNs payloads from the relay (`apps/relay/src/payload.ts`) look like:
-
-```json
-{
-  "aps": { "alert": { "title": "Tether", "body": "New activity" }, "mutable-content": 1, "sound": "default" },
-  "e": "<base64>"
-}
+```
+clients/apple/TetherNotificationService/
+  NotificationService.swift
+  Info.plist
+  TetherNotificationService.entitlements
 ```
 
-`e` is AES-256-GCM ciphertext from `apps/server/src/server/pushCrypto.ts`:
+Embedded into `TetherIOS` via the Xcode target of the same name
+(`com.samuelloranger.tether-mobile.TetherNotificationService`).
 
-- Wire: `base64(nonce[12] ‖ ciphertext ‖ tag[16])`
-- Key: 32 raw bytes, stored as base64 under Keychain account `tether_push_secret` (service `dev.tether.app`), written by `PushRegistrar` with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`
-- Plaintext JSON: `{ "title": string, "body": string, "link"?: "tether://session/…?host=…" }`
+## Shared keychain
 
-The NSE must:
+Both the app and the extension list the same keychain access group:
 
-1. Read `userInfo["e"]`, load the shared Keychain secret, decrypt with CryptoKit `AES.GCM` (split tag from ciphertext — WebCrypto appends the 16-byte tag).
-2. Set `content.title` / `content.body` from the JSON; write `content.userInfo["link"]` so `NotificationTapRouter` can deep-link on tap.
-3. On any failure, pass through the generic relay alert (reveals nothing).
+`$(AppIdentifierPrefix)com.samuelloranger.tether-mobile`
 
-## Xcode setup (later)
+`PushRegistrar` writes account `tether_push_secret` / service `dev.tether.app`
+with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`. The NSE reads that
+item and decrypts AES-256-GCM (`nonce[12] ‖ ciphertext ‖ tag[16]`).
 
-- New App Extension target, `mutable-content` capable, same Team / App Group / **shared keychain access group** as `TetherIOS` (NSE has its own bundle id; without the shared group it cannot read `tether_push_secret`).
-- Entitlements: keychain-access-groups matching the app (already on `TetherIOS.entitlements`).
-- Prefer moving decrypt into `tether-ffi` later; until then copy the CryptoKit path from the RN NSE.
+## Signing note
+
+App Store / TestFlight builds need a provisioning profile that covers the
+extension bundle id as well as the app. Automatic signing handles this in
+Xcode; the release workflow's manual path installs both profiles and passes
+target-specific user settings (`APP_PROVISIONING_PROFILE_SPECIFIER` /
+`NSE_PROVISIONING_PROFILE_SPECIFIER`) — never a global
+`PROVISIONING_PROFILE_SPECIFIER` on the `xcodebuild` command line, which would
+override every target.
