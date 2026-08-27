@@ -173,6 +173,8 @@ interface SessionActivityState {
   residual: string;
   waitingSource: WaitingSource | null;
   agentDriven: boolean;
+  /** Has this session ever declared `working` for itself? See `recordInput`. */
+  seenWorkingSignal: boolean;
 }
 
 const stateBySession = new Map<string, SessionActivityState>();
@@ -188,6 +190,7 @@ function getState(id: string, now: number): SessionActivityState {
       residual: '',
       waitingSource: null,
       agentDriven: false,
+      seenWorkingSignal: false,
     };
     stateBySession.set(id, st);
   }
@@ -271,14 +274,22 @@ export function recordOutputEvent(
 export function recordInput(id: string, now = Date.now()): Activity | null {
   const st = stateBySession.get(id);
   if (!st) return null;
-  // A keystroke answers a `waiting`, and it also ends a `done`: you are typing
-  // the next thing, so the last thing is over. That second case is what keeps a
-  // two-hook config working — an agent-driven session ignores its own output,
-  // so without this nothing would leave `done` until the agent signalled again,
-  // and anyone who pasted the Notification/Stop pair before `UserPromptSubmit`
-  // existed would watch a whole turn run while the tab claimed to be finished.
-  if (st.activity !== 'waiting' && st.activity !== 'done') return null;
-  return transition(st, 'working', now);
+  // A keystroke always answers a `waiting`. That path is never gated: an
+  // agent-driven session ignores its own output, so if typing `y` at a
+  // permission prompt did not clear the block, nothing would until the next
+  // hook fired — a blocked tab with no exit.
+  if (st.activity === 'waiting') return transition(st, 'working', now);
+  // Ending a `done` is a FALLBACK, not the intended path, and it is wrong in
+  // the common case: it fires on the first character you type, so composing a
+  // message marks the session busy before anything is running. It exists only
+  // for a session whose agent never says `working` — the Notification/Stop pair
+  // people pasted before `UserPromptSubmit` was part of the snippet. Once a
+  // session has declared `working` even once, its agent demonstrably has that
+  // hook, so the guess steps aside and the declaration is trusted.
+  if (st.activity === 'done' && !st.seenWorkingSignal) {
+    return transition(st, 'working', now);
+  }
+  return null;
 }
 
 /**
@@ -301,6 +312,7 @@ export type SignalState = 'working' | 'waiting' | 'done';
 export function recordSignal(id: string, state: SignalState, now = Date.now()): Activity | null {
   const st = getState(id, now);
   st.agentDriven = true;
+  if (state === 'working') st.seenWorkingSignal = true;
   return transition(st, state, now, state === 'waiting' ? 'signal' : null);
 }
 
@@ -348,6 +360,9 @@ export function getActivity(id: string, now = Date.now()): Activity | null {
  */
 function releaseToIdle(st: SessionActivityState, now: number): Activity | null {
   st.agentDriven = false;
+  // Cleared with the latch, not kept: the next program in this shell may be a
+  // two-hook agent, and it must inherit a live fallback rather than a dead one.
+  st.seenWorkingSignal = false;
   return transition(st, 'idle', now);
 }
 
