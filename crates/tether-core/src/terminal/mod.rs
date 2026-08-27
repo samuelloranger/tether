@@ -7,6 +7,8 @@ mod alacritty;
 
 pub use alacritty::AlacrittyParser;
 
+use crate::pty_input::MouseMode;
+
 /// Attribute bits in a TGRD cell — must match `crates/tether-ffi/src/grid_snapshot.rs`.
 pub const GRID_ATTR_BOLD: u32 = 1 << 0;
 pub const GRID_ATTR_ITALIC: u32 = 1 << 1;
@@ -57,6 +59,12 @@ pub trait TerminalParser {
     /// pasted text from typing — without it, shells run every newline in the
     /// clipboard as a command.
     fn bracketed_paste(&self) -> bool;
+
+    /// Active mouse tracking mode (DECSET 1000/1002/1003), for client input.
+    fn mouse_mode(&self) -> MouseMode;
+
+    /// Whether SGR mouse encoding (DECSET 1006) is on.
+    fn mouse_sgr(&self) -> bool;
 
     /// Monotonic counter over visible-grid changes. Unchanged when a feed leaves
     /// the viewport identical — the iOS shell uses this to skip redraws.

@@ -5,11 +5,14 @@
 
 use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::Point;
+use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{point_to_viewport, Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
+use unicode_normalization::UnicodeNormalization;
+
+use crate::pty_input::MouseMode;
 
 use super::{
     TerminalCell, TerminalParser, TerminalSnapshot, GRID_ATTR_BOLD, GRID_ATTR_DIM,
@@ -195,6 +198,13 @@ impl TerminalParser for AlacrittyParser {
             return;
         }
         let before = self.visible_digest.clone();
+        // Exact-width line + LF leaves a blank spacer row with WRAPLINE set.
+        // Alacritty's column reflow can then invent leading spaces on the next
+        // content row. Strip WRAPLINE from visually blank rows before any
+        // column change (grow or shrink→grow cycles).
+        if cols != self.cols {
+            clear_spurious_wraplines(&mut self.term);
+        }
         let dimensions = TermDimensions {
             cols: cols as usize,
             rows: rows as usize,
@@ -219,6 +229,14 @@ impl TerminalParser for AlacrittyParser {
         self.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 
+    fn mouse_mode(&self) -> MouseMode {
+        mouse_mode_from_term(self.term.mode())
+    }
+
+    fn mouse_sgr(&self) -> bool {
+        self.term.mode().contains(TermMode::SGR_MOUSE)
+    }
+
     fn generation(&self) -> u64 {
         self.generation
     }
@@ -226,6 +244,53 @@ impl TerminalParser for AlacrittyParser {
     fn snapshot(&self) -> TerminalSnapshot {
         self.extract_view()
     }
+}
+
+/// Map Alacritty's mouse TermMode bits onto our MouseMode vocabulary.
+///
+/// Alacritty does not expose classic X10 (mode 9) as a distinct flag — click-only
+/// tracking is DECSET 1000 (`MOUSE_REPORT_CLICK`) → `Normal`.
+fn mouse_mode_from_term(mode: &TermMode) -> MouseMode {
+    if mode.contains(TermMode::MOUSE_MOTION) {
+        MouseMode::Any
+    } else if mode.contains(TermMode::MOUSE_DRAG) {
+        MouseMode::Button
+    } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+        MouseMode::Normal
+    } else {
+        MouseMode::Off
+    }
+}
+
+/// Drop WRAPLINE on rows that have no visible content.
+///
+/// Exact-width output + LF leaves a blank spacer row with WRAPLINE set. Alacritty's
+/// column-grow reflow then joins that spacer to the next content row, inventing
+/// leading spaces equal to the old width. Real soft-wraps always have glyphs on
+/// the WRAPLINE row, so they are left alone.
+fn clear_spurious_wraplines(term: &mut Term<VoidListener>) {
+    let cols = term.columns();
+    if cols == 0 {
+        return;
+    }
+    let last_col = Column(cols - 1);
+    let history = term.grid().history_size() as i32;
+    let screen = term.screen_lines() as i32;
+    let top = -history;
+    let last = screen - 1;
+    for line_no in top..=last {
+        let line = Line(line_no);
+        if !term.grid()[line][last_col].flags.contains(Flags::WRAPLINE) {
+            continue;
+        }
+        if row_is_visually_blank(&term.grid()[line]) {
+            term.grid_mut()[line][last_col].flags.remove(Flags::WRAPLINE);
+        }
+    }
+}
+
+fn row_is_visually_blank(row: &alacritty_terminal::grid::Row<Cell>) -> bool {
+    row.into_iter().all(|cell| cell.c == ' ' || cell.c == '\0')
 }
 
 fn empty_cell(theme: &TerminalTheme) -> TerminalCell {
@@ -244,7 +309,7 @@ fn map_cell(cell: &Cell, colors: &Colors, theme: &TerminalTheme) -> TerminalCell
     {
         b' ' as u32
     } else {
-        u32::from(cell.c)
+        cell_codepoint(cell)
     };
 
     let mut attrs = 0_u32;
@@ -273,6 +338,24 @@ fn map_cell(cell: &Cell, colors: &Colors, theme: &TerminalTheme) -> TerminalCell
         bg: resolve_color(cell.bg, colors, theme),
         attrs,
     }
+}
+
+/// Base char plus combining marks, NFC-composed into one codepoint when possible.
+fn cell_codepoint(cell: &Cell) -> u32 {
+    let Some(marks) = cell.zerowidth().filter(|m| !m.is_empty()) else {
+        return u32::from(cell.c);
+    };
+    let mut raw = String::with_capacity(marks.len() + 1);
+    raw.push(cell.c);
+    for mark in marks {
+        raw.push(*mark);
+    }
+    let composed: String = raw.nfc().collect();
+    composed
+        .chars()
+        .next()
+        .map(u32::from)
+        .unwrap_or_else(|| u32::from(cell.c))
 }
 
 fn cursor_viewport(display_offset: usize, point: Point, rows: usize, cols: usize) -> (u16, u16) {
@@ -397,24 +480,31 @@ fn argb(a: u8, r: u8, g: u8, b: u8) -> u32 {
 }
 
 fn pack_digest(snapshot: &TerminalSnapshot) -> Vec<u8> {
-    let mut out = Vec::with_capacity(12 + snapshot.cells.len() * 16);
-    out.extend_from_slice(&snapshot.cols.to_le_bytes());
-    out.extend_from_slice(&snapshot.rows.to_le_bytes());
-    out.extend_from_slice(&snapshot.cursor_col.to_le_bytes());
-    out.extend_from_slice(&snapshot.cursor_row.to_le_bytes());
-    out.push(u8::from(snapshot.cursor_visible));
+    // FNV-1a over the visible state — equality only, not a cryptographic hash.
+    // Cheaper than packing every cell into the digest buffer on every feed.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |value: u64| {
+        hash ^= value;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    };
+    mix(u64::from(snapshot.cols));
+    mix(u64::from(snapshot.rows));
+    mix(u64::from(snapshot.cursor_col));
+    mix(u64::from(snapshot.cursor_row));
+    mix(u64::from(snapshot.cursor_visible));
     for cell in &snapshot.cells {
-        out.extend_from_slice(&cell.codepoint.to_le_bytes());
-        out.extend_from_slice(&cell.fg.to_le_bytes());
-        out.extend_from_slice(&cell.bg.to_le_bytes());
-        out.extend_from_slice(&cell.attrs.to_le_bytes());
+        mix(u64::from(cell.codepoint));
+        mix(u64::from(cell.fg));
+        mix(u64::from(cell.bg));
+        mix(u64::from(cell.attrs));
     }
-    out
+    hash.to_le_bytes().to_vec()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pty_input::MouseMode;
     use crate::terminal::TerminalParser;
 
     fn cell_text(snapshot: &TerminalSnapshot, row: usize) -> String {
@@ -468,13 +558,31 @@ mod tests {
     }
 
     #[test]
-    fn combining_mark_stays_in_one_column() {
+    fn combining_mark_nfc_composes_into_one_codepoint() {
         let mut parser = AlacrittyParser::new(20, 5);
         parser.feed("e\u{0301}".as_bytes());
         let snapshot = parser.snapshot();
-        assert_eq!(snapshot.cells[0].codepoint, 'e' as u32);
+        assert_eq!(snapshot.cells[0].codepoint, 'é' as u32);
         assert_eq!(snapshot.cells[1].codepoint, b' ' as u32);
-        assert_eq!(cell_text(&snapshot, 0), "e");
+        assert_eq!(cell_text(&snapshot, 0), "é");
+    }
+
+    #[test]
+    fn mouse_mode_tracks_decset_1000_family() {
+        let mut parser = AlacrittyParser::new(20, 5);
+        assert_eq!(parser.mouse_mode(), MouseMode::Off);
+        assert!(!parser.mouse_sgr());
+        parser.feed(b"\x1b[?1000h");
+        assert_eq!(parser.mouse_mode(), MouseMode::Normal);
+        parser.feed(b"\x1b[?1002h");
+        assert_eq!(parser.mouse_mode(), MouseMode::Button);
+        parser.feed(b"\x1b[?1003h");
+        assert_eq!(parser.mouse_mode(), MouseMode::Any);
+        parser.feed(b"\x1b[?1006h");
+        assert!(parser.mouse_sgr());
+        parser.feed(b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l");
+        assert_eq!(parser.mouse_mode(), MouseMode::Off);
+        assert!(!parser.mouse_sgr());
     }
 
     #[test]
@@ -510,5 +618,61 @@ mod tests {
         parser.feed(b"\x1b[?25h");
         assert_eq!(parser.generation(), hidden + 1);
         assert!(parser.snapshot().cursor_visible);
+    }
+
+    #[test]
+    fn soft_wrapped_lines_rejoin_when_columns_grow() {
+        let mut parser = AlacrittyParser::new(20, 8);
+        parser.feed(b"abcdefghijKLMNOPQRST");
+        parser.feed(b"uvwxyz0123456789XXXX");
+        assert_eq!(cell_text(&parser.snapshot(), 0), "abcdefghijKLMNOPQRST");
+        assert_eq!(cell_text(&parser.snapshot(), 1), "uvwxyz0123456789XXXX");
+        parser.resize(40, 8);
+        assert_eq!(
+            cell_text(&parser.snapshot(), 0),
+            "abcdefghijKLMNOPQRSTuvwxyz0123456789XXXX"
+        );
+        assert_eq!(cell_text(&parser.snapshot(), 1), "");
+    }
+
+    /// Exact-width line + LF leaves WRAPLINE on the full row and a blank row
+    /// beneath it. Alacritty's grow reflow then shoves the next content row to
+    /// the right by the old width — the iOS "spaces on resize" screenshot.
+    #[test]
+    fn exact_width_line_plus_lf_does_not_right_shift_on_grow() {
+        let mut parser = AlacrittyParser::new(20, 10);
+        parser.feed(b"abcdefghijKLMNOPQRST\n");
+        parser.feed(b"uvwxyz0123456789XXXX\n");
+        parser.resize(40, 10);
+        let snapshot = parser.snapshot();
+        let cols = snapshot.cols as usize;
+        for r in 0..3 {
+            let raw: String = snapshot.cells[r * cols..(r + 1) * cols]
+                .iter()
+                .map(|c| char::from_u32(c.codepoint).unwrap_or('?'))
+                .collect();
+            if raw.trim().is_empty() {
+                continue;
+            }
+            let leading = raw.chars().take_while(|c| *c == ' ').count();
+            assert_eq!(
+                leading, 0,
+                "row {r} acquired leading spaces on grow: [{raw}]"
+            );
+        }
+        // Content must stay left-aligned (order may compress the blank LF row).
+        let joined: String = (0..3)
+            .map(|r| cell_text(&snapshot, r))
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("|");
+        assert!(
+            joined.contains("abcdefghijKLMNOPQRST"),
+            "missing first line in {joined}"
+        );
+        assert!(
+            joined.contains("uvwxyz0123456789XXXX"),
+            "missing second line in {joined}"
+        );
     }
 }

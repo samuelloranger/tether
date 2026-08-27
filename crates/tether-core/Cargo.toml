@@ -15,6 +15,7 @@ tokio-tungstenite = "0.24"
 futures-util = "0.3"
 thiserror = "2"
 alacritty_terminal = { version = "0.26.0", optional = true }
+unicode-normalization = { version = "0.1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "process", "io-util"] }
@@ -27,4 +28,4 @@ prost = "0.14"
 default = []
 # iOS-only VT parser. Desktop links tether-core without this feature so xterm.js
 # remains the sole emulator there.
-terminal-parser = ["dep:alacritty_terminal"]
+terminal-parser = ["dep:alacritty_terminal", "dep:unicode-normalization"]
