@@ -5,6 +5,7 @@
  */
 export type NotificationEvent =
   | { type: 'waiting' }
+  | { type: 'done'; title?: string; body?: string }
   | { type: 'oscNotify'; title?: string; body?: string }
   | { type: 'exit'; exitCode?: number }
   | { type: 'longJob'; seconds: number };

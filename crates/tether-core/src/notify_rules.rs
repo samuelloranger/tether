@@ -10,6 +10,11 @@ use std::collections::HashMap;
 pub enum SessionActivity {
     Working,
     Waiting,
+    /// Finished a piece of work. Deliberately NOT a notification edge: the
+    /// server decides whether a completion is worth a push, through the
+    /// separate `done` trigger, and these rules only ever cared about a shell
+    /// that is blocked.
+    Done,
     Idle,
 }
 
@@ -210,6 +215,15 @@ mod tests {
         assert!(!waiting_edge_deserves_notify(
             Some(SessionActivity::Waiting),
             Some(SessionActivity::Waiting),
+            false
+        ));
+    }
+
+    #[test]
+    fn a_finished_session_is_not_a_waiting_edge() {
+        assert!(!waiting_edge_deserves_notify(
+            Some(SessionActivity::Working),
+            Some(SessionActivity::Done),
             false
         ));
     }

@@ -10,7 +10,7 @@ import {
 const config = {
   push: { enabled: true },
   pushDevices: 2,
-  triggers: { waiting: true, oscNotify: true, exit: true, longJob: true },
+  triggers: { waiting: true, done: false, oscNotify: true, exit: true, longJob: true },
   longJobSeconds: 300,
   identity: { name: 'Studio', color: '#89b4fa' },
   session: { defaultShell: 'zsh', defaultCwd: '/work', scrollbackRows: 2000, silenceMs: 15000 },

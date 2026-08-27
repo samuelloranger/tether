@@ -47,6 +47,7 @@ public enum TetherMotion {
     switch state {
     case .working: return decelerate(ignite)
     case .waiting: return decelerate(arrive)
+    case .done: return decelerate(arrive)
     case .idle, .none: return .easeOut(duration: cool)
     }
   }

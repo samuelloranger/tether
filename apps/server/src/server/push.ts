@@ -33,16 +33,20 @@ export function buildPushContent(
 ): PushContent | null {
   if (!cfg.push.enabled || !cfg.triggers[event.type]) return null;
   const title = `${cfg.identity.name} · ${
-    event.type === 'oscNotify' && event.title ? event.title : ctx.sessionTitle
+    (event.type === 'oscNotify' || event.type === 'done') && event.title
+      ? event.title
+      : ctx.sessionTitle
   }`;
   const body =
     event.type === 'waiting'
       ? 'Waiting for input'
-      : event.type === 'oscNotify'
-        ? (event.body ?? event.title ?? 'Notification')
-        : event.type === 'exit'
-          ? `Session exited${event.exitCode === undefined ? '' : ` with code ${event.exitCode}`}`
-          : `Job ran for ${event.seconds} seconds`;
+      : event.type === 'done'
+        ? (event.body ?? 'Finished')
+        : event.type === 'oscNotify'
+          ? (event.body ?? event.title ?? 'Notification')
+          : event.type === 'exit'
+            ? `Session exited${event.exitCode === undefined ? '' : ` with code ${event.exitCode}`}`
+            : `Job ran for ${event.seconds} seconds`;
   return {
     title: truncate(title, MAX_TITLE_CHARS),
     body: truncate(body, MAX_BODY_CHARS),

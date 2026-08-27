@@ -12,15 +12,28 @@ public struct ServerPushConfig: Codable, Equatable, Sendable {
 
 public struct ServerTriggersConfig: Codable, Equatable, Sendable {
   public var waiting: Bool
+  /// Absent on a server older than v2.9 — decode as off rather than failing the
+  /// whole config fetch over one missing flag.
+  public var done: Bool
   public var oscNotify: Bool
   public var exit: Bool
   public var longJob: Bool
 
-  public init(waiting: Bool, oscNotify: Bool, exit: Bool, longJob: Bool) {
+  public init(waiting: Bool, done: Bool = false, oscNotify: Bool, exit: Bool, longJob: Bool) {
     self.waiting = waiting
+    self.done = done
     self.oscNotify = oscNotify
     self.exit = exit
     self.longJob = longJob
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    waiting = try c.decode(Bool.self, forKey: .waiting)
+    done = try c.decodeIfPresent(Bool.self, forKey: .done) ?? false
+    oscNotify = try c.decode(Bool.self, forKey: .oscNotify)
+    exit = try c.decode(Bool.self, forKey: .exit)
+    longJob = try c.decode(Bool.self, forKey: .longJob)
   }
 }
 
@@ -115,24 +128,27 @@ public struct ServerConfigPatch: Equatable, Sendable {
 
   public struct PartialTriggers: Equatable, Sendable {
     public var waiting: Bool?
+    public var done: Bool?
     public var oscNotify: Bool?
     public var exit: Bool?
     public var longJob: Bool?
 
     public init(
       waiting: Bool? = nil,
+      done: Bool? = nil,
       oscNotify: Bool? = nil,
       exit: Bool? = nil,
       longJob: Bool? = nil
     ) {
       self.waiting = waiting
+      self.done = done
       self.oscNotify = oscNotify
       self.exit = exit
       self.longJob = longJob
     }
 
     public var isEmpty: Bool {
-      waiting == nil && oscNotify == nil && exit == nil && longJob == nil
+      waiting == nil && done == nil && oscNotify == nil && exit == nil && longJob == nil
     }
   }
 
@@ -188,6 +204,7 @@ public struct ServerConfigPatch: Equatable, Sendable {
     if let triggers, !triggers.isEmpty {
       var obj: [String: Any] = [:]
       if let waiting = triggers.waiting { obj["waiting"] = waiting }
+      if let done = triggers.done { obj["done"] = done }
       if let oscNotify = triggers.oscNotify { obj["oscNotify"] = oscNotify }
       if let exit = triggers.exit { obj["exit"] = exit }
       if let longJob = triggers.longJob { obj["longJob"] = longJob }
@@ -268,6 +285,7 @@ public func patchForDraft(config: ServerConfig, draft: ServerSettingsDraft) -> S
   }
   var triggers = ServerConfigPatch.PartialTriggers()
   if config.triggers.waiting != draft.triggers.waiting { triggers.waiting = draft.triggers.waiting }
+  if config.triggers.done != draft.triggers.done { triggers.done = draft.triggers.done }
   if config.triggers.oscNotify != draft.triggers.oscNotify {
     triggers.oscNotify = draft.triggers.oscNotify
   }

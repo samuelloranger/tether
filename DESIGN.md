@@ -44,9 +44,12 @@ Tight radii (`SURFACE_RADIUS`: control 2, panel 4, hero 0). Hairline borders. St
 
 Operate defaults: short state transitions only. No page-load choreography, no loops, no idle ambient movement.
 
-**Heat rises fast, cools slow.** The lit chrome's one motion idea: a session becoming live (`working` 260ms / `waiting` 340ms) arrives on a decelerating curve; a session going quiet (`idle` / stopped) lets go over 700ms. Equal durations would make two different events read as one. Tokens: `TetherMotion` (`clients/apple`); on desktop the same curve is one transition on `.app-shell`, made possible by registering `--lit` / `--b1..--rim` with `@property` so the tint is an interpolatable type rather than a string — every tinted surface crossfades from one declaration. `data-lit` carries the state being entered and picks the duration.
+**Heat rises fast, cools slow.** The lit chrome's one motion idea: a session becoming live (`working` 260ms / `waiting` 340ms / `done` 300ms) arrives on a decelerating curve; a session going quiet (`idle` / stopped) lets go over 700ms. Equal durations would make two different events read as one. Tokens: `TetherMotion` (`clients/apple`); on desktop the same curve is one transition on `.app-shell`, made possible by registering `--lit` / `--b1..--rim` with `@property` so the tint is an interpolatable type rather than a string — every tinted surface crossfades from one declaration. `data-lit` carries the state being entered and picks the duration.
 
 **One authored moment:** a single non-repeating swell of the bloom when a session enters `waiting`. It fires only on entry, never loops, and never under Reduce Motion.
+
+`done` gets colour but no swell. Finishing is worth a look, not an interruption —
+the swell is reserved for the one state that cannot proceed without you.
 
 Supporting scale: 90ms touch feedback, 200ms routine state change, 280ms overlay in / 200ms out (exit is faster than entrance). Colour changes crossfade; gradients crossfade by layer, since their colours do not interpolate.
 

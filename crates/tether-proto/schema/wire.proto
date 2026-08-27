@@ -64,6 +64,11 @@ enum Activity {
   ACTIVITY_WORKING = 1;
   ACTIVITY_WAITING = 2;
   ACTIVITY_IDLE = 3;
+  // Finished a piece of work. Distinct from IDLE (a bare prompt, nothing
+  // happened) and from WAITING (blocked, cannot proceed). Appended in v2.9.
+  // A client built before this decodes the number and resolves it to null,
+  // then picks the state up from the JSON session-list poll instead.
+  ACTIVITY_DONE = 4;
 }
 
 // v1: {type:'activity', activity:'working'|'waiting'|'idle'}

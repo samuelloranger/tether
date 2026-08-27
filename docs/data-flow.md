@@ -12,6 +12,24 @@ The core loop, from key press to pixels and back.
 
 `PTY chunk → holder → server → addTerminalLog (SQLite, returns row id) → broadcast to subscribers`. The client stores the latest row id it has seen; on reconnect it sends that as `sinceId`, so only missed output is replayed.
 
+## Session activity
+
+Every output chunk is also scanned for what the foreground program is *doing*:
+`working`, `waiting` (blocked on an answer), `done` (finished a piece of work),
+or `idle` (a bare shell prompt). Transitions are broadcast as an `activity`
+frame and reported by `GET /api/sessions`.
+
+A bell or an OSC 9/777 notification is only a guess — agents emit the same
+sequence on completion as on a question — so a `waiting` that came from one
+decays to `done` after `silenceMs` of quiet if the screen is not actually asking
+anything. That decay happens lazily on the session-list read, so an attached
+client sees it on its next poll rather than as a frame.
+
+A program can skip the guessing entirely: `tether signal <state>` posts to
+`/control/signal` and the session becomes *agent-driven*, which disables the
+heuristics and suppresses its now-duplicate OSC push until the session reaches a
+shell prompt.
+
 ## Holder protocol
 
 Server ↔ holder speak newline-delimited JSON over a unix socket, base64 payloads for binary safety:

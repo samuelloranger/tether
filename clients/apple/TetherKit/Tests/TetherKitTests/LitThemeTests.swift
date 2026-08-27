@@ -43,6 +43,21 @@ final class LitThemeTests: XCTestCase {
     )
     XCTAssertEqual(chrome.state, .waiting)
   }
+
+  func test_done_carries_through_to_its_own_lit_state() {
+    XCTAssertEqual(LitTheme.state(for: .done), .done)
+  }
+
+  func test_done_glows_quieter_than_blocked() {
+    XCTAssertLessThan(LitBloom.done.rim, LitBloom.waiting.rim)
+    XCTAssertGreaterThan(LitBloom.done.rim, LitBloom.idle.rim)
+  }
+
+  func test_done_does_not_fire_the_arrival_swell() {
+    XCTAssertFalse(
+      TetherMotion.pulses(from: .working, to: .done, settled: true, reduceMotion: false)
+    )
+  }
 }
 
 final class SessionStripTests: XCTestCase {

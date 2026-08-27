@@ -207,6 +207,14 @@ public struct ServerSettingsView: View {
       )
       .disabled(readOnly)
       Toggle(
+        "Agent finishes a turn",
+        isOn: Binding(
+          get: { draft.triggers.done },
+          set: { v in updateDraft { $0.triggers.done = v } }
+        )
+      )
+      .disabled(readOnly)
+      Toggle(
         "Alerts from programs",
         isOn: Binding(
           get: { draft.triggers.oscNotify },

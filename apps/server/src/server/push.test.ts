@@ -89,4 +89,24 @@ describe('buildPushContent', () => {
     );
     expect(content?.link).toBe('tether://session/a%20b%2Fc?host=my%20host%26x');
   });
+
+  test('a done push is silent unless the user opted in', () => {
+    expect(buildPushContent({ type: 'done' }, CTX, cfg())).toBeNull();
+  });
+
+  test('a done push says what finished', () => {
+    const config = cfg({ triggers: { ...DEFAULT_CONFIG.triggers, done: true } });
+    expect(buildPushContent({ type: 'done' }, CTX, config)?.body).toBe('Finished');
+  });
+
+  test('a done push prefers the words the program supplied', () => {
+    const config = cfg({ triggers: { ...DEFAULT_CONFIG.triggers, done: true } });
+    const content = buildPushContent(
+      { type: 'done', title: 'Claude', body: 'Tests pass' },
+      CTX,
+      config,
+    );
+    expect(content?.title).toBe('alpha · Claude');
+    expect(content?.body).toBe('Tests pass');
+  });
 });

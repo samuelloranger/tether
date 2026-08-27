@@ -87,6 +87,7 @@
   --t-overlay: 260ms;
   --heat-in: 260ms;
   --heat-wait: 340ms;
+  --heat-done: 300ms;
   --heat-out: 700ms;
 
   --sans: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
@@ -418,6 +419,10 @@ label > textarea {
 
 .app-shell[data-lit='waiting'] {
   --heat: var(--heat-wait);
+}
+
+.app-shell[data-lit='done'] {
+  --heat: var(--heat-done);
 }
 
 .app-shell.centered {
@@ -845,6 +850,11 @@ label > textarea {
 .dot-waiting {
   background: var(--danger);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.dot-done {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent);
 }
 
 .dot-idle {
@@ -2076,6 +2086,7 @@ label > textarea {
     --t-overlay: 120ms;
     --heat-in: 120ms;
     --heat-wait: 120ms;
+    --heat-done: 120ms;
     --heat-out: 120ms;
   }
 

@@ -271,7 +271,7 @@ async fn classifies_session_activity() {
     .await;
     handle.close();
     assert!(
-        ["working", "waiting", "idle"].contains(&activity.as_str()),
+        ["working", "waiting", "idle", "done"].contains(&activity.as_str()),
         "unexpected activity value: {activity}"
     );
 }

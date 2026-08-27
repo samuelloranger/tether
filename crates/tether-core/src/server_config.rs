@@ -33,6 +33,9 @@ pub struct PushConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TriggersConfig {
     pub waiting: bool,
+    /// Absent on a server older than v2.9 — off rather than a parse failure.
+    #[serde(default)]
+    pub done: bool,
     pub osc_notify: bool,
     pub exit: bool,
     pub long_job: bool,
@@ -79,6 +82,8 @@ pub struct PushConfigPartial {
 pub struct TriggersConfigPartial {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub osc_notify: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,5 +323,32 @@ mod tests {
             parse_config_response(400, &json!({ "error": "bad" })),
             Err(ServerConfigError::Api(msg)) if msg == "bad"
         ));
+    }
+
+    #[test]
+    fn done_trigger_defaults_off_on_an_older_server() {
+        let json = r##"{
+            "push": { "enabled": true },
+            "triggers": { "waiting": true, "oscNotify": true, "exit": true, "longJob": false },
+            "longJobSeconds": 300,
+            "identity": { "name": "Homelab", "color": "#f9e2af" },
+            "session": {
+                "defaultShell": "bash", "defaultCwd": "/home/sam",
+                "scrollbackRows": 2000, "silenceMs": 15000
+            }
+        }"##;
+        let cfg: ServerConfig = serde_json::from_str(json).unwrap();
+        assert!(!cfg.triggers.done);
+    }
+
+    #[test]
+    fn done_trigger_round_trips_when_the_server_sends_it() {
+        let json = r#"{ "waiting": true, "done": true, "oscNotify": false,
+                        "exit": true, "longJob": true }"#;
+        let triggers: TriggersConfig = serde_json::from_str(json).unwrap();
+        assert!(triggers.done);
+        assert!(serde_json::to_string(&triggers)
+            .unwrap()
+            .contains("\"done\":true"));
     }
 }

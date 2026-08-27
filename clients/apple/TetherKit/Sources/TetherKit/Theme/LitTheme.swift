@@ -8,6 +8,7 @@ import SwiftUI
 public enum LitState: String, Equatable, Sendable {
   case working
   case waiting
+  case done
   case idle
   case none
 }
@@ -23,6 +24,9 @@ public struct LitBloom: Equatable, Sendable {
 
   public static let working = LitBloom(b1: 0.13, b2: 0.06, b3: 0.02, rim: 0.55)
   public static let waiting = LitBloom(b1: 0.09, b2: 0.04, b3: 0.015, rim: 0.46)
+  // Between waiting and idle: warmer than a shell that is merely alive, quieter
+  // than one that is blocked. Finishing is worth noticing and nothing more.
+  public static let done = LitBloom(b1: 0.08, b2: 0.035, b3: 0.012, rim: 0.36)
   public static let idle = LitBloom(b1: 0.07, b2: 0.03, b3: 0.01, rim: 0.30)
   public static let none = LitBloom(b1: 0, b2: 0, b3: 0, rim: 0)
 
@@ -30,6 +34,7 @@ public struct LitBloom: Equatable, Sendable {
     switch state {
     case .working: .working
     case .waiting: .waiting
+    case .done: .done
     case .idle: .idle
     case .none: .none
     }
@@ -44,6 +49,7 @@ public enum LitTheme {
     switch dot {
     case .working: .working
     case .waiting: .waiting
+    case .done: .done
     case .idle: .idle
     case .stopped, .none: .none
     }
@@ -64,6 +70,7 @@ public enum LitTheme {
     switch state {
     case .working: TetherColors.heatWorking
     case .waiting: TetherColors.heatWaiting
+    case .done: TetherColors.heatDone
     case .idle: TetherColors.heatCool
     case .none: TetherColors.textFaint
     }
@@ -73,6 +80,7 @@ public enum LitTheme {
     switch state {
     case .working: "working"
     case .waiting: "waiting"
+    case .done: "finished"
     case .idle: "idle"
     case .none: "stopped"
     }

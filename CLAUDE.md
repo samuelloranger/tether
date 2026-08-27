@@ -55,7 +55,7 @@ Per workspace:
 - iOS: see `clients/apple/README.md` (`scripts/build-xcframework.sh`, then `xcodebuild -project clients/apple/Tether.xcodeproj -scheme TetherIOS …`)
 - Desktop: `bun --cwd apps/desktop run tauri:dev` / `tauri:build`
 
-**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | set-password | present | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
+**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | set-password | present | signal | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
 
 ## Runtime requirement (important)
 
@@ -73,6 +73,19 @@ Development and CI run **Bun 1.4.x** (`bun-version: latest`); 1.3.14 stays the f
 
 **Push notifications:** the server encrypts a notification for each registered device and posts it to the relay (`apps/relay`, URL baked in at build time by `pushRelay.ts` — not a user setting) when a session flips to `waiting`, emits an OSC 9/777 notify, exits, or finishes a long job. iOS only; `TetherNotificationService` decrypts on arrival, so the relay never sees plaintext. ntfy was removed in favour of this. A session is suppressed only while an attached subscriber reports `focused: true` — a backgrounded phone keeps its socket, so it still gets pushed. Notification delivery is advisory and never blocks the PTY path.
 
+**Session activity:** `sessionActivity.ts` classifies each session `working` /
+`waiting` / `done` / `idle` from the PTY byte stream. `waiting` means BLOCKED —
+the only state allowed to pull attention away from the active tab. `done` means
+a piece of work finished; its own colour, its own notification trigger, off by
+default. A program can override the guesswork with
+`tether signal <working|waiting|done>` (`TETHER_SESSION_ID` is exported into
+every session; the CLI posts to `/control/signal` with the present-control
+token). A session that has signalled is *agent-driven*: the byte heuristics stop
+guessing for it and its duplicate OSC push is suppressed, until it reaches a
+shell prompt, which releases the latch. `tether signal hooks` prints the Claude
+Code configuration mapping its `Notification` hook to `waiting` and its `Stop`
+hook to `done`.
+
 Because the holder is a separate detached process, **the shell survives both client disconnects and server restarts** — `reattachHolders()` re-adopts live sockets on boot. Killing is explicit (`POST /api/sessions/kill`).
 
 **Multi-host:** the client holds N host profiles in the Rust core (`host_store`); passwords on iOS live in Keychain, on desktop in the OS keyring under service `tether-desktop`, account `server-password-<hostId>` (falling back to localStorage when no Secret Service is running). The drawer groups sessions by host. Cache and connection keys are `"<hostId>:<sessionId>"` — session ids are only unique per host. Every host is independently failable. `tether://session/<id>?host=<identityName>` deep links resolve a notification tap to the right host.
@@ -83,7 +96,7 @@ Because the holder is a separate detached process, **the shell survives both cli
 
 ## HTTP API surface (`app.ts`)
 
-`/api/status` + `/api/setup` (TOFU pairing) · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices` and `tls`) · `/api/push/{register,unregister}` · `/api/admin/{password,update,restart,test-notification}` (the first three require the current password in the body, on top of the token).
+`/api/status` + `/api/setup` (TOFU pairing) · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/control/signal` for program-declared session state, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices` and `tls`) · `/api/push/{register,unregister}` · `/api/admin/{password,update,restart,test-notification}` (the first three require the current password in the body, on top of the token).
 
 ## Conventions & gotchas
 

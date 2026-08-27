@@ -36,12 +36,14 @@ const ACTIVITY_TO_PROTO: Record<DomainActivity, Activity> = {
   working: Activity.WORKING,
   waiting: Activity.WAITING,
   idle: Activity.IDLE,
+  done: Activity.DONE,
 };
 
 const ACTIVITY_FROM_PROTO: Partial<Record<Activity, DomainActivity>> = {
   [Activity.WORKING]: 'working',
   [Activity.WAITING]: 'waiting',
   [Activity.IDLE]: 'idle',
+  [Activity.DONE]: 'done',
 };
 
 /** Raw PTY bytes, no wrapper. */

@@ -73,6 +73,8 @@ export interface HeatColors {
   working: string;
   /** wants an answer from you */
   waiting: string;
+  /** finished a piece of work — wears the flavour's success token */
+  done: string;
   /** alive and quiet — also the structural/idle tint */
   cool: string;
 }
@@ -210,7 +212,7 @@ function fromCatppuccin(flavor: CatppuccinFlavor): UiTheme {
       foreground: p.text,
       cursor: flavor === 'latte' ? '#dc8a78' : '#f5e0dc',
     },
-    heat: { working: p.yellow, waiting: p.red, cool: p.blue },
+    heat: { working: p.yellow, waiting: p.red, done: p.green, cool: p.blue },
   };
 }
 
@@ -238,7 +240,7 @@ function defaultDark(): UiTheme {
       info: '#7c8cf8',
     },
     terminal: { background: '#0b0b13', foreground: '#ccccdf', cursor: '#f5e0dc' },
-    heat: { working: '#f2b34c', waiting: '#ff7050', cool: '#7c8cf8' },
+    heat: { working: '#f2b34c', waiting: '#ff7050', done: '#6ee7a8', cool: '#7c8cf8' },
   };
 }
 
@@ -264,7 +266,7 @@ function defaultLight(): UiTheme {
       info: '#4353d0',
     },
     terminal: fromCatppuccin('latte').terminal,
-    heat: { working: '#8a5a00', waiting: '#c4381c', cool: '#4353d0' },
+    heat: { working: '#8a5a00', waiting: '#c4381c', done: '#1c7a4f', cool: '#4353d0' },
   };
 }
 

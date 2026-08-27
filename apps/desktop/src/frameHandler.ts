@@ -72,7 +72,12 @@ export function applyServerFrame(
   }
   if (frame.type === 'activity' && typeof frame.activity === 'string') {
     const activity = frame.activity;
-    if (activity === 'working' || activity === 'waiting' || activity === 'idle') {
+    if (
+      activity === 'working' ||
+      activity === 'waiting' ||
+      activity === 'done' ||
+      activity === 'idle'
+    ) {
       return { lastAppliedId, kind: 'activity', activity };
     }
   }
