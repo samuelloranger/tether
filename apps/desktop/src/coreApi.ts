@@ -124,6 +124,10 @@ export async function coreDetectLinks(
   return invoke<DetectedLinkSpan[][]>('core_detect_links', { texts, wrapped });
 }
 
+export async function coreOpenExternal(url: string): Promise<void> {
+  await invoke('open_external', { url });
+}
+
 export async function coreOsc52Decode(data: string): Promise<string | null> {
   return invoke<string | null>('core_osc52_decode', { data });
 }

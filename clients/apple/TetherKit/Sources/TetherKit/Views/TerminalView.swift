@@ -554,6 +554,8 @@ public struct TerminalView: View {
   /// drew across the drawer, clipping its "New terminal" button. A sheet does not
   /// have this problem because presenting one takes first responder away.
   public var overlayPresented: Bool = false
+  /// Opens a workspace file path detected in the terminal grid.
+  public var onOpenFile: (String, Int?, Int?) -> Void = { _, _, _ in }
   @State private var accessory = TerminalAccessoryModel()
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
@@ -577,12 +579,14 @@ public struct TerminalView: View {
     store: SessionStore,
     preferences: AppPreferences,
     onAddHost: @escaping () -> Void = {},
-    overlayPresented: Bool = false
+    overlayPresented: Bool = false,
+    onOpenFile: @escaping (String, Int?, Int?) -> Void = { _, _, _ in }
   ) {
     self.store = store
     self.preferences = preferences
     self.onAddHost = onAddHost
     self.overlayPresented = overlayPresented
+    self.onOpenFile = onOpenFile
   }
 
   public var body: some View {
@@ -607,7 +611,10 @@ public struct TerminalView: View {
           onTap: { keyboardFocused = true },
           onSelectionText: { text in selectionText = text },
           onOpenURL: { url in UIApplication.shared.open(url) },
-          onMouseBytes: { store.sendInput($0) }
+          onOpenFile: onOpenFile,
+          onMouseBytes: { store.sendInput($0) },
+          mouseMode: store.terminalMouseMode,
+          mouseSgr: store.terminalMouseSgr
         )
         // No inset. The gutter that used to be here cost two columns and, being
         // a different colour from the grid, was itself half of the frame the

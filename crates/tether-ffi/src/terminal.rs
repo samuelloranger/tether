@@ -48,6 +48,21 @@ impl FfiTerminalEmulator {
         paste_payload(&text, bracketed)
     }
 
+    /// Active mouse tracking mode: `off` | `normal` | `button` | `any`.
+    pub fn mouse_mode(&self) -> String {
+        self.inner
+            .lock()
+            .expect("terminal lock")
+            .mouse_mode()
+            .as_str()
+            .to_string()
+    }
+
+    /// Whether SGR mouse encoding (DECSET 1006) is enabled.
+    pub fn mouse_sgr(&self) -> bool {
+        self.inner.lock().expect("terminal lock").mouse_sgr()
+    }
+
     pub fn generation(&self) -> u64 {
         self.inner.lock().expect("terminal lock").generation()
     }
@@ -116,5 +131,15 @@ mod tests {
         let (_header, cells) = decode_grid_snapshot(&emulator.snapshot()).expect("decode");
         assert_eq!(cells[0].codepoint, '\u{4f60}' as u32);
         assert_eq!(cells[1].codepoint, b' ' as u32);
+    }
+
+    #[test]
+    fn mouse_mode_and_sgr_surface_through_ffi() {
+        let emulator = FfiTerminalEmulator::new(20, 5);
+        assert_eq!(emulator.mouse_mode(), "off");
+        assert!(!emulator.mouse_sgr());
+        emulator.feed(b"\x1b[?1000h\x1b[?1006h".to_vec());
+        assert_eq!(emulator.mouse_mode(), "normal");
+        assert!(emulator.mouse_sgr());
     }
 }

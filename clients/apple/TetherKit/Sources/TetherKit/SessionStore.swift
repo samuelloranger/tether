@@ -24,6 +24,10 @@ public final class SessionStore {
     didSet { ResumeMemory.rememberSession(activeSessionId, forHost: activeHostId) }
   }
   public var terminalSnapshot: Data?
+  /// Mouse tracking mode from the local VT emulator (DECSET 1000/1002/1003).
+  public private(set) var terminalMouseMode: MouseMode = .off
+  /// SGR mouse encoding (DECSET 1006) from the local VT emulator.
+  public private(set) var terminalMouseSgr: Bool = true
   public var errorMessage: String?
   public var isLoading = false
   public var isPairing = false
@@ -559,9 +563,23 @@ public final class SessionStore {
   private func refreshTerminalSnapshot() {
     guard let emulator else { return }
     let generation = emulator.generation()
+    // Mouse mode can flip without a viewport change (e.g. vim entering/leaving
+    // mouse tracking). Keep the surface's input path in sync either way.
+    syncMouseModes(from: emulator)
     guard generation != lastRenderedGeneration else { return }
     lastRenderedGeneration = generation
     terminalSnapshot = emulator.snapshot()
+  }
+
+  private func syncMouseModes(from emulator: FfiTerminalEmulator) {
+    let nextMode = MouseMode(rawValue: emulator.mouseMode()) ?? .off
+    let nextSgr = emulator.mouseSgr()
+    if terminalMouseMode != nextMode {
+      terminalMouseMode = nextMode
+    }
+    if terminalMouseSgr != nextSgr {
+      terminalMouseSgr = nextSgr
+    }
   }
 
   /// Pulls a grid snapshot from the core when terminal FFI is wired. Until then, no-op.
@@ -671,6 +689,8 @@ public final class SessionStore {
       emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
       emulatorKey = key
       terminalSnapshot = nil
+      terminalMouseMode = .off
+      terminalMouseSgr = true
     }
     lastRenderedGeneration = nil
     let sinceId = replayStore.sinceId(sessionId: key)
@@ -709,6 +729,8 @@ public final class SessionStore {
     emulator = nil
     emulatorKey = nil
     terminalSnapshot = nil
+    terminalMouseMode = .off
+    terminalMouseSgr = true
     lastRenderedGeneration = nil
   }
 

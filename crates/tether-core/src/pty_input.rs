@@ -35,6 +35,16 @@ impl MouseMode {
             _ => Self::Off,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::X10 => "x10",
+            Self::Normal => "normal",
+            Self::Button => "button",
+            Self::Any => "any",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { rendererLinksForRow, shouldActivateLink } from './terminalLinks';
 
 describe('shouldActivateLink', () => {
-  it('requires a modifier on desktop', () => {
+  it('opens on plain click by default', () => {
+    expect(shouldActivateLink({}, false)).toBe(true);
+    expect(shouldActivateLink(undefined, false)).toBe(true);
+  });
+
+  it('can require a modifier when asked', () => {
     expect(shouldActivateLink({}, true)).toBe(false);
     expect(shouldActivateLink({ ctrlKey: true }, true)).toBe(true);
     expect(shouldActivateLink({ metaKey: true }, true)).toBe(true);

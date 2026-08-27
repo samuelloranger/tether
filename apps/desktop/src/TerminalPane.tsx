@@ -6,11 +6,15 @@ import { useEffect, useRef, useState } from 'react';
 import { sendJson, type TerminalSocket } from './coreTransport';
 import type { FrameApplyResult } from './frameHandler';
 import { setPasteListener } from './pasteBus';
+import { pastePayload } from './pastePayload';
 import type { UI_THEMES } from './preferences';
 import { bindTerminalSession } from './terminalBind';
 import { TerminalFindBar } from './terminalSearch';
 
 import '@xterm/xterm/css/xterm.css';
+
+/** Local xterm history — independent of server `scrollbackRows` (log retention). */
+const LOCAL_SCROLLBACK = 5000;
 
 export interface TerminalPaneProps {
   wsOrigin: string;
@@ -29,6 +33,7 @@ function mountTerminal(
   container: HTMLElement,
   boot: TerminalPaneProps['terminalTheme'],
   fontFamily: string,
+  fontSize: number,
 ): {
   term: Terminal;
   fit: FitAddon;
@@ -41,10 +46,10 @@ function mountTerminal(
     // Mocha constant flashed the wrong background for a frame on every other
     // flavour — visibly so on the light ones.
     fontFamily: `${fontFamily}, ui-monospace, monospace`,
-    fontSize: 14,
+    fontSize,
     theme: boot,
     allowProposedApi: true,
-    scrollback: 1000,
+    scrollback: LOCAL_SCROLLBACK,
   });
   const fit = new FitAddon();
   const search = new SearchAddon();
@@ -60,39 +65,93 @@ function mountTerminal(
   return { term, fit, search, dispose: () => term.dispose() };
 }
 
+type BootOpts = {
+  theme: TerminalPaneProps['terminalTheme'];
+  fontFamily: string;
+  fontSize: number;
+};
+
+function bindMountedTerminal(input: {
+  container: HTMLElement;
+  boot: BootOpts;
+  hostId: string;
+  sessionId: string;
+  wsOrigin: string;
+  password: string;
+  isInteractive: () => boolean;
+  onFrame: TerminalPaneProps['onFrame'];
+  onDisconnected: () => void;
+  onOpenFind: () => void;
+}): {
+  term: Terminal;
+  fit: FitAddon;
+  search: SearchAddon;
+  socket: () => TerminalSocket | null;
+  sendFocus: (focused: boolean) => void;
+  dispose: () => void;
+} {
+  const mounted = mountTerminal(
+    input.container,
+    input.boot.theme,
+    input.boot.fontFamily,
+    input.boot.fontSize,
+  );
+  const bound = bindTerminalSession({
+    term: mounted.term,
+    fit: mounted.fit,
+    search: mounted.search,
+    hostId: input.hostId,
+    sessionId: input.sessionId,
+    wsOrigin: input.wsOrigin,
+    password: input.password,
+    isInteractive: input.isInteractive,
+    onFrame: input.onFrame,
+    onDisconnected: input.onDisconnected,
+    onOpenFind: input.onOpenFind,
+  });
+  return {
+    term: mounted.term,
+    fit: mounted.fit,
+    search: mounted.search,
+    socket: bound.socket,
+    sendFocus: bound.sendFocus,
+    dispose: () => {
+      bound.dispose();
+      mounted.dispose();
+    },
+  };
+}
+
 function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const getSocketRef = useRef<(() => TerminalSocket | null) | null>(null);
+  const sendFocusRef = useRef<((focused: boolean) => void) | null>(null);
   const onFrameRef = useRef(props.onFrame);
   const onDisconnectedRef = useRef(props.onDisconnected);
   onFrameRef.current = props.onFrame;
   onDisconnectedRef.current = props.onDisconnected;
-  // Boot-only values. They must not sit in the mount effect's dependencies:
-  // remounting the terminal on a theme or font change would throw away the
-  // scrollback. A later effect applies changes to the live instance.
-  const bootRef = useRef({ theme: props.terminalTheme, fontFamily: props.fontFamily });
-  bootRef.current = { theme: props.terminalTheme, fontFamily: props.fontFamily };
+  // Boot-only values. Theme/font changes must not remount (would drop scrollback).
+  const bootRef = useRef<BootOpts>({
+    theme: props.terminalTheme,
+    fontFamily: props.fontFamily,
+    fontSize: props.fontSize ?? 14,
+  });
+  bootRef.current = {
+    theme: props.terminalTheme,
+    fontFamily: props.fontFamily,
+    fontSize: props.fontSize ?? 14,
+  };
   const [search, setSearch] = useState<SearchAddon | null>(null);
   const [findOpen, setFindOpen] = useState(false);
 
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return undefined;
-    const {
-      term,
-      fit,
-      search: searchAddon,
-      dispose,
-    } = mountTerminal(container, bootRef.current.theme, bootRef.current.fontFamily);
-    termRef.current = term;
-    fitRef.current = fit;
-    setSearch(searchAddon);
-    const bound = bindTerminalSession({
-      term,
-      fit,
-      search: searchAddon,
+    const live = bindMountedTerminal({
+      container,
+      boot: bootRef.current,
       hostId: props.hostId,
       sessionId: props.sessionId,
       wsOrigin: props.wsOrigin,
@@ -102,24 +161,28 @@ function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: b
       onDisconnected: () => onDisconnectedRef.current(),
       onOpenFind: () => setFindOpen(true),
     });
-    getSocketRef.current = bound.socket;
+    termRef.current = live.term;
+    fitRef.current = live.fit;
+    setSearch(live.search);
+    getSocketRef.current = live.socket;
+    sendFocusRef.current = live.sendFocus;
     return () => {
-      bound.dispose();
+      live.dispose();
       getSocketRef.current = null;
+      sendFocusRef.current = null;
       termRef.current = null;
       fitRef.current = null;
       setSearch(null);
-      dispose();
     };
   }, [props.sessionId, props.hostId, props.wsOrigin, props.password, interactiveRef]);
 
-  return { hostRef, termRef, fitRef, getSocketRef, search, findOpen, setFindOpen };
+  return { hostRef, termRef, fitRef, getSocketRef, sendFocusRef, search, findOpen, setFindOpen };
 }
 
 export function TerminalPane(props: TerminalPaneProps) {
   const interactiveRef = useRef(props.interactive);
   interactiveRef.current = props.interactive;
-  const { hostRef, termRef, fitRef, getSocketRef, search, findOpen, setFindOpen } =
+  const { hostRef, termRef, fitRef, getSocketRef, sendFocusRef, search, findOpen, setFindOpen } =
     useTerminalMount(props, interactiveRef);
 
   useEffect(() => {
@@ -137,10 +200,13 @@ export function TerminalPane(props: TerminalPaneProps) {
     if (!props.interactive) return undefined;
     setPasteListener((text) => {
       const socket = getSocketRef.current?.() ?? null;
-      if (socket) sendJson(socket, { type: 'input', text });
+      const term = termRef.current;
+      if (!socket || !term) return;
+      const payload = pastePayload(text, term.modes.bracketedPasteMode);
+      sendJson(socket, { type: 'input', text: payload });
     });
     return () => setPasteListener(null);
-  }, [props.interactive, getSocketRef]);
+  }, [props.interactive, getSocketRef, termRef]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -153,11 +219,31 @@ export function TerminalPane(props: TerminalPaneProps) {
       const next = fit.proposeDimensions();
       if (socket)
         sendJson(socket, { type: 'resize', cols: next?.cols ?? 80, rows: next?.rows ?? 24 });
+      sendFocusRef.current?.(true);
     } else {
       term.blur();
       setFindOpen(false);
+      sendFocusRef.current?.(false);
     }
-  }, [props.interactive, termRef, fitRef, getSocketRef, setFindOpen]);
+  }, [props.interactive, termRef, fitRef, getSocketRef, sendFocusRef, setFindOpen]);
+
+  // Window / document blur while this pane is active — same push-suppression
+  // contract as iOS scenePhase (server suppresses while focused:true).
+  useEffect(() => {
+    if (!props.interactive) return undefined;
+    const report = () => {
+      const visible = document.visibilityState === 'visible' && document.hasFocus();
+      sendFocusRef.current?.(visible);
+    };
+    window.addEventListener('blur', report);
+    window.addEventListener('focus', report);
+    document.addEventListener('visibilitychange', report);
+    return () => {
+      window.removeEventListener('blur', report);
+      window.removeEventListener('focus', report);
+      document.removeEventListener('visibilitychange', report);
+    };
+  }, [props.interactive, sendFocusRef]);
 
   return (
     <div className={`resident-pane${props.interactive ? ' active' : ' inactive'}`}>

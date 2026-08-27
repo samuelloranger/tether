@@ -19,7 +19,20 @@ import { isFindChord } from './terminalSearch';
 
 export interface BoundTerminalSession {
   socket: () => TerminalSocket | null;
+  /** Report focus to the server (deduped). Used by TerminalPane for tab/window changes. */
+  sendFocus: (focused: boolean) => void;
   dispose: () => void;
+}
+
+function sendFocusFrame(
+  socket: TerminalSocket | null,
+  focused: boolean,
+  last: { value: boolean | null },
+): void {
+  if (!socket) return;
+  if (last.value === focused) return;
+  last.value = focused;
+  sendJson(socket, { type: 'focus', focused });
 }
 
 function attachFeatures(
@@ -27,7 +40,7 @@ function attachFeatures(
   sendInput: (text: string, isAutoReply: boolean) => void,
   isInteractive: () => boolean,
   onOpenFind: () => void,
-): () => void {
+): { dispose: () => void; clearMouseSgr: () => void } {
   let mouseSgr = false;
   const osc52 = registerOsc52Handler(term, (text) => {
     if (!isInteractive()) return;
@@ -56,12 +69,17 @@ function attachFeatures(
   };
   term.attachCustomKeyEventHandler((event) => !(isCopyChord(event) || isFindChord(event)));
   window.addEventListener('keydown', onKey);
-  return () => {
-    window.removeEventListener('keydown', onKey);
-    unMouse();
-    links.dispose();
-    unMouseSgr();
-    osc52.dispose();
+  return {
+    clearMouseSgr: () => {
+      mouseSgr = false;
+    },
+    dispose: () => {
+      window.removeEventListener('keydown', onKey);
+      unMouse();
+      links.dispose();
+      unMouseSgr();
+      osc52.dispose();
+    },
   };
 }
 
@@ -72,12 +90,14 @@ function openSocket(
     sessionId: string;
     wsOrigin: string;
     password: string;
+    isInteractive: () => boolean;
     onFrame: (hostId: string, sessionId: string, frame: FrameApplyResult) => void;
     onDisconnected: () => void;
   },
   sink: ReturnType<typeof createFrameSink>,
   replay: ReplayGate,
   state: { lastAppliedId: number; socket: TerminalSocket | null; closed: boolean },
+  lastFocus: { value: boolean | null },
 ): void {
   const onClose = () => {
     if (state.closed) return;
@@ -108,6 +128,9 @@ function openSocket(
       return;
     }
     state.socket = s;
+    // Fresh socket: tell the server whether this pane is the focused subscriber
+    // so push suppression matches iOS.
+    sendFocusFrame(s, input.isInteractive(), lastFocus);
   });
 }
 
@@ -125,13 +148,21 @@ export function bindTerminalSession(input: {
   onOpenFind: () => void;
 }): BoundTerminalSession {
   const state = { lastAppliedId: 0, socket: null as TerminalSocket | null, closed: false };
+  const lastFocus = { value: null as boolean | null };
   let writeDepth = 0;
+  let clearMouseSgr = () => {};
+
   const sink = createFrameSink(input.term, {
     beginWrite: () => {
       writeDepth += 1;
     },
     endWrite: () => {
       writeDepth = Math.max(0, writeDepth - 1);
+    },
+    onReset: () => {
+      // term.reset() clears DECSET 1006; our CSI mirror must follow or SGR
+      // reports keep firing after a server reset until the next 1006h.
+      clearMouseSgr();
     },
   });
   const replay = createReplayGate();
@@ -143,9 +174,11 @@ export function bindTerminalSession(input: {
     if (state.socket) sendJson(state.socket, { type: 'input', text });
   };
 
-  openSocket(input, sink, replay, state);
+  const features = attachFeatures(input.term, sendInput, input.isInteractive, input.onOpenFind);
+  clearMouseSgr = features.clearMouseSgr;
+
+  openSocket(input, sink, replay, state, lastFocus);
   const dataSub = input.term.onData((text) => sendInput(text, writeDepth > 0));
-  const unFeatures = attachFeatures(input.term, sendInput, input.isInteractive, input.onOpenFind);
 
   const observer = new ResizeObserver(() => {
     input.fit.fit();
@@ -157,12 +190,13 @@ export function bindTerminalSession(input: {
 
   return {
     socket: () => state.socket,
+    sendFocus: (focused: boolean) => sendFocusFrame(state.socket, focused, lastFocus),
     dispose: () => {
       state.closed = true;
       replay.dispose();
       observer.disconnect();
       dataSub.dispose();
-      unFeatures();
+      features.dispose();
       state.socket?.close();
       void forgetCoreSession(input.sessionId);
     },

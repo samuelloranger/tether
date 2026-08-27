@@ -26,6 +26,8 @@ export type FrameApplyResult = {
 export interface FrameSinkHooks {
   beginWrite(): void;
   endWrite(): void;
+  /** Fired after `term.reset()` so callers can drop mode mirrors (e.g. mouse SGR). */
+  onReset?(): void;
 }
 
 export function createFrameSink(term: Terminal, hooks?: FrameSinkHooks): FrameSink {
@@ -36,6 +38,7 @@ export function createFrameSink(term: Terminal, hooks?: FrameSinkHooks): FrameSi
     },
     reset: () => {
       term.reset();
+      hooks?.onReset?.();
     },
   };
 }

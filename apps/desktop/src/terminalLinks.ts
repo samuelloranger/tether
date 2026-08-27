@@ -1,8 +1,8 @@
-import { openUrl } from '@tauri-apps/plugin-opener';
 import type { IDisposable, ILink, Terminal } from '@xterm/xterm';
-import { coreDetectLinks, type DetectedLinkSpan } from './coreApi';
+import { coreDetectLinks, coreOpenExternal, type DetectedLinkSpan } from './coreApi';
+import { requestFileOpen } from './fileOpenBus';
 
-/** Desktop requires Ctrl/Cmd+click so a drag-select isn't hijacked. */
+/** When true, Ctrl/Cmd+click is required so a drag-select isn't hijacked. */
 export function shouldActivateLink(
   event: { ctrlKey?: boolean; metaKey?: boolean } | undefined,
   requireModifierClick: boolean,
@@ -13,10 +13,10 @@ export function shouldActivateLink(
 
 export async function activateLinkTarget(target: DetectedLinkSpan['target']): Promise<void> {
   if (target.kind === 'external') {
-    await openUrl(target.url);
+    await coreOpenExternal(target.url);
     return;
   }
-  // Sprint D owns the file viewer. A path match is a no-op until then.
+  requestFileOpen(target.path, target.line ?? undefined, target.column ?? undefined);
 }
 
 export function rendererLinksForRow(
@@ -41,9 +41,9 @@ export function registerTetherLinks(
   terminal: Terminal,
   opts?: { requireModifierClick?: boolean },
 ): IDisposable {
-  const requireModifierClick = opts?.requireModifierClick ?? true;
-  let cache: DetectedLinkSpan[][] = [];
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  // Plain click opens — same as iOS tap. Drag-select still works because xterm
+  // only fires link activate on click, not on drag.
+  const requireModifierClick = opts?.requireModifierClick ?? false;
 
   const snapshot = () => {
     const buffer = terminal.buffer.active;
@@ -56,42 +56,34 @@ export function registerTetherLinks(
     return { texts, wrapped };
   };
 
-  const refresh = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      const { texts, wrapped } = snapshot();
-      void coreDetectLinks(texts, wrapped)
-        .then((spans) => {
-          cache = spans;
-        })
-        .catch(() => {});
-    }, 40);
-  };
-
   const disposable = terminal.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
-      const { texts } = snapshot();
-      const links: ILink[] = rendererLinksForRow(texts, cache, bufferLineNumber - 1).map(
-        (link) => ({
-          range: link.range,
-          text: link.text,
-          activate: (event) => {
-            if (!shouldActivateLink(event, requireModifierClick)) return;
-            void activateLinkTarget(link.target);
-          },
-        }),
-      );
-      callback(links.length ? links : undefined);
+      const { texts, wrapped } = snapshot();
+      // Resolve spans for this call — a debounced side cache left clicks racing
+      // the detector with an empty map, so the underline never appeared and
+      // activate never ran.
+      void coreDetectLinks(texts, wrapped)
+        .then((spans) => {
+          const links: ILink[] = rendererLinksForRow(texts, spans, bufferLineNumber - 1).map(
+            (link) => ({
+              range: link.range,
+              text: link.text,
+              activate: (event) => {
+                if (!shouldActivateLink(event, requireModifierClick)) return;
+                void activateLinkTarget(link.target).catch(() => {});
+              },
+            }),
+          );
+          callback(links.length ? links : undefined);
+        })
+        .catch(() => {
+          callback(undefined);
+        });
     },
   });
 
-  const onWrite = terminal.onWriteParsed(() => refresh());
-  refresh();
-
   return {
     dispose() {
-      if (timer) clearTimeout(timer);
-      onWrite.dispose();
       disposable.dispose();
     },
   };
