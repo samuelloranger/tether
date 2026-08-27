@@ -85,9 +85,10 @@ guessing for it, its duplicate OSC push is suppressed, and — because a
 full-screen agent redraws constantly, including right after its own "finished"
 signal — plain output no longer drags it back to `working`. The latch holds
 until a shell prompt releases it. `tether signal hooks` prints the Claude Code
-configuration, which needs **three** hooks: `UserPromptSubmit` → `working`,
-`Notification` → `waiting`, `Stop` → `done`. The first is not optional — with
-the heuristics disabled, nothing else ever returns the session to `working`.
+configuration, which wires three hooks: `UserPromptSubmit` → `working`,
+`Notification` → `waiting`, `Stop` → `done`. Wire all three: a keystroke through
+Tether also ends a `done`, which is what keeps a two-hook config from stranding
+the tab, but only `UserPromptSubmit` covers a turn you did not type here.
 
 Because the holder is a separate detached process, **the shell survives both client disconnects and server restarts** — `reattachHolders()` re-adopts live sockets on boot. Killing is explicit (`POST /api/sessions/kill`).
 
