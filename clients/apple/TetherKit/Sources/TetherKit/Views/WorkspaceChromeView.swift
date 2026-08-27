@@ -40,6 +40,7 @@ public struct WorkspaceChromeView: View {
   @Bindable public var workspace: WorkspaceController
 
   @State private var photoItem: PhotosPickerItem?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   public init(store: SessionStore, workspace: WorkspaceController) {
     self.store = store
@@ -66,7 +67,10 @@ public struct WorkspaceChromeView: View {
           onBack: { workspace.closeFile() },
           pathLabel: workspace.lastOpenPath
         )
-        .transition(.move(edge: .trailing))
+        // The viewer covers the terminal, so it comes from the side the way a
+        // pushed screen does. It already declared this transition and never got
+        // an animation to run it on, so the file viewer appeared by hard cut.
+        .transition(reduceMotion ? .opacity : .move(edge: .trailing))
       }
 
       if let preview = workspace.activePresentation,
@@ -81,12 +85,26 @@ public struct WorkspaceChromeView: View {
             Task { await workspace.closePresentation(store: store, id: preview.id) }
           }
         )
+        .transition(reduceMotion ? .opacity : .move(edge: .trailing))
       }
 
       if workspace.isUploading {
         uploadCover
+          .transition(.opacity)
       }
     }
+    .animation(
+      TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion),
+      value: showsFileViewer
+    )
+    .animation(
+      TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion),
+      value: workspace.activePresentation?.id
+    )
+    .animation(
+      TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion),
+      value: workspace.isUploading
+    )
     .onAppear { workspace.startPolling(store: store) }
     .onDisappear { workspace.stopPolling() }
     .sheet(isPresented: $workspace.showOpenFileSheet) {

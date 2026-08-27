@@ -16,6 +16,7 @@ public struct TerminalTitleBar<Overflow: View>: View {
   @ViewBuilder public var overflow: () -> Overflow
 
   @Environment(\.litChrome) private var lit
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   public init(
     store: SessionStore,
@@ -58,6 +59,16 @@ public struct TerminalTitleBar<Overflow: View>: View {
             .padding(.vertical, 4)
             .background(lit.color.opacity(0.14), in: Capsule())
             .accessibilityLabel("Session \(LitTheme.label(for: lit.state))")
+            // The word changes with the state, so the pill is one element that
+            // re-reads rather than three that swap: it fades through instead of
+            // cutting, and only grows in from the trailing edge — where it
+            // actually sits — when it first appears.
+            .contentTransition(.opacity)
+            .transition(
+              reduceMotion
+                ? .opacity
+                : .opacity.combined(with: .scale(scale: 0.94, anchor: .trailing))
+            )
         }
 
         if let hostId = store.activeHostId {
@@ -102,6 +113,7 @@ public struct TerminalTitleBar<Overflow: View>: View {
           Text(LitTheme.label(for: lit.state))
             .font(.system(.caption2, design: .monospaced).weight(.semibold))
             .foregroundStyle(lit.color)
+            .contentTransition(.opacity)
           Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
@@ -114,10 +126,17 @@ public struct TerminalTitleBar<Overflow: View>: View {
     }
     .background(TetherColors.surface)
     .overlay(alignment: .bottom) {
+      // Keyed so the two rules crossfade. A hairline is the thinnest thing on
+      // screen and the first thing a hard colour cut reads as a glitch on.
       Rectangle()
         .fill(lit.state == .none ? TetherColors.border : lit.color.opacity(max(lit.bloom.rim, 0.25)))
         .frame(height: 1)
+        .id(lit.state)
+        .transition(.opacity)
     }
+    // One animation for the whole bar's heat: rim, pill, and the strip's word
+    // move together, because they are three readings of a single state.
+    .animation(TetherMotion.heat(to: lit.state, reduceMotion: reduceMotion), value: lit.state)
   }
 
   /// An icon on a 44pt target — see `tapTarget()`. These were 32pt frames (36
@@ -156,6 +175,8 @@ public struct TerminalTitleBar<Overflow: View>: View {
 private struct ConnectionBadge: View {
   let status: SessionStore.ConnectionStatus
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   /// A dot, not a word.
   ///
   /// The label ("online" / "offline" / "connecting") cost roughly a fifth of the
@@ -166,10 +187,11 @@ private struct ConnectionBadge: View {
   /// is the one state a static colour cannot express. The words survive for
   /// VoiceOver, which is where they were doing real work.
   var body: some View {
-    Group {
+    ZStack {
       if status == .connecting {
         ProgressView()
           .controlSize(.mini)
+          .transition(.opacity)
       } else {
         Circle()
           .fill(tint)
@@ -177,9 +199,15 @@ private struct ConnectionBadge: View {
           .overlay(
             Circle().stroke(tint.opacity(0.35), lineWidth: 3).blur(radius: 1)
           )
+          // Keyed on the status, not just on dot-vs-spinner: reconnecting and
+          // then dropping again are different events, and a colour that cuts
+          // between them looks like a render bug rather than a state.
+          .id(status)
+          .transition(.opacity)
       }
     }
     .frame(width: 14, height: 14)
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: status)
     .accessibilityLabel(label)
   }
 

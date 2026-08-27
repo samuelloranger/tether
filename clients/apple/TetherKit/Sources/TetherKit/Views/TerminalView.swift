@@ -33,6 +33,8 @@ public final class TerminalAccessoryModel {
 }
 
 public struct TerminalAccessoryBar: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   public var model: TerminalAccessoryModel
   public var onKey: (String) -> Void
   public var onPaste: (String) -> Void
@@ -103,10 +105,14 @@ public struct TerminalAccessoryBar: View {
       }
     )
     // Slide the whole row clear of the bottom edge rather than letting UIKit
-    // nudge it by its own height.
-    .offset(y: model.visible ? 0 : Self.keySize * 2.4)
+    // nudge it by its own height. Reduce Motion keeps the fade and drops the
+    // travel — the bar is a full row leaving the bottom of the screen.
+    .offset(y: model.visible || reduceMotion ? 0 : Self.keySize * 2.4)
     .opacity(model.visible ? 1 : 0)
-    .animation(.easeInOut(duration: 0.22), value: model.visible)
+    .animation(
+      TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion),
+      value: model.visible
+    )
   }
 
 
@@ -160,20 +166,22 @@ public struct TerminalAccessoryBar: View {
     .frame(minWidth: Self.keySize, minHeight: Self.keySize)
   }
 
+  /// Arming Ctrl changes what the *next* key does, and nothing on screen moves
+  /// except this one face — so it gets the same confirmation the D-pad and the
+  /// paste key get.
+  private static let armFeedback = UISelectionFeedbackGenerator()
+
   private var ctrlButton: some View {
     Button {
+      Self.armFeedback.selectionChanged()
       model.ctrlArmed.toggle()
     } label: {
       Text(model.ctrlArmed ? "Ctrl ✓" : "Ctrl")
-        .font(.callout.weight(.medium))
-        .padding(.horizontal, 10)
-        .frame(minWidth: Self.keySize, minHeight: Self.keySize)
-        .background(model.ctrlArmed ? TetherColors.accent : TetherColors.surfaceRaised)
-        .foregroundStyle(model.ctrlArmed ? TetherColors.onAccent : TetherColors.textPrimary)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .contentTransition(.opacity)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(TerminalKeyStyle(armed: model.ctrlArmed))
     .accessibilityLabel("Control modifier")
+    .accessibilityValue(model.ctrlArmed ? "Armed" : "Off")
   }
 
   private func accessoryButton(_ title: String, systemImage: String? = nil, action: @escaping () -> Void) -> some View {
@@ -187,14 +195,8 @@ public struct TerminalAccessoryBar: View {
           Text(title)
         }
       }
-      .font(.callout.weight(.medium))
-      .padding(.horizontal, 10)
-      .frame(minWidth: Self.keySize, minHeight: Self.keySize)
-      .background(TetherColors.surfaceRaised)
-      .foregroundStyle(TetherColors.textPrimary)
-      .clipShape(RoundedRectangle(cornerRadius: 8))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(TerminalKeyStyle())
   }
 
   private func send(base: String) {
@@ -556,6 +558,7 @@ public struct TerminalView: View {
   public var overlayPresented: Bool = false
   /// Opens a workspace file path detected in the terminal grid.
   public var onOpenFile: (String, Int?, Int?) -> Void = { _, _, _ in }
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var accessory = TerminalAccessoryModel()
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
@@ -598,6 +601,9 @@ public struct TerminalView: View {
             onAddHost: onAddHost,
             onNewTerminal: { Task { await store.newTerminal() } }
           )
+          // Crossfade with the grid rather than cut: the first session of the
+          // day replaces this view, and a hard swap there reads as a reload.
+          .transition(.opacity)
         } else {
         TetherSurfaceRepresentable(
           snapshot: $store.terminalSnapshot,
@@ -632,6 +638,10 @@ public struct TerminalView: View {
           ScrollPositionIndicator(offset: scrollOffsetFromBottom)
             .padding(.trailing, 4)
             .padding(.top, 8)
+            // Fades in when you leave the live tail and out when you catch up.
+            // It appeared and vanished mid-scroll, which read as a rendering
+            // artefact of the scroll rather than as an answer to "where am I".
+            .transition(.opacity)
         }
 
         if let selectionText, !selectionText.isEmpty {
@@ -640,6 +650,20 @@ public struct TerminalView: View {
 
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      // Scoped to these three values so nothing here can animate the grid: the
+      // terminal surface must never be walked through intermediate sizes.
+      .animation(
+        TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion),
+        value: scrollOffsetFromBottom > 0
+      )
+      .animation(
+        TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion),
+        value: selectionText == nil
+      )
+      .animation(
+        TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion),
+        value: placeholderReason
+      )
 
       TerminalInputBridge(
         text: $inputBuffer,
@@ -722,6 +746,7 @@ public struct TerminalView: View {
       HStack {
         Spacer()
         Button {
+          Self.copyFeedback.impactOccurred()
           UIPasteboard.general.string = text
           selectionText = nil
         } label: {
@@ -737,7 +762,18 @@ public struct TerminalView: View {
         .padding(12)
       }
     }
+    // Rises from the corner it sits in, and leaves the same way. Reduce Motion
+    // keeps the fade only.
+    .transition(
+      reduceMotion
+        ? .opacity
+        : .opacity.combined(with: .move(edge: .bottom))
+    )
   }
+
+  /// Copying is a silent success — the selection disappears and nothing else
+  /// changes — so it gets the same light tap the D-pad and paste key give.
+  private static let copyFeedback = UIImpactFeedbackGenerator(style: .light)
 
   /// Height of the window the keyboard's end frame covers. Uses the window
   /// rather than UIScreen so it stays correct in a resized or split window.
