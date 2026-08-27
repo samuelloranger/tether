@@ -239,6 +239,7 @@ pub fn core_notify_waiting_edge(
         match value.as_deref() {
             Some("working") => Some(SessionActivity::Working),
             Some("waiting") => Some(SessionActivity::Waiting),
+            Some("done") => Some(SessionActivity::Done),
             Some("idle") => Some(SessionActivity::Idle),
             _ => None,
         }
