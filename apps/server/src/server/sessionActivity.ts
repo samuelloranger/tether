@@ -238,7 +238,7 @@ export function recordOutputEvent(
   let activity: Activity | null;
   if ((scan.bell || scan.notify) && !st.agentDriven)
     activity = transition(st, 'waiting', now, 'osc');
-  else if (scan.promptMark === 'A') activity = transition(st, 'idle', now);
+  else if (scan.promptMark === 'A') activity = releaseToIdle(st, now);
   else if (scan.promptMark === 'C') activity = transition(st, 'working', now);
   else if (scan.tail === null)
     activity = fresh ? st.activity : null; // pure escape chunk — no evidence
@@ -324,14 +324,14 @@ export function getActivity(id: string, now = Date.now()): Activity | null {
 }
 
 /**
- * A bare shell prompt is the one unambiguous signal that whatever was running
- * has exited — including the agent. So this is also where the agent-driven
- * latch is released: without it, quitting Claude Code would leave the session
+ * A shell prompt — the tail regex, or an OSC 133;A semantic mark — is the one
+ * unambiguous signal that whatever was running has exited, including the agent.
+ * So this is also where the agent-driven latch is released: without it, quitting Claude Code would leave the session
  * permanently exempt from the heuristics, stuck on whatever state it died in.
  */
-function releaseToIdle(st: SessionActivityState, now: number): void {
+function releaseToIdle(st: SessionActivityState, now: number): Activity | null {
   st.agentDriven = false;
-  transition(st, 'idle', now);
+  return transition(st, 'idle', now);
 }
 
 export function clearActivity(id: string): void {

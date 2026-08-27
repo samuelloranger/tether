@@ -243,6 +243,20 @@ describe('recordSignal', () => {
     expect(isAgentDriven('s3')).toBe(false);
   });
 
+  test('an OSC 133 prompt mark releases the latch, like a prompt in the tail does', () => {
+    // A shell that emits semantic prompt marks reaches `idle` through a
+    // different branch than the tail regex. It has to release the latch too,
+    // or the session stays agent-driven forever and every later bell from an
+    // unrelated command is swallowed.
+    recordSignal('s3', 'done', T0);
+    expect(isAgentDriven('s3')).toBe(true);
+    expect(recordOutput('s3', '\x1b]133;A\x07', T0 + 10)).toBe('idle');
+    expect(isAgentDriven('s3')).toBe(false);
+    // And the proof it matters: a bell is heard again.
+    recordOutput('s3', 'oops\x07', T0 + 20);
+    expect(getActivity('s3', T0 + 30)).toBe('waiting');
+  });
+
   test('an agent-driven session stops raising its duplicate OSC push', () => {
     // The whole bug: Claude Code emits OSC 777 when it FINISHES, and
     // ptyHolder turns any notify payload into an oscNotify push. Once the
