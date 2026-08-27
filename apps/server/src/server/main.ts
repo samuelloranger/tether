@@ -265,6 +265,7 @@ Usage: tether <command>
   status           Show running state + HTTP health
   logs             Follow the server log (tail -f)
   present          Open/reset an agent HTML preview or install an agent skill
+  signal           Tell tether this session is working / waiting / done
   set-password     Set the shared access password (required for clients)
   update           Download the latest release binary and restart
   version          Print the version
@@ -312,6 +313,24 @@ switch (cmd) {
             ? `https://127.0.0.1:${plan.httpsPort}`
             : `http://127.0.0.1:${plan.httpPort}`,
         tokenFile: PRESENT_CONTROL_TOKEN_FILE,
+      });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    }
+    break;
+  }
+  case 'signal': {
+    const { parseSignalArgs, runSignal } = await import('./signalCli');
+    try {
+      const plan = resolveListenerPlan();
+      await runSignal(parseSignalArgs(process.argv.slice(3)), {
+        baseUrl:
+          plan.httpPort === null
+            ? `https://127.0.0.1:${plan.httpsPort}`
+            : `http://127.0.0.1:${plan.httpPort}`,
+        tokenFile: PRESENT_CONTROL_TOKEN_FILE,
+        sessionId: process.env.TETHER_SESSION_ID,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
