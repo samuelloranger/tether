@@ -126,7 +126,22 @@ const PS_PROFILE = [
   '}',
   '',
 ].join('\n');
-if (IS_WINDOWS) writeFileSync(PS_RC_PATH, PS_PROFILE);
+// Written WITH a UTF-8 BOM, which is load-bearing rather than decoration.
+//
+// Windows PowerShell 5.1 — the in-box fallback whenever pwsh 7 is not installed
+// (getDefaultWindowsShell prefers pwsh, but does not require it) — decodes a
+// BOM-less .ps1 using the system ANSI code page, not UTF-8. This file contains
+// non-ASCII in both the prompt glyph (❯) and its own comments (—), so on any
+// non-UTF-8 console default, which is most fr/de installs, the script is
+// already corrupted at PARSE time. The `[Console]::OutputEncoding = UTF8` line
+// inside it cannot help: by the time it runs, the mojibake is baked into the
+// string literal it was meant to protect. A BOM makes 5.1 decode the file as
+// UTF-8, and pwsh 7 — which assumes UTF-8 anyway — honours it too.
+// Built from the code point rather than pasted as a character: U+FEFF is
+// invisible in an editor, so a literal one here could be dropped or duplicated
+// by anyone touching this line without them ever seeing it.
+const UTF8_BOM = String.fromCharCode(0xfeff);
+if (IS_WINDOWS) writeFileSync(PS_RC_PATH, `${UTF8_BOM}${PS_PROFILE}`);
 
 // cmd.exe has no rcfile at all; its only hook is the PROMPT string, which does
 // understand $E (ESC) and $P (cwd). $P expands to a native "C:\dir" path, so

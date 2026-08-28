@@ -100,6 +100,40 @@ function secureInChild(target: string, isDir: boolean): string {
   return (proc.stdout ?? '').trim();
 }
 
+/**
+ * Every spelling `icacls` might legitimately use for the current user.
+ *
+ * It prints whatever the SID resolves to, and that is not one fixed string: a
+ * name when the account resolves, the bare SID when it does not (observed on a
+ * local profile here), and localised well-known names elsewhere in the same
+ * output ("AUTORITE NT\Système" on a French install). Asserting one hard-coded
+ * spelling made this fail on the CI runner while the ACL was perfectly correct.
+ *
+ * So the identity is matched against a set, and the property that actually
+ * matters — that exactly ONE identity is granted — is asserted by counting
+ * distinct entries, which no spelling can affect.
+ */
+function currentUserIdentities(): string[] {
+  const ids = [currentUserPrincipal(), process.env.USERNAME].filter(Boolean) as string[];
+  // `whoami /user` is the only in-box way to get our own SID as a string.
+  const who = spawnSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const sid = /"[^"]*","(S-1-[\d-]+)"/.exec(who.stdout ?? '')?.[1];
+  if (sid) ids.push(sid);
+  return ids.map((id) => id.toLowerCase());
+}
+
+/** The account names in `icacls` output, one per granted ACE. */
+function grantedAccounts(aclText: string, target: string): string[] {
+  return aclText
+    .split('\n')
+    .map((line) => line.replace(target, '').trim())
+    .filter((line) => line.includes(':('))
+    .map((line) => line.slice(0, line.indexOf(':(')).trim().toLowerCase());
+}
+
 test.skipIf(!IS_WINDOWS)('applies a real owner-only ACL to a directory', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'tether-acl-e2e-'));
   try {
@@ -117,17 +151,10 @@ test.skipIf(!IS_WINDOWS)('applies a real owner-only ACL to a directory', () => {
     // Exactly one principal is granted, and it is us. Administrators and SYSTEM
     // lose their inherited entries too, which mirrors POSIX: root can still read
     // a 0700 file, but only by taking ownership first.
-    const principal = currentUserPrincipal();
-    expect(principal).not.toBeNull();
-    const granted = acl
-      .split('\n')
-      .map((line) => line.replace(dir, '').trim())
-      .filter((line) => line.includes(':('))
-      .map((line) => line.slice(0, line.indexOf(':(')));
-    expect(granted.length).toBeGreaterThan(0);
-    for (const account of granted) {
-      expect(account.toLowerCase()).toBe((principal as string).toLowerCase());
-    }
+    expect(currentUserPrincipal()).not.toBeNull();
+    const granted = grantedAccounts(acl, dir);
+    expect(new Set(granted).size).toBe(1);
+    expect(currentUserIdentities()).toContain(granted[0]);
 
     // And the grant is inheritable, which is what lets the files created inside
     // HOLDERS_DIR skip an icacls spawn each.
@@ -150,14 +177,9 @@ test.skipIf(!IS_WINDOWS)('a directory ACL is inherited by files created inside i
 
     const shown = spawnSync('icacls.exe', [child], { encoding: 'utf8', windowsHide: true });
     expect(shown.status).toBe(0);
-    const principal = (currentUserPrincipal() as string).toLowerCase();
-    const accounts = shown.stdout
-      .split('\n')
-      .map((line) => line.replace(child, '').trim())
-      .filter((line) => line.includes(':('))
-      .map((line) => line.slice(0, line.indexOf(':(')).toLowerCase());
-    expect(accounts.length).toBeGreaterThan(0);
-    for (const account of accounts) expect(account).toBe(principal);
+    const accounts = grantedAccounts(shown.stdout, child);
+    expect(new Set(accounts).size).toBe(1);
+    expect(currentUserIdentities()).toContain(accounts[0]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

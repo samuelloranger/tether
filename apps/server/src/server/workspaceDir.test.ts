@@ -242,11 +242,22 @@ test('lstat ino is populated and distinguishes directories on this host', () => 
       expect(lstatSync(canonicalPath(a), { bigint: true }).ino).toBe(idA.ino);
     }
 
-    // A replaced directory is a different object, which is exactly the swap the
-    // identity check exists to catch.
-    rmSync(b, { recursive: true, force: true });
-    mkdirSync(b);
-    expect(lstatSync(b, { bigint: true }).ino).not.toBe(idB.ino);
+    // A replaced directory reads as a different object — on Windows.
+    //
+    // Deliberately not asserted on POSIX: inode numbers are RECYCLED there, and
+    // the allocator commonly hands the just-freed one straight back, so a
+    // recreated directory often has the identity of the one it replaced. That
+    // is not a flake to paper over; it is why readWorkspaceDir does not rest on
+    // dev+ino alone and re-checks `realpathSync(target) === target` afterwards.
+    // The delete-and-recreate case is caught by that second guard, not this one.
+    //
+    // (Observed: ext4 on the CI runner recycled it; the WSL2 volume here did
+    // not. Either is legal, which is exactly why nothing may depend on it.)
+    if (IS_WINDOWS) {
+      rmSync(b, { recursive: true, force: true });
+      mkdirSync(b);
+      expect(lstatSync(b, { bigint: true }).ino).not.toBe(idB.ino);
+    }
   });
 });
 
