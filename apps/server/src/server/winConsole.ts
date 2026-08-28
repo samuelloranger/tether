@@ -42,6 +42,7 @@
 // walk over the result is 0.03ms). The remaining `taskkill /F /T` is a spawn,
 // but it is now fire-and-forget — only the *decision* is on the input path.
 import { logWarn } from './log';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 const ENABLE_PROCESSED_INPUT = 0x0001;
 const GENERIC_READ = 0x8000_0000;
@@ -235,7 +236,7 @@ export function interruptForeground(shellPid: number): 'interrupted' | 'raw' | '
     // waiting for taskkill to report back adds nothing except latency on the
     // keystroke path. unref() so a holder that is shutting down is not held
     // open by it; taskkill is a separate process and finishes either way.
-    Bun.spawn(args, { stdio: ['ignore', 'ignore', 'ignore'] }).unref();
+    Bun.spawn(args, { stdio: ['ignore', 'ignore', 'ignore'], ...HIDE_CONSOLE }).unref();
   } catch {}
   return 'interrupted';
 }

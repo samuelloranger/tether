@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 const REPO_SLUG = process.env.TETHER_REPO_SLUG ?? 'samuelloranger/tether';
 
@@ -205,7 +206,7 @@ async function stageUpdateBinary(dir: string, asset: string, bytes: ArrayBuffer)
     mkdirSync(staging, { recursive: true });
     const archive = path.join(staging, 'tether.tar.gz');
     await Bun.write(archive, bytes);
-    const ex = Bun.spawnSync(['tar', 'xzf', archive, '-C', staging, 'tether']);
+    const ex = Bun.spawnSync(['tar', 'xzf', archive, '-C', staging, 'tether'], HIDE_CONSOLE);
     if (!ex.success) {
       console.error(`Failed to extract ${asset}. Aborting.`);
       rmSync(staging, { recursive: true, force: true });

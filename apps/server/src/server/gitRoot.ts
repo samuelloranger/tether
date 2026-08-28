@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 // A session's cwd can stop existing while the shell still sits in it — a
 // `git worktree remove`, an `rm -rf` of the current directory, a branch switch
@@ -18,6 +19,7 @@ export class GitRootError extends Error {
 export function findGitRoot(cwd: string): string | null {
   const result = spawnSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
+    ...HIDE_CONSOLE,
   });
   const top = result.status === 0 ? result.stdout.trim() : '';
   return top ? realpathSync(top) : null;
@@ -26,6 +28,7 @@ export function findGitRoot(cwd: string): string | null {
 export function resolveGitDir(root: string): string {
   const result = spawnSync('git', ['-C', root, 'rev-parse', '--absolute-git-dir'], {
     encoding: 'utf8',
+    ...HIDE_CONSOLE,
   });
   const gitDir = result.status === 0 ? result.stdout.trim() : '';
   if (!gitDir) throw new Error('not a git repository');

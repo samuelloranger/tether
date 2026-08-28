@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { verifyPassword } from './auth';
 import { setAuthHash } from './db';
 import { selfArgv, VERSION } from './runtime';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 const attempts = new Map<string, number[]>();
 const MAX_ATTEMPTS = 5;
@@ -36,7 +37,7 @@ export async function changePassword(
 export function scheduleAdminCommand(command: 'update' | 'restart'): void {
   setTimeout(() => {
     const [cmd, ...args] = selfArgv(command);
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', ...HIDE_CONSOLE });
     child.unref();
   }, 0);
 }

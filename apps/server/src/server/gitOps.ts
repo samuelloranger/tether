@@ -3,6 +3,7 @@ import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { MAX_DIFF_BYTES, readDiffSummary } from './gitDiff';
 import { canRewriteHead, readRepoStatus } from './gitStatus';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 // Write-side git operations for the diff view: staging, discarding, committing,
 // and history. Same trust anchor as the read side — the session's live cwd
@@ -30,6 +31,7 @@ function runGit(root: string, args: string[], input?: string, okStatuses: number
     encoding: 'utf8',
     input,
     maxBuffer: MAX_DIFF_BYTES + 65_536,
+    ...HIDE_CONSOLE,
   });
   if (result.status === null) throw new GitOpsError(404, 'not a git repository');
   if (!okStatuses.includes(result.status)) {
@@ -115,6 +117,7 @@ function isTracked(root: string, requestedPath: string): boolean {
     ['-C', root, 'ls-files', '--error-unmatch', '--', requestedPath],
     {
       encoding: 'utf8',
+      ...HIDE_CONSOLE,
     },
   );
   return result.status === 0;
@@ -174,6 +177,7 @@ export function undoLastCommit(root: string): void {
   // Need a parent — root commit cannot soft-reset.
   const parents = spawnSync('git', ['-C', root, 'rev-list', '--count', 'HEAD'], {
     encoding: 'utf8',
+    ...HIDE_CONSOLE,
   });
   if (parents.status !== 0 || Number(parents.stdout.trim()) < 2) {
     throw new GitOpsError(409, 'cannot undo: no parent commit');

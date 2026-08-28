@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 // A per-process identity token that changes if the PID is recycled. On Linux we
 // read starttime (field 22 of /proc/<pid>/stat, clock ticks since boot). On
@@ -40,13 +41,16 @@ export function processStartTime(pid: number): string | null {
 // control commands (main.ts), each of which runs this at most twice.
 function windowsStartTime(pid: number): string | null {
   try {
-    const proc = Bun.spawnSync([
-      'powershell.exe',
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).StartTime.Ticks`,
-    ]);
+    const proc = Bun.spawnSync(
+      [
+        'powershell.exe',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).StartTime.Ticks`,
+      ],
+      HIDE_CONSOLE,
+    );
     const out = proc.stdout.toString().trim();
     // A missing pid yields an empty string (SilentlyContinue swallows the
     // error and .Ticks on $null produces nothing) — same "gone" signal the

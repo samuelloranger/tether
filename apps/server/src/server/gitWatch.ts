@@ -18,6 +18,7 @@ import { resolveGitDir } from './gitRoot';
 import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './gitStatus';
 import { shouldSkipWatchDirName } from './gitWatchIgnore';
 import { logWarn } from './log';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 // Directories git itself never has to look inside of when diffing/statusing —
 // the working-tree half of the watch skips these instead of handing the bare
@@ -40,7 +41,7 @@ async function listIgnoredDirs(root: string): Promise<Set<string>> {
       '--directory',
       '--no-empty-directory',
     ],
-    { stdout: 'pipe', stderr: 'ignore' },
+    { stdout: 'pipe', stderr: 'ignore', ...HIDE_CONSOLE },
   );
   const [stdout, exitCode] = await Promise.all([
     new Response(process.stdout).text(),
@@ -69,6 +70,30 @@ const MAX_WATCHED_DIRS = 4096;
 // How long one scan slice may hold the event loop. The scan runs in slices
 // because setRoot is called from the PTY output path: `cd` must not wait on it.
 const SCAN_SLICE_MS = 8;
+
+/**
+ * Whether to install filesystem watchers at all. Off on Windows.
+ *
+ * Watching is not just more expensive there, it is expensive visibly: a git
+ * spawn costs 200-380ms against ~5ms on Linux, readRepoStatus alone runs four,
+ * and the daemon runs console-less — so each one opens and closes a console
+ * window on the user's desktop (spawnWindow.ts). An actively edited repository
+ * made that a continuous stream.
+ *
+ * Only the *live* part is given up: the diff panel still fills on `cd` and on
+ * an explicit kick, and /api/sessions/:id/diff is untouched, so a client that
+ * asks still gets a current answer. It just no longer updates by itself.
+ *
+ * TETHER_GIT_WATCH=1 opts back in (=0 opts out anywhere). The watcher works
+ * correctly here — its tests pass on Windows — so this is a cost decision, not
+ * a bug fix, and it should be reversible by whoever disagrees with the trade.
+ *
+ * Read once at module load rather than per call: it gates a hot path, and a
+ * value that could change between two `cd`s would leave a session half-watched.
+ */
+const GIT_WATCH_ENABLED =
+  process.env.TETHER_GIT_WATCH === '1' ||
+  (process.platform !== 'win32' && process.env.TETHER_GIT_WATCH !== '0');
 
 /** The two git reads the watcher publishes, injectable so tests can slow them down. */
 export type GitWatchReaders = {
@@ -162,6 +187,16 @@ export class GitWatch {
   private async beginScan(root: string, gen: number): Promise<void> {
     this.scanTimer = undefined;
     if (this.disposed || gen !== this.scanGen) return;
+
+    // Watching disabled (Windows): publish one summary for this root and stop,
+    // installing no watchers. See GIT_WATCH_ENABLED above for why, and what the
+    // diff panel still does and no longer does.
+    if (!GIT_WATCH_ENABLED) {
+      this.refresh();
+      this.settle();
+      return;
+    }
+
     let ignoredDirs: Set<string>;
     try {
       ignoredDirs = await this.readIgnoredDirs(root);

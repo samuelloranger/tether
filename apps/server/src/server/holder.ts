@@ -24,6 +24,7 @@ import {
 import { INITIAL_LIVE_CWD_STATE, type LiveCwdState, updateLiveCwd } from './liveCwd';
 import { getProcessCwd } from './procCwd';
 import { FrameDecoder } from './proto/frame';
+import { HIDE_CONSOLE } from './spawnWindow';
 import { interruptForeground } from './winConsole';
 
 const IS_WINDOWS = process.platform === 'win32';
@@ -99,6 +100,7 @@ function killWindowsTree(pid: number): void {
   try {
     Bun.spawnSync(['taskkill.exe', '/PID', String(pid), '/T', '/F'], {
       stdio: ['ignore', 'ignore', 'ignore'],
+      ...HIDE_CONSOLE,
     });
   } catch {}
 }

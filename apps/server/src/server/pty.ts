@@ -24,6 +24,7 @@ import { getDefaultShell, shellInvocation } from './ptyShell';
 import { COMPILED, selfArgv } from './runtime';
 import { clearActivity, recordInput } from './sessionActivity';
 import { clearTitle } from './sessionTitle';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 export type { FocusSubscriber, SessionFrame, Subscriber } from './ptyHolder';
 export { sockPathFor } from './ptyHolder';
@@ -316,6 +317,7 @@ export function killSession(id: string) {
         if (process.platform === 'win32') {
           Bun.spawnSync(['taskkill.exe', '/PID', String(pid), '/T', '/F'], {
             stdio: ['ignore', 'ignore', 'ignore'],
+            ...HIDE_CONSOLE,
           });
         } else {
           process.kill(pid, 'SIGTERM');

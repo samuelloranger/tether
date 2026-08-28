@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 // Server-side RepoStatus + pure helpers. Client mirror:
 // parseRepoStatus / canPushHead live in tether-core (git_status).
@@ -40,7 +41,7 @@ export function formatRepoStatusLabel(status: RepoStatus): string | null {
 }
 
 function gitOut(root: string, args: string[]): { status: number | null; stdout: string } {
-  const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+  const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', ...HIDE_CONSOLE });
   return { status: result.status, stdout: (result.stdout || '').trim() };
 }
 
@@ -80,7 +81,7 @@ function gitOutAsync(
   args: string[],
 ): Promise<{ status: number | null; stdout: string }> {
   return new Promise((resolve) => {
-    const child = spawn('git', ['-C', root, ...args]);
+    const child = spawn('git', ['-C', root, ...args], HIDE_CONSOLE);
     let stdout = '';
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
