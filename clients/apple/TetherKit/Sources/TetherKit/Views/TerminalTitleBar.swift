@@ -35,95 +35,68 @@ public struct TerminalTitleBar<Overflow: View>: View {
   }
 
   public var body: some View {
-    VStack(spacing: 0) {
-      HStack(spacing: 8) {
-        iconButton("line.3.horizontal", label: "Open session list", action: onOpenDrawer)
+    HStack(spacing: 8) {
+      iconButton("line.3.horizontal", label: "Open session list", action: onOpenDrawer)
 
-        VStack(alignment: .leading, spacing: 2) {
-          Text(sessionTitle)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(TetherColors.textPrimary)
-            .lineLimit(1)
-          Text(subtitle)
-            .font(.caption)
-            .foregroundStyle(TetherColors.textSecondary)
-            .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        if lit.state != .none {
-          Text(LitTheme.label(for: lit.state))
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(lit.color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(lit.color.opacity(0.14), in: Capsule())
-            .accessibilityLabel("Session \(LitTheme.label(for: lit.state))")
-            // The word changes with the state, so the pill is one element that
-            // re-reads rather than three that swap: it fades through instead of
-            // cutting, and only grows in from the trailing edge — where it
-            // actually sits — when it first appears.
-            .contentTransition(.opacity)
-            .transition(
-              reduceMotion
-                ? .opacity
-                : .opacity.combined(with: .scale(scale: 0.94, anchor: .trailing))
-            )
-        }
-
-        if let hostId = store.activeHostId {
-          ConnectionBadge(status: store.connectionStatus(for: hostId))
-        }
-
-        // No spacing inside the cluster: the 44pt targets already sit their glyphs
-        // 44pt apart, and adding gaps on top pushed the row wide enough to
-        // truncate the session title — the one thing in the bar that carries
-        // information.
-        HStack(spacing: 0) {
-          iconButton("plus", label: "New terminal", action: onNewSession)
-          iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
-            .disabled(store.activeSessionId == nil)
-          iconButton("gearshape", label: "Settings", action: onSettings)
-          Menu {
-            overflow()
-          } label: {
-            Image(systemName: "ellipsis")
-              .font(.body.weight(.semibold))
-              .tapTarget()
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel("Terminal menu")
-        }
+      VStack(alignment: .leading, spacing: 2) {
+        Text(sessionTitle)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(TetherColors.textPrimary)
+          .lineLimit(1)
+        Text(subtitle)
+          .font(.caption)
+          .foregroundStyle(TetherColors.textSecondary)
+          .lineLimit(1)
       }
-      .foregroundStyle(TetherColors.textPrimary)
-      .padding(.horizontal, 4)
-      .padding(.vertical, 4)
+      .frame(maxWidth: .infinity, alignment: .leading)
 
-      // Desktop status strip, folded into the title bar so it does not fight the
-      // utility bar / keyboard for the bottom edge.
-      if let session = store.activeSession {
-        HStack(spacing: 8) {
-          Text(session.id)
-            .font(.system(.caption2, design: .monospaced))
-            .foregroundStyle(TetherColors.textFaint)
-            .lineLimit(1)
-          Text("out \(SessionStrip.relativeSince(session.lastOutputAt))")
-            .font(.system(.caption2, design: .monospaced))
-            .foregroundStyle(TetherColors.textFaint)
-          Text(LitTheme.label(for: lit.state))
-            .font(.system(.caption2, design: .monospaced).weight(.semibold))
-            .foregroundStyle(lit.color)
-            .contentTransition(.opacity)
-          Spacer(minLength: 0)
+      if lit.state != .none {
+        Text(LitTheme.label(for: lit.state))
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(lit.color)
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .background(lit.color.opacity(0.14), in: Capsule())
+          .accessibilityLabel("Session \(LitTheme.label(for: lit.state))")
+          // The word changes with the state, so the pill is one element that
+          // re-reads rather than three that swap: it fades through instead of
+          // cutting, and only grows in from the trailing edge — where it
+          // actually sits — when it first appears.
+          .contentTransition(.opacity)
+          .transition(
+            reduceMotion
+              ? .opacity
+              : .opacity.combined(with: .scale(scale: 0.94, anchor: .trailing))
+          )
+      }
+
+      if let hostId = store.activeHostId {
+        ConnectionBadge(status: store.connectionStatus(for: hostId))
+      }
+
+      // No spacing inside the cluster: the 44pt targets already sit their glyphs
+      // 44pt apart, and adding gaps on top pushed the row wide enough to
+      // truncate the session title — the one thing in the bar that carries
+      // information.
+      HStack(spacing: 0) {
+        iconButton("plus", label: "New terminal", action: onNewSession)
+        iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
+          .disabled(store.activeSessionId == nil)
+        iconButton("gearshape", label: "Settings", action: onSettings)
+        Menu {
+          overflow()
+        } label: {
+          Image(systemName: "ellipsis")
+            .font(.body.weight(.semibold))
+            .tapTarget()
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 6)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-          "Session \(session.id), last output \(SessionStrip.relativeSince(session.lastOutputAt)), \(LitTheme.label(for: lit.state))"
-        )
+        .buttonStyle(.plain)
+        .accessibilityLabel("Terminal menu")
       }
     }
+    .foregroundStyle(TetherColors.textPrimary)
+    .padding(.horizontal, 4)
+    .padding(.vertical, 4)
     .background(TetherColors.surface)
     .overlay(alignment: .bottom) {
       // Keyed so the two rules crossfade. A hairline is the thinnest thing on
@@ -134,8 +107,8 @@ public struct TerminalTitleBar<Overflow: View>: View {
         .id(lit.state)
         .transition(.opacity)
     }
-    // One animation for the whole bar's heat: rim, pill, and the strip's word
-    // move together, because they are three readings of a single state.
+    // One animation for the whole bar's heat: the rim and the pill move
+    // together, because they are two readings of a single state.
     .animation(TetherMotion.heat(to: lit.state, reduceMotion: reduceMotion), value: lit.state)
   }
 
