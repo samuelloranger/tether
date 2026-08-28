@@ -4,13 +4,19 @@ import path from 'node:path';
 import { logInfo } from './log';
 import { DB_PATH, OLD_DB_PATH, USING_DEFAULT_DB } from './paths';
 import { COMPILED } from './runtime';
+import { secureCreatedDir } from './winAcl';
 
 const DB_DIR = path.dirname(DB_PATH);
-mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
 // The DB holds the argon2 password hash — keep the dir owner-only.
+const createdDbDir = mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
 try {
   chmodSync(DB_DIR, 0o700);
 } catch {}
+// Both lines above are silent no-ops on Windows (node maps chmod onto the
+// read-only attribute), which would leave the password hash resting on whatever
+// ACL ~/.tether inherited. secureCreatedDir applies the equivalent grant, and
+// only on the boot that actually created the directory — see winAcl.ts.
+secureCreatedDir(createdDbDir);
 
 // One-time migration: pre-binary installs kept the DB in the ~/.tether/app
 // source copy. Only for the installed binary on its default path (never a dev

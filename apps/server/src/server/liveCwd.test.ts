@@ -3,6 +3,7 @@ import {
   clearLiveCwd,
   getLiveCwd,
   INITIAL_LIVE_CWD_STATE,
+  normalizeOsc7Cwd,
   recordChunk,
   reportCwd,
   updateLiveCwd,
@@ -57,4 +58,48 @@ test('recordChunk/getLiveCwd/clearLiveCwd track state per session id', () => {
   expect(getLiveCwd('live-cwd-session')).toBe('/a/b');
   clearLiveCwd('live-cwd-session');
   expect(getLiveCwd('live-cwd-session')).toBeNull();
+});
+
+// --- Windows: a file URI path is not a native path -------------------------
+// The URI is always rooted at "/", so a Windows cwd arrives as "/C:/Users/x".
+// The leading slash is URI syntax and the separators depend on which shell
+// emitted it (our PowerShell profile writes "/", cmd.exe's $P writes "\").
+
+test('normalizeOsc7Cwd converts a Windows file-URI path to a native path', () => {
+  expect(normalizeOsc7Cwd('/C:/Users/sam/project', true)).toBe(String.raw`C:\Users\sam\project`);
+});
+
+test('normalizeOsc7Cwd accepts the backslashes cmd.exe $P emits', () => {
+  expect(normalizeOsc7Cwd(String.raw`/C:\Users\sam\project`, true)).toBe(
+    String.raw`C:\Users\sam\project`,
+  );
+});
+
+test('normalizeOsc7Cwd keeps a drive root intact', () => {
+  expect(normalizeOsc7Cwd('/D:/', true)).toBe('D:\\');
+});
+
+test('normalizeOsc7Cwd leaves POSIX paths untouched on POSIX', () => {
+  expect(normalizeOsc7Cwd('/home/sam/project', false)).toBe('/home/sam/project');
+});
+
+test('normalizeOsc7Cwd leaves a non-drive path alone even on Windows', () => {
+  // A Git Bash / WSL shell reports MSYS-style paths that have no drive letter;
+  // rewriting separators there would produce a path Windows cannot resolve.
+  expect(normalizeOsc7Cwd('/c/Users/sam', true)).toBe('/c/Users/sam');
+});
+
+test('an OSC 7 report from a Windows shell lands as a native cwd', () => {
+  const id = 'win-osc7-cwd';
+  const state = updateLiveCwd(
+    INITIAL_LIVE_CWD_STATE,
+    '\x1b]7;file://myhost/C:/Users/sam/project\x07',
+  );
+  expect(state.reported).toBe(true);
+  // Platform-dependent by design: the same bytes mean a native path on Windows
+  // and are left verbatim elsewhere.
+  expect(state.cwd).toBe(
+    process.platform === 'win32' ? String.raw`C:\Users\sam\project` : '/C:/Users/sam/project',
+  );
+  clearLiveCwd(id);
 });

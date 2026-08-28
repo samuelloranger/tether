@@ -15,7 +15,7 @@
     "format": "biome check --write",
     "gen:proto": "bunx --bun @bufbuild/buf@1.60.0 generate",
     "docs:dev": "vitepress dev docs",
-    "docs:build": "cp install.sh docs/public/install.sh && vitepress build docs",
+    "docs:build": "cp install.sh docs/public/install.sh && cp install.ps1 docs/public/install.ps1 && vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "test:desktop": "bun --cwd apps/desktop run test"
   },

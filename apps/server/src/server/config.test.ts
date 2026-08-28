@@ -1,6 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
-import { DEFAULT_CONFIG, getConfig, patchConfig, resetConfigCache } from './config';
+import {
+  DEFAULT_CONFIG,
+  getConfig,
+  getShellSupport,
+  patchConfig,
+  resetConfigCache,
+} from './config';
 import { db, setSetting } from './db';
+import { describeShellSupport } from './ptyShell';
 
 afterEach(() => {
   db.query("DELETE FROM settings WHERE key LIKE 'config.%'").run();
@@ -59,4 +66,31 @@ test('a stored row written before done existed keeps the choices it does have', 
   resetConfigCache();
   expect(getConfig().triggers.waiting).toBe(false);
   expect(getConfig().triggers.done).toBe(false);
+});
+
+// session.defaultShell is free text a client may PATCH to anything, and one of
+// those anythings (an MSYS/Git-for-Windows bash) silently disables the git,
+// file-tree and upload features. The setting is deliberately still accepted —
+// an advanced user may want it — so the classification is what makes the cost
+// visible. Derived state about a setting, like pushDevices and tls: reported,
+// never patchable.
+test('the shell report follows the configured default shell', async () => {
+  expect(getShellSupport().shell).toBe(
+    describeShellSupport(DEFAULT_CONFIG.session.defaultShell).shell,
+  );
+  await patchConfig({ session: { defaultShell: 'nu' } });
+  expect(getShellSupport().shell).toBe('nu');
+});
+
+test('a known-broken shell is accepted, but reported as broken', async () => {
+  const next = await patchConfig({ session: { defaultShell: 'bash.exe' } });
+  // Not rejected: the PATCH goes through and the value is stored.
+  expect(next.session.defaultShell).toBe('bash.exe');
+  const support = describeShellSupport('bash.exe', true);
+  expect(support.integration).toBe('broken');
+  expect(support.reason).toContain('/c/Users/you');
+});
+
+test('the shell report is not a config key and cannot be patched', async () => {
+  await expect(patchConfig({ session: { shellSupport: 'full' } })).rejects.toThrow();
 });

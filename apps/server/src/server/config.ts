@@ -1,6 +1,8 @@
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import { getSetting, setSetting } from './db';
 import { logWarn } from './log';
+import { describeShellSupport, getDefaultShell, type ShellSupport } from './ptyShell';
 
 const nonNegativeInt = z.number().int().nonnegative();
 
@@ -43,8 +45,15 @@ export const DEFAULT_CONFIG: Config = {
   longJobSeconds: 300,
   identity: { name: process.env.HOSTNAME || 'Tether', color: '#89b4fa' },
   session: {
-    defaultShell: process.env.SHELL || 'bash',
-    defaultCwd: process.env.HOME || '/',
+    // getDefaultShell() rather than $SHELL directly: on Windows there is no
+    // login shell to read, and Git for Windows exports SHELL=<its bash.exe> to
+    // everything it launches — so a daemon started from a Git Bash prompt used
+    // to hand every session an MSYS shell reporting /c/Users/... paths that no
+    // Windows API can resolve. On POSIX it still resolves to the user's shell.
+    defaultShell: getDefaultShell(),
+    // homedir() honours USERPROFILE on Windows, where HOME is usually unset —
+    // the old `|| '/'` fallback was not a directory that exists there.
+    defaultCwd: homedir(),
     scrollbackRows: 2000,
     silenceMs: 15_000,
   },
@@ -121,4 +130,19 @@ export async function patchConfig(partial: unknown): Promise<Config> {
 
 export function resetConfigCache(): void {
   cached = null;
+}
+
+/**
+ * How well the *currently configured* default shell integrates with tether —
+ * derived state about a setting, in the same family as `pushDevices` and `tls`:
+ * reported so a client can explain itself, never patchable.
+ *
+ * `session.defaultShell` is a free-text field a client may set to anything, and
+ * one of those anythings (an MSYS/Git-for-Windows bash) silently disables the
+ * git, file-tree and upload features — see describeShellSupport in ptyShell.ts.
+ * The choice is deliberately not rejected: an advanced user may want that shell
+ * and accept the cost. This is how they find out they are paying it.
+ */
+export function getShellSupport(): ShellSupport {
+  return describeShellSupport(getConfig().session.defaultShell);
 }

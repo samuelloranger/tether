@@ -30,3 +30,7 @@ The desktop and iOS clients update through their own channels, not this command 
 ::: info macOS
 Release binaries are unsigned. On first run macOS may need: `xattr -d com.apple.quarantine ~/.local/bin/tether`.
 :::
+
+::: info Windows
+The swap works differently — Windows won't overwrite a running executable, so the old binary is parked as `tether.exe.old` and swept on the next update. See [Windows server](/windows#updating).
+:::

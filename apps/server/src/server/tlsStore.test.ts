@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { X509Certificate } from 'node:crypto';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { HAS_POSIX_MODES } from '../../test-paths';
 import { CERT_VALID_DAYS, ensureTlsMaterial, localAltNames, tlsPaths } from './tlsStore';
 
 const dirs: string[] = [];
@@ -45,14 +54,32 @@ describe('ensureTlsMaterial', () => {
     expect(second.certPem).toBe(first.certPem);
   });
 
-  test('the private key is owner-read-only and the directory is owner-only', () => {
+  // Windows has no mode bits to assert — see HAS_POSIX_MODES. The key still
+  // lands under the user profile, whose ACL is the protection there, but that
+  // is a different mechanism and this test cannot speak to it.
+  test.skipIf(!HAS_POSIX_MODES)(
+    'the private key is owner-read-only and the directory is owner-only',
+    () => {
+      const dir = tempDir();
+      ensureTlsMaterial(dir);
+      const paths = tlsPaths(dir);
+      expect(statSync(paths.keyPath).mode & 0o777).toBe(0o600);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      // The certificate is public by nature — readable is correct.
+      expect(statSync(paths.certPath).mode & 0o777).toBe(0o644);
+    },
+  );
+
+  // The mode is unassertable on Windows, but "the key exists and is not
+  // world-readable by construction" still is: it must at least be there, and
+  // the cert must be a separate file rather than the key being reused.
+  test('the key and certificate are written as separate files', () => {
     const dir = tempDir();
     ensureTlsMaterial(dir);
     const paths = tlsPaths(dir);
-    expect(statSync(paths.keyPath).mode & 0o777).toBe(0o600);
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
-    // The certificate is public by nature — readable is correct.
-    expect(statSync(paths.certPath).mode & 0o777).toBe(0o644);
+    expect(existsSync(paths.keyPath)).toBe(true);
+    expect(existsSync(paths.certPath)).toBe(true);
+    expect(paths.keyPath).not.toBe(paths.certPath);
   });
 
   test('a half-written directory throws instead of minting a new identity', () => {
@@ -100,5 +127,39 @@ describe('localAltNames', () => {
     const san = new X509Certificate(material.certPem).subjectAltName ?? '';
     expect(san).toContain('DNS:localhost');
     expect(san).toContain('IP Address:127.0.0.1');
+  });
+});
+
+describe('windows ACL wiring', () => {
+  // The Windows protection here is an ACL, not a mode (see winAcl.ts), and the
+  // suite opts out of applying one — TETHER_SKIP_WINDOWS_ACL in test-preload.ts.
+  // winAcl.test.ts proves the ACL mechanism end to end; what these two pin is
+  // that wiring it in did not disturb generation, which is the failure that
+  // would actually lock every paired client out.
+
+  test('generation still succeeds when the directory already exists', () => {
+    // secureCreatedDir fires only on the mkdir that CREATES the directory, so
+    // this is the branch where it returns 'skipped' and the key's own
+    // secureWindowsPath call is the only protection applied — the shape a TLS
+    // dir laid down by a tether older than winAcl.ts arrives in.
+    const dir = tempDir();
+    mkdirSync(dir, { recursive: true });
+    const material = ensureTlsMaterial(dir);
+    expect(material.generated).toBe(true);
+    expect(existsSync(tlsPaths(dir).keyPath)).toBe(true);
+    // Readable afterwards: an ACL that excluded the account the daemon runs as
+    // would leave the server unable to load its own key on the next boot.
+    expect(ensureTlsMaterial(dir).fingerprintSha256).toBe(material.fingerprintSha256);
+  });
+
+  test('the certificate stays readable to the process that wrote it', () => {
+    // The cert is deliberately given no ACL of its own. It is public material —
+    // the value clients pin — and inside a 0o700 / owner-only directory it is
+    // already unreachable by another account on both platforms, so the 0o644 is
+    // a statement of intent rather than a grant. This asserts the consequence
+    // that matters: nothing about the ACL wiring made it unreadable.
+    const dir = tempDir();
+    const material = ensureTlsMaterial(dir);
+    expect(readFileSync(tlsPaths(dir).certPath, 'utf8')).toBe(material.certPem);
   });
 });

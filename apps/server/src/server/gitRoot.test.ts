@@ -3,10 +3,11 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { canonicalFixture } from '../../test-paths';
 import { findGitRoot, GitRootError, resolveGitDir, resolveGitRoot } from './gitRoot';
 
 test('resolves the git top-level for a nested cwd inside a repo', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'tether-gitroot-'));
+  const root = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-gitroot-')));
   try {
     execSync('git init -q', { cwd: root });
     mkdirSync(path.join(root, 'src', 'nested'), { recursive: true });
@@ -17,7 +18,7 @@ test('resolves the git top-level for a nested cwd inside a repo', () => {
 });
 
 test('falls back to the cwd itself when it is not inside a git repo', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tether-notgit-'));
+  const dir = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-notgit-')));
   try {
     expect(resolveGitRoot(dir)).toBe(realpathSync(dir));
   } finally {
@@ -26,7 +27,7 @@ test('falls back to the cwd itself when it is not inside a git repo', () => {
 });
 
 test('strictly finds a git root and absolute git directory', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'tether-gitroot-'));
+  const root = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-gitroot-')));
   try {
     execSync('git init -q', { cwd: root });
     expect(findGitRoot(root)).toBe(realpathSync(root));
@@ -37,7 +38,7 @@ test('strictly finds a git root and absolute git directory', () => {
 });
 
 test('returns null when strictly finding a git root outside a repository', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tether-notgit-'));
+  const dir = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-notgit-')));
   try {
     expect(findGitRoot(dir)).toBeNull();
   } finally {
@@ -46,7 +47,7 @@ test('returns null when strictly finding a git root outside a repository', () =>
 });
 
 test('reports a vanished working directory instead of throwing ENOENT', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tether-gitroot-'));
+  const dir = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-gitroot-')));
   rmSync(dir, { recursive: true, force: true });
   expect(() => resolveGitRoot(dir)).toThrow(GitRootError);
   try {

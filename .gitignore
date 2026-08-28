@@ -48,8 +48,9 @@ docs/.vitepress/cache/
 # published to https://samlo.cloud/tether/altstore.json — never commit)
 /altstore.json
 
-# generated: canonical install.sh copied in at docs build
+# generated: canonical install.sh / install.ps1 copied in at docs build
 docs/public/install.sh
+docs/public/install.ps1
 apps/mobile/dist/
 
 # Tauri

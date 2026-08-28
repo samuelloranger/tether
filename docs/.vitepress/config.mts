@@ -23,6 +23,7 @@ export default defineConfig({
         items: [
           { text: "Getting started", link: "/getting-started" },
           { text: "Desktop app", link: "/desktop" },
+          { text: "Windows server", link: "/windows" },
           { text: "Terminal basics", link: "/terminal/basics" },
           { text: "Sessions & tabs", link: "/terminal/sessions" },
           { text: "Saved commands & search", link: "/terminal/saved-commands" },

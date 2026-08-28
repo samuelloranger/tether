@@ -2,6 +2,25 @@
 const OSC7_RE = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 const FILE_URI_RE = /^file:\/\/[^/]*(\/.*)$/;
 
+// A file URI's path is always rooted at "/", so a Windows cwd arrives as
+// "/C:/Users/x" — the leading slash is URI syntax, not part of the path, and
+// the separators are whatever the emitting shell used (our PowerShell profile
+// writes forward slashes; cmd.exe's $P writes native backslashes). Everything
+// downstream — findGitRoot, the workspace file tree, upload paths — compares
+// against values from node:path, so hand back the native form.
+//
+// Takes the platform explicitly rather than reading process.platform so the
+// Windows shape stays testable from a POSIX CI runner.
+export function normalizeOsc7Cwd(
+  uriPath: string,
+  isWindows = process.platform === 'win32',
+): string {
+  if (!isWindows) return uriPath;
+  const drive = /^\/([A-Za-z]:[\\/].*)$/.exec(uriPath);
+  if (!drive) return uriPath;
+  return drive[1].replace(/\//g, '\\');
+}
+
 export interface LiveCwdState {
   cwd: string | null;
   residual: string;
@@ -34,9 +53,9 @@ export function updateLiveCwd(state: LiveCwdState, chunk: string): LiveCwdState 
     if (fileMatch) {
       reported = true;
       try {
-        cwd = decodeURIComponent(fileMatch[1]);
+        cwd = normalizeOsc7Cwd(decodeURIComponent(fileMatch[1]));
       } catch {
-        cwd = fileMatch[1];
+        cwd = normalizeOsc7Cwd(fileMatch[1]);
       }
     }
     consumed = OSC7_RE.lastIndex;
