@@ -41,7 +41,9 @@ public final class SessionStore {
   @ObservationIgnored private var hasRestoredSession = false
 
   private let hostStore: HostStoreAdapter
-  private let replayStore: FfiReplayStore
+  /// Owns the socket and the VT emulator on its OWN executor. See
+  /// `TerminalPipeline` for why none of that may run on the main actor.
+  @ObservationIgnored private let pipeline = TerminalPipeline()
   /// `lazy` + `@ObservationIgnored`: the coordinator's closures capture `self`,
   /// which cannot happen inside `init` before every stored property is
   /// initialized. Building it on first use sidesteps that. It is internal
@@ -58,29 +60,53 @@ public final class SessionStore {
     }
   )
   private var pollTask: Task<Void, Never>?
-  private var socketTask: Task<Void, Never>?
-  private var socket: URLSessionWebSocketTask?
-  /// Tracks whether the active socket is usable (set false on cancel / read end).
-  private var socketIsOpen = false
-  /// Last inbound WS traffic (any frame, including ping), epoch ms — for resume stale check.
-  private var lastTrafficMs: Int64 = 0
-  private var lastRenderedGeneration: UInt64?
-  /// The core's VT parser for the active session. Output bytes are fed in and
-  /// packed TGRD grids come back out; this is what turns a byte stream into
-  /// something the CoreText surface can draw.
-  @ObservationIgnored private var emulator: FfiTerminalEmulator?
-  /// Which session `emulator` holds the scrollback for, as a HOST-QUALIFIED key.
-  /// A reconnect to the same session must reuse it; only a different session
-  /// earns a fresh one. See `terminalKey` for why the host has to be in it.
-  @ObservationIgnored private var emulatorKey: String?
-  /// One source of truth for the grid size: the socket, the parser and any
-  /// later resize must agree or the rendered grid will not match the PTY.
-  private var terminalCols: UInt16 = 80
-  private var terminalRows: UInt16 = 24
+  /// Coalesces drawer refreshes: N taps on the drawer button must produce ONE
+  /// fetch, not N. See `refreshDrawerInBackground`.
+  @ObservationIgnored private var drawerRefreshTask: Task<Void, Never>?
+  @ObservationIgnored private var snapshotObserver: Task<Void, Never>?
+  @ObservationIgnored private var eventObserver: Task<Void, Never>?
+  /// Only `pullTerminalSnapshot` uses this now — the render path's own
+  /// generation check lives inside `TerminalPipeline`.
+  @ObservationIgnored private var lastRenderedGeneration: UInt64?
 
   public init(hostStore: HostStoreAdapter = HostStoreAdapter()) {
     self.hostStore = hostStore
-    replayStore = FfiReplayStore()
+    observePipeline()
+  }
+
+  /// Drains the pipeline's two streams onto the main actor.
+  ///
+  /// Snapshots come through a `bufferingNewest(1)` stream, so when the main
+  /// actor is busy the intermediate grids are DROPPED rather than queued —
+  /// a terminal only ever needs to draw the newest one. Events are unbounded
+  /// because losing "the session list changed" would leave the UI stale.
+  private func observePipeline() {
+    let snapshots = pipeline.snapshots
+    let events = pipeline.events
+    snapshotObserver = Task { [weak self] in
+      for await snapshot in snapshots {
+        guard let self else { return }
+        self.terminalSnapshot = snapshot
+      }
+    }
+    eventObserver = Task { [weak self] in
+      for await event in events {
+        guard let self else { return }
+        self.apply(event)
+      }
+    }
+  }
+
+  private func apply(_ event: TerminalPipelineEvent) {
+    switch event {
+    case let .mouseModes(mode, sgr):
+      terminalMouseMode = mode
+      terminalMouseSgr = sgr
+    case .sessionsChanged:
+      Task { await refreshSessions() }
+    case let .error(message):
+      errorMessage = message
+    }
   }
 
   public func bootstrap() async {
@@ -245,13 +271,45 @@ public final class SessionStore {
   public func refreshDrawer() async {
     isLoading = true
     defer { isLoading = false }
-    var nextSessions: [String: [RemoteSession]] = [:]
-    for host in hosts {
-      nextSessions[host.id] = await fetchSessions(for: host.id)
+    // Concurrently, not one host after another. Each host costs two round
+    // trips (`listSessions` + `testConnection`), so the serial version made
+    // the drawer's refresh time the SUM over every host — and one unreachable
+    // host held up every reachable one behind it.
+    let ids = hosts.map(\.id)
+    let nextSessions = await withTaskGroup(
+      of: (String, [RemoteSession]).self,
+      returning: [String: [RemoteSession]].self
+    ) { group in
+      for id in ids {
+        group.addTask { @MainActor in
+          (id, await self.fetchSessions(for: id))
+        }
+      }
+      var collected: [String: [RemoteSession]] = [:]
+      for await (id, list) in group {
+        collected[id] = list
+      }
+      return collected
     }
     sessionsByHost = nextSessions
     if let activeHostId {
       sessions = nextSessions[activeHostId] ?? []
+    }
+  }
+
+  /// Refreshes the drawer WITHOUT making the caller wait for the network.
+  ///
+  /// The drawer used to open only after `refreshDrawer()` returned, so the
+  /// panel sat shut for as long as the slowest host took to answer — and since
+  /// nothing coalesced the taps, every impatient tap queued another refresh
+  /// that set `isPresented = true` when it landed, re-opening a drawer the
+  /// user had since closed. The panel opens immediately now; the list fills in
+  /// underneath it, and a refresh already in flight is reused.
+  public func refreshDrawerInBackground() {
+    guard drawerRefreshTask == nil else { return }
+    drawerRefreshTask = Task { [weak self] in
+      await self?.refreshDrawer()
+      self?.drawerRefreshTask = nil
     }
   }
 
@@ -290,9 +348,46 @@ public final class SessionStore {
   }
 
   public func newTerminal() async {
-    guard activeHostId != nil else { return }
-    let id = nextSessionId()
-    await startSession(named: id)
+    guard let activeHostId else { return }
+    await newTerminal(hostId: activeHostId)
+  }
+
+  /// Starts a terminal on a NAMED host and switches to it.
+  ///
+  /// The drawer lists every host, so "New terminal" cannot mean "on whichever
+  /// host happens to be active" — reaching a second server took selecting one
+  /// of its sessions first, which is impossible when it has none.
+  public func newTerminal(hostId: String) async {
+    guard let client = client(for: hostId) else { return }
+    // THIS host's list, fetched fresh, before an id is picked. A host the
+    // drawer has never loaded has no `sessionsByHost` entry, so allocating
+    // from the cache would pick `term-1` for a host that already runs one —
+    // and `/api/sessions/start` returns the EXISTING session for a known id
+    // (apps/server/src/server/pty.ts), so the button would silently attach to
+    // a running terminal instead of opening a new one.
+    let known = await fetchSessions(for: hostId)
+    sessionsByHost[hostId] = known
+    if activeHostId == hostId {
+      sessions = known
+    }
+    let id = nextSessionId(among: known)
+    // Explicit, so the cold-launch restore is spent — see `selectSession`.
+    hasRestoredSession = true
+    do {
+      _ = try await client.startSession(id: id)
+      if activeHostId != hostId || activeSessionId != id {
+        await pipeline.sendFocus(focused: false)
+      }
+      activeHostId = hostId
+      activeSessionId = id
+      // Connect FIRST. Refreshing every host before opening the socket meant a
+      // terminal started on a healthy host stayed disconnected for as long as
+      // the slowest host took to time out.
+      await connectTerminal(sessionId: id)
+      refreshDrawerInBackground()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
   }
 
   public var activeSession: RemoteSession? {
@@ -333,7 +428,7 @@ public final class SessionStore {
       _ = try await client.startSession(id: id)
       await refreshSessions()
       if activeSessionId != id {
-        sendFocus(focused: false)
+        await pipeline.sendFocus(focused: false)
       }
       activeSessionId = id
       await connectTerminal(sessionId: id)
@@ -346,10 +441,9 @@ public final class SessionStore {
     guard let client = await activeClient() else { return }
     do {
       try await client.killSession(id: id)
-      replayStore.forget(sessionId: terminalKey(id))
+      await pipeline.forget(key: terminalKey(id))
       if activeSessionId == id {
-        sendFocus(focused: false)
-        releaseTerminal()
+        await pipeline.release()
         activeSessionId = nil
       }
       await refreshSessions()
@@ -373,48 +467,25 @@ public final class SessionStore {
   /// Re-evaluate the active socket after suspension (port of RN `onResumeActive`).
   public func resumeFromForeground() async {
     guard let sessionId = activeSessionId else {
-      sendFocus(focused: true)
+      await pipeline.sendFocus(focused: true)
       return
     }
     let now = Int64(Date().timeIntervalSince1970 * 1000)
-    switch ResumeLogic.action(open: socketIsOpen, lastSeenMs: lastTrafficMs, nowMs: now) {
+    switch await pipeline.resumeAction(nowMs: now) {
     case .reconnect, .close:
       // Native has no onClose→backoff reconnect path, so both actions reconnect.
       await connectTerminal(sessionId: sessionId)
     case .none:
-      sendFocus(focused: true)
+      await pipeline.sendFocus(focused: true)
     }
   }
 
-  /// `{ type: "focus", focused }` — server suppresses push while focused is true.
-  /// Last value actually sent on the current socket, so a repeat is dropped.
-  /// scenePhase reports .inactive and then .background for one transition, and
-  /// both mean the same thing here.
-  private var lastFocusSent: Bool?
-
+  /// `{ type: "focus", focused }` — the server suppresses push while focused
+  /// is true. Fire-and-forget: the repeat guard and the socket live in the
+  /// pipeline. Call `await pipeline.sendFocus` directly from an async path that
+  /// needs the frame ORDERED against a connect or a teardown.
   public func sendFocus(focused: Bool) {
-    guard lastFocusSent != focused else { return }
-    lastFocusSent = focused
-    guard socketIsOpen, let socket else { return }
-    guard
-      let payload = try? JSONSerialization.data(
-        withJSONObject: ["type": "focus", "focused": focused]),
-      let frame = String(data: payload, encoding: .utf8)
-    else { return }
-    // The error was discarded here. Whatever else is losing keystrokes (see the
-    // board task: ~5% of characters vanish under fast typing, while the same
-    // synthetic input into a native TextField in this app loses none), a
-    // swallowed send error guarantees the loss is silent — nothing on the
-    // client or the server records that a keystroke never left the device.
-    // Logged rather than surfaced: a transient send failure is not worth a
-    // banner, but it must not be invisible to the next person measuring this.
-    socket.send(.string(frame)) { error in
-      #if DEBUG
-      if let error {
-        print("[Tether] input send failed: \(error.localizedDescription)")
-      }
-      #endif
-    }
+    pipeline.outbound.yield(.focus(focused))
   }
 
   public func renameSession(id: String, name: String) async {
@@ -460,7 +531,9 @@ public final class SessionStore {
     // it came back" behaviour the latch exists to prevent.
     hasRestoredSession = true
     if activeSessionId != sessionId || activeHostId != hostId {
-      sendFocus(focused: false)
+      // Awaited, not queued: this frame has to reach the OLD socket before
+      // `connectTerminal` tears it down.
+      await pipeline.sendFocus(focused: false)
     }
     activeHostId = hostId
     activeSessionId = sessionId
@@ -472,50 +545,40 @@ public final class SessionStore {
   /// Resizes the local emulator and tells the PTY, so the two agree and the
   /// shell wraps at the width the user can see.
   public func updateGrid(cols: UInt16, rows: UInt16) {
-    guard cols != terminalCols || rows != terminalRows else { return }
-    terminalCols = cols
-    terminalRows = rows
-    emulator?.resize(cols: cols, rows: rows)
-    refreshTerminalSnapshot()
-    sendResize(cols: cols, rows: rows)
+    pipeline.outbound.yield(.resize(cols: cols, rows: rows))
   }
 
-  /// Scrolls the local VT viewport through scrollback (not PTY PgUp/PgDn).
-  ///
-  /// Positive `lines` moves into history (older output); negative toward the
-  /// live bottom. Lives next to `updateGrid` because `emulator` is private —
-  /// an extension in another file cannot reach it.
-  /// Remembers the active session's title so a dropped connection does not erase
-  /// it from the title bar.
+  /// Remembers the active session's title so a dropped connection does not
+  /// erase it from the title bar.
   private func rememberSessionTitle() {
     if let title = activeSession?.displayTitle, !title.isEmpty {
       lastKnownSessionTitle = title
     }
   }
 
+  /// Scrolls the local VT viewport through scrollback (not PTY PgUp/PgDn).
+  ///
+  /// Positive `lines` moves into history (older output); negative toward the
+  /// live bottom.
   public func scrollViewport(lines: Int32) {
     guard lines != 0 else { return }
-    emulator?.scrollViewport(lines: lines)
-    refreshTerminalSnapshot()
+    Task { await pipeline.scrollViewport(lines: lines) }
   }
 
-  private func sendResize(cols: UInt16, rows: UInt16) {
-    guard let socket else { return }
-    guard
-      let payload = try? JSONSerialization.data(
-        withJSONObject: ["type": "resize", "cols": Int(cols), "rows": Int(rows)]),
-      let frame = String(data: payload, encoding: .utf8)
-    else { return }
-    socket.send(.string(frame)) { _ in }
-  }
-
+  /// Queues a keystroke on the pipeline's outbound stream.
+  ///
+  /// NOT `Task { await pipeline.send… }`: a task per keystroke has no defined
+  /// enqueue order, so fast typing could reach the socket scrambled. Stream
+  /// yields are FIFO and need no await, which is what a key handler wants.
   public func sendInput(_ text: String) {
-    guard let socket else { return }
-    guard
-      let payload = try? JSONSerialization.data(withJSONObject: ["type": "input", "text": text]),
-      let frame = String(data: payload, encoding: .utf8)
-    else { return }
-    socket.send(.string(frame)) { _ in }
+    pipeline.outbound.yield(.input(text, key: activeTerminalKey))
+  }
+
+  /// The terminal a keystroke is being typed INTO, stamped on every outbound
+  /// frame so a session switch cannot deliver it to the wrong session.
+  private var activeTerminalKey: String? {
+    guard let activeSessionId else { return nil }
+    return terminalKey(activeSessionId)
   }
 
   public func sendInput(bytes: [UInt8]) {
@@ -532,7 +595,7 @@ public final class SessionStore {
   /// use to skip auto-indent.
   public func sendPaste(_ text: String) {
     guard !text.isEmpty else { return }
-    sendInput(emulator?.pastePayload(text: text) ?? text)
+    pipeline.outbound.yield(.paste(text, key: activeTerminalKey))
   }
 
   public func sendRawKey(_ bytes: [UInt8]) {
@@ -552,33 +615,6 @@ public final class SessionStore {
       errorMessage = "Invalid deep link"
     case .queued:
       break
-    }
-  }
-
-  /// Publishes a new grid only when the visible contents actually changed.
-  ///
-  /// `generation` is why this is cheap: it is compared before pulling the
-  /// packed bytes, so a burst of output that does not alter the viewport costs
-  /// nothing beyond the counter read.
-  private func refreshTerminalSnapshot() {
-    guard let emulator else { return }
-    let generation = emulator.generation()
-    // Mouse mode can flip without a viewport change (e.g. vim entering/leaving
-    // mouse tracking). Keep the surface's input path in sync either way.
-    syncMouseModes(from: emulator)
-    guard generation != lastRenderedGeneration else { return }
-    lastRenderedGeneration = generation
-    terminalSnapshot = emulator.snapshot()
-  }
-
-  private func syncMouseModes(from emulator: FfiTerminalEmulator) {
-    let nextMode = MouseMode(rawValue: emulator.mouseMode()) ?? .off
-    let nextSgr = emulator.mouseSgr()
-    if terminalMouseMode != nextMode {
-      terminalMouseMode = nextMode
-    }
-    if terminalMouseSgr != nextSgr {
-      terminalMouseSgr = nextSgr
     }
   }
 
@@ -643,8 +679,13 @@ public final class SessionStore {
     }
   }
 
-  private func nextSessionId() -> String {
-    let existing = Set(sessions.map(\.id))
+  /// Picks a free `term-N` against ONE host's session list.
+  ///
+  /// Ids are only unique per host, so the candidate list has to be that host's
+  /// own sessions — measured against the active host's list, a new terminal on
+  /// a second server could collide with an id that server already runs.
+  private func nextSessionId(among known: [RemoteSession]) -> String {
+    let existing = Set(known.map(\.id))
     var index = 1
     while existing.contains("term-\(index)") {
       index += 1
@@ -677,161 +718,17 @@ public final class SessionStore {
   }
 
   private func connectTerminal(sessionId: String) async {
-    disconnectTerminal()
+    // Disconnect first even when there is no usable client: leaving the old
+    // socket open under a host that cannot be reached is how the server keeps
+    // believing a session is on screen.
+    await pipeline.disconnect()
     guard let client = await activeClient() else { return }
-    // Rebuilding the emulator here while KEEPING the replay cursor threw away all
-    // scrollback on every foreground resume: an empty grid plus a cursor at the
-    // newest applied frame means the server replays only what arrived since, and
-    // everything before it is gone for good. Reuse the emulator when reconnecting
-    // the same session so `sinceId` resumes into the history it belongs to.
-    let key = terminalKey(sessionId)
-    if emulatorKey != key || emulator == nil {
-      emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
-      emulatorKey = key
-      terminalSnapshot = nil
-      terminalMouseMode = .off
-      terminalMouseSgr = true
-    }
-    lastRenderedGeneration = nil
-    let sinceId = replayStore.sinceId(sessionId: key)
-    do {
-      let task = try await client.openWebSocket(
-        sessionId: sessionId, sinceId: sinceId,
-        cols: terminalCols, rows: terminalRows)
-      socket = task
-      socketIsOpen = true
-      lastTrafficMs = Int64(Date().timeIntervalSince1970 * 1000)
-      task.resume()
-      // Fresh connection is focused unless the app is known to be backgrounded
-      // (matches RN sessionTransport.onSocketOpen).
-      if isAppActive {
-        sendFocus(focused: true)
-      } else {
-        sendFocus(focused: false)
-      }
-      // Capture the host-qualified key for this socket once. Reading
-      // activeHostId again inside the frame handler races a host switch: a late
-      // frame from host A would key under B, feed B's emulator, and advance B's
-      // replay cursor — which can silently skip history.
-      socketTask = Task { [weak self] in
-        await self?.readSocket(key: key, task: task)
-      }
-    } catch {
-      socketIsOpen = false
-      errorMessage = error.localizedDescription
-    }
-  }
-
-  /// Drops the emulator along with the socket — for leaving the terminal
-  /// entirely, as opposed to reconnecting to the same session.
-  private func releaseTerminal() {
-    disconnectTerminal()
-    emulator = nil
-    emulatorKey = nil
-    terminalSnapshot = nil
-    terminalMouseMode = .off
-    terminalMouseSgr = true
-    lastRenderedGeneration = nil
-  }
-
-  private func disconnectTerminal() {
-    defer { lastFocusSent = nil }
-    // Order matters: sendFocus needs the socket, so the frame has to go out
-    // before it is torn down. Switching sessions otherwise left the server
-    // believing the old one was still on screen, and suppressing its pushes.
-    sendFocus(focused: false)
-    // Deliberately NOT clearing `emulator`: this runs at the top of every
-    // connectTerminal, so dropping it here defeated reusing the scrollback on a
-    // foreground reconnect. connectTerminal rebuilds it when the session
-    // actually changes, and `releaseTerminal` clears it when there is no session.
-    socketTask?.cancel()
-    socketTask = nil
-    socket?.cancel(with: .goingAway, reason: nil)
-    socket = nil
-    socketIsOpen = false
-  }
-
-  private func noteSocketTraffic() {
-    lastTrafficMs = Int64(Date().timeIntervalSince1970 * 1000)
-  }
-
-  private func readSocket(key: String, task: URLSessionWebSocketTask) async {
-    while !Task.isCancelled {
-      do {
-        let message = try await task.receive()
-        switch message {
-        case let .string(text):
-          handleServerFrame(text, key: key)
-        case let .data(data):
-          if let text = String(data: data, encoding: .utf8) {
-            handleServerFrame(text, key: key)
-          }
-        @unknown default:
-          break
-        }
-      } catch {
-        await MainActor.run {
-          self.socketIsOpen = false
-          if !Task.isCancelled {
-            self.errorMessage = "Connection closed"
-          }
-        }
-        break
-      }
-    }
-    await MainActor.run {
-      if self.socket === task {
-        self.socketIsOpen = false
-      }
-    }
-  }
-
-  private func handleServerFrame(_ text: String, key: String) {
-    // Stale socket: the active terminal moved on since this connection opened.
-    // Do not re-derive the key from activeHostId — that is the race this guards.
-    guard key == emulatorKey else { return }
-    guard
-      let data = text.data(using: .utf8),
-      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-      let type = json["type"] as? String
-    else { return }
-
-    noteSocketTraffic()
-
-    switch type {
-    case "output":
-      // The id advances the replay cursor; the chunk is the actual terminal
-      // output and must reach the parser, or the surface stays blank however
-      // much data arrives.
-      // acceptOutput is the duplicate guard — it returns false for a frame
-      // already applied. Discarding that answer and feeding anyway makes a
-      // repeated frame reach the parser twice, which renders as doubled
-      // characters ("abc" typed, "aabbcc" on screen).
-      if let id = json["id"] as? UInt64,
-        !replayStore.acceptOutput(sessionId: key, id: id)
-      {
-        return
-      }
-      if let chunk = json["chunk"] as? String, let bytes = chunk.data(using: .utf8) {
-        emulator?.feed(bytes: bytes)
-        refreshTerminalSnapshot()
-      }
-    case "reset":
-      replayStore.reset(sessionId: key)
-      // A reset means the client's history has a hole; rebuild the grid rather
-      // than letting the old contents linger under the replayed tail. This is the
-      // one case where a same-session rebuild is right.
-      emulator = FfiTerminalEmulator(cols: terminalCols, rows: terminalRows)
-      emulatorKey = key
-      lastRenderedGeneration = nil
-      terminalSnapshot = nil
-    case "ping":
-      break
-    case "title", "activity", "exit":
-      Task { await refreshSessions() }
-    default:
-      break
-    }
+    await pipeline.connect(
+      client: client,
+      sessionId: sessionId,
+      key: terminalKey(sessionId),
+      focused: isAppActive
+    )
   }
 
   private func updateHealth(for hostId: String, status: UInt16) {

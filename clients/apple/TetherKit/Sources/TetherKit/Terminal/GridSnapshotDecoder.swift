@@ -6,35 +6,38 @@ public enum GridSnapshotDecoder {
     guard bytes.count >= GridSnapshot.headerSize else {
       throw GridSnapshot.DecodeError.tooShort
     }
+    // ONE `withUnsafeBytes` for the whole buffer. The previous version opened a
+    // fresh one per field — four per cell — so a 60x40 grid paid ~9600 of them
+    // on every frame, on the main thread, in the middle of the render path.
+    return try bytes.withUnsafeBytes { raw in
+      try decode(raw: raw, count: bytes.count)
+    }
+  }
 
-    let magic = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) }
-      .littleEndian
+  private static func decode(
+    raw: UnsafeRawBufferPointer,
+    count: Int
+  ) throws -> (GridSnapshot.Header, [GridSnapshot.Cell]) {
+    let magic = raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self).littleEndian
     guard magic == GridSnapshot.magic else {
       throw GridSnapshot.DecodeError.badMagic
     }
 
-    let version = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt16.self) }
-      .littleEndian
+    let version = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self).littleEndian
     guard version == GridSnapshot.version else {
       throw GridSnapshot.DecodeError.badVersion(version)
     }
 
-    let cols = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 6, as: UInt16.self) }
-      .littleEndian
-    let rows = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 8, as: UInt16.self) }
-      .littleEndian
-    let cursorCol = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 10, as: UInt16.self) }
-      .littleEndian
-    let cursorRow = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 12, as: UInt16.self) }
-      .littleEndian
-    let generation = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 14, as: UInt64.self) }
-      .littleEndian
-    let flags = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 22, as: UInt16.self) }
-      .littleEndian
+    let cols = raw.loadUnaligned(fromByteOffset: 6, as: UInt16.self).littleEndian
+    let rows = raw.loadUnaligned(fromByteOffset: 8, as: UInt16.self).littleEndian
+    let cursorCol = raw.loadUnaligned(fromByteOffset: 10, as: UInt16.self).littleEndian
+    let cursorRow = raw.loadUnaligned(fromByteOffset: 12, as: UInt16.self).littleEndian
+    let generation = raw.loadUnaligned(fromByteOffset: 14, as: UInt64.self).littleEndian
+    let flags = raw.loadUnaligned(fromByteOffset: 22, as: UInt16.self).littleEndian
 
     let expected = GridSnapshot.bufferSize(cols: cols, rows: rows)
-    guard bytes.count == expected else {
-      throw GridSnapshot.DecodeError.sizeMismatch(length: bytes.count, cols: cols, rows: rows)
+    guard count == expected else {
+      throw GridSnapshot.DecodeError.sizeMismatch(length: count, cols: cols, rows: rows)
     }
 
     let header = GridSnapshot.Header(
@@ -47,24 +50,21 @@ public enum GridSnapshotDecoder {
     )
 
     let cellCount = Int(cols) * Int(rows)
-    var cells = [GridSnapshot.Cell]()
-    cells.reserveCapacity(cellCount)
-
-    for index in 0..<cellCount {
-      let offset = GridSnapshot.headerSize + index * GridSnapshot.cellStride
-      let codepoint = bytes.withUnsafeBytes {
-        $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self)
-      }.littleEndian
-      let fg = bytes.withUnsafeBytes {
-        $0.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self)
-      }.littleEndian
-      let bg = bytes.withUnsafeBytes {
-        $0.loadUnaligned(fromByteOffset: offset + 8, as: UInt32.self)
-      }.littleEndian
-      let attrs = bytes.withUnsafeBytes {
-        $0.loadUnaligned(fromByteOffset: offset + 12, as: UInt32.self)
-      }.littleEndian
-      cells.append(GridSnapshot.Cell(codepoint: codepoint, foreground: fg, background: bg, attrs: attrs))
+    // Written straight into uninitialized storage: the cell count is known
+    // exactly, so `append` per cell only buys a capacity check per iteration.
+    let cells = [GridSnapshot.Cell](unsafeUninitializedCapacity: cellCount) { buffer, initialized in
+      for index in 0..<cellCount {
+        let offset = GridSnapshot.headerSize + index * GridSnapshot.cellStride
+        buffer.baseAddress?.advanced(by: index).initialize(
+          to: GridSnapshot.Cell(
+            codepoint: raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self).littleEndian,
+            foreground: raw.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self).littleEndian,
+            background: raw.loadUnaligned(fromByteOffset: offset + 8, as: UInt32.self).littleEndian,
+            attrs: raw.loadUnaligned(fromByteOffset: offset + 12, as: UInt32.self).littleEndian
+          )
+        )
+      }
+      initialized = cellCount
     }
 
     return (header, cells)

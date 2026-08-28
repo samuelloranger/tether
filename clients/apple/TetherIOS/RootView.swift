@@ -231,10 +231,12 @@ struct RootView: View {
   }
 
   private func openDrawer() {
-    Task {
-      await store.refreshDrawer()
-      drawerOpen = true
-    }
+    // Opens NOW, refreshes underneath. Waiting on `refreshDrawer()` first meant
+    // the panel stayed shut for as long as the slowest host took to answer, and
+    // every impatient tap queued another completion that set `drawerOpen = true`
+    // — so one of them re-opened the drawer after the user had closed it.
+    drawerOpen = true
+    store.refreshDrawerInBackground()
   }
 }
 

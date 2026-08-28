@@ -54,6 +54,13 @@ public struct SessionDrawerView: View {
               onRetryHost: {
                 Task { await store.refreshHost(hostId: host.id) }
               },
+              onNewTerminal: {
+                // Closes on the tap, not when the server answers: awaiting
+                // `newTerminal` left the drawer sitting open over a terminal
+                // that was already being opened behind it.
+                onClose()
+                Task { await store.newTerminal(hostId: host.id) }
+              },
               onReenterPassword: onReenterPassword,
               onHostSettings: onHostSettings
             )
@@ -75,23 +82,6 @@ public struct SessionDrawerView: View {
           .padding(.horizontal, 24)
         }
       }
-
-      Button {
-        Task {
-          await store.newTerminal()
-          onClose()
-        }
-      } label: {
-        Label("New terminal", systemImage: "plus")
-          .frame(maxWidth: .infinity)
-      }
-      // With no server paired there is nothing to start a terminal on; the
-      // button used to sit there as the primary action and simply fail.
-      .disabled(store.hosts.isEmpty)
-      .buttonStyle(.borderedProminent)
-      .tint(TetherColors.accent)
-      .padding(16)
-      .background(TetherColors.surfaceRaised)
     }
     .background(TetherColors.background)
     // The drawer is a fixed 264pt wide, so an accessibility text size does not
@@ -115,6 +105,7 @@ private struct HostDrawerSection: View {
   let onSelectSession: (String, String) -> Void
   let onKillSession: (String) -> Void
   let onRetryHost: () -> Void
+  let onNewTerminal: () -> Void
   let onReenterPassword: (String) -> Void
   let onHostSettings: (String) -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -173,6 +164,13 @@ private struct HostDrawerSection: View {
           // every row looks like its neighbours.
           .transition(.opacity)
         }
+
+        // One per host, not one at the bottom of the drawer. A single global
+        // button can only mean "on the active host", so reaching a second
+        // server took selecting one of its sessions first — impossible when it
+        // has none, which is exactly when you want a new terminal.
+        NewTerminalRow(hostName: host.name, action: onNewTerminal)
+          .disabled(isUnavailable)
       }
       .animation(
         TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion),
@@ -233,6 +231,43 @@ private struct HostDrawerSection: View {
       .font(.caption.weight(.semibold))
       .foregroundStyle(TetherColors.accent)
     }
+  }
+}
+
+/// "New terminal" as a list row under one host's sessions.
+///
+/// Deliberately quieter than a session row — dashed rim, no fill — so it reads
+/// as the end of the list rather than as another running terminal.
+private struct NewTerminalRow: View {
+  let hostName: String
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        Image(systemName: "plus")
+          .font(.caption2.weight(.semibold))
+        Text("New terminal")
+          .font(.footnote)
+        Spacer()
+      }
+      .foregroundStyle(TetherColors.accent)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .overlay(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .strokeBorder(
+            TetherColors.accent.opacity(0.35),
+            style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+          )
+      )
+    }
+    .buttonStyle(.plain)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    // The label alone says "New terminal" four times in a four-host drawer, so
+    // VoiceOver needs the host to tell them apart.
+    .accessibilityLabel("New terminal on \(hostName)")
   }
 }
 
