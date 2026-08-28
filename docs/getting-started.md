@@ -4,11 +4,21 @@ Tether has two halves: a **server** you run on your machine, and a **client app*
 
 ## 1. Install the server
 
+On **Linux or macOS**:
+
 ```sh
 curl -fsSL https://samlo.cloud/tether/install.sh | sh
 ```
 
 This downloads a single self-contained binary for your OS/arch into `~/.local/bin/tether` — no bun, git, or node_modules required. If `tether` isn't found afterward, add `~/.local/bin` to your `PATH` (the installer prints the exact line).
+
+On **Windows**, in PowerShell:
+
+```powershell
+irm https://samlo.cloud/tether/install.ps1 | iex
+```
+
+Same idea: one self-contained `tether.exe`, installed to `%LOCALAPPDATA%\Programs\tether` with no administrator prompt, and that directory added to your user `PATH` — open a new terminal for it to take effect. Windows x64 only. See [Windows server](/windows) for which shells work, the firewall prompt on first start, and what behaves differently there.
 
 ## 2. Set a password and start it
 

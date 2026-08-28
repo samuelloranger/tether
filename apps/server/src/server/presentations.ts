@@ -5,12 +5,13 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   statSync,
   watch,
   writeSync,
 } from 'node:fs';
 import path from 'node:path';
+import { secureWindowsPath } from './winAcl';
+import { canonicalPath, inside } from './workspaceFile';
 
 export interface Presentation {
   id: string;
@@ -24,10 +25,24 @@ export interface Presentation {
 export function createControlToken(file: string): string {
   mkdirSync(path.dirname(file), { recursive: true });
   try {
+    // 'wx' plus 0o600: create-or-fail, owner-only. The mode is the whole point —
+    // this token authorises /control/signal and /control/presentations, so any
+    // account that can read the file can drive every session's activity state
+    // and register previews.
     const fd = openSync(file, 'wx', 0o600);
     const token = randomBytes(24).toString('hex');
     writeSync(fd, token);
     closeSync(fd);
+    // The 0o600 above is a no-op on Windows, and this file's parent is ~/.tether
+    // — created without a mode and shared with the pid file and the log, so
+    // there is no owner-only directory grant here for the token to inherit.
+    // Unlike the holder sockets it has to be secured in its own right.
+    //
+    // After closeSync, not before: icacls opens the target itself, and rewriting
+    // the DACL of a file we still hold a write handle to is needless contention.
+    // Only in the create branch — on every later boot the open throws EEXIST and
+    // the ACL set on first boot is still in force, so there is nothing to redo.
+    secureWindowsPath(file, false);
     return token;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -43,13 +58,20 @@ interface InternalPresentation extends Presentation {
 }
 
 export function resolvePresentationFile(root: string, requested: string): string {
-  const canonicalRoot = realpathSync(root);
+  // Same containment primitives as the workspace file/dir routes, for the same
+  // reason: a raw `===`/`startsWith` pair is a case-SENSITIVE comparison, and on
+  // a case-insensitive Windows volume `C:\p\x` and `c:\P\x` are one directory
+  // that compares unequal. See canonicalPath/inside in workspaceFile.ts.
+  const canonicalRoot = canonicalPath(root);
+  // Checked twice on purpose. The first pass rejects a lexical `..` before the
+  // path is ever resolved; the second re-checks what the symlinks actually
+  // resolved to, which is the only form that can be trusted.
   const attempted = path.resolve(canonicalRoot, requested);
-  if (attempted !== canonicalRoot && !attempted.startsWith(`${canonicalRoot}${path.sep}`)) {
+  if (!inside(canonicalRoot, attempted)) {
     throw new Error('preview path escapes its root');
   }
-  const candidate = realpathSync(attempted);
-  if (candidate !== canonicalRoot && !candidate.startsWith(`${canonicalRoot}${path.sep}`)) {
+  const candidate = canonicalPath(attempted);
+  if (!inside(canonicalRoot, candidate)) {
     throw new Error('preview path escapes its root');
   }
   if (statSync(candidate).isDirectory()) {
@@ -69,7 +91,9 @@ export class PresentationRegistry {
     title?: string;
     sessionId?: string;
   }): Presentation {
-    const entry = realpathSync(input.entry);
+    // canonicalPath, so the root stored on the preview is already in the form
+    // resolvePresentationFile will compare against on every /preview request.
+    const entry = canonicalPath(input.entry);
     if (path.extname(entry).toLowerCase() !== '.html')
       throw new Error('preview entry must be an HTML file');
     const root = path.dirname(entry);

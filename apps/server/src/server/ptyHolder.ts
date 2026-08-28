@@ -30,12 +30,21 @@ import type { Dims } from './ptyResize';
 import { buildPushContent, sendPush } from './push';
 import { type Activity, clearActivity, recordOutputEvent } from './sessionActivity';
 import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './sessionTitle';
+import { secureCreatedDir } from './winAcl';
 
 export const HOLDERS_DIR = path.join(CONFIG_DIR, 'holders');
-mkdirSync(HOLDERS_DIR, { recursive: true, mode: 0o700 });
+const createdHoldersDir = mkdirSync(HOLDERS_DIR, { recursive: true, mode: 0o700 });
 try {
   chmodSync(HOLDERS_DIR, 0o700);
 } catch {}
+// Windows equivalent of the 0o700 above, which does nothing there. Anyone who
+// can open a holder socket can write bytes straight into that session's PTY, so
+// this directory is an authorisation boundary, not just tidiness.
+//
+// The grant is inheritable — `(OI)(CI)` in winAcl.ts — so the per-session socket
+// and `<sock>.pid` created inside it are covered without an `icacls` spawn of
+// their own on the session-start path. See the note in holder.ts.
+secureCreatedDir(createdHoldersDir);
 
 export const sockPathFor = (id: string) => path.join(HOLDERS_DIR, `${id}.sock`);
 

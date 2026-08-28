@@ -21,8 +21,53 @@ import {
   sniffDialect,
   takeLegacyLines,
 } from './holderFrame';
+import { INITIAL_LIVE_CWD_STATE, type LiveCwdState, updateLiveCwd } from './liveCwd';
 import { getProcessCwd } from './procCwd';
 import { FrameDecoder } from './proto/frame';
+import { killWindowsTree } from './spawnWindow';
+import { interruptForeground } from './winConsole';
+
+const IS_WINDOWS = process.platform === 'win32';
+/** Ctrl+C. The byte a terminal sends; on POSIX the line discipline signals on it. */
+const ETX = 0x03;
+
+/**
+ * Whether an input chunk is a bare Ctrl+C keystroke (and nothing else). A real
+ * keypress arrives as the single byte 0x03; a paste, a drag, or binary input
+ * that merely carries a 0x03 somewhere in a larger buffer is not an interrupt.
+ * Used only to reproduce the interrupt by hand on Windows — see the call site.
+ */
+export function isInterruptKeystroke(data: Uint8Array): boolean {
+  return data.length === 1 && data[0] === ETX;
+}
+
+// Windows has no /proc/<pid>/cwd. getProcessCwd does read the Win32 cwd out of
+// the target's PEB there, but only answers for shells measured to keep that in
+// step with where they actually are — cmd.exe does, PowerShell and MSYS bash
+// never move it off the startup directory (the table is in procCwd.ts). So for
+// the default Windows shell it still returns null, and without a fallback a
+// holder that outlived a server restart could only ever report the directory it
+// was *spawned* in — every `cd` the user made before the restart would be lost,
+// and the git/file features would come back pointing at the wrong tree.
+//
+// The holder already sees every output byte, so it tracks the same OSC 7
+// escapes the server parses and keeps the last one as its answer. Only on
+// Windows: where the kernel read works it is strictly better (it is current
+// even mid-TUI, with no prompt redraw needed), and this keeps the POSIX hot
+// path free of the extra per-chunk scan.
+const TRACK_OSC7_CWD = process.platform === 'win32';
+let osc7Cwd: LiveCwdState = INITIAL_LIVE_CWD_STATE;
+const osc7Decoder = new TextDecoder('utf-8');
+
+function trackOsc7Cwd(bytes: Uint8Array): void {
+  if (!TRACK_OSC7_CWD) return;
+  osc7Cwd = updateLiveCwd(osc7Cwd, osc7Decoder.decode(bytes, { stream: true }));
+}
+
+/** The shell's cwd: straight from the kernel where that works, else last OSC 7. */
+function holderCwd(pid: number): string | null {
+  return getProcessCwd(pid) ?? osc7Cwd.cwd;
+}
 
 // A process's session id, read straight from the kernel (/proc/<pid>/stat
 // field 6 — session — after the "pid (comm)" prefix, which we skip past by
@@ -54,8 +99,14 @@ function pidsInSession(sid: number): number[] {
 type HolderProc = ReturnType<typeof Bun.spawn>;
 
 // Interactive shells ignore SIGTERM; SIGHUP is the "terminal went away" signal
-// they honor. Escalate to SIGKILL for anything that ignores both.
+// they honor. Escalate to SIGKILL for anything that ignores both. On Windows
+// there are no process groups or SIGHUP, so killWindowsTree (spawnWindow.ts)
+// stands in — taskkill /T is what matches the POSIX process-group kill.
 function killHolderPty(proc: HolderProc): void {
+  if (process.platform === 'win32') {
+    killWindowsTree(proc.pid);
+    return;
+  }
   // Background jobs the shell was told to survive it (nohup, disown) never
   // get the shell's SIGHUP forwarded to them and would otherwise keep
   // running as orphans after an explicit "kill this terminal" — sweep the
@@ -96,6 +147,14 @@ function applyHolderFrame(
   try {
     if (msg.type === 'input' && proc.terminal) {
       proc.terminal.write(Buffer.from(msg.data).toString('utf8'));
+      // The byte still goes through first, unconditionally: that is what makes
+      // ^C work at a PSReadLine prompt and inside raw-mode TUIs. On Windows it
+      // is also all that happens, so a running job additionally needs the
+      // interrupt reproduced by hand — see winConsole.ts.
+      //
+      // Gate that on a *lone* ETX (see isInterruptKeystroke): a paste or binary
+      // input that merely carries a 0x03 must not taskkill the foreground job.
+      if (IS_WINDOWS && isInterruptKeystroke(msg.data)) interruptForeground(proc.pid);
     } else if (msg.type === 'resize' && proc.terminal) {
       proc.terminal.resize(msg.cols, msg.rows);
     } else if (msg.type === 'kill') {
@@ -103,7 +162,7 @@ function applyHolderFrame(
     } else if (msg.type === 'cwdRequest') {
       // Answer from the kernel, not from a remembered value: the point of the
       // request is that the shell may have `cd`-ed since anyone last looked.
-      const cwd = getProcessCwd(proc.pid);
+      const cwd = holderCwd(proc.pid);
       if (cwd && buf?.client) buf.client.write(encodeHolderCwd(cwd));
     }
   } catch {}
@@ -189,7 +248,7 @@ function listenHolder(
         // Fresh read (not just whatever was true at spawn time) so a
         // reattaching server learns about every `cd` that happened while it
         // was gone, not just the shell's starting directory.
-        const currentCwd = getProcessCwd(proc.pid);
+        const currentCwd = holderCwd(proc.pid);
         if (currentCwd) sock.write(encodeHolderCwd(currentCwd));
         for (const frame of buf.frames) sock.write(frame);
         buf.frames = [];
@@ -237,7 +296,9 @@ export function runHolder(argv: string[]): void {
       cols: Number(colsArg) || 80,
       rows: Number(rowsArg) || 24,
       data(_terminal, bytes) {
-        sendHolderFrame(buf, encodeHolderOutput(new Uint8Array(bytes)));
+        const chunk = new Uint8Array(bytes);
+        trackOsc7Cwd(chunk);
+        sendHolderFrame(buf, encodeHolderOutput(chunk));
       },
     },
   });
@@ -259,6 +320,24 @@ export function runHolder(argv: string[]): void {
   try {
     chmodSync(`${socketPath}.pid`, 0o600);
   } catch {}
+  // No secureWindowsPath() here, deliberately — and none on the socket below.
+  //
+  // Both live in HOLDERS_DIR, which ptyHolder.ts secures with an INHERITABLE
+  // grant ((OI)(CI) — see winAcl.ts), so everything created inside it picks up
+  // the owner-only DACL at creation time with no call of our own. The server
+  // process creates and secures that directory at import, and it is the same
+  // process that spawns us, so by the time a holder runs the grant is already
+  // in place.
+  //
+  // Relying on inheritance is not just tidier, it is the point: this runs on the
+  // session-start path, once per session, and an explicit call for each of these
+  // two paths would put two `icacls` process spawns between the user pressing
+  // "new session" and the shell appearing. Inheritance gets the same DACL for
+  // free.
+  //
+  // The POSIX chmods stay because inheritance is a Windows ACL mechanism with no
+  // POSIX counterpart — a 0o700 directory restricts traversal, but does not make
+  // the files inside it 0o600.
 
   let server: ReturnType<typeof Bun.listen>;
   try {

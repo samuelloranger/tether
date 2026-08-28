@@ -11,6 +11,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { hostname, networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { CONFIG_DIR } from './paths';
+import { secureCreatedDir, secureWindowsPath } from './winAcl';
 import { certFingerprint, generateSelfSignedCert, normalizeAltNames } from './x509';
 
 // Sits beside config/tether.db, so a dev run (repo-local DB) never reads or
@@ -105,14 +106,41 @@ export function ensureTlsMaterial(dir: string = TLS_DIR): TlsMaterial {
     notAfter: new Date(now.getTime() + CERT_VALID_DAYS * 86_400_000),
   });
 
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const createdDir = mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
+  // Windows counterpart of the 0o700: neither of the two lines above grants or
+  // denies anything there. See winAcl.ts.
+  secureCreatedDir(createdDir);
+
   writeFileSync(paths.keyPath, cert.keyPem, { mode: 0o600 });
   // writeFileSync's mode is masked by umask, and does nothing at all if the file
   // already existed — chmod is the only way to be sure about the private key.
   chmodSync(paths.keyPath, 0o600);
+  // The private key gets an ACL of its own rather than relying on the one it
+  // inherits from `dir`, and it is the only file here that does. secureCreatedDir
+  // fires solely on the boot that created the directory, so a TLS dir laid down
+  // by a tether older than winAcl.ts keeps its inherited profile ACL forever —
+  // and a key that outlives its directory's protection is the one failure in
+  // this module worth spending an unconditional `icacls` spawn to prevent. This
+  // path runs once in the lifetime of an install (generation is once-only, by
+  // design), so there is no hot path to protect here.
+  secureWindowsPath(paths.keyPath, false);
+
   writeFileSync(paths.certPath, cert.certPem, { mode: 0o644 });
   chmodSync(paths.certPath, 0o644);
+  // Deliberately NO ACL call for the certificate.
+  //
+  // 0o644 is a statement that the cert is public material — it is the very thing
+  // clients pin and the server hands to anyone who completes a TLS handshake. On
+  // POSIX that 0o644 is already unreachable by another account, because the 0o700
+  // directory above blocks the traversal; the mode only says "nothing secret
+  // here". Windows lands in exactly the same place: the cert inherits the
+  // directory's owner-only grant, so the two platforms agree.
+  //
+  // Tightening it explicitly would therefore buy nothing, and loosening it —
+  // granting Users read — would hand out access POSIX never grants either. The
+  // faithful translation of "0o644 inside 0o700" is to leave it alone, and skip
+  // the process spawn.
 
   return readMaterial(paths, true);
 }

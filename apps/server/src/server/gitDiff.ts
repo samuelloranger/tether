@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { HIDE_CONSOLE } from './spawnWindow';
 
 export const MAX_DIFF_BYTES = 1_048_576;
 
@@ -59,6 +60,7 @@ function runGit(root: string, args: string[], okStatuses: number[] = [0]): strin
   const result = spawnSync('git', ['-C', root, ...args], {
     encoding: 'utf8',
     maxBuffer: MAX_DIFF_BYTES + 65_536,
+    ...HIDE_CONSOLE,
   });
   if (result.status === null || !okStatuses.includes(result.status)) {
     throw new GitDiffError(404, 'not a git repository');
@@ -68,7 +70,7 @@ function runGit(root: string, args: string[], okStatuses: number[] = [0]): strin
 
 function runGitDiff(root: string, args: string[], okStatuses: number[] = [0]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['-C', root, ...args]);
+    const child = spawn('git', ['-C', root, ...args], HIDE_CONSOLE);
     const chunks: Buffer[] = [];
     let length = 0;
     child.stdout.on('data', (chunk: Buffer) => {
@@ -144,6 +146,7 @@ function isTracked(root: string, requestedPath: string): boolean {
     ['-C', root, 'ls-files', '--error-unmatch', '--', requestedPath],
     {
       encoding: 'utf8',
+      ...HIDE_CONSOLE,
     },
   );
   return result.status === 0;
@@ -272,6 +275,7 @@ export function readDiffBlob(
   }
   const result = spawnSync('git', ['-C', root, 'show', `HEAD:${requestedPath}`], {
     maxBuffer: MAX_DIFF_BYTES + 65_536,
+    ...HIDE_CONSOLE,
   });
   if (result.status !== 0) return null;
   return result.stdout;

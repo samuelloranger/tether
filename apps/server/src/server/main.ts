@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
+import { followFile } from './logTail';
 import { LOG_FILE, PID_FILE, PRESENT_CONTROL_TOKEN_FILE, STATE_DIR } from './paths';
 import { processStartTime } from './procIdentity';
 import { COMPILED, selfArgv, VERSION } from './runtime';
@@ -100,6 +101,13 @@ async function start(): Promise<void> {
     env,
     detached: true,
     stdio: ['ignore', out, out],
+    // Without this the detached daemon gets its own console window (documented
+    // behaviour of `detached` on Windows), which sticks on screen for as long
+    // as the server runs — from `tether start` and from `tether update`, which
+    // restarts through here. Same fix as the PTY holder spawn in pty.ts. It
+    // only affects the window: verified that the daemon still outlives the
+    // shell that launched it and `tether status` still finds it.
+    windowsHide: true,
   });
   child.unref();
   if (!child.pid) {
@@ -187,7 +195,12 @@ function logs(): void {
     console.log('no logs yet');
     return;
   }
-  spawn('tail', ['-n', '80', '-f', LOG_FILE], { stdio: 'inherit' });
+  // Was `spawn('tail', ['-n','80','-f', …])`. There is no tail(1) on Windows
+  // unless a Git for Windows install happens to be on PATH, so `tether logs`
+  // died with ENOENT on a clean box. followFile is the same behaviour in
+  // process, on every platform — see logTail.ts for why it replaces tail here
+  // rather than only standing in for it on Windows.
+  followFile(LOG_FILE, { lines: 80 });
 }
 
 // Read a line of hidden input: raw-mode manual char loop on a TTY (prompt stays
@@ -263,7 +276,7 @@ Usage: tether <command>
   stop             Stop the background server
   restart          Stop then start
   status           Show running state + HTTP health
-  logs             Follow the server log (tail -f)
+  logs             Follow the server log
   present          Open/reset an agent HTML preview or install an agent skill
   signal           Tell tether this session is working / waiting / done
   set-password     Set the shared access password (required for clients)

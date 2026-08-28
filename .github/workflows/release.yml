@@ -541,6 +541,11 @@ jobs:
             asset: tether-darwin-arm64
           - target: bun-darwin-x64-baseline
             asset: tether-darwin-x64
+          # Windows x64 only: bun does emit a windows-arm64 target, but nobody
+          # has run the PTY layer there, so `tether update` refuses arm64 rather
+          # than resolve to an asset that has never been exercised.
+          - target: bun-windows-x64-baseline
+            asset: tether-windows-x64.exe
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -583,6 +588,11 @@ jobs:
             *darwin*)
               out="${{ matrix.asset }}.tar.gz"
               tar czf "$out" tether ;;
+            *windows*)
+              # --outfile tether + a windows target emits tether.exe: bun adds
+              # the extension itself. The asset already carries .exe.
+              out="${{ matrix.asset }}"
+              mv tether.exe "$out" ;;
             *)
               out="${{ matrix.asset }}"
               mv tether "$out" ;;

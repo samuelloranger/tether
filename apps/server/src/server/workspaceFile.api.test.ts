@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { canonicalFixture, osc7Chunk } from '../../test-paths';
 import { app } from './app';
 import { getAuthHash, setAuthHash, upsertSession } from './db';
 import { clearLiveCwd, recordChunk } from './liveCwd';
@@ -14,20 +15,16 @@ async function ensureAuth() {
   setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
 }
 
-function osc7(root: string) {
-  return `\x1b]7;file://host${root}\x07`;
-}
-
 test('GET /api/sessions/:id/file serves workspace text once the shell has reported its cwd', async () => {
   const previousAuthHash = getAuthHash();
   await ensureAuth();
-  const root = mkdtempSync(path.join(tmpdir(), 'tether-file-api-'));
+  const root = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-file-api-')));
   try {
     execSync('git init -q', { cwd: root });
     mkdirSync(path.join(root, 'src'));
     writeFileSync(path.join(root, 'src', 'main.ts'), 'export const answer = 42;\n');
     upsertSession('file-rooted', 'bash', 'running');
-    recordChunk('file-rooted', osc7(path.join(root, 'src')));
+    recordChunk('file-rooted', osc7Chunk(path.join(root, 'src')));
 
     const ok = await app.request(
       `/api/sessions/file-rooted/file?path=${encodeURIComponent('main.ts')}`,

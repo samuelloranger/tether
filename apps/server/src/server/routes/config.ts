@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { type Config, getConfig, patchConfig } from '../config';
+import { type Config, getConfig, getShellSupport, patchConfig } from '../config';
 import { countPushDevices } from '../pushDevices';
 import { getTlsReport } from '../tlsRuntime';
 
@@ -15,6 +15,12 @@ const withDerived = (config: Config) => ({
   ...config,
   pushDevices: countPushDevices(),
   tls: getTlsReport(),
+  // Read-only verdict on the shell `session.defaultShell` currently names. A
+  // client may set that field to anything, and on Windows one of those anythings
+  // (an MSYS/Git-for-Windows bash) reports /c/Users paths that silently disable
+  // the git, file-tree and upload features. The choice is not rejected — this is
+  // how a client can explain what it costs.
+  shell: getShellSupport(),
 });
 
 export const configRoutes = new Hono();

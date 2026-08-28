@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { CAN_SYMLINK, HAS_POSIX_MODES } from '../../test-paths';
 import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
 
 function tempDir(prefix: string) {
@@ -47,7 +48,8 @@ test('associates a preview with the session that created it, and allows none', (
   }
 });
 
-test('rejects traversal and symlinks that escape a preview root', () => {
+// Needs a symlink fixture, which a default Windows install refuses to create.
+test.skipIf(!CAN_SYMLINK)('rejects traversal and symlinks that escape a preview root', () => {
   const root = tempDir('tether-preview-');
   const outside = tempDir('tether-outside-');
   try {
@@ -111,7 +113,8 @@ test('creates and reuses an owner-only local control token', () => {
 
     expect(first).toMatch(/^[a-f0-9]{48}$/);
     expect(second).toBe(first);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Unassertable on Windows (no mode bits) — see HAS_POSIX_MODES.
+    if (HAS_POSIX_MODES) expect(statSync(file).mode & 0o777).toBe(0o600);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

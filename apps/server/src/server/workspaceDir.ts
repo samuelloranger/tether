@@ -1,13 +1,12 @@
-import { lstatSync, opendirSync, realpathSync } from 'node:fs';
+import { lstatSync, opendirSync } from 'node:fs';
 import path from 'node:path';
-import { WorkspaceFileError } from './workspaceFile';
+import { canonicalPath, inside, samePath, WorkspaceFileError } from './workspaceFile';
+import { toWorkspacePath } from './workspacePath';
 
 const MAX_ENTRIES = 2000;
 // Names held while sorting. Far above MAX_ENTRIES so ordinary large directories
 // sort correctly, low enough that a pathological one cannot exhaust memory.
 const SCAN_CEILING = 50_000;
-const inside = (root: string, value: string) =>
-  value === root || value.startsWith(`${root}${path.sep}`);
 
 export type WorkspaceDirEntry = {
   name: string;
@@ -25,11 +24,11 @@ type ScannedName = { name: string; isDir: boolean; isLink: boolean };
 function resolveDirTarget(root: string, requestedPath: string, cwd?: string) {
   if (path.isAbsolute(requestedPath) || requestedPath.split(/[\\/]/).includes('..'))
     throw new WorkspaceFileError(400, 'invalid file path');
-  const canonicalRoot = realpathSync(root);
+  const canonicalRoot = canonicalPath(root);
   let base = canonicalRoot;
   if (cwd) {
     try {
-      base = realpathSync(cwd);
+      base = canonicalPath(cwd);
     } catch {
       throw new WorkspaceFileError(400, 'invalid working directory');
     }
@@ -38,16 +37,19 @@ function resolveDirTarget(root: string, requestedPath: string, cwd?: string) {
   }
   let target: string;
   try {
-    target = realpathSync(requestedPath ? path.resolve(base, requestedPath) : base);
+    target = canonicalPath(requestedPath ? path.resolve(base, requestedPath) : base);
   } catch {
     throw new WorkspaceFileError(404, 'file not found');
   }
   if (!inside(canonicalRoot, target)) throw new WorkspaceFileError(400, 'path escapes workspace');
-  // lstat, not stat: the target came from realpathSync so it is already
+  // lstat, not stat: the target came from canonicalPath so it is already
   // symlink-free, and lstat lets the identity check after the read compare
   // against what we validated rather than against whatever the name resolves to
   // later.
-  const validated = lstatSync(target);
+  //
+  // `bigint: true` is load-bearing rather than a style choice — the identity
+  // check in readWorkspaceDir explains what the default loses.
+  const validated = lstatSync(target, { bigint: true });
   if (!validated.isDirectory()) throw new WorkspaceFileError(415, 'path is not a directory');
   return { canonicalRoot, target, validated };
 }
@@ -106,7 +108,7 @@ function pageEntries(
     if (item.isLink) {
       let resolved: string | null = null;
       try {
-        resolved = realpathSync(full);
+        resolved = canonicalPath(full);
       } catch {
         resolved = null;
       }
@@ -139,11 +141,27 @@ export function readWorkspaceDir(root: string, requestedPath: string, cwd?: stri
   // This is verify-after-read, not openat(2) — Node cannot readdir from a file
   // descriptor, so a genuinely atomic version is not expressible here. What it
   // guarantees is that no result which escaped the workspace is ever RETURNED.
-  const after = lstatSync(target);
+  //
+  // Read as BigInt, deliberately. The default lstatSync hands dev/ino back as JS
+  // numbers, and on Windows libuv fills ino from the 64-bit NTFS file id, which
+  // routinely exceeds Number.MAX_SAFE_INTEGER — a measured sample here was
+  // 34621422136632508 against a ceiling of 9007199254740991. Past that a double
+  // cannot represent every integer, so ids round to the nearest multiple of 8;
+  // and an NTFS file id is a sequence number in its high bits over an MFT record
+  // index in its low bits, so two directories in adjacent MFT records differ by
+  // one and round to the SAME number. Creating 500 sibling directories and
+  // reading each id both ways gave 500 distinct BigInts but only 497 distinct
+  // numbers — three pairs this check would have declared identical, which is
+  // exactly an attacker's swap passing unnoticed. BigInt is exact and costs
+  // nothing.
+  const after = lstatSync(target, { bigint: true });
   if (after.dev !== validated.dev || after.ino !== validated.ino) {
     throw new WorkspaceFileError(409, 'directory changed while it was being read');
   }
-  if (realpathSync(target) !== target) {
+  // Belt to the identity check's braces: re-resolve the name and require it to
+  // land where it did. Compared with samePath so a Windows volume's case folding
+  // is never mistaken for a swap.
+  if (!samePath(canonicalPath(target), target)) {
     throw new WorkspaceFileError(409, 'directory changed while it was being read');
   }
 
@@ -159,7 +177,7 @@ export function readWorkspaceDir(root: string, requestedPath: string, cwd?: stri
     entries: WorkspaceDirEntry[];
     truncated?: true;
   } = {
-    path: path.relative(canonicalRoot, target),
+    path: toWorkspacePath(path.relative(canonicalRoot, target)),
     entries,
   };
   if (truncated) result.truncated = true;
