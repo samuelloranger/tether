@@ -359,7 +359,18 @@ public final class SessionStore {
   /// of its sessions first, which is impossible when it has none.
   public func newTerminal(hostId: String) async {
     guard let client = client(for: hostId) else { return }
-    let id = nextSessionId(forHost: hostId)
+    // THIS host's list, fetched fresh, before an id is picked. A host the
+    // drawer has never loaded has no `sessionsByHost` entry, so allocating
+    // from the cache would pick `term-1` for a host that already runs one —
+    // and `/api/sessions/start` returns the EXISTING session for a known id
+    // (apps/server/src/server/pty.ts), so the button would silently attach to
+    // a running terminal instead of opening a new one.
+    let known = await fetchSessions(for: hostId)
+    sessionsByHost[hostId] = known
+    if activeHostId == hostId {
+      sessions = known
+    }
+    let id = nextSessionId(among: known)
     // Explicit, so the cold-launch restore is spent — see `selectSession`.
     hasRestoredSession = true
     do {
@@ -369,8 +380,11 @@ public final class SessionStore {
       }
       activeHostId = hostId
       activeSessionId = id
-      await refreshDrawer()
+      // Connect FIRST. Refreshing every host before opening the socket meant a
+      // terminal started on a healthy host stayed disconnected for as long as
+      // the slowest host took to time out.
       await connectTerminal(sessionId: id)
+      refreshDrawerInBackground()
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -557,7 +571,14 @@ public final class SessionStore {
   /// enqueue order, so fast typing could reach the socket scrambled. Stream
   /// yields are FIFO and need no await, which is what a key handler wants.
   public func sendInput(_ text: String) {
-    pipeline.outbound.yield(.input(text))
+    pipeline.outbound.yield(.input(text, key: activeTerminalKey))
+  }
+
+  /// The terminal a keystroke is being typed INTO, stamped on every outbound
+  /// frame so a session switch cannot deliver it to the wrong session.
+  private var activeTerminalKey: String? {
+    guard let activeSessionId else { return nil }
+    return terminalKey(activeSessionId)
   }
 
   public func sendInput(bytes: [UInt8]) {
@@ -574,7 +595,7 @@ public final class SessionStore {
   /// use to skip auto-indent.
   public func sendPaste(_ text: String) {
     guard !text.isEmpty else { return }
-    pipeline.outbound.yield(.paste(text))
+    pipeline.outbound.yield(.paste(text, key: activeTerminalKey))
   }
 
   public func sendRawKey(_ bytes: [UInt8]) {
@@ -658,13 +679,12 @@ public final class SessionStore {
     }
   }
 
-  /// Picks a free `term-N` on ONE host.
+  /// Picks a free `term-N` against ONE host's session list.
   ///
   /// Ids are only unique per host, so the candidate list has to be that host's
-  /// own sessions — keyed off the active host's list, a new terminal on a
-  /// second server could collide with an id that server already runs.
-  private func nextSessionId(forHost hostId: String) -> String {
-    let known = sessionsByHost[hostId] ?? (hostId == activeHostId ? sessions : [])
+  /// own sessions — measured against the active host's list, a new terminal on
+  /// a second server could collide with an id that server already runs.
+  private func nextSessionId(among known: [RemoteSession]) -> String {
     let existing = Set(known.map(\.id))
     var index = 1
     while existing.contains("term-\(index)") {

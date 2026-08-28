@@ -21,8 +21,13 @@ public enum TerminalPipelineEvent: Sendable {
 /// is FIFO and callable without awaiting, which is exactly what a key handler
 /// needs.
 enum OutboundFrame: Sendable {
-  case input(String)
-  case paste(String)
+  /// `key` is the HOST-QUALIFIED session the text was typed INTO. The pump is
+  /// a separate task from `connect`/`disconnect`, so a frame queued just before
+  /// a session switch can be handled after the socket has already been
+  /// replaced — without this, the tail of what you typed into one terminal
+  /// would be sent to the next one.
+  case input(String, key: String?)
+  case paste(String, key: String?)
   case focus(Bool)
   case resize(cols: UInt16, rows: UInt16)
 }
@@ -178,9 +183,11 @@ actor TerminalPipeline {
 
   private func handleOutbound(_ frame: OutboundFrame) {
     switch frame {
-    case let .input(text):
+    case let .input(text, key):
+      guard stillCurrent(key) else { return }
       send(["type": "input", "text": text])
-    case let .paste(text):
+    case let .paste(text, key):
+      guard stillCurrent(key) else { return }
       // The emulator knows whether the program has bracketed paste on (DECSET
       // 2004) and builds the payload: fenced in `ESC[200~`/`ESC[201~` when it
       // does, with the clipboard's own fence markers stripped either way.
@@ -190,6 +197,15 @@ actor TerminalPipeline {
     case let .resize(newCols, newRows):
       resize(cols: newCols, rows: newRows)
     }
+  }
+
+  /// Whether a queued frame still belongs to the terminal on screen.
+  ///
+  /// Dropping the tail of a switched-away-from session is the safe half of the
+  /// trade; delivering it to the session that replaced it is not.
+  private func stillCurrent(_ key: String?) -> Bool {
+    guard let key else { return true }
+    return key == emulatorKey
   }
 
   /// Adopts the grid the surface can actually display: resizes the local

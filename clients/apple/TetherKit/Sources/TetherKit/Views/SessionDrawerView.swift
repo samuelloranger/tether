@@ -55,10 +55,11 @@ public struct SessionDrawerView: View {
                 Task { await store.refreshHost(hostId: host.id) }
               },
               onNewTerminal: {
-                Task {
-                  await store.newTerminal(hostId: host.id)
-                  onClose()
-                }
+                // Closes on the tap, not when the server answers: awaiting
+                // `newTerminal` left the drawer sitting open over a terminal
+                // that was already being opened behind it.
+                onClose()
+                Task { await store.newTerminal(hostId: host.id) }
               },
               onReenterPassword: onReenterPassword,
               onHostSettings: onHostSettings
