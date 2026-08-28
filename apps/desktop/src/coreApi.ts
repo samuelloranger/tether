@@ -81,6 +81,11 @@ export async function coreSessionsKill(input: {
   });
 }
 
+/** One host's session list, fetched now rather than read off the poll. */
+export async function coreSessionsList(hostId: string): Promise<DrawerSession[]> {
+  return invoke<DrawerSession[]>('core_sessions_list', { hostId });
+}
+
 export async function coreSessionsRename(
   hostId: string,
   sessionId: string,

@@ -119,3 +119,46 @@ export function useSessionModals() {
       setRename((current) => (current ? { ...current, text } : null)),
   };
 }
+
+export type SessionModals = ReturnType<typeof useSessionModals>;
+
+/**
+ * The rename and kill dialogs with their state already wired, so the app shell
+ * carries one element instead of two blocks of plumbing.
+ */
+export function SessionModalHost({
+  modals,
+  onRename,
+  onKill,
+}: {
+  modals: SessionModals;
+  onRename: (hostId: string, sessionId: string, name: string) => void;
+  onKill: (hostId: string, sessionId: string) => void;
+}) {
+  return (
+    <>
+      <RenameModal
+        visible={!!modals.rename}
+        value={modals.rename?.text ?? ''}
+        placeholder={modals.rename?.placeholder ?? ''}
+        onChange={modals.setRenameText}
+        onClose={modals.closeRename}
+        onSubmit={() => {
+          if (!modals.rename) return;
+          onRename(modals.rename.hostId, modals.rename.sessionId, modals.rename.text.trim());
+          modals.closeRename();
+        }}
+      />
+      <KillConfirmModal
+        visible={!!modals.kill}
+        sessionLabel={modals.kill?.label ?? ''}
+        onCancel={modals.closeKill}
+        onConfirm={() => {
+          if (!modals.kill) return;
+          onKill(modals.kill.hostId, modals.kill.sessionId);
+          modals.closeKill();
+        }}
+      />
+    </>
+  );
+}

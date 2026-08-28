@@ -42,6 +42,7 @@ fn main() {
             commands::hosts::core_test_connection,
             commands::sessions::core_sessions_kill,
             commands::sessions::core_sessions_rename,
+            commands::sessions::core_sessions_list,
             commands::sessions::core_next_term_id,
             commands::polling::core_polling_start,
             commands::polling::core_polling_stop,

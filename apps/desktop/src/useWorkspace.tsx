@@ -18,7 +18,9 @@ export function useWorkspace({
   const files = useWorkspaceFiles({
     hostId,
     sessionId,
-    browseEnabled: workspaceOpen,
+    // `enabled` too, not just the panel flag: with no session open the tree
+    // would browse `/api/sessions//dir`.
+    browseEnabled: workspaceOpen && enabled,
   });
   const upload = useWorkspaceUpload({
     hostId,

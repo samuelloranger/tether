@@ -251,7 +251,9 @@ export function useWorkspaceUpload({
 
   const uploadPaths = useCallback(
     async (paths: string[]) => {
-      if (!hostId || paths.length === 0) return;
+      // No session means no cwd to upload into: the request would address
+      // `/api/sessions//upload`.
+      if (!hostId || !sessionIdRef.current || paths.length === 0) return;
       setUploading(true);
       setUploadError(null);
       try {

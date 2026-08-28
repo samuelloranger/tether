@@ -14,7 +14,8 @@ interface SessionDrawerProps {
   sidebarPinned?: boolean;
   onTogglePin?: () => void;
   onSelect: (hostId: string, sessionId: string) => void;
-  onNew: () => void;
+  /** Per host: a single global button can only mean "the active host". */
+  onNew: (hostId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
   onRetryHost: (hostId: string) => void;
@@ -250,15 +251,17 @@ export function SessionDrawer({
                   />
                 ))
               )}
+              <button
+                type="button"
+                className="secondary drawer-host-new"
+                onClick={() => onNew(host.id)}
+              >
+                New terminal
+              </button>
             </section>
           );
         })}
       </div>
-      <footer className="drawer-footer">
-        <button type="button" className="secondary" onClick={onNew} disabled={!activeHostId}>
-          New terminal
-        </button>
-      </footer>
     </aside>
   );
 }
