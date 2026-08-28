@@ -66,27 +66,42 @@ test('recordChunk/getLiveCwd/clearLiveCwd track state per session id', () => {
 // emitted it (our PowerShell profile writes "/", cmd.exe's $P writes "\").
 
 test('normalizeOsc7Cwd converts a Windows file-URI path to a native path', () => {
-  expect(normalizeOsc7Cwd('/C:/Users/sam/project', true)).toBe(String.raw`C:\Users\sam\project`);
+  expect(normalizeOsc7Cwd('/C:/Users/sam/project', '', true)).toBe(
+    String.raw`C:\Users\sam\project`,
+  );
 });
 
 test('normalizeOsc7Cwd accepts the backslashes cmd.exe $P emits', () => {
-  expect(normalizeOsc7Cwd(String.raw`/C:\Users\sam\project`, true)).toBe(
+  expect(normalizeOsc7Cwd(String.raw`/C:\Users\sam\project`, '', true)).toBe(
     String.raw`C:\Users\sam\project`,
   );
 });
 
 test('normalizeOsc7Cwd keeps a drive root intact', () => {
-  expect(normalizeOsc7Cwd('/D:/', true)).toBe('D:\\');
+  expect(normalizeOsc7Cwd('/D:/', '', true)).toBe('D:\\');
+});
+
+test('normalizeOsc7Cwd ignores the localhost authority alias', () => {
+  expect(normalizeOsc7Cwd('/C:/Users/sam', 'localhost', true)).toBe(String.raw`C:\Users\sam`);
+});
+
+test('normalizeOsc7Cwd rebuilds a UNC path from the file-URI authority', () => {
+  // file://fileserver/share/dir ⇒ authority is the server, path is /share/dir;
+  // the native form is \\fileserver\share\dir. Dropping the authority (the old
+  // behaviour) lost the server name entirely.
+  expect(normalizeOsc7Cwd('/share/dir', 'fileserver', true)).toBe(
+    String.raw`\\fileserver\share\dir`,
+  );
 });
 
 test('normalizeOsc7Cwd leaves POSIX paths untouched on POSIX', () => {
-  expect(normalizeOsc7Cwd('/home/sam/project', false)).toBe('/home/sam/project');
+  expect(normalizeOsc7Cwd('/home/sam/project', '', false)).toBe('/home/sam/project');
 });
 
 test('normalizeOsc7Cwd leaves a non-drive path alone even on Windows', () => {
   // A Git Bash / WSL shell reports MSYS-style paths that have no drive letter;
   // rewriting separators there would produce a path Windows cannot resolve.
-  expect(normalizeOsc7Cwd('/c/Users/sam', true)).toBe('/c/Users/sam');
+  expect(normalizeOsc7Cwd('/c/Users/sam', '', true)).toBe('/c/Users/sam');
 });
 
 test('an OSC 7 report from a Windows shell lands as a native cwd', () => {

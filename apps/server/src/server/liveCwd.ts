@@ -1,11 +1,16 @@
 // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 7 is delimited by ESC/BEL control bytes by definition.
 const OSC7_RE = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
-const FILE_URI_RE = /^file:\/\/[^/]*(\/.*)$/;
+// Capture the authority as well as the path: for a drive-letter cwd it is empty
+// or "localhost" and gets discarded, but for a UNC cwd it IS the server name
+// (file://server/share ⇒ \\server\share), and dropping it loses half the path.
+const FILE_URI_RE = /^file:\/\/([^/]*)(\/.*)$/;
 
-// A file URI's path is always rooted at "/", so a Windows cwd arrives as
-// "/C:/Users/x" — the leading slash is URI syntax, not part of the path, and
-// the separators are whatever the emitting shell used (our PowerShell profile
-// writes forward slashes; cmd.exe's $P writes native backslashes). Everything
+// A file URI's path is always rooted at "/", so a drive-letter Windows cwd
+// arrives as "/C:/Users/x" — the leading slash is URI syntax, not part of the
+// path, and the separators are whatever the emitting shell used (our PowerShell
+// profile writes forward slashes; cmd.exe's $P writes native backslashes). A
+// UNC cwd instead carries the server in `authority` and arrives as
+// authority="server", uriPath="/share/x" ⇒ \\server\share\x. Everything
 // downstream — findGitRoot, the workspace file tree, upload paths — compares
 // against values from node:path, so hand back the native form.
 //
@@ -13,9 +18,15 @@ const FILE_URI_RE = /^file:\/\/[^/]*(\/.*)$/;
 // Windows shape stays testable from a POSIX CI runner.
 export function normalizeOsc7Cwd(
   uriPath: string,
+  authority = '',
   isWindows = process.platform === 'win32',
 ): string {
   if (!isWindows) return uriPath;
+  // UNC: a non-empty authority that is not the loopback alias is the file
+  // server. uriPath is "/share/rest"; the native form is \\server\share\rest.
+  if (authority && authority.toLowerCase() !== 'localhost') {
+    return `\\\\${authority}${uriPath.replace(/\//g, '\\')}`;
+  }
   const drive = /^\/([A-Za-z]:[\\/].*)$/.exec(uriPath);
   if (!drive) return uriPath;
   return drive[1].replace(/\//g, '\\');
@@ -52,10 +63,11 @@ export function updateLiveCwd(state: LiveCwdState, chunk: string): LiveCwdState 
     const fileMatch = FILE_URI_RE.exec(m[1]);
     if (fileMatch) {
       reported = true;
+      const authority = fileMatch[1];
       try {
-        cwd = normalizeOsc7Cwd(decodeURIComponent(fileMatch[1]));
+        cwd = normalizeOsc7Cwd(decodeURIComponent(fileMatch[2]), authority);
       } catch {
-        cwd = normalizeOsc7Cwd(fileMatch[1]);
+        cwd = normalizeOsc7Cwd(fileMatch[2], authority);
       }
     }
     consumed = OSC7_RE.lastIndex;

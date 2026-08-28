@@ -25,3 +25,20 @@
 // on POSIX, where the field is simply ignored — hence no platform branch, which
 // also keeps the option object's shape identical across platforms.
 export const HIDE_CONSOLE = { windowsHide: true } as const;
+
+// Kill a process and its whole descendant tree on Windows.
+//
+// A signal on Windows only ever terminates the one pid, leaving the shell's
+// children (the build, the agent, the ssh) orphaned and running. `taskkill /T`
+// walks the real parent/child tree the kernel tracks — the one thing here that
+// matches the POSIX process-group kill. `/F` because an interactive shell will
+// not close on the polite request either. Shared so the holder's PTY teardown
+// and pty.ts's detached-holder fallback stay one implementation, not two.
+export function killWindowsTree(pid: number): void {
+  try {
+    Bun.spawnSync(['taskkill.exe', '/PID', String(pid), '/T', '/F'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      ...HIDE_CONSOLE,
+    });
+  } catch {}
+}

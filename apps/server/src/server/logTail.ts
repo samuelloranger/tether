@@ -107,8 +107,10 @@ export function followFile(file: string, options: FollowOptions = {}): FollowHan
 
   let offset = start.size;
   // A write can flush mid-character, so carry the partial sequence across polls
-  // instead of emitting a replacement char for it.
-  const decoder = new StringDecoder('utf8');
+  // instead of emitting a replacement char for it. Replaced (not reused) on an
+  // in-place truncation below: bytes buffered from the pre-truncation content
+  // are gone, and feeding them ahead of the new content corrupts its first char.
+  let decoder = new StringDecoder('utf8');
 
   const poll = () => {
     let size: number;
@@ -121,7 +123,12 @@ export function followFile(file: string, options: FollowOptions = {}): FollowHan
     }
     // Shrank ⇒ truncated in place. Start over from the top; the alternative is
     // sitting at a stale offset past EOF and never printing anything again.
-    if (size < offset) offset = 0;
+    // Drop the decoder's partial-byte carry too: it belongs to content that no
+    // longer exists, and prepending it to the new bytes garbles the first char.
+    if (size < offset) {
+      offset = 0;
+      decoder = new StringDecoder('utf8');
+    }
     if (size === offset) return;
     const fd = openSync(file, 'r');
     try {

@@ -24,12 +24,22 @@ import {
 import { INITIAL_LIVE_CWD_STATE, type LiveCwdState, updateLiveCwd } from './liveCwd';
 import { getProcessCwd } from './procCwd';
 import { FrameDecoder } from './proto/frame';
-import { HIDE_CONSOLE } from './spawnWindow';
+import { killWindowsTree } from './spawnWindow';
 import { interruptForeground } from './winConsole';
 
 const IS_WINDOWS = process.platform === 'win32';
 /** Ctrl+C. The byte a terminal sends; on POSIX the line discipline signals on it. */
 const ETX = 0x03;
+
+/**
+ * Whether an input chunk is a bare Ctrl+C keystroke (and nothing else). A real
+ * keypress arrives as the single byte 0x03; a paste, a drag, or binary input
+ * that merely carries a 0x03 somewhere in a larger buffer is not an interrupt.
+ * Used only to reproduce the interrupt by hand on Windows — see the call site.
+ */
+export function isInterruptKeystroke(data: Uint8Array): boolean {
+  return data.length === 1 && data[0] === ETX;
+}
 
 // Windows has no /proc/<pid>/cwd. getProcessCwd does read the Win32 cwd out of
 // the target's PEB there, but only answers for shells measured to keep that in
@@ -89,22 +99,9 @@ function pidsInSession(sid: number): number[] {
 type HolderProc = ReturnType<typeof Bun.spawn>;
 
 // Interactive shells ignore SIGTERM; SIGHUP is the "terminal went away" signal
-// they honor. Escalate to SIGKILL for anything that ignores both.
-// Windows has no process groups to signal and no SIGHUP: node maps every
-// signal name it accepts to a bare TerminateProcess on the one pid, which
-// leaves the shell's children (the build, the agent, the ssh) orphaned and
-// running. taskkill /T walks the real parent/child tree the kernel tracks, so
-// it is the only thing here that actually matches the POSIX behaviour above.
-// /F because an interactive shell will not close on the polite request either.
-function killWindowsTree(pid: number): void {
-  try {
-    Bun.spawnSync(['taskkill.exe', '/PID', String(pid), '/T', '/F'], {
-      stdio: ['ignore', 'ignore', 'ignore'],
-      ...HIDE_CONSOLE,
-    });
-  } catch {}
-}
-
+// they honor. Escalate to SIGKILL for anything that ignores both. On Windows
+// there are no process groups or SIGHUP, so killWindowsTree (spawnWindow.ts)
+// stands in — taskkill /T is what matches the POSIX process-group kill.
 function killHolderPty(proc: HolderProc): void {
   if (process.platform === 'win32') {
     killWindowsTree(proc.pid);
@@ -154,7 +151,10 @@ function applyHolderFrame(
       // ^C work at a PSReadLine prompt and inside raw-mode TUIs. On Windows it
       // is also all that happens, so a running job additionally needs the
       // interrupt reproduced by hand — see winConsole.ts.
-      if (IS_WINDOWS && msg.data.includes(ETX)) interruptForeground(proc.pid);
+      //
+      // Gate that on a *lone* ETX (see isInterruptKeystroke): a paste or binary
+      // input that merely carries a 0x03 must not taskkill the foreground job.
+      if (IS_WINDOWS && isInterruptKeystroke(msg.data)) interruptForeground(proc.pid);
     } else if (msg.type === 'resize' && proc.terminal) {
       proc.terminal.resize(msg.cols, msg.rows);
     } else if (msg.type === 'kill') {

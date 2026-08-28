@@ -136,4 +136,29 @@ describe('followFile', () => {
       handle.stop();
     }
   });
+
+  test('does not corrupt the first char after a truncation splits a UTF-8 char', async () => {
+    // Leave the decoder holding a partial multibyte sequence, then truncate the
+    // file out from under it. Those buffered bytes belong to content that no
+    // longer exists; if they are not dropped they garble the first char of the
+    // post-truncation content into a replacement char.
+    const file = tempFile('start\n');
+    const seen: string[] = [];
+    const handle = followFile(file, { lines: 1, intervalMs: 5, write: (c) => seen.push(c) });
+    try {
+      await sleep(20);
+      seen.length = 0;
+      // First byte of '—' (U+2014 → E2 80 94): a lead byte that leaves the
+      // decoder waiting for two continuation bytes it will never get.
+      appendFileSync(file, Buffer.from([0xe2]));
+      await sleep(20);
+      truncateSync(file, 0);
+      writeFileSync(file, 'fresh\n');
+      await sleep(60);
+      expect(seen.join('')).toBe('fresh\n');
+      expect(seen.join('')).not.toContain('�');
+    } finally {
+      handle.stop();
+    }
+  });
 });
