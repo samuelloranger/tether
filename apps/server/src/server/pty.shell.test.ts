@@ -189,8 +189,15 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 // gained a shell the other did not.
 for (const cmd of ['bash', '/usr/bin/bash', 'zsh', 'fish', '/opt/homebrew/bin/fish']) {
   eq(describeShellSupport(cmd, false).integration, 'full', `${cmd}: full integration on POSIX`);
-  // A hooked invocation is more than [command, '-i'] (or [command] on Windows).
-  const injected = shellInvocation(cmd).args.length > (process.platform === 'win32' ? 1 : 2);
+  // A hooked invocation carries something the bare one does not — extra args
+  // beyond [command, '-i'] (just [command] on Windows), OR an env override.
+  // zsh is the reason for the second half: it has no --rcfile equivalent, so its
+  // hook rides in entirely through ZDOTDIR and its argv is exactly the bare
+  // [command, '-i']. Counting args alone called that "not injected" — on POSIX
+  // only, since the Windows baseline of 1 let the same 2 args through.
+  const invocation = shellInvocation(cmd);
+  const baseline = process.platform === 'win32' ? 1 : 2;
+  const injected = invocation.args.length > baseline || invocation.env !== undefined;
   eq(injected, true, `${cmd}: shellInvocation really does inject something`);
 }
 for (const cmd of ['sh', 'dash', '/bin/tcsh', 'nu']) {

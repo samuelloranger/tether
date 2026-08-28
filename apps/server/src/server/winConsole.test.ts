@@ -70,6 +70,15 @@ function spawnChild(share: boolean) {
   return child;
 }
 
+/** Whether `pid` joins this process's console roster, within a short window. */
+async function waitForConsoleMember(pid: number): Promise<boolean> {
+  for (let i = 0; i < 20; i++) {
+    if (consoleProcessPids().includes(pid)) return true;
+    await Bun.sleep(100);
+  }
+  return false;
+}
+
 /** Both pids visible as our children, or give up — spawning is not instant. */
 async function waitForChildren(pids: number[]) {
   for (let i = 0; i < 30; i++) {
@@ -153,9 +162,32 @@ test.skipIf(!HAS_CONSOLE)(
     expect(children).toContain(shared.pid);
     expect(children).toContain(detached.pid);
 
+    // Console membership is not instant, and on some hosts it never happens at
+    // all: a GitHub Actions runner has a console by GetConsoleProcessList's
+    // reckoning, yet a child spawned to share it does not join the roster the
+    // way it does under a real terminal. Poll for the precondition instead of
+    // assuming it.
+    const joined = await waitForConsoleMember(shared.pid);
     const foreground = foregroundChildren(children, consoleProcessPids());
-    expect(foreground).toContain(shared.pid);
+
+    // The regression guard, asserted unconditionally because it is the bug this
+    // whole change exists to fix: a detached background job is never selected,
+    // so a ^C for the foreground command cannot take it down. This holds whether
+    // or not the host lets the other child join the console — an empty roster
+    // selects nothing, which is also the safe answer.
     expect(foreground).not.toContain(detached.pid);
+
+    // The inclusion half needs a host that actually shares consoles with
+    // children. Where it does, a ^C must still reach the foreground command —
+    // narrowing that killed nothing would be its own bug.
+    if (joined) {
+      expect(foreground).toContain(shared.pid);
+    } else {
+      console.warn(
+        'winConsole: host does not propagate console membership to children; ' +
+          'asserted the exclusion half only',
+      );
+    }
 
     shared.kill();
     detached.kill();
