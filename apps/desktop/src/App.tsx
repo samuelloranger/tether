@@ -22,10 +22,10 @@ import {
 import { ResidentTerminals } from './ResidentTerminals';
 import { ServerSettingsScreen } from './ServerSettingsScreen';
 import { SessionDrawer } from './SessionDrawer';
-import { KillConfirmModal, RenameModal, useSessionModals } from './SessionModals';
+import { SessionModalHost, useSessionModals } from './SessionModals';
 import { LocalSettingsScreen } from './SettingsScreen';
-import { StatusStrip } from './StatusStrip';
 import { hostSecrets } from './secureConfig';
+import { TerminalEmpty } from './TerminalEmpty';
 import { TerminalToolbar } from './TerminalToolbar';
 import { httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
@@ -70,13 +70,15 @@ export function App() {
     setOverflowAlign(align);
     setOverflowOpen(true);
   };
-  const gitPanel = useGitPanel(app.activeHostId, app.activeSessionId, app.gitOpen);
+  // Nothing to diff or browse without a session: `/api/sessions//diff`.
+  const hasSession = !!app.activeSessionId;
+  const gitPanel = useGitPanel(app.activeHostId, app.activeSessionId, app.gitOpen && hasSession);
   const httpBase = app.activeHost ? httpOriginFor(app.activeHost) : null;
   const workspace = useWorkspace({
     hostId: app.activeHostId,
     sessionId: app.activeSessionId,
     baseUrl: httpBase,
-    enabled: app.ready && app.screen === 'main' && !!app.activeHost,
+    enabled: app.ready && app.screen === 'main' && !!app.activeHost && hasSession,
   });
   const openFileRef = useRef(workspace.openFile);
   openFileRef.current = workspace.openFile;
@@ -96,6 +98,11 @@ export function App() {
     drawerOpen,
   });
   const modals = useSessionModals();
+  const newTerminalOn = (hostId: string | null) => {
+    if (!hostId) return;
+    void app.newSession(hostId);
+    if (!layout.docked) setDrawerOpen(false);
+  };
 
   useEffect(() => {
     void ensureNotificationPermission();
@@ -122,7 +129,7 @@ export function App() {
 
   // Everything tinted in index.css resolves through --lit, so this is what
   // re-colours the app on a session switch. A stopped session tints nothing.
-  const { session: activeSession, dot: activeDot } = useMemo(
+  const { dot: activeDot } = useMemo(
     () => activeSessionDot(app.sessions, app.activeHostId, app.activeSessionId),
     [app.sessions, app.activeHostId, app.activeSessionId],
   );
@@ -282,7 +289,7 @@ export function App() {
               app.selectSession(hostId, sessionId);
               if (!layout.docked) setDrawerOpen(false);
             }}
-            onNew={app.newSession}
+            onNew={newTerminalOn}
             onRequestKill={modals.openKill}
             onRequestRename={modals.openRename}
             onRetryHost={app.retryHost}
@@ -332,6 +339,11 @@ export function App() {
               {workspace.workspaceOpen && <WorkspacePanel workspace={workspace} />}
               <div className="terminal-stack">
                 <div className="screen">
+                  <TerminalEmpty
+                    open={!hasSession}
+                    hostName={app.activeHost.name}
+                    onNew={() => newTerminalOn(app.activeHostId)}
+                  />
                   <ResidentTerminals
                     hosts={app.hosts}
                     passwords={app.passwords}
@@ -342,11 +354,6 @@ export function App() {
                     fontFamily={prefs.terminalFont}
                     onFrame={app.handleWsFrame}
                     onDisconnected={(hostId) => app.retryHost(hostId)}
-                  />
-                  <StatusStrip
-                    sessionId={app.activeSessionId}
-                    dot={activeDot}
-                    lastOutputAt={activeSession?.last_output_at ?? null}
                   />
                 </div>
                 {app.gitOpen && !fileOrPreviewUp && app.gitMode === 'drawer' ? (
@@ -397,31 +404,10 @@ export function App() {
         )}
       </main>
 
-      <RenameModal
-        visible={!!modals.rename}
-        value={modals.rename?.text ?? ''}
-        placeholder={modals.rename?.placeholder ?? ''}
-        onChange={modals.setRenameText}
-        onClose={modals.closeRename}
-        onSubmit={() => {
-          if (!modals.rename) return;
-          void app.renameSessionById(
-            modals.rename.hostId,
-            modals.rename.sessionId,
-            modals.rename.text.trim(),
-          );
-          modals.closeRename();
-        }}
-      />
-      <KillConfirmModal
-        visible={!!modals.kill}
-        sessionLabel={modals.kill?.label ?? ''}
-        onCancel={modals.closeKill}
-        onConfirm={() => {
-          if (!modals.kill) return;
-          void app.killSessionById(modals.kill.hostId, modals.kill.sessionId);
-          modals.closeKill();
-        }}
+      <SessionModalHost
+        modals={modals}
+        onRename={(hostId, sessionId, name) => void app.renameSessionById(hostId, sessionId, name)}
+        onKill={(hostId, sessionId) => void app.killSessionById(hostId, sessionId)}
       />
       <AppOverflowMenu
         visible={overflowOpen}

@@ -872,29 +872,22 @@ label > textarea {
   margin: 0 4px;
 }
 
-.drawer-footer {
-  flex-shrink: 0;
-  padding: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.drawer-footer button {
+/* One per host section: which server a new terminal lands on is the whole
+   point, so the button sits under that server's sessions rather than in a
+   footer that can only mean "the active host". */
+.drawer-host-new {
   width: 100%;
-  height: 36px;
-  background: var(--surface-raised);
-  border-color: var(--border);
-  color: var(--text-muted);
-}
-
-.drawer-footer button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-raised) 78%, var(--text));
-  color: var(--text);
-}
-
-.drawer-footer .kbd {
-  font-family: var(--mono);
-  font-size: 11px;
+  height: 30px;
+  margin: 4px 0 2px;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
   color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.drawer-host-new:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
 }
 
 /* ══ MAIN PANE ════════════════════════════════════════════════════════════ */
@@ -1153,34 +1146,6 @@ label > textarea {
 
 /* A floor for the screen: what this session is and where. Real values only —
    geometry comes from xterm, the rest from /api/sessions. */
-.status-strip {
-  flex-shrink: 0;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 14px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background: color-mix(in srgb, var(--background) 60%, var(--input));
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.status-strip .strip-primary {
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-strip .strip-state {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--lit);
-}
-
 .terminal-find-bar {
   flex-shrink: 0;
   display: flex;

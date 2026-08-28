@@ -15,6 +15,7 @@ import {
   corePollingStart,
   corePollingStop,
   coreSessionsKill,
+  coreSessionsList,
   coreSessionsRename,
   listenHostHealth,
   listenSessions,
@@ -23,6 +24,7 @@ import type { FrameApplyResult } from './frameHandler';
 import { hostSecrets } from './secureConfig';
 import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
+import { pickResume, restorableIds } from './sessionResume';
 import {
   activeSessionStorageKey,
   type DrawerSession,
@@ -44,7 +46,10 @@ export function useTetherDesktop() {
   const [sessions, setSessions] = useState<DrawerSession[]>([]);
   const [healthByHost, setHealthByHost] = useState<Record<string, HostHealthStatus>>({});
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
-  const [activeSessionId, setActiveSessionId] = useState('term-1');
+  // '' means "no terminal open". It used to default to 'term-1', which the WS
+  // open path turns into `startSession` — so a launch with nothing remembered
+  // spawned a shell nobody asked for.
+  const [activeSessionId, setActiveSessionId] = useState('');
   const [screen, setScreen] = useState<Screen>('main');
   const [editingHostId, setEditingHostId] = useState<string | null>(null);
   const [gitOpen, setGitOpen] = useState(false);
@@ -60,6 +65,28 @@ export function useTetherDesktop() {
   hostsRef.current = hosts;
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
+
+  /**
+   * Open the terminal the user was last in on this host — but only if it is
+   * still running.
+   *
+   * The list is fetched rather than read off the poll because the poll may not
+   * have reached this host yet, and opening a socket for a stopped id calls
+   * `startSession` server-side, resurrecting a shell the user killed. A choice
+   * made while the fetch is in flight wins over the restore.
+   */
+  const restoreSession = useCallback(async (hostId: string) => {
+    const remembered = localStorage.getItem(activeSessionStorageKey(hostId));
+    let rows = sessionsRef.current.filter((row) => row.hostId === hostId);
+    try {
+      rows = await coreSessionsList(hostId);
+    } catch {
+      // the poll's copy stands in
+    }
+    if (activeHostIdRef.current !== hostId || activeSessionIdRef.current !== '') return;
+    const picked = pickResume(remembered, restorableIds(rows, hostId));
+    if (picked) setActiveSessionId(picked);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,10 +112,12 @@ export function useTetherDesktop() {
         listed.find((profile) => profile.id === savedHost)?.id ?? listed[0]?.id ?? null;
       if (initialHost) {
         setActiveHostId(initialHost);
+        // Eagerly, because restoreSession checks the refs to see whether its
+        // answer is still wanted and state has not re-rendered yet.
+        activeHostIdRef.current = initialHost;
         localStorage.setItem(KEY_ACTIVE_HOST, initialHost);
         await corePollingSetActive(initialHost);
-        const savedSession = localStorage.getItem(activeSessionStorageKey(initialHost));
-        if (savedSession) setActiveSessionId(savedSession);
+        void restoreSession(initialHost);
       }
       unlistenHealth = await listenHostHealth((hostId, status) => {
         setHealthByHost((current) => ({ ...current, [hostId]: status }));
@@ -105,7 +134,7 @@ export function useTetherDesktop() {
       unlistenSessions?.();
       void corePollingStop();
     };
-  }, []);
+  }, [restoreSession]);
 
   useEffect(() => {
     if (!ready) return;
@@ -115,27 +144,53 @@ export function useTetherDesktop() {
   const activeHost = hosts.find((host) => host.id === activeHostId) ?? null;
   const activePassword = activeHost ? (passwords[activeHost.id] ?? '') : '';
 
-  const selectHost = useCallback((hostId: string) => {
-    setActiveHostId(hostId);
-    localStorage.setItem(KEY_ACTIVE_HOST, hostId);
-    const savedSession = localStorage.getItem(activeSessionStorageKey(hostId));
-    if (savedSession) setActiveSessionId(savedSession);
-    setScreen('main');
-  }, []);
+  const selectHost = useCallback(
+    (hostId: string) => {
+      setActiveHostId(hostId);
+      localStorage.setItem(KEY_ACTIVE_HOST, hostId);
+      setActiveSessionId('');
+      activeHostIdRef.current = hostId;
+      activeSessionIdRef.current = '';
+      setScreen('main');
+      void restoreSession(hostId);
+    },
+    [restoreSession],
+  );
 
   const selectSession = useCallback((hostId: string, sessionId: string) => {
     setActiveHostId(hostId);
     setActiveSessionId(sessionId);
+    // Eagerly: an in-flight restore reads these to decide whether its answer is
+    // still wanted, and must not land on top of a choice the user just made.
+    activeHostIdRef.current = hostId;
+    activeSessionIdRef.current = sessionId;
     localStorage.setItem(KEY_ACTIVE_HOST, hostId);
     localStorage.setItem(activeSessionStorageKey(hostId), sessionId);
     setScreen('main');
   }, []);
 
-  const newSession = useCallback(() => {
-    if (!activeHostId) return;
-    const ids = sessions.filter((row) => row.hostId === activeHostId).map((row) => row.id);
-    void coreNextTermId(ids).then((nextId) => selectSession(activeHostId, nextId));
-  }, [activeHostId, sessions, selectSession]);
+  /**
+   * Start a terminal on one named host.
+   *
+   * The id is allocated against that host's own list, fetched fresh: a host the
+   * drawer has never polled has no rows here, so the next id would come out
+   * `term-1` — and `/api/sessions/start` answers a known id with the EXISTING
+   * session, so the button would silently attach to a running shell instead of
+   * opening a new one. The poll's copy is the fallback when the fetch fails.
+   */
+  const newSession = useCallback(
+    async (hostId: string) => {
+      let ids = sessionsRef.current.filter((row) => row.hostId === hostId).map((row) => row.id);
+      try {
+        ids = (await coreSessionsList(hostId)).map((row) => row.id);
+      } catch {
+        // the poll's copy stands in
+      }
+      const nextId = await coreNextTermId(ids);
+      selectSession(hostId, nextId);
+    },
+    [selectSession],
+  );
 
   const killSessionById = useCallback(
     async (hostId: string, sessionId: string) => {
@@ -294,6 +349,7 @@ export function useTetherDesktop() {
   );
 
   const activeSessionLabel = useMemo(() => {
+    if (!activeSessionId) return 'No terminal';
     const row = sessions.find((s) => s.hostId === activeHostId && s.id === activeSessionId);
     return row ? sessionLabel(row) : activeSessionId;
   }, [sessions, activeHostId, activeSessionId]);

@@ -30,7 +30,7 @@ struct SessionsEvent {
     sessions: Vec<Value>,
 }
 
-fn drawer_session(row: &SessionRow) -> Value {
+pub fn drawer_session(row: &SessionRow) -> Value {
     json!({
         "hostId": row.host_id,
         "id": row.id,
