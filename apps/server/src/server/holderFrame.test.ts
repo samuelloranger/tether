@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { isInterruptKeystroke } from './holder';
 import {
   decodeHolderFrame,
   decodeLegacyHolderLine,
@@ -17,7 +18,6 @@ import {
   sniffDialect,
   takeLegacyLines,
 } from './holderFrame';
-import { isInterruptKeystroke } from './holder';
 import { FrameDecoder } from './proto/frame';
 
 const one = (bytes: Uint8Array) => {
