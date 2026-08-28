@@ -22,14 +22,18 @@ export function normalizeOsc7Cwd(
   isWindows = process.platform === 'win32',
 ): string {
   if (!isWindows) return uriPath;
-  // UNC: a non-empty authority that is not the loopback alias is the file
-  // server. uriPath is "/share/rest"; the native form is \\server\share\rest.
+  // Drive letter wins over the authority. A local file URI routinely carries a
+  // hostname there — file://HOST/C:/Users/x as well as the empty and localhost
+  // forms — but the path is still a plain drive path, so the authority is not a
+  // file server and must be dropped, not turned into \\HOST\C:\.
+  const drive = /^\/([A-Za-z]:[\\/].*)$/.exec(uriPath);
+  if (drive) return drive[1].replace(/\//g, '\\');
+  // No drive letter but a real authority ⇒ UNC: the authority is the server and
+  // uriPath is "/share/rest", so the native form is \\server\share\rest.
   if (authority && authority.toLowerCase() !== 'localhost') {
     return `\\\\${authority}${uriPath.replace(/\//g, '\\')}`;
   }
-  const drive = /^\/([A-Za-z]:[\\/].*)$/.exec(uriPath);
-  if (!drive) return uriPath;
-  return drive[1].replace(/\//g, '\\');
+  return uriPath;
 }
 
 export interface LiveCwdState {

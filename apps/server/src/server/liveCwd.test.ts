@@ -85,6 +85,12 @@ test('normalizeOsc7Cwd ignores the localhost authority alias', () => {
   expect(normalizeOsc7Cwd('/C:/Users/sam', 'localhost', true)).toBe(String.raw`C:\Users\sam`);
 });
 
+test('normalizeOsc7Cwd drops a hostname authority on a drive path', () => {
+  // A local file URI can name the host (file://HOST/C:/...); the drive letter
+  // still means a local path, so the authority must not become a UNC server.
+  expect(normalizeOsc7Cwd('/C:/Users/sam', 'HOST', true)).toBe(String.raw`C:\Users\sam`);
+});
+
 test('normalizeOsc7Cwd rebuilds a UNC path from the file-URI authority', () => {
   // file://fileserver/share/dir ⇒ authority is the server, path is /share/dir;
   // the native form is \\fileserver\share\dir. Dropping the authority (the old
