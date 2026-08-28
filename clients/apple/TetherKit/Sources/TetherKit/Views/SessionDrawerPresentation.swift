@@ -79,10 +79,9 @@ public struct SessionDrawerOverlay: View {
   }
 
   private func open() {
-    Task {
-      await store.refreshDrawer()
-      isPresented = true
-    }
+    // Same reason as RootView.openDrawer: never gate the panel on the network.
+    isPresented = true
+    store.refreshDrawerInBackground()
   }
 
   private func dismiss() {
