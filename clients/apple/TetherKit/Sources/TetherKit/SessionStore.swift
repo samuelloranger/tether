@@ -237,16 +237,23 @@ public final class SessionStore {
     }
   }
 
+  /// Pairs with a server and saves it as a host.
+  ///
+  /// Returns whether the host was actually created. The caller needs an answer:
+  /// this reported failure only by leaving `errorMessage` set, so the pairing
+  /// sheet had nothing to branch on and stayed open over a host it had just
+  /// added successfully.
+  @discardableResult
   public func completePairing(
     host: String,
     port: String,
     password: String,
     confirmPassword: String,
     displayName: String
-  ) async {
+  ) async -> Bool {
     guard password == confirmPassword else {
       errorMessage = "Passwords do not match"
-      return
+      return false
     }
     isLoading = true
     defer { isLoading = false }
@@ -256,8 +263,14 @@ public final class SessionStore {
       }
       _ = try await createHost(name: displayName, host: host, port: port, password: password)
       isPairing = false
+      // A probe that failed before the reader corrected the address leaves its
+      // message behind, and carrying it past a success would put an error on
+      // screen describing something that no longer happened.
+      errorMessage = nil
+      return true
     } catch {
       errorMessage = error.localizedDescription
+      return false
     }
   }
 

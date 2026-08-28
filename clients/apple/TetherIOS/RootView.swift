@@ -162,7 +162,7 @@ struct RootView: View {
     }
     .sheet(isPresented: $showPairing) {
       NavigationStack {
-        PairingView(store: store)
+        PairingView(store: store, onDone: { showPairing = false })
           .toolbar {
             ToolbarItem(placement: .cancellationAction) {
               Button("Cancel") { showPairing = false }

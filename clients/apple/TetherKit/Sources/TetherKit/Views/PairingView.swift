@@ -2,14 +2,22 @@ import SwiftUI
 
 public struct PairingView: View {
   @Bindable public var store: SessionStore
+  /// Called once the host has actually been created.
+  ///
+  /// The view cannot dismiss itself: it is presented inside a sheet the caller
+  /// owns, and `@Environment(\.dismiss)` would close that sheet without the
+  /// caller's `showPairing` flag ever going false, leaving a flag that says the
+  /// sheet is up over a screen where it is not.
+  public var onDone: () -> Void
   @State private var host = ""
   @State private var port = "8085"
   @State private var password = ""
   @State private var confirmPassword = ""
   @State private var displayName = ""
 
-  public init(store: SessionStore) {
+  public init(store: SessionStore, onDone: @escaping () -> Void = {}) {
     self.store = store
+    self.onDone = onDone
   }
 
   public var body: some View {
@@ -71,13 +79,18 @@ public struct PairingView: View {
       Section {
         Button(store.pairingNeedsSetup ? "Pair and save" : "Connect") {
           Task {
-            await store.completePairing(
+            // Only on success. A wrong password has to leave the form up with
+            // its error, or the reader is dropped back to a terminal with no
+            // idea what went wrong.
+            if await store.completePairing(
               host: host,
               port: port,
               password: password,
               confirmPassword: store.pairingNeedsSetup ? confirmPassword : password,
               displayName: displayName
-            )
+            ) {
+              onDone()
+            }
           }
         }
         .buttonStyle(PairingActionStyle(prominent: true))
