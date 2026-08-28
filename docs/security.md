@@ -65,6 +65,15 @@ Two things to know about `only`:
 
 `TETHER_TLS_EXTRA_NAMES` (comma-separated) adds extra SANs — a Tailscale name, say — but only on the boot that *generates* the certificate. Adding names later means deleting `~/.tether/config/tls/` and re-pairing every client.
 
+## Files at rest
+
+The sensitive files the server writes are locked to the owner: the database in `~/.tether/config/` (it holds the argon2 password hash and the session log), the TLS private key, the holder sockets, and the local control token.
+
+- **Linux / macOS** — POSIX modes, as noted above: the key is `0600` inside a `0700` directory, and the other paths are created owner-only the same way.
+- **Windows** — those modes are a no-op (`chmod` there sets only the read-only attribute, which is not a confidentiality control), so the server uses ACLs instead. It runs `icacls` to drop the inherited entries and grant the owning user alone, which is the faithful stand-in for `0600`/`0700`. See [Windows server](/windows) for the rest of the platform's differences.
+
+Either way the guarantee is the same: another user on the machine cannot read your password hash or your TLS key.
+
 ## A tunnel is still a good idea
 
 TLS closes the "the wire is readable" hole. It does not make the port safe to expose:
