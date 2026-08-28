@@ -133,7 +133,12 @@ public struct TerminalAccessoryBar: View {
     // the whole VStack — title bar included — was squeezed off screen with no
     // later frame to correct it. A bar cannot start off the top of the screen
     // nor be taller than the screen, so those frames are dismissal artefacts.
-    guard frame.minY >= 0 else { return }
+    // ...and a bar that has not been POSITIONED yet reports the opposite
+    // artefact: {{0, 0}, {0, 56}}, at the origin with no width. `screen.maxY - 0`
+    // is then the whole screen, and it slips past the height check below by
+    // being exactly equal to it — measured on an iPad, dockedHeight 820 on an
+    // 820pt screen. A docked bar is never at the origin and never zero-wide.
+    guard frame.minY > 0, frame.width > 0 else { return }
     let height = max(0, screen.bounds.maxY - frame.minY)
     guard height <= screen.bounds.height else { return }
     guard abs(height - model.dockedHeight) > 0.5 else { return }
