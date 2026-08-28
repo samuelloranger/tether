@@ -117,17 +117,15 @@ private struct HostDrawerSection: View {
         Circle()
           .fill(Color(hex: host.color))
           .frame(width: 8, height: 8)
-        // Two servers that never got a custom name are both called by their
-        // identity — "Tether" and "Tether" — so the name alone cannot say which
-        // machine a session is about to open on. The address can.
-        VStack(alignment: .leading, spacing: 1) {
-          Text(host.name)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(TetherColors.textPrimary)
-          Text("\(host.host):\(host.port)")
-            .font(.caption2)
-            .foregroundStyle(TetherColors.textSecondary)
-        }
+        // Name only. The address used to sit under it to tell two identically
+        // named servers apart; in practice it just made every host header two
+        // lines tall. It stays in the settings label for VoiceOver.
+        Text(host.name)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(TetherColors.textPrimary)
+          // One row now, 264pt wide: a long name has to truncate rather than
+          // push the status dot and the gear off the end.
+          .lineLimit(1)
         statusView
           .id(healthKey)
           .transition(.opacity)
