@@ -5,6 +5,8 @@ interface TerminalToolbarProps {
   /** null when nothing is running — the state chip is then omitted, not faked. */
   dot: DotKey | null;
   address: string;
+  /** Every action here addresses a session; with none open they have no target. */
+  hasSession: boolean;
   /** Narrow windows put a fixed hamburger over this row, which has to be cleared. */
   inset: boolean;
   onGit: () => void;
@@ -25,6 +27,7 @@ export function TerminalToolbar({
   sessionLabel,
   dot,
   address,
+  hasSession,
   inset,
   onGit,
   onReview,
@@ -37,16 +40,16 @@ export function TerminalToolbar({
       <span className="terminal-label">{sessionLabel}</span>
       {dot ? <span className="session-state">{activityLabel(dot)}</span> : null}
       <div className="toolbar-actions">
-        <button type="button" onClick={onGit}>
+        <button type="button" onClick={onGit} disabled={!hasSession}>
           Git
         </button>
-        <button type="button" onClick={onReview}>
+        <button type="button" onClick={onReview} disabled={!hasSession}>
           Review
         </button>
-        <button type="button" onClick={onWorkspace}>
+        <button type="button" onClick={onWorkspace} disabled={!hasSession}>
           Workspace
         </button>
-        <button type="button" onClick={onUpload}>
+        <button type="button" onClick={onUpload} disabled={!hasSession}>
           Upload
         </button>
       </div>

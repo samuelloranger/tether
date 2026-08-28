@@ -313,6 +313,7 @@ export function App() {
               sessionLabel={app.activeSessionLabel}
               dot={activeDot}
               address={`${app.activeHost.host}:${app.activeHost.port}`}
+              hasSession={hasSession}
               inset={layout.showMenuButton}
               onGit={() => {
                 app.setGitMode('drawer');

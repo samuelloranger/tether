@@ -180,6 +180,7 @@ export function useTetherDesktop() {
    */
   const newSession = useCallback(
     async (hostId: string) => {
+      const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
       let ids = sessionsRef.current.filter((row) => row.hostId === hostId).map((row) => row.id);
       try {
         ids = (await coreSessionsList(hostId)).map((row) => row.id);
@@ -187,6 +188,11 @@ export function useTetherDesktop() {
         // the poll's copy stands in
       }
       const nextId = await coreNextTermId(ids);
+      // A slow host must not take the screen from wherever the user went while
+      // it was answering — the same trade the restore path makes.
+      if (activeHostIdRef.current !== from.host || activeSessionIdRef.current !== from.session) {
+        return;
+      }
       selectSession(hostId, nextId);
     },
     [selectSession],
