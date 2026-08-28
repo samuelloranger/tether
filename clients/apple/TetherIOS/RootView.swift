@@ -29,6 +29,7 @@ struct RootView: View {
   var body: some View {
 
     ZStack {
+
       // The backdrop, as the ZStack's FIRST child rather than a .background()
       // modifier. As a modifier it did not reach the home-indicator strip even
       // with ignoresSafeArea, so the window's own darker fill showed through
@@ -180,6 +181,14 @@ struct RootView: View {
       }
       Button("Cancel", role: .cancel) {}
     }
+    // LAST in the chain, so every presentation wrapper above is inside it. On
+    // the ZStack alone it did not hold: the .sheet and .alert modifiers are
+    // applied after that one, so they WRAP the view that opted out and stayed
+    // free to resize for the keyboard themselves. Measured on iPad in
+    // landscape, with only the inner opt-out: the container shrank 820 -> 722.5
+    // and its origin moved to y = -29.5, and the grid lost a third of its rows
+    // to a keyboard the terminal had already reserved space for.
+    .ignoresSafeArea(.keyboard, edges: .bottom)
   }
 
   /// The … menu's items.
