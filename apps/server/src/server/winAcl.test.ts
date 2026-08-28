@@ -101,37 +101,122 @@ function secureInChild(target: string, isDir: boolean): string {
 }
 
 /**
- * Every spelling `icacls` might legitimately use for the current user.
+ * The SID of every principal granted access to `target`.
  *
- * It prints whatever the SID resolves to, and that is not one fixed string: a
- * name when the account resolves, the bare SID when it does not (observed on a
- * local profile here), and localised well-known names elsewhere in the same
- * output ("AUTORITE NT\Système" on a French install). Asserting one hard-coded
- * spelling made this fail on the CI runner while the ACL was perfectly correct.
- *
- * So the identity is matched against a set, and the property that actually
- * matters — that exactly ONE identity is granted — is asserted by counting
- * distinct entries, which no spelling can affect.
+ * Read through Get-Acl and translated to SIDs rather than scraped out of
+ * `icacls` text. Account *names* are neither stable nor parseable: icacls
+ * prints a bare SID when a name does not resolve, localises the well-known
+ * ones ("AUTORITE NT\Système" here, "NT AUTHORITY\SYSTEM" on an English
+ * install), and lays them out positionally. A SID is the identity itself.
  */
-function currentUserIdentities(): string[] {
-  const ids = [currentUserPrincipal(), process.env.USERNAME].filter(Boolean) as string[];
-  // `whoami /user` is the only in-box way to get our own SID as a string.
-  const who = spawnSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  const sid = /"[^"]*","(S-1-[\d-]+)"/.exec(who.stdout ?? '')?.[1];
-  if (sid) ids.push(sid);
-  return ids.map((id) => id.toLowerCase());
-}
-
-/** The account names in `icacls` output, one per granted ACE. */
-function grantedAccounts(aclText: string, target: string): string[] {
-  return aclText
+function grantedSids(target: string): string[] {
+  const shown = spawnSync('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
+  // `<path> ACCOUNT:(FLAGS)` on the first line, then `ACCOUNT:(FLAGS)` indented.
+  // The trailing summary line is localised ("1 fichiers correctement traités")
+  // and carries no ':(', so it drops out here rather than needing a match.
+  const names = (shown.stdout ?? '')
     .split('\n')
     .map((line) => line.replace(target, '').trim())
     .filter((line) => line.includes(':('))
-    .map((line) => line.slice(0, line.indexOf(':(')).trim().toLowerCase());
+    .map((line) => line.slice(0, line.indexOf(':(')).trim())
+    .filter(Boolean);
+  return names.length === 0 ? [] : translateToSids(names);
+}
+
+/**
+ * Account names to SIDs.
+ *
+ * Deliberately NOT `Get-Acl`: that cmdlet lives in Microsoft.PowerShell.Security,
+ * which fails to load on this development machine ("le module n'a pas pu être
+ * chargé"), so it returned an empty access list and made a perfectly correct ACL
+ * look like an empty one. `icacls` is the tool the implementation itself uses and
+ * is always present; `NTAccount.Translate` is a plain .NET type and needs no
+ * module.
+ *
+ * A name that will not translate is passed through unchanged, which is right in
+ * the one case it happens: icacls prints a bare SID when it cannot resolve the
+ * account, and that string is already the answer.
+ */
+function translateToSids(names: string[]): string[] {
+  const list = names.map((n) => `'${n.replace(/'/g, "''")}'`).join(',');
+  const ps = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `foreach ($n in @(${list})) { try { ` +
+        '[System.Security.Principal.NTAccount]::new($n).Translate(' +
+        '[System.Security.Principal.SecurityIdentifier]).Value } catch { $n } }',
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  return (ps.stdout ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Principals whose access is not a weakening, so the assertions below tolerate
+ * them if the host had already granted them explicitly.
+ *
+ * `/inheritance:r` removes INHERITED entries; an entry that was already
+ * explicit on the path survives it. These are the ones that legitimately can
+ * be, and they are the Windows equivalent of root — POSIX makes exactly the
+ * same concession, since root reads a 0700 file regardless. What must never
+ * appear is an ordinary second user.
+ */
+const PRIVILEGED_SIDS = new Set([
+  'S-1-5-18', // NT AUTHORITY\SYSTEM
+  'S-1-5-32-544', // BUILTIN\Administrators
+  'S-1-3-0', // CREATOR OWNER
+  'S-1-3-4', // OWNER RIGHTS
+]);
+
+/**
+ * Our own SID, the one identity that must be granted.
+ *
+ * Asked of .NET rather than of `whoami /user`, which looks like the obvious
+ * tool and is a trap: Git for Windows ships a POSIX `whoami` that wins on PATH
+ * inside a Git Bash environment, rejects `/user`, and exits 1 with empty
+ * stdout — so the SID silently came back null and every assertion below
+ * collapsed into "expected not null".
+ */
+function currentUserSid(): string | null {
+  const ps = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  const sid = (ps.stdout ?? '').trim();
+  return /^S-1-[\d-]+$/.test(sid) ? sid : null;
+}
+
+/**
+ * The security property, asserted so a failure names the offender.
+ *
+ * bun:test has no assertion message, and "expected 1, received 3" told us
+ * nothing about WHICH principals had access — which is the only part that
+ * decides whether a difference is benign or a hole.
+ */
+function expectOwnerOnly(target: string, label: string): void {
+  const mine = currentUserSid();
+  expect(mine).not.toBeNull();
+  const sids = grantedSids(target);
+  const strangers = sids.filter((sid) => sid !== mine && !PRIVILEGED_SIDS.has(sid));
+  if (strangers.length > 0) {
+    throw new Error(
+      `${label}: unprivileged principals still have access: ${strangers.join(', ')}\n` +
+        `(all granted: ${sids.join(', ') || 'none'}; ours: ${mine})`,
+    );
+  }
+  expect(sids).toContain(mine as string);
 }
 
 test.skipIf(!IS_WINDOWS)('applies a real owner-only ACL to a directory', () => {
@@ -148,13 +233,10 @@ test.skipIf(!IS_WINDOWS)('applies a real owner-only ACL to a directory', () => {
     // against — the profile's ACL flowing down into the state directory.
     expect(acl).not.toContain('(I)');
 
-    // Exactly one principal is granted, and it is us. Administrators and SYSTEM
-    // lose their inherited entries too, which mirrors POSIX: root can still read
-    // a 0700 file, but only by taking ownership first.
+    // We are granted, and nobody unprivileged is. See expectOwnerOnly for why
+    // that is the property rather than "exactly one entry".
     expect(currentUserPrincipal()).not.toBeNull();
-    const granted = grantedAccounts(acl, dir);
-    expect(new Set(granted).size).toBe(1);
-    expect(currentUserIdentities()).toContain(granted[0]);
+    expectOwnerOnly(dir, 'directory');
 
     // And the grant is inheritable, which is what lets the files created inside
     // HOLDERS_DIR skip an icacls spawn each.
@@ -175,11 +257,8 @@ test.skipIf(!IS_WINDOWS)('a directory ACL is inherited by files created inside i
     const child = path.join(dir, 'session.sock.pid');
     Bun.write(child, '1234');
 
-    const shown = spawnSync('icacls.exe', [child], { encoding: 'utf8', windowsHide: true });
-    expect(shown.status).toBe(0);
-    const accounts = grantedAccounts(shown.stdout, child);
-    expect(new Set(accounts).size).toBe(1);
-    expect(currentUserIdentities()).toContain(accounts[0]);
+    // The inherited grant reached the new file, and brought nothing else with it.
+    expectOwnerOnly(child, 'inherited file');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

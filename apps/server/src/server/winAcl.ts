@@ -15,9 +15,18 @@
 // down — silently exposes all of it.
 //
 // The faithful stand-in is an explicit ACL: drop inherited entries and grant
-// the current user alone. Administrators and SYSTEM lose their inherited
-// entries too, which mirrors POSIX exactly — root can still read a 0700 file by
-// taking ownership, and so can an administrator here.
+// the current user alone. Administrators and SYSTEM lose their INHERITED
+// entries with everyone else, which mirrors POSIX — root can still read a 0700
+// file by taking ownership, and so can an administrator here.
+//
+// What `/inheritance:r` does not touch is an entry that was already EXPLICIT on
+// the path, and some hosts ship one: a GitHub Actions runner's temp directory
+// hands its children explicit SYSTEM and Administrators ACEs, which survive
+// this call. That is not a weakening — they are the root-equivalent principals
+// POSIX concedes to as well — but it does mean this grants owner-only access
+// rather than guaranteeing an owner-only ACL, and the distinction is worth
+// keeping straight. An ordinary second user is never among them; winAcl.test.ts
+// asserts exactly that, by SID.
 //
 // Applied through `icacls` rather than a native API: setting a DACL from
 // scratch needs SetNamedSecurityInfo plus a hand-built ACL, which is a large

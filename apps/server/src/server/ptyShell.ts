@@ -173,7 +173,17 @@ export function shellInvocation(command: string): ShellInvocation {
   // Windows shells are matched with the extension optional and case-insensitively
   // — a user-configured defaultShell may be "pwsh", "pwsh.exe" or a full
   // "C:\Program Files\PowerShell\7\pwsh.exe", and NTFS does not care about case.
-  const win = shell.toLowerCase().replace(/\.exe$/, '');
+  //
+  // Taken with a win32 basename rather than the `shell` above, which used the
+  // host's separator: on POSIX `path.basename` does not split on a backslash
+  // (legal in a POSIX filename), so an absolute Windows path arrived here whole
+  // and matched nothing. That is not only a test concern — describeShellSupport
+  // takes the platform as a parameter for the same reason — but the suite is
+  // where it shows up, since it classifies Windows shells while running on Linux.
+  const win = path.win32
+    .basename(command)
+    .toLowerCase()
+    .replace(/\.exe$/, '');
   if (win === 'pwsh' || win === 'powershell') {
     return { args: [command, '-NoLogo', '-NoExit', '-File', PS_RC_PATH] };
   }
