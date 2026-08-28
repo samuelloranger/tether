@@ -128,10 +128,11 @@ Index → `(hostId, sessionId)` resolution is a pure function in TetherKit,
 flattening `store.hosts` and `store.sessionsByHost` in the same order the drawer
 renders them, and returning `nil` past the end. Tested directly.
 
-One risk to verify before writing the shortcuts: `TerminalKeyMap.bytes(for:)`
-runs inside `pressesBegan` and returns bytes for keys the terminal claims. If it
-claims ⌘-modified keys, they never reach SwiftUI and no shortcut fires. Confirm
-it excludes `.command` and add the exclusion if it does not.
+The conflict risk is resolved by reading `TerminalKeyMap.bytes(for:)`: after the
+named-key switch it runs `guard ctrl || alt else { return nil }`, so a
+⌘-modified letter or digit is never claimed, `pressesBegan` forwards it to
+`super`, and it travels the responder chain to SwiftUI. None of the shortcuts
+above collide with a key the switch claims. No exclusion is needed.
 
 ### Adaptive bar
 
@@ -150,9 +151,9 @@ disconnect.
   instead of a hardcoded `false`. The Unified / Side by side toggle stays.
 - `ConfigSettingsView` content gets a `maxWidth` so form rows do not run the
   full width of a 13" screen.
-- First-launch default `terminalFontSize` becomes 16 on the iPad idiom, 14 on
-  iPhone. **Only the default.** An existing stored value is never overwritten —
-  a user who set 12 keeps 12.
+- First-launch default `terminalFontSize` becomes 14 on the iPad idiom. The
+  iPhone default stays at its current 11. **Only the default.** An existing
+  stored value is never overwritten — a user who set 12 keeps 12.
 
 ## 6. Drag & drop, pointer
 
