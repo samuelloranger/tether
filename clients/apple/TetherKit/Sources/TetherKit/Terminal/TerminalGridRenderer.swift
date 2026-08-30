@@ -164,30 +164,45 @@ final class TerminalGridRenderer {
     let baseline = y + (metrics.cellHeight - metrics.font.lineHeight) / 2 + metrics.font.ascender
     for run in TerminalRunBuilder.glyphRuns(cells: cells, rowStart: rowStart, cols: cols) {
       let bold = run.style & GridSnapshot.attrBold != 0
+      var textColor = color(run.color)
+      if run.style & GridSnapshot.attrDim != 0 {
+        textColor = textColor.copy(alpha: textColor.alpha * 0.65) ?? textColor
+      }
+      context.setFillColor(textColor)
+
+      // A run shares a colour and a style, but not necessarily a FONT: a
+      // codepoint the terminal face cannot draw comes back from the cache on
+      // whatever fallback Core Text picked for it. Glyph ids only mean anything
+      // relative to their own font, so the run is flushed at every font change.
+      var batchFont: CTFont?
       var glyphs: [CGGlyph] = []
       var positions: [CGPoint] = []
       glyphs.reserveCapacity(run.codepoints.count)
       positions.reserveCapacity(run.codepoints.count)
+      var drewAnything = false
+
+      func flush() {
+        guard let batchFont, !glyphs.isEmpty else { return }
+        CTFontDrawGlyphs(batchFont, glyphs, positions, glyphs.count, context)
+        glyphs.removeAll(keepingCapacity: true)
+        positions.removeAll(keepingCapacity: true)
+      }
+
       for (offset, codepoint) in run.codepoints.enumerated() {
-        guard let glyph = glyphCache.glyph(for: codepoint, bold: bold) else { continue }
-        glyphs.append(glyph)
+        guard let resolved = glyphCache.glyph(for: codepoint, bold: bold) else { continue }
+        if let current = batchFont, !CFEqual(current, resolved.font) { flush() }
+        batchFont = resolved.font
+        glyphs.append(resolved.glyph)
         positions.append(
           CGPoint(
             x: CGFloat(run.startCol + offset) * metrics.cellWidth + glyphOffsetX,
             y: baseline
           )
         )
+        drewAnything = true
       }
-      guard !glyphs.isEmpty else { continue }
-
-      var textColor = color(run.color)
-      if run.style & GridSnapshot.attrDim != 0 {
-        textColor = textColor.copy(alpha: textColor.alpha * 0.65) ?? textColor
-      }
-      context.setFillColor(textColor)
-      CTFontDrawGlyphs(
-        glyphCache.font(bold: bold), glyphs, positions, glyphs.count, context
-      )
+      flush()
+      guard drewAnything else { continue }
 
       let runWidth = CGFloat(run.codepoints.count) * metrics.cellWidth
       let runX = CGFloat(run.startCol) * metrics.cellWidth
@@ -259,8 +274,8 @@ final class TerminalGridRenderer {
 
   /// The grid is monospaced, so one measurement centres every glyph.
   private static func horizontalInset(cellWidth: CGFloat, cache: TerminalGlyphCache) -> CGFloat {
-    guard let glyph = cache.glyph(for: 0x4D, bold: false) else { return 0 }
-    var glyphs = [glyph]
+    guard let resolved = cache.glyph(for: 0x4D, bold: false) else { return 0 }
+    var glyphs = [resolved.glyph]
     var advances = [CGSize.zero]
     _ = CTFontGetAdvancesForGlyphs(cache.regular, .horizontal, &glyphs, &advances, 1)
     return max(0, (cellWidth - advances[0].width) / 2)

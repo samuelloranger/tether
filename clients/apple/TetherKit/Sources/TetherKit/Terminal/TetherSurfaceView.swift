@@ -92,6 +92,11 @@ public final class TetherSurfaceView: UIView {
   private var pendingSnapshot: Data?
   private var needsRepaint = false
   private var isRendering = false
+  /// Bumped whenever the surface's contents stop being the ones a render was
+  /// started for. A render already in flight completes anyway — the queue has
+  /// no cancellation — and its `commit` would otherwise repopulate the layers
+  /// with the session that was just cleared.
+  private var frameEpoch: UInt64 = 0
 
   public override init(frame: CGRect) {
     super.init(frame: frame)
@@ -179,7 +184,12 @@ public final class TetherSurfaceView: UIView {
   }
 
   public func clearSnapshot() {
+    frameEpoch &+= 1
+    // An in-flight render will still call commit; it is discarded there, so the
+    // pump has to be released here or the next frame never starts.
+    isRendering = false
     pendingSnapshot = nil
+    needsRepaint = false
     header = nil
     cells = []
     cachedRowTexts = []
@@ -215,6 +225,7 @@ public final class TetherSurfaceView: UIView {
     needsRepaint = false
     isRendering = true
 
+    let epoch = frameEpoch
     renderQueue.async { [weak self, worker] in
       let output: TerminalRenderOutput?
       if let bytes {
@@ -223,13 +234,16 @@ public final class TetherSurfaceView: UIView {
         output = worker.rerender(metrics: metrics)
       }
       DispatchQueue.main.async {
-        self?.commit(output)
+        self?.commit(output, epoch: epoch)
       }
     }
     return true
   }
 
-  private func commit(_ output: TerminalRenderOutput?) {
+  private func commit(_ output: TerminalRenderOutput?, epoch: UInt64) {
+    // Rendered for contents the surface has since dropped. `isRendering` was
+    // already cleared by whoever bumped the epoch.
+    guard epoch == frameEpoch else { return }
     isRendering = false
     defer {
       if pendingSnapshot != nil || needsRepaint { scheduler?.requestFrame() }

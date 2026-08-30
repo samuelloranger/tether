@@ -928,6 +928,12 @@ struct ScrollPositionIndicator: View {
   @Binding var isScrubbing: Bool
   var onScrub: (Int) -> Void
 
+  /// Offset the drag started from. The thumb's travel only represents
+  /// `maxOffset` lines, so mapping a pointer position straight onto an absolute
+  /// offset would teleport anyone deeper than that back to 200 the instant they
+  /// touched the thumb. The drag moves RELATIVE to where it began instead.
+  @State private var scrubOrigin: Int?
+
   var body: some View {
     GeometryReader { geo in
       let track = max(geo.size.height - Self.inset * 2, 1)
@@ -943,11 +949,13 @@ struct ScrollPositionIndicator: View {
         .gesture(
           DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
             .onChanged { value in
+              if scrubOrigin == nil { scrubOrigin = offset }
               isScrubbing = true
-              onScrub(target(forPointerY: value.location.y, travel: travel))
+              onScrub(target(for: value, travel: travel))
             }
             .onEnded { value in
-              onScrub(target(forPointerY: value.location.y, travel: travel))
+              onScrub(target(for: value, travel: travel))
+              scrubOrigin = nil
               isScrubbing = false
             }
         )
@@ -962,13 +970,18 @@ struct ScrollPositionIndicator: View {
 
   private static let space = "tether.scroll-track"
 
-  /// The pointer holds the MIDDLE of the thumb, so half of it comes off before
-  /// the position is mapped back onto the track.
-  private func target(forPointerY pointerY: CGFloat, travel: CGFloat) -> Int {
-    let top = pointerY - Self.inset - Self.thumbHeight / 2
-    let clamped = min(max(top, 0), travel)
-    let progress = 1 - clamped / travel
-    return max(0, Int((progress * CGFloat(Self.maxOffset)).rounded()))
+  /// Maps the drag's travel onto a scrollback offset.
+  ///
+  /// Full travel covers `maxOffset` lines, or the offset the drag started from
+  /// when that is deeper — so a drag that begins 1,000 lines back can still
+  /// reach the live bottom in one sweep rather than jumping to 200 on contact.
+  private func target(for value: DragGesture.Value, travel: CGFloat) -> Int {
+    let origin = scrubOrigin ?? offset
+    let span = CGFloat(max(Self.maxOffset, origin))
+    let movedDown = value.location.y - value.startLocation.y
+    // Down the track is toward the live bottom, which is a smaller offset.
+    let delta = movedDown / travel * span
+    return max(0, Int((CGFloat(origin) - delta).rounded()))
   }
 }
 #endif
