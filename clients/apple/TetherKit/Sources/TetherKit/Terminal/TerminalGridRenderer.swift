@@ -109,7 +109,6 @@ final class TerminalGridRenderer {
       context.fill(CGRect(origin: .zero, size: metrics.size))
     }
 
-    context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
     for row in dirty {
       draw(
         row: row, cols: cols, cells: cells, originY: originY,
@@ -181,9 +180,24 @@ final class TerminalGridRenderer {
       positions.reserveCapacity(run.codepoints.count)
       var drewAnything = false
 
+      // CTFontDrawGlyphs takes positions in TEXT space, which the text matrix
+      // then maps into user space — unlike CTLineDraw, which anchors on
+      // `context.textPosition` in user space. Under the flipped text matrix
+      // this originally carried, a glyph asked for at `baseline` was drawn at
+      // `-baseline`: every glyph landed above the top of the canvas and the
+      // terminal rendered nothing but its cursor.
+      //
+      // So the flip is done explicitly here instead, around the baseline, with
+      // an identity text matrix and glyphs at y = 0. The whole run shares one
+      // baseline, so this is one save/restore per run rather than per glyph.
       func flush() {
         guard let batchFont, !glyphs.isEmpty else { return }
+        context.saveGState()
+        context.textMatrix = .identity
+        context.translateBy(x: 0, y: baseline)
+        context.scaleBy(x: 1, y: -1)
         CTFontDrawGlyphs(batchFont, glyphs, positions, glyphs.count, context)
+        context.restoreGState()
         glyphs.removeAll(keepingCapacity: true)
         positions.removeAll(keepingCapacity: true)
       }
@@ -193,10 +207,11 @@ final class TerminalGridRenderer {
         if let current = batchFont, !CFEqual(current, resolved.font) { flush() }
         batchFont = resolved.font
         glyphs.append(resolved.glyph)
+        // y is 0 because `flush` has already translated to the baseline.
         positions.append(
           CGPoint(
             x: CGFloat(run.startCol + offset) * metrics.cellWidth + glyphOffsetX,
-            y: baseline
+            y: 0
           )
         )
         drewAnything = true
