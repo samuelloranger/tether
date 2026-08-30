@@ -239,6 +239,18 @@ public struct TerminalInputBridge: UIViewRepresentable {
     Coordinator(onSubmitBytes: onSubmitBytes, isFocused: isFocused)
   }
 
+  /// Connects a view's byte hooks to the PTY.
+  ///
+  /// Shared with the tests on purpose. When this lived inline in `makeUIView`,
+  /// a test could build the view and the coordinator, drive a real keypress,
+  /// and watch nothing come out — not because the code was wrong but because
+  /// the test had wired it differently from the app.
+  static func wire(_ view: TerminalInputTextView, onSubmitBytes: @escaping (String) -> Void) {
+    // 0x7F (DEL) is what terminals and readline expect from backspace.
+    view.onBackspace = { onSubmitBytes("\u{7F}") }
+    view.onKeyBytes = { bytes in onSubmitBytes(bytes) }
+  }
+
   public func makeUIView(context: Context) -> TerminalInputTextView {
     let view = TerminalInputTextView()
     view.delegate = context.coordinator
@@ -251,9 +263,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.tintColor = .clear
     view.accessoryHosting.rootView = accessory
     view.showsAccessory = showsAccessory
-    // 0x7F (DEL) is what terminals and readline expect from backspace.
-    view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
-    view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
+    Self.wire(view, onSubmitBytes: onSubmitBytes)
     view.refillFiller()
     return view
   }
@@ -298,12 +308,13 @@ public struct TerminalInputBridge: UIViewRepresentable {
       // document actually shrinks: UIKit stops auto-repeating a held delete key
       // the moment a press changes nothing. A held key can also escalate to a
       // word deletion, so send one DEL per character removed.
+      // Deletions are the one edit allowed through, so the hidden document
+      // actually shrinks — UIKit stops auto-repeating a held delete key the
+      // moment a press changes nothing. The byte is REQUESTED rather than sent:
+      // UIKit reports one press through both this delegate and
+      // `deleteBackward()`, and the view coalesces them.
       if text.isEmpty {
-        let view = textView as? TerminalInputTextView
-        if view?.consumeDeletionByteSent() != true {
-          for _ in 0..<max(range.length, 1) { onSubmitBytes("\u{7F}") }
-        }
-        DispatchQueue.main.async { view?.refillFiller() }
+        (textView as? TerminalInputTextView)?.requestDeletion(characters: range.length)
         return true
       }
       onSubmitBytes(text)
@@ -416,9 +427,7 @@ public final class TerminalInputTextView: UITextView {
   /// Receives the bytes for any hardware key the terminal claims.
   var onKeyBytes: ((String) -> Void)?
 
-  /// Software-keyboard backspace. The on-screen delete key routes here rather
-  /// than through `pressesBegan`, and reports an empty replacement string to
-  /// the delegate, so it needs its own hook.
+  /// Emits one DEL. Called only from the coalesced deletion flush.
   var onBackspace: (() -> Void)?
 
   /// UIKit only routes the software delete key to `deleteBackward()` while the
@@ -436,17 +445,6 @@ public final class TerminalInputTextView: UITextView {
   private static let filler = "\u{00A0}"
   private static let fillerCount = 64
 
-  /// `deleteBackward()` emits the byte itself and then lets UIKit perform the
-  /// real deletion, which re-enters the delegate. Without this the delegate
-  /// would send a second DEL for the same keypress.
-  private var deletionByteAlreadySent = false
-
-  /// Called by the delegate: true when this deletion's byte was already sent.
-  func consumeDeletionByteSent() -> Bool {
-    defer { deletionByteAlreadySent = false }
-    return deletionByteAlreadySent
-  }
-
   /// Tops the document back up, prepending so the caret stays at the end — a
   /// selection change mid-repeat cancels the repeat.
   func refillFiller() {
@@ -457,10 +455,45 @@ public final class TerminalInputTextView: UITextView {
   }
 
   public override func deleteBackward() {
-    onBackspace?()
-    deletionByteAlreadySent = true
+    // Both this and the delegate can fire for ONE press, so neither may emit
+    // directly — see `requestDeletion`.
+    requestDeletion(characters: 1)
     super.deleteBackward()
-    deletionByteAlreadySent = false
+  }
+
+  private var pendingDeletionCharacters = 0
+  private var deletionFlushScheduled = false
+
+  /// Records a deletion of `characters` and emits ONE batch per press.
+  ///
+  /// UIKit reports a single delete key through two independent callbacks:
+  /// `deleteBackward()` on this view, and `shouldChangeTextIn` on the delegate.
+  /// Neither is guaranteed — which one fires depends on the keyboard and on
+  /// whether the document has anything to delete — and when both fire they
+  /// describe the SAME press. Sending from either one alone risks a backspace
+  /// that does nothing; sending from both gave two characters per press, which
+  /// is what shipped.
+  ///
+  /// So both merely report, and the flush on the next runloop turn sends the
+  /// largest count either of them claimed: 1 for a plain press, `range.length`
+  /// when a held key escalates to a word deletion. Both callbacks for one press
+  /// land in the same turn; a repeat gets a turn each.
+  func requestDeletion(characters: Int) {
+    pendingDeletionCharacters = max(pendingDeletionCharacters, max(characters, 1))
+    guard !deletionFlushScheduled else { return }
+    deletionFlushScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      self?.flushDeletion()
+    }
+  }
+
+  /// Exposed for tests, which drive the flush rather than waiting on a runloop.
+  func flushDeletion() {
+    deletionFlushScheduled = false
+    let count = pendingDeletionCharacters
+    pendingDeletionCharacters = 0
+    guard count > 0 else { return }
+    for _ in 0..<count { onBackspace?() }
     refillFiller()
   }
 

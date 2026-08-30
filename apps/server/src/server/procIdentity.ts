@@ -40,6 +40,15 @@ export function processStartTime(pid: number): string | null {
 // a hot path, which is fine: the only callers are the daemon's start/stop/status
 // control commands (main.ts), each of which runs this at most twice.
 function windowsStartTime(pid: number): string | null {
+  // Retried once. An empty answer is ambiguous — it means EITHER the pid is
+  // gone (the documented case below) OR powershell.exe never got far enough to
+  // answer, which happens on a cold start under load and made this return null
+  // for a process that was plainly alive. The retry costs one extra spawn on
+  // the genuinely-gone path, and the callers run this at most twice.
+  return queryWindowsStartTime(pid) ?? queryWindowsStartTime(pid);
+}
+
+function queryWindowsStartTime(pid: number): string | null {
   try {
     const proc = Bun.spawnSync(
       [
