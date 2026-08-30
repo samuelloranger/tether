@@ -314,7 +314,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
       // UIKit reports one press through both this delegate and
       // `deleteBackward()`, and the view coalesces them.
       if text.isEmpty {
-        (textView as? TerminalInputTextView)?.requestDeletion(characters: range.length)
+        (textView as? TerminalInputTextView)?.requestDeletionFlush()
         return true
       }
       onSubmitBytes(text)
@@ -354,20 +354,7 @@ enum TerminalKeyMap {
     let alt = mods.contains(.alternate)
     let mod = modifierParam(mods)
 
-    switch key.keyCode {
-    case .keyboardUpArrow: return csi("A", mod)
-    case .keyboardDownArrow: return csi("B", mod)
-    case .keyboardRightArrow: return csi("C", mod)
-    case .keyboardLeftArrow: return csi("D", mod)
-    case .keyboardHome: return csi("H", mod)
-    case .keyboardEnd: return csi("F", mod)
-    case .keyboardPageUp: return "\u{1B}[5~"
-    case .keyboardPageDown: return "\u{1B}[6~"
-    case .keyboardDeleteForward: return "\u{1B}[3~"
-    case .keyboardDeleteOrBackspace: return "\u{7F}"
-    case .keyboardEscape: return "\u{1B}"
-    default: break
-    }
+    if let special = specialKeyBytes(keyCode: key.keyCode, mod: mod) { return special }
 
     // Plain text is the delegate's job; only modified keys are claimed here,
     // otherwise every character would be sent twice.
@@ -408,6 +395,30 @@ enum TerminalKeyMap {
   }
 
   /// xterm's modifier parameter: 1 + shift(1) + alt(2) + ctrl(4).
+  /// The keys whose bytes depend only on the key and its modifier parameter.
+  ///
+  /// Split out so it is reachable from a test: `UIKey` cannot be constructed.
+  static func specialKeyBytes(keyCode: UIKeyboardHIDUsage, mod: Int) -> String? {
+    switch keyCode {
+    case .keyboardUpArrow: return csi("A", mod)
+    case .keyboardDownArrow: return csi("B", mod)
+    case .keyboardRightArrow: return csi("C", mod)
+    case .keyboardLeftArrow: return csi("D", mod)
+    case .keyboardHome: return csi("H", mod)
+    case .keyboardEnd: return csi("F", mod)
+    case .keyboardPageUp: return "\u{1B}[5~"
+    case .keyboardPageDown: return "\u{1B}[6~"
+    case .keyboardDeleteForward: return "\u{1B}[3~"
+    // Backspace is deliberately absent. Left to UIKit it reaches
+    // `deleteBackward()` and shows up as the document shrinking, which is the
+    // one deletion signal the view trusts. Claimed here it was a THIRD emitter
+    // alongside `deleteBackward()` and the delegate, outside the measurement —
+    // which is why one press still deleted two characters.
+    case .keyboardEscape: return "\u{1B}"
+    default: return nil
+    }
+  }
+
   private static func modifierParam(_ m: UIKeyModifierFlags) -> Int {
     var value = 1
     if m.contains(.shift) { value += 1 }
@@ -449,37 +460,38 @@ public final class TerminalInputTextView: UITextView {
   /// selection change mid-repeat cancels the repeat.
   func refillFiller() {
     let missing = Self.fillerCount - (text as NSString).length
-    guard missing > 0 else { return }
-    text = String(repeating: Self.filler, count: missing) + text
-    selectedRange = NSRange(location: (text as NSString).length, length: 0)
+    if missing > 0 {
+      text = String(repeating: Self.filler, count: missing) + text
+      selectedRange = NSRange(location: (text as NSString).length, length: 0)
+    }
+    documentLength = (text as NSString).length
   }
 
   public override func deleteBackward() {
-    // Both this and the delegate can fire for ONE press, so neither may emit
-    // directly — see `requestDeletion`.
-    requestDeletion(characters: 1)
     super.deleteBackward()
+    // The edit has happened; the flush measures it — see `requestDeletionFlush`.
+    requestDeletionFlush()
   }
 
-  private var pendingDeletionCharacters = 0
+  /// Length of the hidden document as of the last refill — the baseline a
+  /// deletion is measured against.
+  private var documentLength = 0
   private var deletionFlushScheduled = false
 
-  /// Records a deletion of `characters` and emits ONE batch per press.
+  /// Notes that SOMETHING may have deleted, and schedules the measurement.
   ///
-  /// UIKit reports a single delete key through two independent callbacks:
-  /// `deleteBackward()` on this view, and `shouldChangeTextIn` on the delegate.
-  /// Neither is guaranteed — which one fires depends on the keyboard and on
-  /// whether the document has anything to delete — and when both fire they
-  /// describe the SAME press. Sending from either one alone risks a backspace
-  /// that does nothing; sending from both gave two characters per press, which
-  /// is what shipped.
+  /// Counting callbacks does not work. UIKit reports one delete key through
+  /// several independent paths — `deleteBackward()`, the delegate's
+  /// `shouldChangeTextIn`, and (until now) `pressesBegan` — none of them
+  /// guaranteed, and `shouldChangeTextIn` is documented to fire twice for a
+  /// single press with some keyboards. Every version of "emit here, suppress
+  /// there" either sent two DELs or none.
   ///
-  /// So both merely report, and the flush on the next runloop turn sends the
-  /// largest count either of them claimed: 1 for a plain press, `range.length`
-  /// when a held key escalates to a word deletion. Both callbacks for one press
-  /// land in the same turn; a repeat gets a turn each.
-  func requestDeletion(characters: Int) {
-    pendingDeletionCharacters = max(pendingDeletionCharacters, max(characters, 1))
+  /// So nothing emits on a callback. They only schedule a measurement, and the
+  /// flush sends one DEL per character the document ACTUALLY lost. Duplicate
+  /// notifications for one press measure the same single deletion; a held key
+  /// escalating to a word delete measures the whole word.
+  func requestDeletionFlush() {
     guard !deletionFlushScheduled else { return }
     deletionFlushScheduled = true
     DispatchQueue.main.async { [weak self] in
@@ -490,10 +502,16 @@ public final class TerminalInputTextView: UITextView {
   /// Exposed for tests, which drive the flush rather than waiting on a runloop.
   func flushDeletion() {
     deletionFlushScheduled = false
-    let count = pendingDeletionCharacters
-    pendingDeletionCharacters = 0
-    guard count > 0 else { return }
-    for _ in 0..<count { onBackspace?() }
+    let current = (text as NSString).length
+    let removed = max(0, documentLength - current)
+    guard removed > 0 else {
+      // A callback that changed nothing — a duplicate for a press already
+      // measured, or an edit UIKit declined. Nothing happened, so nothing goes
+      // on the wire.
+      documentLength = current
+      return
+    }
+    for _ in 0..<removed { onBackspace?() }
     refillFiller()
   }
 
