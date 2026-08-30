@@ -610,6 +610,8 @@ public struct TerminalView: View {
   @State private var accessory = TerminalAccessoryModel()
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
+  /// Held while the scrollback thumb is under a finger — see ScrollPositionIndicator.
+  @State private var isScrubbingScroll = false
   @State private var selectionText: String?
   /// How far the keyboard (plus its accessory bar) overlaps this view.
   ///
@@ -682,14 +684,27 @@ public struct TerminalView: View {
 
         }
 
-        if scrollOffsetFromBottom > 0 {
-          ScrollPositionIndicator(offset: scrollOffsetFromBottom)
-            .padding(.trailing, 4)
-            .padding(.top, 8)
-            // Fades in when you leave the live tail and out when you catch up.
-            // It appeared and vanished mid-scroll, which read as a rendering
-            // artefact of the scroll rather than as an answer to "where am I".
-            .transition(.opacity)
+        // Stays mounted while scrubbing: a drag that reaches the live bottom
+        // would otherwise unmount the thumb under the finger and cancel itself.
+        if scrollOffsetFromBottom > 0 || isScrubbingScroll {
+          ScrollPositionIndicator(
+            offset: scrollOffsetFromBottom,
+            isScrubbing: $isScrubbingScroll,
+            onScrub: { target in
+              let delta = target - scrollOffsetFromBottom
+              guard delta != 0 else { return }
+              // Positive lines move into history, which is also the direction
+              // the offset counts in.
+              store.scrollViewport(lines: Int32(delta))
+              scrollOffsetFromBottom = target
+            }
+          )
+          .padding(.trailing, 4)
+          .padding(.top, 8)
+          // Fades in when you leave the live tail and out when you catch up.
+          // It appeared and vanished mid-scroll, which read as a rendering
+          // artefact of the scroll rather than as an answer to "where am I".
+          .transition(.opacity)
         }
 
         if let selectionText, !selectionText.isEmpty {
@@ -888,24 +903,72 @@ public struct TerminalView: View {
 }
 
 /// Thin thumb on the trailing edge while scrolled into history.
+/// Scrollback position, and the handle for moving it.
+///
+/// This was `allowsHitTesting(false)` — it looked exactly like a scrollbar and
+/// answered nothing when you grabbed it. It is a control now: the thumb carries
+/// a 28pt-wide hit area (the bar itself is 3pt, far under the 44pt touch
+/// target), and dragging it scrubs the viewport.
+///
+/// Only the thumb takes touches. The track deliberately does not: it spans the
+/// full height of the terminal, and swallowing touches there would cost the
+/// terminal its own pan along the whole right edge.
 struct ScrollPositionIndicator: View {
+  /// Lines from the live bottom that put the thumb at the top of its travel.
+  /// The emulator does not report how much scrollback it holds, so the travel
+  /// is capped rather than proportional — the same cap the thumb has always
+  /// been drawn with.
+  static let maxOffset = 200
+
+  private static let thumbHeight: CGFloat = 36
+  private static let inset: CGFloat = 12
+  private static let hitWidth: CGFloat = 28
+
   var offset: Int
+  @Binding var isScrubbing: Bool
+  var onScrub: (Int) -> Void
 
   var body: some View {
     GeometryReader { geo in
-      let track = max(geo.size.height - 24, 1)
-      // Approximate: more offset → thumb closer to top. Cap visual travel.
-      let progress = min(1, CGFloat(offset) / 200)
-      let thumbH: CGFloat = 36
-      let y = 12 + (1 - progress) * (track - thumbH)
+      let track = max(geo.size.height - Self.inset * 2, 1)
+      let travel = max(track - Self.thumbHeight, 1)
+      // More offset → thumb closer to top.
+      let progress = min(1, CGFloat(offset) / CGFloat(Self.maxOffset))
+      let y = Self.inset + (1 - progress) * travel
       Capsule()
-        .fill(TetherColors.textSecondary.opacity(0.55))
-        .frame(width: 3, height: thumbH)
+        .fill(TetherColors.textSecondary.opacity(isScrubbing ? 0.9 : 0.55))
+        .frame(width: isScrubbing ? 5 : 3, height: Self.thumbHeight)
+        .frame(width: Self.hitWidth, alignment: .trailing)
+        .contentShape(Rectangle())
+        .gesture(
+          DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+              isScrubbing = true
+              onScrub(target(forPointerY: value.location.y, travel: travel))
+            }
+            .onEnded { value in
+              onScrub(target(forPointerY: value.location.y, travel: travel))
+              isScrubbing = false
+            }
+        )
         .frame(maxWidth: .infinity, alignment: .trailing)
         .offset(y: y)
     }
-    .allowsHitTesting(false)
-    .accessibilityHidden(true)
+    .coordinateSpace(name: Self.space)
+    .animation(.easeOut(duration: 0.12), value: isScrubbing)
+    .accessibilityLabel("Scrollback position")
+    .accessibilityValue("\(offset) lines from the bottom")
+  }
+
+  private static let space = "tether.scroll-track"
+
+  /// The pointer holds the MIDDLE of the thumb, so half of it comes off before
+  /// the position is mapped back onto the track.
+  private func target(forPointerY pointerY: CGFloat, travel: CGFloat) -> Int {
+    let top = pointerY - Self.inset - Self.thumbHeight / 2
+    let clamped = min(max(top, 0), travel)
+    let progress = 1 - clamped / travel
+    return max(0, Int((progress * CGFloat(Self.maxOffset)).rounded()))
   }
 }
 #endif
