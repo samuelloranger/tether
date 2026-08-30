@@ -254,6 +254,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     // 0x7F (DEL) is what terminals and readline expect from backspace.
     view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
     view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
+    view.refillFiller()
     return view
   }
 
@@ -264,9 +265,10 @@ public struct TerminalInputBridge: UIViewRepresentable {
       uiView.showsAccessory = showsAccessory
       uiView.reloadInputViews()
     }
-    if uiView.text != text {
-      uiView.text = text
-    }
+    // The document is not user-visible text — it is invisible filler that keeps
+    // the delete key repeating (see `refillFiller`). Syncing the binding here
+    // would wipe that filler on every SwiftUI update.
+    uiView.refillFiller()
     if isFocused.wrappedValue, !uiView.isFirstResponder {
       uiView.becomeFirstResponder()
     } else if !isFocused.wrappedValue, uiView.isFirstResponder {
@@ -291,9 +293,18 @@ public struct TerminalInputBridge: UIViewRepresentable {
       // An EMPTY replacement is a deletion. UIKit reports the software backspace
       // here rather than through `deleteBackward()`, so the previous code — which
       // only forwarded non-empty text — silently dropped every backspace.
+      //
+      // The deletion is ALLOWED through (unlike every other edit) so the hidden
+      // document actually shrinks: UIKit stops auto-repeating a held delete key
+      // the moment a press changes nothing. A held key can also escalate to a
+      // word deletion, so send one DEL per character removed.
       if text.isEmpty {
-        onSubmitBytes("\u{7F}")
-        return false
+        let view = textView as? TerminalInputTextView
+        if view?.consumeDeletionByteSent() != true {
+          for _ in 0..<max(range.length, 1) { onSubmitBytes("\u{7F}") }
+        }
+        DispatchQueue.main.async { view?.refillFiller() }
+        return true
       }
       onSubmitBytes(text)
       return false
@@ -417,8 +428,45 @@ public final class TerminalInputTextView: UITextView {
   /// did nothing at all. Claiming text unconditionally restores the key.
   public override var hasText: Bool { true }
 
+  /// The hidden document is kept stocked with invisible filler so the system
+  /// keyboard's delete key always has something to consume. Holding the key
+  /// only auto-repeats while each press actually shortens the document; a view
+  /// that refuses every edit gets one `deleteBackward()` and the repeat stalls
+  /// after it, which is why holding backspace deleted a single character.
+  private static let filler = "\u{00A0}"
+  private static let fillerCount = 64
+
+  /// `deleteBackward()` emits the byte itself and then lets UIKit perform the
+  /// real deletion, which re-enters the delegate. Without this the delegate
+  /// would send a second DEL for the same keypress.
+  private var deletionByteAlreadySent = false
+
+  /// Called by the delegate: true when this deletion's byte was already sent.
+  func consumeDeletionByteSent() -> Bool {
+    defer { deletionByteAlreadySent = false }
+    return deletionByteAlreadySent
+  }
+
+  /// Tops the document back up, prepending so the caret stays at the end — a
+  /// selection change mid-repeat cancels the repeat.
+  func refillFiller() {
+    let missing = Self.fillerCount - (text as NSString).length
+    guard missing > 0 else { return }
+    text = String(repeating: Self.filler, count: missing) + text
+    selectedRange = NSRange(location: (text as NSString).length, length: 0)
+  }
+
   public override func deleteBackward() {
     onBackspace?()
+    deletionByteAlreadySent = true
+    super.deleteBackward()
+    deletionByteAlreadySent = false
+    refillFiller()
+  }
+
+  public override func becomeFirstResponder() -> Bool {
+    refillFiller()
+    return super.becomeFirstResponder()
   }
 
   public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
