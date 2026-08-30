@@ -7,6 +7,15 @@ import { currentUserPrincipal, icaclsArgs, secureCreatedDir, secureWindowsPath }
 
 const IS_WINDOWS = process.platform === 'win32';
 
+/**
+ * How long a PowerShell probe may take before it counts as a failure.
+ *
+ * Only ever hit on a runner that is thrashing; a warm powershell.exe answers in
+ * well under a second. Large rather than tight because the cost of overshooting
+ * is a slow test and the cost of undershooting is a red release gate.
+ */
+const PS_TIMEOUT_MS = 30_000;
+
 // ---------------------------------------------------------------------------
 // Pure argument shaping. Runs on every platform, which is the whole reason
 // icaclsArgs and currentUserPrincipal are exported separately from the spawn:
@@ -149,7 +158,7 @@ function translateToSids(names: string[]): string[] {
         '[System.Security.Principal.NTAccount]::new($n).Translate(' +
         '[System.Security.Principal.SecurityIdentifier]).Value } catch { $n } }',
     ],
-    { encoding: 'utf8', windowsHide: true },
+    { encoding: 'utf8', windowsHide: true, timeout: PS_TIMEOUT_MS },
   );
   return (ps.stdout ?? '')
     .split('\n')
@@ -183,7 +192,28 @@ const PRIVILEGED_SIDS = new Set([
  * stdout — so the SID silently came back null and every assertion below
  * collapsed into "expected not null".
  */
+let cachedUserSid: string | null | undefined;
+
 function currentUserSid(): string | null {
+  // The SID cannot change inside one test process, and every assertion asks for
+  // it — so pay for PowerShell once rather than per check.
+  if (cachedUserSid !== undefined) return cachedUserSid;
+  cachedUserSid = readUserSid() ?? readUserSid();
+  return cachedUserSid;
+}
+
+/**
+ * One attempt at the SID.
+ *
+ * The timeout is explicit and generous on purpose. A cold `powershell.exe` on a
+ * loaded CI runner takes seconds to start, and when the budget ran out
+ * spawnSync returned empty stdout — indistinguishable from "no SID" — so the
+ * assertion failed as a bare `Received: null` and this suite flaked on Windows
+ * about half the time, blocking the release gate for reasons that had nothing
+ * to do with the release. `currentUserSid` retries once on top of this: a
+ * runner slow enough to miss the budget once is not necessarily slow twice.
+ */
+function readUserSid(): string | null {
   const ps = spawnSync(
     'powershell.exe',
     [
@@ -192,7 +222,7 @@ function currentUserSid(): string | null {
       '-Command',
       '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
     ],
-    { encoding: 'utf8', windowsHide: true },
+    { encoding: 'utf8', windowsHide: true, timeout: PS_TIMEOUT_MS },
   );
   const sid = (ps.stdout ?? '').trim();
   return /^S-1-[\d-]+$/.test(sid) ? sid : null;
