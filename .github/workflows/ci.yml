@@ -270,6 +270,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
+      # v3.2.1 shipped a terminal that rendered nothing: every unit test passed
+      # because none of them looked at the OUTPUT. TerminalGridRendererTests
+      # rasterizes and counts pixels, and it is UIKit-only, so it needs a
+      # simulator rather than `swift test`.
+      - name: TetherKit tests on the simulator
+        timeout-minutes: 20
+        run: |
+          xcodebuild test \
+            -scheme TetherKit \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+        working-directory: clients/apple/TetherKit
+
   # Warm release caches on main only. Tag-triggered Release builds can restore
   # from the default branch, but cannot see caches saved under other tags —
   # so every release was a cold Rust compile until this job populates main.
