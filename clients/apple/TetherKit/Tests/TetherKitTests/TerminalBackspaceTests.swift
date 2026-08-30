@@ -45,8 +45,8 @@ final class TerminalBackspaceTests: XCTestCase {
     return (view, coordinator)
   }
 
-  /// One press through `deleteBackward()` alone.
-  func testDeleteBackwardAloneSendsOneDel() {
+  /// One real press: the document loses a character, so one DEL goes out.
+  func testOnePressSendsOneDel() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
     withExtendedLifetime(coordinator) {
@@ -56,26 +56,16 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertEqual(sent, ["\u{7F}"])
   }
 
-  /// One press reported through the delegate alone.
-  func testDelegateDeletionAloneSendsOneDel() {
-    var sent: [String] = []
-    let (view, coordinator) = makeView { sent.append($0) }
-    withExtendedLifetime(coordinator) {
-      _ = coordinator.textView(
-        view, shouldChangeTextIn: NSRange(location: 0, length: 1), replacementText: ""
-      )
-      view.flushDeletion()
-    }
-    XCTAssertEqual(sent, ["\u{7F}"])
-  }
-
-  /// The shipped bug: UIKit reports ONE press through BOTH callbacks, and the
-  /// terminal received two DELs for it.
-  func testBothCallbacksForOnePressStillSendOneDel() {
+  /// The shipped bug. UIKit reports one press through several callbacks, and
+  /// `shouldChangeTextIn` is documented to fire twice for a single press with
+  /// some keyboards. Only ONE character actually leaves the document, so only
+  /// one DEL may leave the app.
+  func testDuplicateCallbacksForOnePressSendOneDel() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
     withExtendedLifetime(coordinator) {
       view.deleteBackward()
+      // The delegate's duplicate report for the same press — no second edit.
       _ = coordinator.textView(
         view, shouldChangeTextIn: NSRange(location: 0, length: 1), replacementText: ""
       )
@@ -84,22 +74,31 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertEqual(sent, ["\u{7F}"], "one press must never delete two characters")
   }
 
-  /// A held key escalating to a word deletion keeps its real count, even though
-  /// `deleteBackward()` reports only 1 for the same press.
-  func testAWordDeletionKeepsItsCount() {
+  /// A callback that changes nothing puts nothing on the wire.
+  func testACallbackThatDeletesNothingSendsNothing() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
     withExtendedLifetime(coordinator) {
-      view.deleteBackward()
       _ = coordinator.textView(
-        view, shouldChangeTextIn: NSRange(location: 0, length: 4), replacementText: ""
+        view, shouldChangeTextIn: NSRange(location: 0, length: 1), replacementText: ""
       )
+      view.flushDeletion()
+    }
+    XCTAssertEqual(sent, [])
+  }
+
+  /// A word deletion is measured whole.
+  func testAWordDeletionSendsOneDelPerCharacter() {
+    var sent: [String] = []
+    let (view, coordinator) = makeView { sent.append($0) }
+    withExtendedLifetime(coordinator) {
+      for _ in 0..<4 { view.deleteBackward() }
       view.flushDeletion()
     }
     XCTAssertEqual(sent, Array(repeating: "\u{7F}", count: 4))
   }
 
-  /// A repeat gets a runloop turn each, so the presses do not merge.
+  /// Separate presses each get their own turn, so they do not merge.
   func testSeparatePressesEachSendTheirOwnDel() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
@@ -113,7 +112,7 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertTrue(sent.allSatisfy { $0 == "\u{7F}" })
   }
 
-  /// The flush really does run on its own without a test driving it.
+  /// The flush runs on its own without a test driving it.
   func testTheFlushHappensOnItsOwnRunloopTurn() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
@@ -169,6 +168,15 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertFalse(allowed)
     XCTAssertEqual(sent, ["a"])
     XCTAssertEqual(view.text, before)
+  }
+
+  /// Backspace must not be claimed as a hardware key: that made a third
+  /// emitter, outside the measurement, and it doubled every press.
+  func testBackspaceIsNotClaimedAsAHardwareKey() {
+    XCTAssertNil(TerminalKeyMap.specialKeyBytes(keyCode: .keyboardDeleteOrBackspace, mod: 1))
+    // The neighbours it sits between must still be claimed.
+    XCTAssertEqual(TerminalKeyMap.specialKeyBytes(keyCode: .keyboardDeleteForward, mod: 1), "\u{1B}[3~")
+    XCTAssertEqual(TerminalKeyMap.specialKeyBytes(keyCode: .keyboardEscape, mod: 1), "\u{1B}")
   }
 }
 #endif
