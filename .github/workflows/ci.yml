@@ -224,6 +224,52 @@ jobs:
           cargo build --target aarch64-apple-ios --release
           cargo build --target aarch64-apple-ios-sim --release
 
+  # Nothing in CI ever compiled the Swift client, so an iOS-only change reached
+  # a release tag with no build behind it at all. This job is the compile check
+  # (board #874 also wants the TetherKit tests here; the simulator run is a
+  # follow-up). PROFILE=debug because the XCFramework only has to link, not be
+  # fast, and a release build of tether-ffi triples the job.
+  ios-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      # Its own key: a PR must not overwrite the cache release.yml restores from.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tether-core
+          shared-key: tether-ios-ci
+          cache-on-failure: true
+
+      - name: Build tether-ffi and assemble the XCFramework
+        timeout-minutes: 30
+        env:
+          PROFILE: debug
+        run: bash scripts/build-xcframework.sh
+
+      # Signing is off: this proves the sources compile, nothing more. A device
+      # build needs the certificates only release.yml has.
+      - name: Build TetherIOS for the simulator
+        timeout-minutes: 30
+        run: |
+          xcodebuild build \
+            -project clients/apple/Tether.xcodeproj \
+            -scheme TetherIOS \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
   # Warm release caches on main only. Tag-triggered Release builds can restore
   # from the default branch, but cannot see caches saved under other tags —
   # so every release was a cold Rust compile until this job populates main.

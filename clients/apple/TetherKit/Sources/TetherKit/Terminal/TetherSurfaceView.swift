@@ -1,9 +1,16 @@
 #if canImport(UIKit)
+import CoreGraphics
 import CoreText
 import SwiftUI
 import UIKit
 
-/// CoreText terminal surface. Redraws only when the snapshot generation changes.
+/// CoreText terminal surface.
+///
+/// The view itself no longer draws. A display link pulls the newest snapshot
+/// once per vsync, a serial queue decodes and rasterizes it into a retained
+/// bitmap, and the main thread only assigns the resulting image to a layer.
+/// Cursor and selection live on their own layers so neither one re-runs any
+/// text drawing.
 public final class TetherSurfaceView: UIView {
   public var fontSize: CGFloat = 14 {
     didSet { invalidateMetrics() }
@@ -41,7 +48,10 @@ public final class TetherSurfaceView: UIView {
   public private(set) var cellHeight: CGFloat = 16
 
   public var selection: TerminalSelection? {
-    didSet { setNeedsDisplay() }
+    didSet {
+      guard selection != oldValue else { return }
+      updateSelectionLayers()
+    }
   }
 
   private var reportedGrid: (cols: UInt16, rows: UInt16)?
@@ -52,9 +62,9 @@ public final class TetherSurfaceView: UIView {
   /// full-screen TUI's screen for good — when the view settled the rows came
   /// back but the content did not, leaving a few lines and blank space.
   private var gridSettleWork: DispatchWorkItem?
-  private var lastGeneration: UInt64?
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
+  private var cachedRowTexts: [String] = []
   private var linkSpans: [[LinkSpan]] = []
 
   private var font: UIFont = .monospacedSystemFont(ofSize: 14, weight: .regular)
@@ -63,6 +73,30 @@ public final class TetherSurfaceView: UIView {
   private var scrollRemainder: CGFloat = 0
   private var lastPanY: CGFloat = 0
   private var selectionAnchor: (row: Int, col: Int)?
+
+  // MARK: - Layers
+
+  /// Holds every content layer so a pan can translate all of them at once.
+  private let contentLayer = CALayer()
+  private let textLayer = CALayer()
+  private let selectionLayer = CAShapeLayer()
+  private let cursorLayer = CALayer()
+  private let startHandleLayer = CALayer()
+  private let endHandleLayer = CALayer()
+
+  // MARK: - Frame pipeline
+
+  private let renderQueue = DispatchQueue(label: "cloud.samlo.tether.surface-render", qos: .userInteractive)
+  private let worker = TerminalRenderWorker()
+  private var scheduler: TerminalFrameScheduler?
+  private var pendingSnapshot: Data?
+  private var needsRepaint = false
+  private var isRendering = false
+  /// Bumped whenever the surface's contents stop being the ones a render was
+  /// started for. A render already in flight completes anyway — the queue has
+  /// no cancellation — and its `commit` would otherwise repopulate the layers
+  /// with the session that was just cleared.
+  private var frameEpoch: UInt64 = 0
 
   public override init(frame: CGRect) {
     super.init(frame: frame)
@@ -74,15 +108,49 @@ public final class TetherSurfaceView: UIView {
     commonInit()
   }
 
+  deinit {
+    scheduler?.stop()
+  }
+
   private func commonInit() {
     isOpaque = true
     // Same constant the SwiftUI chrome uses, so the grid and everything around
     // it are one colour rather than two that nearly match.
     backgroundColor = UIColor(TetherColors.terminalBackground)
-    contentMode = .redraw
     isMultipleTouchEnabled = false
+    installLayers()
+    scheduler = TerminalFrameScheduler { [weak self] in
+      self?.pumpFrame() ?? false
+    }
     invalidateMetrics()
     installGestures()
+  }
+
+  private func installLayers() {
+    contentLayer.masksToBounds = true
+    layer.addSublayer(contentLayer)
+
+    textLayer.contentsGravity = .topLeft
+    textLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+    textLayer.isOpaque = true
+    contentLayer.addSublayer(textLayer)
+
+    selectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.35).cgColor
+    selectionLayer.strokeColor = nil
+    selectionLayer.isHidden = true
+    contentLayer.addSublayer(selectionLayer)
+
+    cursorLayer.backgroundColor = UIColor.white.withAlphaComponent(0.35).cgColor
+    cursorLayer.isHidden = true
+    contentLayer.addSublayer(cursorLayer)
+
+    for handle in [startHandleLayer, endHandleLayer] {
+      handle.backgroundColor = UIColor.systemBlue.cgColor
+      handle.cornerRadius = 6
+      handle.bounds = CGRect(x: 0, y: 0, width: 12, height: 12)
+      handle.isHidden = true
+      contentLayer.addSublayer(handle)
+    }
   }
 
   private func installGestures() {
@@ -104,51 +172,198 @@ public final class TetherSurfaceView: UIView {
     addGestureRecognizer(tap)
   }
 
-  /// Updates the grid from packed TGRD bytes. Skips decode and redraw when generation is unchanged.
+  // MARK: - Snapshot intake
+
+  /// Hands the newest packed TGRD bytes to the frame pump.
+  ///
+  /// Deliberately does no work: decoding here meant one decode per WebSocket
+  /// frame, most of them discarded before the next vsync.
   public func updateSnapshot(_ bytes: Data) {
-    guard let decoded = try? GridSnapshotDecoder.decode(bytes) else { return }
-    if lastGeneration == decoded.0.generation { return }
-    lastGeneration = decoded.0.generation
-    header = decoded.0
-    cells = decoded.1
-    rebuildLinks()
-    setNeedsDisplay()
+    pendingSnapshot = bytes
+    scheduler?.requestFrame()
   }
 
   public func clearSnapshot() {
-    lastGeneration = nil
+    frameEpoch &+= 1
+    // An in-flight render will still call commit; it is discarded there, so the
+    // pump has to be released here or the next frame never starts.
+    isRendering = false
+    pendingSnapshot = nil
+    needsRepaint = false
     header = nil
     cells = []
+    cachedRowTexts = []
     linkSpans = []
-    setNeedsDisplay()
+    renderQueue.async { [worker] in
+      worker.reset()
+    }
+    withoutAnimations {
+      textLayer.contents = nil
+      cursorLayer.isHidden = true
+      selectionLayer.isHidden = true
+      startHandleLayer.isHidden = true
+      endHandleLayer.isHidden = true
+      contentLayer.setAffineTransform(.identity)
+    }
   }
 
   /// Plain text of each visible row (trailing spaces trimmed).
   public func rowTexts() -> [String] {
-    guard let header else { return [] }
+    cachedRowTexts
+  }
+
+  // MARK: - Frame pump
+
+  /// One display-link tick. Returns whether it had work to do.
+  private func pumpFrame() -> Bool {
+    if isRendering { return true }
+    let bytes = pendingSnapshot
+    guard bytes != nil || needsRepaint else { return false }
+    guard let metrics = currentMetrics() else { return false }
+
+    pendingSnapshot = nil
+    needsRepaint = false
+    isRendering = true
+
+    let epoch = frameEpoch
+    renderQueue.async { [weak self, worker] in
+      let output: TerminalRenderOutput?
+      if let bytes {
+        output = worker.render(bytes: bytes, metrics: metrics)
+      } else {
+        output = worker.rerender(metrics: metrics)
+      }
+      DispatchQueue.main.async {
+        self?.commit(output, epoch: epoch)
+      }
+    }
+    return true
+  }
+
+  private func commit(_ output: TerminalRenderOutput?, epoch: UInt64) {
+    // Rendered for contents the surface has since dropped. `isRendering` was
+    // already cleared by whoever bumped the epoch.
+    guard epoch == frameEpoch else { return }
+    isRendering = false
+    defer {
+      if pendingSnapshot != nil || needsRepaint { scheduler?.requestFrame() }
+    }
+    guard let output else { return }
+
+    header = output.header
+    cells = output.cells
+    cachedRowTexts = output.rowTexts
+    linkSpans = output.linkSpans
+
+    withoutAnimations {
+      if let image = output.image {
+        textLayer.frame = bounds
+        textLayer.contents = image
+      }
+      // The grid now reflects every line the pan sent, so the sub-cell offset
+      // that stood in for them is spent.
+      contentLayer.setAffineTransform(.identity)
+      updateCursorLayer()
+      updateSelectionLayers()
+    }
+    invalidateIntrinsicContentSize()
+  }
+
+  private func currentMetrics() -> TerminalRenderMetrics? {
+    guard bounds.width > 0, bounds.height > 0 else { return nil }
+    let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+    return TerminalRenderMetrics(
+      cellWidth: cellWidth,
+      cellHeight: cellHeight,
+      size: bounds.size,
+      scale: scale,
+      font: font,
+      boldFont: boldFont,
+      background: (backgroundColor ?? .black).cgColor
+    )
+  }
+
+  private func requestRepaint() {
+    needsRepaint = true
+    scheduler?.requestFrame()
+  }
+
+  /// Layer geometry changes must not animate: an implicit 0.25s CABasicAnimation
+  /// on `contents` turns every terminal frame into a cross-fade.
+  private func withoutAnimations(_ body: () -> Void) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    body()
+    CATransaction.commit()
+  }
+
+  // MARK: - Cursor and selection layers
+
+  private func updateCursorLayer() {
+    guard let header, header.cursorVisible else {
+      cursorLayer.isHidden = true
+      return
+    }
+    cursorLayer.isHidden = false
+    cursorLayer.frame = CGRect(
+      x: CGFloat(header.cursorCol) * cellWidth,
+      y: CGFloat(header.cursorRow) * cellHeight + gridOriginY,
+      width: cellWidth,
+      height: cellHeight
+    )
+  }
+
+  private func updateSelectionLayers() {
+    guard let selection, let header else {
+      withoutAnimations {
+        selectionLayer.isHidden = true
+        startHandleLayer.isHidden = true
+        endHandleLayer.isHidden = true
+      }
+      return
+    }
+    let normalized = selection.normalized
+    let path = CGMutablePath()
     let cols = Int(header.cols)
     let rows = Int(header.rows)
-    var out: [String] = []
-    out.reserveCapacity(rows)
-    for row in 0..<rows {
-      var line = ""
-      for col in 0..<cols {
-        let index = row * cols + col
-        guard index < cells.count else { break }
-        let cp = cells[index].codepoint
-        if cp == 0 {
-          line.append(" ")
-        } else if let scalar = Unicode.Scalar(cp) {
-          line.append(Character(scalar))
-        } else {
-          line.append(" ")
-        }
+    let originY = gridOriginY
+
+    for row in max(0, normalized.startRow)...max(0, normalized.endRow) where row < rows {
+      var first: Int?
+      var last: Int?
+      for col in 0..<cols where normalized.contains(row: row, col: col) {
+        if first == nil { first = col }
+        last = col
       }
-      while line.last == " " { line.removeLast() }
-      out.append(line)
+      guard let first, let last else { continue }
+      path.addRect(
+        CGRect(
+          x: CGFloat(first) * cellWidth,
+          y: CGFloat(row) * cellHeight + originY,
+          width: CGFloat(last - first + 1) * cellWidth,
+          height: cellHeight
+        )
+      )
     }
-    return out
+
+    withoutAnimations {
+      selectionLayer.frame = bounds
+      selectionLayer.path = path
+      selectionLayer.isHidden = path.isEmpty
+      startHandleLayer.isHidden = false
+      endHandleLayer.isHidden = false
+      startHandleLayer.position = CGPoint(
+        x: CGFloat(normalized.startCol) * cellWidth,
+        y: CGFloat(normalized.startRow) * cellHeight + originY
+      )
+      endHandleLayer.position = CGPoint(
+        x: CGFloat(normalized.endCol + 1) * cellWidth,
+        y: CGFloat(normalized.endRow + 1) * cellHeight + originY
+      )
+    }
   }
+
+  // MARK: - Geometry
 
   public override var intrinsicContentSize: CGSize {
     guard let header else {
@@ -174,115 +389,21 @@ public final class TetherSurfaceView: UIView {
     return max(0, bounds.height - drawn)
   }
 
-  public override func draw(_ rect: CGRect) {
-    guard let context = UIGraphicsGetCurrentContext(), let header else { return }
-
-    let cols = Int(header.cols)
-    let rows = Int(header.rows)
-    let originY = gridOriginY
-
-    for row in 0..<rows {
-      for col in 0..<cols {
-        let index = row * cols + col
-        guard index < cells.count else { continue }
-        let cell = cells[index]
-        let x = CGFloat(col) * cellWidth
-        let y = CGFloat(row) * cellHeight + originY
-        let cellRect = CGRect(x: x, y: y, width: cellWidth, height: cellHeight)
-
-        var fg = cell.foreground
-        var bg = cell.background
-        if cell.attrs & GridSnapshot.attrInverse != 0 {
-          swap(&fg, &bg)
-        }
-
-        context.setFillColor(colorFromARGB(bg).cgColor)
-        context.fill(cellRect)
-
-        if let selection, selection.contains(row: row, col: col) {
-          context.setFillColor(UIColor.systemBlue.withAlphaComponent(0.35).cgColor)
-          context.fill(cellRect)
-        }
-
-        guard cell.codepoint != 0x20, cell.codepoint != 0 else { continue }
-        guard let scalar = Unicode.Scalar(cell.codepoint) else { continue }
-
-        let useBold = cell.attrs & GridSnapshot.attrBold != 0
-        let useDim = cell.attrs & GridSnapshot.attrDim != 0
-        let selectedFont = useBold ? boldFont : font
-        var textColor = colorFromARGB(fg)
-        if useDim {
-          textColor = textColor.withAlphaComponent(0.65)
-        }
-
-        let attributes: [NSAttributedString.Key: Any] = [
-          .font: selectedFont,
-          .foregroundColor: textColor,
-          .kern: 0,
-        ]
-        let glyph = String(scalar)
-        let attributed = NSAttributedString(string: glyph, attributes: attributes)
-        let line = CTLineCreateWithAttributedString(attributed)
-        let bounds = CTLineGetBoundsWithOptions(line, [])
-        let drawX = x + max(0, (cellWidth - bounds.width) / 2 - bounds.origin.x)
-        let drawY = y + (cellHeight - selectedFont.lineHeight) / 2 + selectedFont.ascender
-
-        context.saveGState()
-        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        context.textPosition = CGPoint(x: drawX, y: drawY)
-        CTLineDraw(line, context)
-
-        if cell.attrs & GridSnapshot.attrUnderline != 0 {
-          context.setStrokeColor(textColor.cgColor)
-          context.setLineWidth(1)
-          let underlineY = y + cellHeight - 2
-          context.move(to: CGPoint(x: x, y: underlineY))
-          context.addLine(to: CGPoint(x: x + cellWidth, y: underlineY))
-          context.strokePath()
-        }
-
-        if cell.attrs & GridSnapshot.attrStrikethrough != 0 {
-          context.setStrokeColor(textColor.cgColor)
-          context.setLineWidth(1)
-          let strikeY = y + cellHeight / 2
-          context.move(to: CGPoint(x: x, y: strikeY))
-          context.addLine(to: CGPoint(x: x + cellWidth, y: strikeY))
-          context.strokePath()
-        }
-
-        context.restoreGState()
-      }
-    }
-
-    if header.cursorVisible {
-      let cursorX = CGFloat(header.cursorCol) * cellWidth
-      let cursorY = CGFloat(header.cursorRow) * cellHeight + originY
-      context.setFillColor(UIColor.white.withAlphaComponent(0.35).cgColor)
-      context.fill(CGRect(x: cursorX, y: cursorY, width: cellWidth, height: cellHeight))
-    }
-
-    if let selection {
-      drawSelectionHandles(context: context, selection: selection.normalized)
-    }
-  }
-
-  private func drawSelectionHandles(context: CGContext, selection: TerminalSelection) {
-    let start = CGPoint(
-      x: CGFloat(selection.startCol) * cellWidth,
-      y: CGFloat(selection.startRow) * cellHeight + gridOriginY
-    )
-    let end = CGPoint(
-      x: CGFloat(selection.endCol + 1) * cellWidth,
-      y: CGFloat(selection.endRow + 1) * cellHeight + gridOriginY
-    )
-    context.setFillColor(UIColor.systemBlue.cgColor)
-    context.fillEllipse(in: CGRect(x: start.x - 6, y: start.y - 6, width: 12, height: 12))
-    context.fillEllipse(in: CGRect(x: end.x - 6, y: end.y - 6, width: 12, height: 12))
-  }
-
   public override func layoutSubviews() {
     super.layoutSubviews()
+    withoutAnimations {
+      contentLayer.frame = bounds
+      textLayer.frame = bounds
+      textLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+    }
     reportGridSize()
+    requestRepaint()
+  }
+
+  public override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+    super.traitCollectionDidChange(previous)
+    guard traitCollection.displayScale != previous?.displayScale else { return }
+    requestRepaint()
   }
 
   private func reportGridSize() {
@@ -338,15 +459,8 @@ public final class TetherSurfaceView: UIView {
     cellWidth = ceil(font.advancement(for: "M"))
     cellHeight = ceil(font.lineHeight)
     invalidateIntrinsicContentSize()
-    setNeedsDisplay()
+    requestRepaint()
     reportGridSize()
-  }
-
-  private func rebuildLinks() {
-    let texts = rowTexts()
-    // TGRD has no soft-wrap flags yet — hard-wrap heuristic in LinkSpans still runs.
-    let wrapped = Array(repeating: false, count: texts.count)
-    linkSpans = LinkSpans.compute(texts: texts, wrapped: wrapped)
   }
 
   private func cellAt(_ point: CGPoint) -> (row: Int, col: Int)? {
@@ -358,6 +472,8 @@ public final class TetherSurfaceView: UIView {
     }
     return (row, col)
   }
+
+  // MARK: - Gestures
 
   @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
     let point = gesture.location(in: self)
@@ -382,10 +498,29 @@ public final class TetherSurfaceView: UIView {
         // touchScrollLines matches xterm; alacritty Delta is inverted.
         onScrollLines?(Int32(-result.lines))
       }
+      applyScrollOffset()
     case .ended, .cancelled, .failed:
       scrollRemainder = 0
+      applyScrollOffset()
     default:
       break
+    }
+  }
+
+  /// Tracks the finger through the part of a drag that has not yet become a
+  /// whole row.
+  ///
+  /// Scrolling only ever moved in cell-height steps, and each step waited for
+  /// the emulator to send a new grid — so the content visibly lagged the touch.
+  /// The leftover pixels are exactly the distance the grid does not know about
+  /// yet, so shifting the content layer by them costs nothing (it is a
+  /// compositor transform, not a redraw) and makes the drag track 1:1.
+  private func applyScrollOffset() {
+    withoutAnimations {
+      // `scrollRemainder` carries the sign of `lastPanY - point.y`, so a finger
+      // moving DOWN produces a negative remainder while the content it drags
+      // has to move DOWN — hence the negation.
+      contentLayer.setAffineTransform(CGAffineTransform(translationX: 0, y: -scrollRemainder))
     }
   }
 
@@ -498,14 +633,6 @@ public final class TetherSurfaceView: UIView {
       onSelectionChanged?(selection)
     }
     onDoubleTapCell?(cell.col, cell.row)
-  }
-
-  private func colorFromARGB(_ argb: UInt32) -> UIColor {
-    let a = CGFloat((argb >> 24) & 0xFF) / 255
-    let r = CGFloat((argb >> 16) & 0xFF) / 255
-    let g = CGFloat((argb >> 8) & 0xFF) / 255
-    let b = CGFloat(argb & 0xFF) / 255
-    return UIColor(red: r, green: g, blue: b, alpha: a == 0 ? 1 : a)
   }
 }
 

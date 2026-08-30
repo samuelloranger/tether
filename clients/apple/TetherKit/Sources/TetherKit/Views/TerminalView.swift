@@ -254,6 +254,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     // 0x7F (DEL) is what terminals and readline expect from backspace.
     view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
     view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
+    view.refillFiller()
     return view
   }
 
@@ -264,9 +265,10 @@ public struct TerminalInputBridge: UIViewRepresentable {
       uiView.showsAccessory = showsAccessory
       uiView.reloadInputViews()
     }
-    if uiView.text != text {
-      uiView.text = text
-    }
+    // The document is not user-visible text — it is invisible filler that keeps
+    // the delete key repeating (see `refillFiller`). Syncing the binding here
+    // would wipe that filler on every SwiftUI update.
+    uiView.refillFiller()
     if isFocused.wrappedValue, !uiView.isFirstResponder {
       uiView.becomeFirstResponder()
     } else if !isFocused.wrappedValue, uiView.isFirstResponder {
@@ -291,9 +293,18 @@ public struct TerminalInputBridge: UIViewRepresentable {
       // An EMPTY replacement is a deletion. UIKit reports the software backspace
       // here rather than through `deleteBackward()`, so the previous code — which
       // only forwarded non-empty text — silently dropped every backspace.
+      //
+      // The deletion is ALLOWED through (unlike every other edit) so the hidden
+      // document actually shrinks: UIKit stops auto-repeating a held delete key
+      // the moment a press changes nothing. A held key can also escalate to a
+      // word deletion, so send one DEL per character removed.
       if text.isEmpty {
-        onSubmitBytes("\u{7F}")
-        return false
+        let view = textView as? TerminalInputTextView
+        if view?.consumeDeletionByteSent() != true {
+          for _ in 0..<max(range.length, 1) { onSubmitBytes("\u{7F}") }
+        }
+        DispatchQueue.main.async { view?.refillFiller() }
+        return true
       }
       onSubmitBytes(text)
       return false
@@ -417,8 +428,45 @@ public final class TerminalInputTextView: UITextView {
   /// did nothing at all. Claiming text unconditionally restores the key.
   public override var hasText: Bool { true }
 
+  /// The hidden document is kept stocked with invisible filler so the system
+  /// keyboard's delete key always has something to consume. Holding the key
+  /// only auto-repeats while each press actually shortens the document; a view
+  /// that refuses every edit gets one `deleteBackward()` and the repeat stalls
+  /// after it, which is why holding backspace deleted a single character.
+  private static let filler = "\u{00A0}"
+  private static let fillerCount = 64
+
+  /// `deleteBackward()` emits the byte itself and then lets UIKit perform the
+  /// real deletion, which re-enters the delegate. Without this the delegate
+  /// would send a second DEL for the same keypress.
+  private var deletionByteAlreadySent = false
+
+  /// Called by the delegate: true when this deletion's byte was already sent.
+  func consumeDeletionByteSent() -> Bool {
+    defer { deletionByteAlreadySent = false }
+    return deletionByteAlreadySent
+  }
+
+  /// Tops the document back up, prepending so the caret stays at the end — a
+  /// selection change mid-repeat cancels the repeat.
+  func refillFiller() {
+    let missing = Self.fillerCount - (text as NSString).length
+    guard missing > 0 else { return }
+    text = String(repeating: Self.filler, count: missing) + text
+    selectedRange = NSRange(location: (text as NSString).length, length: 0)
+  }
+
   public override func deleteBackward() {
     onBackspace?()
+    deletionByteAlreadySent = true
+    super.deleteBackward()
+    deletionByteAlreadySent = false
+    refillFiller()
+  }
+
+  public override func becomeFirstResponder() -> Bool {
+    refillFiller()
+    return super.becomeFirstResponder()
   }
 
   public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -562,6 +610,8 @@ public struct TerminalView: View {
   @State private var accessory = TerminalAccessoryModel()
   @State private var inputBuffer = ""
   @State private var scrollOffsetFromBottom = 0
+  /// Held while the scrollback thumb is under a finger — see ScrollPositionIndicator.
+  @State private var isScrubbingScroll = false
   @State private var selectionText: String?
   /// How far the keyboard (plus its accessory bar) overlaps this view.
   ///
@@ -634,14 +684,27 @@ public struct TerminalView: View {
 
         }
 
-        if scrollOffsetFromBottom > 0 {
-          ScrollPositionIndicator(offset: scrollOffsetFromBottom)
-            .padding(.trailing, 4)
-            .padding(.top, 8)
-            // Fades in when you leave the live tail and out when you catch up.
-            // It appeared and vanished mid-scroll, which read as a rendering
-            // artefact of the scroll rather than as an answer to "where am I".
-            .transition(.opacity)
+        // Stays mounted while scrubbing: a drag that reaches the live bottom
+        // would otherwise unmount the thumb under the finger and cancel itself.
+        if scrollOffsetFromBottom > 0 || isScrubbingScroll {
+          ScrollPositionIndicator(
+            offset: scrollOffsetFromBottom,
+            isScrubbing: $isScrubbingScroll,
+            onScrub: { target in
+              let delta = target - scrollOffsetFromBottom
+              guard delta != 0 else { return }
+              // Positive lines move into history, which is also the direction
+              // the offset counts in.
+              store.scrollViewport(lines: Int32(delta))
+              scrollOffsetFromBottom = target
+            }
+          )
+          .padding(.trailing, 4)
+          .padding(.top, 8)
+          // Fades in when you leave the live tail and out when you catch up.
+          // It appeared and vanished mid-scroll, which read as a rendering
+          // artefact of the scroll rather than as an answer to "where am I".
+          .transition(.opacity)
         }
 
         if let selectionText, !selectionText.isEmpty {
@@ -840,24 +903,85 @@ public struct TerminalView: View {
 }
 
 /// Thin thumb on the trailing edge while scrolled into history.
+/// Scrollback position, and the handle for moving it.
+///
+/// This was `allowsHitTesting(false)` — it looked exactly like a scrollbar and
+/// answered nothing when you grabbed it. It is a control now: the thumb carries
+/// a 28pt-wide hit area (the bar itself is 3pt, far under the 44pt touch
+/// target), and dragging it scrubs the viewport.
+///
+/// Only the thumb takes touches. The track deliberately does not: it spans the
+/// full height of the terminal, and swallowing touches there would cost the
+/// terminal its own pan along the whole right edge.
 struct ScrollPositionIndicator: View {
+  /// Lines from the live bottom that put the thumb at the top of its travel.
+  /// The emulator does not report how much scrollback it holds, so the travel
+  /// is capped rather than proportional — the same cap the thumb has always
+  /// been drawn with.
+  static let maxOffset = 200
+
+  private static let thumbHeight: CGFloat = 36
+  private static let inset: CGFloat = 12
+  private static let hitWidth: CGFloat = 28
+
   var offset: Int
+  @Binding var isScrubbing: Bool
+  var onScrub: (Int) -> Void
+
+  /// Offset the drag started from. The thumb's travel only represents
+  /// `maxOffset` lines, so mapping a pointer position straight onto an absolute
+  /// offset would teleport anyone deeper than that back to 200 the instant they
+  /// touched the thumb. The drag moves RELATIVE to where it began instead.
+  @State private var scrubOrigin: Int?
 
   var body: some View {
     GeometryReader { geo in
-      let track = max(geo.size.height - 24, 1)
-      // Approximate: more offset → thumb closer to top. Cap visual travel.
-      let progress = min(1, CGFloat(offset) / 200)
-      let thumbH: CGFloat = 36
-      let y = 12 + (1 - progress) * (track - thumbH)
+      let track = max(geo.size.height - Self.inset * 2, 1)
+      let travel = max(track - Self.thumbHeight, 1)
+      // More offset → thumb closer to top.
+      let progress = min(1, CGFloat(offset) / CGFloat(Self.maxOffset))
+      let y = Self.inset + (1 - progress) * travel
       Capsule()
-        .fill(TetherColors.textSecondary.opacity(0.55))
-        .frame(width: 3, height: thumbH)
+        .fill(TetherColors.textSecondary.opacity(isScrubbing ? 0.9 : 0.55))
+        .frame(width: isScrubbing ? 5 : 3, height: Self.thumbHeight)
+        .frame(width: Self.hitWidth, alignment: .trailing)
+        .contentShape(Rectangle())
+        .gesture(
+          DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+              if scrubOrigin == nil { scrubOrigin = offset }
+              isScrubbing = true
+              onScrub(target(for: value, travel: travel))
+            }
+            .onEnded { value in
+              onScrub(target(for: value, travel: travel))
+              scrubOrigin = nil
+              isScrubbing = false
+            }
+        )
         .frame(maxWidth: .infinity, alignment: .trailing)
         .offset(y: y)
     }
-    .allowsHitTesting(false)
-    .accessibilityHidden(true)
+    .coordinateSpace(name: Self.space)
+    .animation(.easeOut(duration: 0.12), value: isScrubbing)
+    .accessibilityLabel("Scrollback position")
+    .accessibilityValue("\(offset) lines from the bottom")
+  }
+
+  private static let space = "tether.scroll-track"
+
+  /// Maps the drag's travel onto a scrollback offset.
+  ///
+  /// Full travel covers `maxOffset` lines, or the offset the drag started from
+  /// when that is deeper — so a drag that begins 1,000 lines back can still
+  /// reach the live bottom in one sweep rather than jumping to 200 on contact.
+  private func target(for value: DragGesture.Value, travel: CGFloat) -> Int {
+    let origin = scrubOrigin ?? offset
+    let span = CGFloat(max(Self.maxOffset, origin))
+    let movedDown = value.location.y - value.startLocation.y
+    // Down the track is toward the live bottom, which is a smaller offset.
+    let delta = movedDown / travel * span
+    return max(0, Int((CGFloat(origin) - delta).rounded()))
   }
 }
 #endif
