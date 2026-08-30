@@ -42,23 +42,87 @@ final class TerminalBackspaceTests: XCTestCase {
     return (view, coordinator)
   }
 
-  func testOneBackspaceSendsExactlyOneDel() {
+  /// One press through `deleteBackward()` alone.
+  func testDeleteBackwardAloneSendsOneDel() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
     withExtendedLifetime(coordinator) {
       view.deleteBackward()
+      view.flushDeletion()
     }
-    XCTAssertEqual(sent, ["\u{7F}"], "a single backspace must put exactly one DEL on the wire")
+    XCTAssertEqual(sent, ["\u{7F}"])
   }
 
-  func testRepeatedBackspacesSendOneDelEach() {
+  /// One press reported through the delegate alone.
+  func testDelegateDeletionAloneSendsOneDel() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
     withExtendedLifetime(coordinator) {
-      for _ in 0..<5 { view.deleteBackward() }
+      _ = coordinator.textView(
+        view, shouldChangeTextIn: NSRange(location: 0, length: 1), replacementText: ""
+      )
+      view.flushDeletion()
+    }
+    XCTAssertEqual(sent, ["\u{7F}"])
+  }
+
+  /// The shipped bug: UIKit reports ONE press through BOTH callbacks, and the
+  /// terminal received two DELs for it.
+  func testBothCallbacksForOnePressStillSendOneDel() {
+    var sent: [String] = []
+    let (view, coordinator) = makeView { sent.append($0) }
+    withExtendedLifetime(coordinator) {
+      view.deleteBackward()
+      _ = coordinator.textView(
+        view, shouldChangeTextIn: NSRange(location: 0, length: 1), replacementText: ""
+      )
+      view.flushDeletion()
+    }
+    XCTAssertEqual(sent, ["\u{7F}"], "one press must never delete two characters")
+  }
+
+  /// A held key escalating to a word deletion keeps its real count, even though
+  /// `deleteBackward()` reports only 1 for the same press.
+  func testAWordDeletionKeepsItsCount() {
+    var sent: [String] = []
+    let (view, coordinator) = makeView { sent.append($0) }
+    withExtendedLifetime(coordinator) {
+      view.deleteBackward()
+      _ = coordinator.textView(
+        view, shouldChangeTextIn: NSRange(location: 0, length: 4), replacementText: ""
+      )
+      view.flushDeletion()
+    }
+    XCTAssertEqual(sent, Array(repeating: "\u{7F}", count: 4))
+  }
+
+  /// A repeat gets a runloop turn each, so the presses do not merge.
+  func testSeparatePressesEachSendTheirOwnDel() {
+    var sent: [String] = []
+    let (view, coordinator) = makeView { sent.append($0) }
+    withExtendedLifetime(coordinator) {
+      for _ in 0..<5 {
+        view.deleteBackward()
+        view.flushDeletion()
+      }
     }
     XCTAssertEqual(sent.count, 5)
     XCTAssertTrue(sent.allSatisfy { $0 == "\u{7F}" })
+  }
+
+  /// The flush really does run on its own without a test driving it.
+  func testTheFlushHappensOnItsOwnRunloopTurn() {
+    var sent: [String] = []
+    let (view, coordinator) = makeView { sent.append($0) }
+    let delivered = expectation(description: "DEL reaches the wire without a manual flush")
+    withExtendedLifetime(coordinator) {
+      view.deleteBackward()
+      DispatchQueue.main.async {
+        DispatchQueue.main.async { delivered.fulfill() }
+      }
+      wait(for: [delivered], timeout: 2)
+    }
+    XCTAssertEqual(sent, ["\u{7F}"])
   }
 
   /// The filler is what keeps UIKit's auto-repeat alive: a press that removes
@@ -67,11 +131,14 @@ final class TerminalBackspaceTests: XCTestCase {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
     withExtendedLifetime(coordinator) {
-      for _ in 0..<20 { view.deleteBackward() }
-      view.refillFiller()
+      for _ in 0..<20 {
+        view.deleteBackward()
+        view.flushDeletion()
+      }
     }
     XCTAssertTrue(view.hasText)
     XCTAssertGreaterThan((view.text as NSString).length, 0)
+    XCTAssertEqual(sent.count, 20)
   }
 
   /// The caret stays at the end — a selection change mid-repeat cancels it.
@@ -99,22 +166,6 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertFalse(allowed)
     XCTAssertEqual(sent, ["a"])
     XCTAssertEqual(view.text, before)
-  }
-
-  /// A held key can escalate to a word deletion; each removed character is its
-  /// own DEL.
-  func testAWordDeletionSendsOneDelPerCharacter() {
-    var sent: [String] = []
-    let (view, coordinator) = makeView { sent.append($0) }
-    let allowed = withExtendedLifetime(coordinator) {
-      coordinator.textView(
-        view,
-        shouldChangeTextIn: NSRange(location: 0, length: 4),
-        replacementText: ""
-      )
-    }
-    XCTAssertTrue(allowed, "deletions are the one edit allowed through, so the document shrinks")
-    XCTAssertEqual(sent, Array(repeating: "\u{7F}", count: 4))
   }
 }
 #endif
