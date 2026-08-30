@@ -31,6 +31,9 @@ final class TerminalBackspaceTests: XCTestCase {
       isFocused: .constant(true)
     )
     view.delegate = coordinator
+    // The same wiring makeUIView applies — the app and this test must not be
+    // able to disagree about where the bytes go.
+    TerminalInputBridge.wire(view, onSubmitBytes: sink)
 
     let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
     window.addSubview(view)

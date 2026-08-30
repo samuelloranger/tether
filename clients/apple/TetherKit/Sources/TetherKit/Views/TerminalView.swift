@@ -239,6 +239,18 @@ public struct TerminalInputBridge: UIViewRepresentable {
     Coordinator(onSubmitBytes: onSubmitBytes, isFocused: isFocused)
   }
 
+  /// Connects a view's byte hooks to the PTY.
+  ///
+  /// Shared with the tests on purpose. When this lived inline in `makeUIView`,
+  /// a test could build the view and the coordinator, drive a real keypress,
+  /// and watch nothing come out — not because the code was wrong but because
+  /// the test had wired it differently from the app.
+  static func wire(_ view: TerminalInputTextView, onSubmitBytes: @escaping (String) -> Void) {
+    // 0x7F (DEL) is what terminals and readline expect from backspace.
+    view.onBackspace = { onSubmitBytes("\u{7F}") }
+    view.onKeyBytes = { bytes in onSubmitBytes(bytes) }
+  }
+
   public func makeUIView(context: Context) -> TerminalInputTextView {
     let view = TerminalInputTextView()
     view.delegate = context.coordinator
@@ -251,9 +263,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.tintColor = .clear
     view.accessoryHosting.rootView = accessory
     view.showsAccessory = showsAccessory
-    // 0x7F (DEL) is what terminals and readline expect from backspace.
-    view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
-    view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
+    Self.wire(view, onSubmitBytes: onSubmitBytes)
     view.refillFiller()
     return view
   }
