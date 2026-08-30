@@ -251,8 +251,6 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.tintColor = .clear
     view.accessoryHosting.rootView = accessory
     view.showsAccessory = showsAccessory
-    // 0x7F (DEL) is what terminals and readline expect from backspace.
-    view.onBackspace = { [onSubmitBytes] in onSubmitBytes("\u{7F}") }
     view.onKeyBytes = { [onSubmitBytes] bytes in onSubmitBytes(bytes) }
     view.refillFiller()
     return view
@@ -300,9 +298,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
       // word deletion, so send one DEL per character removed.
       if text.isEmpty {
         let view = textView as? TerminalInputTextView
-        if view?.consumeDeletionByteSent() != true {
-          for _ in 0..<max(range.length, 1) { onSubmitBytes("\u{7F}") }
-        }
+        for _ in 0..<max(range.length, 1) { onSubmitBytes("\u{7F}") }
         DispatchQueue.main.async { view?.refillFiller() }
         return true
       }
@@ -416,11 +412,6 @@ public final class TerminalInputTextView: UITextView {
   /// Receives the bytes for any hardware key the terminal claims.
   var onKeyBytes: ((String) -> Void)?
 
-  /// Software-keyboard backspace. The on-screen delete key routes here rather
-  /// than through `pressesBegan`, and reports an empty replacement string to
-  /// the delegate, so it needs its own hook.
-  var onBackspace: (() -> Void)?
-
   /// UIKit only routes the software delete key to `deleteBackward()` while the
   /// input view reports that it has something to delete. This view's text is
   /// always empty — the delegate refuses every change and forwards bytes to the
@@ -436,17 +427,6 @@ public final class TerminalInputTextView: UITextView {
   private static let filler = "\u{00A0}"
   private static let fillerCount = 64
 
-  /// `deleteBackward()` emits the byte itself and then lets UIKit perform the
-  /// real deletion, which re-enters the delegate. Without this the delegate
-  /// would send a second DEL for the same keypress.
-  private var deletionByteAlreadySent = false
-
-  /// Called by the delegate: true when this deletion's byte was already sent.
-  func consumeDeletionByteSent() -> Bool {
-    defer { deletionByteAlreadySent = false }
-    return deletionByteAlreadySent
-  }
-
   /// Tops the document back up, prepending so the caret stays at the end — a
   /// selection change mid-repeat cancels the repeat.
   func refillFiller() {
@@ -456,11 +436,16 @@ public final class TerminalInputTextView: UITextView {
     selectedRange = NSRange(location: (text as NSString).length, length: 0)
   }
 
+  /// Performs the deletion and nothing else.
+  ///
+  /// The BYTE is sent from one place only — the delegate, which is the one that
+  /// knows how many characters actually went, and so gets a word-delete right
+  /// too. This method used to send it as well and suppress the delegate's copy
+  /// with a flag, which assumed `super.deleteBackward()` re-enters the delegate
+  /// synchronously. It does not always, so the flag was already cleared by the
+  /// time the delegate ran and every backspace deleted two characters.
   public override func deleteBackward() {
-    onBackspace?()
-    deletionByteAlreadySent = true
     super.deleteBackward()
-    deletionByteAlreadySent = false
     refillFiller()
   }
 
