@@ -88,12 +88,25 @@ actor TerminalPipeline {
     // Rebuilding the emulator while KEEPING the replay cursor throws away all
     // scrollback: an empty grid plus a cursor at the newest applied frame means
     // the server replays only what arrived since. Reuse it when reconnecting
-    // the same session so `sinceId` resumes into the history it belongs to.
-    if emulatorKey != key || emulator == nil {
+    // the same session so `sinceId` resumes into the history it belongs to —
+    // and when it cannot be reused, rewind the cursor with it so the empty grid
+    // is refilled from the whole retained tail.
+    let plan = TerminalAttachPlan.plan(
+      emulatorKey: emulatorKey,
+      hasEmulator: emulator != nil,
+      key: key
+    )
+    if plan.rebuildEmulator {
       emulator = FfiTerminalEmulator(cols: cols, rows: rows)
       emulatorKey = key
       snapshotSink.yield(nil)
       resetMouseModes()
+    }
+    if plan.rewindReplayCursor {
+      // Rewinds `sinceId` AND reopens the ids the duplicate guard would
+      // otherwise drop — sending `sinceId: 0` alone would fetch the replay and
+      // then throw every frame of it away.
+      replayStore.reset(sessionId: key)
     }
     lastRenderedGeneration = nil
     let sinceId = replayStore.sinceId(sessionId: key)
