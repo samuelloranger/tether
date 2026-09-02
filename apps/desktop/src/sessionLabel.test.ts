@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { sessionLabel, sessionLabels } from './sessionLabel';
+import { sessionLabel, sessionLabels, tabLabels } from './sessionLabel';
 
 describe('sessionLabel', () => {
   it('prefers a user name, then the auto title, then the id', () => {
@@ -40,5 +40,50 @@ describe('sessionLabels', () => {
     ]);
     expect(labels.get('a')).toBe('deploy');
     expect(labels.get('b')).toBe('tether');
+  });
+});
+
+describe('tabLabels', () => {
+  const hosts = [
+    { id: 'devbox', name: 'devbox' },
+    { id: 'macbuild', name: 'macbuild' },
+  ];
+
+  it('leaves a unique label alone', () => {
+    const labels = tabLabels(
+      [
+        { hostId: 'devbox', id: 'term-1', auto_title: 'tether' },
+        { hostId: 'macbuild', id: 'term-1', auto_title: 'vigie' },
+      ],
+      hosts,
+    );
+    expect(labels.get('devbox:term-1')).toBe('tether');
+    expect(labels.get('macbuild:term-1')).toBe('vigie');
+  });
+
+  it('appends the host name when the same label appears on two hosts', () => {
+    const labels = tabLabels(
+      [
+        { hostId: 'devbox', id: 'term-1', auto_title: 'tether' },
+        { hostId: 'macbuild', id: 'term-1', auto_title: 'tether' },
+      ],
+      hosts,
+    );
+    expect(labels.get('devbox:term-1')).toBe('tether · devbox');
+    expect(labels.get('macbuild:term-1')).toBe('tether · macbuild');
+  });
+
+  it('still breaks a within-host collision with the session id first', () => {
+    const labels = tabLabels(
+      [
+        { hostId: 'devbox', id: 'main', auto_title: 'tether' },
+        { hostId: 'devbox', id: 'build', auto_title: 'tether' },
+        { hostId: 'macbuild', id: 'term-1', auto_title: 'vigie' },
+      ],
+      hosts,
+    );
+    expect(labels.get('devbox:main')).toBe('tether · main');
+    expect(labels.get('devbox:build')).toBe('tether · build');
+    expect(labels.get('macbuild:term-1')).toBe('vigie');
   });
 });

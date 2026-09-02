@@ -1042,6 +1042,174 @@ label > textarea {
   padding-left: 52px;
 }
 
+/* ── horizontal session tabs ───────────────────────────────────────────── */
+
+.session-tabbar {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-tabbar > .icon-button {
+  width: 32px;
+  height: 32px;
+  margin: 4px 2px 0;
+  flex-shrink: 0;
+}
+
+.session-tabbar > .icon-button svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.session-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 0;
+  overflow-x: auto;
+}
+
+.session-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 120px;
+  max-width: 200px;
+  flex: 1 1 140px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  overflow: hidden;
+  transition:
+    background var(--t-state) var(--ease-out),
+    box-shadow var(--t-state) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+
+.session-tab-host {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+}
+
+.session-tab-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 12px;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
+.session-tab-main:hover:not(:disabled) {
+  background: none;
+  color: inherit;
+}
+
+.session-tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.session-tab.active {
+  color: var(--text);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--lit) 14%, var(--surface-raised)) 0%,
+    color-mix(in srgb, var(--lit) 5%, var(--surface-raised)) 100%
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lit) 30%, transparent);
+}
+
+.session-tab.active .session-tab-title {
+  font-weight: 600;
+}
+
+.session-tab.wants {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.session-tab.wants:hover {
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+}
+
+.session-tab:hover {
+  background: var(--surface-raised);
+}
+
+.session-tab.active:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--lit) 14%, var(--surface-raised)) 0%,
+    color-mix(in srgb, var(--lit) 5%, var(--surface-raised)) 100%
+  );
+}
+
+.session-tab.dimmed {
+  opacity: 0.55;
+}
+
+.session-tab-kill {
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.session-tab:hover > .session-tab-kill,
+.session-tab:focus-within > .session-tab-kill {
+  opacity: 1;
+}
+
+.session-tab-kill:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.session-tab-new {
+  width: 32px;
+  height: 32px;
+  margin: 4px 4px 0;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.session-tab-new:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--border);
+}
+
 .terminal-label {
   font-family: var(--sans);
   font-size: 13.5px;

@@ -56,15 +56,47 @@ test('sidebar layout helpers', () => {
     docked: false,
     visible: false,
     showMenuButton: true,
+    showTabBar: false,
   });
   expect(sidebarLayout({ wide: true, sidebarPinned: true, drawerOpen: false })).toEqual({
     docked: true,
     visible: true,
     showMenuButton: false,
+    showTabBar: false,
   });
   expect(sidebarLayout({ wide: false, sidebarPinned: true, drawerOpen: true })).toEqual({
     docked: false,
     visible: true,
     showMenuButton: false,
+    showTabBar: false,
+  });
+});
+
+test('horizontal tab layout hides the sidebar at any width', () => {
+  expect(
+    sidebarLayout({
+      wide: true,
+      sidebarPinned: true,
+      drawerOpen: true,
+      tabLayout: 'horizontal',
+    }),
+  ).toEqual({
+    docked: false,
+    visible: false,
+    showMenuButton: false,
+    showTabBar: true,
+  });
+  expect(
+    sidebarLayout({
+      wide: false,
+      sidebarPinned: false,
+      drawerOpen: true,
+      tabLayout: 'horizontal',
+    }),
+  ).toEqual({
+    docked: false,
+    visible: false,
+    showMenuButton: false,
+    showTabBar: true,
   });
 });
