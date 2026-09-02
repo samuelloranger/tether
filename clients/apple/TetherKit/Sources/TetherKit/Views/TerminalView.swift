@@ -851,6 +851,17 @@ public struct TerminalView: View {
       scrollOffsetFromBottom = 0
       selectionText = nil
     }
+    // An overlay (presentation, file viewer, drawer) hides the accessory bar but
+    // does not on its own resign first responder, so the raw keyboard stayed up
+    // behind the presentation. Drop focus when one appears; reclaim it when the
+    // overlay dismisses and there is still a session to type into.
+    .onChange(of: overlayPresented) { _, presented in
+      if presented {
+        keyboardFocused = false
+      } else if placeholderReason == nil {
+        keyboardFocused = true
+      }
+    }
   }
 
   @ViewBuilder
