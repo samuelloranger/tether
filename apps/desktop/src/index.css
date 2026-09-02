@@ -135,11 +135,6 @@ html {
   -webkit-app-region: drag;
 }
 
-[data-tauri-no-drag] {
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
-}
-
 .titlebar-title {
   flex: 1;
   min-width: 0;
@@ -1859,7 +1854,7 @@ label > textarea {
 
 .modal-backdrop {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 40;
   display: grid;
   place-items: center;
@@ -1984,7 +1979,7 @@ label > textarea {
 
 .session-drawer.overlay {
   position: fixed;
-  top: 0;
+  top: var(--titlebar-h);
   left: 0;
   bottom: 0;
   z-index: 30;
@@ -1998,7 +1993,7 @@ label > textarea {
 
 .drawer-scrim {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 25;
   animation: scrim-in var(--t-overlay) ease-out;
   height: auto;

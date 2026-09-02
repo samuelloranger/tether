@@ -1,8 +1,9 @@
 // Custom window title bar for the frameless desktop build. Replaces the OS
-// titlebar: the whole bar is a Tauri drag region (drag to move, double-click to
-// maximize); interactive controls opt out via data-tauri-no-drag. macOS keeps
-// native traffic lights (we reserve a left inset via titlebarChrome); Windows/
-// Linux get the custom min/max/close cluster on the right.
+// titlebar: the title strip is a Tauri drag region (drag to move, double-click
+// to maximize). The control cluster is a sibling of that strip, not a child, so
+// its button clicks are never turned into window drags. macOS keeps native
+// traffic lights (we reserve a left inset via titlebarChrome); Windows/Linux get
+// the custom min/max/close cluster on the right.
 
 import { useEffect, useState } from 'react';
 import { titlebarChrome } from './titlebarChrome';
@@ -29,27 +30,44 @@ export function TitleBar({ title }: TitleBarProps) {
 
   useEffect(() => {
     if (!showControls) return;
+    // `cancelled` guards the async gap: under StrictMode the cleanup can run
+    // before the listener promise resolves, so we both unlisten a listener that
+    // already resolved and skip keeping one that resolves after teardown.
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onMaximizeChange(setMaximized).then((fn) => {
-      unlisten = fn;
+      if (cancelled) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [showControls]);
 
   // macOS: the native traffic lights hide in fullscreen, so collapse the inset.
   useEffect(() => {
     if (!IS_MAC) return;
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onFullscreenChange(setFullscreen).then((fn) => {
-      unlisten = fn;
+      if (cancelled) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   return (
-    <div className="titlebar" data-tauri-drag-region="deep">
+    <div className="titlebar">
       {leftInset > 0 ? <div style={{ width: leftInset }} /> : null}
-      <span className="titlebar-title" data-tauri-drag-region="deep">
+      {/* Only the title strip is the drag handle. Keeping the controls OUT of any
+          data-tauri-drag-region subtree (they are siblings, not children) is the
+          documented way to stop button clicks turning into window drags. The
+          strip has flex:1, so it also covers the empty gap up to the controls. */}
+      <span className="titlebar-title" data-tauri-drag-region>
         {title}
       </span>
       {showControls ? (
@@ -57,7 +75,6 @@ export function TitleBar({ title }: TitleBarProps) {
           <button
             type="button"
             className="titlebar-btn"
-            data-tauri-no-drag=""
             aria-label="Minimize"
             onClick={() => void minimizeWindow()}
           >
@@ -68,7 +85,6 @@ export function TitleBar({ title }: TitleBarProps) {
           <button
             type="button"
             className="titlebar-btn"
-            data-tauri-no-drag=""
             aria-label={maximized ? 'Restore' : 'Maximize'}
             onClick={() => void toggleMaximizeWindow()}
           >
@@ -98,7 +114,6 @@ export function TitleBar({ title }: TitleBarProps) {
           <button
             type="button"
             className="titlebar-btn titlebar-btn-close"
-            data-tauri-no-drag=""
             aria-label="Close"
             onClick={() => void closeWindow()}
           >
