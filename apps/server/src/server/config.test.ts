@@ -49,6 +49,13 @@ test('the done trigger is off by default', () => {
   expect(DEFAULT_CONFIG.triggers.done).toBe(false);
 });
 
+test('the exit trigger is off by default', () => {
+  // A tab you closed (or a shell that exited while you were looking) is not a
+  // reason to wake the phone. Users who want "something died in the background"
+  // can still turn it on.
+  expect(DEFAULT_CONFIG.triggers.exit).toBe(false);
+});
+
 test('the done trigger can be patched on', async () => {
   const next = await patchConfig({ triggers: { done: true } });
   expect(next.triggers.done).toBe(true);

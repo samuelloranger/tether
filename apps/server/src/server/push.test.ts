@@ -18,7 +18,9 @@ describe('buildPushContent', () => {
   });
 
   test('respects the per-event trigger toggles', () => {
-    const config = cfg({ triggers: { ...DEFAULT_CONFIG.triggers, waiting: false } });
+    const config = cfg({
+      triggers: { ...DEFAULT_CONFIG.triggers, waiting: false, exit: true },
+    });
     expect(buildPushContent({ type: 'waiting' }, CTX, config)).toBeNull();
     expect(buildPushContent({ type: 'exit' }, CTX, config)).not.toBeNull();
   });
@@ -34,12 +36,22 @@ describe('buildPushContent', () => {
 
   test.each([
     [{ type: 'waiting' } as const, 'Waiting for input'],
-    [{ type: 'exit', exitCode: 1 } as const, 'Session exited with code 1'],
-    [{ type: 'exit' } as const, 'Session exited'],
     [{ type: 'longJob', seconds: 300 } as const, 'Job ran for 300 seconds'],
     [{ type: 'oscNotify', body: 'Tests green' } as const, 'Tests green'],
   ])('renders %o as its body', (event, expected) => {
     expect(buildPushContent(event, CTX, cfg())?.body).toBe(expected);
+  });
+
+  test.each([
+    [{ type: 'exit', exitCode: 1 } as const, 'Session exited with code 1'],
+    [{ type: 'exit' } as const, 'Session exited'],
+  ])('renders an opted-in exit as %o', (event, expected) => {
+    const config = cfg({ triggers: { ...DEFAULT_CONFIG.triggers, exit: true } });
+    expect(buildPushContent(event, CTX, config)?.body).toBe(expected);
+  });
+
+  test('an exit push is silent unless the user opted in', () => {
+    expect(buildPushContent({ type: 'exit' }, CTX, cfg())).toBeNull();
   });
 
   test('deep link carries session and host so a tap opens the right tab', () => {

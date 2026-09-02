@@ -41,7 +41,7 @@ export type ConfigPatch = { [K in keyof Config]?: Partial<Config[K]> };
 
 export const DEFAULT_CONFIG: Config = {
   push: { enabled: false },
-  triggers: { waiting: true, done: false, oscNotify: true, exit: true, longJob: true },
+  triggers: { waiting: true, done: false, oscNotify: true, exit: false, longJob: true },
   longJobSeconds: 300,
   identity: { name: process.env.HOSTNAME || 'Tether', color: '#89b4fa' },
   session: {

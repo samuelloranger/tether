@@ -23,7 +23,7 @@ import {
 } from './holderFrame';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
 import { logError, logInfo } from './log';
-import type { NotificationEvent } from './notifications';
+import { type NotificationEvent, pushesFromOutput, pushFromExit } from './notifications';
 import { CONFIG_DIR } from './paths';
 import { FrameDecoder } from './proto/frame';
 import type { Dims } from './ptyResize';
@@ -224,13 +224,8 @@ function flushHolderOutput(id: string, link: HolderLink): void {
   }
   const activityEvent = recordOutputEvent(id, text);
   if (activityEvent.activity) broadcast(id, { type: 'activity', activity: activityEvent.activity });
-  if (activityEvent.notify) {
-    notify(id, { type: 'oscNotify', ...activityEvent.notify });
-  } else if (activityEvent.activity === 'waiting') {
-    notify(id, { type: 'waiting' });
-  }
-  if (activityEvent.longJob) {
-    notify(id, { type: 'longJob', seconds: getConfig().longJobSeconds });
+  for (const event of pushesFromOutput(activityEvent, getConfig().longJobSeconds)) {
+    notify(id, event);
   }
 }
 
@@ -258,14 +253,16 @@ function handleHolderMessage(id: string, msg: HolderMessage | null, link: Holder
     if (tail) link.pendingOutput.push(tail);
     flushHolderOutput(id, link);
     logInfo(`PTY process for session "${id}" exited with code ${msg.exitCode}`);
-    if (killed.delete(id)) {
+    const wasKilled = killed.delete(id);
+    if (wasKilled) {
       deleteSession(id);
     } else {
       const sess = getSession(id);
       upsertSession(id, sess?.command ?? 'bash', 'stopped');
     }
     broadcast(id, { type: 'exit', exitCode: msg.exitCode });
-    notify(id, { type: 'exit', exitCode: msg.exitCode });
+    const exitEvent = pushFromExit(wasKilled, msg.exitCode);
+    if (exitEvent) notify(id, exitEvent);
     instances.get(id)?.gitWatch.dispose();
     instances.get(id)?.subscribers.clear();
     instances.delete(id);
