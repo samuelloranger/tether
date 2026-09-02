@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "tether-desktop-native"
-version = "3.2.3"
+version = "3.2.4"
 dependencies = [
  "base64 0.22.1",
  "keyring",
