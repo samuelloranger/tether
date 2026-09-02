@@ -7,12 +7,14 @@ import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import { App } from './App';
 import './index.css';
+import { TitleBar } from './TitleBar';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element #root not found');
 
 createRoot(root).render(
   <StrictMode>
+    <TitleBar title="Tether" />
     <App />
   </StrictMode>,
 );

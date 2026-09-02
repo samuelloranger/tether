@@ -108,6 +108,71 @@
 
 html {
   height: 100%;
+  --titlebar-h: 36px;
+}
+
+/* ── custom window title bar (frameless) ───────────────────────────────────
+   The window has no OS decorations (tauri.conf decorations:false). This fixed
+   bar is the drag handle (data-tauri-drag-region) and holds the min/max/close
+   cluster on Windows/Linux; macOS keeps its native traffic lights. */
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar-h);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+[data-tauri-drag-region] {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+.titlebar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.titlebar-btn {
+  width: 44px;
+  height: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.titlebar-btn:hover {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.titlebar-btn-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 body {
@@ -391,6 +456,8 @@ label > textarea {
   display: flex;
   height: 100%;
   min-height: 100vh;
+  /* Clear the fixed custom title bar; border-box keeps the total at 100vh. */
+  padding-top: var(--titlebar-h);
   background: var(--background);
   color: var(--text);
 
@@ -1038,7 +1105,7 @@ label > textarea {
 
 .drawer-menu-button {
   position: fixed;
-  top: 11px;
+  top: calc(11px + var(--titlebar-h));
   left: 12px;
   z-index: 20;
   width: 30px;
@@ -1787,7 +1854,7 @@ label > textarea {
 
 .modal-backdrop {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 40;
   display: grid;
   place-items: center;
@@ -1912,7 +1979,7 @@ label > textarea {
 
 .session-drawer.overlay {
   position: fixed;
-  top: 0;
+  top: var(--titlebar-h);
   left: 0;
   bottom: 0;
   z-index: 30;
@@ -1926,7 +1993,7 @@ label > textarea {
 
 .drawer-scrim {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 25;
   animation: scrim-in var(--t-overlay) ease-out;
   height: auto;
