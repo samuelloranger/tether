@@ -34,6 +34,7 @@ const THEME_KEY = 'tether.desktop.theme';
 const FONT_KEY = 'tether.desktop.terminalFont';
 const SIDEBAR_PIN_KEY = 'tether_sidebar_pinned';
 const NOTIFICATIONS_KEY = 'tether_notifications_enabled';
+const TAB_LAYOUT_KEY = 'tether_tab_layout';
 
 export interface AppColors {
   background: string;
@@ -86,11 +87,15 @@ export interface UiTheme {
   heat: HeatColors;
 }
 
+export const TAB_LAYOUTS = ['sidebar', 'horizontal'] as const;
+export type TabLayout = (typeof TAB_LAYOUTS)[number];
+
 export interface AppPreferences {
   theme: ThemePreference;
   terminalFont: TerminalFont;
   sidebarPinned: boolean;
   notificationsEnabled: boolean;
+  tabLayout: TabLayout;
 }
 
 export const TERMINAL_FONTS: TerminalFont[] = ['JetBrains Mono Variable', 'monospace'];
@@ -108,6 +113,11 @@ export const THEME_LABELS: Record<ThemePreference, string> = {
   frappe: 'Frappé',
   macchiato: 'Macchiato',
   mocha: 'Mocha',
+};
+
+export const TAB_LAYOUT_LABELS: Record<TabLayout, string> = {
+  sidebar: 'Sidebar',
+  horizontal: 'Horizontal',
 };
 
 const CATPPUCCIN = {
@@ -288,6 +298,10 @@ export function parseThemePreference(value: string | null): ThemePreference {
   return THEME_OPTIONS.includes(value as ThemePreference) ? (value as ThemePreference) : 'system';
 }
 
+export function parseTabLayout(value: string | null): TabLayout {
+  return TAB_LAYOUTS.includes(value as TabLayout) ? (value as TabLayout) : 'sidebar';
+}
+
 export function resolveFlavor(
   preference: ThemePreference,
   scheme: 'light' | 'dark' | null | undefined,
@@ -308,6 +322,7 @@ export function loadPreferences(): AppPreferences {
       : 'JetBrains Mono Variable',
     sidebarPinned: pinned === 'true',
     notificationsEnabled: notifications !== 'false',
+    tabLayout: parseTabLayout(localStorage.getItem(TAB_LAYOUT_KEY)),
   };
 }
 
@@ -316,17 +331,23 @@ export function savePreferences(prefs: AppPreferences): void {
   localStorage.setItem(FONT_KEY, prefs.terminalFont);
   localStorage.setItem(SIDEBAR_PIN_KEY, prefs.sidebarPinned ? 'true' : 'false');
   localStorage.setItem(NOTIFICATIONS_KEY, prefs.notificationsEnabled ? 'true' : 'false');
+  localStorage.setItem(TAB_LAYOUT_KEY, prefs.tabLayout);
 }
 
 export function sidebarLayout(opts: {
   wide: boolean;
   sidebarPinned: boolean;
   drawerOpen: boolean;
-}): { docked: boolean; visible: boolean; showMenuButton: boolean } {
+  tabLayout?: TabLayout;
+}): { docked: boolean; visible: boolean; showMenuButton: boolean; showTabBar: boolean } {
+  if (opts.tabLayout === 'horizontal') {
+    return { docked: false, visible: false, showMenuButton: false, showTabBar: true };
+  }
   const docked = opts.wide && opts.sidebarPinned;
   return {
     docked,
     visible: docked || opts.drawerOpen,
     showMenuButton: opts.wide && !opts.sidebarPinned,
+    showTabBar: false,
   };
 }

@@ -23,10 +23,10 @@ import { ResidentTerminals } from './ResidentTerminals';
 import { ServerSettingsScreen } from './ServerSettingsScreen';
 import { SessionDrawer } from './SessionDrawer';
 import { SessionModalHost, useSessionModals } from './SessionModals';
+import { SessionChrome } from './SessionTabBar';
 import { LocalSettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
 import { TerminalEmpty } from './TerminalEmpty';
-import { TerminalToolbar } from './TerminalToolbar';
 import { httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
 import { useShellChrome } from './useHeatArrival';
@@ -96,6 +96,7 @@ export function App() {
     wide,
     sidebarPinned: prefs.sidebarPinned,
     drawerOpen,
+    tabLayout: prefs.tabLayout,
   });
   const modals = useSessionModals();
   const newTerminalOn = (hostId: string | null) => {
@@ -309,20 +310,14 @@ export function App() {
       <main className="main-pane">
         {app.activeHost ? (
           <>
-            <TerminalToolbar
-              sessionLabel={app.activeSessionLabel}
-              dot={activeDot}
-              address={`${app.activeHost.host}:${app.activeHost.port}`}
-              hasSession={hasSession}
+            <SessionChrome
+              showTabBar={layout.showTabBar}
               inset={layout.showMenuButton}
-              onGit={() => {
-                app.setGitMode('drawer');
-                app.setGitOpen(true);
-              }}
-              onReview={() => {
-                app.setGitMode('review');
-                app.setGitOpen(true);
-              }}
+              app={app}
+              dot={activeDot}
+              hasSession={hasSession}
+              onNew={newTerminalOn}
+              onKill={modals.openKill}
               onWorkspace={() => workspace.setWorkspaceOpen(true)}
               onUpload={() => void workspace.pickAndUpload()}
               onOverflow={() => openOverflow('end')}

@@ -9,6 +9,8 @@ interface TerminalToolbarProps {
   hasSession: boolean;
   /** Narrow windows put a fixed hamburger over this row, which has to be cleared. */
   inset: boolean;
+  /** Horizontal tabs already name the session; the toolbar title would duplicate it. */
+  showSessionLabel?: boolean;
   onGit: () => void;
   onReview: () => void;
   onWorkspace: () => void;
@@ -29,6 +31,7 @@ export function TerminalToolbar({
   address,
   hasSession,
   inset,
+  showSessionLabel = true,
   onGit,
   onReview,
   onWorkspace,
@@ -37,7 +40,7 @@ export function TerminalToolbar({
 }: TerminalToolbarProps) {
   return (
     <header className={`terminal-toolbar${inset ? ' with-menu' : ''}`}>
-      <span className="terminal-label">{sessionLabel}</span>
+      {showSessionLabel ? <span className="terminal-label">{sessionLabel}</span> : null}
       {dot ? <span className="session-state">{activityLabel(dot)}</span> : null}
       <div className="toolbar-actions">
         <button type="button" onClick={onGit} disabled={!hasSession}>
