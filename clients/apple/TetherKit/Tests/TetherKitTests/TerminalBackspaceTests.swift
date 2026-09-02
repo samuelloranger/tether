@@ -115,14 +115,22 @@ final class TerminalBackspaceTests: XCTestCase {
   /// The flush runs on its own without a test driving it.
   func testTheFlushHappensOnItsOwnRunloopTurn() {
     var sent: [String] = []
-    let (view, coordinator) = makeView { sent.append($0) }
     let delivered = expectation(description: "DEL reaches the wire without a manual flush")
+    // Fulfill on the ACTUAL delivery rather than after a guessed number of
+    // runloop turns: under a loaded CI sim the main queue is starved (the
+    // haptic subsystem alone floods it), and counting `DispatchQueue.main.async`
+    // hops raced the 2s wait. Keying off the sink makes the test pass the
+    // instant the self-scheduled flush fires and time out only on a real
+    // regression — the generous ceiling is never reached on success.
+    delivered.assertForOverFulfill = false
+    let (view, coordinator) = makeView {
+      sent.append($0)
+      delivered.fulfill()
+    }
     withExtendedLifetime(coordinator) {
+      // No manual flushDeletion(): the flush must schedule itself.
       view.deleteBackward()
-      DispatchQueue.main.async {
-        DispatchQueue.main.async { delivered.fulfill() }
-      }
-      wait(for: [delivered], timeout: 2)
+      wait(for: [delivered], timeout: 10)
     }
     XCTAssertEqual(sent, ["\u{7F}"])
   }
