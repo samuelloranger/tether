@@ -70,6 +70,13 @@ actor TerminalPipeline {
   /// later resize must agree or the rendered grid will not match the PTY.
   private var cols: UInt16 = 80
   private var rows: UInt16 = 24
+  /// What to re-open after an *unexpected* drop. Set on every successful
+  /// connect; a deliberate `disconnect()`/`release()` cancels the loop, and the
+  /// readLoop's own cancellation guard stops a torn-down socket from retrying.
+  private var reconnectParams: (client: NativeHostClient, sessionId: String, key: String, focused: Bool)?
+  private var reconnectTask: Task<Void, Never>?
+  private var reconnectAttempt: UInt32 = 0
+  private var connectedAtMs: Int64 = 0
 
   init() {
     (snapshots, snapshotSink) = AsyncStream.makeStream(
@@ -82,7 +89,13 @@ actor TerminalPipeline {
 
   // MARK: - Connection
 
-  func connect(client: NativeHostClient, sessionId: String, key: String, focused: Bool) async {
+  func connect(
+    client: NativeHostClient,
+    sessionId: String,
+    key: String,
+    focused: Bool,
+    isReconnect: Bool = false
+  ) async {
     disconnect()
     startOutboundPumpIfNeeded()
     // Rebuilding the emulator while KEEPING the replay cursor throws away all
@@ -121,6 +134,14 @@ actor TerminalPipeline {
       socketIsOpen = true
       noteTraffic()
       task.resume()
+      // Remember how to re-open this exact session after an unexpected drop.
+      // A manual (user-driven) connect starts the backoff fresh; an auto
+      // reconnect keeps the growing counter.
+      reconnectParams = (client: client, sessionId: sessionId, key: key, focused: focused)
+      connectedAtMs = nowMs()
+      if !isReconnect {
+        reconnectAttempt = 0
+      }
       // Fresh connection is focused unless the app is known to be backgrounded.
       sendFocus(focused: focused)
       // Capture the host-qualified key for this socket once. Re-deriving it
@@ -140,6 +161,10 @@ actor TerminalPipeline {
   /// `connect`, so clearing it here would defeat scrollback reuse on a
   /// foreground reconnect.
   func disconnect() {
+    // A deliberate teardown must stop any pending auto-reconnect from racing to
+    // re-open the socket we're closing.
+    reconnectTask?.cancel()
+    reconnectTask = nil
     // Order matters: `sendFocus` needs the socket, so the frame has to go out
     // before it is torn down. Otherwise the server keeps believing the old
     // session is on screen, and keeps suppressing its pushes.
@@ -156,6 +181,8 @@ actor TerminalPipeline {
   /// session: the emulator and its scrollback go too.
   func release() {
     disconnect()
+    // Leaving the session entirely: forget how to reconnect it.
+    reconnectParams = nil
     emulator = nil
     emulatorKey = nil
     lastRenderedGeneration = nil
@@ -282,8 +309,12 @@ actor TerminalPipeline {
         }
       } catch {
         socketIsOpen = false
+        // `Task.isCancelled` is true only for a DELIBERATE teardown (disconnect
+        // cancels this task). An unexpected drop — server restart, network blip
+        // — is where auto-reconnect kicks in.
         if !Task.isCancelled {
           eventSink.yield(.error("Connection closed"))
+          scheduleReconnect()
         }
         break
       }
@@ -291,6 +322,45 @@ actor TerminalPipeline {
     if socket === task {
       socketIsOpen = false
     }
+  }
+
+  // MARK: - Reconnect
+
+  private func nowMs() -> Int64 {
+    Int64(Date().timeIntervalSince1970 * 1000)
+  }
+
+  /// Schedules one backoff-delayed reconnect of the last session. The readLoop
+  /// calls this on an unexpected drop; the reconnect itself may drop again and
+  /// re-schedule, so the backoff grows across a sustained outage and resets once
+  /// a connection has lived long enough to be healthy.
+  private func scheduleReconnect() {
+    guard reconnectParams != nil else { return }
+    reconnectTask?.cancel()
+    reconnectAttempt = ReconnectBackoff.retryAfterClose(
+      retry: reconnectAttempt,
+      openedAtMs: connectedAtMs,
+      nowMs: nowMs()
+    )
+    let attempt = reconnectAttempt
+    reconnectAttempt = min(reconnectAttempt + 1, 5)
+    let delayMs = ReconnectBackoff.delayMs(attempt: attempt, randomUnit: Double.random(in: 0..<1))
+    reconnectTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(Int(delayMs)))
+      guard !Task.isCancelled else { return }
+      await self?.reconnectNow()
+    }
+  }
+
+  private func reconnectNow() async {
+    guard let params = reconnectParams else { return }
+    await connect(
+      client: params.client,
+      sessionId: params.sessionId,
+      key: params.key,
+      focused: params.focused,
+      isReconnect: true
+    )
   }
 
   private func handleServerFrame(_ text: String, key: String) {

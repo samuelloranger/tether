@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::AppHandle;
@@ -13,6 +13,10 @@ use crate::storage::{new_host_store, DesktopHostStore};
 
 pub struct CoreBridge {
     pub sessions: Mutex<HashMap<String, tether_core::session::SessionHandle>>,
+    /// Per-connection cancel flag. Set by `core_close` so the reconnect loop
+    /// (which re-opens the socket after an unexpected drop) knows the drop was
+    /// the user's intent and stops retrying instead of racing to reconnect.
+    pub cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub replay: Arc<tether_core::store::ReplayStore>,
 }
 
@@ -20,6 +24,7 @@ impl Default for CoreBridge {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            cancels: Mutex::new(HashMap::new()),
             replay: Arc::new(tether_core::store::ReplayStore::default()),
         }
     }
