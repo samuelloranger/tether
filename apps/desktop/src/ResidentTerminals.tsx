@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { coreCacheDelete, coreCacheIds, coreCacheTouch } from './coreApi';
+import { type DropIntent, dropIntent, SESSION_DND_MIME } from './dropZone';
 import { EmptyPanePicker } from './EmptyPanePicker';
 import type { FrameApplyResult } from './frameHandler';
-import { layoutTree } from './layoutRects';
+import { layoutTree, type Rect } from './layoutRects';
 import { PaneDivider } from './PaneDivider';
 import type { PaneDir, PaneNode, PaneSide } from './paneTree';
 import type { UI_THEMES } from './preferences';
 import { residentKeys } from './residentKeys';
+import { SplitPreviewOverlay } from './SplitPreviewOverlay';
 import { sessionKey } from './sessionKey';
 import { TerminalPane } from './TerminalPane';
 import type { DrawerSession, HostProfile } from './types';
@@ -28,6 +30,13 @@ export interface ResidentTerminalsProps {
   onPickSession: (paneId: string) => void;
   onSplit: (paneId: string, dir: PaneDir, side: PaneSide) => void;
   onClosePane: (paneId: string) => void;
+  onDropSession: (paneId: string, intent: DropIntent, key: string) => void;
+}
+
+interface DragHover {
+  paneId: string;
+  rect: Rect;
+  intent: DropIntent;
 }
 
 interface Box {
@@ -40,6 +49,7 @@ interface Box {
 export function ResidentTerminals(props: ResidentTerminalsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<Box>({ width: 0, height: 0, left: 0, top: 0 });
+  const [hover, setHover] = useState<DragHover | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -90,7 +100,21 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         };
         if (!leaf.session) {
           return (
-            <div key={leaf.paneId} className="pane-slot" style={style}>
+            <div
+              key={leaf.paneId}
+              className="pane-slot"
+              style={style}
+              onDragOver={(e) => {
+                if (!e.dataTransfer.types.includes(SESSION_DND_MIME)) return;
+                e.preventDefault();
+              }}
+              onDrop={(e) => {
+                const key = e.dataTransfer.getData(SESSION_DND_MIME);
+                if (!key) return;
+                e.preventDefault();
+                props.onDropSession(leaf.paneId, { kind: 'replace' }, key);
+              }}
+            >
               <EmptyPanePicker onPick={() => props.onPickSession(leaf.paneId)} />
             </div>
           );
@@ -104,6 +128,32 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
             className={`pane-slot${leaf.paneId === props.focusedPaneId ? ' focused' : ''}`}
             style={style}
             onPointerDownCapture={() => props.onFocusPane(leaf.paneId)}
+            onDragOver={(e) => {
+              if (!e.dataTransfer.types.includes(SESSION_DND_MIME)) return;
+              e.preventDefault();
+              const b = e.currentTarget.getBoundingClientRect();
+              const local: Rect = { left: 0, top: 0, width: b.width, height: b.height };
+              setHover({
+                paneId: leaf.paneId,
+                rect: leaf.rect,
+                intent: dropIntent(e.clientX - b.left, e.clientY - b.top, local),
+              });
+            }}
+            onDragLeave={() => setHover((h) => (h?.paneId === leaf.paneId ? null : h))}
+            onDrop={(e) => {
+              const key = e.dataTransfer.getData(SESSION_DND_MIME);
+              const current = hover;
+              setHover(null);
+              if (!key) return;
+              e.preventDefault();
+              const b = e.currentTarget.getBoundingClientRect();
+              const local: Rect = { left: 0, top: 0, width: b.width, height: b.height };
+              const intent =
+                current?.paneId === leaf.paneId
+                  ? current.intent
+                  : dropIntent(e.clientX - b.left, e.clientY - b.top, local);
+              props.onDropSession(leaf.paneId, intent, key);
+            }}
           >
             {leaf.paneId === props.focusedPaneId && (
               <div className="pane-controls">
@@ -153,6 +203,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
           onRatio={(ratio) => props.onSetRatio(divider.branchId, ratio)}
         />
       ))}
+      {hover && <SplitPreviewOverlay rect={hover.rect} intent={hover.intent} />}
     </div>
   );
 }

@@ -5,6 +5,9 @@ export type DropIntent = { kind: 'split'; dir: PaneDir; side: PaneSide } | { kin
 
 export const EDGE_FRAC = 0.33;
 
+/** dataTransfer MIME for dragging a session tab into a pane. Value = sessionKey. */
+export const SESSION_DND_MIME = 'application/x-tether-session';
+
 export function dropIntent(
   px: number,
   py: number,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
 import { ensureNotificationPermission } from './desktopNotifications';
+import type { DropIntent } from './dropZone';
 import { FileViewer } from './FileViewer';
 import { setFileOpenListener } from './fileOpenBus';
 import { GitDrawer } from './git/GitDrawer';
@@ -10,7 +11,21 @@ import { useGitPanel } from './git/useGitPanel';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
 import { activeSessionDot, litStateFor, shellVars } from './litTheme';
+import { PanePickerModal } from './PanePickerModal';
 import { PresentationBanner, PresentationView } from './PresentationView';
+import {
+  closePane,
+  findLeaf,
+  firstLeafId,
+  type PaneDir,
+  type PaneNode,
+  type PaneSide,
+  type SessionRef,
+  setRatio,
+  setSession,
+  splitLeaf,
+} from './paneTree';
+import { prunePaneTree } from './paneTreeSerialize';
 import {
   type AppPreferences,
   loadPaneTree,
@@ -21,21 +36,6 @@ import {
   sidebarLayout,
   UI_THEMES,
 } from './preferences';
-import {
-  findLeaf,
-  firstLeafId,
-  type PaneDir,
-  type PaneNode,
-  type PaneSide,
-  type SessionRef,
-  closePane,
-  setRatio,
-  setSession,
-  splitLeaf,
-} from './paneTree';
-import { PanePickerModal } from './PanePickerModal';
-import { prunePaneTree } from './paneTreeSerialize';
-import { sessionKey } from './sessionKey';
 import { ResidentTerminals } from './ResidentTerminals';
 import { ServerSettingsScreen } from './ServerSettingsScreen';
 import { SessionDrawer } from './SessionDrawer';
@@ -43,6 +43,7 @@ import { SessionModalHost, useSessionModals } from './SessionModals';
 import { SessionChrome } from './SessionTabBar';
 import { LocalSettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
+import { parseSessionKey, sessionKey } from './sessionKey';
 import { TerminalEmpty } from './TerminalEmpty';
 import { httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
@@ -179,6 +180,21 @@ export function App() {
   };
   const fillPane = (paneId: string, ref: SessionRef) => {
     updateTree(setSession(tree, paneId, ref));
+    setFocusedPaneId(paneId);
+  };
+  // Right-click a tab → split the focused pane and drop that session in.
+  const splitFromTab = (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => {
+    updateTree(splitLeaf(tree, focusedPaneId, dir, side, { hostId, sessionId }));
+  };
+  // Drag a tab onto a pane → split at the drop edge, or replace on a center drop.
+  const dropSessionIntoPane = (paneId: string, intent: DropIntent, key: string) => {
+    const { hostId, sessionId } = parseSessionKey(key);
+    const ref: SessionRef = { hostId, sessionId };
+    updateTree(
+      intent.kind === 'replace'
+        ? setSession(tree, paneId, ref)
+        : splitLeaf(tree, paneId, intent.dir, intent.side, ref),
+    );
     setFocusedPaneId(paneId);
   };
 
@@ -387,6 +403,7 @@ export function App() {
               app.setSettingsHostId(hostId);
               app.setScreen('settings');
             }}
+            onSplitFromTab={splitFromTab}
           />
         </>
       ) : null}
@@ -404,6 +421,7 @@ export function App() {
               onWorkspace={() => workspace.setWorkspaceOpen(true)}
               onUpload={() => void workspace.pickAndUpload()}
               onOverflow={() => openOverflow('end')}
+              onSplitFromTab={splitFromTab}
             />
             {workspace.sessionPreview && !workspace.activePresentation && !workspace.fileView && (
               <PresentationBanner
@@ -438,6 +456,7 @@ export function App() {
                     onPickSession={(paneId) => setPanePickerFor(paneId)}
                     onSplit={splitPane}
                     onClosePane={closePane_}
+                    onDropSession={dropSessionIntoPane}
                   />
                 </div>
                 {app.gitOpen && !fileOrPreviewUp && app.gitMode === 'drawer' ? (

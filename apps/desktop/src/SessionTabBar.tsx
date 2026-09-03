@@ -1,8 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
+import { SESSION_DND_MIME } from './dropZone';
+import type { PaneDir, PaneSide } from './paneTree';
 import { sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
+import { TabContextMenu } from './TabContextMenu';
 import { TerminalToolbar } from './TerminalToolbar';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 import type { TetherDesktop } from './useTetherDesktop';
@@ -17,6 +20,7 @@ interface SessionTabBarProps {
   onNew: (hostId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onOpenHosts: () => void;
+  onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
 }
 
 function HostsIcon() {
@@ -36,6 +40,7 @@ function SessionTab({
   dimmed,
   onSelect,
   onRequestKill,
+  onSplitFromTab,
 }: {
   host: HostProfile;
   session: DrawerSession;
@@ -44,15 +49,38 @@ function SessionTab({
   dimmed: boolean;
   onSelect: (hostId: string, sessionId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
+  onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
 }) {
   const live = active || isRecentlyActive(session.last_output_at);
   const dot = activityDotKey(session.status, session.activity, live);
   const wants = !active && dot === 'waiting';
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   return (
     <div
       className={`session-tab${active ? ' active' : ''}${wants ? ' wants' : ''}${dimmed ? ' dimmed' : ''}`}
+      draggable={!!onSplitFromTab}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(SESSION_DND_MIME, sessionKey(host.id, session.id));
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onContextMenu={
+        onSplitFromTab
+          ? (e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
     >
+      {menu && onSplitFromTab && (
+        <TabContextMenu
+          x={menu.x}
+          y={menu.y}
+          onSplit={(dir, side) => onSplitFromTab(host.id, session.id, dir, side)}
+          onClose={() => setMenu(null)}
+        />
+      )}
       <span className="session-tab-host" style={{ background: host.color }} aria-hidden />
       <button
         type="button"
@@ -88,6 +116,7 @@ export function SessionTabBar({
   onNew,
   onRequestKill,
   onOpenHosts,
+  onSplitFromTab,
 }: SessionTabBarProps) {
   const labels = useMemo(() => tabLabels(sessions, hosts), [sessions, hosts]);
   const ordered = hosts.flatMap((host) =>
@@ -119,6 +148,7 @@ export function SessionTabBar({
               dimmed={health === 'unreachable' || health === 'unauthorized'}
               onSelect={onSelect}
               onRequestKill={onRequestKill}
+              onSplitFromTab={onSplitFromTab}
             />
           );
         })}
@@ -151,6 +181,7 @@ export function SessionChrome({
   onWorkspace,
   onUpload,
   onOverflow,
+  onSplitFromTab,
 }: {
   showTabBar: boolean;
   inset: boolean;
@@ -162,6 +193,7 @@ export function SessionChrome({
   onWorkspace: () => void;
   onUpload: () => void;
   onOverflow: () => void;
+  onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
 }) {
   const host = app.activeHost;
   if (!host) return null;
@@ -178,6 +210,7 @@ export function SessionChrome({
           onNew={onNew}
           onRequestKill={onKill}
           onOpenHosts={() => app.setScreen('hosts')}
+          onSplitFromTab={onSplitFromTab}
         />
       ) : null}
       <TerminalToolbar
