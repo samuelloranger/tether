@@ -15,6 +15,8 @@ export interface DividerRect {
   branchId: string;
   dir: PaneDir;
   rect: Rect;
+  /** The branch's full box — the space `ratio` is measured against. */
+  containerRect: Rect;
 }
 export interface Layout {
   leaves: LeafRect[];
@@ -55,7 +57,7 @@ function walk(node: PaneNode, rect: Rect, dividerPx: number, out: Layout): void 
       width: avail - aw,
       height: rect.height,
     };
-    out.dividers.push({ branchId: node.id, dir: 'row', rect: dRect });
+    out.dividers.push({ branchId: node.id, dir: 'row', rect: dRect, containerRect: rect });
     walk(node.a, aRect, dividerPx, out);
     walk(node.b, bRect, dividerPx, out);
   } else {
@@ -74,7 +76,7 @@ function walk(node: PaneNode, rect: Rect, dividerPx: number, out: Layout): void 
       width: rect.width,
       height: avail - ah,
     };
-    out.dividers.push({ branchId: node.id, dir: 'col', rect: dRect });
+    out.dividers.push({ branchId: node.id, dir: 'col', rect: dRect, containerRect: rect });
     walk(node.a, aRect, dividerPx, out);
     walk(node.b, bRect, dividerPx, out);
   }

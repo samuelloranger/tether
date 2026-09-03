@@ -13,12 +13,29 @@ import { activeSessionDot, litStateFor, shellVars } from './litTheme';
 import { PresentationBanner, PresentationView } from './PresentationView';
 import {
   type AppPreferences,
+  loadPaneTree,
   loadPreferences,
   resolveFlavor,
+  savePaneTree,
   savePreferences,
   sidebarLayout,
   UI_THEMES,
 } from './preferences';
+import {
+  findLeaf,
+  firstLeafId,
+  type PaneDir,
+  type PaneNode,
+  type PaneSide,
+  type SessionRef,
+  closePane,
+  setRatio,
+  setSession,
+  splitLeaf,
+} from './paneTree';
+import { PanePickerModal } from './PanePickerModal';
+import { prunePaneTree } from './paneTreeSerialize';
+import { sessionKey } from './sessionKey';
 import { ResidentTerminals } from './ResidentTerminals';
 import { ServerSettingsScreen } from './ServerSettingsScreen';
 import { SessionDrawer } from './SessionDrawer';
@@ -99,6 +116,72 @@ export function App() {
     tabLayout: prefs.tabLayout,
   });
   const modals = useSessionModals();
+
+  // Split layout: a binary pane tree, persisted. The focused pane's session is
+  // the app-wide active session, so git/workspace/tint keep following it.
+  const [tree, setTreeState] = useState<PaneNode>(loadPaneTree);
+  const [focusedPaneId, setFocusedPaneId] = useState<string>(() => firstLeafId(tree));
+  const [panePickerFor, setPanePickerFor] = useState<string | null>(null);
+  const updateTree = (next: PaneNode) => {
+    setTreeState(next);
+    savePaneTree(next);
+  };
+
+  // Seed the focused empty pane with the active session (first-run / single pane).
+  useEffect(() => {
+    if (!app.activeHostId || !app.activeSessionId) return;
+    const ref: SessionRef = { hostId: app.activeHostId, sessionId: app.activeSessionId };
+    const focused = findLeaf(tree, focusedPaneId);
+    if (focused && !focused.session) updateTree(setSession(tree, focusedPaneId, ref));
+  }, [app.activeHostId, app.activeSessionId, tree, focusedPaneId]);
+
+  // Drop sessions that no longer exist out of the tree (killed elsewhere).
+  useEffect(() => {
+    const live = new Set(app.sessions.map((row) => sessionKey(row.hostId, row.id)));
+    const pruned = prunePaneTree(tree, live);
+    if (pruned !== tree) updateTree(pruned);
+  }, [app.sessions]);
+
+  // Focused pane → active session, so the rest of the app follows the focus.
+  useEffect(() => {
+    const leaf = findLeaf(tree, focusedPaneId);
+    if (leaf?.session) app.selectSession(leaf.session.hostId, leaf.session.sessionId);
+  }, [focusedPaneId, tree]);
+
+  const splitPane = (paneId: string, dir: PaneDir, side: PaneSide) => {
+    updateTree(splitLeaf(tree, paneId, dir, side, null));
+  };
+  // Split/close shortcuts. Gate on Cmd, or Ctrl+Shift — never plain Ctrl+D,
+  // which is the terminal's EOF and must still reach the PTY.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const active = e.metaKey || (e.ctrlKey && e.shiftKey);
+      if (!active) return;
+      const k = e.key.toLowerCase();
+      if (k === 'd') {
+        e.preventDefault();
+        splitPane(focusedPaneId, 'row', 'b');
+      } else if (k === 'e') {
+        e.preventDefault();
+        splitPane(focusedPaneId, 'col', 'b');
+      } else if (k === 'w') {
+        e.preventDefault();
+        closePane_(focusedPaneId);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [focusedPaneId, tree]);
+  const closePane_ = (paneId: string) => {
+    const next = closePane(tree, paneId);
+    updateTree(next);
+    if (!findLeaf(next, focusedPaneId)) setFocusedPaneId(firstLeafId(next));
+  };
+  const fillPane = (paneId: string, ref: SessionRef) => {
+    updateTree(setSession(tree, paneId, ref));
+    setFocusedPaneId(paneId);
+  };
+
   const newTerminalOn = (hostId: string | null) => {
     if (!hostId) return;
     void app.newSession(hostId);
@@ -344,12 +427,17 @@ export function App() {
                     hosts={app.hosts}
                     passwords={app.passwords}
                     sessions={app.sessions}
-                    activeHostId={app.activeHostId}
-                    activeSessionId={app.activeSessionId}
+                    tree={tree}
+                    focusedPaneId={focusedPaneId}
                     terminalTheme={theme.terminal}
                     fontFamily={prefs.terminalFont}
                     onFrame={app.handleWsFrame}
                     onDisconnected={(hostId) => app.retryHost(hostId)}
+                    onFocusPane={setFocusedPaneId}
+                    onSetRatio={(branchId, ratio) => updateTree(setRatio(tree, branchId, ratio))}
+                    onPickSession={(paneId) => setPanePickerFor(paneId)}
+                    onSplit={splitPane}
+                    onClosePane={closePane_}
                   />
                 </div>
                 {app.gitOpen && !fileOrPreviewUp && app.gitMode === 'drawer' ? (
@@ -405,6 +493,21 @@ export function App() {
         onRename={(hostId, sessionId, name) => void app.renameSessionById(hostId, sessionId, name)}
         onKill={(hostId, sessionId) => void app.killSessionById(hostId, sessionId)}
       />
+      {panePickerFor && (
+        <PanePickerModal
+          hosts={app.hosts}
+          sessions={app.sessions}
+          onPick={(ref) => {
+            fillPane(panePickerFor, ref);
+            setPanePickerFor(null);
+          }}
+          onNew={(hostId) => {
+            newTerminalOn(hostId);
+            setPanePickerFor(null);
+          }}
+          onClose={() => setPanePickerFor(null)}
+        />
+      )}
       <AppOverflowMenu
         visible={overflowOpen}
         align={overflowAlign}
