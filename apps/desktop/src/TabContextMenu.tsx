@@ -24,13 +24,20 @@ export function TabContextMenu({
     </button>
   );
   return (
-    <div className="tab-menu-scrim" onClick={onClose} onContextMenu={(e) => e.preventDefault()}>
-      <div className="tab-menu" style={{ left: x, top: y }} onClick={(e) => e.stopPropagation()}>
+    <>
+      <button
+        type="button"
+        className="tab-menu-scrim"
+        aria-label="Close menu"
+        onClick={onClose}
+        onContextMenu={(e) => e.preventDefault()}
+      />
+      <div className="tab-menu" style={{ left: x, top: y }}>
         {item('Split right', 'row', 'b')}
         {item('Split left', 'row', 'a')}
         {item('Split up', 'col', 'a')}
         {item('Split down', 'col', 'b')}
       </div>
-    </div>
+    </>
   );
 }

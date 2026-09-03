@@ -139,6 +139,7 @@ function SessionRow({
   const wants = !active && dot === 'waiting';
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only row drag + right-click split; the row's actions live in the buttons inside
     <div
       className={`drawer-session-row${active ? ' active' : ''}${wants ? ' wants' : ''}`}
       draggable={!!onSplitFromTab}

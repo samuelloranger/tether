@@ -47,8 +47,7 @@ export function PaneDivider({
         height: divider.rect.height,
       }}
       onPointerDown={onPointerDown}
-      role="separator"
-      aria-orientation={divider.dir === 'row' ? 'vertical' : 'horizontal'}
+      aria-hidden="true"
     />
   );
 }

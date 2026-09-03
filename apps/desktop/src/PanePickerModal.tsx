@@ -25,8 +25,14 @@ export function PanePickerModal({
   const firstHostId = hosts[0]?.id ?? null;
 
   return (
-    <div className="pane-picker-scrim" onClick={onClose}>
-      <div className="pane-picker" onClick={(e) => e.stopPropagation()}>
+    <>
+      <button
+        type="button"
+        className="pane-picker-scrim"
+        aria-label="Close picker"
+        onClick={onClose}
+      />
+      <div className="pane-picker">
         <div className="pane-picker-title">Choose a session</div>
         <div className="pane-picker-list">
           {sessions.map((session) => {
@@ -51,6 +57,6 @@ export function PanePickerModal({
           </button>
         )}
       </div>
-    </div>
+    </>
   );
 }

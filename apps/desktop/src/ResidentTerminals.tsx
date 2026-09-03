@@ -46,6 +46,7 @@ interface Box {
   top: number;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: measures the container, keeps the resident cache in sync, and lays out slots + dividers + drop preview in one place
 export function ResidentTerminals(props: ResidentTerminalsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<Box>({ width: 0, height: 0, left: 0, top: 0 });
@@ -90,6 +91,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
 
   return (
     <div className="resident-terminals" ref={containerRef}>
+      {/* biome-ignore lint/complexity/noExcessiveLinesPerFunction: per-leaf render — positioning, drag/drop wiring, and pane controls */}
       {layout.leaves.map((leaf) => {
         const style = {
           position: 'absolute' as const,
@@ -100,6 +102,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         };
         if (!leaf.session) {
           return (
+            // biome-ignore lint/a11y/noStaticElementInteractions: pane is a pointer drop target for dragged session tabs
             <div
               key={leaf.paneId}
               className="pane-slot"
@@ -123,6 +126,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         const host = props.hosts.find((row) => row.id === session.hostId);
         if (!host) return null;
         return (
+          // biome-ignore lint/a11y/noStaticElementInteractions: pane focuses on pointer-down and is a drop target for dragged session tabs
           <div
             key={leaf.paneId}
             className={`pane-slot${leaf.paneId === props.focusedPaneId ? ' focused' : ''}`}

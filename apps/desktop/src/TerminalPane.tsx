@@ -180,6 +180,7 @@ function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: b
   return { hostRef, termRef, fitRef, getSocketRef, sendFocusRef, search, findOpen, setFindOpen };
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: binds several PTY-lifecycle effects (focus, paste, refit, blur) to one pane
 export function TerminalPane(props: TerminalPaneProps) {
   const interactiveRef = useRef(props.interactive);
   interactiveRef.current = props.interactive;

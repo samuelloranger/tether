@@ -1,3 +1,4 @@
+// biome-ignore-all lint/style/noExcessiveLinesPerFile: root app shell — routes every screen and wires the drawer, terminal panes, git, and workspace panels
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
@@ -130,6 +131,7 @@ export function App() {
   };
 
   // Seed the focused empty pane with the active session (first-run / single pane).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: updateTree/setSession are stable; re-running only on the listed inputs is intended
   useEffect(() => {
     if (!app.activeHostId || !app.activeSessionId) return;
     const ref: SessionRef = { hostId: app.activeHostId, sessionId: app.activeSessionId };
@@ -138,6 +140,7 @@ export function App() {
   }, [app.activeHostId, app.activeSessionId, tree, focusedPaneId]);
 
   // Drop sessions that no longer exist out of the tree (killed elsewhere).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: prune reacts to the session list only; reading the latest tree inside is intended
   useEffect(() => {
     const live = new Set(app.sessions.map((row) => sessionKey(row.hostId, row.id)));
     const pruned = prunePaneTree(tree, live);
@@ -145,6 +148,7 @@ export function App() {
   }, [app.sessions]);
 
   // Focused pane → active session, so the rest of the app follows the focus.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: app.selectSession is stable; this mirrors focus into the active session
   useEffect(() => {
     const leaf = findLeaf(tree, focusedPaneId);
     if (leaf?.session) app.selectSession(leaf.session.hostId, leaf.session.sessionId);
@@ -155,6 +159,7 @@ export function App() {
   };
   // Split/close shortcuts. Gate on Cmd, or Ctrl+Shift — never plain Ctrl+D,
   // which is the terminal's EOF and must still reach the PTY.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: splitPane/closePane_ close over the current tree via the listed deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = e.metaKey || (e.ctrlKey && e.shiftKey);

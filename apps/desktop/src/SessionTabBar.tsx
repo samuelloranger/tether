@@ -57,6 +57,7 @@ function SessionTab({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only tab drag + right-click split; the tab's actions live in the buttons inside
     <div
       className={`session-tab${active ? ' active' : ''}${wants ? ' wants' : ''}${dimmed ? ' dimmed' : ''}`}
       draggable={!!onSplitFromTab}
