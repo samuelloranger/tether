@@ -130,6 +130,16 @@ export function App() {
     setTreeState(next);
     savePaneTree(next);
   };
+  // Session keys already shown in a pane — the picker hides these.
+  const openSessionKeys = useMemo(
+    () =>
+      new Set(
+        leaves(tree).flatMap((l) =>
+          l.session ? [sessionKey(l.session.hostId, l.session.sessionId)] : [],
+        ),
+      ),
+    [tree],
+  );
 
   // Seed the focused empty pane with the active session (first-run / single pane).
   // biome-ignore lint/correctness/useExhaustiveDependencies: updateTree/setSession are stable; re-running only on the listed inputs is intended
@@ -555,14 +565,21 @@ export function App() {
       {panePickerFor && (
         <PanePickerModal
           hosts={app.hosts}
-          sessions={app.sessions}
+          sessions={app.sessions.filter(
+            (row) => !openSessionKeys.has(sessionKey(row.hostId, row.id)),
+          )}
           onPick={(ref) => {
             fillPane(panePickerFor, ref);
             setPanePickerFor(null);
           }}
           onNew={(hostId) => {
-            newTerminalOn(hostId);
+            const target = panePickerFor;
             setPanePickerFor(null);
+            // Route the new terminal into the pane the picker was opened for,
+            // not the focused pane (newTerminalOn's default).
+            void app.newSession(hostId).then((sessionId) => {
+              if (target && sessionId) fillPane(target, { hostId, sessionId });
+            });
           }}
           onClose={() => setPanePickerFor(null)}
         />
