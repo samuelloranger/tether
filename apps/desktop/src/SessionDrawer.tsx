@@ -1,6 +1,11 @@
+import { useState } from 'react';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
+import { SESSION_DND_MIME } from './dropZone';
+import type { PaneDir, PaneSide } from './paneTree';
+import { sessionKey } from './sessionKey';
 import { sessionLabel, sessionLabels } from './sessionLabel';
+import { TabContextMenu } from './TabContextMenu';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 
 interface SessionDrawerProps {
@@ -23,6 +28,7 @@ interface SessionDrawerProps {
   onOpenHosts: () => void;
   onOpenSettings: () => void;
   onOpenHostSettings: (hostId: string) => void;
+  onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
 }
 
 // The app icon's glyph at toolbar size: the prompt chevron and the cursor
@@ -111,6 +117,7 @@ function SessionRow({
   onSelect,
   onRequestKill,
   onRequestRename,
+  onSplitFromTab,
 }: {
   host: HostProfile;
   session: DrawerSession;
@@ -120,17 +127,43 @@ function SessionRow({
   onSelect: (hostId: string, sessionId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
+  onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
 }) {
   const live = active || isRecentlyActive(session.last_output_at);
   const dot = activityDotKey(session.status, session.activity, live);
   const shown = label ?? sessionLabel(session);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   // A shell that wants an answer marks its own row even when you are somewhere
   // else — the one thing allowed to pull attention away from the active session.
   const wants = !active && dot === 'waiting';
 
   return (
-    <div className={`drawer-session-row${active ? ' active' : ''}${wants ? ' wants' : ''}`}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only row drag + right-click split; the row's actions live in the buttons inside
+    <div
+      className={`drawer-session-row${active ? ' active' : ''}${wants ? ' wants' : ''}`}
+      draggable={!!onSplitFromTab}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(SESSION_DND_MIME, sessionKey(host.id, session.id));
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onContextMenu={
+        onSplitFromTab
+          ? (e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
+    >
+      {menu && onSplitFromTab && (
+        <TabContextMenu
+          x={menu.x}
+          y={menu.y}
+          onSplit={(dir, side) => onSplitFromTab(host.id, session.id, dir, side)}
+          onClose={() => setMenu(null)}
+        />
+      )}
       <button
         type="button"
         className="drawer-session-main"
@@ -180,6 +213,7 @@ export function SessionDrawer({
   onOpenHosts,
   onOpenSettings,
   onOpenHostSettings,
+  onSplitFromTab,
 }: SessionDrawerProps) {
   return (
     <aside className={`session-drawer${docked ? ' docked' : ' overlay'}`}>
@@ -248,6 +282,7 @@ export function SessionDrawer({
                     onSelect={onSelect}
                     onRequestKill={onRequestKill}
                     onRequestRename={onRequestRename}
+                    onSplitFromTab={onSplitFromTab}
                   />
                 ))
               )}

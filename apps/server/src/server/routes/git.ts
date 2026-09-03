@@ -1,5 +1,4 @@
 import { type Context, Hono } from 'hono';
-import { getSession } from '../db';
 import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from '../gitDiff';
 import {
   commitStaged,
@@ -17,9 +16,8 @@ import {
   unstageHunk,
   unstagePath,
 } from '../gitOps';
-import { GitRootError, resolveGitRoot } from '../gitRoot';
+import { GitRootError } from '../gitRoot';
 import { readRepoStatus } from '../gitStatus';
-import { getLiveCwd } from '../liveCwd';
 import { kickSessionGitWatch } from '../pty';
 import { previewMime } from './previewMime';
 import { resolveSessionCwd } from './sessionCwd';

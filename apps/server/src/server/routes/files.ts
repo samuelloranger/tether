@@ -1,8 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
-import { getSession } from '../db';
-import { resolveGitRoot } from '../gitRoot';
 import { UPLOADS_DIR } from '../paths';
 import { resolveUploadPath } from '../upload';
 import { readWorkspaceDir } from '../workspaceDir';

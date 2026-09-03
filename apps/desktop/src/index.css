@@ -1337,14 +1337,168 @@ label > textarea {
   z-index: 0;
 }
 
-.resident-pane.active {
-  z-index: 1;
-  visibility: visible;
+/* Panes are positioned by their slot now, not stacked — every resident pane is
+   visible. Focus only governs input gating (handled in JS) and focus styling. */
+.pane-slot {
+  overflow: hidden;
 }
 
-.resident-pane.inactive {
-  visibility: hidden;
+.pane-slot.focused {
+  z-index: 1;
+}
+
+.pane-divider {
+  position: absolute;
+  z-index: 2;
+  background: color-mix(in srgb, var(--lit) 16%, transparent);
+}
+
+.pane-divider-row {
+  cursor: col-resize;
+}
+
+.pane-divider-col {
+  cursor: row-resize;
+}
+
+.pane-divider:hover {
+  background: color-mix(in srgb, var(--lit) 40%, transparent);
+}
+
+.empty-pane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: var(--term-bg);
+}
+
+.empty-pane-button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--input) 80%, transparent);
+  color: var(--text);
+}
+
+.pane-controls {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.pane-slot.focused:hover .pane-controls {
+  opacity: 1;
+}
+
+.pane-controls button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--input) 80%, transparent);
+  color: var(--text);
+}
+
+.pane-controls button:hover {
+  background: color-mix(in srgb, var(--lit) 30%, transparent);
+}
+
+.pane-picker-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 40%);
+}
+
+.pane-picker {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 280px;
+  max-width: 420px;
+  max-height: 70vh;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--input);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 50%);
+}
+
+.pane-picker-title {
+  font-weight: 600;
+}
+
+.pane-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.pane-picker-item,
+.pane-picker-new {
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--input) 60%, transparent);
+  color: var(--text);
+}
+
+.pane-picker-item:hover,
+.pane-picker-new:hover {
+  background: color-mix(in srgb, var(--lit) 22%, transparent);
+}
+
+.pane-picker-new {
+  border: 1px solid color-mix(in srgb, var(--lit) 30%, transparent);
+}
+
+.tab-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.tab-menu {
+  position: fixed;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--input);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+}
+
+.tab-menu-item {
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.tab-menu-item:hover {
+  background: color-mix(in srgb, var(--lit) 20%, transparent);
+}
+
+.split-preview {
+  z-index: 4;
   pointer-events: none;
+  background: color-mix(in srgb, var(--lit) 30%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--lit) 70%, transparent);
+  border-radius: 8px;
 }
 
 .terminal-host {
