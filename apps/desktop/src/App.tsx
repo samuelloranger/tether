@@ -17,6 +17,7 @@ import {
   closePane,
   findLeaf,
   firstLeafId,
+  leaves,
   type PaneDir,
   type PaneNode,
   type PaneSide,
@@ -198,6 +199,17 @@ export function App() {
     setFocusedPaneId(paneId);
   };
 
+  // Selecting a session from the drawer/tab strip loads it into the focused
+  // pane — unless a pane already shows it, in which case focus that pane.
+  const openSession = (hostId: string, sessionId: string) => {
+    const key = sessionKey(hostId, sessionId);
+    const existing = leaves(tree).find(
+      (l) => l.session && sessionKey(l.session.hostId, l.session.sessionId) === key,
+    );
+    if (existing) setFocusedPaneId(existing.id);
+    else fillPane(focusedPaneId, { hostId, sessionId });
+  };
+
   const newTerminalOn = (hostId: string | null) => {
     if (!hostId) return;
     void app.newSession(hostId);
@@ -214,7 +226,7 @@ export function App() {
   useDeepLinks({
     ready: app.ready,
     profiles: app.hosts,
-    onSession: app.selectSession,
+    onSession: openSession,
   });
 
   const editingHost = useMemo(
@@ -386,7 +398,7 @@ export function App() {
               if (prefs.sidebarPinned) setDrawerOpen(false);
             }}
             onSelect={(hostId, sessionId) => {
-              app.selectSession(hostId, sessionId);
+              openSession(hostId, sessionId);
               if (!layout.docked) setDrawerOpen(false);
             }}
             onNew={newTerminalOn}
@@ -422,6 +434,7 @@ export function App() {
               onUpload={() => void workspace.pickAndUpload()}
               onOverflow={() => openOverflow('end')}
               onSplitFromTab={splitFromTab}
+              onSelectSession={openSession}
             />
             {workspace.sessionPreview && !workspace.activePresentation && !workspace.fileView && (
               <PresentationBanner

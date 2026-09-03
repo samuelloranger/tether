@@ -182,6 +182,7 @@ export function SessionChrome({
   onUpload,
   onOverflow,
   onSplitFromTab,
+  onSelectSession,
 }: {
   showTabBar: boolean;
   inset: boolean;
@@ -194,6 +195,7 @@ export function SessionChrome({
   onUpload: () => void;
   onOverflow: () => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
+  onSelectSession?: (hostId: string, sessionId: string) => void;
 }) {
   const host = app.activeHost;
   if (!host) return null;
@@ -206,7 +208,7 @@ export function SessionChrome({
           sessions={app.sessions}
           activeHostId={app.activeHostId}
           activeSessionId={app.activeSessionId}
-          onSelect={app.selectSession}
+          onSelect={onSelectSession ?? app.selectSession}
           onNew={onNew}
           onRequestKill={onKill}
           onOpenHosts={() => app.setScreen('hosts')}
