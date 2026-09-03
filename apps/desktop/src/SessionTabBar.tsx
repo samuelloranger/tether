@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
-import { SESSION_DND_MIME } from './dropZone';
 import type { PaneDir, PaneSide } from './paneTree';
 import { sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
 import { TerminalToolbar } from './TerminalToolbar';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
+import type { BeginTabDrag } from './useTabDrag';
 import type { TetherDesktop } from './useTetherDesktop';
 
 interface SessionTabBarProps {
@@ -21,6 +21,7 @@ interface SessionTabBarProps {
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onOpenHosts: () => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
+  onBeginDrag?: BeginTabDrag;
 }
 
 function HostsIcon() {
@@ -41,6 +42,7 @@ function SessionTab({
   onSelect,
   onRequestKill,
   onSplitFromTab,
+  onBeginDrag,
 }: {
   host: HostProfile;
   session: DrawerSession;
@@ -50,6 +52,7 @@ function SessionTab({
   onSelect: (hostId: string, sessionId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
+  onBeginDrag?: BeginTabDrag;
 }) {
   const live = active || isRecentlyActive(session.last_output_at);
   const dot = activityDotKey(session.status, session.activity, live);
@@ -60,11 +63,7 @@ function SessionTab({
     // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only tab drag + right-click split; the tab's actions live in the buttons inside
     <div
       className={`session-tab${active ? ' active' : ''}${wants ? ' wants' : ''}${dimmed ? ' dimmed' : ''}`}
-      draggable={!!onSplitFromTab}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(SESSION_DND_MIME, sessionKey(host.id, session.id));
-        e.dataTransfer.effectAllowed = 'move';
-      }}
+      onPointerDown={(e) => onBeginDrag?.(e, host.id, session.id, label)}
       onContextMenu={
         onSplitFromTab
           ? (e) => {
@@ -99,6 +98,7 @@ function SessionTab({
         className="icon-button session-tab-kill"
         title="Kill session"
         aria-label={`Kill ${label}`}
+        data-tab-action
         onClick={() => onRequestKill(host.id, session.id, label)}
       >
         ×
@@ -118,6 +118,7 @@ export function SessionTabBar({
   onRequestKill,
   onOpenHosts,
   onSplitFromTab,
+  onBeginDrag,
 }: SessionTabBarProps) {
   const labels = useMemo(() => tabLabels(sessions, hosts), [sessions, hosts]);
   const ordered = hosts.flatMap((host) =>
@@ -150,6 +151,7 @@ export function SessionTabBar({
               onSelect={onSelect}
               onRequestKill={onRequestKill}
               onSplitFromTab={onSplitFromTab}
+              onBeginDrag={onBeginDrag}
             />
           );
         })}
@@ -184,6 +186,7 @@ export function SessionChrome({
   onOverflow,
   onSplitFromTab,
   onSelectSession,
+  onBeginDrag,
 }: {
   showTabBar: boolean;
   inset: boolean;
@@ -197,6 +200,7 @@ export function SessionChrome({
   onOverflow: () => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
   onSelectSession?: (hostId: string, sessionId: string) => void;
+  onBeginDrag?: BeginTabDrag;
 }) {
   const host = app.activeHost;
   if (!host) return null;
@@ -214,6 +218,7 @@ export function SessionChrome({
           onRequestKill={onKill}
           onOpenHosts={() => app.setScreen('hosts')}
           onSplitFromTab={onSplitFromTab}
+          onBeginDrag={onBeginDrag}
         />
       ) : null}
       <TerminalToolbar

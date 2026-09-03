@@ -51,6 +51,7 @@ import { httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
 import { useShellChrome } from './useHeatArrival';
 import { useLaunchUpdateCheck } from './useLaunchUpdateCheck';
+import { useTabDrag } from './useTabDrag';
 import { useTetherDesktop } from './useTetherDesktop';
 import { useWindowTheme } from './useWindowTheme';
 import { useWorkspace, WorkspacePanel } from './useWorkspace';
@@ -203,6 +204,10 @@ export function App() {
     );
     setFocusedPaneId(paneId);
   };
+  // Pointer-driven tab→pane drag. HTML5 DnD can't be used: Tauri's native
+  // drag-drop handler (kept on for OS file-drop upload) swallows in-webview
+  // drags on Windows/WebView2. See useTabDrag.
+  const tabDrag = useTabDrag(dropSessionIntoPane);
 
   // Selecting a session from the drawer/tab strip loads it into the focused
   // pane — unless a pane already shows it, in which case focus that pane.
@@ -217,7 +222,12 @@ export function App() {
 
   const newTerminalOn = (hostId: string | null) => {
     if (!hostId) return;
-    void app.newSession(hostId);
+    // The seed effect only fills an EMPTY focused pane, so a new terminal must
+    // be routed into the focused pane explicitly — otherwise "+" silently
+    // allocates a session that never lands in any pane.
+    void app.newSession(hostId).then((sessionId) => {
+      if (sessionId) openSession(hostId, sessionId);
+    });
     if (!layout.docked) setDrawerOpen(false);
   };
 
@@ -421,6 +431,7 @@ export function App() {
               app.setScreen('settings');
             }}
             onSplitFromTab={splitFromTab}
+            onBeginDrag={tabDrag.begin}
           />
         </>
       ) : null}
@@ -440,6 +451,7 @@ export function App() {
               onOverflow={() => openOverflow('end')}
               onSplitFromTab={splitFromTab}
               onSelectSession={openSession}
+              onBeginDrag={tabDrag.begin}
             />
             {workspace.sessionPreview && !workspace.activePresentation && !workspace.fileView && (
               <PresentationBanner
@@ -474,7 +486,7 @@ export function App() {
                     onPickSession={(paneId) => setPanePickerFor(paneId)}
                     onSplit={splitPane}
                     onClosePane={closePane_}
-                    onDropSession={dropSessionIntoPane}
+                    preview={tabDrag.drag?.target ?? null}
                   />
                 </div>
                 {app.gitOpen && !fileOrPreviewUp && app.gitMode === 'drawer' ? (
@@ -524,6 +536,16 @@ export function App() {
           </div>
         )}
       </main>
+
+      {tabDrag.drag && (
+        <div
+          className="tab-drag-ghost"
+          style={{ left: tabDrag.drag.x, top: tabDrag.drag.y }}
+          aria-hidden
+        >
+          {tabDrag.drag.label}
+        </div>
+      )}
 
       <SessionModalHost
         modals={modals}

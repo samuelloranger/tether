@@ -179,7 +179,7 @@ export function useTetherDesktop() {
    * opening a new one. The poll's copy is the fallback when the fetch fails.
    */
   const newSession = useCallback(
-    async (hostId: string) => {
+    async (hostId: string): Promise<string | null> => {
       const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
       let ids = sessionsRef.current.filter((row) => row.hostId === hostId).map((row) => row.id);
       try {
@@ -191,9 +191,26 @@ export function useTetherDesktop() {
       // A slow host must not take the screen from wherever the user went while
       // it was answering — the same trade the restore path makes.
       if (activeHostIdRef.current !== from.host || activeSessionIdRef.current !== from.session) {
-        return;
+        return null;
       }
+      // Show the tab immediately — the drawer/tab strip render off `sessions`,
+      // which otherwise only refreshes on the next poll, so the new terminal
+      // opened in its pane before its own tab appeared. The poll reconciles.
+      setSessions((previous) =>
+        previous.some((row) => row.hostId === hostId && row.id === nextId)
+          ? previous
+          : [
+              ...previous,
+              {
+                hostId,
+                id: nextId,
+                status: 'running',
+                last_output_at: null,
+              },
+            ],
+      );
       selectSession(hostId, nextId);
+      return nextId;
     },
     [selectSession],
   );

@@ -1501,6 +1501,26 @@ label > textarea {
   border-radius: 8px;
 }
 
+/* Floating label that follows the cursor while dragging a session tab into a
+   pane (pointer-driven drag; see useTabDrag). */
+.tab-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  transform: translate(12px, 12px);
+  max-width: 240px;
+  overflow: hidden;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-raised));
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  box-shadow: 0 6px 20px var(--overlay);
+}
+
 .terminal-host {
   flex: 1;
   min-height: 0;

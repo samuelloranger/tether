@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
-import { SESSION_DND_MIME } from './dropZone';
 import type { PaneDir, PaneSide } from './paneTree';
-import { sessionKey } from './sessionKey';
 import { sessionLabel, sessionLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
+import type { BeginTabDrag } from './useTabDrag';
 
 interface SessionDrawerProps {
   hosts: HostProfile[];
@@ -29,6 +28,7 @@ interface SessionDrawerProps {
   onOpenSettings: () => void;
   onOpenHostSettings: (hostId: string) => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
+  onBeginDrag?: BeginTabDrag;
 }
 
 // The app icon's glyph at toolbar size: the prompt chevron and the cursor
@@ -118,6 +118,7 @@ function SessionRow({
   onRequestKill,
   onRequestRename,
   onSplitFromTab,
+  onBeginDrag,
 }: {
   host: HostProfile;
   session: DrawerSession;
@@ -128,6 +129,7 @@ function SessionRow({
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
+  onBeginDrag?: BeginTabDrag;
 }) {
   const live = active || isRecentlyActive(session.last_output_at);
   const dot = activityDotKey(session.status, session.activity, live);
@@ -142,11 +144,7 @@ function SessionRow({
     // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only row drag + right-click split; the row's actions live in the buttons inside
     <div
       className={`drawer-session-row${active ? ' active' : ''}${wants ? ' wants' : ''}`}
-      draggable={!!onSplitFromTab}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(SESSION_DND_MIME, sessionKey(host.id, session.id));
-        e.dataTransfer.effectAllowed = 'move';
-      }}
+      onPointerDown={(e) => onBeginDrag?.(e, host.id, session.id, shown)}
       onContextMenu={
         onSplitFromTab
           ? (e) => {
@@ -178,6 +176,7 @@ function SessionRow({
         type="button"
         className="icon-button"
         title="Rename session"
+        data-tab-action
         onClick={() => onRequestRename(host.id, session.id, session.name ?? shown, shown)}
       >
         ✎
@@ -186,6 +185,7 @@ function SessionRow({
         type="button"
         className="icon-button danger"
         title="Kill session"
+        data-tab-action
         onClick={() => onRequestKill(host.id, session.id, shown)}
       >
         ×
@@ -214,6 +214,7 @@ export function SessionDrawer({
   onOpenSettings,
   onOpenHostSettings,
   onSplitFromTab,
+  onBeginDrag,
 }: SessionDrawerProps) {
   return (
     <aside className={`session-drawer${docked ? ' docked' : ' overlay'}`}>
@@ -283,6 +284,7 @@ export function SessionDrawer({
                     onRequestKill={onRequestKill}
                     onRequestRename={onRequestRename}
                     onSplitFromTab={onSplitFromTab}
+                    onBeginDrag={onBeginDrag}
                   />
                 ))
               )}
