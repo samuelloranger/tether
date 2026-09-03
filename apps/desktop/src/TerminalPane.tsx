@@ -8,6 +8,7 @@ import type { FrameApplyResult } from './frameHandler';
 import { setPasteListener } from './pasteBus';
 import { pastePayload } from './pastePayload';
 import type { UI_THEMES } from './preferences';
+import { resizeFrame } from './resizeFrame';
 import { bindTerminalSession } from './terminalBind';
 import { TerminalFindBar } from './terminalSearch';
 
@@ -217,8 +218,7 @@ export function TerminalPane(props: TerminalPaneProps) {
       term.focus();
       fit.fit();
       const next = fit.proposeDimensions();
-      if (socket)
-        sendJson(socket, { type: 'resize', cols: next?.cols ?? 80, rows: next?.rows ?? 24 });
+      if (socket) sendJson(socket, resizeFrame(next));
       sendFocusRef.current?.(true);
     } else {
       term.blur();
@@ -226,6 +226,23 @@ export function TerminalPane(props: TerminalPaneProps) {
       sendFocusRef.current?.(false);
     }
   }, [props.interactive, termRef, fitRef, getSocketRef, sendFocusRef, setFindOpen]);
+
+  // A pane in a split is smaller than full-screen and its box changes on divider
+  // drag, split, close, and window resize. Refit the emulator and tell the server
+  // the new grid whenever the host element resizes.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+    const observer = new ResizeObserver(() => {
+      const fit = fitRef.current;
+      const socket = getSocketRef.current?.() ?? null;
+      if (!fit) return;
+      fit.fit();
+      if (socket) sendJson(socket, resizeFrame(fit.proposeDimensions()));
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [hostRef, fitRef, getSocketRef]);
 
   // Window / document blur while this pane is active — same push-suppression
   // contract as iOS scenePhase (server suppresses while focused:true).
