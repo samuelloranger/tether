@@ -231,9 +231,10 @@ actor TerminalPipeline {
           }
         case .exit:
           eventSink.yield(.sessionsChanged)
-        case .devices, .devicesRevoked:
-          // Device-management replies never ride the terminal channel; they are
-          // driven by `DevicesView` over its own short-lived session. Ignore.
+        case .devices, .devicesRevoked, .authToken:
+          // Device-management and auth-token replies never ride the terminal
+          // channel; they are driven over their own short-lived sessions
+          // (`DevicesView`, `NoiseTokenCache`). Ignore.
           break
         }
       } catch {

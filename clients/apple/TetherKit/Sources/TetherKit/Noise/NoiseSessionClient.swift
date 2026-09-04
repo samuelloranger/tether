@@ -33,6 +33,9 @@ public enum NoiseServerMessage: Sendable, Equatable {
   case devices([DeviceInfo])
   /// Reply to `devices.revoke`: the verdict for one target.
   case devicesRevoked(target: String, ok: Bool, error: String?)
+  /// Reply to `auth.token`: an opaque bearer token for REST calls plus its
+  /// ISO8601 expiry (`{t:"auth.token",token,expiresAt}`).
+  case authToken(token: String, expiresAt: String)
 }
 
 /// One paired device as reported by the server over the authenticated Noise
@@ -148,6 +151,44 @@ public final class NoiseSessionClient {
     return NoiseChannel(session: handshake, transport: transport)
   }
 
+  // MARK: - Device auth token
+
+  /// Mint a per-device REST bearer token over a fresh Noise session: reconnect
+  /// (IK), send the sealed `{t:"auth.token"}` request, read replies until the
+  /// sealed `{t:"auth.token",token,expiresAt}` arrives, close the channel, and
+  /// return the token plus its parsed expiry. The channel is closed on every
+  /// path (success or throw) — a token request needs no long-lived socket.
+  public func requestToken(hostId: String, url: URL) async throws -> (token: String, expiresAt: Date) {
+    let channel = try await reconnect(hostId: hostId, url: url)
+    do {
+      try await channel.sendAuthToken()
+      while true {
+        let message = try await channel.receive()
+        if case let .authToken(token, expiresAt) = message {
+          await channel.close()
+          guard let date = Self.parseISO8601(expiresAt) else {
+            throw NoiseClientError.badReply
+          }
+          return (token, date)
+        }
+      }
+    } catch {
+      await channel.close()
+      throw error
+    }
+  }
+
+  /// Parse a server `expiresAt` (an ISO8601 string, with or without fractional
+  /// seconds — `Date().toISOString()` emits milliseconds). Static + internal so
+  /// it is unit-testable without a socket.
+  static func parseISO8601(_ value: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: value) { return date }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: value)
+  }
+
   // MARK: - Device fingerprint
 
   /// The full-form fingerprint of THIS device's own static public key for a
@@ -253,10 +294,22 @@ public final class NoiseChannel {
     try await sendSealed(Self.devicesRevokeRequest(target: target))
   }
 
+  /// Ask the host to mint a per-device REST bearer token
+  /// (`{t:"auth.token"}`). The reply arrives through `receive()` as
+  /// `.authToken`.
+  public func sendAuthToken() async throws {
+    try await sendSealed(Self.authTokenRequest())
+  }
+
   /// The `devices.list` request body. Pure + static so the wire shape is unit
   /// testable without an established channel.
   static func devicesListRequest() -> [String: Any] {
     ["t": "devices.list"]
+  }
+
+  /// The `auth.token` request body. Pure + static, as above.
+  static func authTokenRequest() -> [String: Any] {
+    ["t": "auth.token"]
   }
 
   /// The `devices.revoke` request body. Pure + static, as above.
@@ -284,7 +337,7 @@ public final class NoiseChannel {
 
 extension NoiseServerMessage: Decodable {
   private enum CodingKeys: String, CodingKey {
-    case t, id, chunk, exitCode, items, target, ok, error
+    case t, id, chunk, exitCode, items, target, ok, error, token, expiresAt
   }
 
   public init(from decoder: Decoder) throws {
@@ -305,6 +358,10 @@ extension NoiseServerMessage: Decodable {
       let ok = try container.decode(Bool.self, forKey: .ok)
       let error = try container.decodeIfPresent(String.self, forKey: .error)
       self = .devicesRevoked(target: target, ok: ok, error: error)
+    case "auth.token":
+      let token = try container.decode(String.self, forKey: .token)
+      let expiresAt = try container.decode(String.self, forKey: .expiresAt)
+      self = .authToken(token: token, expiresAt: expiresAt)
     default:
       throw DecodingError.dataCorruptedError(
         forKey: .t,

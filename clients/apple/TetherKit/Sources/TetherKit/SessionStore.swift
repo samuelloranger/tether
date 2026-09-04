@@ -48,6 +48,16 @@ public final class SessionStore {
   /// The Noise transport engine, sharing `noiseKeyStore` so the keys a host was
   /// paired with are the keys its reconnect uses.
   @ObservationIgnored private let noiseClient: NoiseSessionClient
+  /// In-memory per-device REST token cache for Noise hosts. A Noise host has no
+  /// password, so its REST `Authorization: Bearer` value is a token minted over
+  /// the Noise channel (`mintNoiseToken`), cached until near expiry and
+  /// re-minted on a 401. Lazy so the mint closure can capture `self` after init.
+  @ObservationIgnored private lazy var noiseTokenCache = NoiseTokenCache(
+    mint: { [weak self] hostId in
+      guard let self else { throw NoiseClientError.notPaired }
+      return try await self.mintNoiseToken(hostId: hostId)
+    }
+  )
   /// Owns the socket and the VT emulator on its OWN executor. See
   /// `TerminalPipeline` for why none of that may run on the main actor.
   @ObservationIgnored private let pipeline = TerminalPipeline()
@@ -756,15 +766,37 @@ public final class SessionStore {
   }
 
   private func client(for hostId: String) -> NativeHostClient? {
+    guard let profile = hosts.first(where: { $0.id == hostId }) else { return nil }
+    // A Noise host has no password: its REST Bearer is a device token minted
+    // over the Noise channel and cached (re-minted on 401). Additive — password
+    // hosts are unchanged below.
+    if authMode(for: hostId) == .noise {
+      return NativeHostClient(
+        profile: profile,
+        bearerSource: NoiseTokenBearerSource(cache: noiseTokenCache, hostId: hostId)
+      )
+    }
     // `try?` on a throwing call that already returns String? flattens in
     // Swift 5+, so `password` binds as a non-optional String here — a second
     // `let` to unwrap it does not compile.
     guard
-      let profile = hosts.first(where: { $0.id == hostId }),
       let password = try? hostStore.password(for: hostId),
       !password.isEmpty
     else { return nil }
     return NativeHostClient(profile: profile, password: password)
+  }
+
+  /// Mint a REST device token for a Noise host over its Noise channel. Backs
+  /// `noiseTokenCache`; resolves the host's Noise base URL and delegates to
+  /// `NoiseSessionClient.requestToken`.
+  private func mintNoiseToken(hostId: String) async throws -> (token: String, expiresAt: Date) {
+    guard
+      let host = hosts.first(where: { $0.id == hostId }),
+      let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+    else {
+      throw HostClientError.invalidURL
+    }
+    return try await noiseClient.requestToken(hostId: hostId, url: url)
   }
 
   private func fetchSessions(for hostId: String) async -> [RemoteSession] {
