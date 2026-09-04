@@ -172,17 +172,19 @@ With the password gone and one narrow enrollment surface, tighten the rest so th
 
 ## Security target & decomposition
 
-Honest scoring (a shell host is inherently trusted, so 10/10 does not exist; ~9.5 is the ceiling):
+Honest scoring (a shell host is inherently trusted, so 10/10 does not exist; ~9 is the realistic ceiling for tether's own code):
 
 - **Foundation as specced (this doc):** ~8.5/10.
-- **+ rendezvous relay + signed updates shipped:** ~9.3/10.
-- **+ that, externally audited, + the cheap hardening (rekey, longer code — already folded in here):** ~9.5/10.
+- **+ signed updates + the cheap hardening (rekey, longer code — already folded in here):** ~8.8/10.
+- **+ externally audited:** ~9/10.
+
+**No-open-port exposure is a deployment concern, not a tether feature.** A rendezvous relay was considered and **cut**: it would require publicly-hosted, bandwidth-heavy infrastructure (forwarding continuous terminal I/O, unlike the tiny push blobs), which is not a burden this project will take on. Instead, the no-inbound-port path is delivered by **documenting existing tunnels** — Tailscale / WireGuard / Cloudflare Tunnel — which are professionally-hosted zero-knowledge rendezvous relays users already run, free, hosting nothing on our side. The foundation's Noise E2E rides safely over any of them.
 
 This spec is the **foundation** sub-project. Downstream, each with its own spec → plan cycle:
 
-1. **Rendezvous relay (no open inbound port)** — the largest single jump for internet exposure, spec'd separately in [`2026-09-03-tether-rendezvous-relay-design.md`](./2026-09-03-tether-rendezvous-relay-design.md). Depends on this foundation (reuses the server's static Noise key as its rendezvous address). This is the intended path to "expose over the internet without opening a port."
-2. **Signed, verified updates** — `tether update` verifies a minisign/cosign signature over the binary against a public key baked into the client. Closes the supply-chain path that bypasses all auth work. Own spec.
-3. **External protocol/crypto audit + handshake/frame fuzzing** — the gate before any "internet-safe" / "audited" claim is made publicly. Not a code sub-project so much as a release gate.
+1. **Signed, verified updates** — `tether update` verifies a minisign/cosign signature over the binary against a public key baked into the client. Closes the supply-chain path that bypasses all auth work. Own spec.
+2. **External protocol/crypto audit + handshake/frame fuzzing** — the gate before any "internet-safe" / "audited" claim is made publicly. Not a code sub-project so much as a release gate.
+3. **No-port exposure docs** — a "reach your server from anywhere" page that walks through Tailscale / Cloudflare Tunnel. Documentation, not code.
 4. **At-rest encryption** — deferred by operator decision; revisit only if the threat model changes.
 
 ## Open questions (resolve during planning)
