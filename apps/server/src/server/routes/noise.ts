@@ -1,28 +1,15 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
-import { internalAuthHeaders } from '../auth';
 import { runReconnect } from '../authGate';
 import { getDeviceByPubkey, touchDevice } from '../deviceRegistry';
 import { logError, logInfo } from '../log';
 import { ChannelError } from '../noiseChannel';
 import { loadOrCreateServerKeypair } from '../noiseIdentity';
-import { runNoiseRpc } from '../noiseRpc';
 import { runNoiseSession } from '../noiseSessionProtocol';
 import { toFrameBytes, WsFrameIO, type WsSender } from '../noiseWsAdapter';
 import { handlePairingConnection } from '../pairControl';
 
 export const noiseRoutes = new Hono();
-
-// The dispatcher the RPC tunnel runs requests through — set once by app.ts to
-// `app.fetch` after the app is assembled, so routes/noise.ts never imports app.ts
-// (which would be a cycle). Read at connection time.
-let noiseRpcDispatch: ((req: Request) => Promise<Response>) | null = null;
-export function setNoiseRpcDispatch(dispatch: (req: Request) => Promise<Response>): void {
-  noiseRpcDispatch = dispatch;
-}
-export function getNoiseRpcDispatch(): ((req: Request) => Promise<Response>) | null {
-  return noiseRpcDispatch;
-}
 
 // Public (pre-auth-reachable) endpoints: bound how many Noise sockets can be
 // mid-flight at once, and kill an upgrade whose handshake stalls, so idle/hostile
@@ -163,74 +150,6 @@ noiseRoutes.get(
             // whether the key is unknown vs. the handshake simply failed.
             if (!(err instanceof ChannelError)) {
               logError('Noise session setup failed:', err);
-            }
-            try {
-              ws.close(1008);
-            } catch {}
-          })
-          .finally(() => {
-            adapter.close();
-            activeNoiseConnections -= 1;
-          });
-      },
-      onMessage(evt) {
-        if (io) pushFrame(io, evt.data);
-      },
-      onClose() {
-        io?.close();
-      },
-    };
-  }),
-);
-
-// GET /api/noise/rpc — the same IK reconnect + registry authorization as
-// /api/noise/session (fail-closed), but the established channel carries the REST
-// tunnel (serialized Request -> app.fetch -> Response) instead of a terminal.
-noiseRoutes.get(
-  '/api/noise/rpc',
-  upgradeWebSocket(() => {
-    let io: WsFrameIO | null = null;
-    return {
-      onOpen(_evt, ws) {
-        if (activeNoiseConnections >= MAX_NOISE_CONNECTIONS) {
-          try {
-            ws.close(1013);
-          } catch {}
-          return;
-        }
-        activeNoiseConnections += 1;
-        const adapter = new WsFrameIO(sink(ws));
-        io = adapter;
-        const priv = loadOrCreateServerKeypair().priv;
-        withHandshakeTimeout(runReconnect(adapter, priv, { getDeviceByPubkey, touchDevice }), () =>
-          adapter.close(),
-        )
-          .then(async ({ channel, device }) => {
-            const dispatch = getNoiseRpcDispatch();
-            if (!dispatch) {
-              try {
-                ws.close(1011);
-              } catch {}
-              return;
-            }
-            logInfo(`Noise rpc authorized device ${device.id}`);
-            try {
-              await runNoiseRpc(channel, adapter, {
-                dispatch,
-                identity: { deviceId: device.id },
-                requestHeaders: internalAuthHeaders(),
-              });
-            } finally {
-              channel.free();
-              try {
-                ws.close();
-              } catch {}
-            }
-          })
-          .catch((err) => {
-            // Fail closed: an unknown/revoked key never entered transport mode.
-            if (!(err instanceof ChannelError)) {
-              logError('Noise rpc setup failed:', err);
             }
             try {
               ws.close(1008);

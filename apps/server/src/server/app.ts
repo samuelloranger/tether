@@ -18,7 +18,7 @@ import { registerPushDevice, removePushDevice } from './pushDevices';
 import { configRoutes } from './routes/config';
 import { filesRoutes } from './routes/files';
 import { gitRoutes } from './routes/git';
-import { noiseRoutes, setNoiseRpcDispatch } from './routes/noise';
+import { noiseRoutes } from './routes/noise';
 import {
   hasControlToken,
   presentationControlToken,
@@ -216,9 +216,5 @@ app.route('/', filesRoutes);
 app.route('/', gitRoutes);
 app.route('/', sessionsRoutes);
 app.route('/', signalRoutes);
-
-// Give the Noise RPC tunnel a way to dispatch tunneled requests through the fully
-// assembled app, without routes/noise.ts importing app.ts (which would cycle).
-setNoiseRpcDispatch(async (req: Request) => app.fetch(req));
 
 export { app };
