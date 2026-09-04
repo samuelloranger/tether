@@ -16,6 +16,7 @@ pub mod host_health;
 pub mod host_polling;
 pub mod host_store;
 pub mod links;
+pub mod noise;
 pub mod notify_rules;
 pub mod protocol;
 pub mod pty_input;
