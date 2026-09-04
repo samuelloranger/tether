@@ -11,11 +11,12 @@
     "build": "bun run build:binary",
     "start": "./dist/tether serve",
     "typecheck": "tsc --noEmit",
+    "pretest": "bun run build:ffi",
     "test": "bun test --parallel",
     "lint": "biome check",
     "format": "biome check --write",
-    "build:binary": "bun build --compile --minify --define process.env.TETHER_VERSION=\\\"$TETHER_VERSION\\\" --define process.env.TETHER_DEFAULT_PUSH_RELAY_URL=\\\"$TETHER_PUSH_RELAY_URL\\\" --outfile dist/tether src/server/main.ts",
-    "build:ffi": "cargo build --manifest-path ../../crates/tether-noise-ffi/Cargo.toml"
+    "build:binary": "bun run build:ffi && bun build --compile --minify --define process.env.TETHER_VERSION=\\\"$TETHER_VERSION\\\" --define process.env.TETHER_DEFAULT_PUSH_RELAY_URL=\\\"$TETHER_PUSH_RELAY_URL\\\" --outfile dist/tether src/server/main.ts",
+    "build:ffi": "bun ../../scripts/build-ffi.ts"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.14.0",

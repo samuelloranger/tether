@@ -1,12 +1,30 @@
 import { dlopen, FFIType, type Pointer, ptr, suffix } from 'bun:ffi';
+import { copyFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-// Debug-build path; the shipped binary will embed + extract the library (Plan 2c).
-const LIB = new URL(
-  `../../../../crates/tether-noise-ffi/target/debug/libtether_noise_ffi.${suffix}`,
-  import.meta.url,
-).pathname;
+// The Noise crypto lives in a native cdylib (crates/tether-noise-ffi). We embed
+// it into the binary as a file asset: `bun build --compile` bundles the file at
+// this specifier, and at runtime `embeddedNoiseLib` is a path to it. `build:ffi`
+// (scripts/build-ffi.ts) compiles the cdylib and copies it to this path for both
+// source runs (dev, `bun run test`) and the compile step — and release.yml swaps
+// in the correct-arch cdylib before each cross-target `bun build`. This replaced
+// an `import.meta.url`-relative path that resolved to a non-existent `/crates/…`
+// inside the compiled binary, so the shipped server crashed on boot.
+import embeddedNoiseLib from './noiseNativeLib' with { type: 'file' };
 
-const { symbols } = dlopen(LIB, {
+// dlopen(3) on Linux/macOS loads any filename, including bun's extension-less
+// `$bunfs` extraction path, so use it as-is. Windows' LoadLibrary appends `.dll`
+// to an extension-less path and then fails to find it, so materialize a copy
+// with the real suffix (once) and load that.
+function resolveNoiseLib(): string {
+  if (process.platform !== 'win32') return embeddedNoiseLib;
+  const dest = join(tmpdir(), `tether-noise-${process.env.TETHER_VERSION ?? 'dev'}.${suffix}`);
+  if (!existsSync(dest)) copyFileSync(embeddedNoiseLib, dest);
+  return dest;
+}
+
+const { symbols } = dlopen(resolveNoiseLib(), {
   tether_noise_gen_keypair: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
   tether_noise_derive_psk: {
     args: [FFIType.ptr, FFIType.u64_fast, FFIType.ptr],
