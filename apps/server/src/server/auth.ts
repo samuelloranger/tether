@@ -16,7 +16,17 @@ export async function verifyPassword(provided: string): Promise<boolean> {
 // Unauthenticated endpoints: the first-run pairing surface. `/api/status`
 // reports whether a password exists; `/api/setup` sets it once (TOFU). Both are
 // safe to leave open — status leaks no secret, and setup self-locks after use.
-const PUBLIC_API_PATHS = new Set(['/api/status', '/api/setup']);
+//
+// The two `/api/noise/*` WebSocket routes are also exempt from the password:
+// they are end-to-end-encrypted Noise channels whose handshake (a pairing PSK,
+// then a pinned static key on reconnect) IS the authentication — there is no
+// password to present over them. See `routes/noise.ts`.
+const PUBLIC_API_PATHS = new Set([
+  '/api/status',
+  '/api/setup',
+  '/api/noise/pair',
+  '/api/noise/session',
+]);
 
 // Reject any request lacking a valid `Authorization: Bearer <password>`.
 // Applied to /api/* (including the WS upgrade), on the plaintext and TLS

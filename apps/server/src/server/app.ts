@@ -18,6 +18,7 @@ import { registerPushDevice, removePushDevice } from './pushDevices';
 import { configRoutes } from './routes/config';
 import { filesRoutes } from './routes/files';
 import { gitRoutes } from './routes/git';
+import { noiseRoutes } from './routes/noise';
 import {
   hasControlToken,
   presentationControlToken,
@@ -209,6 +210,7 @@ app.post('/api/push/unregister', async (c) => {
 
 app.route('/', presentationsRoutes);
 app.route('/', pairControlRoutes);
+app.route('/', noiseRoutes);
 app.route('/', configRoutes);
 app.route('/', filesRoutes);
 app.route('/', gitRoutes);
