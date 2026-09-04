@@ -2,88 +2,113 @@
 
 ## The trust model
 
-Every `/api/*` route — HTTP **and** the WebSocket upgrade — requires a shared password (`Authorization: Bearer <password>`), stored as an argon2 hash in the server's database. With no password set, the server rejects all clients. Set it with `tether set-password` or the first-run pairing flow in the app.
+Tether's root of trust is **shell access to the host**. Whoever can run `tether pair` on the machine can enroll a device — the same trust decision SSH makes with `authorized_keys`. There is no shared password: nothing to leak, phish, or brute-force.
+
+Each device holds its own **X25519 keypair**. The server keeps a registry of authorized device public keys, and a device proves possession of its private key during a cryptographic handshake — it never sends a reusable secret over the wire. Revoke one device and the others are untouched.
+
+::: warning The password is gone
+Earlier releases authenticated every request with a shared `Authorization: Bearer <password>`. That model is **removed outright** — no `set-password`, no bearer routes, no coexistence. On upgrade, every existing client stops connecting until you re-pair it (see [Upgrading from the password model](#upgrading-from-the-password-model)).
+:::
+
+## Enrolling a device
+
+Pairing runs from the host and requires a human at the keyboard to confirm each new device.
+
+```sh
+tether pair
+```
+
+This opens a single-use enrollment window (about 5 minutes) and prints:
+
+- a **12-character code**, grouped `XXXX-XXXX-XXXX`, case-insensitive (Crockford base32 — no `0/O` or `1/I/L`), and
+- a **QR code** carrying the server address(es), the code, and the server's key fingerprint.
+
+On the device you either **scan the QR** (phone) or **type the 12-char code plus the address** (desktop — it has no camera, so typing is the primary path). The device generates a fresh keypair, runs the handshake, and sends its public key plus a label you choose.
+
+The host then prompts you to confirm:
+
+```
+Device 'sam-iphone'  fp b3f8a1…  authorize? [y/N]
+```
+
+Only on `y` is the device written into the registry and the window closed. Knowing the code is necessary but **not sufficient** — a leaked or shoulder-surfed code cannot enroll a device without someone at the host approving it. A second party racing for the same window gets a distinct "code already used" error, and you see both attempts.
+
+Once approved, the device stores its private key in the iOS Keychain / desktop OS keyring, keyed per host, and every later connection authenticates with the key alone.
+
+::: tip Per-host keypairs
+A device generates a **separate keypair for each host it pairs with**. The same phone therefore presents different public keys to different servers, so no one — not even someone watching several servers — can correlate "the same device" across them.
+:::
 
 ## Transport encryption
 
-The server opens **two listeners**:
+Every connection is end-to-end encrypted with the **Noise protocol** — the same handshake WireGuard uses — implemented once in Rust via the audited [`snow`](https://docs.rs/snow) crate and shared by iOS, desktop, and the server. This protects the wire **independently of TLS**: confidential, tamper-proof, and MITM-proof on first contact.
 
-| Listener | Default port | Env | Encryption |
-|---|---|---|---|
-| Plaintext HTTP | `8085` | `TETHER_PORT` | none |
-| HTTPS / WSS | `8443` | `TETHER_TLS_PORT` | TLS, self-signed cert |
+The whole API rides inside it. A paired client opens **one Noise-secured channel** — the WebSocket, which runs the handshake as its first bytes — and multiplexes everything over it: the request/response calls that used to be REST endpoints, the live PTY streams, and server→client events. There is no plaintext `/api/*` surface any more.
 
-On its first boot the server generates a self-signed ECDSA P-256 certificate into `~/.tether/config/tls/` (`cert.pem`, `key.pem` — the key is `0600` inside a `0700` directory) and serves TLS from it. It is valid for ten years, and it is **never rotated automatically**: clients pin its fingerprint, so silently minting a new one would lock every paired client out. If the directory is half-populated, the server refuses to start TLS rather than regenerate.
+| Phase | Handshake | What it proves |
+|---|---|---|
+| **Pairing** (first contact) | `Noise_XXpsk2` | Neither side knows the other yet; the enrollment code is mixed in as a pre-shared key, so a party without the code cannot complete the handshake. The device learns and **pins** the server's static public key. |
+| **Reconnect** (steady state) | `Noise_IK` | The device presents its authorized key against the pinned server key. No code, no PSK, no MITM window — every connection after the first. |
 
-Both listeners serve the same API. That is deliberate — see [Migrating to TLS](#migrating-to-tls).
+Both cipher suites are **fixed constants — never negotiated**, because negotiation is a downgrade surface. A version string (`tether-noise/1`) is bound into every handshake; a mismatch is a hard failure, not a fallback.
 
-### Pinning the certificate
+### The code is stretched
 
-The certificate is self-signed, so no CA will vouch for it. Trust comes from **pinning on first contact** (TOFU), the same trust decision the password already makes:
+The enrollment code is not fed into the handshake raw. Both sides derive the pre-shared key as `Argon2id(code)` → 32 bytes, so each offline guess against a recorded pairing handshake costs a full Argon2id evaluation. Combined with the single-use, ~5-minute, rate-limited window, that makes online guessing hopeless and offline guessing expensive — on top of the code's own ~60 bits of entropy.
 
-1. `GET /api/status` (unauthenticated) returns
+### Authorization is a registry lookup
 
-   ```json
-   {
-     "needsSetup": true,
-     "secure": true,
-     "tls": {
-       "enabled": true,
-       "plaintext": true,
-       "port": 8443,
-       "fingerprint": "sha256:86c3fb2a…"
-     }
-   }
-   ```
+Completing an `IK` handshake proves only that the device holds *a* private key — not that it is *authorized*. So after the handshake the server **looks up the device's public key in the registry and drops the connection before any application data if it is absent or revoked**. The drop is fail-closed and indistinguishable from other handshake failures — there is no oracle that confirms "right server, wrong device."
 
-   `POST /api/setup` echoes the same `secure` and `tls` fields, so a client can pair and pin in one round trip.
+## The server's identity key
 
-2. `secure` reports whether **that response** arrived over the TLS listener. It is derived from the socket, never from a header — `X-Forwarded-Proto` is ignored on purpose, because anything a caller can *claim* a MITM can claim too.
+The server has its own long-term X25519 static keypair — the identity every device pins on pairing.
 
-3. A client may only pin a fingerprint it read with `secure: true`, and must compare it against the certificate that actually terminated the connection. Over plaintext the fingerprint is **discovery data only** — useful for finding the HTTPS port, worthless as proof, because whoever can read the plaintext can rewrite it.
+- **Generated on first boot** into `~/.tether/config/noise/` (private key `0600` inside a `0700` directory; Windows uses ACLs, as the TLS key already does).
+- **Never rotated automatically.** Every paired device pins it, so minting a new one silently would lock all of them out.
+- **As sensitive as the TLS private key** — theft enables MITM of every future reconnect — and stored the same way.
+- Rotation is a deliberate operator action that invalidates all pins and forces every device to re-pair. Reach for it only if you believe the key is compromised.
 
-4. Once pinned, a fingerprint mismatch is a hard failure. It is not a re-pair prompt: the certificate does not change on its own, so a change means either an attacker or an operator who deliberately deleted the TLS directory.
+## Managing devices
 
-Pinning on first contact is only as good as that first contact. Do the initial pairing on a network you trust — the LAN, or a tunnel.
+```sh
+tether devices                          # list authorized devices
+tether device revoke <name|fp-prefix>   # revoke by label or fingerprint prefix
+```
 
-### Migrating to TLS
+```
+NAME              FINGERPRINT   PAIRED        LAST SEEN     ADDRESS
+sam-iphone        b3f8a1c9      2026-09-01    2m ago        100.x.x.x
+desktop-homelab   7q4k92de      2026-09-03    now           127.0.0.1
+```
 
-`TETHER_TLS` picks the listener topology. It is **not** in `/api/config`, and cannot be changed by a client: a phone that closed the plaintext port would lock out every other client on the network, and the only recovery would be shell access to the host. `/api/config` and `/api/status` *report* the transport state; only the host's environment sets it.
+Revoke targets a label or a fingerprint prefix; if the target is ambiguous the CLI refuses and lists the matches rather than guessing. The app mirrors these operations (list plus swipe-to-revoke).
 
-| `TETHER_TLS` | Result |
-|---|---|
-| unset / `both` (default) | plaintext **and** TLS |
-| `only` | TLS only — the plaintext port is closed |
-| `off` | plaintext only — no certificate is generated or served |
+### Revocation keeps your shells alive
 
-The default keeps the plaintext port open, so a `tether update` changes nothing for a client that has not learned TLS yet. When every client you use has paired over HTTPS, cut over with `TETHER_TLS=only tether restart` and the plaintext port closes.
+Revoking a device does **not** kill any PTY — that would break the persistence that is the whole point of Tether. Precisely:
 
-Two things to know about `only`:
+- Revoke drops **that device's live connection only.** The detached holders and their shells keep running; another authorized device (or the same one, re-paired) reattaches and replays the missed output.
+- It also removes the device from the **push** registry, so a revoked phone stops receiving notifications.
+- A later reconnect from the revoked key fails the registry lookup and is dropped before any data.
+- Revoking your *last* device only warns — shell access plus `tether pair` is always the recovery path.
 
-- `tether status` and `tether present` follow the same setting, so they keep working over loopback TLS.
-- Any client still on `http://` stops working the moment you flip it. That is the point of it being a deliberate, host-side switch.
+## What TLS is for now
 
-`TETHER_TLS_EXTRA_NAMES` (comma-separated) adds extra SANs — a Tailscale name, say — but only on the boot that *generates* the certificate. Adding names later means deleting `~/.tether/config/tls/` and re-pairing every client.
+TLS is no longer what protects your traffic — Noise does that end to end. TLS becomes **optional defence in depth**: an extra outer layer on any HTTP surface that remains, useful but not load-bearing. New installs no longer open a plaintext listener by default; disabling encryption entirely is now an explicit opt-out.
 
-## Files at rest
+## Reaching the server from outside your LAN
 
-The sensitive files the server writes are locked to the owner: the database in `~/.tether/config/` (it holds the argon2 password hash and the session log), the TLS private key, the holder sockets, and the local control token.
+Exposing an inbound port to the internet is a **deployment choice, not something Tether does for you**. A rendezvous relay was considered and deliberately cut — forwarding continuous terminal I/O would mean running bandwidth-heavy public infrastructure this project won't take on.
 
-- **Linux / macOS** — POSIX modes, as noted above: the key is `0600` inside a `0700` directory, and the other paths are created owner-only the same way.
-- **Windows** — those modes are a no-op (`chmod` there sets only the read-only attribute, which is not a confidentiality control), so the server uses ACLs instead. It runs `icacls` to drop the inherited entries and grant the owning user alone, which is the faithful stand-in for `0600`/`0700`. See [Windows server](/windows) for the rest of the platform's differences.
+The recommended path is a **tunnel you already run** — Tailscale, WireGuard, or Cloudflare Tunnel — none of which require an open inbound port. The Noise end-to-end encryption rides safely over any of them. See [Reach your server from anywhere](/reach-from-anywhere) for a step-by-step walkthrough.
 
-Either way the guarantee is the same: another user on the machine cannot read your password hash or your TLS key.
+## Honest limits
 
-## A tunnel is still a good idea
-
-TLS closes the "the wire is readable" hole. It does not make the port safe to expose:
-
-- The certificate is self-signed, so an unpinned client has no way to detect a MITM on first contact.
-- CORS is still `*`, and the API exposes file read, file upload, and git write operations.
-- A remote shell is a high-trust surface either way.
-
-So: keep Tether on the LAN, or behind **Tailscale** / **WireGuard** / an **SSH** port-forward. TLS is defence in depth on top of that, not a replacement for it, and it is what makes an accidental exposure survivable instead of catastrophic.
+- **A compromised server sees your PTY.** The server runs your shell, so it inherently reads the bytes flowing through it. Noise protects the wire and the pairing — not the host against itself. This is an accepted, documented limit, not a bug.
+- **The SQLite session log is not encrypted at rest.** It is locked to the owning user by filesystem permissions (POSIX modes, or ACLs on Windows), but at-rest encryption is deliberately out of scope for now.
+- **Not yet audited.** The design targets internet-exposability, but the protocol and crypto have not been through an external audit. Until they have, treat any "internet-safe" or "audited" claim as unearned — pair and run over a network you trust or a tunnel.
 
 ::: warning
-A remote shell is a high-trust surface. Anyone with the password and network reach gets a shell. Do not expose the port directly to the internet.
+A remote shell is a high-trust surface. Per-device keypairs and Noise raise the bar considerably, but until the external audit lands, prefer a private network or a tunnel over a bare open port.
 :::
