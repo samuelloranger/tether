@@ -170,9 +170,11 @@ async fn open_management_session<K: KeyStore>(
 /// health badge, since the password `/api/status` probe always 401s a Noise host.
 #[tauri::command]
 pub async fn core_noise_ping(host_id: String, address: String) -> Result<bool, String> {
-    Ok(open_management_session(&KeyringKeyStore, &host_id, &address)
-        .await
-        .is_ok())
+    Ok(
+        open_management_session(&KeyringKeyStore, &host_id, &address)
+            .await
+            .is_ok(),
+    )
 }
 
 /// List the devices paired with a Noise host over a dedicated management session.
