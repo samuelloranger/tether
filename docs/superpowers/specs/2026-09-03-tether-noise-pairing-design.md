@@ -67,8 +67,8 @@ Both suites are **fixed constants, never negotiated** — negotiation is a downg
 
 - A paired client opens **one Noise-secured channel** (the WebSocket, upgraded and then immediately running the `IK` handshake as its first bytes). All traffic after the handshake is Noise-encrypted frames.
 - That channel **multiplexes** three things over length-prefixed frames: (a) request/response pairs that stand in for the old REST calls, (b) the live PTY streams, (c) server→client events. A small frame header carries `{channel-id, type}`; the server reuses the existing Hono handlers internally by dispatching a decrypted request into them, so route logic is not rewritten — only its transport and auth change.
-- **Plain HTTP `/api/*` bearer routes are removed** once migration completes (see [Migration](#migration-password--keypair)). During Phase 1 they remain only for un-migrated legacy-password clients, hardened as described there.
-- `/api/status` stays as a tiny **unauthenticated** endpoint (it leaks no secret) so a client can discover the server and its Noise static key fingerprint before pairing. `/api/setup` (the old password-TOFU entry) is **removed on Noise-first installs** — leaving it is an unauthenticated password backdoor. Local loopback `/control/*` tokens (present CLI, signal) are unchanged; they never leave the host.
+- **Plain HTTP `/api/*` bearer routes and the password middleware are removed outright** — there is no coexistence period (see [Cutover](#cutover-no-coexistence)). After the WS upgrade + `IK` handshake, the Noise channel is the *only* transport for API traffic.
+- `/api/status` stays as a tiny **unauthenticated** discovery endpoint (it leaks no secret) so a client can find the server and its Noise static-key fingerprint before pairing. `/api/setup` and `set-password` are **removed entirely** — with no password there is nothing to set, and a lingering setup route would be an unauthenticated backdoor. Local loopback `/control/*` tokens (present CLI, signal) are unchanged; they never leave the host.
 
 ### FFI contract (the session-state machine)
 
@@ -172,30 +172,29 @@ The server has its own long-term X25519 static keypair — the identity every de
 - **Theft = MITM of every future IK reconnect.** It is as sensitive as the TLS private key and stored the same way.
 - **Rotation is an explicit operator action** (`tether rotate-identity`, resolve name in planning) that invalidates all pins and forces every device to re-pair — the deliberate, recoverable path if the key is believed compromised.
 
-## Migration (password → keypair) — and its downgrade rules
+## Cutover (no coexistence)
 
-Mirror the existing TLS cutover (`TETHER_TLS: both → only`), but with explicit anti-downgrade rules, because "both auth methods on the same port" is otherwise a downgrade oracle:
+**Decision: the password is removed outright, in one release — there is no coexist phase.** This is a deliberate hard cutover, and it *eliminates* the downgrade-oracle risk entirely: with no password path on the server, there is nothing for a MITM to force a client down to.
 
-- **Phase 1 — coexist, hardened.** Keypair auth ships alongside legacy password auth so un-migrated clients keep working. But:
-  - A client that has paired a keypair for a host **uses IK only and never falls back to password** for that host — a MITM cannot force it down to the password path.
-  - Legacy password auth is **rate-limited and lockout-protected** exactly like the enrollment surface (the first draft rate-limited only enrollment).
-  - **Phase 1 is documented as *not* internet-exposable.** While the password path is reachable, scanners and on-path attackers still have a target; keep it on a tunnel/LAN until the flip.
-- **Phase 2 — flip (irreversible).** A host-side switch (`TETHER_LEGACY_PASSWORD=off`, matching the `TETHER_TLS` shape) removes the password code path, `set-password` and `/api/setup` with it. End state: no shared secret anywhere, plain-HTTP bearer routes gone.
+- On upgrade to the Noise release, password auth, `set-password`, `/api/setup`, and the plain-HTTP bearer routes are **gone**. The device registry starts empty.
+- **Every existing client stops connecting until it re-pairs.** The operator updates the server, then runs `tether pair` on the host once per device and re-enrolls each — exactly the muscle memory of the `TETHER_TLS=only` flip, but forced at this one upgrade rather than opt-in.
+- This break is stated plainly in the release notes; there is no silent-fallback path by design.
+- Fresh installs: first-run is `tether pair`, never `set-password`.
 
-Fresh installs skip Phase 1: first-run is `tether pair`, never `set-password`.
+**Consequence to accept:** an operator who updates the server while away from the host (no shell access at that moment) locks themselves out until they can run `tether pair` there. Shell access to the host is, by design, the sole root of trust — so this is inherent, not a regression. Call it out in the upgrade docs.
 
 ## Hardening (rides along)
 
 - **Drop the plaintext default.** New installs default to no plaintext listener; `TETHER_TLS=off` becomes an explicit opt-out.
 - **CORS — allowlist, don't blanket-deny.** The Tauri desktop webview sends an `Origin`; a naive "reject all cross-origin" would break it. Scope CORS to the known webview origin(s) and nothing else, rather than `*` or a blind deny. (Native iOS and the server-internal dispatch are unaffected; this is about the desktop webview only.)
-- **Rate-limit both guessable surfaces** — the enrollment code *and* (during Phase 1) legacy password auth: per-source and global attempt caps on top of single-use/expiry.
+- **Rate-limit the one guessable surface** — the enrollment code: per-source and global attempt caps on top of single-use/expiry. (There is no password surface to rate-limit; it is removed outright.)
 - **Security headers** on any HTTP surface that remains.
 
 ## Affected components (blast radius)
 
 - **`crates/tether-core`** — Noise module (`snow`): frozen suites + prologue, XXpsk2 pairing + IK reconnect state machines, Argon2id PSK derivation, per-host keypair generation, server-key pinning, chunking + in-band rekey, the opaque-handle FFI surface.
 - **`crates/tether-ffi`** (or a new `tether-noise-ffi`) — C ABI for the Bun server; the packaging path for shipping the library inside `bun --compile`.
-- **`apps/server/src/server/`** — `auth.ts` (Noise-authed device identity + registry lookup gate, replacing bearer middleware), `app.ts` (WS gateway runs IK then multiplexes all API traffic as Noise frames; internal dispatch into existing Hono handlers), `db.ts` (device registry + migration), `main.ts` (`pair`/`devices`/`device`/`rotate-identity` verbs + host-side confirm prompt), remove `/api/setup` on Noise-first, `pushDevices.ts` (revoke deletes push rows), CORS config, `x509.ts`/`tlsStore.ts` (TLS demoted to defence-in-depth; new `noise/` keystore alongside).
+- **`apps/server/src/server/`** — `auth.ts` (Noise-authed device identity + registry lookup gate, **replacing bearer middleware outright** — delete password verify), `app.ts` (WS gateway runs IK then multiplexes all API traffic as Noise frames; internal dispatch into existing Hono handlers; **remove plain-HTTP bearer routes, `/api/setup`**), `db.ts` (device registry migration; drop the password-hash column/usage), `main.ts` (`pair`/`devices`/`device`/`rotate-identity` verbs + host-side confirm prompt; **remove `set-password`**), `admin.ts` (drop the password-change endpoint), `pushDevices.ts` (revoke deletes push rows), CORS config, `x509.ts`/`tlsStore.ts` (TLS demoted to defence-in-depth; new `noise/` keystore alongside).
 - **iOS (`clients/apple`)** — replace stored-password model (`HostStoreAdapter.password`, `NativeHostClient(profile, password)`, ~20 call sites) with per-host keypair in Keychain + the Noise client channel; pairing UI (scan/enter code); device management UI.
 - **Desktop (`apps/desktop`)** — same credential swap in `src-tauri` (keyring) + Noise client; typed-code pairing UI; device management UI.
 - **Deep-link scheme (`crates/tether-core/src/deep_link.rs`)** — unchanged for session routing; explicitly **not** used to carry pairing codes.
@@ -204,9 +203,9 @@ Fresh installs skip Phase 1: first-run is `tether pair`, never `set-password`.
 ## Testing strategy
 
 - **Rust core:** XXpsk2 success; wrong-code failure; suite/prologue mismatch hard-fails (no downgrade); IK reconnect against pinned key; **IK from an unregistered key is dropped before app data with no distinguishing error**; tampered-frame rejection; >64 KB chunk round-trip; in-band rekey mid-stream keeps the byte stream intact; Argon2id PSK determinism + salt binding; per-host keypairs differ across hosts.
-- **Server (bun:test):** enrollment window single-use/expiry/rate-limit; **host-confirm gate (no insert without `y`)**; race-loser gets the non-oracle error; **every `/api/*` operation refuses outside the Noise channel**; `/api/setup` absent on Noise-first; device registry CRUD; **revoke drops WS subscribers but the holder/PTY survives and replays**; **revoke deletes the push row**; migration: paired client refuses password fallback; legacy password rate-limited; CORS allows the webview origin and rejects others.
+- **Server (bun:test):** enrollment window single-use/expiry/rate-limit; **host-confirm gate (no insert without `y`)**; race-loser gets the non-oracle error; **every `/api/*` operation refuses outside the Noise channel**; **no password/`set-password`/`/api/setup` route exists at all** (route table assertion); device registry CRUD; **revoke drops WS subscribers but the holder/PTY survives and replays**; **revoke deletes the push row**; CORS allows the webview origin and rejects others.
 - **Cross-stack:** pair a simulated device end-to-end (Rust client ↔ Bun server FFI), confirm at the host, exchange an API request/response and a PTY frame over the one channel.
-- **Downgrade negative test:** a MITM that strips Noise / offers only the password path cannot get a keypair-paired client to authenticate.
+- **No-fallback test:** with the server on the Noise release, a client presenting a bearer password is rejected (401/closed) — there is no password path to fall back to.
 
 ## Security target & decomposition
 
