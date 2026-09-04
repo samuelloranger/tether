@@ -1,227 +1,166 @@
-# Noise-authenticated REST transport (and the password cutover)
+# Per-device auth tokens (replacing the shared password)
 
-Status: design / spec
+Status: design / spec (revised — supersedes the earlier HTTP-tunnel design)
 Date: 2026-09-04
 Author: pairing with Sam
 Depends on: the Noise pairing + session model already shipped (per-device X25519
-keypairs, IK reconnect, `/api/noise/{pair,session}`, device registry, devices
-list/revoke over the session).
+keypairs, IK reconnect, `/api/noise/{pair,session}`, device registry).
 
-## 1. Problem
+## 1. Problem and the pivot
 
-Today `authMiddleware` gates every `/api/*` route behind the shared password,
-except four public paths (`/api/status`, `/api/setup`, `/api/noise/pair`,
-`/api/noise/session`). Noise currently carries only two things: the terminal
-session (`output`/`exit` + `start`/`input`/`resize`) and device management
-(`devices.list`/`devices.revoke`). Everything else — sessions list/start/kill,
-git, file read, upload, presentations, push registration — is still
-password-only over plain REST. That is why the password cannot yet be removed:
-deleting `authMiddleware` would leave those routes unauthenticated (open to
-anyone on the port) or force deleting the features.
+Today every `/api/*` route is gated by the shared password (`authMiddleware`),
+except a few public paths. We want the password gone, access scoped to paired
+devices.
 
-Goal: carry the full **client-facing** REST surface over the authenticated
-Noise channel so the shared password can be removed entirely.
+An earlier draft tunneled the whole REST surface *inside* Noise (sealing every
+request/response) to be end-to-end even without TLS. That was overkill: the REST
+endpoints (session lists, git, file reads, uploads, config) don't need to be
+re-encrypted on top of HTTPS — they just need to require a paired device. The
+truly-sensitive live data (the terminal) is already end-to-end over Noise and
+stays that way.
 
-## 2. Decisions (locked)
+So: keep REST as normal HTTPS, and replace the shared-password check with a
+**per-device auth token** that a paired device obtains over its Noise channel.
 
-- **Transport: HTTP tunnel over Noise.** Hono is Web-standard (`app.fetch(Request)
-  -> Response`). A client serializes an HTTP request, seals it over Noise; the
-  server opens it, runs `app.fetch` against the *existing* route handlers, and
-  seals the response back. No per-endpoint message types; server routes and
-  client `fetch` call-sites keep their shapes — only the transport beneath them
-  changes.
-- **No coexistence — flag day.** This is not additive-forever. The end state is
-  Noise-only: the password (`authMiddleware`, `set-password`, `/api/setup`,
-  `/api/admin/password`, the TOFU `needsSetup` flow) is deleted in the same
-  effort, in one coordinated release across server + iOS + desktop. Old clients
-  stop working; that is accepted.
-- **Config + admin move to the host CLI**, off the remote surface entirely.
-  `/api/config` (PATCH) and `/api/admin/{update,restart,test-notification}`
-  become `tether` CLI operations on the host, reusing the existing loopback
-  present-control-token pattern. They never travel over Noise. `/api/admin/password`
-  disappears with the password.
-- **Remote Noise surface** (what the tunnel must carry): `/api/sessions`
-  (list/start/kill/rename), `/api/sessions/:id/{logs,diff,diff/file,diff/summary,
-  git/*,file,upload}`, `/api/presentations`, `/api/push/{register,unregister}`,
-  plus the already-built terminal + devices. `/api/health` stays a trivial
-  unauthenticated liveness route.
+## 2. Threat model (revised, honest)
 
-## 3. Threat model
+The terminal stays end-to-end encrypted over Noise (unchanged). The REST surface
+is an ordinary authenticated HTTPS API: **authentication** is per-device (only a
+paired device holds a valid token); **confidentiality** is TLS. A hostile proxy
+that terminates TLS could read a `git diff` or replay a token until it expires —
+acceptable for a homelab tool meant to run behind a tunnel/LAN, which is how
+Tether is deployed. This is the same posture as any token-authed HTTPS service.
 
-Internet-exposable + end-to-end. Confidentiality and authentication are the
-Noise layer's job, NOT TLS — a request must be unreadable and unforgeable to
-anyone who is not a paired device, even if TLS is absent or terminated by a
-proxy. Consequences: every tunneled request/response is sealed; authorization is
-by device keypair (registry lookup), fail-closed; TLS becomes optional (nice for
-`https://` URLs and ATS on iOS, but not a security dependency).
+## 3. Decisions (locked)
+
+- **Auth = a per-device bearer token.** A paired device asks for a token over its
+  authenticated Noise channel; presents it as `Authorization: Bearer <token>` on
+  REST calls; `authMiddleware` verifies it instead of a password.
+- **Stateless, signed token — no token store.** Token = a compact signed blob
+  `{ deviceId, issuedAt, expiresAt }` HMAC'd with a per-server secret. Verify =
+  check the signature + not-expired + **the device id is still in the registry**
+  (a revoked device is deleted from the registry, so its tokens stop verifying
+  immediately — revocation for free, no token table to maintain).
+- **Short lifetime + silent refresh.** Tokens live ~24h. The client re-mints over
+  Noise before expiry (or on a 401). No refresh tokens; the Noise keypair IS the
+  long-lived credential.
+- **No coexistence in the end state**, additive build: ship token-minting +
+  middleware-accepts-token first (password still accepted so nothing breaks),
+  migrate the clients, then remove the password in a flag-day cutover.
+- **Terminal stays E2E over Noise** (out of scope for this change). Its
+  metadata-parity gap (`title`/`activity`/`diff`/`reset` on the session protocol)
+  is a separate, still-needed plan.
+- **Config + admin**: with tokens, these are just normal token-authed REST — no
+  tunnel, no special handling. `/api/admin/password` goes away with the password;
+  the rest (`/api/config`, `/api/admin/{update,restart}`) can stay token-authed
+  REST. (Sam's earlier "config via CLI" preference is now optional, not required —
+  decide during the cutover plan.)
 
 ## 4. Architecture
 
-Three layers, client and server mirror each other:
-
 ```
-  REST call-site (client)                     Hono routes (server, unchanged)
-        | fetch-shaped request                        ^ Response
-   ┌────▼─────────────┐                          ┌────┴───────────────┐
-   │ NoiseHttp client │  serialize + reqId       │ NoiseHttp server   │
-   │  (mux + chunk)   │─────────────────────────▶│  app.fetch(Request)│
-   └────┬─────────────┘   sealed frames          └────┬───────────────┘
-        │                                              │
-   ┌────▼─────────────────────  Noise channel  ────────▼───────────────┐
-   │ IK-authenticated, registry-authorized (fail-closed) — the same    │
-   │ handshake the terminal/devices use. One RPC channel per host.     │
-   └───────────────────────────────────────────────────────────────────┘
+  Pair (existing) ──► device keypair pinned both sides
+        │
+  Noise session (existing IK channel, already authenticated)
+        │  { t:'auth.token' }  ──►  server mints + signs
+        │  ◄── { t:'auth.token', token, expiresAt }
+        ▼
+  Device caches token, then normal HTTPS:
+     GET /api/sessions   Authorization: Bearer <token>
+        │
+   authMiddleware.verify(token): sig ok? not expired? device still registered?
+        │  yes → route runs (unchanged)      no → 401
 ```
 
-### 4.1 The RPC channel
+### 4.1 The token
 
-A new endpoint `GET /api/noise/rpc` (WS upgrade), authenticated exactly like
-`/api/noise/session`: IK reconnect → registry lookup by pinned device pubkey →
-fail-closed before any app data. It is a **separate** channel from the terminal
-session (a host may have several terminals plus REST in flight), and it
-multiplexes concurrent requests. Reuse `authGate.runReconnect` +
-`ServerChannel`/`FrameIO`; thread the authorized device identity in for
-per-device authorization/audit.
+`crates`-free, server-side TS. A token is `base64url(payload) + "." +
+base64url(hmacSHA256(payload, secret))` where payload is
+`{ v:1, sub:<deviceId>, iat:<sec>, exp:<sec> }`. The secret is a per-server random
+key persisted alongside the Noise server keypair (`~/.tether/config/noise/`),
+generated once. Verification is constant-time on the HMAC, then `exp > now`, then
+`getDeviceById(sub)` is non-null. New module `apps/server/src/server/deviceToken.ts`
+(`mintToken(deviceId)`, `verifyToken(token) -> { deviceId } | null`), pure + unit-tested.
 
-One long-lived RPC channel per host, opened lazily on the first REST call and
-kept warm; re-established on drop with the same backoff the terminal pump uses.
+### 4.2 Minting over Noise
 
-### 4.2 Wire framing
+Extend the existing sealed session protocol (`noiseSessionProtocol.ts`, which
+already carries `devices.list`/`devices.revoke`) with one request/response:
 
-Every request and response is a sealed envelope. Requests and responses are
-multiplexed by `id`; large bodies are split into ordered chunks (a single Noise
-record caps at 65535 bytes, and uploads/file reads exceed that).
+- client → server (sealed): `{ t: 'auth.token' }`
+- server → client (sealed): `{ t: 'auth.token', token: string, expiresAt: string }`
 
-Client → server:
-- `{ t:'req', id, method, path, headers, bodyLen }` — request head (path includes
-  query string; headers is a small map, minus Authorization which no longer
-  exists).
-- `{ t:'req.body', id, seq, chunk }` — 0..N ordered body chunks (base64 or raw
-  bytes per the frame codec), for non-empty bodies (upload, POST/PATCH).
-- `{ t:'req.end', id }` — body complete.
-- `{ t:'req.cancel', id }` — client abandoned the request.
+The session channel is already IK-authenticated + registry-authorized, and the
+authorized `deviceId` is already threaded in — so minting is a one-liner:
+`mintToken(identity.deviceId)`. No new endpoint. A device that only needs REST
+opens a session, requests a token, and may close it.
 
-Server → client:
-- `{ t:'res', id, status, headers, bodyLen? }` — response head.
-- `{ t:'res.body', id, seq, chunk }` — 0..N ordered body chunks.
-- `{ t:'res.end', id }` — response complete.
-- `{ t:'res.error', id, message }` — transport-level failure (distinct from an
-  HTTP error status, which is a normal `res`).
+### 4.3 Middleware
 
-`id` is a per-channel monotonic u32 from the client. `seq` orders chunks per id.
-Chunk size is bounded well under the FFI transport buffer (reuse the existing
-`MAX_OUTPUT_CHARS`-style cap). A hard per-request byte ceiling and an in-flight
-request cap protect the server (mirror the DoS caps already added to the session
-endpoint).
+`authMiddleware` gains token acceptance:
 
-### 4.3 Server dispatch
+```
+if PUBLIC_API_PATHS.has(path): next()
+token = bearer(header)
+if token and verifyToken(token): next()            // device token — the new path
+else if token and await verifyPassword(token): next()  // password — removed at cutover
+else: 401
+```
 
-On `req.end` (or immediately for bodyless requests), reconstruct a standard
-`Request` (method, `https://noise.local<path>`, headers, a `ReadableStream` body
-fed by the buffered/streamed chunks) and call `app.fetch(request)`. Stream the
-returned `Response` back as `res` + `res.body` chunks. Because the request
-arrived through an authenticated Noise channel, it bypasses `authMiddleware`
-(which is being deleted anyway); a thin server-side guard still rejects paths not
-on the allowed remote surface (defense in depth — e.g., never tunnel `/api/config`
-or `/api/admin`).
+A `verifyToken` that also matches the `<payload>.<sig>` shape avoids paying an
+argon2 verify on a token that is obviously not a password. Order: try the token
+shape first, fall back to password.
 
-### 4.4 Client integration
+### 4.4 Client changes (small)
 
-A `NoiseHttp` client exposes a `fetch`-shaped method: `noiseFetch(hostId, path,
-init) -> Response`. Every existing REST call-site for a Noise host routes through
-it instead of `globalThis.fetch`/`URLSession`. On desktop this is a Tauri command
-(`core_noise_http`) plus a thin TS wrapper so `coreApi.ts` callers change their
-transport, not their shape; on iOS a method on `NoiseSessionClient` backing the
-existing `NativeHostClient` REST calls. The password `NativeHostClient` REST path
-is deleted at cutover.
+Both clients already send `Authorization: Bearer <password>` on REST. Change the
+*source* of that value from the stored password to a minted device token:
 
-## 5. Closing the terminal parity gap
+- On connect to a Noise host, open the session, send `auth.token`, cache the
+  `{token, expiresAt}` (in memory; re-mint on expiry or a 401).
+- The REST layer (`NativeHostClient` on iOS, the desktop REST fetch) reads the
+  cached token instead of the password for a Noise host. Password hosts are
+  unaffected until the cutover.
+- A 401 triggers one silent re-mint + retry; a second 401 surfaces as
+  auth-failed.
 
-The Noise session protocol currently emits only `output`/`exit`. The password
-terminal WS also emits `title`, `activity`, `diff`, `reset`, `ping`. For a
-Noise-only world those must flow too — add them to the session protocol
-(`{ t:'title'|'activity'|'diff'|'reset' , ... }`, sealed) so a Noise host gets
-live titles, activity/heat, git-diff nudges, and replay resets. `ping` becomes a
-keepalive on the channel. This is part of this effort, not a follow-up: without
-it, Noise hosts lose those signals at cutover.
+## 5. The cutover (flag day), ordered
 
-## 6. The `/preview` browser exception
+1. Server: `deviceToken.ts` + `auth.token` session message + middleware accepts
+   tokens (additive; password still works).
+2. Clients: mint + use tokens for Noise hosts.
+3. Coordinated release. Once every client is on tokens:
+4. Delete the password: `authMiddleware`'s password branch, `verifyPassword`,
+   `set-password` CLI, `/api/setup`, the TOFU `needsSetup` flow, `/api/status`'s
+   password reporting, `/api/admin/password`. Middleware becomes token-only.
+5. Rewrite `docs/security.md`: no shared password; access is per-device tokens
+   minted over Noise; confidentiality is TLS; the terminal is E2E over Noise.
 
-`tether present` serves HTML previews at `/preview/:token/*` for a **browser** to
-load. A browser cannot speak Noise, so this route cannot be part of the sealed
-remote surface. Decision: `/preview` binds **loopback-only** (host-local viewing)
-and is never internet-exposed. Native clients that render presentations in-app
-(iOS `PresentationView`, desktop `PresentationView`) fetch the HTML over the Noise
-tunnel like any other REST resource — they are not browsers. The public,
-tokenized `/preview` HTTP surface is removed from the exposed listener.
+## 6. Error handling
 
-## 7. The cutover (flag day), ordered
+- Bad/expired token → 401; client re-mints once over Noise, retries; a second
+  failure surfaces.
+- Revoked device → its `deviceId` is gone from the registry, so `verifyToken`
+  returns null → 401 on the very next request (no token store to purge).
+- Clock skew → `exp` uses server time; the client trusts `expiresAt` from the
+  mint response and refreshes a bit early (e.g., at 90% of lifetime).
+- Secret rotation (rare/manual): rotating the HMAC secret invalidates all tokens;
+  clients re-mint on the resulting 401. No migration needed.
 
-1. Ship the RPC channel + tunnel on the server (additive; password path still
-   present but now redundant for Noise hosts).
-2. Ship iOS + desktop routing all REST through `noiseFetch`; add the session
-   protocol metadata messages; move config/admin to CLI.
-3. Cut a coordinated release. Once every client is on Noise:
-4. Delete `authMiddleware` and its `app.use('/api/*', ...)`, `auth.ts` password +
-   token logic, `set-password` CLI, `/api/setup`, the `needsSetup`/TOFU flow,
-   `/api/status` password/`secure` reporting, `/api/admin/password`. Collapse
-   `PUBLIC_API_PATHS`. `/api/health` stays open; `/api/noise/*` self-authenticate.
-5. Rewrite `docs/security.md`: Noise is the auth+confidentiality layer; TLS is
-   optional; there is no shared password.
+## 7. Testing
 
-Because there is no coexistence, step 3 is a hard version floor — pre-cutover
-clients stop working against a post-cutover server. Documented in the release
-notes; enforced by a server version check that rejects the deleted routes with a
-clear "upgrade your client" error rather than a bare 404.
+- Unit: `mintToken`/`verifyToken` round-trip; tampered sig rejected; expired
+  rejected; unknown/revoked `deviceId` rejected (inject a fake registry lookup).
+- Unit: `authMiddleware` — a valid token passes, a forged token 401s, the
+  password still passes (pre-cutover), a public path is exempt.
+- Integration: `auth.token` over a fake session channel returns a token that
+  `verifyToken` accepts.
+- Live E2E (env-gated, homelab pattern): pair → open session → `auth.token` →
+  `GET /api/sessions` with the token → 200; revoke the device → the same token
+  now 401s (fail-closed).
 
-## 8. Error handling
+## 8. Out of scope
 
-- Transport (channel dropped, decrypt failure, chunk overflow, in-flight cap) →
-  `res.error` for pending ids + channel teardown; client retries by reopening the
-  channel and re-issuing idempotent requests. Non-idempotent (POST upload) surface
-  the error to the caller rather than auto-retry.
-- HTTP errors (4xx/5xx from a route) are normal `res` frames — the tunnel is
-  transparent to them.
-- Revoked/unknown device → the IK handshake or the registry gate fails before any
-  `req` is accepted (fail-closed), same as the session endpoint.
-- Path not on the allowed remote surface → server replies `res` 403 without
-  dispatching.
-
-## 9. Testing
-
-- Unit: envelope codec (req/res head + chunk ordering + reassembly), mux (two
-  concurrent ids don't interleave bodies), chunking at/over the record cap,
-  path-allowlist guard.
-- Integration: `app.fetch` driven through an in-memory channel pair — a real
-  route (`GET /api/sessions`) round-trips; an upload streams; a 404 passes
-  through; a disallowed path is refused.
-- Live E2E (env-gated, homelab pattern): pair → open RPC channel → `GET
-  /api/sessions` over Noise returns the list; a revoked device is refused
-  (fail-closed). Mirrors the existing session/devices live E2Es.
-- Regression: the full server suite stays green while the tunnel is additive;
-  after the cutover, the password tests are deleted with the password.
-
-## 10. Risks / open items
-
-- **Large uploads/downloads** over a sealed, chunked, single channel are slower
-  than raw HTTP and serialize behind other RPCs on that channel. Mitigation:
-  per-request chunk streaming (not buffer-whole), and consider a second RPC
-  channel for bulk transfers if a single channel head-of-line blocks interactive
-  calls. Measure before optimizing.
-- **Streaming responses**: Tether's only true stream is the terminal (already its
-  own channel). REST responses here are bounded (lists, diffs, file reads), so
-  request/response framing suffices; no SSE needed.
-- **Flag-day risk**: no coexistence means server + both clients must ship
-  together. The version-floor rejection message is the safety net.
-- **Perf of an IK handshake per channel** is amortized by keeping one warm RPC
-  channel per host; only reconnects pay it.
-- **Audit/authorization granularity**: the device identity is available per
-  request, enabling per-device scoping later (not in scope now — all paired
-  devices are equal, matching the CLI).
-
-## 11. Out of scope
-
-Per-device permission tiers; a rendezvous relay (explicitly dropped earlier);
-browser access to the sealed surface; changing the terminal transport (already on
-Noise). Config/admin remote editing is intentionally removed, not moved to the
-tunnel.
+Per-device permission tiers; refresh tokens; changing the terminal transport
+(already Noise); the terminal metadata-parity plan; a rendezvous relay (dropped).
+Whether config/admin move to the CLI is deferred to the cutover plan.
