@@ -128,6 +128,23 @@ const migrations = [
       );
     `,
   },
+  {
+    version: 9,
+    name: 'auth_devices',
+    // One row per authorized device public key — the authorized_keys allow-list
+    // for Noise auth. pubkey is base64 of the 32-byte X25519 static key, unique.
+    up: `
+      CREATE TABLE IF NOT EXISTS auth_devices (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        pubkey TEXT NOT NULL UNIQUE,
+        fingerprint TEXT NOT NULL,
+        paired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME,
+        last_address TEXT
+      );
+    `,
+  },
 ];
 
 export function runMigrations() {

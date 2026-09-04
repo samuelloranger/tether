@@ -280,6 +280,8 @@ Usage: tether <command>
   present          Open/reset an agent HTML preview or install an agent skill
   signal           Tell tether this session is working / waiting / done
   set-password     Set the shared access password (required for clients)
+  devices          List authorized devices
+  device <cmd>     Manage a device: revoke <target> | rename <target> <name>
   update           Download the latest release binary and restart
   version          Print the version
   help             Show this help
@@ -348,6 +350,23 @@ switch (cmd) {
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
+    }
+    break;
+  }
+  case 'devices': {
+    const { runDevice } = await import('./deviceCli');
+    const result = runDevice({ kind: 'list' });
+    process.exit(result.ok ? 0 : 1);
+    break;
+  }
+  case 'device': {
+    const { parseDeviceArgs, runDevice } = await import('./deviceCli');
+    try {
+      const result = runDevice(parseDeviceArgs(process.argv.slice(3)));
+      process.exit(result.ok ? 0 : 1);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
     }
     break;
   }
