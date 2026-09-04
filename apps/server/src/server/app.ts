@@ -11,6 +11,7 @@ import { authMiddleware } from './auth';
 import { getConfig } from './config';
 import { getAuthHash, setAuthHashIfUnset } from './db';
 import { logError, logInfo } from './log';
+import { pairControlRoutes } from './pairControl';
 import { sendTestPush } from './push';
 import { isValidSecretKey } from './pushCrypto';
 import { registerPushDevice, removePushDevice } from './pushDevices';
@@ -207,6 +208,7 @@ app.post('/api/push/unregister', async (c) => {
 });
 
 app.route('/', presentationsRoutes);
+app.route('/', pairControlRoutes);
 app.route('/', configRoutes);
 app.route('/', filesRoutes);
 app.route('/', gitRoutes);
