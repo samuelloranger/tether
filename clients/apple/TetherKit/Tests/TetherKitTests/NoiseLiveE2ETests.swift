@@ -2,6 +2,23 @@ import XCTest
 
 @testable import TetherKit
 
+/// Accepts the server's self-signed TLS cert. Trust here is redundant: the Noise
+/// handshake authenticates the server by its pinned static key, and TLS is only
+/// present to satisfy iOS App Transport Security (which blocks cleartext ws://).
+private final class InsecureTrustDelegate: NSObject, URLSessionDelegate {
+  func urlSession(
+    _ session: URLSession,
+    didReceive challenge: URLAuthenticationChallenge,
+    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+  ) {
+    if let trust = challenge.protectionSpace.serverTrust {
+      completionHandler(.useCredential, URLCredential(trust: trust))
+    } else {
+      completionHandler(.performDefaultHandling, nil)
+    }
+  }
+}
+
 /// Live end-to-end test: a real Swift Noise client pairs, reconnects, and runs a
 /// shell command against a REAL running tether server over the network.
 ///
@@ -19,7 +36,10 @@ final class NoiseLiveE2ETests: XCTestCase {
     }
 
     let hostId = "e2e-\(UUID().uuidString)"
-    let client = NoiseSessionClient(keyStore: FakeNoiseKeyStore())
+    // TLS (wss) to satisfy ATS; the delegate accepts the self-signed cert.
+    let urlSession = URLSession(
+      configuration: .ephemeral, delegate: InsecureTrustDelegate(), delegateQueue: nil)
+    let client = NoiseSessionClient(keyStore: FakeNoiseKeyStore(), session: urlSession)
 
     // Pair: XXpsk2 over /api/noise/pair (host auto-confirms out of band).
     let serverPub = try await client.pair(hostId: hostId, url: url, code: code)
