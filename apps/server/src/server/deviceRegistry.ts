@@ -50,6 +50,8 @@ function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
 }
 
+const DEVICE_COLUMNS = 'id, label, pubkey, fingerprint, paired_at, last_seen_at, last_address';
+
 export function addDevice(input: { label: string; pubkey: string; address?: string }): AuthDevice {
   const id = crypto.randomUUID();
   const fingerprint = fingerprintOf(input.pubkey);
@@ -86,7 +88,7 @@ export function addDevice(input: { label: string; pubkey: string; address?: stri
 export function listDevices(): AuthDevice[] {
   const rows = db
     .query(
-      `SELECT id, label, pubkey, fingerprint, paired_at, last_seen_at, last_address
+      `SELECT ${DEVICE_COLUMNS}
        FROM auth_devices
        ORDER BY paired_at DESC, rowid DESC`,
     )
@@ -96,11 +98,64 @@ export function listDevices(): AuthDevice[] {
 
 export function getDeviceByPubkey(pubkey: string): AuthDevice | null {
   const row = db
-    .query(
-      `SELECT id, label, pubkey, fingerprint, paired_at, last_seen_at, last_address
-       FROM auth_devices
-       WHERE pubkey = $pubkey`,
-    )
+    .query(`SELECT ${DEVICE_COLUMNS} FROM auth_devices WHERE pubkey = $pubkey`)
     .get({ $pubkey: pubkey }) as AuthDeviceRow | null;
   return row ? fromRow(row) : null;
+}
+
+function getDeviceById(id: string): AuthDevice | null {
+  const row = db
+    .query(`SELECT ${DEVICE_COLUMNS} FROM auth_devices WHERE id = $id`)
+    .get({ $id: id }) as AuthDeviceRow | null;
+  return row ? fromRow(row) : null;
+}
+
+export function resolveTarget(target: string): AuthDevice {
+  const rows = db
+    .query(
+      `SELECT id FROM auth_devices WHERE label = $t
+       UNION
+       SELECT id FROM auth_devices WHERE fingerprint LIKE $t || '%'`,
+    )
+    .all({ $t: target }) as { id: string }[];
+  if (rows.length === 0) {
+    throw new RegistryError('not_found', `no device matches '${target}'`);
+  }
+  if (rows.length > 1) {
+    throw new RegistryError('ambiguous', `multiple devices match '${target}'`);
+  }
+  return getDeviceById(rows[0].id)!;
+}
+
+export function revokeDevice(target: string): AuthDevice {
+  const device = resolveTarget(target);
+  db.query('DELETE FROM auth_devices WHERE id = $id').run({ $id: device.id });
+  // Plan 2c: tear down the device's live connection and delete its push_devices row.
+  return device;
+}
+
+export function renameDevice(target: string, label: string): AuthDevice {
+  const device = resolveTarget(target);
+  db.query('UPDATE auth_devices SET label = $label WHERE id = $id').run({
+    $id: device.id,
+    $label: label,
+  });
+  return { ...device, label };
+}
+
+export function touchDevice(pubkey: string, address?: string): void {
+  db.query(
+    `UPDATE auth_devices
+     SET last_seen_at = $now, last_address = COALESCE($address, last_address)
+     WHERE pubkey = $pubkey`,
+  ).run({
+    $now: new Date().toISOString(),
+    $address: address ?? null,
+    $pubkey: pubkey,
+  });
+}
+
+export function deviceCount(): number {
+  const row = db.query('SELECT COUNT(*) AS n FROM auth_devices').get() as { n: number };
+  return row.n;
 }
