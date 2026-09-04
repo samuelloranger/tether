@@ -1,5 +1,6 @@
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
+import { mintToken as mintDeviceToken } from './deviceToken';
 import { logError } from './log';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import {
@@ -35,6 +36,15 @@ export interface SessionDeps {
   revokeDevice: typeof revokeDevice;
   resolveTarget: typeof resolveTarget;
   identity: SessionIdentity;
+  mintToken?: (deviceId: string) => { token: string; expiresAt: string };
+}
+
+function defaultMintToken(deviceId: string): { token: string; expiresAt: string } {
+  const token = mintDeviceToken(deviceId);
+  const payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString()) as {
+    exp: number;
+  };
+  return { token, expiresAt: new Date(payload.exp * 1000).toISOString() };
 }
 
 const defaultDeps: SessionDeps = {
@@ -46,6 +56,7 @@ const defaultDeps: SessionDeps = {
   revokeDevice,
   resolveTarget,
   identity: { deviceId: '' },
+  mintToken: defaultMintToken,
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
@@ -54,7 +65,8 @@ type ClientMessage =
   | { t: 'input'; id: string; text: string }
   | { t: 'resize'; id: string; cols: number; rows: number }
   | { t: 'devices.list' }
-  | { t: 'devices.revoke'; target: string };
+  | { t: 'devices.revoke'; target: string }
+  | { t: 'auth.token' };
 
 /** One row of the `devices` reply — the wire shape an iOS client mirrors. */
 interface DeviceListItem {
@@ -163,6 +175,10 @@ async function applyMessage(
     if (attachment) d.resizeSession(msg.id, attachment.sub, msg.cols, msg.rows);
   } else if (msg.t === 'devices.list' || msg.t === 'devices.revoke') {
     applyDevicesMessage(msg, d, sendSealed);
+  } else if (msg.t === 'auth.token') {
+    const mint = d.mintToken ?? defaultMintToken;
+    const { token, expiresAt } = mint(d.identity.deviceId);
+    sendSealed({ t: 'auth.token', token, expiresAt });
   }
 }
 

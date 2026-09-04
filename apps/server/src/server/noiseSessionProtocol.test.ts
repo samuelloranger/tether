@@ -428,4 +428,27 @@ describe('runNoiseSession — device management', () => {
       error: 'That target matches more than one device.',
     });
   });
+
+  test("'auth.token' seals back the injected mint for the session device", async () => {
+    const pty = fakePty();
+    const minted = { token: 'tok-from-inject', expiresAt: '2026-09-05T00:00:00.000Z' };
+    const mintedFor: string[] = [];
+    const io = scriptedIo([jsonFrame({ t: 'auth.token' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      identity: { deviceId: 'dev-self' },
+      mintToken: (deviceId) => {
+        mintedFor.push(deviceId);
+        return minted;
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(mintedFor).toEqual(['dev-self']);
+    expect(JSON.parse(dec.decode(io.sent[0]))).toEqual({
+      t: 'auth.token',
+      token: 'tok-from-inject',
+      expiresAt: '2026-09-05T00:00:00.000Z',
+    });
+  });
 });
