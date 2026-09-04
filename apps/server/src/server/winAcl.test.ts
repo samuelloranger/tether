@@ -249,50 +249,60 @@ function expectOwnerOnly(target: string, label: string): void {
   expect(sids).toContain(mine as string);
 }
 
-test.skipIf(!IS_WINDOWS)('applies a real owner-only ACL to a directory', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tether-acl-e2e-'));
-  try {
-    expect(secureInChild(dir, true)).toBe('applied');
+test.skipIf(!IS_WINDOWS)(
+  'applies a real owner-only ACL to a directory',
+  () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'tether-acl-e2e-'));
+    try {
+      expect(secureInChild(dir, true)).toBe('applied');
 
-    const shown = spawnSync('icacls.exe', [dir], { encoding: 'utf8', windowsHide: true });
-    expect(shown.status).toBe(0);
-    const acl = shown.stdout;
+      const shown = spawnSync('icacls.exe', [dir], { encoding: 'utf8', windowsHide: true });
+      expect(shown.status).toBe(0);
+      const acl = shown.stdout;
 
-    // Inheritance was dropped: none of the entries icacls prints may be marked
-    // (I). A surviving inherited entry is the whole failure mode this guards
-    // against — the profile's ACL flowing down into the state directory.
-    expect(acl).not.toContain('(I)');
+      // Inheritance was dropped: none of the entries icacls prints may be marked
+      // (I). A surviving inherited entry is the whole failure mode this guards
+      // against — the profile's ACL flowing down into the state directory.
+      expect(acl).not.toContain('(I)');
 
-    // We are granted, and nobody unprivileged is. See expectOwnerOnly for why
-    // that is the property rather than "exactly one entry".
-    expect(currentUserPrincipal()).not.toBeNull();
-    expectOwnerOnly(dir, 'directory');
+      // We are granted, and nobody unprivileged is. See expectOwnerOnly for why
+      // that is the property rather than "exactly one entry".
+      expect(currentUserPrincipal()).not.toBeNull();
+      expectOwnerOnly(dir, 'directory');
 
-    // And the grant is inheritable, which is what lets the files created inside
-    // HOLDERS_DIR skip an icacls spawn each.
-    expect(acl).toMatch(/\(OI\)\(CI\)/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+      // And the grant is inheritable, which is what lets the files created inside
+      // HOLDERS_DIR skip an icacls spawn each.
+      expect(acl).toMatch(/\(OI\)\(CI\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    // Spawns a child (secureInChild) plus several icacls.exe reads; slow enough on
+    // a contended Windows CI runner to exceed bun's 5000ms default.
+  },
+  20_000,
+);
 
-test.skipIf(!IS_WINDOWS)('a directory ACL is inherited by files created inside it', () => {
-  // The claim ptyHolder.ts and holder.ts rely on to avoid two icacls spawns per
-  // session start. Asserted rather than assumed, because if inheritance did not
-  // in fact reach new files the holder socket and pid file would be silently
-  // unprotected.
-  const dir = mkdtempSync(path.join(tmpdir(), 'tether-acl-inherit-'));
-  try {
-    expect(secureInChild(dir, true)).toBe('applied');
-    const child = path.join(dir, 'session.sock.pid');
-    Bun.write(child, '1234');
+test.skipIf(!IS_WINDOWS)(
+  'a directory ACL is inherited by files created inside it',
+  () => {
+    // The claim ptyHolder.ts and holder.ts rely on to avoid two icacls spawns per
+    // session start. Asserted rather than assumed, because if inheritance did not
+    // in fact reach new files the holder socket and pid file would be silently
+    // unprotected.
+    const dir = mkdtempSync(path.join(tmpdir(), 'tether-acl-inherit-'));
+    try {
+      expect(secureInChild(dir, true)).toBe('applied');
+      const child = path.join(dir, 'session.sock.pid');
+      Bun.write(child, '1234');
 
-    // The inherited grant reached the new file, and brought nothing else with it.
-    expectOwnerOnly(child, 'inherited file');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+      // The inherited grant reached the new file, and brought nothing else with it.
+      expectOwnerOnly(child, 'inherited file');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+  20_000,
+);
 
 test.skipIf(!IS_WINDOWS)(
   'reports failure instead of throwing on a path that does not exist',
