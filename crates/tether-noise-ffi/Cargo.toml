@@ -1,0 +1,13 @@
+[package]
+name = "tether-noise-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI over tether-core::noise for the Bun server"
+publish = false
+
+[lib]
+name = "tether_noise_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]
+tether-core = { path = "../tether-core" }
