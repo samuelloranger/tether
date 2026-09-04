@@ -20,17 +20,14 @@ irm https://samlo.cloud/tether/install.ps1 | iex
 
 Same idea: one self-contained `tether.exe`, installed to `%LOCALAPPDATA%\Programs\tether` with no administrator prompt, and that directory added to your user `PATH` — open a new terminal for it to take effect. Windows x64 only. See [Windows server](/windows) for which shells work, the firewall prompt on first start, and what behaves differently there.
 
-## 2. Set a password and start it
-
-Every client must authenticate with a shared password.
+## 2. Start it
 
 ```sh
-tether set-password      # prompts, hidden input
 tether start             # runs in the background on :8085
 tether status            # confirm it's up
 ```
 
-You can also set the password later from the phone the first time you connect (see below).
+There is no password to set. Access is granted per device by pairing (next section) — the same trust model as SSH `authorized_keys`. See [Security & networking](/security) for how it works.
 
 ## 3. Install a client
 
@@ -44,16 +41,22 @@ Pick the app for your device — both connect to the same server the same way. E
 - **iOS** — install [TestFlight](https://apps.apple.com/app/testflight/id899247664), then open the [public beta link](https://testflight.apple.com/join/j7rPkfhq). No Mac, no AltServer, and nothing to re-sign every week. New builds arrive automatically; each is testable for 90 days.
 - **Desktop** — download the installer for your platform; see [Desktop app](/desktop) for the per-OS files and how it differs from mobile.
 
-## 4. Connect
+## 4. Pair the device
 
-In the app's setup screen, enter your server's **host/IP**, **port** (default `8085`), and **password**, then **Test connection**. You'll get one of:
+On the **server**, open an enrollment window:
 
-- **Reachable** — the server answered and the password is correct. Save & connect.
-- **This server has no password yet** — you're pairing a fresh server; choose a password and the app sets it.
-- **Wrong password** / **Unreachable** — fix and retry.
+```sh
+tether pair              # prints a 12-char code (and a QR) valid ~5 min
+```
 
-::: tip Encryption
-The password controls *access*, not encryption. For encrypted transport, run Tether behind a tunnel — see [Security & networking](/security).
+In the app's setup screen, enter your server's **host/IP** and **port** (default `8085`), then enter the **12-char code** (or scan the QR on a phone). The device generates its own key and enrolls over an encrypted handshake. Back on the server, `tether pair` shows the new device's name + fingerprint and asks you to confirm — press **y** to authorize it.
+
+That's it: the device is now paired. It reconnects on its own key from then on — no code, no password. Repeat `tether pair` once per device.
+
+Manage devices anytime with `tether devices` (list) and `tether device revoke <name>` (kick one out; running shells keep going).
+
+::: tip Encryption is automatic
+Every connection is end-to-end encrypted by [Noise](/security#transport-encryption), even on the LAN. To reach the server from outside your network without opening a port, see [Reach your server from anywhere](/reach-from-anywhere).
 :::
 
 Once connected, see [Terminal basics](/terminal/basics).
