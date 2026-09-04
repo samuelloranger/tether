@@ -40,34 +40,56 @@ interface Waiter {
  * that grows past `maxQueue` (default 1024) is treated as fatal: the adapter
  * closes and the channel is torn down, rather than silently dropping frames.
  */
+// A single inbound Noise frame is one handshake message (<= 65535) or a sealed
+// control message (tiny). Cap generously but hard: a frame past this is a
+// misuse/attack, not legitimate traffic, so it is fatal rather than buffered.
+// (Server -> client output frames are outbound and not subject to this.)
+export const MAX_FRAME_BYTES = 128 * 1024;
+
 export class WsFrameIO implements FrameIO {
   private queue: Uint8Array[] = [];
   private waiters: Waiter[] = [];
   private closedErr: Error | null = null;
+  private queuedBytes = 0;
 
   constructor(
     private ws: WsSender,
     private maxQueue = 1024,
+    private maxQueueBytes = 8 * 1024 * 1024,
   ) {}
 
   /** Enqueue a frame received from the socket, or hand it to a waiting `recv`. */
   push(bytes: Uint8Array): void {
     if (this.closedErr) return; // frames after close are dropped
+    // Byte-cap each frame: a single oversized frame must not be copied/buffered.
+    if (bytes.length > MAX_FRAME_BYTES) {
+      this.close(new Error('WsFrameIO: frame exceeds MAX_FRAME_BYTES'));
+      return;
+    }
     const waiter = this.waiters.shift();
     if (waiter) {
       waiter.resolve(bytes);
       return;
     }
-    if (this.queue.length >= this.maxQueue) {
+    // Bound the backlog by both count and total bytes — a Noise transport cannot
+    // tolerate a dropped/reordered frame, so overflow is fatal, not lossy.
+    if (
+      this.queue.length >= this.maxQueue ||
+      this.queuedBytes + bytes.length > this.maxQueueBytes
+    ) {
       this.close(new Error('WsFrameIO: receive queue overflow'));
       return;
     }
     this.queue.push(bytes);
+    this.queuedBytes += bytes.length;
   }
 
   recv(): Promise<Uint8Array> {
     const frame = this.queue.shift();
-    if (frame !== undefined) return Promise.resolve(frame);
+    if (frame !== undefined) {
+      this.queuedBytes -= frame.length;
+      return Promise.resolve(frame);
+    }
     if (this.closedErr) return Promise.reject(this.closedErr);
     return new Promise<Uint8Array>((resolve, reject) => {
       this.waiters.push({ resolve, reject });

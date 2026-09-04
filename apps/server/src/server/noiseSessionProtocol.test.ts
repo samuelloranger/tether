@@ -197,3 +197,47 @@ describe('runNoiseSession', () => {
     expect(pty.starts).toHaveLength(0);
   });
 });
+
+describe('runNoiseSession — robustness (cipher-desync fixes)', () => {
+  test('large output is chunked into multiple sealed frames (each under the FFI buffer)', async () => {
+    const pty = fakePty();
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1' })]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    const big = 'x'.repeat(40 * 1024); // > MAX_OUTPUT_CHARS (16 KiB)
+    pty.subscriptions[0].sub({ type: 'output', chunk: big, id: 1 });
+
+    expect(io.sent.length).toBeGreaterThan(1);
+    // Reassembling the chunks reproduces the original output exactly.
+    const reassembled = io.sent
+      .map((f) => JSON.parse(dec.decode(f)) as { t: string; chunk: string })
+      .filter((m) => m.t === 'output')
+      .map((m) => m.chunk)
+      .join('');
+    expect(reassembled).toBe(big);
+    for (const f of io.sent) expect(f.length).toBeLessThan(512 * 1024);
+  });
+
+  test('a seal failure tears the session down instead of desyncing the cipher', async () => {
+    const pty = fakePty();
+    // A channel whose seal always throws (mimics an FFI seal/send failure).
+    const throwing = {
+      seal: () => {
+        throw new Error('seal boom');
+      },
+      open: (wire: Uint8Array) => wire,
+      free: () => {},
+    } as unknown as ServerChannel;
+
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1' })]);
+    const done = runNoiseSession(throwing, io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Driving output triggers a seal failure → fatal → the loop returns.
+    pty.subscriptions[0].sub({ type: 'output', chunk: 'boom', id: 1 });
+    await expect(done).resolves.toBeUndefined();
+    expect(pty.unsubscribed).toBeGreaterThanOrEqual(1); // cleaned up
+    expect(io.sent).toHaveLength(0); // nothing sent after the failed seal
+  });
+});

@@ -43,8 +43,10 @@ const { symbols } = dlopen(LIB, {
 
 const OK = 0;
 
-// A big-enough scratch buffer for any single Noise message / framed payload.
-const BUF = 128 * 1024;
+// Scratch buffer for a single Noise message / framed payload. Callers keep
+// individual frames well under this (session output is chunked to ~16 KiB of
+// plaintext); the margin absorbs JSON escaping expansion + Noise framing.
+const BUF = 512 * 1024;
 
 type IoFn = (
   h: Pointer,

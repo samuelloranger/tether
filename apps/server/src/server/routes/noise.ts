@@ -11,6 +11,25 @@ import { handlePairingConnection } from '../pairControl';
 
 export const noiseRoutes = new Hono();
 
+// Public (pre-auth-reachable) endpoints: bound how many Noise sockets can be
+// mid-flight at once, and kill an upgrade whose handshake stalls, so idle/hostile
+// connections can't pin file descriptors + native handshake handles.
+const MAX_NOISE_CONNECTIONS = 64;
+const HANDSHAKE_TIMEOUT_MS = 10_000;
+let activeNoiseConnections = 0;
+
+/** Reject a handshake that does not complete within `ms`, running `onTimeout`. */
+function withHandshakeTimeout<T>(p: Promise<T>, onTimeout: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      onTimeout();
+      reject(new ChannelError('handshake'));
+    }, HANDSHAKE_TIMEOUT_MS);
+  });
+  return Promise.race([p.finally(() => clearTimeout(timer)), timeout]);
+}
+
 /**
  * The Noise WebSocket front door. These two routes are the ONLY `/api/*`
  * endpoints that bypass the shared-password `authMiddleware` (they are listed in
@@ -48,9 +67,16 @@ noiseRoutes.get(
     let io: WsFrameIO | null = null;
     return {
       onOpen(_evt, ws) {
+        if (activeNoiseConnections >= MAX_NOISE_CONNECTIONS) {
+          try {
+            ws.close(1013); // Try Again Later
+          } catch {}
+          return;
+        }
+        activeNoiseConnections += 1;
         const adapter = new WsFrameIO(sink(ws));
         io = adapter;
-        handlePairingConnection(adapter)
+        withHandshakeTimeout(handlePairingConnection(adapter), () => adapter.close())
           .then((res) => {
             logInfo(`Noise pairing enrolled device ${res.pubkey}`);
             ws.send(JSON.stringify({ ok: true }));
@@ -66,7 +92,10 @@ noiseRoutes.get(
             } catch {}
             ws.close();
           })
-          .finally(() => adapter.close());
+          .finally(() => {
+            adapter.close();
+            activeNoiseConnections -= 1;
+          });
       },
       onMessage(evt) {
         if (io) pushFrame(io, evt.data);
@@ -87,16 +116,30 @@ noiseRoutes.get(
     let io: WsFrameIO | null = null;
     return {
       onOpen(_evt, ws) {
+        if (activeNoiseConnections >= MAX_NOISE_CONNECTIONS) {
+          try {
+            ws.close(1013); // Try Again Later
+          } catch {}
+          return;
+        }
+        activeNoiseConnections += 1;
         const adapter = new WsFrameIO(sink(ws));
         io = adapter;
         const priv = loadOrCreateServerKeypair().priv;
-        runReconnect(adapter, priv, { getDeviceByPubkey, touchDevice })
+        // Only the handshake is time-bounded; an established session runs as long
+        // as the client keeps it open.
+        withHandshakeTimeout(runReconnect(adapter, priv, { getDeviceByPubkey, touchDevice }), () =>
+          adapter.close(),
+        )
           .then(async ({ channel, device }) => {
             logInfo(`Noise session authorized device ${device.id}`);
             try {
               await runNoiseSession(channel, adapter);
             } finally {
               channel.free();
+              try {
+                ws.close();
+              } catch {}
             }
           })
           .catch((err) => {
@@ -110,7 +153,10 @@ noiseRoutes.get(
               ws.close(1008);
             } catch {}
           })
-          .finally(() => adapter.close());
+          .finally(() => {
+            adapter.close();
+            activeNoiseConnections -= 1;
+          });
       },
       onMessage(evt) {
         if (io) pushFrame(io, evt.data);

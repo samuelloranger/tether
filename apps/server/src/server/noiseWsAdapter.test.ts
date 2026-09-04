@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { toFrameBytes, WsFrameIO } from './noiseWsAdapter';
+import { MAX_FRAME_BYTES, toFrameBytes, WsFrameIO } from './noiseWsAdapter';
 
 function fakeWs(): { send: (data: Uint8Array) => void; sent: Uint8Array[] } {
   const sent: Uint8Array[] = [];
@@ -90,5 +90,22 @@ describe('toFrameBytes', () => {
 
   test('returns null for a text (string) frame', () => {
     expect(toFrameBytes('hello')).toBeNull();
+  });
+});
+
+describe('WsFrameIO — byte caps (DoS fixes)', () => {
+  test('an oversized frame closes the adapter instead of buffering it', async () => {
+    const io = new WsFrameIO({ send: () => {} });
+    const recv = io.recv();
+    io.push(new Uint8Array(MAX_FRAME_BYTES + 1));
+    expect(io.closed).toBe(true);
+    await expect(recv).rejects.toThrow(/MAX_FRAME_BYTES/);
+  });
+
+  test('a frame at the cap is accepted', async () => {
+    const io = new WsFrameIO({ send: () => {} });
+    io.push(new Uint8Array(MAX_FRAME_BYTES));
+    expect(io.closed).toBe(false);
+    expect((await io.recv()).length).toBe(MAX_FRAME_BYTES);
   });
 });
