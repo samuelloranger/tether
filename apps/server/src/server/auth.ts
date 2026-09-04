@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
 import { getAuthHash } from './db';
+import { looksLikeToken, verifyToken } from './deviceToken';
 
 // Verify a provided password against the stored argon2 hash.
 // No password set ⇒ always false (server refuses until `tether set-password`).
@@ -35,9 +36,14 @@ const PUBLIC_API_PATHS = new Set([
 export const authMiddleware: MiddlewareHandler = async (c, next) => {
   if (PUBLIC_API_PATHS.has(c.req.path)) return next();
   const header = c.req.header('Authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!token || !(await verifyPassword(token))) {
-    return c.json({ error: 'auth' }, 401);
+  const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (looksLikeToken(bearer) && verifyToken(bearer)) {
+    await next();
+    return;
   }
-  await next();
+  if (bearer && (await verifyPassword(bearer))) {
+    await next();
+    return;
+  }
+  return c.json({ error: 'auth' }, 401);
 };
