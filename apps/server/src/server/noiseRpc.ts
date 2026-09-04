@@ -75,5 +75,124 @@ const ALLOW_PREFIXES = ['/api/sessions', '/api/presentations', '/api/push/'];
 export function isTunnelablePath(path: string): boolean {
   // Normalize away any traversal, then compare the pathname only.
   const clean = new URL(path, 'https://noise.local').pathname;
-  return ALLOW_PREFIXES.some((p) => clean === p || clean.startsWith(`${p}/`) || clean.startsWith(p));
+  return ALLOW_PREFIXES.some(
+    (p) => clean === p || clean.startsWith(`${p}/`) || clean.startsWith(p),
+  );
+}
+
+import type { FrameIO, ServerChannel } from './noiseChannel';
+
+export interface RpcDeps {
+  dispatch: (req: Request) => Promise<Response>;
+  identity: { deviceId: string };
+  maxInFlight?: number;
+}
+
+interface Pending {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  hasBody: boolean;
+  chunks: Uint8Array[];
+}
+
+function fromB64(b64: string): Uint8Array {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+
+export async function runNoiseRpc(
+  channel: ServerChannel,
+  io: FrameIO,
+  deps: RpcDeps,
+): Promise<void> {
+  const maxInFlight = deps.maxInFlight ?? 32;
+  const pending = new Map<number, Pending>();
+  let inFlight = 0;
+
+  const send = (msg: RpcServerMessage) => {
+    try {
+      void io.send(channel.seal(encodeMessage(msg)));
+    } catch {
+      // A seal/send failure means the channel is unusable; the recv loop below
+      // will observe the close and unwind.
+    }
+  };
+
+  const dispatchRequest = async (id: number, p: Pending) => {
+    if (!isTunnelablePath(p.path)) {
+      send({ t: 'res', id, status: 403, headers: {} });
+      send({ t: 'res.end', id });
+      inFlight -= 1;
+      return;
+    }
+    try {
+      const total = p.chunks.reduce((n, c) => n + c.length, 0);
+      const body = total > 0 ? new Blob(p.chunks as BlobPart[]) : undefined;
+      const req = new Request(`https://noise.local${p.path}`, {
+        method: p.method,
+        headers: p.headers,
+        body,
+      });
+      const res = await deps.dispatch(req);
+      const headers: Record<string, string> = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      send({ t: 'res', id, status: res.status, headers });
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      for (const frame of chunkBody(bytes, (seq, b64) => [
+        { t: 'res.body' as const, id, seq, b64 },
+      ])) {
+        send(frame);
+      }
+      send({ t: 'res.end', id });
+    } catch (err) {
+      send({ t: 'res.error', id, message: err instanceof Error ? err.message : 'dispatch failed' });
+    } finally {
+      inFlight -= 1;
+    }
+  };
+
+  const begin = (id: number, p: Pending) => {
+    inFlight += 1;
+    void dispatchRequest(id, p);
+  };
+
+  try {
+    for (;;) {
+      const msg = decodeClientMessage(channel.open(await io.recv()));
+      if (msg.t === 'req') {
+        if (inFlight >= maxInFlight) {
+          send({ t: 'res', id: msg.id, status: 503, headers: {} });
+          send({ t: 'res.end', id: msg.id });
+          continue;
+        }
+        const p: Pending = {
+          method: msg.method,
+          path: msg.path,
+          headers: msg.headers,
+          hasBody: msg.hasBody,
+          chunks: [],
+        };
+        if (msg.hasBody) {
+          pending.set(msg.id, p);
+        } else {
+          begin(msg.id, p);
+        }
+      } else if (msg.t === 'req.body') {
+        pending.get(msg.id)?.chunks.push(fromB64(msg.b64));
+      } else if (msg.t === 'req.end') {
+        const p = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (p) begin(msg.id, p);
+      } else if (msg.t === 'req.cancel') {
+        pending.delete(msg.id);
+      }
+    }
+  } catch {
+    // io.recv() rejected (channel closed) or a decrypt/parse failure — end.
+  }
 }

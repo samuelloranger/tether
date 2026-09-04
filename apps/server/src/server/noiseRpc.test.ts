@@ -69,3 +69,107 @@ describe('rpc chunking + allowlist', () => {
     expect(isTunnelablePath('/api/../api/config')).toBe(false);
   });
 });
+
+import type { FrameIO, ServerChannel } from './noiseChannel';
+import { runNoiseRpc } from './noiseRpc';
+
+// A pass-through "channel": seal/open are identity so the test can read frames
+// as plaintext. Mirrors how noiseSessionProtocol tests fake the channel.
+function fakeChannel(): ServerChannel {
+  return { seal: (b: Uint8Array) => b, open: (b: Uint8Array) => b } as unknown as ServerChannel;
+}
+
+function fakeIO() {
+  const inbound: Uint8Array[] = [];
+  const outbound: Uint8Array[] = [];
+  const waiters: ((f: Uint8Array) => void)[] = [];
+  let closed: Error | null = null;
+  return {
+    io: {
+      send(frame: Uint8Array) {
+        outbound.push(frame);
+      },
+      recv(): Promise<Uint8Array> {
+        const f = inbound.shift();
+        if (f) return Promise.resolve(f);
+        if (closed) return Promise.reject(closed);
+        return new Promise((res) => waiters.push(res));
+      },
+    } as FrameIO,
+    push(frame: Uint8Array) {
+      const w = waiters.shift();
+      if (w) w(frame);
+      else inbound.push(frame);
+    },
+    close() {
+      closed = new Error('closed');
+    },
+    outbound,
+  };
+}
+
+test('runNoiseRpc dispatches a GET and streams the response back', async () => {
+  const { io, push, close, outbound } = fakeIO();
+  const dispatch = async (req: Request) => {
+    expect(req.method).toBe('GET');
+    expect(new URL(req.url).pathname).toBe('/api/sessions');
+    return new Response(JSON.stringify([{ id: 'term-1' }]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  const loop = runNoiseRpc(fakeChannel(), io, { dispatch, identity: { deviceId: 'dev-1' } });
+
+  push(
+    encodeMessage({
+      t: 'req',
+      id: 1,
+      method: 'GET',
+      path: '/api/sessions',
+      headers: {},
+      hasBody: false,
+    }),
+  );
+  push(encodeMessage({ t: 'req.end', id: 1 }));
+  await new Promise((r) => setTimeout(r, 20));
+  close();
+  push(encodeMessage({ t: 'req.cancel', id: 999 }));
+  await loop;
+
+  const msgs = outbound.map((f) => decodeServerMessage(f));
+  const res = msgs.find((m) => m.t === 'res');
+  const bodies = msgs.filter((m) => m.t === 'res.body');
+  const end = msgs.find((m) => m.t === 'res.end');
+  expect(res).toMatchObject({ id: 1, status: 200 });
+  expect(end).toMatchObject({ id: 1 });
+  const text = bodies.map((b) => atob((b as { b64: string }).b64)).join('');
+  expect(JSON.parse(text)).toEqual([{ id: 'term-1' }]);
+});
+
+test('runNoiseRpc refuses a disallowed path with 403 and does not dispatch', async () => {
+  const { io, push, close, outbound } = fakeIO();
+  let dispatched = false;
+  const dispatch = async () => {
+    dispatched = true;
+    return new Response('', { status: 200 });
+  };
+  const loop = runNoiseRpc(fakeChannel(), io, { dispatch, identity: { deviceId: 'dev-1' } });
+  push(
+    encodeMessage({
+      t: 'req',
+      id: 7,
+      method: 'PATCH',
+      path: '/api/config',
+      headers: {},
+      hasBody: false,
+    }),
+  );
+  push(encodeMessage({ t: 'req.end', id: 7 }));
+  await new Promise((r) => setTimeout(r, 20));
+  close();
+  push(encodeMessage({ t: 'req.cancel', id: 999 }));
+  await loop;
+  expect(dispatched).toBe(false);
+  const res = outbound.map((f) => decodeServerMessage(f)).find((m) => m.t === 'res');
+  expect(res).toMatchObject({ id: 7, status: 403 });
+});
