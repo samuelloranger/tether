@@ -1,6 +1,6 @@
 import { websocket } from 'hono/bun';
 import { app } from './app';
-import { getAuthHash, resetRunningSessions, setSessionStatus } from './db';
+import { resetRunningSessions, setSessionStatus } from './db';
 import { logError, logInfo, logWarn } from './log';
 import { reattachHolders } from './pty';
 import { type ListenerPlan, resolveListenerPlan } from './tlsConfig';
@@ -116,13 +116,7 @@ export async function serve(): Promise<void> {
     logInfo(`TLS certificate fingerprint: sha256:${tls.fingerprintSha256}`);
   }
 
-  if (getAuthHash()) {
-    logInfo('Auth: password required on all /api routes.');
-  } else {
-    logWarn(
-      'Auth: NO PASSWORD SET — /api routes will reject all clients. Run: tether set-password',
-    );
-  }
+  logInfo('Auth: /api routes require a per-device bearer token.');
 
   if (httpPort !== null && httpsPort !== null) {
     logInfo(

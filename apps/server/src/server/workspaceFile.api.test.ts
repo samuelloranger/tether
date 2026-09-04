@@ -5,19 +5,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { canonicalFixture, osc7Chunk } from '../../test-paths';
 import { app } from './app';
-import { getAuthHash, setAuthHash, upsertSession } from './db';
+import { upsertSession } from './db';
 import { clearLiveCwd, recordChunk } from './liveCwd';
-
-const PASSWORD = 'test-password';
-const AUTH = { Authorization: `Bearer ${PASSWORD}` };
-
-async function ensureAuth() {
-  setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
-}
+import { testAuthHeaders } from './testAuth';
 
 test('GET /api/sessions/:id/file serves workspace text once the shell has reported its cwd', async () => {
-  const previousAuthHash = getAuthHash();
-  await ensureAuth();
+  const AUTH = testAuthHeaders();
   const root = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-file-api-')));
   try {
     execSync('git init -q', { cwd: root });
@@ -59,6 +52,5 @@ test('GET /api/sessions/:id/file serves workspace text once the shell has report
     clearLiveCwd('file-rooted');
     clearLiveCwd('file-pending');
     rmSync(root, { recursive: true, force: true });
-    setAuthHash(previousAuthHash);
   }
 });

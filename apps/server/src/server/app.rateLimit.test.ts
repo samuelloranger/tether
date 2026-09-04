@@ -1,27 +1,21 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { resetAdminRateLimit } from './admin';
 import { app } from './app';
-import { getAuthHash, setAuthHash } from './db';
-
-const PASSWORD = 'rate-limit-test-password';
-const AUTH = { Authorization: `Bearer ${PASSWORD}`, 'Content-Type': 'application/json' };
+import { testAuthHeaders } from './testAuth';
 
 afterEach(() => resetAdminRateLimit());
 
-async function withAuth(fn: () => Promise<void>): Promise<void> {
-  const previous = getAuthHash();
+async function withAuth(fn: (auth: Record<string, string>) => Promise<void>): Promise<void> {
   const error = spyOn(console, 'error').mockImplementation(() => {});
   try {
-    setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
-    await fn();
+    await fn({ ...testAuthHeaders(), 'Content-Type': 'application/json' });
   } finally {
-    setAuthHash(previous);
     error.mockRestore();
   }
 }
 
 test('admin rate limit ignores spoofed X-Forwarded-For — same peer shares one bucket', async () => {
-  await withAuth(async () => {
+  await withAuth(async (AUTH) => {
     const peer = { peerAddress: '203.0.113.10' };
     for (let i = 0; i < 5; i++) {
       const res = await app.request(
@@ -47,7 +41,7 @@ test('admin rate limit ignores spoofed X-Forwarded-For — same peer shares one 
 });
 
 test('admin rate limit buckets separately for different peer addresses', async () => {
-  await withAuth(async () => {
+  await withAuth(async (AUTH) => {
     for (let i = 0; i < 5; i++) {
       const res = await app.request(
         '/api/admin/test-notification',

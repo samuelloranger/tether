@@ -203,69 +203,6 @@ function logs(): void {
   followFile(LOG_FILE, { lines: 80 });
 }
 
-// Read a line of hidden input: raw-mode manual char loop on a TTY (prompt stays
-// visible, nothing echoes), plain line read when piped.
-function readHidden(promptText: string): Promise<string> {
-  const stdin = process.stdin;
-  process.stdout.write(promptText);
-  if (!stdin.isTTY) {
-    return new Promise((resolve) => {
-      let buf = '';
-      stdin.setEncoding('utf8');
-      stdin.resume();
-      const onData = (d: string) => {
-        buf += d;
-        const nl = buf.indexOf('\n');
-        if (nl >= 0) {
-          stdin.off('data', onData);
-          stdin.pause();
-          resolve(buf.slice(0, nl).replace(/\r$/, ''));
-        }
-      };
-      stdin.on('data', onData);
-    });
-  }
-  return new Promise((resolve, reject) => {
-    let buf = '';
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding('utf8');
-    const finish = (fn: () => void) => {
-      stdin.setRawMode(false);
-      stdin.pause();
-      stdin.off('data', onData);
-      process.stdout.write('\n');
-      fn();
-    };
-    const onData = (chunk: string) => {
-      for (const c of chunk) {
-        if (c === '\r' || c === '\n') return finish(() => resolve(buf));
-        if (c === '\x03') return finish(() => reject(new Error('cancelled')));
-        if (c === '\x7f' || c === '\b') buf = buf.slice(0, -1);
-        else if (c >= ' ') buf += c;
-      }
-    };
-    stdin.on('data', onData);
-  });
-}
-
-async function setPassword(): Promise<void> {
-  let password: string;
-  try {
-    password = await readHidden('New Tether password: ');
-  } catch {
-    console.error('\nCancelled.');
-    process.exit(1);
-  }
-  if (!password || password.length < 1) {
-    console.error('Password cannot be empty.');
-    process.exit(1);
-  }
-  const { setAuthHash } = await import('./db');
-  setAuthHash(await Bun.password.hash(password, { algorithm: 'argon2id' }));
-  console.log('Password set. Restart the server if it is running: tether restart');
-}
-
 function help(): void {
   console.log(`tether — persistent remote-shell server (v${VERSION})
 
@@ -280,7 +217,6 @@ Usage: tether <command>
   present          Open/reset an agent HTML preview or install an agent skill
   pair             Open an enrollment window and confirm a device
   signal           Tell tether this session is working / waiting / done
-  set-password     Set the shared access password (required for clients)
   devices          List authorized devices
   device <cmd>     Manage a device: revoke <target> | rename <target> <name>
   update           Download the latest release binary and restart
@@ -389,9 +325,6 @@ switch (cmd) {
     }
     break;
   }
-  case 'set-password':
-    await setPassword();
-    break;
   case 'update': {
     const { runUpdate } = await import('./update');
     await runUpdate({ version: VERSION, compiled: COMPILED, start, stop, runningPid });

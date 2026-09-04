@@ -2,7 +2,11 @@
 
 ## The trust model
 
-Every `/api/*` route — HTTP **and** the WebSocket upgrade — requires a shared password (`Authorization: Bearer <password>`), stored as an argon2 hash in the server's database. With no password set, the server rejects all clients. Set it with `tether set-password` or the first-run pairing flow in the app.
+Access is **per-device**. A paired device mints a short-lived bearer token over its already-authenticated Noise session (`{t:'auth.token'}`) and presents it as `Authorization: Bearer <token>` on every `/api/*` HTTP request and the WebSocket upgrade. There is no shared password, no `tether set-password`, and no `/api/setup` TOFU flow.
+
+`authMiddleware` verifies the token (HMAC signature, expiry, and that the device is still in the registry). Revoking a device is enough: the next request with its token is 401. Public exceptions are `/api/status` (discovery) and the `/api/noise/*` handshake sockets — those authenticate via Noise itself.
+
+The **terminal stream is end-to-end encrypted over Noise**. REST confidentiality is TLS.
 
 ## Transport encryption
 
@@ -19,13 +23,12 @@ Both listeners serve the same API. That is deliberate — see [Migrating to TLS]
 
 ### Pinning the certificate
 
-The certificate is self-signed, so no CA will vouch for it. Trust comes from **pinning on first contact** (TOFU), the same trust decision the password already makes:
+The certificate is self-signed, so no CA will vouch for it. Trust comes from **pinning on first contact**, the same kind of decision Noise pairing already makes for the server's static key:
 
 1. `GET /api/status` (unauthenticated) returns
 
    ```json
    {
-     "needsSetup": true,
      "secure": true,
      "tls": {
        "enabled": true,
@@ -36,15 +39,13 @@ The certificate is self-signed, so no CA will vouch for it. Trust comes from **p
    }
    ```
 
-   `POST /api/setup` echoes the same `secure` and `tls` fields, so a client can pair and pin in one round trip.
-
 2. `secure` reports whether **that response** arrived over the TLS listener. It is derived from the socket, never from a header — `X-Forwarded-Proto` is ignored on purpose, because anything a caller can *claim* a MITM can claim too.
 
 3. A client may only pin a fingerprint it read with `secure: true`, and must compare it against the certificate that actually terminated the connection. Over plaintext the fingerprint is **discovery data only** — useful for finding the HTTPS port, worthless as proof, because whoever can read the plaintext can rewrite it.
 
 4. Once pinned, a fingerprint mismatch is a hard failure. It is not a re-pair prompt: the certificate does not change on its own, so a change means either an attacker or an operator who deliberately deleted the TLS directory.
 
-Pinning on first contact is only as good as that first contact. Do the initial pairing on a network you trust — the LAN, or a tunnel.
+Pinning on first contact is only as good as that first contact. Pair devices (`tether pair`) on a network you trust — the LAN, or a tunnel.
 
 ### Migrating to TLS
 
@@ -67,23 +68,23 @@ Two things to know about `only`:
 
 ## Files at rest
 
-The sensitive files the server writes are locked to the owner: the database in `~/.tether/config/` (it holds the argon2 password hash and the session log), the TLS private key, the holder sockets, and the local control token.
+The sensitive files the server writes are locked to the owner: the database in `~/.tether/config/` (session log + device registry), the TLS private key, the Noise identity and auth-token HMAC secret (`~/.tether/config/noise/`), the holder sockets, and the local control token.
 
 - **Linux / macOS** — POSIX modes, as noted above: the key is `0600` inside a `0700` directory, and the other paths are created owner-only the same way.
 - **Windows** — those modes are a no-op (`chmod` there sets only the read-only attribute, which is not a confidentiality control), so the server uses ACLs instead. It runs `icacls` to drop the inherited entries and grant the owning user alone, which is the faithful stand-in for `0600`/`0700`. See [Windows server](/windows) for the rest of the platform's differences.
 
-Either way the guarantee is the same: another user on the machine cannot read your password hash or your TLS key.
+Either way the guarantee is the same: another user on the machine cannot read your device registry, Noise keys, or TLS key.
 
 ## A tunnel is still a good idea
 
-TLS closes the "the wire is readable" hole. It does not make the port safe to expose:
+TLS closes the "the wire is readable" hole for REST. It does not make the port safe to expose:
 
 - The certificate is self-signed, so an unpinned client has no way to detect a MITM on first contact.
 - CORS is still `*`, and the API exposes file read, file upload, and git write operations.
 - A remote shell is a high-trust surface either way.
 
-So: keep Tether on the LAN, or behind **Tailscale** / **WireGuard** / an **SSH** port-forward. TLS is defence in depth on top of that, not a replacement for it, and it is what makes an accidental exposure survivable instead of catastrophic.
+So: keep Tether on the LAN, or behind **Tailscale** / **WireGuard** / an **SSH** port-forward. TLS is defence in depth on top of that, not a replacement for it, and it is what makes an accidental exposure survivable instead of catastrophic. The terminal itself is E2E over Noise even on plaintext HTTP.
 
 ::: warning
-A remote shell is a high-trust surface. Anyone with the password and network reach gets a shell. Do not expose the port directly to the internet.
+A remote shell is a high-trust surface. Anyone with a paired device (or its token) and network reach gets a shell. Do not expose the port directly to the internet.
 :::

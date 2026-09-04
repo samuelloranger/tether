@@ -1,11 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 import { app } from './app';
 import { resetConfigCache } from './config';
-import { db, getAuthHash, setAuthHash } from './db';
+import { db } from './db';
 import { registerPushDevice, removePushDevice } from './pushDevices';
-
-const PASSWORD = 'config-api-password';
-const AUTH = { Authorization: `Bearer ${PASSWORD}`, 'Content-Type': 'application/json' };
+import { testAuthHeaders } from './testAuth';
 
 afterEach(() => {
   db.query("DELETE FROM settings WHERE key LIKE 'config.%'").run();
@@ -13,35 +11,29 @@ afterEach(() => {
 });
 
 test('GET and PATCH /api/config are authenticated and merged', async () => {
-  const previous = getAuthHash();
-  setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
-  try {
-    expect((await app.request('/api/config')).status).toBe(401);
-    const patched = await app.request('/api/config', {
-      method: 'PATCH',
-      headers: AUTH,
-      body: JSON.stringify({ push: { enabled: true }, triggers: { exit: false } }),
-    });
-    expect(patched.status).toBe(200);
-    const body = await patched.json();
-    expect(body.push).toEqual({ enabled: true });
-    expect(body.triggers).toEqual({
-      waiting: true,
-      done: false,
-      oscNotify: true,
-      exit: false,
-      longJob: true,
-    });
-    const fetched = await app.request('/api/config', { headers: AUTH });
-    expect((await fetched.json()).push.enabled).toBe(true);
-  } finally {
-    setAuthHash(previous);
-  }
+  const AUTH = { ...testAuthHeaders(), 'Content-Type': 'application/json' };
+  expect((await app.request('/api/config')).status).toBe(401);
+  const patched = await app.request('/api/config', {
+    method: 'PATCH',
+    headers: AUTH,
+    body: JSON.stringify({ push: { enabled: true }, triggers: { exit: false } }),
+  });
+  expect(patched.status).toBe(200);
+  const body = await patched.json();
+  expect(body.push).toEqual({ enabled: true });
+  expect(body.triggers).toEqual({
+    waiting: true,
+    done: false,
+    oscNotify: true,
+    exit: false,
+    longJob: true,
+  });
+  const fetched = await app.request('/api/config', { headers: AUTH });
+  expect((await fetched.json()).push.enabled).toBe(true);
 });
 
 test('/api/config reports how many devices are registered for push', async () => {
-  const previous = getAuthHash();
-  setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
+  const AUTH = { ...testAuthHeaders(), 'Content-Type': 'application/json' };
   registerPushDevice('config-api-device', Buffer.alloc(32, 3).toString('base64'));
   try {
     const res = await app.request('/api/config', { headers: AUTH });
@@ -55,7 +47,6 @@ test('/api/config reports how many devices are registered for push', async () =>
     });
     expect(rejected.status).toBe(400);
   } finally {
-    setAuthHash(previous);
     removePushDevice('config-api-device');
   }
 });

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Hono } from 'hono';
-import { authMiddleware, verifyPassword } from './auth';
-import { db, getAuthHash, setAuthHash } from './db';
+import { authMiddleware } from './auth';
+import { db } from './db';
 import { addDevice } from './deviceRegistry';
 import { mintToken } from './deviceToken';
 
@@ -10,7 +10,6 @@ import { mintToken } from './deviceToken';
 // suite never touches the developer's live config database.
 
 afterEach(() => {
-  setAuthHash(null);
   db.query('DELETE FROM auth_devices').run();
 });
 
@@ -26,24 +25,6 @@ function appWithAuth(): Hono {
   h.get('/api/status', (c) => c.json({ public: true }));
   return h;
 }
-
-test('verifyPassword false when no hash set', async () => {
-  expect(getAuthHash()).toBeNull();
-  expect(await verifyPassword('anything')).toBe(false);
-});
-
-test('auth hash round-trips through settings', () => {
-  setAuthHash('argon2-hash-placeholder');
-  expect(getAuthHash()).toBe('argon2-hash-placeholder');
-  setAuthHash('second');
-  expect(getAuthHash()).toBe('second'); // upsert overwrites
-});
-
-test('verifyPassword true only for the set password', async () => {
-  setAuthHash(await Bun.password.hash('hunter2', { algorithm: 'argon2id' }));
-  expect(await verifyPassword('hunter2')).toBe(true);
-  expect(await verifyPassword('wrong')).toBe(false);
-});
 
 test('authMiddleware: minted token for a known device passes', async () => {
   const device = addDevice({ label: 'phone', pubkey: pubkeyFill(1) });
@@ -69,13 +50,16 @@ test('authMiddleware: tampered token is 401', async () => {
   expect(await res.json()).toEqual({ error: 'auth' });
 });
 
-test('authMiddleware: a valid password still passes', async () => {
-  setAuthHash(await Bun.password.hash('hunter2', { algorithm: 'argon2id' }));
-  const res = await appWithAuth().request('/api/health', {
+test('authMiddleware: a missing or garbage token is 401', async () => {
+  const missing = await appWithAuth().request('/api/health');
+  expect(missing.status).toBe(401);
+  expect(await missing.json()).toEqual({ error: 'auth' });
+
+  const garbage = await appWithAuth().request('/api/health', {
     headers: { Authorization: 'Bearer hunter2' },
   });
-  expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ ok: true });
+  expect(garbage.status).toBe(401);
+  expect(await garbage.json()).toEqual({ error: 'auth' });
 });
 
 test('authMiddleware: a public path is exempt', async () => {

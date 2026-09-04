@@ -1,15 +1,12 @@
 import { expect, test } from 'bun:test';
 import { app } from './app';
-import { deleteSession, getAuthHash, setAuthHash, upsertSession } from './db';
+import { deleteSession, upsertSession } from './db';
 import { clearLiveCwd, reportCwd } from './liveCwd';
 import { clearTitle, recordTitleChunk } from './sessionTitle';
-
-const PASSWORD = 'test-password';
-const AUTH = { Authorization: `Bearer ${PASSWORD}` };
+import { testAuthHeaders } from './testAuth';
 
 test('GET /api/sessions annotates rows with auto_title', async () => {
-  const previousAuthHash = getAuthHash();
-  setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
+  const AUTH = testAuthHeaders();
   upsertSession('tt-osc', 'bash', 'running');
   upsertSession('tt-cwd', 'bash', 'running');
   upsertSession('tt-bare', 'zsh', 'running');
@@ -35,6 +32,5 @@ test('GET /api/sessions annotates rows with auto_title', async () => {
       clearLiveCwd(id);
       deleteSession(id);
     }
-    setAuthHash(previousAuthHash);
   }
 });
