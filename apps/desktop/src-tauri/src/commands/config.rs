@@ -4,17 +4,9 @@ use tether_core::host_client::HostClient;
 use tether_core::host_store::{HostProfile, HostProfileChanges, HostSecrets};
 use tether_core::server_config::{self, ServerConfig, ServerConfigPatch};
 
-use crate::http;
+use crate::commands::noise::execute_authed;
 use crate::state::shared_from_app;
 use crate::storage::KeyringHostSecrets;
-
-fn client_for(profile: &HostProfile) -> Result<HostClient, String> {
-    let password = KeyringHostSecrets
-        .get(&profile.id)
-        .map_err(|error| error.to_string())?
-        .unwrap_or_default();
-    Ok(HostClient::new(profile.clone(), password))
-}
 
 fn profile_for(app: &AppHandle, host_id: &str) -> Result<HostProfile, String> {
     shared_from_app(app)
@@ -24,12 +16,19 @@ fn profile_for(app: &AppHandle, host_id: &str) -> Result<HostProfile, String> {
         .ok_or_else(|| format!("unknown host {host_id}"))
 }
 
+async fn exec_config(
+    app: &AppHandle,
+    host_id: &str,
+    build: impl Fn(&HostClient) -> tether_core::host_client::HttpRequest,
+) -> Result<crate::http::HttpResponse, String> {
+    let state = shared_from_app(app);
+    let profile = profile_for(app, host_id)?;
+    execute_authed(&state, &profile, build).await
+}
+
 #[tauri::command]
 pub async fn core_config_get(app: AppHandle, host_id: String) -> Result<ServerConfig, String> {
-    let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&profile)?;
-    let request = server_config::get_config_request(&client);
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = exec_config(&app, &host_id, server_config::get_config_request).await?;
     server_config::parse_config_response(response.status, &response.body).map_err(|e| e.to_string())
 }
 
@@ -39,10 +38,10 @@ pub async fn core_config_patch(
     host_id: String,
     patch: ServerConfigPatch,
 ) -> Result<ServerConfig, String> {
-    let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&profile)?;
-    let request = server_config::patch_config_request(&client, &patch);
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = exec_config(&app, &host_id, |client| {
+        server_config::patch_config_request(client, &patch)
+    })
+    .await?;
     server_config::parse_config_response(response.status, &response.body).map_err(|e| e.to_string())
 }
 
@@ -53,10 +52,10 @@ pub async fn core_admin_change_password(
     current: String,
     next: String,
 ) -> Result<(), String> {
-    let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&profile)?;
-    let request = server_config::change_password_request(&client, &current, &next);
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = exec_config(&app, &host_id, |client| {
+        server_config::change_password_request(client, &current, &next)
+    })
+    .await?;
     server_config::parse_admin_ok(response.status, &response.body).map_err(|e| e.to_string())
 }
 
@@ -66,10 +65,10 @@ pub async fn core_admin_update(
     host_id: String,
     current: String,
 ) -> Result<(), String> {
-    let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&profile)?;
-    let request = server_config::update_server_request(&client, &current);
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = exec_config(&app, &host_id, |client| {
+        server_config::update_server_request(client, &current)
+    })
+    .await?;
     server_config::parse_admin_ok(response.status, &response.body).map_err(|e| e.to_string())
 }
 
@@ -79,19 +78,16 @@ pub async fn core_admin_restart(
     host_id: String,
     current: String,
 ) -> Result<(), String> {
-    let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&profile)?;
-    let request = server_config::restart_server_request(&client, &current);
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = exec_config(&app, &host_id, |client| {
+        server_config::restart_server_request(client, &current)
+    })
+    .await?;
     server_config::parse_admin_ok(response.status, &response.body).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn core_admin_test_notification(app: AppHandle, host_id: String) -> Result<(), String> {
-    let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&profile)?;
-    let request = server_config::test_notification_request(&client);
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = exec_config(&app, &host_id, server_config::test_notification_request).await?;
     server_config::parse_admin_ok(response.status, &response.body).map_err(|e| e.to_string())
 }
 
@@ -100,10 +96,7 @@ pub async fn core_health_version(
     app: AppHandle,
     host_id: String,
 ) -> Result<Option<String>, String> {
-    let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&profile)?;
-    let request = server_config::health_version_request(&client);
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = exec_config(&app, &host_id, server_config::health_version_request).await?;
     server_config::parse_health_version(response.status, &response.body).map_err(|e| e.to_string())
 }
 

@@ -1,9 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tether_core::host_client::{HostClient, HttpRequest};
+use tether_core::host_store::{HostProfile, HostSecrets};
 use tether_core::noise::driver::{client_pair, client_reconnect, Transport};
 use tether_core::noise::pairing::{derive_public, generate_static_keypair};
 use tether_core::noise::{code, psk, NoiseSession};
@@ -11,6 +13,7 @@ use tether_core::terminal_session_logic::{backoff_delay, retry_after_close};
 use tokio::sync::mpsc;
 
 use crate::commands::connect::{now_ms, random_unit, HEALTHY_MS};
+use crate::http::{self, HttpBytesResponse, HttpResponse};
 use crate::noise_session::{
     decode_server, encode_auth_token_request, encode_devices_list, encode_devices_revoke,
     encode_frontend_output, encode_start, translate_frontend, DeviceInfo, ServerMsg,
@@ -19,8 +22,13 @@ use crate::noise_store::{
     load_device_keypair_in, load_pinned_server_key_in, save_device_keypair_in,
     save_pinned_server_key_in, KeyStore, KeyringKeyStore,
 };
+use crate::noise_token::{
+    cached_token_if_fresh, invalidate_token, should_remint_on_401, store_token,
+};
 use crate::noise_ws::{NoiseWs, NoiseWsRx, NoiseWsTx};
-use crate::state::{NoiseHandle, SharedState};
+use crate::state::{AppState, NoiseHandle, SharedState};
+use crate::storage::KeyringHostSecrets;
+use tether_core::workspace::UploadPlan;
 
 fn fingerprint(key: &[u8]) -> String {
     Sha256::digest(key)
@@ -243,12 +251,10 @@ pub async fn core_noise_revoke(
 /// Mint a per-device REST bearer over a dedicated management session. Fail-closed:
 /// a reconnect/handshake failure (revoked or unknown device) errors rather than
 /// falling back to the shared password.
-#[tauri::command]
-pub async fn core_noise_token(host_id: String, address: String) -> Result<TokenResult, String> {
-    request_auth_token(&host_id, &address).await
-}
-
-async fn request_auth_token(host_id: &str, address: &str) -> Result<TokenResult, String> {
+pub(crate) async fn mint_noise_token(
+    host_id: &str,
+    address: &str,
+) -> Result<(String, String), String> {
     let (mut ws, mut session) = open_management_session(&KeyringKeyStore, host_id, address).await?;
     let wire = session
         .seal(&encode_auth_token_request())
@@ -260,8 +266,141 @@ async fn request_auth_token(host_id: &str, address: &str) -> Result<TokenResult,
         if let ServerMsg::AuthToken { token, expires_at } =
             decode_server(&plain).map_err(|error| error.to_string())?
         {
-            return Ok(TokenResult { token, expires_at });
+            return Ok((token, expires_at));
         }
+    }
+}
+
+#[tauri::command]
+pub async fn core_noise_token(host_id: String, address: String) -> Result<TokenResult, String> {
+    let (token, expires_at) = mint_noise_token(&host_id, &address).await?;
+    Ok(TokenResult { token, expires_at })
+}
+
+pub(crate) fn noise_session_address(profile: &HostProfile) -> String {
+    format!("ws://{}:{}/api/noise/session", profile.host, profile.port)
+}
+
+/// True iff this host has a pinned Noise server key (i.e. it was paired).
+pub(crate) fn is_noise_host(host_id: &str) -> Result<bool, String> {
+    Ok(load_pinned_server_key_in(&KeyringKeyStore, host_id)
+        .map_err(|error| error.to_string())?
+        .is_some())
+}
+
+pub(crate) fn invalidate_cached_token(state: &AppState, host_id: &str) {
+    if let Ok(mut cache) = state.noise_tokens.lock() {
+        invalidate_token(&mut cache, host_id);
+    }
+}
+
+/// REST bearer for `profile`: a cached-or-freshly-minted Noise token when the
+/// host is paired, otherwise the keyring password (unchanged).
+pub(crate) async fn bearer_for_host(
+    state: &AppState,
+    profile: &HostProfile,
+) -> Result<String, String> {
+    if is_noise_host(&profile.id)? {
+        {
+            let cache = state
+                .noise_tokens
+                .lock()
+                .map_err(|error| error.to_string())?;
+            if let Some(token) = cached_token_if_fresh(&cache, &profile.id, Instant::now()) {
+                return Ok(token);
+            }
+        }
+        let address = noise_session_address(profile);
+        let (token, expires_at) = mint_noise_token(&profile.id, &address).await?;
+        {
+            let mut cache = state
+                .noise_tokens
+                .lock()
+                .map_err(|error| error.to_string())?;
+            store_token(
+                &mut cache,
+                &profile.id,
+                token.clone(),
+                &expires_at,
+                Instant::now(),
+                SystemTime::now(),
+            );
+        }
+        Ok(token)
+    } else {
+        Ok(KeyringHostSecrets
+            .get(&profile.id)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default())
+    }
+}
+
+pub(crate) async fn host_client(
+    state: &AppState,
+    profile: &HostProfile,
+) -> Result<HostClient, String> {
+    Ok(HostClient::new(
+        profile.clone(),
+        bearer_for_host(state, profile).await?,
+    ))
+}
+
+/// Execute a REST request with the host's current bearer. On a Noise host, a
+/// 401 invalidates the cached token, remints once, and retries.
+pub(crate) async fn execute_authed(
+    state: &AppState,
+    profile: &HostProfile,
+    build: impl Fn(&HostClient) -> HttpRequest,
+) -> Result<HttpResponse, String> {
+    let mut retried = false;
+    loop {
+        let client = host_client(state, profile).await?;
+        let response = http::execute(&state.http, &build(&client)).await?;
+        if should_remint_on_401(is_noise_host(&profile.id)?, response.status, retried) {
+            invalidate_cached_token(state, &profile.id);
+            retried = true;
+            continue;
+        }
+        return Ok(response);
+    }
+}
+
+pub(crate) async fn execute_bytes_authed(
+    state: &AppState,
+    profile: &HostProfile,
+    build: impl Fn(&HostClient) -> HttpRequest,
+) -> Result<HttpBytesResponse, String> {
+    let mut retried = false;
+    loop {
+        let client = host_client(state, profile).await?;
+        let response = http::execute_bytes(&state.http, &build(&client)).await?;
+        if should_remint_on_401(is_noise_host(&profile.id)?, response.status, retried) {
+            invalidate_cached_token(state, &profile.id);
+            retried = true;
+            continue;
+        }
+        return Ok(response);
+    }
+}
+
+pub(crate) async fn execute_upload_authed(
+    state: &AppState,
+    profile: &HostProfile,
+    plan: impl Fn(&HostClient) -> UploadPlan,
+    file_bytes: Vec<u8>,
+    filename: &str,
+) -> Result<HttpResponse, String> {
+    let mut retried = false;
+    loop {
+        let client = host_client(state, profile).await?;
+        let response =
+            http::execute_upload(&state.http, &plan(&client), file_bytes.clone(), filename).await?;
+        if should_remint_on_401(is_noise_host(&profile.id)?, response.status, retried) {
+            invalidate_cached_token(state, &profile.id);
+            retried = true;
+            continue;
+        }
+        return Ok(response);
     }
 }
 

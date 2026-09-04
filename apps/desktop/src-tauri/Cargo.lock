@@ -5073,6 +5073,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tether-core",
+ "time",
  "tokio",
  "tokio-tungstenite",
  "uuid",

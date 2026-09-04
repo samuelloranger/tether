@@ -1,8 +1,6 @@
 use serde::Deserialize;
 use serde_json::Value;
 use tauri::AppHandle;
-use tether_core::host_client::HostClient;
-use tether_core::host_store::HostSecrets;
 use tether_core::session_cache::next_term_id;
 use tether_core::session_host_ops::{
     plan_kill_session, reduce_session_list_response, RefreshOutcome,
@@ -10,35 +8,17 @@ use tether_core::session_host_ops::{
 use tether_core::terminal_session_logic::{SessionKey, SessionRow};
 use tether_core::tether_app_actions::submit_rename;
 
+use crate::commands::noise::host_client;
 use crate::commands::polling::{drawer_session, restart_polling};
 use crate::http;
 use crate::state::shared_from_app;
-use crate::storage::KeyringHostSecrets;
 
+/// A drawer session id pair from the frontend (`{ hostId, id }`).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DrawerSessionRef {
     pub host_id: String,
     pub id: String,
-}
-
-fn client_for(host_id: &str, profile_host: &str, profile_port: &str) -> Result<HostClient, String> {
-    let password = KeyringHostSecrets
-        .get(host_id)
-        .map_err(|error| error.to_string())?
-        .unwrap_or_default();
-    Ok(HostClient::new(
-        tether_core::host_store::HostProfile {
-            id: host_id.to_string(),
-            name: String::new(),
-            color: String::new(),
-            host: profile_host.to_string(),
-            port: profile_port.to_string(),
-            identity_name: String::new(),
-            order: 0,
-        },
-        password,
-    ))
 }
 
 fn profile_for(
@@ -67,7 +47,8 @@ pub async fn core_sessions_kill(
     drawer_sessions: Vec<DrawerSessionRef>,
 ) -> Result<Option<String>, String> {
     let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&host_id, &profile.host, &profile.port)?;
+    let state = shared_from_app(&app);
+    let client = host_client(&state, &profile).await?;
     let key = SessionKey::new(&host_id, &session_id).map_err(|error| error.to_string())?;
     let rows: Vec<SessionRow> = drawer_sessions
         .into_iter()
@@ -82,7 +63,7 @@ pub async fn core_sessions_kill(
         })
         .collect();
     let plan = plan_kill_session(&client, &key, &rows);
-    let _ = http::execute(&shared_from_app(&app).http, &plan.request).await;
+    let _ = http::execute(&state.http, &plan.request).await;
     let latest = match (active_host_id.as_deref(), active_session_id.as_deref()) {
         (Some(host), Some(session)) => {
             SessionKey::new(host, session).unwrap_or_else(|_| key.clone())
@@ -104,10 +85,11 @@ pub async fn core_sessions_rename(
     name: String,
 ) -> Result<(), String> {
     let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&host_id, &profile.host, &profile.port)?;
+    let state = shared_from_app(&app);
+    let client = host_client(&state, &profile).await?;
     let key = SessionKey::new(&host_id, &session_id).map_err(|error| error.to_string())?;
     let plan = submit_rename(&client, &key, &name);
-    let response = http::execute(&shared_from_app(&app).http, &plan.request).await?;
+    let response = http::execute(&state.http, &plan.request).await?;
     if !(200..300).contains(&response.status) {
         return Err(format!("rename failed ({})", response.status));
     }
@@ -126,9 +108,10 @@ pub async fn core_sessions_rename(
 #[tauri::command]
 pub async fn core_sessions_list(app: AppHandle, host_id: String) -> Result<Vec<Value>, String> {
     let profile = profile_for(&app, &host_id)?;
-    let client = client_for(&host_id, &profile.host, &profile.port)?;
+    let state = shared_from_app(&app);
+    let client = host_client(&state, &profile).await?;
     let request = client.get("/api/sessions", Default::default());
-    let response = http::execute(&shared_from_app(&app).http, &request).await?;
+    let response = http::execute(&state.http, &request).await?;
     match reduce_session_list_response(&profile, &host_id, response.status, &response.body) {
         RefreshOutcome::Success { rows, .. } => Ok(rows.iter().map(drawer_session).collect()),
         RefreshOutcome::Unauthorized { .. } => Err("unauthorized".to_string()),

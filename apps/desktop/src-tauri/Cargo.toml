@@ -27,3 +27,4 @@ tauri-plugin-opener = "2"
 base64 = "0.22"
 tauri-plugin-dialog = "2"
 sha2 = "0.10"
+time = { version = "0.3", default-features = false, features = ["parsing", "std"] }

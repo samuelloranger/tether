@@ -10,6 +10,7 @@ use tether_core::session_cache::SessionCache;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::http;
+use crate::noise_token::CachedToken;
 use crate::storage::{new_host_store, DesktopHostStore};
 
 /// Per-connection handle for a live Noise terminal session. Mirrors the password
@@ -55,6 +56,8 @@ pub struct AppState {
     pub poll_generation: AtomicU64,
     pub http: reqwest::Client,
     pub session_cache: Mutex<SessionCache<()>>,
+    /// Per-host Noise REST bearers. Password hosts never touch this map.
+    pub noise_tokens: Mutex<HashMap<String, CachedToken>>,
 }
 
 impl AppState {
@@ -68,6 +71,7 @@ impl AppState {
             poll_generation: AtomicU64::new(0),
             http: http::http_client(),
             session_cache: Mutex::new(SessionCache::default()),
+            noise_tokens: Mutex::new(HashMap::new()),
         }
     }
 

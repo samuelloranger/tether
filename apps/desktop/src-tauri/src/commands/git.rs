@@ -10,26 +10,28 @@ use tether_core::git_api::{self, DiffPayload, GitLogEntry};
 use tether_core::git_status::RepoStatus;
 use tether_core::host_client::{HostClient, HttpRequest};
 
-use crate::http;
-use crate::state::shared_from_app;
-use crate::storage::KeyringHostSecrets;
-use tether_core::host_store::HostSecrets;
+use crate::commands::noise::{execute_authed, execute_bytes_authed};
+use crate::state::{shared_from_app, AppState};
 
-fn client_for(app: &AppHandle, host_id: &str) -> Result<HostClient, String> {
-    let profile = shared_from_app(app)
+fn profile_for(
+    state: &AppState,
+    host_id: &str,
+) -> Result<tether_core::host_store::HostProfile, String> {
+    state
         .list_profiles()?
         .into_iter()
         .find(|profile| profile.id == host_id)
-        .ok_or_else(|| format!("unknown host {host_id}"))?;
-    let password = KeyringHostSecrets
-        .get(host_id)
-        .map_err(|error| error.to_string())?
-        .unwrap_or_default();
-    Ok(HostClient::new(profile, password))
+        .ok_or_else(|| format!("unknown host {host_id}"))
 }
 
-async fn exec_json(app: &AppHandle, request: &HttpRequest) -> Result<(u16, Value), String> {
-    let response = http::execute(&shared_from_app(app).http, request).await?;
+async fn exec_json(
+    app: &AppHandle,
+    host_id: &str,
+    build: impl Fn(&HostClient) -> HttpRequest,
+) -> Result<(u16, Value), String> {
+    let state = shared_from_app(app);
+    let profile = profile_for(&state, host_id)?;
+    let response = execute_authed(&state, &profile, build).await?;
     Ok((response.status, response.body))
 }
 
@@ -39,9 +41,10 @@ pub async fn core_git_summary(
     host_id: String,
     session_id: String,
 ) -> Result<tether_core::diff_model::DiffSummary, String> {
-    let client = client_for(&app, &host_id)?;
-    let request = git_api::diff_summary_request(&client, &session_id);
-    let (status, body) = exec_json(&app, &request).await?;
+    let (status, body) = exec_json(&app, &host_id, |client| {
+        git_api::diff_summary_request(client, &session_id)
+    })
+    .await?;
     git_api::parse_diff_summary_response(status, &body).map_err(|e| e.to_string())
 }
 
@@ -53,9 +56,10 @@ pub async fn core_git_diff(
     path: Option<String>,
     mode: Option<String>,
 ) -> Result<DiffPayload, String> {
-    let client = client_for(&app, &host_id)?;
-    let request = git_api::diff_request(&client, &session_id, path.as_deref(), mode.as_deref());
-    let (status, body) = exec_json(&app, &request).await?;
+    let (status, body) = exec_json(&app, &host_id, |client| {
+        git_api::diff_request(client, &session_id, path.as_deref(), mode.as_deref())
+    })
+    .await?;
     git_api::parse_diff_payload(status, &body).map_err(|e| e.to_string())
 }
 
@@ -74,9 +78,12 @@ pub async fn core_git_diff_file(
     path: String,
     side: String,
 ) -> Result<Option<DiffFileBytes>, String> {
-    let client = client_for(&app, &host_id)?;
-    let request = git_api::diff_file_request(&client, &session_id, &path, &side);
-    let response = http::execute_bytes(&shared_from_app(&app).http, &request).await?;
+    let state = shared_from_app(&app);
+    let profile = profile_for(&state, &host_id)?;
+    let response = execute_bytes_authed(&state, &profile, |client| {
+        git_api::diff_file_request(client, &session_id, &path, &side)
+    })
+    .await?;
     if response.status == 404 {
         return Ok(None);
     }
@@ -104,9 +111,10 @@ pub async fn core_git_status(
     host_id: String,
     session_id: String,
 ) -> Result<RepoStatus, String> {
-    let client = client_for(&app, &host_id)?;
-    let request = git_api::git_status_request(&client, &session_id);
-    let (status, body) = exec_json(&app, &request).await?;
+    let (status, body) = exec_json(&app, &host_id, |client| {
+        git_api::git_status_request(client, &session_id)
+    })
+    .await?;
     git_api::parse_git_status_response(status, &body).map_err(|e| e.to_string())
 }
 
@@ -117,9 +125,10 @@ pub async fn core_git_log(
     session_id: String,
     limit: Option<u32>,
 ) -> Result<Vec<GitLogEntry>, String> {
-    let client = client_for(&app, &host_id)?;
-    let request = git_api::git_log_request(&client, &session_id, limit.unwrap_or(50));
-    let (status, body) = exec_json(&app, &request).await?;
+    let (status, body) = exec_json(&app, &host_id, |client| {
+        git_api::git_log_request(client, &session_id, limit.unwrap_or(50))
+    })
+    .await?;
     git_api::parse_git_log_response(status, &body).map_err(|e| e.to_string())
 }
 
@@ -131,14 +140,19 @@ pub async fn core_git_commit_diff(
     sha: String,
     path: Option<String>,
 ) -> Result<DiffPayload, String> {
-    let client = client_for(&app, &host_id)?;
-    let request = git_api::git_commit_diff_request(&client, &session_id, &sha, path.as_deref());
-    let (status, body) = exec_json(&app, &request).await?;
+    let (status, body) = exec_json(&app, &host_id, |client| {
+        git_api::git_commit_diff_request(client, &session_id, &sha, path.as_deref())
+    })
+    .await?;
     git_api::parse_diff_payload(status, &body).map_err(|e| e.to_string())
 }
 
-async fn run_ok(app: &AppHandle, request: HttpRequest) -> Result<(), String> {
-    let (status, body) = exec_json(app, &request).await?;
+async fn run_ok(
+    app: &AppHandle,
+    host_id: &str,
+    build: impl Fn(&HostClient) -> HttpRequest,
+) -> Result<(), String> {
+    let (status, body) = exec_json(app, host_id, build).await?;
     git_api::parse_ok_response(status, &body).map_err(|e| e.to_string())
 }
 
@@ -149,8 +163,10 @@ pub async fn core_git_stage(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::stage_request(&client, &session_id, &path)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::stage_request(client, &session_id, &path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -160,8 +176,10 @@ pub async fn core_git_unstage(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::unstage_request(&client, &session_id, &path)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::unstage_request(client, &session_id, &path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -171,8 +189,10 @@ pub async fn core_git_discard(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::discard_request(&client, &session_id, &path)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::discard_request(client, &session_id, &path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -183,11 +203,9 @@ pub async fn core_git_stage_hunk(
     path: String,
     hunk_index: u32,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(
-        &app,
-        git_api::stage_hunk_request(&client, &session_id, &path, hunk_index),
-    )
+    run_ok(&app, &host_id, |client| {
+        git_api::stage_hunk_request(client, &session_id, &path, hunk_index)
+    })
     .await
 }
 
@@ -199,11 +217,9 @@ pub async fn core_git_unstage_hunk(
     path: String,
     hunk_index: u32,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(
-        &app,
-        git_api::unstage_hunk_request(&client, &session_id, &path, hunk_index),
-    )
+    run_ok(&app, &host_id, |client| {
+        git_api::unstage_hunk_request(client, &session_id, &path, hunk_index)
+    })
     .await
 }
 
@@ -213,8 +229,10 @@ pub async fn core_git_stage_all(
     host_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::stage_all_request(&client, &session_id)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::stage_all_request(client, &session_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -223,8 +241,10 @@ pub async fn core_git_unstage_all(
     host_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::unstage_all_request(&client, &session_id)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::unstage_all_request(client, &session_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -233,8 +253,10 @@ pub async fn core_git_discard_all(
     host_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::discard_all_request(&client, &session_id)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::discard_all_request(client, &session_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -245,11 +267,9 @@ pub async fn core_git_commit(
     message: String,
     amend: bool,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(
-        &app,
-        git_api::commit_request(&client, &session_id, &message, amend),
-    )
+    run_ok(&app, &host_id, |client| {
+        git_api::commit_request(client, &session_id, &message, amend)
+    })
     .await
 }
 
@@ -259,8 +279,10 @@ pub async fn core_git_undo_commit(
     host_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::undo_commit_request(&client, &session_id)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::undo_commit_request(client, &session_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -269,8 +291,10 @@ pub async fn core_git_push(
     host_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    let client = client_for(&app, &host_id)?;
-    run_ok(&app, git_api::push_request(&client, &session_id)).await
+    run_ok(&app, &host_id, |client| {
+        git_api::push_request(client, &session_id)
+    })
+    .await
 }
 
 #[derive(Serialize)]
