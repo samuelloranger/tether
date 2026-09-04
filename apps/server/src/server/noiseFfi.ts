@@ -14,6 +14,8 @@ const { symbols } = dlopen(LIB, {
   },
   tether_noise_pair_initiator_new: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
   tether_noise_pair_responder_new: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+  tether_noise_reconnect_initiator_new: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+  tether_noise_reconnect_responder_new: { args: [FFIType.ptr], returns: FFIType.ptr },
   tether_noise_write_message: {
     args: [FFIType.ptr, FFIType.ptr, FFIType.u64_fast, FFIType.ptr, FFIType.u64_fast, FFIType.ptr],
     returns: FFIType.i32,
@@ -120,5 +122,13 @@ export function pairInitiator(devicePriv: Uint8Array, psk: Uint8Array): NoiseHan
 }
 export function pairResponder(serverPriv: Uint8Array, psk: Uint8Array): NoiseHandle {
   const h = symbols.tether_noise_pair_responder_new(ptr(serverPriv), ptr(psk));
+  return new NoiseHandle(h as Pointer);
+}
+export function reconnectInitiator(devicePriv: Uint8Array, serverPub: Uint8Array): NoiseHandle {
+  const h = symbols.tether_noise_reconnect_initiator_new(ptr(devicePriv), ptr(serverPub));
+  return new NoiseHandle(h as Pointer);
+}
+export function reconnectResponder(serverPriv: Uint8Array): NoiseHandle {
+  const h = symbols.tether_noise_reconnect_responder_new(ptr(serverPriv));
   return new NoiseHandle(h as Pointer);
 }
