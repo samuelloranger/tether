@@ -5,6 +5,7 @@
 
 pub mod code;
 pub mod params;
+pub mod psk;
 
 use thiserror::Error;
 
