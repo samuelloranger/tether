@@ -28,14 +28,13 @@ import {
   setSession,
   splitLeaf,
 } from './paneTree';
-import { prunePaneTree } from './paneTreeSerialize';
 import {
   type AppPreferences,
-  loadPaneTree,
   loadPreferences,
+  loadViews,
   resolveFlavor,
-  savePaneTree,
   savePreferences,
+  saveViews,
   sidebarLayout,
   UI_THEMES,
 } from './preferences';
@@ -46,9 +45,9 @@ import { SessionModalHost, useSessionModals } from './SessionModals';
 import { SessionChrome } from './SessionTabBar';
 import { LocalSettingsScreen } from './SettingsScreen';
 import { hostSecrets } from './secureConfig';
-import { parseSessionKey, sessionKey } from './sessionKey';
+import { sessionKey } from './sessionKey';
 import { TerminalEmpty } from './TerminalEmpty';
-import { httpOriginFor } from './types';
+import { type DrawerSession, type HostHealthStatus, httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
 import { useShellChrome } from './useHeatArrival';
 import { useLaunchUpdateCheck } from './useLaunchUpdateCheck';
@@ -56,6 +55,15 @@ import { useTabDrag } from './useTabDrag';
 import { useTetherDesktop } from './useTetherDesktop';
 import { useWindowTheme } from './useWindowTheme';
 import { useWorkspace, WorkspacePanel } from './useWorkspace';
+import {
+  moveSessionIntoView,
+  newSoloView,
+  reconcileViews,
+  type View,
+  type ViewState,
+  viewMemberKeys,
+} from './viewModel';
+import { serializeViews } from './viewsSerialize';
 
 function useMediaScheme(): 'light' | 'dark' {
   const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
@@ -78,6 +86,36 @@ function useWideLayout(): boolean {
     return () => window.removeEventListener('resize', onResize);
   }, []);
   return wide;
+}
+
+function liveSessionKeys(
+  sessions: DrawerSession[],
+  views: View[],
+  healthByHost: Record<string, HostHealthStatus>,
+): Set<string> {
+  const live = new Set(sessions.map((row) => sessionKey(row.hostId, row.id)));
+  const known = new Set(
+    Object.entries(healthByHost)
+      .filter(([, status]) => status !== 'unknown')
+      .map(([id]) => id),
+  );
+  for (const view of views) {
+    for (const leaf of leaves(view.tree)) {
+      if (!leaf.session) continue;
+      if (!known.has(leaf.session.hostId)) {
+        live.add(sessionKey(leaf.session.hostId, leaf.session.sessionId));
+      }
+    }
+  }
+  return live;
+}
+
+function statesEqual(a: ViewState, b: ViewState): boolean {
+  return serializeViews(a) === serializeViews(b);
+}
+
+function patchActiveView(views: View[], activeViewId: string, patch: (view: View) => View): View[] {
+  return views.map((view) => (view.id === activeViewId ? patch(view) : view));
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
@@ -122,42 +160,38 @@ export function App() {
   });
   const modals = useSessionModals();
 
-  // Split layout: a binary pane tree, persisted. The focused pane's session is
-  // the app-wide active session, so git/workspace/tint keep following it.
-  const [tree, setTreeState] = useState<PaneNode>(loadPaneTree);
-  const [focusedPaneId, setFocusedPaneId] = useState<string>(() => firstLeafId(tree));
+  // Per-view layouts: solo (1 leaf) or group (2+). The active view's focused
+  // pane is the app-wide active session, so git/workspace/tint keep following it.
+  const initialViews = useMemo(() => loadViews(), []);
+  const [views, setViews] = useState<View[]>(initialViews.views);
+  const [activeViewId, setActiveViewId] = useState(initialViews.activeViewId);
   const [panePickerFor, setPanePickerFor] = useState<string | null>(null);
-  const updateTree = (next: PaneNode) => {
-    setTreeState(next);
-    savePaneTree(next);
+  const viewStateRef = useRef<ViewState>({ views, activeViewId });
+  viewStateRef.current = { views, activeViewId };
+  const applyViews = (next: ViewState) => {
+    viewStateRef.current = next;
+    setViews(next.views);
+    setActiveViewId(next.activeViewId);
+    saveViews(next);
   };
-  // Session keys already shown in a pane — the picker hides these.
+  const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
+  const tree: PaneNode = activeView?.tree ?? { kind: 'leaf', id: 'empty', session: null };
+  const focusedPaneId = activeView?.focusedPaneId ?? firstLeafId(tree);
+  const liveKeys = () =>
+    liveSessionKeys(app.sessions, viewStateRef.current.views, app.healthByHost);
+
   const openSessionKeys = useMemo(
-    () =>
-      new Set(
-        leaves(tree).flatMap((l) =>
-          l.session ? [sessionKey(l.session.hostId, l.session.sessionId)] : [],
-        ),
-      ),
-    [tree],
+    () => new Set(views.flatMap((view) => viewMemberKeys(view))),
+    [views],
   );
 
-  // Seed the focused empty pane with the active session (first-run / single pane).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: updateTree/setSession are stable; re-running only on the listed inputs is intended
+  // Every live session belongs to exactly one view leaf.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the live session list; latest views are read from the ref
   useEffect(() => {
-    if (!app.activeHostId || !app.activeSessionId) return;
-    const ref: SessionRef = { hostId: app.activeHostId, sessionId: app.activeSessionId };
-    const focused = findLeaf(tree, focusedPaneId);
-    if (focused && !focused.session) updateTree(setSession(tree, focusedPaneId, ref));
-  }, [app.activeHostId, app.activeSessionId, tree, focusedPaneId]);
-
-  // Drop sessions that no longer exist out of the tree (killed elsewhere).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: prune reacts to the session list only; reading the latest tree inside is intended
-  useEffect(() => {
-    const live = new Set(app.sessions.map((row) => sessionKey(row.hostId, row.id)));
-    const pruned = prunePaneTree(tree, live);
-    if (pruned !== tree) updateTree(pruned);
-  }, [app.sessions]);
+    const current = viewStateRef.current;
+    const next = reconcileViews(current.views, liveKeys(), current.activeViewId);
+    if (!statesEqual(current, next)) applyViews(next);
+  }, [app.sessions, app.healthByHost]);
 
   // Focused pane → active session, so the rest of the app follows the focus.
   // biome-ignore lint/correctness/useExhaustiveDependencies: app.selectSession is stable; this mirrors focus into the active session
@@ -167,11 +201,18 @@ export function App() {
   }, [focusedPaneId, tree]);
 
   const splitPane = (paneId: string, dir: PaneDir, side: PaneSide) => {
-    updateTree(splitLeaf(tree, paneId, dir, side, null));
+    const current = viewStateRef.current;
+    applyViews({
+      views: patchActiveView(current.views, current.activeViewId, (view) => ({
+        ...view,
+        tree: splitLeaf(view.tree, paneId, dir, side, null),
+      })),
+      activeViewId: current.activeViewId,
+    });
   };
   // Split/close shortcuts. Gate on Cmd, or Ctrl+Shift — never plain Ctrl+D,
   // which is the terminal's EOF and must still reach the PTY.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: splitPane/closePane_ close over the current tree via the listed deps
+  // biome-ignore lint/correctness/useExhaustiveDependencies: splitPane/closePane_ close over the current view via the listed deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = e.metaKey || (e.ctrlKey && e.shiftKey);
@@ -190,54 +231,113 @@ export function App() {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [focusedPaneId, tree]);
+  }, [focusedPaneId, tree, views, activeViewId]);
   const closePane_ = (paneId: string) => {
-    const next = closePane(tree, paneId);
-    updateTree(next);
-    if (!findLeaf(next, focusedPaneId)) setFocusedPaneId(firstLeafId(next));
+    const current = viewStateRef.current;
+    const nextViews = patchActiveView(current.views, current.activeViewId, (view) => {
+      const nextTree = closePane(view.tree, paneId);
+      return {
+        ...view,
+        tree: nextTree,
+        focusedPaneId: findLeaf(nextTree, view.focusedPaneId)
+          ? view.focusedPaneId
+          : firstLeafId(nextTree),
+      };
+    });
+    applyViews(reconcileViews(nextViews, liveKeys(), current.activeViewId));
   };
   const fillPane = (paneId: string, ref: SessionRef) => {
-    updateTree(setSession(tree, paneId, ref));
-    setFocusedPaneId(paneId);
+    const current = viewStateRef.current;
+    const nextViews = patchActiveView(current.views, current.activeViewId, (view) => ({
+      ...view,
+      tree: setSession(view.tree, paneId, ref),
+      focusedPaneId: paneId,
+    }));
+    applyViews(reconcileViews(nextViews, liveKeys(), current.activeViewId));
   };
-  // Right-click a tab → split the focused pane and drop that session in.
+  // Right-click a tab → split the active view's focused pane and move that session in.
   const splitFromTab = (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => {
-    updateTree(splitLeaf(tree, focusedPaneId, dir, side, { hostId, sessionId }));
+    const current = viewStateRef.current;
+    applyViews(
+      moveSessionIntoView(
+        current.views,
+        sessionKey(hostId, sessionId),
+        current.activeViewId,
+        {
+          kind: 'split',
+          paneId:
+            current.views.find((v) => v.id === current.activeViewId)?.focusedPaneId ??
+            focusedPaneId,
+          dir,
+          side,
+        },
+        liveKeys(),
+        current.activeViewId,
+      ),
+    );
   };
   // Drag a tab onto a pane → split at the drop edge, or replace on a center drop.
   const dropSessionIntoPane = (paneId: string, intent: DropIntent, key: string) => {
-    const { hostId, sessionId } = parseSessionKey(key);
-    const ref: SessionRef = { hostId, sessionId };
-    updateTree(
+    const current = viewStateRef.current;
+    const op =
       intent.kind === 'replace'
-        ? setSession(tree, paneId, ref)
-        : splitLeaf(tree, paneId, intent.dir, intent.side, ref),
+        ? { kind: 'replace' as const, paneId }
+        : { kind: 'split' as const, paneId, dir: intent.dir, side: intent.side };
+    applyViews(
+      moveSessionIntoView(
+        current.views,
+        key,
+        current.activeViewId,
+        op,
+        liveKeys(),
+        current.activeViewId,
+      ),
     );
-    setFocusedPaneId(paneId);
   };
   // Pointer-driven tab→pane drag. HTML5 DnD can't be used: Tauri's native
   // drag-drop handler (kept on for OS file-drop upload) swallows in-webview
   // drags on Windows/WebView2. See useTabDrag.
   const tabDrag = useTabDrag(dropSessionIntoPane);
 
-  // Selecting a session from the drawer/tab strip loads it into the focused
-  // pane — unless a pane already shows it, in which case focus that pane.
+  const openView = (viewId: string) => {
+    const current = viewStateRef.current;
+    if (current.activeViewId === viewId) return;
+    applyViews({ views: current.views, activeViewId: viewId });
+  };
+
+  // Drawer click: activate the view that holds this session (and focus its pane).
   const openSession = (hostId: string, sessionId: string) => {
+    const current = viewStateRef.current;
     const key = sessionKey(hostId, sessionId);
-    const existing = leaves(tree).find(
-      (l) => l.session && sessionKey(l.session.hostId, l.session.sessionId) === key,
-    );
-    if (existing) setFocusedPaneId(existing.id);
-    else fillPane(focusedPaneId, { hostId, sessionId });
+    const existing = current.views.find((view) => viewMemberKeys(view).includes(key));
+    if (existing) {
+      const pane = leaves(existing.tree).find(
+        (l) => l.session && sessionKey(l.session.hostId, l.session.sessionId) === key,
+      );
+      applyViews({
+        views: current.views.map((view) =>
+          view.id === existing.id && pane ? { ...view, focusedPaneId: pane.id } : view,
+        ),
+        activeViewId: existing.id,
+      });
+      return;
+    }
+    fillPane(focusedPaneId, { hostId, sessionId });
   };
 
   const newTerminalOn = (hostId: string | null) => {
     if (!hostId) return;
-    // The seed effect only fills an EMPTY focused pane, so a new terminal must
-    // be routed into the focused pane explicitly — otherwise "+" silently
-    // allocates a session that never lands in any pane.
     void app.newSession(hostId).then((sessionId) => {
-      if (sessionId) openSession(hostId, sessionId);
+      if (!sessionId) return;
+      const current = viewStateRef.current;
+      const key = sessionKey(hostId, sessionId);
+      const existing = current.views.find((view) => viewMemberKeys(view).includes(key));
+      if (existing) {
+        applyViews({ views: current.views, activeViewId: existing.id });
+        return;
+      }
+      const solo = newSoloView({ hostId, sessionId });
+      applyViews({ views: [...current.views, solo], activeViewId: solo.id });
     });
     if (!layout.docked) setDrawerOpen(false);
   };
@@ -467,15 +567,18 @@ export function App() {
               showTabBar={layout.showTabBar}
               inset={layout.showMenuButton}
               app={app}
+              views={views}
+              activeViewId={activeViewId}
               dot={activeDot}
               hasSession={hasSession}
               onNew={newTerminalOn}
               onKill={modals.openKill}
+              onKillMembers={modals.openKillMembers}
               onWorkspace={() => workspace.setWorkspaceOpen(true)}
               onUpload={() => void workspace.pickAndUpload()}
               onOverflow={() => openOverflow('end')}
               onSplitFromTab={splitFromTab}
-              onSelectSession={openSession}
+              onSelectView={openView}
               onBeginDrag={tabDrag.begin}
             />
             {workspace.sessionPreview && !workspace.activePresentation && !workspace.fileView && (
@@ -506,8 +609,26 @@ export function App() {
                     fontFamily={prefs.terminalFont}
                     onFrame={app.handleWsFrame}
                     onDisconnected={(hostId) => app.retryHost(hostId)}
-                    onFocusPane={setFocusedPaneId}
-                    onSetRatio={(branchId, ratio) => updateTree(setRatio(tree, branchId, ratio))}
+                    onFocusPane={(paneId) => {
+                      const current = viewStateRef.current;
+                      applyViews({
+                        views: patchActiveView(current.views, current.activeViewId, (view) => ({
+                          ...view,
+                          focusedPaneId: paneId,
+                        })),
+                        activeViewId: current.activeViewId,
+                      });
+                    }}
+                    onSetRatio={(branchId, ratio) => {
+                      const current = viewStateRef.current;
+                      applyViews({
+                        views: patchActiveView(current.views, current.activeViewId, (view) => ({
+                          ...view,
+                          tree: setRatio(view.tree, branchId, ratio),
+                        })),
+                        activeViewId: current.activeViewId,
+                      });
+                    }}
                     onPickSession={(paneId) => setPanePickerFor(paneId)}
                     onSplit={splitPane}
                     onClosePane={closePane_}

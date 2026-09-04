@@ -101,8 +101,7 @@ export function useSessionModals() {
     placeholder: string;
   } | null>(null);
   const [kill, setKill] = useState<{
-    hostId: string;
-    sessionId: string;
+    members: Array<{ hostId: string; sessionId: string }>;
     label: string;
   } | null>(null);
 
@@ -112,7 +111,9 @@ export function useSessionModals() {
     openRename: (hostId: string, sessionId: string, text: string, placeholder: string) =>
       setRename({ hostId, sessionId, text, placeholder }),
     openKill: (hostId: string, sessionId: string, label: string) =>
-      setKill({ hostId, sessionId, label }),
+      setKill({ members: [{ hostId, sessionId }], label }),
+    openKillMembers: (members: Array<{ hostId: string; sessionId: string }>, label: string) =>
+      setKill({ members, label }),
     closeRename: () => setRename(null),
     closeKill: () => setKill(null),
     setRenameText: (text: string) =>
@@ -155,7 +156,9 @@ export function SessionModalHost({
         onCancel={modals.closeKill}
         onConfirm={() => {
           if (!modals.kill) return;
-          onKill(modals.kill.hostId, modals.kill.sessionId);
+          for (const member of modals.kill.members) {
+            onKill(member.hostId, member.sessionId);
+          }
           modals.closeKill();
         }}
       />

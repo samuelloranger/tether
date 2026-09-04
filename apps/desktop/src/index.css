@@ -1158,6 +1158,23 @@ label > textarea {
   border-radius: 0 2px 2px 0;
 }
 
+.session-tab-hosts {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.session-tab-host-chip {
+  flex: 1;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+}
+
 .session-tab-main {
   flex: 1;
   min-width: 0;

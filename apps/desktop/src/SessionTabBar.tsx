@@ -2,23 +2,36 @@ import { useMemo, useState } from 'react';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
-import { sessionKey } from './sessionKey';
+import { parseSessionKey, sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
 import { TerminalToolbar } from './TerminalToolbar';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 import type { BeginTabDrag } from './useTabDrag';
 import type { TetherDesktop } from './useTetherDesktop';
+import {
+  aggregateDot,
+  groupHostIds,
+  groupLabel,
+  isGroup,
+  type View,
+  viewMemberKeys,
+} from './viewModel';
 
 interface SessionTabBarProps {
   hosts: HostProfile[];
   healthByHost: Record<string, HostHealthStatus>;
   sessions: DrawerSession[];
+  views: View[];
+  activeViewId: string;
   activeHostId: string | null;
-  activeSessionId: string;
-  onSelect: (hostId: string, sessionId: string) => void;
+  onSelectView: (viewId: string) => void;
   onNew: (hostId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
+  onRequestKillMembers: (
+    members: Array<{ hostId: string; sessionId: string }>,
+    label: string,
+  ) => void;
   onOpenHosts: () => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
   onBeginDrag?: BeginTabDrag;
@@ -49,7 +62,7 @@ function SessionTab({
   active: boolean;
   label: string;
   dimmed: boolean;
-  onSelect: (hostId: string, sessionId: string) => void;
+  onSelect: () => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
   onBeginDrag?: BeginTabDrag;
@@ -88,7 +101,7 @@ function SessionTab({
         role="tab"
         aria-selected={active}
         title={activityLabel(dot)}
-        onClick={() => onSelect(host.id, session.id)}
+        onClick={onSelect}
       >
         <span className={`activity-dot dot-${dot}`} aria-hidden />
         <span className="session-tab-title">{label}</span>
@@ -107,23 +120,94 @@ function SessionTab({
   );
 }
 
+function GroupTab({
+  view,
+  hosts,
+  sessions,
+  healthByHost,
+  active,
+  label,
+  onSelect,
+  onRequestKillMembers,
+}: {
+  view: View;
+  hosts: HostProfile[];
+  sessions: DrawerSession[];
+  healthByHost: Record<string, HostHealthStatus>;
+  active: boolean;
+  label: string;
+  onSelect: () => void;
+  onRequestKillMembers: (
+    members: Array<{ hostId: string; sessionId: string }>,
+    label: string,
+  ) => void;
+}) {
+  const dot = aggregateDot(view, sessions);
+  const wants = !active && dot === 'waiting';
+  const colors = groupHostIds(view).flatMap((id) => {
+    const host = hosts.find((h) => h.id === id);
+    return host ? [{ id, color: host.color }] : [];
+  });
+  const dimmed = groupHostIds(view).every((id) => {
+    const health = healthByHost[id] ?? 'unknown';
+    return health === 'unreachable' || health === 'unauthorized';
+  });
+  const members = viewMemberKeys(view).map(parseSessionKey);
+
+  return (
+    <div
+      className={`session-tab session-tab-group${active ? ' active' : ''}${wants ? ' wants' : ''}${dimmed ? ' dimmed' : ''}`}
+    >
+      <span className="session-tab-hosts" aria-hidden>
+        {colors.map((chip) => (
+          <span
+            key={chip.id}
+            className="session-tab-host-chip"
+            style={{ background: chip.color }}
+          />
+        ))}
+      </span>
+      <button
+        type="button"
+        className="session-tab-main"
+        role="tab"
+        aria-selected={active}
+        title={activityLabel(dot)}
+        onClick={onSelect}
+      >
+        <span className={`activity-dot dot-${dot}`} aria-hidden />
+        <span className="session-tab-title">{label}</span>
+      </button>
+      <button
+        type="button"
+        className="icon-button session-tab-kill"
+        title="Kill sessions"
+        aria-label={`Kill ${label}`}
+        data-tab-action
+        onClick={() => onRequestKillMembers(members, label)}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export function SessionTabBar({
   hosts,
   healthByHost,
   sessions,
+  views,
+  activeViewId,
   activeHostId,
-  activeSessionId,
-  onSelect,
+  onSelectView,
   onNew,
   onRequestKill,
+  onRequestKillMembers,
   onOpenHosts,
   onSplitFromTab,
   onBeginDrag,
 }: SessionTabBarProps) {
   const labels = useMemo(() => tabLabels(sessions, hosts), [sessions, hosts]);
-  const ordered = hosts.flatMap((host) =>
-    sessions.filter((row) => row.hostId === host.id).map((session) => ({ host, session })),
-  );
 
   return (
     <div className="session-tabbar">
@@ -137,18 +221,40 @@ export function SessionTabBar({
         <HostsIcon />
       </button>
       <div className="session-tabs" role="tablist">
-        {ordered.map(({ host, session }) => {
-          const health = healthByHost[host.id] ?? 'unknown';
+        {views.map((view) => {
+          if (isGroup(view)) {
+            return (
+              <GroupTab
+                key={view.id}
+                view={view}
+                hosts={hosts}
+                sessions={sessions}
+                healthByHost={healthByHost}
+                active={view.id === activeViewId}
+                label={groupLabel(view, sessions, hosts)}
+                onSelect={() => onSelectView(view.id)}
+                onRequestKillMembers={onRequestKillMembers}
+              />
+            );
+          }
+          const ref = view.tree.kind === 'leaf' ? view.tree.session : null;
+          if (!ref) return null;
+          const host = hosts.find((h) => h.id === ref.hostId);
+          const session = sessions.find(
+            (row) => row.hostId === ref.hostId && row.id === ref.sessionId,
+          );
+          if (!host || !session) return null;
           const shown = labels.get(sessionKey(host.id, session.id)) ?? sessionLabel(session);
+          const health = healthByHost[host.id] ?? 'unknown';
           return (
             <SessionTab
-              key={sessionKey(host.id, session.id)}
+              key={view.id}
               host={host}
               session={session}
-              active={host.id === activeHostId && session.id === activeSessionId}
+              active={view.id === activeViewId}
               label={shown}
               dimmed={health === 'unreachable' || health === 'unauthorized'}
-              onSelect={onSelect}
+              onSelect={() => onSelectView(view.id)}
               onRequestKill={onRequestKill}
               onSplitFromTab={onSplitFromTab}
               onBeginDrag={onBeginDrag}
@@ -177,29 +283,35 @@ export function SessionChrome({
   showTabBar,
   inset,
   app,
+  views,
+  activeViewId,
   dot,
   hasSession,
   onNew,
   onKill,
+  onKillMembers,
   onWorkspace,
   onUpload,
   onOverflow,
   onSplitFromTab,
-  onSelectSession,
+  onSelectView,
   onBeginDrag,
 }: {
   showTabBar: boolean;
   inset: boolean;
   app: TetherDesktop;
+  views: View[];
+  activeViewId: string;
   dot: DotKey | null;
   hasSession: boolean;
   onNew: (hostId: string) => void;
   onKill: (hostId: string, sessionId: string, label: string) => void;
+  onKillMembers: (members: Array<{ hostId: string; sessionId: string }>, label: string) => void;
   onWorkspace: () => void;
   onUpload: () => void;
   onOverflow: () => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
-  onSelectSession?: (hostId: string, sessionId: string) => void;
+  onSelectView: (viewId: string) => void;
   onBeginDrag?: BeginTabDrag;
 }) {
   const host = app.activeHost;
@@ -211,11 +323,13 @@ export function SessionChrome({
           hosts={app.hosts}
           healthByHost={app.healthByHost}
           sessions={app.sessions}
+          views={views}
+          activeViewId={activeViewId}
           activeHostId={app.activeHostId}
-          activeSessionId={app.activeSessionId}
-          onSelect={onSelectSession ?? app.selectSession}
+          onSelectView={onSelectView}
           onNew={onNew}
           onRequestKill={onKill}
+          onRequestKillMembers={onKillMembers}
           onOpenHosts={() => app.setScreen('hosts')}
           onSplitFromTab={onSplitFromTab}
           onBeginDrag={onBeginDrag}

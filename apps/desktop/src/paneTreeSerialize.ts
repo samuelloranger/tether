@@ -5,7 +5,7 @@ export function serializePaneTree(tree: PaneNode): string {
   return JSON.stringify(tree);
 }
 
-function isValid(node: unknown): node is PaneNode {
+export function isValid(node: unknown): node is PaneNode {
   if (!node || typeof node !== 'object') return false;
   const n = node as Record<string, unknown>;
   if (n.kind === 'leaf') return typeof n.id === 'string';
