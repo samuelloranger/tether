@@ -12,8 +12,8 @@ use tokio::sync::mpsc;
 
 use crate::commands::connect::{now_ms, random_unit, HEALTHY_MS};
 use crate::noise_session::{
-    decode_server, encode_devices_list, encode_devices_revoke, encode_frontend_output,
-    encode_start, translate_frontend, DeviceInfo, ServerMsg,
+    decode_server, encode_auth_token_request, encode_devices_list, encode_devices_revoke,
+    encode_frontend_output, encode_start, translate_frontend, DeviceInfo, ServerMsg,
 };
 use crate::noise_store::{
     load_device_keypair_in, load_pinned_server_key_in, save_device_keypair_in,
@@ -141,6 +141,14 @@ pub struct RevokeResult {
     pub error: Option<String>,
 }
 
+/// A minted per-device REST bearer. camelCase so the webview reads `expiresAt`.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenResult {
+    pub token: String,
+    pub expires_at: String,
+}
+
 /// Open a short-lived authenticated management session to `address` using the
 /// pinned keys stored under `host_id`. Fail-closed: a WS-connect or handshake
 /// failure (a revoked or unknown device fails the IK handshake here) returns Err.
@@ -228,6 +236,31 @@ pub async fn core_noise_revoke(
             if verdict_target == target {
                 return Ok(RevokeResult { ok, error });
             }
+        }
+    }
+}
+
+/// Mint a per-device REST bearer over a dedicated management session. Fail-closed:
+/// a reconnect/handshake failure (revoked or unknown device) errors rather than
+/// falling back to the shared password.
+#[tauri::command]
+pub async fn core_noise_token(host_id: String, address: String) -> Result<TokenResult, String> {
+    request_auth_token(&host_id, &address).await
+}
+
+async fn request_auth_token(host_id: &str, address: &str) -> Result<TokenResult, String> {
+    let (mut ws, mut session) = open_management_session(&KeyringKeyStore, host_id, address).await?;
+    let wire = session
+        .seal(&encode_auth_token_request())
+        .map_err(|error| error.to_string())?;
+    ws.send(wire).await.map_err(|error| error.to_string())?;
+    loop {
+        let frame = ws.recv().await.map_err(|error| error.to_string())?;
+        let plain = session.open(&frame).map_err(|error| error.to_string())?;
+        if let ServerMsg::AuthToken { token, expires_at } =
+            decode_server(&plain).map_err(|error| error.to_string())?
+        {
+            return Ok(TokenResult { token, expires_at });
         }
     }
 }
@@ -469,8 +502,12 @@ pub async fn core_noise_connect(
                                 let _ = app.emit(&msg_evt, encode_frontend_output(counter, &chunk));
                             }
                             Ok(ServerMsg::Exit { .. }) => break false, // remote exit → close
-                            // devices.* replies + anything else the terminal ignores.
-                            Ok(ServerMsg::Devices(_) | ServerMsg::DevicesRevoked { .. }) => {}
+                            // devices.* / auth.token replies + anything else the terminal ignores.
+                            Ok(
+                                ServerMsg::Devices(_)
+                                | ServerMsg::DevicesRevoked { .. }
+                                | ServerMsg::AuthToken { .. },
+                            ) => {}
                             Ok(ServerMsg::Other) => {}
                             Err(_) => break false, // undecodable plaintext → close
                         }

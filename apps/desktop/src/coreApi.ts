@@ -156,6 +156,14 @@ export async function coreNoisePing(hostId: string, address: string): Promise<bo
   return invoke<boolean>('core_noise_ping', { hostId, address });
 }
 
+/** Mint a per-device REST bearer over the authenticated Noise session. */
+export async function coreNoiseToken(
+  hostId: string,
+  address: string,
+): Promise<{ token: string; expiresAt: string }> {
+  return invoke<{ token: string; expiresAt: string }>('core_noise_token', { hostId, address });
+}
+
 /**
  * One device paired with a Noise host, as the server reports it. camelCase keys
  * match the sealed `devices` reply byte-for-byte (the Rust side re-serializes

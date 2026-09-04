@@ -107,6 +107,7 @@ fn main() {
             commands::noise::core_noise_ping,
             commands::noise::core_noise_devices_list,
             commands::noise::core_noise_revoke,
+            commands::noise::core_noise_token,
             commands::noise::core_noise_connect,
             commands::noise::core_noise_send,
             commands::noise::core_noise_close,

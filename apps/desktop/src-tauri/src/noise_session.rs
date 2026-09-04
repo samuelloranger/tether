@@ -49,6 +49,8 @@ pub enum ServerMsg {
         ok: bool,
         error: Option<String>,
     },
+    /// A minted per-device REST bearer, in reply to `auth.token`.
+    AuthToken { token: String, expires_at: String },
     /// Any other sealed frame — the terminal pump ignores it.
     Other,
 }
@@ -123,6 +125,11 @@ pub fn encode_devices_revoke(target: &str) -> Vec<u8> {
         .expect("devices.revoke serializes")
 }
 
+/// Encode a `{"t":"auth.token"}` plaintext — request a per-device REST bearer.
+pub fn encode_auth_token_request() -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({ "t": "auth.token" })).expect("auth.token serializes")
+}
+
 /// Encode a `{"t":"resize",…}` plaintext.
 pub fn encode_resize(session_id: &str, cols: u16, rows: u16) -> Vec<u8> {
     serde_json::to_vec(&ResizeMsg {
@@ -192,6 +199,18 @@ pub fn decode_server(plaintext: &[u8]) -> Result<ServerMsg, serde_json::Error> {
                 .get("error")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+        },
+        Some("auth.token") => ServerMsg::AuthToken {
+            token: value
+                .get("token")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            expires_at: value
+                .get("expiresAt")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         },
         _ => ServerMsg::Other,
     })
@@ -404,6 +423,27 @@ mod tests {
     #[test]
     fn decode_server_rejects_non_json() {
         assert!(decode_server(b"not json at all").is_err());
+    }
+
+    #[test]
+    fn auth_token_request_encodes_to_the_noise_shape() {
+        let value: Value = serde_json::from_slice(&encode_auth_token_request()).unwrap();
+        assert_eq!(value, json!({ "t": "auth.token" }));
+    }
+
+    #[test]
+    fn decode_server_auth_token() {
+        let msg = decode_server(
+            br#"{"t":"auth.token","token":"tok-abc","expiresAt":"2026-09-05T00:00:00.000Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            msg,
+            ServerMsg::AuthToken {
+                token: "tok-abc".to_string(),
+                expires_at: "2026-09-05T00:00:00.000Z".to_string(),
+            }
+        );
     }
 
     #[test]
