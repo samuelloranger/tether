@@ -16,10 +16,14 @@ import embeddedNoiseLib from './noiseNativeLib' with { type: 'file' };
 // dlopen(3) on Linux/macOS loads any filename, including bun's extension-less
 // `$bunfs` extraction path, so use it as-is. Windows' LoadLibrary appends `.dll`
 // to an extension-less path and then fails to find it, so materialize a copy
-// with the real suffix (once) and load that.
+// with the real suffix and load that. The destination is per-process (pid): the
+// server test suite runs `bun test --parallel`, and a shared destination would
+// have every worker copy/lock the same .dll at once — which on Windows blocks
+// on the file lock and hangs the run. This module is imported once per process,
+// so the copy happens at most once.
 function resolveNoiseLib(): string {
   if (process.platform !== 'win32') return embeddedNoiseLib;
-  const dest = join(tmpdir(), `tether-noise-${process.env.TETHER_VERSION ?? 'dev'}.${suffix}`);
+  const dest = join(tmpdir(), `tether-noise-${process.pid}.${suffix}`);
   if (!existsSync(dest)) copyFileSync(embeddedNoiseLib, dest);
   return dest;
 }
