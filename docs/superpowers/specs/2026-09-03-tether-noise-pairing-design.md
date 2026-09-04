@@ -72,8 +72,8 @@ Noise frames ride **inside** the existing WebSocket/TCP transport. TLS becomes o
 
 ```
 host:   tether pair
-        → generate one-time enrollment code (8 chars) + open enrollment window
-        → print code (grouped XXXX-XXXX) + QR carrying {address(es), code}
+        → generate one-time enrollment code (12 chars) + open enrollment window
+        → print code (grouped XXXX-XXXX-XXXX) + QR carrying {address(es), code}
         → window: single-use, ~5 min expiry, rate-limited
 
 device: enter 8-char code + address  (desktop, typed)   OR   scan QR (phone)
@@ -90,14 +90,20 @@ after:  device stores its private key in Keychain (iOS) / OS keyring (desktop)
         subsequent connects use Noise IK against the pinned server key
 ```
 
-### The 8-char code
+### The enrollment code (12 chars)
 
-- **Alphabet:** Crockford base32 (no ambiguous `0/O`, `1/I/L`) → ~40 bits over 8 chars.
-- **Display:** grouped `XXXX-XXXX`, case-insensitive on entry.
-- **Lifetime:** single successful use; ~5-minute expiry; rate-limited attempts (see Hardening). 40 bits is ample for a one-shot online secret under those constraints — an online guesser gets a negligible number of tries before expiry.
+- **Alphabet:** Crockford base32 (no ambiguous `0/O`, `1/I/L`) → ~60 bits over 12 chars.
+- **Display:** grouped `XXXX-XXXX-XXXX`, case-insensitive on entry.
+- **Lifetime:** single successful use; ~5-minute expiry; rate-limited attempts (see Hardening).
+- **Why 12, not 8:** an 8-char (~40-bit) code is safe against *online* guessing, but a passive MITM who records the pairing handshake can brute the PSK **offline** (~10¹², GPU-feasible) and enroll a rogue device. 12 chars (~60 bits, ~10¹⁸) puts offline brute out of reach while staying typeable in three groups of four. This closes the offline-brute corner flagged in review.
 - **Delivery:** printed to the host terminal; QR encodes `{address(es), code}` for camera devices. Both paths are identical in security — QR only saves typing.
+- **Optional SAS (high-value hosts):** after the handshake, host terminal and device may display a short word-pair derived from the handshake hash for the user to compare. Belt-and-suspenders; not required, since the code already authenticates the handshake.
 
-Desktop has no camera, so the typed 8-char code is the **primary** path, not a fallback. It is the reason the code (not a pubkey-in-QR) is the out-of-band authenticator.
+Desktop has no camera, so the typed 12-char code is the **primary** path, not a fallback. It is the reason the code (not a pubkey-in-QR) is the out-of-band authenticator.
+
+### Session rekey (forward secrecy)
+
+Noise already gives per-session forward secrecy through the ephemeral keys in each handshake. For long-lived terminal sessions, add a **periodic rekey** of the transport keys (e.g. on a time or bytes-transferred threshold) so that a key compromised late in a session cannot decrypt the whole earlier scrollback. Rekey is a standard Noise transport operation (`Rekey()` on the cipher state); it is invisible to the PTY path and must never interrupt the byte stream. Resolve the exact trigger (time vs. bytes vs. both) during planning.
 
 ## Device registry & revocation
 
@@ -164,12 +170,20 @@ With the password gone and one narrow enrollment surface, tighten the rest so th
 - **Cross-stack:** one integration test that pairs a simulated device end-to-end (Rust client handshake ↔ Bun server FFI) and exchanges a frame.
 - **MITM negative test:** a relay/proxy that forwards handshake bytes without the code must fail to establish.
 
-## Decomposition
+## Security target & decomposition
+
+Honest scoring (a shell host is inherently trusted, so 10/10 does not exist; ~9.5 is the ceiling):
+
+- **Foundation as specced (this doc):** ~8.5/10.
+- **+ rendezvous relay + signed updates shipped:** ~9.3/10.
+- **+ that, externally audited, + the cheap hardening (rekey, longer code — already folded in here):** ~9.5/10.
 
 This spec is the **foundation** sub-project. Downstream, each with its own spec → plan cycle:
 
-1. **Rendezvous relay** — optional zero-knowledge relay so the host needs no open inbound port at all (the true "safe to expose" endgame). The Noise-frames-through-a-dumb-relay property here is what makes it possible; not built now.
-2. **At-rest encryption** — deferred by operator decision; revisit only if the threat model changes.
+1. **Rendezvous relay (no open inbound port)** — the largest single jump for internet exposure, spec'd separately in [`2026-09-03-tether-rendezvous-relay-design.md`](./2026-09-03-tether-rendezvous-relay-design.md). Depends on this foundation (reuses the server's static Noise key as its rendezvous address). This is the intended path to "expose over the internet without opening a port."
+2. **Signed, verified updates** — `tether update` verifies a minisign/cosign signature over the binary against a public key baked into the client. Closes the supply-chain path that bypasses all auth work. Own spec.
+3. **External protocol/crypto audit + handshake/frame fuzzing** — the gate before any "internet-safe" / "audited" claim is made publicly. Not a code sub-project so much as a release gate.
+4. **At-rest encryption** — deferred by operator decision; revisit only if the threat model changes.
 
 ## Open questions (resolve during planning)
 
@@ -177,3 +191,4 @@ This spec is the **foundation** sub-project. Downstream, each with its own spec 
 - Whether the Bun-server FFI reuses `tether-ffi` or gets a dedicated `tether-noise-ffi` crate (keeps UniFFI/Swift surface separate from the C-ABI/Bun surface).
 - Enrollment window UX when multiple devices race the same code (should be single-use → second attempt fails cleanly).
 - Whether legacy TLS listener is kept at all in the end state or removed once Noise is the transport.
+- Rekey trigger: time-based, bytes-based, or both.
