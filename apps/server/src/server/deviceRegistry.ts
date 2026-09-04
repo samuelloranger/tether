@@ -103,7 +103,7 @@ export function getDeviceByPubkey(pubkey: string): AuthDevice | null {
   return row ? fromRow(row) : null;
 }
 
-function getDeviceById(id: string): AuthDevice | null {
+export function getDeviceById(id: string): AuthDevice | null {
   const row = db
     .query(`SELECT ${DEVICE_COLUMNS} FROM auth_devices WHERE id = $id`)
     .get({ $id: id }) as AuthDeviceRow | null;
