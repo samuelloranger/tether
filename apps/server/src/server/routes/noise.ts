@@ -134,7 +134,9 @@ noiseRoutes.get(
           .then(async ({ channel, device }) => {
             logInfo(`Noise session authorized device ${device.id}`);
             try {
-              await runNoiseSession(channel, adapter);
+              // Thread the authorized device's id in so `devices.list` can flag
+              // the caller's own row (`isSelf`); registry fns default to live.
+              await runNoiseSession(channel, adapter, { identity: { deviceId: device.id } });
             } finally {
               channel.free();
               try {

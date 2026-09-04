@@ -81,8 +81,10 @@ function expectCode(fn: () => unknown, code: RegistryError['code']) {
   }
 }
 
-test('resolveTarget finds by exact label and by fingerprint prefix', () => {
+test('resolveTarget finds by exact id, exact label, and fingerprint prefix', () => {
   const device = addDevice({ label: 'sam-iphone', pubkey: pubkeyFill(11) });
+  // A GUI revokes by the exact id it got from the device list.
+  expect(resolveTarget(device.id).id).toBe(device.id);
   expect(resolveTarget('sam-iphone').id).toBe(device.id);
   expect(resolveTarget(device.fingerprint.slice(0, 8)).id).toBe(device.id);
 });

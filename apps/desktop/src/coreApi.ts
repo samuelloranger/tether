@@ -114,6 +114,78 @@ export async function coreHostRetry(hostId: string): Promise<void> {
   await invoke('core_host_retry', { hostId });
 }
 
+/**
+ * Run the Noise XXpsk2 pairing handshake against a host and pin its static key.
+ * Returns the pinned server fingerprint (hex sha256). Keys are stored in the OS
+ * keyring under `hostId`, so `hostId` must be the host profile's id for
+ * `coreNoiseReconnect` to find them later.
+ */
+export async function coreNoisePair(input: {
+  hostId: string;
+  address: string;
+  code: string;
+}): Promise<string> {
+  return invoke<string>('core_noise_pair', {
+    hostId: input.hostId,
+    address: input.address,
+    code: input.code,
+  });
+}
+
+/** Reconnect to an already-paired host using the pinned keys under `hostId`. */
+export async function coreNoiseReconnect(hostId: string, address: string): Promise<void> {
+  await invoke('core_noise_reconnect', { hostId, address });
+}
+
+/**
+ * Persist a Noise-paired host WITHOUT the password connection test / keyring
+ * password `core_hosts_save` runs — a Noise host has no password. The password
+ * save path is unchanged; this is its sibling for the pairing flow.
+ */
+export async function coreHostsSaveNoise(input: {
+  name: string;
+  host: string;
+  port: string;
+}): Promise<HostProfile> {
+  return invoke<HostProfile>('core_hosts_save_noise', {
+    name: input.name,
+    host: input.host,
+    port: input.port,
+  });
+}
+
+/**
+ * Open a terminal session over Noise. Keeps the sealed channel alive and emits
+ * `core-message-{connId}` / `core-closed-{connId}` in the SAME WS-JSON shape the
+ * password path uses, so the terminal frontend consumes it identically. Drive
+ * input/resize with `coreNoiseSend` (WS-JSON text) and end it with `coreNoiseClose`.
+ */
+export async function coreNoiseConnect(input: {
+  connId: string;
+  hostId: string;
+  address: string;
+  sessionId: string;
+  cols: number;
+  rows: number;
+}): Promise<void> {
+  await invoke('core_noise_connect', {
+    connId: input.connId,
+    hostId: input.hostId,
+    address: input.address,
+    sessionId: input.sessionId,
+    cols: input.cols,
+    rows: input.rows,
+  });
+}
+
+export async function coreNoiseSend(connId: string, text: string): Promise<void> {
+  await invoke('core_noise_send', { connId, text });
+}
+
+export async function coreNoiseClose(connId: string): Promise<void> {
+  await invoke('core_noise_close', { connId });
+}
+
 export interface DetectedLinkSpan {
   start: number;
   end: number;

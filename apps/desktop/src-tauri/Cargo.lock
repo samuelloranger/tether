@@ -859,6 +859,7 @@ dependencies = [
  "fiat-crypto",
  "rustc_version",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -5039,6 +5040,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
+ "curve25519-dalek",
  "futures-util",
  "getrandom 0.2.17",
  "regex",

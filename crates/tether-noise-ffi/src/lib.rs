@@ -72,6 +72,25 @@ pub unsafe extern "C" fn tether_noise_gen_keypair(out_pub: *mut u8, out_priv: *m
     }
 }
 
+/// Recover the device's own static public key from its stored private key.
+/// Byte-identical to the `out_pub` that `tether_noise_gen_keypair` produced for
+/// the same private key.
+///
+/// # Safety
+/// `private` and `out_pub` must each point to at least 32 readable/writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn tether_noise_derive_public(private: *const u8, out_pub: *mut u8) -> i32 {
+    let Some(sk) = read_key(private) else {
+        return STATUS_NULL;
+    };
+    if out_pub.is_null() {
+        return STATUS_NULL;
+    }
+    let pk = pairing::derive_public(&sk);
+    std::ptr::copy_nonoverlapping(pk.as_ptr(), out_pub, 32);
+    STATUS_OK
+}
+
 /// # Safety
 /// `code` must point to `code_len` readable bytes; `out_psk` to 32 writable bytes.
 #[no_mangle]
@@ -437,6 +456,26 @@ mod tests {
         let mut pk = [0u8; 32];
         assert_eq!(
             unsafe { tether_noise_gen_keypair(pk.as_mut_ptr(), std::ptr::null_mut()) },
+            STATUS_NULL
+        );
+    }
+
+    #[test]
+    fn derive_public_recovers_gen_keypair_public() {
+        let mut pk = [0u8; 32];
+        let mut sk = [0u8; 32];
+        unsafe { tether_noise_gen_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
+        let mut recovered = [0u8; 32];
+        let rc = unsafe { tether_noise_derive_public(sk.as_ptr(), recovered.as_mut_ptr()) };
+        assert_eq!(rc, STATUS_OK);
+        assert_eq!(recovered, pk);
+    }
+
+    #[test]
+    fn derive_public_rejects_null() {
+        let mut out = [0u8; 32];
+        assert_eq!(
+            unsafe { tether_noise_derive_public(std::ptr::null(), out.as_mut_ptr()) },
             STATUS_NULL
         );
     }

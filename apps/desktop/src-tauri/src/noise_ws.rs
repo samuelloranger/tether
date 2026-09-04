@@ -6,11 +6,13 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
+type WsSource = futures_util::stream::SplitStream<WsStream>;
 
 /// WebSocket transport for the Noise handshake drivers: binary frames only.
 pub struct NoiseWs {
-    sink: futures_util::stream::SplitSink<WsStream, Message>,
-    stream: futures_util::stream::SplitStream<WsStream>,
+    sink: WsSink,
+    stream: WsSource,
 }
 
 impl NoiseWs {
@@ -24,6 +26,56 @@ impl NoiseWs {
             .await
             .map_err(|_| NoiseError::Transport)?;
         Ok(Self::new(ws))
+    }
+
+    /// Split into independently-owned send/recv halves. After the handshake the
+    /// session pump must `select!` between an inbound frame and an outgoing
+    /// send; with one `&mut self` both arms would borrow the same value. The two
+    /// halves borrow disjointly, so the pump can await recv while holding the
+    /// sender.
+    pub fn into_split(self) -> (NoiseWsTx, NoiseWsRx) {
+        (
+            NoiseWsTx { sink: self.sink },
+            NoiseWsRx {
+                stream: self.stream,
+            },
+        )
+    }
+}
+
+/// Send half of a split [`NoiseWs`]: binary frames only.
+pub struct NoiseWsTx {
+    sink: WsSink,
+}
+
+impl NoiseWsTx {
+    pub async fn send(&mut self, frame: Vec<u8>) -> Result<(), NoiseError> {
+        self.sink
+            .send(Message::Binary(frame))
+            .await
+            .map_err(|_| NoiseError::Transport)
+    }
+}
+
+/// Recv half of a split [`NoiseWs`]: yields binary frames, skips ping/pong, and
+/// treats text/close/end/error as a transport error (same rules as the
+/// [`Transport`] impl).
+pub struct NoiseWsRx {
+    stream: WsSource,
+}
+
+impl NoiseWsRx {
+    pub async fn recv(&mut self) -> Result<Vec<u8>, NoiseError> {
+        loop {
+            match self.stream.next().await {
+                Some(Ok(Message::Binary(data))) => return Ok(data),
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                Some(Ok(Message::Frame(_))) => continue,
+                Some(Ok(Message::Text(_) | Message::Close(_))) | None | Some(Err(_)) => {
+                    return Err(NoiseError::Transport);
+                }
+            }
+        }
     }
 }
 

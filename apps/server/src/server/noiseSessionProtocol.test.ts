@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
 import type { FocusSubscriber } from './pty';
@@ -64,6 +65,23 @@ interface FakePty {
   unsubscribed: number;
 }
 
+/**
+ * The device-registry half of `SessionDeps`. Defaults to an empty registry that
+ * any target misses (so PTY-only tests never touch the real DB); the device
+ * tests pass a `fakeRegistry` with rows + a recording `revoke`.
+ */
+function emptyRegistry(): Pick<SessionDeps, 'listDevices' | 'revokeDevice' | 'resolveTarget'> {
+  return {
+    listDevices: (() => []) as SessionDeps['listDevices'],
+    resolveTarget: ((target: string) => {
+      throw new RegistryError('not_found', `no device matches '${target}'`);
+    }) as SessionDeps['resolveTarget'],
+    revokeDevice: ((target: string) => {
+      throw new RegistryError('not_found', `no device matches '${target}'`);
+    }) as SessionDeps['revokeDevice'],
+  };
+}
+
 function fakePty(): FakePty {
   const state: FakePty = {
     starts: [],
@@ -90,8 +108,51 @@ function fakePty(): FakePty {
     resizeSession: ((id, _client, cols, rows) => {
       state.resizes.push({ id, cols, rows });
     }) as SessionDeps['resizeSession'],
+    ...emptyRegistry(),
+    identity: { deviceId: '' },
   };
   return state;
+}
+
+function device(overrides: Partial<AuthDevice> & { id: string }): AuthDevice {
+  return {
+    label: `label-${overrides.id}`,
+    pubkey: `pubkey-${overrides.id}`,
+    fingerprint: `fp${overrides.id}`,
+    pairedAt: '2026-01-01T00:00:00.000Z',
+    lastSeenAt: null,
+    lastAddress: null,
+    ...overrides,
+  };
+}
+
+/**
+ * A registry double over an in-memory device list. `resolveTarget` matches by
+ * id, exact label, or fingerprint prefix (mirroring the real one's semantics);
+ * `revokeDevice` records the resolved id and removes the row.
+ */
+function fakeRegistry(devices: AuthDevice[]) {
+  const revoked: string[] = [];
+  const resolve = (target: string): AuthDevice => {
+    const matches = devices.filter(
+      (d) => d.id === target || d.label === target || d.fingerprint.startsWith(target),
+    );
+    if (matches.length === 0) throw new RegistryError('not_found', `no device matches '${target}'`);
+    if (matches.length > 1) throw new RegistryError('ambiguous', `multiple match '${target}'`);
+    return matches[0];
+  };
+  const deps: Pick<SessionDeps, 'listDevices' | 'revokeDevice' | 'resolveTarget'> = {
+    listDevices: (() => devices) as SessionDeps['listDevices'],
+    resolveTarget: resolve as SessionDeps['resolveTarget'],
+    revokeDevice: ((target: string) => {
+      const d = resolve(target);
+      revoked.push(d.id);
+      const idx = devices.indexOf(d);
+      if (idx >= 0) devices.splice(idx, 1);
+      return d;
+    }) as SessionDeps['revokeDevice'],
+  };
+  return { deps, revoked };
 }
 
 describe('runNoiseSession', () => {
@@ -239,5 +300,132 @@ describe('runNoiseSession — robustness (cipher-desync fixes)', () => {
     await expect(done).resolves.toBeUndefined();
     expect(pty.unsubscribed).toBeGreaterThanOrEqual(1); // cleaned up
     expect(io.sent).toHaveLength(0); // nothing sent after the failed seal
+  });
+});
+
+describe('runNoiseSession — device management', () => {
+  test("'devices.list' returns the rows with isSelf on the caller's own device", async () => {
+    const pty = fakePty();
+    const registry = fakeRegistry([
+      device({ id: 'dev-self', label: 'my-phone' }),
+      device({ id: 'dev-other', label: 'old-laptop', lastSeenAt: '2026-02-02T00:00:00.000Z' }),
+    ]);
+    const io = scriptedIo([jsonFrame({ t: 'devices.list' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      ...registry.deps,
+      identity: { deviceId: 'dev-self' },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(io.sent).toHaveLength(1);
+    const reply = JSON.parse(dec.decode(io.sent[0]));
+    expect(reply.t).toBe('devices');
+    expect(reply.items).toEqual([
+      {
+        id: 'dev-self',
+        label: 'my-phone',
+        fingerprint: 'fpdev-self',
+        pairedAt: '2026-01-01T00:00:00.000Z',
+        lastSeenAt: null,
+        lastAddress: null,
+        isSelf: true,
+      },
+      {
+        id: 'dev-other',
+        label: 'old-laptop',
+        fingerprint: 'fpdev-other',
+        pairedAt: '2026-01-01T00:00:00.000Z',
+        lastSeenAt: '2026-02-02T00:00:00.000Z',
+        lastAddress: null,
+        isSelf: false,
+      },
+    ]);
+  });
+
+  test("'devices.revoke' on a good target revokes and replies ok:true", async () => {
+    const pty = fakePty();
+    const registry = fakeRegistry([
+      device({ id: 'dev-self' }),
+      device({ id: 'dev-other', label: 'to-remove' }),
+    ]);
+    const io = scriptedIo([jsonFrame({ t: 'devices.revoke', target: 'to-remove' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      ...registry.deps,
+      identity: { deviceId: 'dev-self' },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(registry.revoked).toEqual(['dev-other']);
+    expect(JSON.parse(dec.decode(io.sent[0]))).toEqual({
+      t: 'devices.revoked',
+      target: 'to-remove',
+      ok: true,
+    });
+  });
+
+  test("'devices.revoke' allows self-revoke (CLI parity — not blocked)", async () => {
+    const pty = fakePty();
+    const registry = fakeRegistry([device({ id: 'dev-self', label: 'my-phone' })]);
+    const io = scriptedIo([jsonFrame({ t: 'devices.revoke', target: 'dev-self' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      ...registry.deps,
+      identity: { deviceId: 'dev-self' },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(registry.revoked).toEqual(['dev-self']);
+    expect(JSON.parse(dec.decode(io.sent[0])).ok).toBe(true);
+  });
+
+  test("'devices.revoke' on a bad target replies ok:false and keeps the session alive", async () => {
+    const pty = fakePty();
+    const registry = fakeRegistry([device({ id: 'dev-self' })]);
+    const io = scriptedIo([
+      jsonFrame({ t: 'devices.revoke', target: 'nope' }),
+      // A follow-up start must still be processed — the loop did not tear down.
+      jsonFrame({ t: 'start', id: 's-after' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      ...registry.deps,
+      identity: { deviceId: 'dev-self' },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(registry.revoked).toEqual([]); // nothing removed
+    expect(JSON.parse(dec.decode(io.sent[0]))).toEqual({
+      t: 'devices.revoked',
+      target: 'nope',
+      ok: false,
+      error: 'No device matches that target.',
+    });
+    // The session survived the bad revoke and went on to start a session.
+    expect(pty.starts.map((s) => s.id)).toEqual(['s-after']);
+  });
+
+  test("'devices.revoke' on an ambiguous target replies ok:false with a friendly error", async () => {
+    const pty = fakePty();
+    const registry = fakeRegistry([
+      device({ id: 'a1', fingerprint: 'abcd1' }),
+      device({ id: 'a2', fingerprint: 'abcd2' }),
+    ]);
+    const io = scriptedIo([jsonFrame({ t: 'devices.revoke', target: 'abcd' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      ...registry.deps,
+      identity: { deviceId: 'a1' },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(registry.revoked).toEqual([]);
+    expect(JSON.parse(dec.decode(io.sent[0]))).toEqual({
+      t: 'devices.revoked',
+      target: 'abcd',
+      ok: false,
+      error: 'That target matches more than one device.',
+    });
   });
 });

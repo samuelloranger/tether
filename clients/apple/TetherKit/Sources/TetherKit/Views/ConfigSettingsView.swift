@@ -7,6 +7,11 @@ public struct ConfigSettingsView: View {
   public var onDismiss: () -> Void
   public var initialHostId: String?
   @State private var path: NavigationPath
+  @State private var pairDevice = false
+  /// A fresh id the Noise device key + pinned server key are stored under for
+  /// this pairing. Regenerated each time the sheet opens so a cancelled attempt
+  /// never reuses a half-set-up id.
+  @State private var pairHostId = UUID().uuidString
 
   public init(
     store: SessionStore,
@@ -85,6 +90,13 @@ public struct ConfigSettingsView: View {
           Button(action: onAddHost) {
             Label("Add host", systemImage: "plus")
           }
+
+          Button {
+            pairHostId = UUID().uuidString
+            pairDevice = true
+          } label: {
+            Label("Pair a device", systemImage: "lock.shield")
+          }
         }
       }
       .navigationTitle("Settings")
@@ -95,6 +107,31 @@ public struct ConfigSettingsView: View {
       }
       .navigationDestination(for: String.self) { hostId in
         HostSettingsView(store: store, hostId: hostId)
+      }
+      .sheet(isPresented: $pairDevice) {
+        NavigationStack {
+          PairDeviceView(hostId: pairHostId) { pairId, host, port, _ in
+            // Keys are pinned in the Keychain under `pairId`. Persist a
+            // password-less HostProfile for the paired device; `createNoiseHost`
+            // migrates the Noise keys onto the profile's real id and selects it.
+            do {
+              try store.createNoiseHost(
+                name: "",
+                host: host,
+                port: port,
+                pairHostId: pairId
+              )
+            } catch {
+              store.errorMessage = error.localizedDescription
+            }
+            pairDevice = false
+          }
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Cancel") { pairDevice = false }
+            }
+          }
+        }
       }
     }
   }
@@ -123,6 +160,15 @@ public struct HostSettingsView: View {
             ServerSettingsView(store: store, hostId: hostId)
           } label: {
             Label("Server settings", systemImage: "server.rack")
+          }
+          // Device management rides the authenticated Noise session, so only
+          // Noise hosts get it — a password host has no device roster.
+          if store.authMode(for: hostId) == .noise {
+            NavigationLink {
+              DevicesView(store: store, hostId: hostId)
+            } label: {
+              Label("Devices", systemImage: "lock.laptopcomputer")
+            }
           }
         }
 

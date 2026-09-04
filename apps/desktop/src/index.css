@@ -562,6 +562,11 @@ label > textarea {
   margin-bottom: 6px;
 }
 
+.hosts-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .hosts-header > h1 {
   margin: 0;
   font-size: 21px;
@@ -629,6 +634,56 @@ label > textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* ── pair device ───────────────────────────────────────────────────────── */
+
+/* The 12-char enrollment code is shown grouped 4·4·4; wider tracking so the
+   three blocks read apart, uppercased to match the folded form. */
+.pairing-code-input {
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.pairing-status {
+  margin: 0 0 14px;
+  display: grid;
+  gap: 6px;
+}
+
+/* Working-amber line while the handshake runs, with a pulsing dot. */
+.pairing-status.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--warning);
+}
+
+.pairing-status.working::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  animation: pairing-pulse 1s var(--ease-out) infinite;
+}
+
+@keyframes pairing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.pairing-fingerprint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  word-break: break-all;
+  line-height: 1.5;
 }
 
 .admin-form {

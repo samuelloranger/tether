@@ -29,6 +29,42 @@ public enum NoiseClientError: Error, LocalizedError {
 public enum NoiseServerMessage: Sendable, Equatable {
   case output(id: String, chunk: String)
   case exit(id: String, exitCode: Int?)
+  /// Reply to `devices.list`: the full roster for this host.
+  case devices([DeviceInfo])
+  /// Reply to `devices.revoke`: the verdict for one target.
+  case devicesRevoked(target: String, ok: Bool, error: String?)
+}
+
+/// One paired device as reported by the server over the authenticated Noise
+/// session (`{t:"devices"}`). Decodes the server shape verbatim; `lastSeenAt`
+/// and `lastAddress` are nullable and `isSelf` flags the device this session is
+/// running on.
+public struct DeviceInfo: Sendable, Equatable, Decodable, Identifiable {
+  public let id: String
+  public let label: String
+  public let fingerprint: String
+  public let pairedAt: String
+  public let lastSeenAt: String?
+  public let lastAddress: String?
+  public let isSelf: Bool
+
+  public init(
+    id: String,
+    label: String,
+    fingerprint: String,
+    pairedAt: String,
+    lastSeenAt: String?,
+    lastAddress: String?,
+    isSelf: Bool
+  ) {
+    self.id = id
+    self.label = label
+    self.fingerprint = fingerprint
+    self.pairedAt = pairedAt
+    self.lastSeenAt = lastSeenAt
+    self.lastAddress = lastAddress
+    self.isSelf = isSelf
+  }
 }
 
 /// The client engine for Tether's Noise-secured transport. Owns the device
@@ -112,6 +148,21 @@ public final class NoiseSessionClient {
     return NoiseChannel(session: handshake, transport: transport)
   }
 
+  // MARK: - Device fingerprint
+
+  /// The full-form fingerprint of THIS device's own static public key for a
+  /// host, or `nil` if no device key is stored under `hostId` yet. The private
+  /// key was saved at pairing time; deriving its public key (via the
+  /// `noiseDerivePublic` FFI) and fingerprinting it yields the same 64-char
+  /// lowercase form the host prints, so the two can be eyeballed side by side.
+  public func deviceFingerprintFull(hostId: String) throws -> String? {
+    guard let devicePriv = try keyStore.loadDevicePrivateKey(hostId: hostId) else {
+      return nil
+    }
+    let devicePub = try noiseDerivePublic(`private`: devicePriv)
+    return NoiseFingerprint.full(devicePub)
+  }
+
   // MARK: - Helpers
 
   private func loadOrCreateDeviceKey(hostId: String) throws -> Data {
@@ -189,6 +240,30 @@ public final class NoiseChannel {
     try await sendSealed(["t": "resize", "id": id, "cols": Int(cols), "rows": Int(rows)])
   }
 
+  /// Ask the host for its full device roster (`{t:"devices.list"}`). The reply
+  /// arrives through `receive()` as `.devices`.
+  public func sendDevicesList() async throws {
+    try await sendSealed(Self.devicesListRequest())
+  }
+
+  /// Ask the host to revoke a device by id or fingerprint prefix
+  /// (`{t:"devices.revoke",target}`). The verdict arrives through `receive()`
+  /// as `.devicesRevoked`.
+  public func sendDevicesRevoke(target: String) async throws {
+    try await sendSealed(Self.devicesRevokeRequest(target: target))
+  }
+
+  /// The `devices.list` request body. Pure + static so the wire shape is unit
+  /// testable without an established channel.
+  static func devicesListRequest() -> [String: Any] {
+    ["t": "devices.list"]
+  }
+
+  /// The `devices.revoke` request body. Pure + static, as above.
+  static func devicesRevokeRequest(target: String) -> [String: Any] {
+    ["t": "devices.revoke", "target": target]
+  }
+
   /// Open the next sealed frame from the server into an application message.
   public func receive() async throws -> NoiseServerMessage {
     let wire = try await transport.recv()
@@ -209,27 +284,27 @@ public final class NoiseChannel {
 
 extension NoiseServerMessage: Decodable {
   private enum CodingKeys: String, CodingKey {
-    case t, id, chunk, exitCode
+    case t, id, chunk, exitCode, items, target, ok, error
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let t = try container.decode(String.self, forKey: .t)
-    // `id` is a number for output frames (the log id) and a string for exit
-    // frames (the session id); normalise both to String.
-    let id: String
-    if let intId = try? container.decode(Int.self, forKey: .id) {
-      id = String(intId)
-    } else {
-      id = try container.decode(String.self, forKey: .id)
-    }
     switch t {
     case "output":
       let chunk = try container.decode(String.self, forKey: .chunk)
-      self = .output(id: id, chunk: chunk)
+      self = .output(id: try Self.decodeId(from: container), chunk: chunk)
     case "exit":
       let exitCode = try container.decodeIfPresent(Int.self, forKey: .exitCode)
-      self = .exit(id: id, exitCode: exitCode)
+      self = .exit(id: try Self.decodeId(from: container), exitCode: exitCode)
+    case "devices":
+      let items = try container.decode([DeviceInfo].self, forKey: .items)
+      self = .devices(items)
+    case "devices.revoked":
+      let target = try container.decode(String.self, forKey: .target)
+      let ok = try container.decode(Bool.self, forKey: .ok)
+      let error = try container.decodeIfPresent(String.self, forKey: .error)
+      self = .devicesRevoked(target: target, ok: ok, error: error)
     default:
       throw DecodingError.dataCorruptedError(
         forKey: .t,
@@ -237,5 +312,16 @@ extension NoiseServerMessage: Decodable {
         debugDescription: "Unknown server message type '\(t)'"
       )
     }
+  }
+
+  /// `id` is a number for output frames (the log id) and a string for exit
+  /// frames (the session id); normalise both to String.
+  private static func decodeId(
+    from container: KeyedDecodingContainer<CodingKeys>
+  ) throws -> String {
+    if let intId = try? container.decode(Int.self, forKey: .id) {
+      return String(intId)
+    }
+    return try container.decode(String.self, forKey: .id)
   }
 }

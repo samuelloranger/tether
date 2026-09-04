@@ -195,6 +195,44 @@ pub async fn core_hosts_save(
     Ok(profile)
 }
 
+/// Persist a Noise-only host profile WITHOUT a connection test or keyring
+/// password. The password path (`core_hosts_save`) rejects a Noise-only host
+/// because its connection test needs a shared password; a paired Noise host has
+/// none, so pairing (`core_noise_pair`) is the trust step and this only records
+/// the profile. Deliberately mirrors the create branch of `core_hosts_save`
+/// minus the test + `KeyringHostSecrets.set`. The password path is untouched.
+///
+/// The frontend calls this after a successful pairing; wiring it is a later step.
+#[tauri::command]
+pub fn core_hosts_save_noise(
+    app: AppHandle,
+    name: String,
+    host: String,
+    port: String,
+) -> Result<HostProfile, String> {
+    let state = shared_from_app(&app);
+    let profile = {
+        let store = state.hosts.lock().map_err(|error| error.to_string())?;
+        store
+            .create(NewHostProfile {
+                name,
+                color: "#89b4fa".into(),
+                host,
+                port,
+                identity_name: String::new(),
+            })
+            .map_err(|error| error.to_string())?
+    };
+
+    {
+        let mut health = state.health.lock().unwrap();
+        health.insert(profile.id.clone(), initial_host_health());
+    }
+    set_active_host(&app, Some(profile.id.clone()));
+    let _ = restart_polling(&app);
+    Ok(profile)
+}
+
 #[tauri::command]
 pub fn core_hosts_remove(app: AppHandle, host_id: String) -> Result<(), String> {
     let state = shared_from_app(&app);

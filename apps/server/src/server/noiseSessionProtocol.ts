@@ -1,3 +1,5 @@
+import type { AuthDevice } from './deviceRegistry';
+import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { logError } from './log';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import {
@@ -9,14 +11,30 @@ import {
 } from './pty';
 
 /**
- * The subset of `pty.ts` the Noise session loop drives. Injected so the loop is
- * testable without a real PTY/holder; defaults to the live functions.
+ * The identity of the device on the far end of this Noise session — already
+ * authorized by the IK reconnect (`authGate.runReconnect`) before this loop
+ * runs. Threaded in so `devices.list` can flag the caller's own row (`isSelf`).
+ */
+export interface SessionIdentity {
+  deviceId: string;
+}
+
+/**
+ * The dependencies the Noise session loop drives: the `pty.ts` subset (so the
+ * loop is testable without a real PTY/holder) plus the device-registry functions
+ * that back the `devices.list` / `devices.revoke` control messages, and the
+ * authenticated caller identity. All default to the live implementations, so
+ * existing callers/tests that only override the PTY subset are unaffected.
  */
 export interface SessionDeps {
   startSession: typeof startSession;
   subscribeToSession: typeof subscribeToSession;
   writeToSession: typeof writeToSession;
   resizeSession: typeof resizeSession;
+  listDevices: typeof listDevices;
+  revokeDevice: typeof revokeDevice;
+  resolveTarget: typeof resolveTarget;
+  identity: SessionIdentity;
 }
 
 const defaultDeps: SessionDeps = {
@@ -24,13 +42,42 @@ const defaultDeps: SessionDeps = {
   subscribeToSession,
   writeToSession,
   resizeSession,
+  listDevices,
+  revokeDevice,
+  resolveTarget,
+  identity: { deviceId: '' },
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
 type ClientMessage =
   | { t: 'start'; id: string; command?: string; cols?: number; rows?: number }
   | { t: 'input'; id: string; text: string }
-  | { t: 'resize'; id: string; cols: number; rows: number };
+  | { t: 'resize'; id: string; cols: number; rows: number }
+  | { t: 'devices.list' }
+  | { t: 'devices.revoke'; target: string };
+
+/** One row of the `devices` reply — the wire shape an iOS client mirrors. */
+interface DeviceListItem {
+  id: string;
+  label: string;
+  fingerprint: string;
+  pairedAt: string;
+  lastSeenAt: string | null;
+  lastAddress: string | null;
+  isSelf: boolean;
+}
+
+function toListItem(device: AuthDevice, selfId: string): DeviceListItem {
+  return {
+    id: device.id,
+    label: device.label,
+    fingerprint: device.fingerprint,
+    pairedAt: device.pairedAt,
+    lastSeenAt: device.lastSeenAt,
+    lastAddress: device.lastAddress,
+    isSelf: device.id === selfId,
+  };
+}
 
 interface Attachment {
   unsub: () => void;
@@ -46,12 +93,53 @@ const decoder = new TextDecoder();
 // any seal/send failure as fatal (below).
 const MAX_OUTPUT_CHARS = 16 * 1024;
 
+/**
+ * Handle the device-management control messages (`devices.list` /
+ * `devices.revoke`). Both ride the already-authenticated Noise channel, so the
+ * caller is a paired device — CLI parity: any paired device may manage devices.
+ * A revoke against a bad target replies `ok:false` with a friendly error and
+ * NEVER throws out of the loop (so a mistyped target can't tear the session
+ * down). Self-revoke is not blocked (CLI parity); `isSelf` only marks the row.
+ */
+function applyDevicesMessage(
+  msg: { t: 'devices.list' } | { t: 'devices.revoke'; target: string },
+  d: SessionDeps,
+  sendSealed: (obj: unknown) => boolean,
+): void {
+  if (msg.t === 'devices.list') {
+    const items = d.listDevices().map((device) => toListItem(device, d.identity.deviceId));
+    sendSealed({ t: 'devices', items });
+    return;
+  }
+  // devices.revoke
+  try {
+    d.resolveTarget(msg.target); // resolve first so a bad target yields a clean error
+    d.revokeDevice(msg.target);
+    sendSealed({ t: 'devices.revoked', target: msg.target, ok: true });
+  } catch (err) {
+    const error =
+      err instanceof RegistryError ? friendlyRegistryError(err) : 'Could not revoke that device.';
+    if (!(err instanceof RegistryError)) {
+      logError(`Noise session: devices.revoke('${msg.target}') failed:`, err);
+    }
+    sendSealed({ t: 'devices.revoked', target: msg.target, ok: false, error });
+  }
+}
+
+/** Map a RegistryError code to a short human string for the client UI. */
+function friendlyRegistryError(err: RegistryError): string {
+  if (err.code === 'not_found') return 'No device matches that target.';
+  if (err.code === 'ambiguous') return 'That target matches more than one device.';
+  return 'Could not revoke that device.';
+}
+
 /** Apply one decoded client message to the PTY. Extracted to keep the loop small. */
 async function applyMessage(
   msg: ClientMessage,
   d: SessionDeps,
   attachments: Map<string, Attachment>,
   makeSubscriber: (id: string) => FocusSubscriber,
+  sendSealed: (obj: unknown) => boolean,
 ): Promise<void> {
   if (msg.t === 'start') {
     const cols = msg.cols ?? 80;
@@ -73,6 +161,8 @@ async function applyMessage(
     // resize a session this channel actually subscribed to.
     const attachment = attachments.get(msg.id);
     if (attachment) d.resizeSession(msg.id, attachment.sub, msg.cols, msg.rows);
+  } else if (msg.t === 'devices.list' || msg.t === 'devices.revoke') {
+    applyDevicesMessage(msg, d, sendSealed);
   }
 }
 
@@ -170,7 +260,7 @@ export async function runNoiseSession(
         logError('Noise session: decrypt/parse failed, ending session:', err);
         return;
       }
-      await applyMessage(msg, d, attachments, makeSubscriber);
+      await applyMessage(msg, d, attachments, makeSubscriber, sendSealed);
     }
   } catch {
     // io.recv() rejected (socket closed) — fall through to cleanup.

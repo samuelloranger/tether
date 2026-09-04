@@ -12,6 +12,7 @@ import { useGitPanel } from './git/useGitPanel';
 import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
 import { activeSessionDot, litStateFor, shellVars } from './litTheme';
+import { PairDeviceScreen } from './PairDeviceScreen';
 import { PanePickerModal } from './PanePickerModal';
 import { PresentationBanner, PresentationView } from './PresentationView';
 import {
@@ -293,6 +294,19 @@ export function App() {
     );
   }
 
+  if (app.screen === 'pair-device') {
+    return (
+      <div className="app-shell centered" {...shellProps}>
+        <PairDeviceScreen
+          onPair={app.pairHost}
+          onDone={() => app.setScreen('hosts')}
+          onCancel={() => app.setScreen(app.hosts.length > 0 ? 'hosts' : 'main')}
+        />
+        <AlertModal />
+      </div>
+    );
+  }
+
   if (app.hosts.length === 0 || app.screen === 'host-form') {
     return (
       <div className="app-shell centered" {...shellProps}>
@@ -327,6 +341,7 @@ export function App() {
             app.setEditingHostId(null);
             app.setScreen('host-form');
           }}
+          onPairDevice={() => app.setScreen('pair-device')}
           onEdit={(hostId) => {
             app.setEditingHostId(hostId);
             app.setScreen('host-form');

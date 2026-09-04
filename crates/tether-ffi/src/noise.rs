@@ -7,7 +7,9 @@ use std::sync::Mutex;
 
 use thiserror::Error;
 
-use tether_core::noise::pairing::{generate_static_keypair, PairingInitiator, PairingResponder};
+use tether_core::noise::pairing::{
+    derive_public, generate_static_keypair, PairingInitiator, PairingResponder,
+};
 use tether_core::noise::reconnect::{ReconnectInitiator, ReconnectResponder};
 use tether_core::noise::{code, psk, NoiseError, NoiseSession};
 
@@ -58,6 +60,15 @@ pub fn noise_gen_keypair() -> Result<FfiNoiseKeypair, FfiNoiseError> {
 pub fn noise_derive_psk(code: String) -> Result<Vec<u8>, FfiNoiseError> {
     let normalized = code::normalize(&code)?;
     Ok(psk::derive(&normalized)?.to_vec())
+}
+
+/// Recover the device's own static public key from its stored private key, so a
+/// client can present its public (and fingerprint) without having persisted it.
+/// Returns byte-identical output to the `public` from `noise_gen_keypair`.
+/// A private key that is not exactly 32 bytes is rejected as `Handshake`.
+#[uniffi::export]
+pub fn noise_derive_public(private: Vec<u8>) -> Result<Vec<u8>, FfiNoiseError> {
+    Ok(derive_public(&take32(&private)?).to_vec())
 }
 
 enum Handshake {
@@ -274,6 +285,21 @@ mod tests {
 
         let sealed = i.seal(b"hello ios".to_vec()).unwrap();
         assert_eq!(r.open(sealed).unwrap(), b"hello ios");
+    }
+
+    #[test]
+    fn derive_public_recovers_keypair_public_through_the_uniffi_surface() {
+        let kp = noise_gen_keypair().unwrap();
+        let recovered = noise_derive_public(kp.private.clone()).unwrap();
+        assert_eq!(recovered, kp.public);
+    }
+
+    #[test]
+    fn derive_public_rejects_bad_length() {
+        assert!(matches!(
+            noise_derive_public(vec![0u8; 31]),
+            Err(FfiNoiseError::Handshake)
+        ));
     }
 
     #[test]

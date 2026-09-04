@@ -113,7 +113,11 @@ function getDeviceById(id: string): AuthDevice | null {
 export function resolveTarget(target: string): AuthDevice {
   const rows = db
     .query(
-      `SELECT id FROM auth_devices WHERE label = $t
+      // Exact id first — a GUI revokes by the unambiguous id it got from the
+      // device list; label and fingerprint-prefix are the CLI's human affordances.
+      `SELECT id FROM auth_devices WHERE id = $t
+       UNION
+       SELECT id FROM auth_devices WHERE label = $t
        UNION
        SELECT id FROM auth_devices WHERE fingerprint LIKE $t || '%'`,
     )

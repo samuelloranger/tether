@@ -3,6 +3,7 @@
 
 mod commands;
 mod http;
+mod noise_session;
 mod noise_store;
 mod noise_ws;
 mod state;
@@ -102,6 +103,10 @@ fn main() {
             commands::config::core_notify_waiting_edge,
             commands::noise::core_noise_pair,
             commands::noise::core_noise_reconnect,
+            commands::noise::core_noise_connect,
+            commands::noise::core_noise_send,
+            commands::noise::core_noise_close,
+            commands::hosts::core_hosts_save_noise,
         ])
         .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())

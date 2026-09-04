@@ -3,6 +3,7 @@ import { coreCacheDelete, coreCacheIds, coreCacheTouch } from './coreApi';
 import { EmptyPanePicker } from './EmptyPanePicker';
 import type { FrameApplyResult } from './frameHandler';
 import { layoutTree } from './layoutRects';
+import { isNoiseHost, noiseSessionAddress } from './noiseHosts';
 import { PaneDivider } from './PaneDivider';
 import type { PaneDir, PaneNode, PaneSide } from './paneTree';
 import type { UI_THEMES } from './preferences';
@@ -152,6 +153,9 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
               interactive={leaf.paneId === props.focusedPaneId}
               wsOrigin={wsOriginFor(host)}
               password={props.passwords[session.hostId] ?? ''}
+              noiseAddress={
+                isNoiseHost(session.hostId) ? noiseSessionAddress(host.host, host.port) : undefined
+              }
               terminalTheme={props.terminalTheme}
               fontFamily={props.fontFamily}
               fontSize={props.fontSize}

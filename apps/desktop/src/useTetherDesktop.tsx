@@ -1,3 +1,4 @@
+// biome-ignore-all lint/style/noExcessiveLinesPerFile: desktop app state hook — owns hosts, sessions, pairing, and the screen state machine in one place
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   coreCacheDelete,
@@ -6,9 +7,11 @@ import {
   coreHostsMigrate,
   coreHostsRemove,
   coreHostsSave,
+  coreHostsSaveNoise,
   coreHostsUpdateConnection,
   coreHostsUpdateIdentity,
   coreNextTermId,
+  coreNoisePair,
   coreNotifyWaitingEdge,
   corePollingRestart,
   corePollingSetActive,
@@ -21,6 +24,7 @@ import {
   listenSessions,
 } from './coreApi';
 import type { FrameApplyResult } from './frameHandler';
+import { markNoiseHost, unmarkNoiseHost } from './noiseHosts';
 import { hostSecrets } from './secureConfig';
 import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
@@ -36,7 +40,7 @@ import {
 
 export type { DrawerSession } from './types';
 
-type Screen = 'main' | 'hosts' | 'host-form' | 'settings' | 'local-settings';
+type Screen = 'main' | 'hosts' | 'host-form' | 'pair-device' | 'settings' | 'local-settings';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: desktop app state hook mirrors mobile session runtime scope
 export function useTetherDesktop() {
@@ -274,9 +278,63 @@ export function useTetherDesktop() {
     [],
   );
 
+  /**
+   * Pair a new host over Noise, then persist it.
+   *
+   * The profile is created FIRST so the pinned device + server keys land under
+   * its real id — reconnect (`coreNoiseReconnect`) namespaces its keys by the
+   * host profile id, so pairing under any other id would strand them. This
+   * mirrors HostFormScreen's save path (`coreHostsSave` → refresh → activate),
+   * minus the routing, so the pairing screen can show the fingerprint before it
+   * navigates on.
+   *
+   * NOTE: `coreHostsSave` still runs a password connection test and stores a
+   * password in the keyring — the password-TOFU auth and Noise pairing are
+   * separate systems today. A Noise-only server with no password will reject
+   * this create; a password-less save path is a backend follow-up. If pairing
+   * itself fails after the profile exists, the orphan profile is removed.
+   */
+  const pairHost = useCallback(
+    async (input: {
+      name: string;
+      host: string;
+      port: string;
+      address: string;
+      code: string;
+    }): Promise<{ fingerprint: string }> => {
+      // Password-less save: a Noise host has no password, so it must NOT go
+      // through the password connection test in `coreHostsSave`.
+      const profile = await coreHostsSaveNoise({
+        name: input.name,
+        host: input.host,
+        port: input.port,
+      });
+      try {
+        const fingerprint = await coreNoisePair({
+          hostId: profile.id,
+          address: input.address,
+          code: input.code,
+        });
+        // Mark it a Noise host so its terminal streams over the Noise channel.
+        markNoiseHost(profile.id);
+        setPasswords((current) => ({ ...current, [profile.id]: '' }));
+        setHosts(await coreHostsList());
+        setActiveHostId(profile.id);
+        localStorage.setItem(KEY_ACTIVE_HOST, profile.id);
+        return { fingerprint };
+      } catch (error) {
+        await coreHostsRemove(profile.id).catch(() => undefined);
+        unmarkNoiseHost(profile.id);
+        throw error;
+      }
+    },
+    [],
+  );
+
   const removeHost = useCallback(
     async (hostId: string) => {
       await coreHostsRemove(hostId);
+      unmarkNoiseHost(hostId);
       setHosts(await coreHostsList());
       setPasswords((current) => {
         const next = { ...current };
@@ -405,6 +463,7 @@ export function useTetherDesktop() {
     renameSessionById,
     retryHost,
     saveHost,
+    pairHost,
     removeHost,
     updateHostIdentity,
     updateHostConnection,

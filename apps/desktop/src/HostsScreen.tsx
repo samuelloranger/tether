@@ -13,6 +13,7 @@ interface HostsScreenProps {
   healthByHost: Record<string, HostHealthStatus>;
   onBack: () => void;
   onAdd: () => void;
+  onPairDevice: () => void;
   onEdit: (hostId: string) => void;
   onRemove: (hostId: string) => void;
   onSelect: (hostId: string) => void;
@@ -23,6 +24,7 @@ export function HostsScreen({
   healthByHost,
   onBack,
   onAdd,
+  onPairDevice,
   onEdit,
   onRemove,
   onSelect,
@@ -34,9 +36,14 @@ export function HostsScreen({
       </button>
       <header className="hosts-header">
         <h1>Hosts</h1>
-        <button type="button" onClick={onAdd}>
-          Add host
-        </button>
+        <div className="hosts-header-actions">
+          <button type="button" className="secondary" onClick={onPairDevice}>
+            Pair a device
+          </button>
+          <button type="button" onClick={onAdd}>
+            Add host
+          </button>
+        </div>
       </header>
       <ul className="hosts-list">
         {hosts.map((host) => {

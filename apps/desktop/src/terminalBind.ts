@@ -5,6 +5,7 @@ import {
   forgetCoreSession,
   nextConnId,
   openCoreSocket,
+  openNoiseSocket,
   sendJson,
   type TerminalSocket,
 } from './coreTransport';
@@ -90,6 +91,11 @@ function openSocket(
     sessionId: string;
     wsOrigin: string;
     password: string;
+    // When set, this host streams over Noise: connect via `core_noise_connect`
+    // to this `ws://host:port/api/noise/session` endpoint instead of the
+    // password WS. The frames it emits are the same WS-JSON, so the handlers
+    // below are unchanged.
+    noiseAddress?: string;
     isInteractive: () => boolean;
     onFrame: (hostId: string, sessionId: string, frame: FrameApplyResult) => void;
     onDisconnected: () => void;
@@ -106,23 +112,23 @@ function openSocket(
   };
   input.fit.fit();
   const dims = input.fit.proposeDimensions();
-  void openCoreSocket(
-    nextConnId(),
-    input.wsOrigin,
-    input.password,
-    { sessionId: input.sessionId, cols: dims?.cols ?? 80, rows: dims?.rows ?? 24 },
-    {
-      onOpen: () => {},
-      onMessage: (raw) => {
-        const result = applyServerFrame(sink, raw, state.lastAppliedId);
-        state.lastAppliedId = result.lastAppliedId;
-        if (result.kind === 'output') replay.onOutput();
-        if (result.kind === 'reset') replay.onReset();
-        input.onFrame(input.hostId, input.sessionId, result);
-      },
-      onClose,
+  const connId = nextConnId();
+  const params = { sessionId: input.sessionId, cols: dims?.cols ?? 80, rows: dims?.rows ?? 24 };
+  const handlers = {
+    onOpen: () => {},
+    onMessage: (raw: string) => {
+      const result = applyServerFrame(sink, raw, state.lastAppliedId);
+      state.lastAppliedId = result.lastAppliedId;
+      if (result.kind === 'output') replay.onOutput();
+      if (result.kind === 'reset') replay.onReset();
+      input.onFrame(input.hostId, input.sessionId, result);
     },
-  ).then((s) => {
+    onClose,
+  };
+  const socket = input.noiseAddress
+    ? openNoiseSocket(connId, input.hostId, input.noiseAddress, params, handlers)
+    : openCoreSocket(connId, input.wsOrigin, input.password, params, handlers);
+  void socket.then((s) => {
     if (state.closed) {
       s.close();
       return;
@@ -142,6 +148,8 @@ export function bindTerminalSession(input: {
   sessionId: string;
   wsOrigin: string;
   password: string;
+  /** Set for a Noise host: the `ws://host:port/api/noise/session` endpoint. */
+  noiseAddress?: string;
   isInteractive: () => boolean;
   onFrame: (hostId: string, sessionId: string, frame: FrameApplyResult) => void;
   onDisconnected: () => void;
