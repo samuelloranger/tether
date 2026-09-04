@@ -1,4 +1,5 @@
 import { confirmAction } from './dialog';
+import { isNoiseHost } from './noiseHosts';
 import type { HostHealthStatus, HostProfile } from './types';
 
 const HEALTH_LABEL: Record<HostHealthStatus, string> = {
@@ -15,6 +16,7 @@ interface HostsScreenProps {
   onAdd: () => void;
   onPairDevice: () => void;
   onEdit: (hostId: string) => void;
+  onDevices: (hostId: string) => void;
   onRemove: (hostId: string) => void;
   onSelect: (hostId: string) => void;
 }
@@ -26,6 +28,7 @@ export function HostsScreen({
   onAdd,
   onPairDevice,
   onEdit,
+  onDevices,
   onRemove,
   onSelect,
 }: HostsScreenProps) {
@@ -56,6 +59,15 @@ export function HostsScreen({
                   {host.host}:{host.port} · {HEALTH_LABEL[health]}
                 </span>
               </button>
+              {isNoiseHost(host.id) ? (
+                <button
+                  type="button"
+                  className="secondary small"
+                  onClick={() => onDevices(host.id)}
+                >
+                  Devices
+                </button>
+              ) : null}
               <button type="button" className="secondary small" onClick={() => onEdit(host.id)}>
                 Edit
               </button>

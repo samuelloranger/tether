@@ -775,7 +775,11 @@ public final class SessionStore {
     // TODO: a `GET /api/noise/sessions`-equivalent would let the drawer show a
     // Noise host's real server-side session list.
     if authMode(for: hostId) == .noise {
-      healthByHost[hostId] = .reachable
+      // No Bearer credential + no REST list — probe reachability over the Noise
+      // path (a reconnect handshake) instead of the password `/api/config`, which
+      // would always 401 it. Throttled so the 3s poll doesn't hammer a handshake.
+      // Keep the locally-synthesized tabs either way.
+      await pingNoiseHealth(hostId)
       return sessionsByHost[hostId] ?? []
     }
     guard let client = client(for: hostId) else {
@@ -804,6 +808,33 @@ public final class SessionStore {
         errorMessage = error.localizedDescription
       }
       return []
+    }
+  }
+
+  /// Last time each Noise host's reachability was probed, so the 3s session poll
+  /// runs the (heavier) Noise handshake at most every 8s.
+  private var lastNoisePingAt: [String: Date] = [:]
+
+  /// Reachability for a Noise host: attempt the IK reconnect handshake. Success =
+  /// up AND this device still authorized → `.reachable`; any failure (host down,
+  /// or this device revoked) → `.unreachable`. Throttled to ~8s.
+  private func pingNoiseHealth(_ hostId: String) async {
+    let now = Date()
+    if let last = lastNoisePingAt[hostId], now.timeIntervalSince(last) < 8 { return }
+    lastNoisePingAt[hostId] = now
+
+    guard let host = hosts.first(where: { $0.id == hostId }),
+          let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+    else {
+      markHostFailure(hostId)
+      return
+    }
+    do {
+      let channel = try await noiseClient.reconnect(hostId: hostId, url: url)
+      await channel.close()
+      healthByHost[hostId] = .reachable
+    } catch {
+      markHostFailure(hostId)
     }
   }
 

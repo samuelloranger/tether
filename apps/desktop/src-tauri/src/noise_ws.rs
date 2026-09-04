@@ -57,9 +57,9 @@ impl NoiseWsTx {
     }
 }
 
-/// Recv half of a split [`NoiseWs`]: yields binary frames, skips ping/pong, and
-/// treats text/close/end/error as a transport error (same rules as the
-/// [`Transport`] impl).
+/// Recv half of a split [`NoiseWs`]: yields binary frames (and the one text
+/// frame — the pairing verdict — as bytes), skips ping/pong, and treats
+/// close/end/error as a transport error (same rules as the [`Transport`] impl).
 pub struct NoiseWsRx {
     stream: WsSource,
 }
@@ -71,7 +71,11 @@ impl NoiseWsRx {
                 Some(Ok(Message::Binary(data))) => return Ok(data),
                 Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                 Some(Ok(Message::Frame(_))) => continue,
-                Some(Ok(Message::Text(_) | Message::Close(_))) | None | Some(Err(_)) => {
+                // All Noise handshake/transport frames are binary; the ONE text
+                // frame is the plaintext pairing verdict ({ok}). Surface it as
+                // bytes so the client can read it instead of erroring.
+                Some(Ok(Message::Text(t))) => return Ok(t.as_bytes().to_vec()),
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
                     return Err(NoiseError::Transport);
                 }
             }
@@ -93,7 +97,11 @@ impl Transport for NoiseWs {
                 Some(Ok(Message::Binary(data))) => return Ok(data),
                 Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                 Some(Ok(Message::Frame(_))) => continue,
-                Some(Ok(Message::Text(_) | Message::Close(_))) | None | Some(Err(_)) => {
+                // All Noise handshake/transport frames are binary; the ONE text
+                // frame is the plaintext pairing verdict ({ok}). Surface it as
+                // bytes so the client can read it instead of erroring.
+                Some(Ok(Message::Text(t))) => return Ok(t.as_bytes().to_vec()),
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
                     return Err(NoiseError::Transport);
                 }
             }

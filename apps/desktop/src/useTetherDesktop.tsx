@@ -11,7 +11,9 @@ import {
   coreHostsUpdateConnection,
   coreHostsUpdateIdentity,
   coreNextTermId,
+  coreNoiseDeviceFingerprint,
   coreNoisePair,
+  coreNoisePing,
   coreNotifyWaitingEdge,
   corePollingRestart,
   corePollingSetActive,
@@ -24,7 +26,7 @@ import {
   listenSessions,
 } from './coreApi';
 import type { FrameApplyResult } from './frameHandler';
-import { markNoiseHost, unmarkNoiseHost } from './noiseHosts';
+import { isNoiseHost, markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
 import { hostSecrets } from './secureConfig';
 import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
@@ -40,7 +42,14 @@ import {
 
 export type { DrawerSession } from './types';
 
-type Screen = 'main' | 'hosts' | 'host-form' | 'pair-device' | 'settings' | 'local-settings';
+type Screen =
+  | 'main'
+  | 'hosts'
+  | 'host-form'
+  | 'pair-device'
+  | 'settings'
+  | 'local-settings'
+  | 'devices';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: desktop app state hook mirrors mobile session runtime scope
 export function useTetherDesktop() {
@@ -124,6 +133,9 @@ export function useTetherDesktop() {
         void restoreSession(initialHost);
       }
       unlistenHealth = await listenHostHealth((hostId, status) => {
+        // A Noise host has no password, so the poll's `/api/status` probe always
+        // 401s it — ignore that here; its health comes from the Noise ping below.
+        if (isNoiseHost(hostId)) return;
         setHealthByHost((current) => ({ ...current, [hostId]: status }));
       });
       unlistenSessions = await listenSessions((hostId, rows) => {
@@ -144,6 +156,37 @@ export function useTetherDesktop() {
     if (!ready) return;
     void corePollingSetActive(activeHostId);
   }, [ready, activeHostId]);
+
+  // Health for Noise hosts: the password poll can't authenticate them, so probe
+  // reachability over the Noise path (a reconnect handshake) instead. A success
+  // means up + still authorized; a failure (host down, or this device revoked)
+  // shows unreachable.
+  useEffect(() => {
+    if (!ready) return undefined;
+    let cancelled = false;
+    const pingAll = async () => {
+      for (const host of hostsRef.current) {
+        if (!isNoiseHost(host.id)) continue;
+        let ok = false;
+        try {
+          ok = await coreNoisePing(host.id, noiseSessionAddress(host.host, host.port));
+        } catch {
+          ok = false;
+        }
+        if (cancelled) return;
+        setHealthByHost((current) => ({
+          ...current,
+          [host.id]: ok ? 'reachable' : 'unreachable',
+        }));
+      }
+    };
+    void pingAll();
+    const timer = setInterval(() => void pingAll(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [ready]);
 
   const activeHost = hosts.find((host) => host.id === activeHostId) ?? null;
   const activePassword = activeHost ? (passwords[activeHost.id] ?? '') : '';
@@ -295,13 +338,16 @@ export function useTetherDesktop() {
    * itself fails after the profile exists, the orphan profile is removed.
    */
   const pairHost = useCallback(
-    async (input: {
-      name: string;
-      host: string;
-      port: string;
-      address: string;
-      code: string;
-    }): Promise<{ fingerprint: string }> => {
+    async (
+      input: {
+        name: string;
+        host: string;
+        port: string;
+        address: string;
+        code: string;
+      },
+      onProgress?: (progress: { deviceFingerprint: string }) => void,
+    ): Promise<{ fingerprint: string }> => {
       // Password-less save: a Noise host has no password, so it must NOT go
       // through the password connection test in `coreHostsSave`.
       const profile = await coreHostsSaveNoise({
@@ -310,6 +356,11 @@ export function useTetherDesktop() {
         port: input.port,
       });
       try {
+        // Surface THIS device's fingerprint before the pair call blocks on the
+        // host's confirm, so the pairing screen can show it to read aloud
+        // (parity with iOS). The device key is keyed by the profile id.
+        const deviceFingerprint = await coreNoiseDeviceFingerprint(profile.id);
+        onProgress?.({ deviceFingerprint });
         const fingerprint = await coreNoisePair({
           hostId: profile.id,
           address: input.address,

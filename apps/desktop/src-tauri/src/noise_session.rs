@@ -15,8 +15,24 @@
 //!   frame into a [`ServerMsg`]; [`encode_frontend_output`] renders the WS-JSON
 //!   `output` line the frontend consumes, stamping the synthesized numeric id.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// One paired device, as the server reports it in a `devices` reply. The serde
+/// field renames match the wire EXACTLY (`pairedAt`/`lastSeenAt`/`lastAddress`/
+/// `isSelf` are camelCase), so this both decodes the reply AND re-serializes to
+/// the same camelCase JSON the React side reads back over the Tauri boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub id: String,
+    pub label: String,
+    pub fingerprint: String,
+    pub paired_at: String,
+    pub last_seen_at: Option<String>,
+    pub last_address: Option<String>,
+    pub is_self: bool,
+}
 
 /// A server → client application message, after Noise `open` + JSON parse.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +41,15 @@ pub enum ServerMsg {
     Output { chunk: String },
     /// The session ended. `exit_code` mirrors the server's `exitCode`.
     Exit { exit_code: i64 },
-    /// Any other sealed frame (e.g. `devices.*`) — the terminal pump ignores it.
+    /// The device roster, in reply to `devices.list`.
+    Devices(Vec<DeviceInfo>),
+    /// The verdict of a `devices.revoke`, matched to its `target`.
+    DevicesRevoked {
+        target: String,
+        ok: bool,
+        error: Option<String>,
+    },
+    /// Any other sealed frame — the terminal pump ignores it.
     Other,
 }
 
@@ -85,6 +109,20 @@ pub fn encode_input(session_id: &str, text: &str) -> Vec<u8> {
     .expect("input serializes")
 }
 
+/// Encode a `{"t":"devices.list"}` plaintext — request the paired-device roster.
+pub fn encode_devices_list() -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({ "t": "devices.list" }))
+        .expect("devices.list serializes")
+}
+
+/// Encode a `{"t":"devices.revoke","target":…}` plaintext. `target` should be
+/// the exact device `id` from a prior `devices` reply (the server also resolves
+/// a label or fingerprint-prefix, but the id is unambiguous).
+pub fn encode_devices_revoke(target: &str) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({ "t": "devices.revoke", "target": target }))
+        .expect("devices.revoke serializes")
+}
+
 /// Encode a `{"t":"resize",…}` plaintext.
 pub fn encode_resize(session_id: &str, cols: u16, rows: u16) -> Vec<u8> {
     serde_json::to_vec(&ResizeMsg {
@@ -135,6 +173,25 @@ pub fn decode_server(plaintext: &[u8]) -> Result<ServerMsg, serde_json::Error> {
         },
         Some("exit") => ServerMsg::Exit {
             exit_code: value.get("exitCode").and_then(Value::as_i64).unwrap_or(0),
+        },
+        Some("devices") => {
+            let items = value
+                .get("items")
+                .cloned()
+                .unwrap_or_else(|| Value::Array(vec![]));
+            ServerMsg::Devices(serde_json::from_value(items)?)
+        }
+        Some("devices.revoked") => ServerMsg::DevicesRevoked {
+            target: value
+                .get("target")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            ok: value.get("ok").and_then(Value::as_bool).unwrap_or(false),
+            error: value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         },
         _ => ServerMsg::Other,
     })
@@ -239,8 +296,109 @@ mod tests {
 
     #[test]
     fn decode_server_unknown_type_is_other() {
-        let msg = decode_server(br#"{"t":"devices.revoked","target":"x","ok":true}"#).unwrap();
+        let msg = decode_server(br#"{"t":"reset","id":"sess-1"}"#).unwrap();
         assert_eq!(msg, ServerMsg::Other);
+    }
+
+    #[test]
+    fn devices_list_encodes_to_the_noise_shape() {
+        let value: Value = serde_json::from_slice(&encode_devices_list()).unwrap();
+        assert_eq!(value, json!({ "t": "devices.list" }));
+    }
+
+    #[test]
+    fn devices_revoke_encodes_the_target() {
+        let value: Value = serde_json::from_slice(&encode_devices_revoke("dev-7")).unwrap();
+        assert_eq!(value, json!({ "t": "devices.revoke", "target": "dev-7" }));
+    }
+
+    #[test]
+    fn decode_server_devices_roster() {
+        // Two devices: one fully populated, one with null lastSeenAt/lastAddress
+        // and isSelf true — exercising every Option + the bool.
+        let bytes = br#"{"t":"devices","items":[
+            {"id":"a","label":"homelab","fingerprint":"ab:cd","pairedAt":"2026-01-01T00:00:00Z","lastSeenAt":"2026-02-02T00:00:00Z","lastAddress":"192.168.1.2","isSelf":false},
+            {"id":"b","label":"this phone","fingerprint":"ef:01","pairedAt":"2026-01-03T00:00:00Z","lastSeenAt":null,"lastAddress":null,"isSelf":true}
+        ]}"#;
+        let msg = decode_server(bytes).unwrap();
+        assert_eq!(
+            msg,
+            ServerMsg::Devices(vec![
+                DeviceInfo {
+                    id: "a".to_string(),
+                    label: "homelab".to_string(),
+                    fingerprint: "ab:cd".to_string(),
+                    paired_at: "2026-01-01T00:00:00Z".to_string(),
+                    last_seen_at: Some("2026-02-02T00:00:00Z".to_string()),
+                    last_address: Some("192.168.1.2".to_string()),
+                    is_self: false,
+                },
+                DeviceInfo {
+                    id: "b".to_string(),
+                    label: "this phone".to_string(),
+                    fingerprint: "ef:01".to_string(),
+                    paired_at: "2026-01-03T00:00:00Z".to_string(),
+                    last_seen_at: None,
+                    last_address: None,
+                    is_self: true,
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn device_info_reencodes_to_camelcase() {
+        // The JSON handed back to the webview must keep the wire's camelCase keys.
+        let device = DeviceInfo {
+            id: "a".to_string(),
+            label: "homelab".to_string(),
+            fingerprint: "ab:cd".to_string(),
+            paired_at: "2026-01-01T00:00:00Z".to_string(),
+            last_seen_at: None,
+            last_address: None,
+            is_self: true,
+        };
+        let value = serde_json::to_value(&device).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "id": "a",
+                "label": "homelab",
+                "fingerprint": "ab:cd",
+                "pairedAt": "2026-01-01T00:00:00Z",
+                "lastSeenAt": null,
+                "lastAddress": null,
+                "isSelf": true
+            })
+        );
+    }
+
+    #[test]
+    fn decode_server_devices_revoked_ok() {
+        let msg = decode_server(br#"{"t":"devices.revoked","target":"dev-7","ok":true}"#).unwrap();
+        assert_eq!(
+            msg,
+            ServerMsg::DevicesRevoked {
+                target: "dev-7".to_string(),
+                ok: true,
+                error: None,
+            }
+        );
+    }
+
+    #[test]
+    fn decode_server_devices_revoked_error() {
+        let msg =
+            decode_server(br#"{"t":"devices.revoked","target":"x","ok":false,"error":"nope"}"#)
+                .unwrap();
+        assert_eq!(
+            msg,
+            ServerMsg::DevicesRevoked {
+                target: "x".to_string(),
+                ok: false,
+                error: Some("nope".to_string()),
+            }
+        );
     }
 
     #[test]

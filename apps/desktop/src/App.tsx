@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
+import { DevicesScreen } from './DevicesScreen';
 import { ensureNotificationPermission } from './desktopNotifications';
 import type { DropIntent } from './dropZone';
 import { FileViewer } from './FileViewer';
@@ -407,6 +408,21 @@ export function App() {
     );
   }
 
+  if (app.screen === 'devices' && settingsHost) {
+    return (
+      <div className="app-shell centered" {...shellProps}>
+        <DevicesScreen
+          host={settingsHost}
+          onBack={() => {
+            app.setSettingsHostId(null);
+            app.setScreen('hosts');
+          }}
+        />
+        <AlertModal />
+      </div>
+    );
+  }
+
   if (app.hosts.length === 0 || app.screen === 'host-form') {
     return (
       <div className="app-shell centered" {...shellProps}>
@@ -445,6 +461,10 @@ export function App() {
           onEdit={(hostId) => {
             app.setEditingHostId(hostId);
             app.setScreen('host-form');
+          }}
+          onDevices={(hostId) => {
+            app.setSettingsHostId(hostId);
+            app.setScreen('devices');
           }}
           onRemove={(hostId) => void app.removeHost(hostId)}
           onSelect={app.selectHost}

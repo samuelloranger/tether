@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { groupFingerprint } from './groupFingerprint';
 import { parsePairAddress } from './pairAddress';
 import { formatPairingInput, normalizePairingCode } from './pairingCode';
 
@@ -9,28 +10,27 @@ type PairStatus =
   | { kind: 'error'; message: string };
 
 interface PairDeviceScreenProps {
-  onPair: (input: {
-    name: string;
-    host: string;
-    port: string;
-    address: string;
-    code: string;
-  }) => Promise<{ fingerprint: string }>;
+  onPair: (
+    input: {
+      name: string;
+      host: string;
+      port: string;
+      address: string;
+      code: string;
+    },
+    // Called mid-pairing with THIS device's fingerprint, before the pair call
+    // blocks on the host's confirm — so the screen can show it to read aloud.
+    onProgress?: (progress: { deviceFingerprint: string }) => void,
+  ) => Promise<{ fingerprint: string }>;
   onDone: () => void;
   onCancel: () => void;
-}
-
-// The pinned key is a 64-char hex sha256 — the SAME string the host prints as
-// its "Server fingerprint". Group it into 4-char blocks (matching the iOS
-// client) so it can be read and compared out loud against the host.
-function groupFingerprint(hex: string): string {
-  return (hex.match(/.{1,4}/g) ?? [hex]).join(' ');
 }
 
 export function PairDeviceScreen({ onPair, onDone, onCancel }: PairDeviceScreenProps) {
   const [address, setAddress] = useState('127.0.0.1:8085');
   const [code, setCode] = useState('');
   const [status, setStatus] = useState<PairStatus>({ kind: 'idle' });
+  const [deviceFingerprint, setDeviceFingerprint] = useState<string | null>(null);
 
   const busy = status.kind === 'pairing';
   const done = status.kind === 'success';
@@ -48,14 +48,18 @@ export function PairDeviceScreen({ onPair, onDone, onCancel }: PairDeviceScreenP
       return;
     }
     setStatus({ kind: 'pairing' });
+    setDeviceFingerprint(null);
     try {
-      const { fingerprint } = await onPair({
-        name: parsed.host,
-        host: parsed.host,
-        port: parsed.port,
-        address: parsed.wsAddress,
-        code: normalized,
-      });
+      const { fingerprint } = await onPair(
+        {
+          name: parsed.host,
+          host: parsed.host,
+          port: parsed.port,
+          address: parsed.wsAddress,
+          code: normalized,
+        },
+        ({ deviceFingerprint: fp }) => setDeviceFingerprint(fp),
+      );
       setStatus({ kind: 'success', fingerprint });
       // Show the pinned fingerprint, then route on to the paired host.
       window.setTimeout(onDone, 1600);
@@ -96,7 +100,17 @@ export function PairDeviceScreen({ onPair, onDone, onCancel }: PairDeviceScreenP
           maxLength={14}
         />
       </label>
-      {status.kind === 'pairing' ? <p className="pairing-status working">Pairing…</p> : null}
+      {status.kind === 'pairing' ? (
+        <div className="pairing-status working">
+          <p>Pairing…</p>
+          {deviceFingerprint ? (
+            <>
+              <p className="success-msg">This device:</p>
+              <p className="mono pairing-fingerprint">{groupFingerprint(deviceFingerprint)}</p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
       {status.kind === 'success' ? (
         <div className="pairing-status success">
           <p className="success-msg">Paired. Pinned server fingerprint:</p>

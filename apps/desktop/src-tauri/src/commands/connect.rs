@@ -12,9 +12,12 @@ use crate::state::SharedState;
 /// A connection that has lived at least this long is considered healthy, so its
 /// retry counter resets — a socket that dropped after a good run reconnects
 /// immediately rather than inheriting the previous outage's backoff.
-const HEALTHY_MS: u64 = 10_000;
+///
+/// `pub(crate)` so the Noise pump (`commands::noise`) reuses the exact same
+/// backoff policy as this password path.
+pub(crate) const HEALTHY_MS: u64 = 10_000;
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -24,7 +27,9 @@ fn now_ms() -> u64 {
 /// Cheap [0,1) jitter source for `backoff_delay`. The subsecond nanos of the
 /// wall clock are more than random enough to spread reconnect storms; the crate
 /// deliberately avoids a rand dependency.
-fn random_unit() -> f64 {
+///
+/// `pub(crate)` so the Noise pump reuses the same jitter source.
+pub(crate) fn random_unit() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.subsec_nanos() as f64 / 1_000_000_000.0)

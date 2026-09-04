@@ -132,9 +132,68 @@ export async function coreNoisePair(input: {
   });
 }
 
+/**
+ * This device's own Noise fingerprint for `hostId` (lowercase 64-hex sha256 of
+ * the device public key — same shape as the pinned server fingerprint).
+ * Generates the device keypair if it does not exist yet, so it can be shown on
+ * the pairing screen for the user to read aloud, matching the iOS client.
+ */
+export async function coreNoiseDeviceFingerprint(hostId: string): Promise<string> {
+  return invoke<string>('core_noise_device_fingerprint', { hostId });
+}
+
 /** Reconnect to an already-paired host using the pinned keys under `hostId`. */
 export async function coreNoiseReconnect(hostId: string, address: string): Promise<void> {
   await invoke('core_noise_reconnect', { hostId, address });
+}
+
+/**
+ * Reachability check for a Noise host: `true` when the IK reconnect handshake
+ * succeeds (host up AND this device still authorized). Used for the health badge
+ * instead of the password `/api/status` probe, which always 401s a Noise host.
+ */
+export async function coreNoisePing(hostId: string, address: string): Promise<boolean> {
+  return invoke<boolean>('core_noise_ping', { hostId, address });
+}
+
+/**
+ * One device paired with a Noise host, as the server reports it. camelCase keys
+ * match the sealed `devices` reply byte-for-byte (the Rust side re-serializes
+ * with `rename_all = "camelCase"`), so this reads straight off the wire.
+ */
+export interface DeviceInfo {
+  id: string;
+  label: string;
+  fingerprint: string;
+  pairedAt: string;
+  lastSeenAt: string | null;
+  lastAddress: string | null;
+  isSelf: boolean;
+}
+
+/**
+ * List the devices paired with a Noise host, over a short-lived management
+ * session on the same authenticated Noise channel the terminal uses. Rejects if
+ * the reconnect/handshake fails (this device was revoked, or is unknown).
+ */
+export async function coreNoiseDevicesList(hostId: string, address: string): Promise<DeviceInfo[]> {
+  return invoke<DeviceInfo[]>('core_noise_devices_list', { hostId, address });
+}
+
+/**
+ * Revoke one device on a Noise host by its exact `target` id. Relays the
+ * server's verdict — `ok:false` with an `error` when the server declined.
+ */
+export async function coreNoiseRevoke(
+  hostId: string,
+  address: string,
+  target: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return invoke<{ ok: boolean; error?: string }>('core_noise_revoke', {
+    hostId,
+    address,
+    target,
+  });
 }
 
 /**
