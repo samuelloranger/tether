@@ -5,11 +5,10 @@ import XCTest
 /// Accepts the server's self-signed TLS cert. Trust here is redundant: the Noise
 /// handshake authenticates the server by its pinned static key, and TLS is only
 /// present to satisfy iOS App Transport Security (which blocks cleartext ws://).
-private final class InsecureTrustDelegate: NSObject, URLSessionDelegate {
-  func urlSession(
-    _ session: URLSession,
-    didReceive challenge: URLAuthenticationChallenge,
-    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+private final class InsecureTrustDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
+  private func accept(
+    _ challenge: URLAuthenticationChallenge,
+    _ completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
   ) {
     if let trust = challenge.protectionSpace.serverTrust {
       completionHandler(.useCredential, URLCredential(trust: trust))
@@ -17,6 +16,20 @@ private final class InsecureTrustDelegate: NSObject, URLSessionDelegate {
       completionHandler(.performDefaultHandling, nil)
     }
   }
+  // Session-level (most challenges) and task-level (URLSessionWebSocketTask
+  // delivers the server-trust challenge here) — implement both.
+  func urlSession(
+    _ session: URLSession,
+    didReceive challenge: URLAuthenticationChallenge,
+    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+  ) { accept(challenge, completionHandler) }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    didReceive challenge: URLAuthenticationChallenge,
+    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+  ) { accept(challenge, completionHandler) }
 }
 
 /// Live end-to-end test: a real Swift Noise client pairs, reconnects, and runs a
