@@ -4,6 +4,7 @@
 mod commands;
 mod http;
 mod noise_store;
+mod noise_ws;
 mod state;
 mod storage;
 
