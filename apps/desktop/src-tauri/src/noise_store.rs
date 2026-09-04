@@ -39,22 +39,6 @@ fn server_account(host_id: &str) -> String {
     format!("noise-server-key-{host_id}")
 }
 
-pub fn save_device_keypair(host_id: &str, private: &[u8]) -> Result<(), HostStoreError> {
-    save_device_keypair_in(&KeyringKeyStore, host_id, private)
-}
-
-pub fn load_device_keypair(host_id: &str) -> Result<Option<Vec<u8>>, HostStoreError> {
-    load_device_keypair_in(&KeyringKeyStore, host_id)
-}
-
-pub fn save_pinned_server_key(host_id: &str, public: &[u8]) -> Result<(), HostStoreError> {
-    save_pinned_server_key_in(&KeyringKeyStore, host_id, public)
-}
-
-pub fn load_pinned_server_key(host_id: &str) -> Result<Option<Vec<u8>>, HostStoreError> {
-    load_pinned_server_key_in(&KeyringKeyStore, host_id)
-}
-
 pub fn save_device_keypair_in<K: KeyStore>(
     store: &K,
     host_id: &str,
@@ -96,39 +80,45 @@ fn load_bytes<K: KeyStore>(store: &K, account: &str) -> Result<Option<Vec<u8>>, 
 }
 
 #[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct MemoryKeyStore(
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
+);
+
+#[cfg(test)]
+impl MemoryKeyStore {
+    pub(crate) fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        )))
+    }
+}
+
+#[cfg(test)]
+impl KeyStore for MemoryKeyStore {
+    fn set(&self, account: &str, value: &str) -> Result<(), HostStoreError> {
+        self.0
+            .lock()
+            .map_err(|error| HostStoreError::Secret(error.to_string()))?
+            .insert(account.to_string(), value.to_string());
+        Ok(())
+    }
+
+    fn get(&self, account: &str) -> Result<Option<String>, HostStoreError> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|error| HostStoreError::Secret(error.to_string()))?
+            .get(account)
+            .cloned())
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
 
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-
-    struct MemoryKeyStore(Mutex<HashMap<String, String>>);
-
-    impl MemoryKeyStore {
-        fn new() -> Self {
-            Self(Mutex::new(HashMap::new()))
-        }
-    }
-
-    impl KeyStore for MemoryKeyStore {
-        fn set(&self, account: &str, value: &str) -> Result<(), HostStoreError> {
-            self.0
-                .lock()
-                .map_err(|error| HostStoreError::Secret(error.to_string()))?
-                .insert(account.to_string(), value.to_string());
-            Ok(())
-        }
-
-        fn get(&self, account: &str) -> Result<Option<String>, HostStoreError> {
-            Ok(self
-                .0
-                .lock()
-                .map_err(|error| HostStoreError::Secret(error.to_string()))?
-                .get(account)
-                .cloned())
-        }
-    }
 
     #[test]
     fn missing_device_keypair_is_none() {
