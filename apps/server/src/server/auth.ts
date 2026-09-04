@@ -26,6 +26,7 @@ const PUBLIC_API_PATHS = new Set([
   '/api/setup',
   '/api/noise/pair',
   '/api/noise/session',
+  '/api/noise/rpc',
 ]);
 
 // Reject any request lacking a valid `Authorization: Bearer <password>`.
