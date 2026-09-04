@@ -51,7 +51,10 @@ impl PairingInitiator {
     pub fn remote_static(&self) -> Result<Vec<u8>, NoiseError> {
         self.hs.get_remote_static().map(|s| s.to_vec()).ok_or(NoiseError::MissingRemoteStatic)
     }
-    // into_transport added in Task 7 (needs transport::NoiseSession).
+    pub fn into_transport(self) -> Result<super::transport::NoiseSession, NoiseError> {
+        let ts = self.hs.into_transport_mode().map_err(|_| NoiseError::Transport)?;
+        Ok(super::transport::NoiseSession::from_transport(ts))
+    }
 }
 
 impl PairingResponder {
@@ -81,7 +84,10 @@ impl PairingResponder {
     pub fn remote_static(&self) -> Result<Vec<u8>, NoiseError> {
         self.hs.get_remote_static().map(|s| s.to_vec()).ok_or(NoiseError::MissingRemoteStatic)
     }
-    // into_transport added in Task 7 (needs transport::NoiseSession).
+    pub fn into_transport(self) -> Result<super::transport::NoiseSession, NoiseError> {
+        let ts = self.hs.into_transport_mode().map_err(|_| NoiseError::Transport)?;
+        Ok(super::transport::NoiseSession::from_transport(ts))
+    }
 }
 
 #[cfg(test)]

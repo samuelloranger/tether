@@ -8,6 +8,9 @@ pub mod pairing;
 pub mod params;
 pub mod psk;
 pub mod reconnect;
+pub mod transport;
+
+pub use transport::NoiseSession;
 
 use thiserror::Error;
 

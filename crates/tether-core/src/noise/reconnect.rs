@@ -37,6 +37,10 @@ impl ReconnectInitiator {
     pub fn is_finished(&self) -> bool {
         self.hs.is_handshake_finished()
     }
+    pub fn into_transport(self) -> Result<super::transport::NoiseSession, NoiseError> {
+        let ts = self.hs.into_transport_mode().map_err(|_| NoiseError::Transport)?;
+        Ok(super::transport::NoiseSession::from_transport(ts))
+    }
 }
 
 impl ReconnectResponder {
@@ -62,6 +66,10 @@ impl ReconnectResponder {
     }
     pub fn remote_static(&self) -> Result<Vec<u8>, NoiseError> {
         self.hs.get_remote_static().map(|s| s.to_vec()).ok_or(NoiseError::MissingRemoteStatic)
+    }
+    pub fn into_transport(self) -> Result<super::transport::NoiseSession, NoiseError> {
+        let ts = self.hs.into_transport_mode().map_err(|_| NoiseError::Transport)?;
+        Ok(super::transport::NoiseSession::from_transport(ts))
     }
 }
 
