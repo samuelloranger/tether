@@ -48,3 +48,32 @@ export function decodeServerMessage(bytes: Uint8Array): RpcServerMessage {
   }
   return value as unknown as RpcServerMessage;
 }
+
+export const MAX_RPC_CHUNK_BYTES = 48 * 1024;
+
+function toB64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+export function chunkBody<T>(bytes: Uint8Array, make: (seq: number, b64: string) => T[]): T[] {
+  const out: T[] = [];
+  let seq = 0;
+  for (let i = 0; i < bytes.length; i += MAX_RPC_CHUNK_BYTES) {
+    const slice = bytes.subarray(i, i + MAX_RPC_CHUNK_BYTES);
+    out.push(...make(seq, toB64(slice)));
+    seq += 1;
+  }
+  return out;
+}
+
+// The ONLY paths a paired device may reach over the tunnel. Everything else
+// (config, admin, setup, status, noise/*, preview) is refused before dispatch.
+const ALLOW_PREFIXES = ['/api/sessions', '/api/presentations', '/api/push/'];
+
+export function isTunnelablePath(path: string): boolean {
+  // Normalize away any traversal, then compare the pathname only.
+  const clean = new URL(path, 'https://noise.local').pathname;
+  return ALLOW_PREFIXES.some((p) => clean === p || clean.startsWith(`${p}/`) || clean.startsWith(p));
+}

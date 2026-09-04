@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { decodeClientMessage, decodeServerMessage, encodeMessage } from './noiseRpc';
+import {
+  chunkBody,
+  decodeClientMessage,
+  decodeServerMessage,
+  encodeMessage,
+  isTunnelablePath,
+  MAX_RPC_CHUNK_BYTES,
+} from './noiseRpc';
 
 describe('rpc codec', () => {
   test('req head round-trips', () => {
@@ -31,5 +38,34 @@ describe('rpc codec', () => {
   test('decode rejects unknown type and bad json', () => {
     expect(() => decodeClientMessage(new TextEncoder().encode('{"t":"nope"}'))).toThrow();
     expect(() => decodeClientMessage(new TextEncoder().encode('not json'))).toThrow();
+  });
+});
+
+describe('rpc chunking + allowlist', () => {
+  test('chunkBody splits over the cap, preserves order + bytes', () => {
+    const raw = new Uint8Array(MAX_RPC_CHUNK_BYTES * 2 + 10).map((_, i) => i % 256);
+    const chunks = chunkBody(raw, (seq, b64) => [{ seq, b64 }]);
+    expect(chunks.length).toBe(3);
+    expect(chunks.map((c) => c.seq)).toEqual([0, 1, 2]);
+    const joined = chunks.map((c) => Uint8Array.from(atob(c.b64), (ch) => ch.charCodeAt(0)));
+    const total = new Uint8Array(joined.reduce((n, a) => n + a.length, 0));
+    let off = 0;
+    for (const a of joined) {
+      total.set(a, off);
+      off += a.length;
+    }
+    expect(total).toEqual(raw);
+  });
+
+  test('allowlist admits the remote surface, refuses the rest', () => {
+    expect(isTunnelablePath('/api/sessions')).toBe(true);
+    expect(isTunnelablePath('/api/sessions/term-1/diff')).toBe(true);
+    expect(isTunnelablePath('/api/presentations')).toBe(true);
+    expect(isTunnelablePath('/api/push/register')).toBe(true);
+    expect(isTunnelablePath('/api/config')).toBe(false);
+    expect(isTunnelablePath('/api/admin/restart')).toBe(false);
+    expect(isTunnelablePath('/api/noise/session')).toBe(false);
+    expect(isTunnelablePath('/preview/abc/index.html')).toBe(false);
+    expect(isTunnelablePath('/api/../api/config')).toBe(false);
   });
 });
