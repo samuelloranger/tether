@@ -3,6 +3,7 @@
 //! misuse-resistant API. The device is always the initiator; the server the
 //! responder.
 
+pub mod code;
 pub mod params;
 
 use thiserror::Error;
