@@ -85,7 +85,7 @@ The crypto core is driven across an FFI boundary from Bun (TypeScript). This bou
 ```
 host:   tether pair
         → generate one-time enrollment code (12 Crockford chars) + open enrollment window
-        → derive PSK = Argon2id(code, salt = serverStaticPub || windowId)  [see PSK derivation]
+        → derive PSK = Argon2id(code, salt = b"tether-noise-pair/1")  [see PSK derivation]
         → print code (grouped XXXX-XXXX-XXXX) + QR carrying {address(es), code, serverFingerprint}
         → window: single-use, ~5 min expiry, rate-limited
 
@@ -115,7 +115,11 @@ The first draft auto-authorized on the first successful handshake. That means a 
 
 ### PSK derivation
 
-Noise's PSK is 32 bytes; the code is not fed in raw. The server derives `PSK = Argon2id(password = normalized code, salt = serverStaticPub || windowId)` with server-side parameters (resolve exact cost in planning; target ~100 ms/guess). This makes each *offline* guess of a recorded pairing handshake cost an Argon2id evaluation, so the code's raw entropy is no longer the whole story:
+Noise's PSK is 32 bytes; the code is not fed in raw. Both sides derive `PSK = Argon2id(password = normalized code, salt = b"tether-noise-pair/1")` → 32 bytes, with server-side parameters (resolve exact cost in planning; target ~100 ms/guess).
+
+> **Why a *fixed* salt, not a per-pairing one.** `snow` requires the PSK at builder time — before any handshake message. The device does not learn the server's static key until handshake message 2, and the typed code cannot carry a window nonce, so neither the server key nor a per-window salt can seed the derivation both sides must compute *before* the first message. A fixed salt is sound here anyway: the "password" is a 60-bit single-use random code, so precomputation across the codespace (2⁶⁰ Argon2id evaluations) is already infeasible regardless of salt — the salt's usual job (defeating rainbow tables over *reused* human passwords) does not apply. The Argon2id pass exists only to make each individual guess expensive.
+
+This makes each *offline* guess of a recorded pairing handshake cost an Argon2id evaluation, so the code's raw entropy is no longer the whole story:
 
 - **Code:** 12 Crockford base32 chars (no `0/O`, `1/I/L`) → ~60 bits, shown grouped `XXXX-XXXX-XXXX`, case-insensitive. Argon2id + the single-use/5-min window means even a much shorter code would resist online guessing; 60 bits is margin against offline work on a captured handshake.
 - **Optional SAS** (high-value hosts): host terminal and device display a short word-pair derived from the handshake hash to compare by eye. Belt-and-suspenders on top of the code + host confirm.
