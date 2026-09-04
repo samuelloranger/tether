@@ -3,6 +3,8 @@
 
 mod commands;
 mod http;
+mod noise_store;
+mod noise_ws;
 mod state;
 mod storage;
 
@@ -98,6 +100,8 @@ fn main() {
             commands::config::core_deep_link_resolve,
             commands::config::core_notify_decide,
             commands::config::core_notify_waiting_edge,
+            commands::noise::core_noise_pair,
+            commands::noise::core_noise_reconnect,
         ])
         .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())

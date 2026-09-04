@@ -4,6 +4,7 @@
 //! responder.
 
 pub mod code;
+pub mod driver;
 pub mod pairing;
 pub mod params;
 pub mod psk;
