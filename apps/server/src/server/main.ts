@@ -278,6 +278,7 @@ Usage: tether <command>
   status           Show running state + HTTP health
   logs             Follow the server log
   present          Open/reset an agent HTML preview or install an agent skill
+  pair             Open an enrollment window and confirm a device
   signal           Tell tether this session is working / waiting / done
   set-password     Set the shared access password (required for clients)
   devices          List authorized devices
@@ -322,6 +323,24 @@ switch (cmd) {
     try {
       const plan = resolveListenerPlan();
       await runPresent(parsePresentArgs(process.argv.slice(3)), {
+        port: PORT,
+        baseUrl:
+          plan.httpPort === null
+            ? `https://127.0.0.1:${plan.httpsPort}`
+            : `http://127.0.0.1:${plan.httpPort}`,
+        tokenFile: PRESENT_CONTROL_TOKEN_FILE,
+      });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    }
+    break;
+  }
+  case 'pair': {
+    const { runPair } = await import('./pairCli');
+    try {
+      const plan = resolveListenerPlan();
+      await runPair({
         port: PORT,
         baseUrl:
           plan.httpPort === null
