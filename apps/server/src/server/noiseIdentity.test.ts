@@ -1,7 +1,7 @@
+import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, test } from 'bun:test';
 import { loadOrCreateServerKeypair, serverFingerprint } from './noiseIdentity';
 
 describe('noise identity', () => {

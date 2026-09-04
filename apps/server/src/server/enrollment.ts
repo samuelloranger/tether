@@ -15,9 +15,7 @@ export function generateCode(): string {
 }
 
 function fingerprint(pubkeyBase64: string): string {
-  return new Bun.CryptoHasher('sha256')
-    .update(Buffer.from(pubkeyBase64, 'base64'))
-    .digest('hex');
+  return new Bun.CryptoHasher('sha256').update(Buffer.from(pubkeyBase64, 'base64')).digest('hex');
 }
 
 interface OpenWindow {
@@ -53,12 +51,7 @@ export class EnrollmentWindow {
 
   isOpen(): boolean {
     const w = this.win;
-    return (
-      w !== null &&
-      !w.consumed &&
-      w.attempts < this.maxAttempts &&
-      this.now() < w.expiresAt
-    );
+    return w !== null && !w.consumed && w.attempts < this.maxAttempts && this.now() < w.expiresAt;
   }
 
   psk(): Uint8Array {
