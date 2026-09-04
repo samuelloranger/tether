@@ -27,7 +27,10 @@ impl NoiseSession {
         wire.extend_from_slice(&(chunks.len() as u32).to_be_bytes());
         let mut buf = [0u8; 65535];
         for chunk in chunks {
-            let n = self.ts.write_message(chunk, &mut buf).map_err(|_| NoiseError::Transport)?;
+            let n = self
+                .ts
+                .write_message(chunk, &mut buf)
+                .map_err(|_| NoiseError::Transport)?;
             wire.extend_from_slice(&(n as u16).to_be_bytes());
             wire.extend_from_slice(&buf[..n]);
         }

@@ -38,6 +38,9 @@ mod tests {
 
     #[test]
     fn different_codes_derive_different_psks() {
-        assert_ne!(derive("011B23456789").unwrap(), derive("011B2345678A").unwrap());
+        assert_ne!(
+            derive("011B23456789").unwrap(),
+            derive("011B2345678A").unwrap()
+        );
     }
 }

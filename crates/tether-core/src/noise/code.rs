@@ -11,7 +11,9 @@ pub fn generate() -> String {
     let mut raw = [0u8; CODE_LEN];
     getrandom::getrandom(&mut raw).expect("system RNG");
     // Reject-free mapping: 256 % 32 == 0, so a plain modulo is unbiased here.
-    raw.iter().map(|b| bytes[(*b as usize) % bytes.len()] as char).collect()
+    raw.iter()
+        .map(|b| bytes[(*b as usize) % bytes.len()] as char)
+        .collect()
 }
 
 pub fn normalize(input: &str) -> Result<String, NoiseError> {
@@ -75,7 +77,10 @@ mod tests {
     #[test]
     fn normalize_rejects_out_of_alphabet() {
         // '!' is not foldable.
-        assert!(matches!(normalize("!23456789ABC"), Err(NoiseError::BadCode)));
+        assert!(matches!(
+            normalize("!23456789ABC"),
+            Err(NoiseError::BadCode)
+        ));
     }
 
     #[test]

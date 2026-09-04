@@ -26,6 +26,9 @@ mod tests {
 
     #[test]
     fn a_bogus_pattern_is_rejected() {
-        assert!(matches!(parse("Noise_NOPE_25519"), Err(NoiseError::BadParams)));
+        assert!(matches!(
+            parse("Noise_NOPE_25519"),
+            Err(NoiseError::BadParams)
+        ));
     }
 }

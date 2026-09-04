@@ -20,8 +20,13 @@ pub struct PairingResponder {
 
 pub fn generate_static_keypair() -> Result<Keypair, NoiseError> {
     let params = params::parse(params::PAIRING_PATTERN)?;
-    let kp = Builder::new(params).generate_keypair().map_err(|_| NoiseError::Handshake)?;
-    Ok(Keypair { public: kp.public, private: kp.private })
+    let kp = Builder::new(params)
+        .generate_keypair()
+        .map_err(|_| NoiseError::Handshake)?;
+    Ok(Keypair {
+        public: kp.public,
+        private: kp.private,
+    })
 }
 
 impl PairingInitiator {
@@ -40,19 +45,29 @@ impl PairingInitiator {
     }
 
     pub fn write_message(&mut self, payload: &[u8], out: &mut [u8]) -> Result<usize, NoiseError> {
-        self.hs.write_message(payload, out).map_err(|_| NoiseError::Handshake)
+        self.hs
+            .write_message(payload, out)
+            .map_err(|_| NoiseError::Handshake)
     }
     pub fn read_message(&mut self, msg: &[u8], out: &mut [u8]) -> Result<usize, NoiseError> {
-        self.hs.read_message(msg, out).map_err(|_| NoiseError::Handshake)
+        self.hs
+            .read_message(msg, out)
+            .map_err(|_| NoiseError::Handshake)
     }
     pub fn is_finished(&self) -> bool {
         self.hs.is_handshake_finished()
     }
     pub fn remote_static(&self) -> Result<Vec<u8>, NoiseError> {
-        self.hs.get_remote_static().map(|s| s.to_vec()).ok_or(NoiseError::MissingRemoteStatic)
+        self.hs
+            .get_remote_static()
+            .map(|s| s.to_vec())
+            .ok_or(NoiseError::MissingRemoteStatic)
     }
     pub fn into_transport(self) -> Result<super::transport::NoiseSession, NoiseError> {
-        let ts = self.hs.into_transport_mode().map_err(|_| NoiseError::Transport)?;
+        let ts = self
+            .hs
+            .into_transport_mode()
+            .map_err(|_| NoiseError::Transport)?;
         Ok(super::transport::NoiseSession::from_transport(ts))
     }
 }
@@ -73,19 +88,29 @@ impl PairingResponder {
     }
 
     pub fn write_message(&mut self, payload: &[u8], out: &mut [u8]) -> Result<usize, NoiseError> {
-        self.hs.write_message(payload, out).map_err(|_| NoiseError::Handshake)
+        self.hs
+            .write_message(payload, out)
+            .map_err(|_| NoiseError::Handshake)
     }
     pub fn read_message(&mut self, msg: &[u8], out: &mut [u8]) -> Result<usize, NoiseError> {
-        self.hs.read_message(msg, out).map_err(|_| NoiseError::Handshake)
+        self.hs
+            .read_message(msg, out)
+            .map_err(|_| NoiseError::Handshake)
     }
     pub fn is_finished(&self) -> bool {
         self.hs.is_handshake_finished()
     }
     pub fn remote_static(&self) -> Result<Vec<u8>, NoiseError> {
-        self.hs.get_remote_static().map(|s| s.to_vec()).ok_or(NoiseError::MissingRemoteStatic)
+        self.hs
+            .get_remote_static()
+            .map(|s| s.to_vec())
+            .ok_or(NoiseError::MissingRemoteStatic)
     }
     pub fn into_transport(self) -> Result<super::transport::NoiseSession, NoiseError> {
-        let ts = self.hs.into_transport_mode().map_err(|_| NoiseError::Transport)?;
+        let ts = self
+            .hs
+            .into_transport_mode()
+            .map_err(|_| NoiseError::Transport)?;
         Ok(super::transport::NoiseSession::from_transport(ts))
     }
 }

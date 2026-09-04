@@ -12,6 +12,9 @@ pub mod transport;
 
 pub use transport::NoiseSession;
 
+#[cfg(test)]
+mod tests_e2e;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
