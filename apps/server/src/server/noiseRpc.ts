@@ -86,6 +86,9 @@ export interface RpcDeps {
   dispatch: (req: Request) => Promise<Response>;
   identity: { deviceId: string };
   maxInFlight?: number;
+  // Headers stamped onto every dispatched request (last, so a client cannot
+  // suppress them) — used to mark the request already-authenticated by Noise.
+  requestHeaders?: Record<string, string>;
 }
 
 interface Pending {
@@ -133,7 +136,7 @@ export async function runNoiseRpc(
       const body = total > 0 ? new Blob(p.chunks as BlobPart[]) : undefined;
       const req = new Request(`https://noise.local${p.path}`, {
         method: p.method,
-        headers: p.headers,
+        headers: { ...p.headers, ...(deps.requestHeaders ?? {}) },
         body,
       });
       const res = await deps.dispatch(req);

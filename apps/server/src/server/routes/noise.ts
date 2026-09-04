@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
+import { internalAuthHeaders } from '../auth';
 import { runReconnect } from '../authGate';
 import { getDeviceByPubkey, touchDevice } from '../deviceRegistry';
 import { logError, logInfo } from '../log';
@@ -214,7 +215,11 @@ noiseRoutes.get(
             }
             logInfo(`Noise rpc authorized device ${device.id}`);
             try {
-              await runNoiseRpc(channel, adapter, { dispatch, identity: { deviceId: device.id } });
+              await runNoiseRpc(channel, adapter, {
+                dispatch,
+                identity: { deviceId: device.id },
+                requestHeaders: internalAuthHeaders(),
+              });
             } finally {
               channel.free();
               try {
