@@ -34,6 +34,17 @@ jobs:
       - name: Lint (biome + tsc)
         run: bun lint
 
+      # The server's noise suite dlopens crates/tether-noise-ffi's cdylib
+      # (apps/server/src/server/noiseFfi.ts resolves it at
+      # crates/tether-noise-ffi/target/debug/libtether_noise_ffi.<suffix>). It is
+      # built manually in local dev; without this step the 18 noise tests fail
+      # with ERR_DLOPEN_FAILED ("cannot open shared object file"). The later
+      # rust-toolchain step is a no-op after this one.
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - name: Build the Noise FFI cdylib (server noise tests dlopen it)
+        run: bun run build:ffi
+        working-directory: apps/server
+
       # `bun run test` (not raw `bun test`) so the --parallel flag lives in one
       # place: apps/server/package.json. No TETHER_DB_PATH here on purpose —
       # test-preload.ts derives a per-process temp DB, and pinning every worker
@@ -135,6 +146,14 @@ jobs:
 
       - name: Install
         run: bun install --frozen-lockfile
+
+      # The noise suite dlopens crates/tether-noise-ffi's cdylib
+      # (libtether_noise_ffi.dll here); without it the 18 noise tests fail with
+      # ERR_DLOPEN_FAILED (Windows error 126).
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - name: Build the Noise FFI cdylib (server noise tests dlopen it)
+        run: bun run build:ffi
+        working-directory: apps/server
 
       # `bun run test`, never bare `bun test`: the built-in runner shadows the
       # script name and silently drops the --parallel flag it carries.

@@ -1,6 +1,4 @@
 import { spawn } from 'node:child_process';
-import { verifyPassword } from './auth';
-import { setAuthHash } from './db';
 import { selfArgv, VERSION } from './runtime';
 import { HIDE_CONSOLE } from './spawnWindow';
 
@@ -13,22 +11,6 @@ export function allowAdminRequest(client: string, now = Date.now()): boolean {
   if (recent.length >= MAX_ATTEMPTS) return false;
   recent.push(now);
   attempts.set(client, recent);
-  return true;
-}
-
-export async function requireCurrentPassword(current: unknown, client: string): Promise<boolean> {
-  if (!allowAdminRequest(client) || typeof current !== 'string') return false;
-  return verifyPassword(current);
-}
-
-export async function changePassword(
-  current: unknown,
-  next: unknown,
-  client: string,
-): Promise<boolean> {
-  if (typeof next !== 'string' || !next || !(await requireCurrentPassword(current, client)))
-    return false;
-  setAuthHash(await Bun.password.hash(next, { algorithm: 'argon2id' }));
   return true;
 }
 

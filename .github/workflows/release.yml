@@ -527,28 +527,51 @@ jobs:
   server:
     needs: draft
     if: github.event_name == 'push' || inputs.scope == 'all'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      # One platform's cdylib toolchain failing must not cancel the others'
+      # assets — a partial release is recoverable, a cancelled matrix is not.
+      fail-fast: false
       matrix:
         include:
+          # Each asset builds on its own OS so the embedded Noise cdylib
+          # (crates/tether-noise-ffi, dlopen'd at boot) is produced by a native
+          # toolchain — the server binary is dead without a loadable cdylib for
+          # its exact target. Only linux-arm64 cross-compiles (no arm64 Linux
+          # runner); that ELF cross is well-trodden. bun `--compile --target`
+          # itself cross-emits fine from any host.
+          #
           # x64 uses -baseline (no AVX2 requirement) so the single x64 asset runs
           # on older CPUs too; arm64 has no such split.
           - target: bun-linux-x64-baseline
             asset: tether-linux-x64
+            os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
           - target: bun-linux-arm64
             asset: tether-linux-arm64
+            os: ubuntu-latest
+            rust_target: aarch64-unknown-linux-gnu
           - target: bun-darwin-arm64
             asset: tether-darwin-arm64
+            os: macos-latest
+            rust_target: aarch64-apple-darwin
           - target: bun-darwin-x64-baseline
             asset: tether-darwin-x64
+            os: macos-latest
+            rust_target: x86_64-apple-darwin
           # Windows x64 only: bun does emit a windows-arm64 target, but nobody
           # has run the PTY layer there, so `tether update` refuses arm64 rather
           # than resolve to an asset that has never been exercised.
           - target: bun-windows-x64-baseline
             asset: tether-windows-x64.exe
+            os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          targets: ${{ matrix.rust_target }}
       - uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
@@ -557,6 +580,21 @@ jobs:
             bun-install-${{ runner.os }}-
       - name: Install workspace deps
         run: bun install --frozen-lockfile
+      # The aarch64 cross needs the GNU cross linker; every other leg builds the
+      # cdylib with a native toolchain.
+      - name: Install aarch64 cross linker
+        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      # Builds the release cdylib for this leg's target and stages it at
+      # apps/server/src/server/noiseNativeLib, which the next step embeds.
+      - name: Build the Noise FFI cdylib (${{ matrix.rust_target }})
+        working-directory: apps/server
+        shell: bash
+        run: bun run build:ffi
+        env:
+          FFI_PROFILE: release
+          FFI_TARGET: ${{ matrix.rust_target }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       # The asset name embeds the tag. macOS ships a .tar.gz wrapping a stable
       # inner `tether`: a raw Mach-O can't survive a browser download — GitHub
       # release assets drop the exec bit and the browser stamps
@@ -567,6 +605,7 @@ jobs:
       # enough there). install.sh and `tether update` mirror this branch.
       - name: Compile ${{ matrix.asset }}
         working-directory: apps/server
+        shell: bash
         run: |
           # The relay URL is stamped in here rather than configured per server:
           # only the relay holding the APNs key for this app's signing identity
@@ -602,10 +641,19 @@ jobs:
           RELAY_URL: ${{ vars.TETHER_PUSH_RELAY_URL || 'https://tether-relay.samlo.cloud' }}
       - name: Checksum ${{ matrix.asset }}
         working-directory: apps/server
-        run: sha256sum "$ASSET" > "$ASSET.sha256"
+        shell: bash
+        # macOS runners have `shasum`, not `sha256sum`; git-bash on Windows and
+        # Linux have `sha256sum`.
+        run: |
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$ASSET" > "$ASSET.sha256"
+          else
+            shasum -a 256 "$ASSET" > "$ASSET.sha256"
+          fi
       - name: Attach to release
         if: github.event_name == 'push'
         working-directory: apps/server
+        shell: bash
         run: gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
         env:
           GH_TOKEN: ${{ github.token }}

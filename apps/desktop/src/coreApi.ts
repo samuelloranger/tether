@@ -114,6 +114,145 @@ export async function coreHostRetry(hostId: string): Promise<void> {
   await invoke('core_host_retry', { hostId });
 }
 
+/**
+ * Run the Noise XXpsk2 pairing handshake against a host and pin its static key.
+ * Returns the pinned server fingerprint (hex sha256). Keys are stored in the OS
+ * keyring under `hostId`, so `hostId` must be the host profile's id for
+ * `coreNoiseReconnect` to find them later.
+ */
+export async function coreNoisePair(input: {
+  hostId: string;
+  address: string;
+  code: string;
+}): Promise<string> {
+  return invoke<string>('core_noise_pair', {
+    hostId: input.hostId,
+    address: input.address,
+    code: input.code,
+  });
+}
+
+/**
+ * This device's own Noise fingerprint for `hostId` (lowercase 64-hex sha256 of
+ * the device public key — same shape as the pinned server fingerprint).
+ * Generates the device keypair if it does not exist yet, so it can be shown on
+ * the pairing screen for the user to read aloud, matching the iOS client.
+ */
+export async function coreNoiseDeviceFingerprint(hostId: string): Promise<string> {
+  return invoke<string>('core_noise_device_fingerprint', { hostId });
+}
+
+/** Reconnect to an already-paired host using the pinned keys under `hostId`. */
+export async function coreNoiseReconnect(hostId: string, address: string): Promise<void> {
+  await invoke('core_noise_reconnect', { hostId, address });
+}
+
+/**
+ * Reachability check for a Noise host: `true` when the IK reconnect handshake
+ * succeeds (host up AND this device still authorized). Used for the health badge
+ * instead of the password `/api/status` probe, which always 401s a Noise host.
+ */
+export async function coreNoisePing(hostId: string, address: string): Promise<boolean> {
+  return invoke<boolean>('core_noise_ping', { hostId, address });
+}
+
+/** Mint a per-device REST bearer over the authenticated Noise session. */
+export async function coreNoiseToken(
+  hostId: string,
+  address: string,
+): Promise<{ token: string; expiresAt: string }> {
+  return invoke<{ token: string; expiresAt: string }>('core_noise_token', { hostId, address });
+}
+
+/**
+ * One device paired with a Noise host, as the server reports it. camelCase keys
+ * match the sealed `devices` reply byte-for-byte (the Rust side re-serializes
+ * with `rename_all = "camelCase"`), so this reads straight off the wire.
+ */
+export interface DeviceInfo {
+  id: string;
+  label: string;
+  fingerprint: string;
+  pairedAt: string;
+  lastSeenAt: string | null;
+  lastAddress: string | null;
+  isSelf: boolean;
+}
+
+/**
+ * List the devices paired with a Noise host, over a short-lived management
+ * session on the same authenticated Noise channel the terminal uses. Rejects if
+ * the reconnect/handshake fails (this device was revoked, or is unknown).
+ */
+export async function coreNoiseDevicesList(hostId: string, address: string): Promise<DeviceInfo[]> {
+  return invoke<DeviceInfo[]>('core_noise_devices_list', { hostId, address });
+}
+
+/**
+ * Revoke one device on a Noise host by its exact `target` id. Relays the
+ * server's verdict — `ok:false` with an `error` when the server declined.
+ */
+export async function coreNoiseRevoke(
+  hostId: string,
+  address: string,
+  target: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return invoke<{ ok: boolean; error?: string }>('core_noise_revoke', {
+    hostId,
+    address,
+    target,
+  });
+}
+
+/**
+ * Persist a Noise-paired host WITHOUT the password connection test / keyring
+ * password `core_hosts_save` runs — a Noise host has no password. The password
+ * save path is unchanged; this is its sibling for the pairing flow.
+ */
+export async function coreHostsSaveNoise(input: {
+  name: string;
+  host: string;
+  port: string;
+}): Promise<HostProfile> {
+  return invoke<HostProfile>('core_hosts_save_noise', {
+    name: input.name,
+    host: input.host,
+    port: input.port,
+  });
+}
+
+/**
+ * Open a terminal session over Noise. Keeps the sealed channel alive and emits
+ * `core-message-{connId}` / `core-closed-{connId}` in the SAME WS-JSON shape the
+ * password path uses, so the terminal frontend consumes it identically. Drive
+ * input/resize with `coreNoiseSend` (WS-JSON text) and end it with `coreNoiseClose`.
+ */
+export async function coreNoiseConnect(input: {
+  connId: string;
+  hostId: string;
+  address: string;
+  sessionId: string;
+  cols: number;
+  rows: number;
+}): Promise<void> {
+  await invoke('core_noise_connect', {
+    connId: input.connId,
+    hostId: input.hostId,
+    address: input.address,
+    sessionId: input.sessionId,
+    cols: input.cols,
+    rows: input.rows,
+  });
+}
+
+export async function coreNoiseSend(connId: string, text: string): Promise<void> {
+  await invoke('core_noise_send', { connId, text });
+}
+
+export async function coreNoiseClose(connId: string): Promise<void> {
+  await invoke('core_noise_close', { connId });
+}
+
 export interface DetectedLinkSpan {
   start: number;
   end: number;

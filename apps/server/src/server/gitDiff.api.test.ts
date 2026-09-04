@@ -4,11 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { canonicalFixture, osc7Chunk } from '../../test-paths';
 import { app } from './app';
-import { getAuthHash, setAuthHash, upsertSession } from './db';
+import { upsertSession } from './db';
 import { clearLiveCwd, recordChunk } from './liveCwd';
-
-const PASSWORD = 'test-password';
-const AUTH = { Authorization: `Bearer ${PASSWORD}` };
+import { testAuthHeaders } from './testAuth';
 
 /**
  * Runs git without blocking the event loop.
@@ -34,15 +32,10 @@ async function git(cwd: string, ...args: string[]): Promise<void> {
  */
 const GIT_TEST_TIMEOUT_MS = process.platform === 'win32' ? 20_000 : 5_000;
 
-async function ensureAuth() {
-  setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
-}
-
 test(
   'diff routes summarize and return an in-progress change',
   async () => {
-    const previousAuthHash = getAuthHash();
-    await ensureAuth();
+    const AUTH = testAuthHeaders();
     const root = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-diff-api-')));
     try {
       await git(root, 'init', '-q');
@@ -93,7 +86,6 @@ test(
       clearLiveCwd('diff-session');
       clearLiveCwd('diff-pending');
       rmSync(root, { recursive: true, force: true });
-      setAuthHash(previousAuthHash);
     }
   },
   GIT_TEST_TIMEOUT_MS,

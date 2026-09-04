@@ -1,16 +1,16 @@
 // End-to-end transport test: a real TLS listener, a real socket, and the
-// pairing endpoints answering over it. This is the only place that proves the
+// discovery endpoints answering over it. This is the only place that proves the
 // generated certificate is one Bun's TLS stack will actually serve — a unit test
 // over DER bytes cannot tell you that.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { connect } from 'node:tls';
 import { app } from './app';
-import { setAuthHash } from './db';
+import { testAuthHeaders } from './testAuth';
 import { resolveListenerPlan } from './tlsConfig';
 import { publishTlsReport, resetTlsReport } from './tlsRuntime';
 import { ensureTlsMaterial } from './tlsStore';
@@ -57,8 +57,6 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-beforeEach(() => setAuthHash(null));
-
 describe('serving over TLS', () => {
   test('the generated certificate is one Bun will actually serve', async () => {
     const res = await fetch(`https://127.0.0.1:${httpsPort}/`, insecure);
@@ -103,39 +101,14 @@ describe('serving over TLS', () => {
     expect(((await res.json()) as { secure: boolean }).secure).toBe(false);
   });
 
-  test('status still reports needsSetup, so an old client is unaffected', async () => {
-    const res = await fetch(`http://127.0.0.1:${httpPort}/api/status`);
-    expect(((await res.json()) as { needsSetup: boolean }).needsSetup).toBe(true);
-  });
-
-  test('pairing over TLS returns the fingerprint to pin in the same round trip', async () => {
-    const res = await fetch(`https://127.0.0.1:${httpsPort}/api/setup`, {
-      ...insecure,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: 'pw' }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      ok: boolean;
-      secure: boolean;
-      tls: { fingerprint: string };
-    };
-    expect(body.ok).toBe(true);
-    expect(body.secure).toBe(true);
-    expect(body.tls.fingerprint).toBe(`sha256:${material.fingerprintSha256}`);
-    setAuthHash(null);
-  });
-
   test('an authenticated WebSocket-less config read reports transport state', async () => {
-    setAuthHash(await Bun.password.hash('pw', { algorithm: 'argon2id' }));
+    const AUTH = testAuthHeaders();
     const res = await fetch(`https://127.0.0.1:${httpsPort}/api/config`, {
       ...insecure,
-      headers: { Authorization: 'Bearer pw' },
+      headers: AUTH,
     });
     const body = (await res.json()) as { tls: { enabled: boolean; plaintext: boolean } };
     expect(body.tls.enabled).toBe(true);
     expect(body.tls.plaintext).toBe(true);
-    setAuthHash(null);
   });
 });

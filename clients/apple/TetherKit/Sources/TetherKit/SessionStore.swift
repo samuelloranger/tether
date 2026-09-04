@@ -41,6 +41,23 @@ public final class SessionStore {
   @ObservationIgnored private var hasRestoredSession = false
 
   private let hostStore: HostStoreAdapter
+  /// Per-host Noise key material (device key + pinned server key). Used both to
+  /// DERIVE a host's auth mode (`authMode(for:)`) and to drive the Noise
+  /// transport. Injectable so tests can pass an in-memory fake.
+  private let noiseKeyStore: NoiseKeyStore
+  /// The Noise transport engine, sharing `noiseKeyStore` so the keys a host was
+  /// paired with are the keys its reconnect uses.
+  @ObservationIgnored private let noiseClient: NoiseSessionClient
+  /// In-memory per-device REST token cache for Noise hosts. A Noise host has no
+  /// password, so its REST `Authorization: Bearer` value is a token minted over
+  /// the Noise channel (`mintNoiseToken`), cached until near expiry and
+  /// re-minted on a 401. Lazy so the mint closure can capture `self` after init.
+  @ObservationIgnored private lazy var noiseTokenCache = NoiseTokenCache(
+    mint: { [weak self] hostId in
+      guard let self else { throw NoiseClientError.notPaired }
+      return try await self.mintNoiseToken(hostId: hostId)
+    }
+  )
   /// Owns the socket and the VT emulator on its OWN executor. See
   /// `TerminalPipeline` for why none of that may run on the main actor.
   @ObservationIgnored private let pipeline = TerminalPipeline()
@@ -69,8 +86,13 @@ public final class SessionStore {
   /// generation check lives inside `TerminalPipeline`.
   @ObservationIgnored private var lastRenderedGeneration: UInt64?
 
-  public init(hostStore: HostStoreAdapter = HostStoreAdapter()) {
+  public init(
+    hostStore: HostStoreAdapter = HostStoreAdapter(),
+    noiseKeyStore: NoiseKeyStore = KeychainNoiseKeyStore()
+  ) {
     self.hostStore = hostStore
+    self.noiseKeyStore = noiseKeyStore
+    noiseClient = NoiseSessionClient(keyStore: noiseKeyStore)
     observePipeline()
   }
 
@@ -207,7 +229,85 @@ public final class SessionStore {
     return profile
   }
 
+  /// The DERIVED auth mode for a host — see `HostAuthModeResolver`. Interim: a
+  /// host is a Noise host iff a pinned Noise server key exists for it and it has
+  /// no stored password.
+  public func authMode(for hostId: String) -> HostAuthMode {
+    // `try?` flattens the throwing `-> Data?` / `-> String?` to a single
+    // optional (same idiom as `client(for:)`). Both Noise keys are required to
+    // classify `.noise` — reconnect needs the device key too, so a host missing
+    // it must fall back to the password path rather than fail mid-handshake.
+    let pinned = try? noiseKeyStore.loadServerPublicKey(hostId: hostId)
+    let device = try? noiseKeyStore.loadDevicePrivateKey(hostId: hostId)
+    let password = try? hostStore.password(for: hostId)
+    return HostAuthModeResolver.resolve(
+      hasPinnedNoiseKey: (pinned ?? nil) != nil,
+      hasDeviceKey: (device ?? nil) != nil,
+      hasPassword: !((password ?? "").isEmpty)
+    )
+  }
+
+  /// Persists a HostProfile for a device that paired over Noise — the
+  /// password-less sibling of `createHost`.
+  ///
+  /// A Noise host has no password, so it cannot `probeIdentity` (authenticated
+  /// GET /api/config) and must not `setPassword`. It is created straight through
+  /// the pure `hostStore.create(...)`, then the Noise key material — which the
+  /// pairing sheet stored under the throwaway `pairHostId` — is migrated onto the
+  /// profile's real (FFI-generated) id so `authMode(for:)` and
+  /// `NoiseSessionClient.reconnect` resolve it. Additive: the password path in
+  /// `createHost` is untouched.
+  @discardableResult
+  public func createNoiseHost(
+    name: String,
+    host: String,
+    port: String,
+    pairHostId: String,
+    color: String = "#89b4fa"
+  ) throws -> HostProfileModel {
+    let displayName = name.isEmpty ? host : name
+    // Load BOTH paired keys up front — before creating any profile. If either is
+    // missing, pairing did not complete; throw without persisting anything, so we
+    // never leave a keyless profile that would silently reclassify as a password
+    // host on the next launch. (`try?` on a throwing `-> Data?` yields `Data??`;
+    // flatten with `?? nil`.)
+    guard let device = (try? noiseKeyStore.loadDevicePrivateKey(hostId: pairHostId)) ?? nil,
+          let server = (try? noiseKeyStore.loadServerPublicKey(hostId: pairHostId)) ?? nil
+    else {
+      throw NoiseHostError.missingPairedKeys
+    }
+    let profile = try hostStore.create(
+      name: displayName,
+      color: color.isEmpty ? "#89b4fa" : color,
+      host: host,
+      port: port,
+      identityName: displayName
+    )
+    // Migrate the keys onto the profile id atomically: if either save fails, roll
+    // the profile back so we don't persist an orphan mis-typed as a password host.
+    do {
+      try noiseKeyStore.saveDevicePrivateKey(device, hostId: profile.id)
+      try noiseKeyStore.saveServerPublicKey(server, hostId: profile.id)
+    } catch {
+      try? hostStore.remove(id: profile.id)
+      try? noiseKeyStore.clear(hostId: profile.id)
+      throw error
+    }
+    // Both keys now live under the profile id; drop the throwaway pairing id.
+    if pairHostId != profile.id {
+      try? noiseKeyStore.clear(hostId: pairHostId)
+    }
+    reloadHosts()
+    healthByHost[profile.id] = .reachable
+    activeHostId = profile.id
+    return profile
+  }
+
   public func removeHost(id: String) {
+    // Clear Noise key material FIRST — even if the profile remove throws, no
+    // pinned server key or device key may survive to let a re-created host with
+    // the same id masquerade as still-paired.
+    try? noiseKeyStore.clear(hostId: id)
     do {
       try hostStore.remove(id: id)
       healthByHost[id] = nil
@@ -358,6 +458,10 @@ public final class SessionStore {
   /// host happens to be active" — reaching a second server took selecting one
   /// of its sessions first, which is impossible when it has none.
   public func newTerminal(hostId: String) async {
+    if authMode(for: hostId) == .noise {
+      await newNoiseTerminal(hostId: hostId)
+      return
+    }
     guard let client = client(for: hostId) else { return }
     // THIS host's list, fetched fresh, before an id is picked. A host the
     // drawer has never loaded has no `sessionsByHost` entry, so allocating
@@ -388,6 +492,30 @@ public final class SessionStore {
     } catch {
       errorMessage = error.localizedDescription
     }
+  }
+
+  /// Opens a terminal on a Noise host. There is no REST `startSession` for a
+  /// Noise host — the Noise `start` frame both spawns and attaches server-side —
+  /// so the tab is synthesized locally and the session is created lazily by the
+  /// pipeline's `sendStart`. Multiple concurrent Noise sessions are a future TODO;
+  /// for now a Noise host drives one `term-1`.
+  private func newNoiseTerminal(hostId: String) async {
+    let known = sessionsByHost[hostId] ?? []
+    let id = nextSessionId(among: known)
+    let synthesized = RemoteSession(
+      id: id, status: "running", lastOutputAt: nil, name: nil, autoTitle: nil, activity: nil
+    )
+    var next = known
+    next.append(synthesized)
+    sessionsByHost[hostId] = next
+    hasRestoredSession = true
+    if activeHostId != hostId || activeSessionId != id {
+      await pipeline.sendFocus(focused: false)
+    }
+    activeHostId = hostId
+    activeSessionId = id
+    sessions = next
+    await connectTerminal(sessionId: id)
   }
 
   public var activeSession: RemoteSession? {
@@ -638,18 +766,54 @@ public final class SessionStore {
   }
 
   private func client(for hostId: String) -> NativeHostClient? {
+    guard let profile = hosts.first(where: { $0.id == hostId }) else { return nil }
+    // A Noise host has no password: its REST Bearer is a device token minted
+    // over the Noise channel and cached (re-minted on 401). Additive — password
+    // hosts are unchanged below.
+    if authMode(for: hostId) == .noise {
+      return NativeHostClient(
+        profile: profile,
+        bearerSource: NoiseTokenBearerSource(cache: noiseTokenCache, hostId: hostId)
+      )
+    }
     // `try?` on a throwing call that already returns String? flattens in
     // Swift 5+, so `password` binds as a non-optional String here — a second
     // `let` to unwrap it does not compile.
     guard
-      let profile = hosts.first(where: { $0.id == hostId }),
       let password = try? hostStore.password(for: hostId),
       !password.isEmpty
     else { return nil }
     return NativeHostClient(profile: profile, password: password)
   }
 
+  /// Mint a REST device token for a Noise host over its Noise channel. Backs
+  /// `noiseTokenCache`; resolves the host's Noise base URL and delegates to
+  /// `NoiseSessionClient.requestToken`.
+  private func mintNoiseToken(hostId: String) async throws -> (token: String, expiresAt: Date) {
+    guard
+      let host = hosts.first(where: { $0.id == hostId }),
+      let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+    else {
+      throw HostClientError.invalidURL
+    }
+    return try await noiseClient.requestToken(hostId: hostId, url: url)
+  }
+
   private func fetchSessions(for hostId: String) async -> [RemoteSession] {
+    // A Noise host has no Bearer credential and no REST session list — its
+    // sessions live only over the Noise channel. Report it reachable and keep
+    // whatever tabs were synthesized locally, so the 3-second poll neither marks
+    // it auth-failed nor wipes an open Noise terminal out from under the stream.
+    // TODO: a `GET /api/noise/sessions`-equivalent would let the drawer show a
+    // Noise host's real server-side session list.
+    if authMode(for: hostId) == .noise {
+      // No Bearer credential + no REST list — probe reachability over the Noise
+      // path (a reconnect handshake) instead of the password `/api/config`, which
+      // would always 401 it. Throttled so the 3s poll doesn't hammer a handshake.
+      // Keep the locally-synthesized tabs either way.
+      await pingNoiseHealth(hostId)
+      return sessionsByHost[hostId] ?? []
+    }
     guard let client = client(for: hostId) else {
       // No usable password for this host. Returning early without touching
       // health left it at `.unknown`, which the drawer renders as
@@ -676,6 +840,33 @@ public final class SessionStore {
         errorMessage = error.localizedDescription
       }
       return []
+    }
+  }
+
+  /// Last time each Noise host's reachability was probed, so the 3s session poll
+  /// runs the (heavier) Noise handshake at most every 8s.
+  private var lastNoisePingAt: [String: Date] = [:]
+
+  /// Reachability for a Noise host: attempt the IK reconnect handshake. Success =
+  /// up AND this device still authorized → `.reachable`; any failure (host down,
+  /// or this device revoked) → `.unreachable`. Throttled to ~8s.
+  private func pingNoiseHealth(_ hostId: String) async {
+    let now = Date()
+    if let last = lastNoisePingAt[hostId], now.timeIntervalSince(last) < 8 { return }
+    lastNoisePingAt[hostId] = now
+
+    guard let host = hosts.first(where: { $0.id == hostId }),
+          let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+    else {
+      markHostFailure(hostId)
+      return
+    }
+    do {
+      let channel = try await noiseClient.reconnect(hostId: hostId, url: url)
+      await channel.close()
+      healthByHost[hostId] = .reachable
+    } catch {
+      markHostFailure(hostId)
     }
   }
 
@@ -722,13 +913,49 @@ public final class SessionStore {
     // socket open under a host that cannot be reached is how the server keeps
     // believing a session is on screen.
     await pipeline.disconnect()
-    guard let client = await activeClient() else { return }
-    await pipeline.connect(
-      client: client,
+    guard let hostId = activeHostId else { return }
+    // Branch ONCE on the derived auth mode: a Noise host drives the sealed
+    // channel, a password host drives the Bearer WebSocket. Both feed the same
+    // emulator inside the pipeline.
+    switch authMode(for: hostId) {
+    case .noise:
+      await connectTerminalNoise(hostId: hostId, sessionId: sessionId)
+    case .password:
+      guard let client = client(for: hostId) else { return }
+      await pipeline.connect(
+        client: client,
+        sessionId: sessionId,
+        key: terminalKey(sessionId),
+        focused: isAppActive
+      )
+    }
+  }
+
+  /// Establishes the Noise transport for a session and hands the pipeline a live
+  /// `NoiseChannel` to pump. The URL is `https://host:port`;
+  /// `NoiseSessionClient.reconnect` maps it to `wss` and appends
+  /// `/api/noise/session` itself.
+  private func connectTerminalNoise(hostId: String, sessionId: String) async {
+    guard
+      let host = hosts.first(where: { $0.id == hostId }),
+      let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+    else {
+      errorMessage = HostClientError.invalidURL.localizedDescription
+      return
+    }
+    await pipeline.connectNoise(
+      client: noiseClient,
+      hostId: hostId,
+      url: url,
       sessionId: sessionId,
-      key: terminalKey(sessionId),
-      focused: isAppActive
+      key: terminalKey(sessionId)
     )
+  }
+
+  /// Base URL for the Noise handshake. Noise runs over TLS (`wss`), so this is
+  /// `https://…`; the port is the host's stored port.
+  static func noiseBaseURL(host: String, port: String) -> URL? {
+    URL(string: "https://\(host):\(port)")
   }
 
   private func updateHealth(for hostId: String, status: UInt16) {

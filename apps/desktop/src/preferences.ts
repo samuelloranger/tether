@@ -1,5 +1,5 @@
-import { newLeaf, type PaneNode } from './paneTree';
-import { deserializePaneTree, serializePaneTree } from './paneTreeSerialize';
+import { newSoloView, type ViewState } from './viewModel';
+import { deserializeViews, serializeViews } from './viewsSerialize';
 
 export const THEME_OPTIONS = [
   'system',
@@ -40,12 +40,15 @@ const NOTIFICATIONS_KEY = 'tether_notifications_enabled';
 const TAB_LAYOUT_KEY = 'tether_tab_layout';
 const PANE_TREE_KEY = 'tether_pane_tree';
 
-export function loadPaneTree(): PaneNode {
-  return deserializePaneTree(localStorage.getItem(PANE_TREE_KEY)) ?? newLeaf();
+export function loadViews(): ViewState {
+  const loaded = deserializeViews(localStorage.getItem(PANE_TREE_KEY));
+  if (loaded) return loaded;
+  const view = newSoloView();
+  return { views: [view], activeViewId: view.id };
 }
 
-export function savePaneTree(tree: PaneNode): void {
-  localStorage.setItem(PANE_TREE_KEY, serializePaneTree(tree));
+export function saveViews(state: ViewState): void {
+  localStorage.setItem(PANE_TREE_KEY, serializeViews(state));
 }
 
 export interface AppColors {

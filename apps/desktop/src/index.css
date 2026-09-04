@@ -562,6 +562,11 @@ label > textarea {
   margin-bottom: 6px;
 }
 
+.hosts-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .hosts-header > h1 {
   margin: 0;
   font-size: 21px;
@@ -629,6 +634,120 @@ label > textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* ── devices ───────────────────────────────────────────────────────────── */
+
+.devices-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.devices-row {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.devices-row:last-child {
+  border-bottom: 0;
+}
+
+.devices-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.devices-row-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Accent-tinted chip — same grammar as the primary button's tint, not a slab. */
+.devices-self-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.devices-row-fp {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.devices-row-seen {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.devices-revoke {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.devices-action-error {
+  margin-top: 14px;
+}
+
+/* ── pair device ───────────────────────────────────────────────────────── */
+
+/* The 12-char enrollment code is shown grouped 4·4·4; wider tracking so the
+   three blocks read apart, uppercased to match the folded form. */
+.pairing-code-input {
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.pairing-status {
+  margin: 0 0 14px;
+  display: grid;
+  gap: 6px;
+}
+
+/* Working-amber line while the handshake runs, with a pulsing dot. */
+.pairing-status.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--warning);
+}
+
+.pairing-status.working::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  animation: pairing-pulse 1s var(--ease-out) infinite;
+}
+
+@keyframes pairing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.pairing-fingerprint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  word-break: break-all;
+  line-height: 1.5;
 }
 
 .admin-form {
@@ -1099,6 +1218,23 @@ label > textarea {
   left: 0;
   top: 7px;
   bottom: 7px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+}
+
+.session-tab-hosts {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.session-tab-host-chip {
+  flex: 1;
   width: 2px;
   border-radius: 0 2px 2px 0;
 }

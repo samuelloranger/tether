@@ -19,9 +19,9 @@ The installer also adds that directory to your **user PATH** if it isn't there. 
 Then, as on any other platform:
 
 ```powershell
-tether set-password
 tether start
 tether status
+tether pair      # pair a device (see Getting started)
 ```
 
 The installer accepts the same environment variables as its POSIX counterpart — `TETHER_VERSION` to pin a release, `TETHER_REPO_SLUG` to install from a fork, `DRY_RUN=1` to print the plan and stop:

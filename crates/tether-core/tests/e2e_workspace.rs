@@ -163,7 +163,7 @@ async fn accepts_a_multipart_upload() {
             "http://127.0.0.1:{}/api/sessions/{session}/upload",
             server.port
         ))
-        .header("Authorization", format!("Bearer {}", server.password))
+        .header("Authorization", format!("Bearer {}", server.token))
         .header(
             "Content-Type",
             format!("multipart/form-data; boundary={boundary}"),

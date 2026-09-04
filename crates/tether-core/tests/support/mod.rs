@@ -47,7 +47,11 @@ pub struct Server {
     workdir: Option<PathBuf>,
     db_path: PathBuf,
     pub port: u16,
-    pub password: String,
+    /// A per-device bearer token minted through `tether device token`. The auth
+    /// model is token-only (the shared password was removed), so this is the
+    /// credential every client request carries — `HostClient`/`SessionConfig`
+    /// still name the field `password`, but the value is a bearer token.
+    pub token: String,
     pub state_dir: tempfile::TempDir,
     pub http: reqwest::Client,
 }
@@ -102,12 +106,12 @@ impl Server {
             workdir: workdir.map(Path::to_path_buf),
             db_path: db_path.clone(),
             port,
-            password: "e2e-password".to_string(),
+            token: String::new(),
             state_dir,
             http,
         };
         server.await_ready().await;
-        server.pair().await;
+        server.token = server.mint_token();
         server
     }
 
@@ -160,34 +164,35 @@ impl Server {
         panic!("server did not answer /api/status within 20s");
     }
 
-    /// First-run TOFU pairing. `needsSetup` must be true on a fresh temp DB; if
-    /// it is not, the DB is not the one we thought we handed it.
-    async fn pair(&self) {
-        let status: Value = self
-            .http
-            .get(format!("{}/api/status", self.base()))
-            .send()
-            .await
-            .expect("status")
-            .json()
-            .await
-            .expect("status json");
-        assert_eq!(
-            status["needsSetup"], true,
-            "a fresh temp DB should need setup, got {status}"
+    /// Mints a per-device bearer token by invoking `tether device token` against
+    /// the same DB the server runs on. This is the token-only replacement for the
+    /// old TOFU/password pairing: the CLI enrolls a synthetic device and prints a
+    /// signed token, which every request below carries as `Authorization: Bearer`.
+    /// Runs after `await_ready`, so the server has already applied the migrations
+    /// this shares the DB file with.
+    fn mint_token(&self) -> String {
+        let mut command = Command::new(&self.binary);
+        if let Some(dir) = &self.workdir {
+            command.current_dir(dir);
+        }
+        let output = command
+            .arg("device")
+            .arg("token")
+            .arg("e2e")
+            .env("TETHER_DB_PATH", &self.db_path)
+            .output()
+            .expect("run `tether device token`");
+        assert!(
+            output.status.success(),
+            "`tether device token` failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
-
-        let setup: Value = self
-            .http
-            .post(format!("{}/api/setup", self.base()))
-            .json(&serde_json::json!({ "password": self.password }))
-            .send()
-            .await
-            .expect("setup")
-            .json()
-            .await
-            .expect("setup json");
-        assert_eq!(setup["ok"], true, "pairing failed: {setup}");
+        let token = String::from_utf8(output.stdout)
+            .expect("token utf8")
+            .trim()
+            .to_string();
+        assert!(!token.is_empty(), "`tether device token` printed nothing");
+        token
     }
 
     /// A `HostClient` pointed at this server, which is what the desktop and iOS
@@ -203,12 +208,12 @@ impl Server {
                 identity_name: "e2e".to_string(),
                 order: 0,
             },
-            self.password.clone(),
+            self.token.clone(),
         )
     }
 
-    /// A client pointed at this server with an arbitrary password, for the
-    /// tests that assert what a wrong or rotated credential does.
+    /// A client pointed at this server with an arbitrary bearer token, for the
+    /// tests that assert what an unknown or malformed credential does.
     pub fn client_with(&self, password: &str) -> HostClient {
         HostClient::new(
             HostProfile {

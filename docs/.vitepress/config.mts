@@ -28,6 +28,7 @@ export default defineConfig({
           { text: "Sessions & tabs", link: "/terminal/sessions" },
           { text: "Saved commands & search", link: "/terminal/saved-commands" },
           { text: "Security & networking", link: "/security" },
+          { text: "Reach from anywhere", link: "/reach-from-anywhere" },
           { text: "Privacy", link: "/privacy" },
           { text: "Updating & data", link: "/updating" },
           { text: "Changelog", link: "/changelog" },

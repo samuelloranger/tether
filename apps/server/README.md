@@ -14,7 +14,7 @@ This package is the **server only** — an API/WebSocket backend with no web UI.
 - **Detached holder processes:** each session's PTY lives in its own `holder` process (`main.ts holder …`) that owns a unix socket. The Hono server attaches to it, so the shell survives server restarts; on boot the server reattaches to surviving holders.
 - **Persistent SQLite log cache:** every stdout chunk is written to `bun:sqlite` with an incrementing row id (capped per session, pruned periodically).
 - **Reconnect + replay:** clients persist the last log id they saw; on reconnect the server replays everything since that id from SQLite, so no output is missed. A prune watermark tells a client to reset if its cursor predates pruned rows.
-- **Shared-password auth:** all `/api/*` routes (HTTP + the WS upgrade) require `Authorization: Bearer <password>` (argon2 hash in the DB). Set it with `tether set-password` or first-run TOFU pairing (`/api/status` + one-time `/api/setup`).
+- **Per-device token auth:** all `/api/*` routes (HTTP + the WS upgrade) require `Authorization: Bearer <token>`. A paired device mints the token over its Noise session. Pair with `tether pair`.
 
 ---
 

@@ -4,14 +4,13 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { app } from './app';
-import { deleteSession, getAuthHash, setAuthHash, upsertSession } from './db';
+import { deleteSession, upsertSession } from './db';
 import { clearLiveCwd, reportCwd } from './liveCwd';
+import { testAuthHeaders } from './testAuth';
 
-const PASSWORD = 'test-password';
-const AUTH = { Authorization: `Bearer ${PASSWORD}` };
+let AUTH: Record<string, string>;
 const ID = 'gitops-api';
 let root: string;
-let previousAuthHash: string | null;
 
 function git(cmd: string) {
   return execSync(`git ${cmd}`, { cwd: root, encoding: 'utf8' });
@@ -25,9 +24,8 @@ function post(route: string, body: unknown) {
   });
 }
 
-beforeEach(async () => {
-  previousAuthHash = getAuthHash();
-  setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
+beforeEach(() => {
+  AUTH = testAuthHeaders();
   root = realpathSync(mkdtempSync(path.join(tmpdir(), 'tether-gitops-api-')));
   git('init -q');
   git('config user.email test@example.com');
@@ -42,7 +40,6 @@ beforeEach(async () => {
 afterEach(() => {
   clearLiveCwd(ID);
   deleteSession(ID);
-  setAuthHash(previousAuthHash);
   rmSync(root, { recursive: true, force: true });
 });
 

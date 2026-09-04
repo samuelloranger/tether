@@ -5,6 +5,7 @@ mod error;
 mod grid_snapshot;
 mod host_health;
 mod host_store;
+mod noise;
 mod replay;
 mod terminal;
 
@@ -23,6 +24,9 @@ pub use host_health::FfiHostHealth;
 pub use host_store::{
     FfiHostProfile, FfiHostProfileChanges, FfiNewHostProfile, HostStorage, HostStoreHandle,
     SecretStore,
+};
+pub use noise::{
+    noise_derive_psk, noise_gen_keypair, FfiNoiseError, FfiNoiseKeypair, FfiNoiseSession,
 };
 pub use replay::FfiReplayStore;
 pub use terminal::FfiTerminalEmulator;

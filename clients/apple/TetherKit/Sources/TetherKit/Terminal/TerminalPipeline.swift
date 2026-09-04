@@ -60,6 +60,15 @@ actor TerminalPipeline {
   private var socket: URLSessionWebSocketTask?
   private var socketIsOpen = false
   private var readTask: Task<Void, Never>?
+  /// The Noise transport, when this pipeline is driving a Noise host instead of
+  /// the Bearer WebSocket. Exactly one of {`socket`, `noiseChannel`} is live at a
+  /// time — `connect`/`connectNoise` both `disconnect()` first, and the outbound
+  /// pump routes to whichever is set. See `connectNoise`.
+  private var noiseChannel: NoiseChannel?
+  /// The session id `sendStart` was issued for — every Noise input/resize frame
+  /// carries it.
+  private var noiseSessionId: String?
+  private var noiseReadTask: Task<Void, Never>?
   private var outboundTask: Task<Void, Never>?
   private var lastTrafficMs: Int64 = 0
   private var lastRenderedGeneration: UInt64?
@@ -157,6 +166,89 @@ actor TerminalPipeline {
     }
   }
 
+  // MARK: - Noise connection (parallel path)
+
+  /// Establishes a Noise session and pumps it into the SAME emulator/snapshot
+  /// sink the Bearer path feeds. This is the deliberately narrow parallel seam
+  /// described in the Noise-integration task: `TerminalPipeline` is too tightly
+  /// bound to `URLSessionWebSocketTask` (replay cursor, backoff, JSON framing) to
+  /// abstract behind one transport protocol cheaply, so the Noise transport gets
+  /// its own establish + read loop here while reusing everything downstream of
+  /// the emulator (feed → `publishSnapshot`) and the single outbound pump (which
+  /// routes input/resize to `noiseChannel` when it is set).
+  ///
+  /// The server replays a session's whole retained tail in response to `start`
+  /// (`subscribeToSession`), so unlike the Bearer path there is no `sinceId`
+  /// cursor: the emulator is always rebuilt fresh and refilled from that replay.
+  ///
+  /// Reduced-robustness vs the Bearer path, all TODOs for a later pass:
+  ///   - No auto-reconnect/backoff. An unexpected drop surfaces an error; the
+  ///     next foreground resume (or a manual reselect) re-runs `reconnect` +
+  ///     `sendStart`, which is the "simpler reconnect" the task allows.
+  ///   - No replay de-dup guard (relies on the fresh-emulator + full-replay
+  ///     model above).
+  func connectNoise(
+    client: NoiseSessionClient,
+    hostId: String,
+    url: URL,
+    sessionId: String,
+    key: String
+  ) async {
+    disconnect()
+    startOutboundPumpIfNeeded()
+    // Always a fresh grid: the server replays the whole tail on `start`.
+    emulator = FfiTerminalEmulator(cols: cols, rows: rows)
+    emulatorKey = key
+    lastRenderedGeneration = nil
+    snapshotSink.yield(nil)
+    resetMouseModes()
+    do {
+      let channel = try await client.reconnect(hostId: hostId, url: url)
+      try await channel.sendStart(id: sessionId, cols: cols, rows: rows)
+      noiseChannel = channel
+      noiseSessionId = sessionId
+      noteTraffic()
+      noiseReadTask = Task { [weak self] in
+        await self?.readLoopNoise(key: key, channel: channel)
+      }
+    } catch {
+      eventSink.yield(.error(error.localizedDescription))
+    }
+  }
+
+  private func readLoopNoise(key: String, channel: NoiseChannel) async {
+    while !Task.isCancelled {
+      do {
+        let message = try await channel.receive()
+        // Stale channel: the active terminal moved on since this opened.
+        guard key == emulatorKey else { continue }
+        noteTraffic()
+        switch message {
+        case let .output(_, chunk):
+          if let bytes = chunk.data(using: .utf8) {
+            emulator?.feed(bytes: bytes)
+            publishSnapshot()
+          }
+        case .exit:
+          eventSink.yield(.sessionsChanged)
+        case .devices, .devicesRevoked, .authToken:
+          // Device-management and auth-token replies never ride the terminal
+          // channel; they are driven over their own short-lived sessions
+          // (`DevicesView`, `NoiseTokenCache`). Ignore.
+          break
+        }
+      } catch {
+        // A deliberate teardown cancels this task; anything else is an
+        // unexpected drop. No backoff here (see `connectNoise` TODOs) — just
+        // report it so the UI can reflect a closed connection.
+        if !Task.isCancelled {
+          eventSink.yield(.error("Connection closed"))
+        }
+        break
+      }
+    }
+  }
+
   /// Drops the socket but KEEPS the emulator — this runs at the top of every
   /// `connect`, so clearing it here would defeat scrollback reuse on a
   /// foreground reconnect.
@@ -175,6 +267,16 @@ actor TerminalPipeline {
     socket?.cancel(with: .goingAway, reason: nil)
     socket = nil
     socketIsOpen = false
+    // Tear down the Noise transport too, if this pipeline was driving one. The
+    // channel close is async; fire it off and drop the reference now so the
+    // outbound pump stops routing to a dead channel.
+    noiseReadTask?.cancel()
+    noiseReadTask = nil
+    if let channel = noiseChannel {
+      noiseChannel = nil
+      noiseSessionId = nil
+      Task { await channel.close() }
+    }
   }
 
   /// Leaves the terminal entirely, as opposed to reconnecting to the same
@@ -221,7 +323,27 @@ actor TerminalPipeline {
     }
   }
 
-  private func handleOutbound(_ frame: OutboundFrame) {
+  private func handleOutbound(_ frame: OutboundFrame) async {
+    // Noise transport: route input/resize through the sealed channel. `focus`
+    // has no Noise frame — the server treats a Noise client as the sole,
+    // always-focused viewer of its session.
+    if let channel = noiseChannel, let id = noiseSessionId {
+      switch frame {
+      case let .input(text, key):
+        guard stillCurrent(key) else { return }
+        try? await channel.sendInput(id: id, text: text)
+      case let .paste(text, key):
+        guard stillCurrent(key) else { return }
+        try? await channel.sendInput(id: id, text: emulator?.pastePayload(text: text) ?? text)
+      case .focus:
+        break
+      case let .resize(newCols, newRows):
+        if applyLocalResize(cols: newCols, rows: newRows) {
+          try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
+        }
+      }
+      return
+    }
     switch frame {
     case let .input(text, key):
       guard stillCurrent(key) else { return }
@@ -252,12 +374,21 @@ actor TerminalPipeline {
   /// emulator AND tells the PTY, so the two agree and the shell wraps at the
   /// width the user can see.
   private func resize(cols newCols: UInt16, rows newRows: UInt16) {
-    guard newCols != cols || newRows != rows else { return }
+    guard applyLocalResize(cols: newCols, rows: newRows) else { return }
+    send(["type": "resize", "cols": Int(newCols), "rows": Int(newRows)])
+  }
+
+  /// Resizes the LOCAL emulator and records the new grid size, shared by the
+  /// Bearer and Noise resize paths. Returns whether the size actually changed, so
+  /// the caller only puts a resize frame on the wire when it did.
+  @discardableResult
+  private func applyLocalResize(cols newCols: UInt16, rows newRows: UInt16) -> Bool {
+    guard newCols != cols || newRows != rows else { return false }
     cols = newCols
     rows = newRows
     emulator?.resize(cols: newCols, rows: newRows)
     publishSnapshot()
-    send(["type": "resize", "cols": Int(newCols), "rows": Int(newRows)])
+    return true
   }
 
   /// `{ type: "focus", focused }` — the server suppresses push while focused is

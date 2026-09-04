@@ -115,71 +115,11 @@ async fn refuses_an_invalid_patch_without_applying_any_of_it() {
     );
 }
 
-#[tokio::test]
-async fn changes_the_password_and_invalidates_the_old_one() {
-    let server = Server::start().await;
-    let client = server.client();
-
-    let (status, _) = server
-        .exec(&server_config::change_password_request(
-            &client,
-            "not-the-password",
-            "irrelevant",
-        ))
-        .await;
-    assert_eq!(status, 403, "a wrong current password was accepted");
-
-    let (status, body) = server
-        .exec(&server_config::change_password_request(
-            &client,
-            &server.password,
-            "second-password",
-        ))
-        .await;
-    server_config::parse_admin_ok(status, &body)
-        .unwrap_or_else(|e| panic!("password change failed: {e} / {body}"));
-
-    let (status, _) = server
-        .exec(&client.get("/api/health", BTreeMap::new()))
-        .await;
-    assert_eq!(status, 401, "the old password still authenticates");
-
-    let rotated = server.client_with("second-password");
-    let (status, _) = server
-        .exec(&rotated.get("/api/health", BTreeMap::new()))
-        .await;
-    assert_eq!(status, 200, "the new password does not authenticate");
-}
-
-/// `update` and `restart` take the password in the body on top of the bearer.
-/// Only the refusal path is safe to assert: the success path would replace or
-/// stop the server under test.
-#[tokio::test]
-async fn destructive_admin_actions_refuse_a_wrong_password() {
-    let server = Server::start().await;
-    let client = server.client();
-
-    let (status, body) = server
-        .exec(&server_config::update_server_request(&client, "wrong"))
-        .await;
-    assert!(
-        status >= 400,
-        "admin update accepted a wrong password: {status} {body}"
-    );
-
-    let (status, body) = server
-        .exec(&server_config::restart_server_request(&client, "wrong"))
-        .await;
-    assert!(
-        status >= 400,
-        "admin restart accepted a wrong password: {status} {body}"
-    );
-
-    let (status, _) = server
-        .exec(&client.get("/api/health", BTreeMap::new()))
-        .await;
-    assert_eq!(status, 200, "the server died during a refused admin action");
-}
+// The password-change and password-gated admin-refusal e2e tests were removed
+// with the password itself: auth is now a per-device bearer token (see
+// `support::Server::mint_token`), there is no `/api/admin/password`, and
+// `update`/`restart` no longer take a body password. Bearer verification and
+// revocation are covered by the server's own unit suite.
 
 /// Test notification with no registered device must fail in a way the Settings
 /// screen can show: a coded error with a sentence for the user, not a bare 500.

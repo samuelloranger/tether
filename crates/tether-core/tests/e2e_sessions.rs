@@ -29,19 +29,9 @@ async fn rejects_a_wrong_password_and_accepts_the_paired_one() {
     assert_eq!(status, 401, "a wrong password must be refused");
 }
 
-/// Pairing is one-shot; a second setup on a paired server must not re-key it.
-#[tokio::test]
-async fn setup_refuses_a_second_pairing() {
-    let server = Server::start().await;
-    let response = server
-        .http
-        .post(format!("http://127.0.0.1:{}/api/setup", server.port))
-        .json(&json!({ "password": "someone-elses-password" }))
-        .send()
-        .await
-        .expect("setup");
-    assert_eq!(response.status().as_u16(), 409, "setup must self-lock");
-}
+// `setup_refuses_a_second_pairing` was removed with `/api/setup`: pairing is no
+// longer a one-shot shared-password TOFU but a per-device Noise enrollment, so
+// there is no single setup endpoint to self-lock.
 
 #[tokio::test]
 async fn starts_lists_renames_and_kills_a_session() {
@@ -118,7 +108,7 @@ async fn round_trips_input_through_a_live_pty() {
     let handle = open_session(
         SessionConfig {
             base_ws_url: server.ws_base(),
-            password: server.password.clone(),
+            password: server.token.clone(),
             session_id: "pty1".to_string(),
             cols: 80,
             rows: 24,

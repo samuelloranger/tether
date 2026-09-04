@@ -2,6 +2,7 @@ pub mod config;
 pub mod connect;
 pub mod git;
 pub mod hosts;
+pub mod noise;
 pub mod polling;
 pub mod secrets;
 pub mod sessions;

@@ -7,9 +7,22 @@ use tether_core::host_health::HostHealth;
 use tether_core::host_polling::HostPolling;
 use tether_core::host_store::HostProfile;
 use tether_core::session_cache::SessionCache;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::http;
+use crate::noise_token::CachedToken;
 use crate::storage::{new_host_store, DesktopHostStore};
+
+/// Per-connection handle for a live Noise terminal session. Mirrors the password
+/// path's `sessions`/`cancels` pair, but folded into one value: `core_noise_send`
+/// pushes plaintext WS-JSON onto `outgoing` (the pump translates + seals it), and
+/// `core_noise_close` sets `cancel` and drops the handle so the pump's outgoing
+/// receiver closes and it tears down.
+#[derive(Clone)]
+pub struct NoiseHandle {
+    pub outgoing: UnboundedSender<String>,
+    pub cancel: Arc<AtomicBool>,
+}
 
 pub struct CoreBridge {
     pub sessions: Mutex<HashMap<String, tether_core::session::SessionHandle>>,
@@ -18,6 +31,9 @@ pub struct CoreBridge {
     /// the user's intent and stops retrying instead of racing to reconnect.
     pub cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub replay: Arc<tether_core::store::ReplayStore>,
+    /// Live Noise terminal sessions, keyed by `conn_id`. Sibling to `sessions`
+    /// so the two transports never collide.
+    pub noise_sessions: Mutex<HashMap<String, NoiseHandle>>,
 }
 
 impl Default for CoreBridge {
@@ -26,6 +42,7 @@ impl Default for CoreBridge {
             sessions: Mutex::new(HashMap::new()),
             cancels: Mutex::new(HashMap::new()),
             replay: Arc::new(tether_core::store::ReplayStore::default()),
+            noise_sessions: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -39,6 +56,8 @@ pub struct AppState {
     pub poll_generation: AtomicU64,
     pub http: reqwest::Client,
     pub session_cache: Mutex<SessionCache<()>>,
+    /// Per-host Noise REST bearers. Password hosts never touch this map.
+    pub noise_tokens: Mutex<HashMap<String, CachedToken>>,
 }
 
 impl AppState {
@@ -52,6 +71,7 @@ impl AppState {
             poll_generation: AtomicU64::new(0),
             http: http::http_client(),
             session_cache: Mutex::new(SessionCache::default()),
+            noise_tokens: Mutex::new(HashMap::new()),
         }
     }
 

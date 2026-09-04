@@ -1,0 +1,24 @@
+[package]
+name = "tether-noise-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI over tether-core::noise for the Bun server"
+publish = false
+
+[lib]
+name = "tether_noise_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]
+tether-core = { path = "../tether-core" }
+
+# Argon2id PSK derivation (64 MiB, 3 passes; noise/psk.rs) targets ~100 ms in a
+# release build but runs for multiple seconds when unoptimized. The Bun server
+# tests dlopen this debug cdylib and derive PSKs synchronously, so an
+# unoptimized KDF blocks the test event loop for seconds and — under
+# `bun test --parallel` — starves every concurrent test's timers into a
+# timeout (this reliably reddened lint-test + server-windows on CI). Optimize
+# dependencies (tether-core, argon2, blake2, …) even in the dev profile so the
+# KDF runs at release speed; our own crate stays unoptimized for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 3

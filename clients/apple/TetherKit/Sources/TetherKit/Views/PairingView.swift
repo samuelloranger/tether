@@ -98,7 +98,7 @@ public struct PairingView: View {
 /// grouped list, so a disabled action looked exactly like an empty placeholder
 /// and the primary action was invisible. A capsule reads as pressable whether or
 /// not it is currently available.
-private struct PairingActionStyle: ButtonStyle {
+struct PairingActionStyle: ButtonStyle {
   let prominent: Bool
   @Environment(\.isEnabled) private var isEnabled
 

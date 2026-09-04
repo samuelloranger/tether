@@ -1,4 +1,5 @@
 import { confirmAction } from './dialog';
+import { isNoiseHost } from './noiseHosts';
 import type { HostHealthStatus, HostProfile } from './types';
 
 const HEALTH_LABEL: Record<HostHealthStatus, string> = {
@@ -13,7 +14,9 @@ interface HostsScreenProps {
   healthByHost: Record<string, HostHealthStatus>;
   onBack: () => void;
   onAdd: () => void;
+  onPairDevice: () => void;
   onEdit: (hostId: string) => void;
+  onDevices: (hostId: string) => void;
   onRemove: (hostId: string) => void;
   onSelect: (hostId: string) => void;
 }
@@ -23,7 +26,9 @@ export function HostsScreen({
   healthByHost,
   onBack,
   onAdd,
+  onPairDevice,
   onEdit,
+  onDevices,
   onRemove,
   onSelect,
 }: HostsScreenProps) {
@@ -34,9 +39,14 @@ export function HostsScreen({
       </button>
       <header className="hosts-header">
         <h1>Hosts</h1>
-        <button type="button" onClick={onAdd}>
-          Add host
-        </button>
+        <div className="hosts-header-actions">
+          <button type="button" className="secondary" onClick={onPairDevice}>
+            Pair a device
+          </button>
+          <button type="button" onClick={onAdd}>
+            Add host
+          </button>
+        </div>
       </header>
       <ul className="hosts-list">
         {hosts.map((host) => {
@@ -49,6 +59,15 @@ export function HostsScreen({
                   {host.host}:{host.port} · {HEALTH_LABEL[health]}
                 </span>
               </button>
+              {isNoiseHost(host.id) ? (
+                <button
+                  type="button"
+                  className="secondary small"
+                  onClick={() => onDevices(host.id)}
+                >
+                  Devices
+                </button>
+              ) : null}
               <button type="button" className="secondary small" onClick={() => onEdit(host.id)}>
                 Edit
               </button>

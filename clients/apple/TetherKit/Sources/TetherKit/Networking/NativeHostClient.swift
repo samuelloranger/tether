@@ -86,12 +86,38 @@ public enum HostClientError: Error, LocalizedError {
 /// tether-ffi as the core exports expand; this stays in the shell transport layer.
 public actor NativeHostClient {
   public let profile: HostProfileModel
-  private let password: String
+  /// Where the `Authorization: Bearer` value comes from: a stored password
+  /// (password hosts) or a Noise-minted device token (Noise hosts). Additive —
+  /// the password init is unchanged; Noise hosts use the new token init.
+  private enum AuthSource {
+    case password(String)
+    case token(HostBearerSource)
+  }
+
+  private let auth: AuthSource
+  /// The bearer the WebSocket path uses. Only password hosts open this REST WS
+  /// (a Noise host's terminal rides its own Noise channel), so an empty string
+  /// for a token host is never sent.
+  private let webSocketBearer: String
   private let session: URLSession
 
   public init(profile: HostProfileModel, password: String, session: URLSession = .shared) {
     self.profile = profile
-    self.password = password
+    self.auth = .password(password)
+    self.webSocketBearer = password
+    self.session = session
+  }
+
+  /// Token-authed variant for a Noise host: the Bearer is minted (and cached +
+  /// re-minted on 401) through `bearerSource` instead of a stored password.
+  public init(
+    profile: HostProfileModel,
+    bearerSource: HostBearerSource,
+    session: URLSession = .shared
+  ) {
+    self.profile = profile
+    self.auth = .token(bearerSource)
+    self.webSocketBearer = ""
     self.session = session
   }
 
@@ -100,16 +126,53 @@ public actor NativeHostClient {
     return base.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
   }
 
-  private func authorizedRequest(url: URL, method: String = "GET", body: Data? = nil) -> URLRequest {
+  private func bearerValue() async throws -> String {
+    switch auth {
+    case let .password(password):
+      return password
+    case let .token(source):
+      return try await source.currentBearer()
+    }
+  }
+
+  private func invalidateBearer() async {
+    if case let .token(source) = auth {
+      await source.invalidateBearer()
+    }
+  }
+
+  private func authorizedRequest(url: URL, method: String = "GET", body: Data? = nil) async throws -> URLRequest {
     var request = URLRequest(url: url)
     request.httpMethod = method
-    request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let body {
       request.httpBody = body
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     }
     return request
+  }
+
+  /// Send an authorized request and return its body + status. For a token host,
+  /// a 401 triggers exactly one silent re-mint (invalidate the cached token,
+  /// mint a fresh one) and retry; a second 401 surfaces to the caller. Password
+  /// hosts never retry — a 401 is a wrong password, not a stale token.
+  private func sendAuthorized(
+    url: URL,
+    method: String = "GET",
+    body: Data? = nil
+  ) async throws -> (Data, Int) {
+    let request = try await authorizedRequest(url: url, method: method, body: body)
+    let (data, response) = try await session.data(for: request)
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    guard status == 401, case .token = auth else {
+      return (data, status)
+    }
+    await invalidateBearer()
+    let retry = try await authorizedRequest(url: url, method: method, body: body)
+    let (retryData, retryResponse) = try await session.data(for: retry)
+    let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? 0
+    return (retryData, retryStatus)
   }
 
   public func fetchStatus() async throws -> ServerStatus {
@@ -125,22 +188,17 @@ public actor NativeHostClient {
 
   public func setup(password newPassword: String) async throws {
     let body = try JSONEncoder().encode(["password": newPassword])
-    let request = authorizedRequest(url: try url(path: "/api/setup"), method: "POST", body: body)
-    let (_, response) = try await session.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (_, status) = try await sendAuthorized(url: try url(path: "/api/setup"), method: "POST", body: body)
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
   }
 
   public func testConnection() async throws -> Int {
-    let request = authorizedRequest(url: try url(path: "/api/health"))
-    let (_, response) = try await session.data(for: request)
-    return (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (_, status) = try await sendAuthorized(url: try url(path: "/api/health"))
+    return status
   }
 
   public func loadIdentity() async throws -> ServerIdentity {
-    let request = authorizedRequest(url: try url(path: "/api/config"))
-    let (data, response) = try await session.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (data, status) = try await sendAuthorized(url: try url(path: "/api/config"))
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
     guard
       let decoded = try? JSONDecoder().decode(ConfigResponse.self, from: data),
@@ -152,9 +210,7 @@ public actor NativeHostClient {
   }
 
   public func listSessions() async throws -> [RemoteSession] {
-    let request = authorizedRequest(url: try url(path: "/api/sessions"))
-    let (data, response) = try await session.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (data, status) = try await sendAuthorized(url: try url(path: "/api/sessions"))
     guard status != 401 else { throw HostClientError.unauthorized }
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
     guard let decoded = try? JSONDecoder().decode([RemoteSession].self, from: data) else {
@@ -166,9 +222,7 @@ public actor NativeHostClient {
   public func startSession(id: String, cwd: String = "") async throws -> RemoteSession {
     let payload = ["id": id, "cwd": cwd]
     let body = try JSONSerialization.data(withJSONObject: payload)
-    let request = authorizedRequest(url: try url(path: "/api/sessions/start"), method: "POST", body: body)
-    let (data, response) = try await session.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (data, status) = try await sendAuthorized(url: try url(path: "/api/sessions/start"), method: "POST", body: body)
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
     // The server wraps this one: { ok, session }. Decoding RemoteSession
     // straight from the body always failed, and it failed AFTER the session
@@ -187,17 +241,13 @@ public actor NativeHostClient {
 
   public func killSession(id: String) async throws {
     let body = try JSONSerialization.data(withJSONObject: ["id": id])
-    let request = authorizedRequest(url: try url(path: "/api/sessions/kill"), method: "POST", body: body)
-    let (_, response) = try await session.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (_, status) = try await sendAuthorized(url: try url(path: "/api/sessions/kill"), method: "POST", body: body)
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
   }
 
   public func renameSession(id: String, name: String) async throws {
     let body = try JSONSerialization.data(withJSONObject: ["id": id, "name": name])
-    let request = authorizedRequest(url: try url(path: "/api/sessions/rename"), method: "POST", body: body)
-    let (_, response) = try await session.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (_, status) = try await sendAuthorized(url: try url(path: "/api/sessions/rename"), method: "POST", body: body)
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
   }
 
@@ -220,7 +270,7 @@ public actor NativeHostClient {
     ]
     guard let wsURL = components.url else { throw HostClientError.invalidURL }
     var request = URLRequest(url: wsURL)
-    request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(webSocketBearer)", forHTTPHeaderField: "Authorization")
     return session.webSocketTask(with: request)
   }
 }

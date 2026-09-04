@@ -128,6 +128,23 @@ const migrations = [
       );
     `,
   },
+  {
+    version: 9,
+    name: 'auth_devices',
+    // One row per authorized device public key — the authorized_keys allow-list
+    // for Noise auth. pubkey is base64 of the 32-byte X25519 static key, unique.
+    up: `
+      CREATE TABLE IF NOT EXISTS auth_devices (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        pubkey TEXT NOT NULL UNIQUE,
+        fingerprint TEXT NOT NULL,
+        paired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME,
+        last_address TEXT
+      );
+    `,
+  },
 ];
 
 export function runMigrations() {
@@ -366,27 +383,6 @@ export function setSetting(key: string, value: string): void {
     INSERT INTO settings (key, value) VALUES ($key, $value)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run({ $key: key, $value: value });
-}
-
-const AUTH_HASH_KEY = 'auth_password_hash';
-export function getAuthHash(): string | null {
-  return getSetting(AUTH_HASH_KEY);
-}
-export function setAuthHash(hash: string | null): void {
-  if (hash === null) {
-    db.query('DELETE FROM settings WHERE key = $key').run({ $key: AUTH_HASH_KEY });
-    return;
-  }
-  setSetting(AUTH_HASH_KEY, hash);
-}
-
-// Atomic first-run claim: INSERT ... DO NOTHING is a single statement, so two
-// concurrent /api/setup requests can't both pass a null-check and both write.
-export function setAuthHashIfUnset(hash: string): boolean {
-  const res = db
-    .query('INSERT INTO settings (key, value) VALUES ($key, $value) ON CONFLICT(key) DO NOTHING')
-    .run({ $key: AUTH_HASH_KEY, $value: hash });
-  return res.changes === 1;
 }
 
 // Fully remove a session (row + its logs) so it disappears from the list.

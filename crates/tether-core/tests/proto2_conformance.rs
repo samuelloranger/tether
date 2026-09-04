@@ -25,7 +25,6 @@ use tether_proto::{
     ResizeFrame, TitleFrame,
 };
 
-const PASSWORD: &str = "conformance-p1";
 const SESSION_ID: &str = "proto2-conformance";
 
 struct LiveServer {
@@ -34,6 +33,9 @@ struct LiveServer {
     /// Owns the temp directory (DB + holders); removed on drop.
     tmp: TempDir,
     base: String,
+    /// Per-device bearer token (auth is token-only). Minted in `spawn`.
+    token: String,
+    server_dir: PathBuf,
 }
 
 impl LiveServer {
@@ -67,9 +69,43 @@ impl LiveServer {
             port,
             tmp,
             base,
+            token: String::new(),
+            server_dir,
         };
         server.wait_ready().await;
+        server.token = server.mint_token();
         server
+    }
+
+    /// Mints a per-device bearer via `bun run src/server/main.ts device token`
+    /// against the same DB the server runs on — the token-only replacement for
+    /// the removed `/api/setup` TOFU pairing.
+    fn mint_token(&self) -> String {
+        let db_path = self.tmp.path().join("tether.db");
+        let output = std::process::Command::new("bun")
+            .args([
+                "run",
+                "src/server/main.ts",
+                "device",
+                "token",
+                "conformance",
+            ])
+            .current_dir(&self.server_dir)
+            .env("TETHER_DB_PATH", &db_path)
+            .env("TETHER_TLS", "off")
+            .output()
+            .expect("run `device token`");
+        assert!(
+            output.status.success(),
+            "`device token` failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let token = String::from_utf8(output.stdout)
+            .expect("token utf8")
+            .trim()
+            .to_string();
+        assert!(!token.is_empty(), "`device token` printed nothing");
+        token
     }
 
     async fn wait_ready(&mut self) {
@@ -87,36 +123,15 @@ impl LiveServer {
         panic!("server never became ready on {}", self.base);
     }
 
-    fn auth_header() -> String {
-        format!("Bearer {PASSWORD}")
-    }
-
-    async fn setup(&self) {
-        let client = reqwest::Client::new();
-        let status: serde_json::Value = client
-            .get(format!("{}/api/status", self.base))
-            .send()
-            .await
-            .expect("status")
-            .json()
-            .await
-            .expect("status json");
-        assert_eq!(status["needsSetup"], true);
-
-        let res = client
-            .post(format!("{}/api/setup", self.base))
-            .json(&serde_json::json!({ "password": PASSWORD }))
-            .send()
-            .await
-            .expect("setup");
-        assert!(res.status().is_success(), "setup failed: {}", res.status());
+    fn auth_header(&self) -> String {
+        format!("Bearer {}", self.token)
     }
 
     async fn kill_session(&self) {
         let client = reqwest::Client::new();
         let _ = client
             .post(format!("{}/api/sessions/kill", self.base))
-            .bearer_auth(PASSWORD)
+            .bearer_auth(&self.token)
             .json(&serde_json::json!({ "id": SESSION_ID }))
             .send()
             .await;
@@ -207,7 +222,6 @@ fn kinds_seen(frames: &[(u8, Vec<u8>)]) -> HashSet<u8> {
 #[ignore = "spawns the real Bun server; CI runs with cargo test -- --ignored"]
 async fn proto2_frame_kinds_round_trip_against_real_server() {
     let server = LiveServer::spawn().await;
-    server.setup().await;
     // Do NOT HTTP-start the session first: activity transitions fire while the
     // holder is coming up, and with no subscriber they are lost. Letting the
     // WS hydrate path start the session means we are attached for the first
@@ -220,7 +234,7 @@ async fn proto2_frame_kinds_round_trip_against_real_server() {
     let mut request = ws_url.into_client_request().expect("ws url");
     request.headers_mut().insert(
         AUTHORIZATION,
-        HeaderValue::from_str(&LiveServer::auth_header()).expect("auth header"),
+        HeaderValue::from_str(&server.auth_header()).expect("auth header"),
     );
 
     let (socket, _) = tokio_tungstenite::connect_async(request)
@@ -297,29 +311,29 @@ async fn proto2_frame_kinds_round_trip_against_real_server() {
         .await
         .expect("send title osc");
 
-    let after_input = collect_until(&mut read, &mut decoder, Duration::from_secs(10), |f| {
-        has_kind(f, FrameKind::Title)
-    })
-    .await;
+    // The shell emits an auto-title (the cwd, e.g. "~") before our OSC lands, so
+    // wait for the specific OSC title rather than the first TITLE frame — matching
+    // on any earlier auto-title would race and read the wrong value.
+    let osc_title = |f: &[(u8, Vec<u8>)]| {
+        f.iter()
+            .filter(|(k, _)| *k == kind_u8(FrameKind::Title))
+            .filter_map(|(_, p)| TitleFrame::decode(p.as_slice()).ok())
+            .any(|t| t.title.contains("p1-conformance"))
+    };
+    let after_input =
+        collect_until(&mut read, &mut decoder, Duration::from_secs(10), osc_title).await;
 
     let mut all = initial;
     all.extend(after_input);
 
     assert!(
-        has_kind(&all, FrameKind::Title),
-        "expected TITLE from OSC; kinds={:?}",
-        kinds_seen(&all)
-    );
-    let title_payload = all
-        .iter()
-        .find(|(k, _)| *k == kind_u8(FrameKind::Title))
-        .map(|(_, p)| p.as_slice())
-        .unwrap();
-    let title = TitleFrame::decode(title_payload).expect("title protobuf");
-    assert!(
-        title.title.contains("p1-conformance"),
-        "title was {:?}",
-        title.title
+        osc_title(&all),
+        "expected the OSC TITLE 'p1-conformance'; titles={:?}",
+        all.iter()
+            .filter(|(k, _)| *k == kind_u8(FrameKind::Title))
+            .filter_map(|(_, p)| TitleFrame::decode(p.as_slice()).ok())
+            .map(|t| t.title)
+            .collect::<Vec<_>>()
     );
 
     // ACTIVITY usually flips to working on the first real output chunk.

@@ -1,14 +1,11 @@
 import { expect, test } from 'bun:test';
 import { app } from './app';
-import { deleteSession, getAuthHash, setAuthHash, upsertSession } from './db';
+import { deleteSession, upsertSession } from './db';
 import { clearActivity, recordOutput } from './sessionActivity';
-
-const PASSWORD = 'test-password';
-const AUTH = { Authorization: `Bearer ${PASSWORD}` };
+import { testAuthHeaders } from './testAuth';
 
 test('GET /api/sessions annotates rows with live activity', async () => {
-  const previousAuthHash = getAuthHash();
-  setAuthHash(await Bun.password.hash(PASSWORD, { algorithm: 'argon2id' }));
+  const AUTH = testAuthHeaders();
   upsertSession('act-busy', 'bash', 'running');
   upsertSession('act-blocked', 'bash', 'running');
   upsertSession('act-unknown', 'bash', 'running');
@@ -32,6 +29,5 @@ test('GET /api/sessions annotates rows with live activity', async () => {
       clearActivity(id);
       deleteSession(id);
     }
-    setAuthHash(previousAuthHash);
   }
 });

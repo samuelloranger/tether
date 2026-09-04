@@ -3,6 +3,10 @@
 
 mod commands;
 mod http;
+mod noise_session;
+mod noise_store;
+mod noise_token;
+mod noise_ws;
 mod state;
 mod storage;
 
@@ -98,6 +102,17 @@ fn main() {
             commands::config::core_deep_link_resolve,
             commands::config::core_notify_decide,
             commands::config::core_notify_waiting_edge,
+            commands::noise::core_noise_pair,
+            commands::noise::core_noise_device_fingerprint,
+            commands::noise::core_noise_reconnect,
+            commands::noise::core_noise_ping,
+            commands::noise::core_noise_devices_list,
+            commands::noise::core_noise_revoke,
+            commands::noise::core_noise_token,
+            commands::noise::core_noise_connect,
+            commands::noise::core_noise_send,
+            commands::noise::core_noise_close,
+            commands::hosts::core_hosts_save_noise,
         ])
         .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())

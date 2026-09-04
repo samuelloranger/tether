@@ -13,7 +13,7 @@ Downloads the latest release binary for your platform, verifies it, atomically s
 One binary is the whole CLI:
 
 ```
-tether serve | start | stop | restart | status | logs | present | set-password | update | version
+tether serve | start | stop | restart | status | logs | present | pair | devices | update | version
 ```
 
 - `serve` (or no argument) runs the daemon in the foreground; `start` runs it detached.
