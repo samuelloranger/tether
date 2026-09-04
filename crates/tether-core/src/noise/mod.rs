@@ -7,6 +7,7 @@ pub mod code;
 pub mod pairing;
 pub mod params;
 pub mod psk;
+pub mod reconnect;
 
 use thiserror::Error;
 
