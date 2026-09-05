@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import * as readline from 'node:readline/promises';
+import { pairQrPayload, renderPairQr } from './pairQr';
 
 export function groupPairCode(code: string): string {
   return `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}`;
@@ -11,6 +12,8 @@ export interface PairDeps {
   // http on `port`; main.ts overrides it when the daemon is https-only.
   baseUrl?: string;
   tokenFile: string;
+  advertiseUrl?: string | null;
+  qr?: (payload: string) => Promise<string>;
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   log?: (message: string) => void;
   readLine?: (prompt: string) => Promise<string>;
@@ -82,6 +85,16 @@ export async function runPair(deps: PairDeps): Promise<void> {
     log(`Pairing code: ${groupPairCode(code)}`);
     log('Enter this code on the device.');
     log(`Server fingerprint: ${fingerprint}`);
+
+    if (deps.advertiseUrl !== undefined) {
+      if (deps.advertiseUrl === null) {
+        console.error('No non-loopback IPv4; scan skipped — type the code.');
+      } else {
+        log(deps.advertiseUrl);
+        const qr = deps.qr ?? renderPairQr;
+        log(await qr(pairQrPayload(code, deps.advertiseUrl)));
+      }
+    }
 
     const pending = await waitForPending(deps);
     log(`Device '${pending.label}'  fp ${pending.fingerprint}`);

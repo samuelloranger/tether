@@ -274,6 +274,7 @@ switch (cmd) {
   }
   case 'pair': {
     const { runPair } = await import('./pairCli');
+    const { advertisePairUrl, firstNonLoopbackIPv4 } = await import('./pairAdvertise');
     try {
       const plan = resolveListenerPlan();
       await runPair({
@@ -283,6 +284,7 @@ switch (cmd) {
             ? `https://127.0.0.1:${plan.httpsPort}`
             : `http://127.0.0.1:${plan.httpPort}`,
         tokenFile: PRESENT_CONTROL_TOKEN_FILE,
+        advertiseUrl: advertisePairUrl({ ...plan, hosts: firstNonLoopbackIPv4() }),
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
