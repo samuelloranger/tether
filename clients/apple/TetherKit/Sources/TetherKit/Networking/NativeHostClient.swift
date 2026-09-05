@@ -127,13 +127,13 @@ public actor NativeHostClient {
     body: Data? = nil
   ) async throws -> (Data, Int) {
     try await AuthorizedHTTP.sendAuthorizedOnce(
-      bearer: { try await bearerValue() },
-      invalidate: { await invalidateBearer() },
+      bearer: { try await self.bearerValue() },
+      invalidate: { await self.invalidateBearer() },
       makeRequest: { token in
-        authorizedRequest(url: url, method: method, body: body, bearer: token)
+        self.authorizedRequest(url: url, method: method, body: body, bearer: token)
       },
       data: { request in
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await self.session.data(for: request)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
       }
     )
@@ -141,15 +141,15 @@ public actor NativeHostClient {
 
   func sendAuthorized(request template: URLRequest) async throws -> (Data, Int) {
     try await AuthorizedHTTP.sendAuthorizedOnce(
-      bearer: { try await bearerValue() },
-      invalidate: { await invalidateBearer() },
+      bearer: { try await self.bearerValue() },
+      invalidate: { await self.invalidateBearer() },
       makeRequest: { token in
         var request = template
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return request
       },
       data: { request in
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await self.session.data(for: request)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
       }
     )
@@ -162,8 +162,8 @@ public actor NativeHostClient {
   ) async throws -> (Data, Int) {
     let uploadSession = uploadSession ?? session
     return try await AuthorizedHTTP.sendAuthorizedOnce(
-      bearer: { try await bearerValue() },
-      invalidate: { await invalidateBearer() },
+      bearer: { try await self.bearerValue() },
+      invalidate: { await self.invalidateBearer() },
       makeRequest: { token in
         var request = template
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

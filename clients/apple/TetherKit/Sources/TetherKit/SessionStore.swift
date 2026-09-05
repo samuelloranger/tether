@@ -410,19 +410,18 @@ public final class SessionStore {
   }
 
   public func killSession(id: String, hostId: String? = nil) async {
-    let hostId = hostId ?? activeHostId
-    guard let hostId else { return }
+    guard let targetHostId = hostId ?? activeHostId else { return }
     do {
       if let remoteKill {
-        try await remoteKill(hostId, id)
+        try await remoteKill(targetHostId, id)
       } else {
-        guard let client = client(for: hostId) else { return }
+        guard let client = client(for: targetHostId) else { return }
         try await client.killSession(id: id)
       }
-      locallyKilled[hostId, default: []].insert(id)
-      dropSession(id: id, hostId: hostId)
-      await pipeline.forget(key: terminalKey(id, hostId: hostId))
-      if activeSessionId == id, activeHostId == hostId {
+      locallyKilled[targetHostId, default: []].insert(id)
+      dropSession(id: id, hostId: targetHostId)
+      await pipeline.forget(key: terminalKey(id, hostId: targetHostId))
+      if activeSessionId == id, activeHostId == targetHostId {
         await pipeline.release()
         activeSessionId = nil
       }
