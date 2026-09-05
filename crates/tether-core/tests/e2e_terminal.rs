@@ -16,7 +16,7 @@ use tether_core::store::ReplayStore;
 fn config(server: &Server, session_id: &str) -> SessionConfig {
     SessionConfig {
         base_ws_url: server.ws_base(),
-        password: server.token.clone(),
+        bearer: server.token.clone(),
         session_id: session_id.to_string(),
         cols: 80,
         rows: 24,

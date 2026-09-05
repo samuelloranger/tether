@@ -415,14 +415,14 @@ async fn reconnect_terminal_session(
     Ok((ws, session))
 }
 
-/// Reconnect the live pump after an unexpected socket drop, mirroring the
-/// password path's backoff loop (`core_connect`). Emits `"reconnecting"`, then
-/// retries `NoiseWs::connect` + `client_reconnect` with capped exponential
-/// backoff until it succeeds — swapping in the new socket/session and emitting
-/// `"connected"` — or the cancel flag is set (returns `false`, meaning give up
-/// and let the pump emit close). There is no max-attempt cap on purpose: a
-/// paired terminal should ride out a long server restart the way the password
-/// path does. The cancel flag is checked on both sides of each backoff sleep so
+/// Reconnect the live pump after an unexpected socket drop, using the same
+/// backoff helpers as `commands::connect` (`HEALTHY_MS`, `now_ms`, `random_unit`).
+/// Emits `"reconnecting"`, then retries `NoiseWs::connect` + `client_reconnect`
+/// with capped exponential backoff until it succeeds — swapping in the new
+/// socket/session and emitting `"connected"` — or the cancel flag is set
+/// (returns `false`, meaning give up and let the pump emit close). There is no
+/// max-attempt cap on purpose: a paired terminal should ride out a long server
+/// restart. The cancel flag is checked on both sides of each backoff sleep so
 /// `core_noise_close` stops it promptly.
 #[allow(clippy::too_many_arguments)]
 async fn reconnect(
@@ -484,13 +484,12 @@ async fn reconnect(
 /// - outgoing frontend WS-JSON on the handle's channel → translated + sealed onto
 ///   the socket (`input`/`resize`; `focus` and unknowns dropped).
 ///
-/// **Reconnect (parity with the password path `core_connect`):** an *unexpected*
-/// socket drop while the user has NOT closed the session triggers a
-/// backoff+replay reconnect — rebuild a fresh Noise session to the same
-/// `address`, re-send `start` (the server replays the whole tail, so the
-/// terminal catches up), swap the live socket/session the pump uses, and keep
+/// **Reconnect:** an *unexpected* socket drop while the user has NOT closed the
+/// session triggers a backoff+replay reconnect — rebuild a fresh Noise session
+/// to the same `address`, re-send `start` (the server replays the whole tail, so
+/// the terminal catches up), swap the live socket/session the pump uses, and keep
 /// pumping. `core-status-{conn_id}` emits `"reconnecting"` before each attempt
-/// and `"connected"` on success, mirroring the password path. A user close (the
+/// and `"connected"` on success. A user close (the
 /// cancel flag set by `core_noise_close`, which also drops the outgoing sender)
 /// and a remote `exit` both end the pump and emit `core-closed-{conn_id}`.
 ///
@@ -499,11 +498,10 @@ async fn reconnect(
 /// make the replayed tail (and every later frame) be silently discarded. Keeping
 /// it climbing lets the replayed tail apply and the terminal catch up.
 ///
-/// Retry policy mirrors `core_connect`: reconnect indefinitely with capped
-/// exponential backoff, giving up ONLY when the cancel flag is set (no max
-/// attempts) — a paired terminal should survive a long server restart the same
-/// way the password path does. The cancel flag is honored between retries so
-/// `core_noise_close` stops it promptly.
+/// Retry policy: reconnect indefinitely with capped exponential backoff, giving
+/// up ONLY when the cancel flag is set (no max attempts) — a paired terminal
+/// should survive a long server restart. The cancel flag is honored between
+/// retries so `core_noise_close` stops it promptly.
 ///
 /// TODO: server→client `title`/`activity`/`diff`/`reset` WS message types do not
 /// flow over Noise yet — only `output`/`exit` are translated.

@@ -22,5 +22,5 @@ features:
   - title: Phone and desktop
     details: The same VT emulator, tuned per device — a mobile key layer (Ctrl, Tab, arrows, voice/swipe) on iOS, and a docked session sidebar with a real physical keyboard and mouse selection on the Linux/Windows/macOS desktop app.
   - title: One binary to self-host
-    details: Install with one command, no bun or node_modules on the box. A shared password gates access; tether update swaps the binary atomically.
+    details: Install with one command, no bun or node_modules on the box. Pair each device with tether pair; tether update swaps the binary atomically.
 ---

@@ -88,7 +88,6 @@ struct RootView: View {
             await store.selectSession(hostId: hostId, sessionId: sessionId)
           }
         },
-        onReenterPassword: { _ in },
         onHostSettings: { hostId in
           settingsHostId = hostId
           showSettings = true

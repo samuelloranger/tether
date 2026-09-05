@@ -92,7 +92,7 @@ if [ -f "$PID_FILE" ]; then
     kill "$oldpid" 2>/dev/null || true
     # SIGTERM returns immediately; wait for the process to actually exit so it has
     # released the SQLite DB before the first-run migration copies it (else the
-    # copy can be torn / lose the password or sessions). Escalate after ~5s.
+    # copy can be torn / lose sessions). Escalate after ~5s.
     i=0
     while kill -0 "$oldpid" 2>/dev/null; do
       i=$((i + 1))

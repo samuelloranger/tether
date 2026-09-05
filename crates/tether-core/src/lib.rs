@@ -4,7 +4,6 @@
 //! UniFFI by the iOS app. Deliberately free of any Tauri or platform
 //! dependency.
 
-pub mod connection_test;
 pub mod deep_link;
 pub mod diff_model;
 pub mod file_tree;

@@ -35,7 +35,6 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::connect::core_connect,
             commands::connect::core_send,
             commands::connect::core_close,
             commands::connect::core_forget,

@@ -266,7 +266,7 @@ public enum WorkspaceLoadError: LocalizedError {
   public var errorDescription: String? {
     switch self {
     case .noSession: "Open a terminal to open a file."
-    case .noCredentials: "This server needs its password again."
+    case .noCredentials: "This host needs pairing again."
     }
   }
 }

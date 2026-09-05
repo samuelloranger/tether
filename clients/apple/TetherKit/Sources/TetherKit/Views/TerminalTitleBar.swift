@@ -189,7 +189,7 @@ private struct ConnectionBadge: View {
     case .online: "Connected"
     case .connecting: "Connecting"
     case .offline: "Offline"
-    case .authFailed: "Password rejected"
+    case .authFailed: "Access rejected"
     }
   }
 

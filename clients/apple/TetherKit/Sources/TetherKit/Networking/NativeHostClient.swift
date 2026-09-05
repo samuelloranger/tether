@@ -27,15 +27,8 @@ public struct RemoteSession: Identifiable, Equatable, Sendable, Codable {
 }
 
 public struct ServerStatus: Decodable, Sendable {
-  public var needsSetup: Bool
   public var secure: Bool?
   public var tls: TLSInfo?
-
-  enum CodingKeys: String, CodingKey {
-    case needsSetup = "needsSetup"
-    case secure
-    case tls
-  }
 
   public struct TLSInfo: Decodable, Sendable {
     public var fingerprint: String?
@@ -209,29 +202,6 @@ public actor NativeHostClient {
     let body = try JSONSerialization.data(withJSONObject: ["id": id, "name": name])
     let (_, status) = try await sendAuthorized(url: try url(path: "/api/sessions/rename"), method: "POST", body: body)
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
-  }
-
-  public func openWebSocket(
-    sessionId: String,
-    sinceId: UInt64,
-    cols: UInt16,
-    rows: UInt16
-  ) async throws -> URLSessionWebSocketTask {
-    guard var components = profile.baseWSURL.flatMap({
-      URLComponents(url: $0.appendingPathComponent("/api/ws"), resolvingAgainstBaseURL: false)
-    }) else {
-      throw HostClientError.invalidURL
-    }
-    components.queryItems = [
-      URLQueryItem(name: "sessionId", value: sessionId),
-      URLQueryItem(name: "sinceId", value: String(sinceId)),
-      URLQueryItem(name: "cols", value: String(cols)),
-      URLQueryItem(name: "rows", value: String(rows)),
-    ]
-    guard let wsURL = components.url else { throw HostClientError.invalidURL }
-    var request = URLRequest(url: wsURL)
-    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
-    return session.webSocketTask(with: request)
   }
 }
 

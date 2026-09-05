@@ -62,7 +62,7 @@ async fn spawn_server(
 fn config(base: &str, session_id: &str) -> SessionConfig {
     SessionConfig {
         base_ws_url: base.to_string(),
-        password: "pw".to_string(),
+        bearer: "pw".to_string(),
         session_id: session_id.to_string(),
         cols: 80,
         rows: 24,

@@ -155,11 +155,11 @@ function Install-Tether {
   }
 
   Write-Host ''
-  Write-Host 'Next:  tether set-password'
-  Write-Host '       tether start'
+  Write-Host 'Next:  tether start'
+  Write-Host '       tether pair'
   Write-Host ''
   Write-Host 'On first start Windows Defender Firewall asks whether to allow tether on the network. Allow it for the networks you connect from, or nothing but this machine can reach the server.'
-  Write-Host 'SECURITY: a password gates access. TLS is served on :8443 (self-signed, pinned by the client) alongside plaintext :8085 for older clients - still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only.'
+  Write-Host 'SECURITY: access is per-device Noise pairing (`tether pair`). TLS is served on :8443 (self-signed, pinned by the client) alongside plaintext :8085 for older clients - still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only.'
 }
 
 Install-Tether

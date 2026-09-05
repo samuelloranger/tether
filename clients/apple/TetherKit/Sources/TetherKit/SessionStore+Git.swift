@@ -175,7 +175,7 @@ public enum GitLoadError: LocalizedError {
   public var errorDescription: String? {
     switch self {
     case .noSession: "Open a terminal to see its changes."
-    case .noCredentials: "This server needs its password again."
+    case .noCredentials: "This host needs pairing again."
     }
   }
 }

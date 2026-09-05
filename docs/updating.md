@@ -22,7 +22,7 @@ tether serve | start | stop | restart | status | logs | present | pair | devices
 
 ## Data & environment
 
-- Database (sessions + password) lives in `~/.tether/config/tether.db`.
+- Database (sessions) lives in `~/.tether/config/tether.db`.
 - Environment: `TETHER_PORT` (default `8085`), `TETHER_TLS` (`both` | `only` | `off`) and `TETHER_TLS_PORT` (default `8443`) — see [Security & networking](/security#transport-encryption), `TETHER_DB_PATH` (override the DB path), `TETHER_REPO_SLUG` (update source, default `samuelloranger/tether`).
 
 The desktop and iOS clients update through their own channels, not this command — see [Desktop app](/desktop#updating) for the desktop updater.

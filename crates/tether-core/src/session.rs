@@ -13,7 +13,7 @@ use crate::store::ReplayStore;
 pub struct SessionConfig {
     /// Origin only, e.g. `ws://host:8085` — no path, no query.
     pub base_ws_url: String,
-    pub password: String,
+    pub bearer: String,
     pub session_id: String,
     pub cols: u16,
     pub rows: u16,
@@ -113,7 +113,7 @@ pub async fn open_session(
         .map_err(|e| SessionError::Url(e.to_string()))?;
     request.headers_mut().insert(
         "Authorization",
-        format!("Bearer {}", cfg.password)
+        format!("Bearer {}", cfg.bearer)
             .parse()
             .map_err(|_| SessionError::AuthHeader)?,
     );
@@ -179,7 +179,7 @@ mod tests {
     fn builds_the_v1_ws_url_with_the_stored_cursor() {
         let cfg = SessionConfig {
             base_ws_url: "ws://10.0.0.5:8085".to_string(),
-            password: "secret".to_string(),
+            bearer: "secret".to_string(),
             session_id: "build".to_string(),
             cols: 120,
             rows: 40,
@@ -196,7 +196,7 @@ mod tests {
     fn percent_encodes_the_session_id() {
         let cfg = SessionConfig {
             base_ws_url: "ws://h:1".to_string(),
-            password: String::new(),
+            bearer: String::new(),
             session_id: "a b&cols=1".to_string(),
             cols: 80,
             rows: 24,

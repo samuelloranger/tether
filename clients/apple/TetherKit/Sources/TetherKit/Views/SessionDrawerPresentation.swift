@@ -9,7 +9,6 @@ public struct SessionDrawerOverlay: View {
   @Binding public var isPresented: Bool
   public var store: SessionStore
   public var onSelectSession: (String, String) -> Void
-  public var onReenterPassword: (String) -> Void
   public var onHostSettings: (String) -> Void
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -18,13 +17,11 @@ public struct SessionDrawerOverlay: View {
     isPresented: Binding<Bool>,
     store: SessionStore,
     onSelectSession: @escaping (String, String) -> Void,
-    onReenterPassword: @escaping (String) -> Void,
     onHostSettings: @escaping (String) -> Void
   ) {
     _isPresented = isPresented
     self.store = store
     self.onSelectSession = onSelectSession
-    self.onReenterPassword = onReenterPassword
     self.onHostSettings = onHostSettings
   }
 
@@ -41,10 +38,6 @@ public struct SessionDrawerOverlay: View {
           onSelectSession: { hostId, sessionId in
             onSelectSession(hostId, sessionId)
             dismiss()
-          },
-          onReenterPassword: { hostId in
-            dismiss()
-            onReenterPassword(hostId)
           },
           onHostSettings: { hostId in
             dismiss()
