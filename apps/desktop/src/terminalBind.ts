@@ -131,10 +131,8 @@ function openSocket(
       return;
     }
     state.socket = s;
-    // Fit often ran while `state.socket` was still null, so those observer
-    // resizes were dropped. Re-fit now and send resize+focus so a TUI
-    // (cursor-agent) gets SIGWINCH / DECSET 1004 instead of staying at the
-    // 80×24 `start` geometry.
+    // Fit often ran while `state.socket` was null, dropping those resizes; re-fit
+    // and send resize+focus so a TUI gets SIGWINCH instead of the 80×24 `start` geometry.
     input.fit.fit();
     const [resize, focus] = socketOpenFrames(input.fit.proposeDimensions(), input.isInteractive());
     sendJson(s, resize);

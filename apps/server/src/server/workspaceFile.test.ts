@@ -101,7 +101,6 @@ test('rejects traversal, absolute paths, directories, binary, oversized, and esc
   });
 });
 
-// ---------------------------------------------------------------------------
 // Path containment.
 //
 // The comparison these tests pin used to be a plain `===`/`startsWith` pair
@@ -110,7 +109,6 @@ test('rejects traversal, absolute paths, directories, binary, oversized, and esc
 // letter case nor 8.3 short names (only `realpathSync.native` does), so one
 // directory reached by two spellings compared unequal and a legitimate read was
 // refused.
-// ---------------------------------------------------------------------------
 
 const IS_WINDOWS = process.platform === 'win32';
 

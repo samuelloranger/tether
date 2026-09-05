@@ -80,9 +80,7 @@ export function usePresentations({
           if (activePresentationId === id) setActivePresentationId(null);
           await refreshPresentations();
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     },
     [hostId, activePresentationId, refreshPresentations],
   );

@@ -12,9 +12,8 @@ import { handlePairingConnection } from '../pairControl';
 
 export const noiseRoutes = new Hono();
 
-// Public (pre-auth-reachable) endpoints: bound how many Noise sockets can be
-// mid-flight at once, and kill an upgrade whose handshake stalls, so idle/hostile
-// connections can't pin file descriptors + native handshake handles.
+// Public (pre-auth-reachable): bound in-flight Noise sockets and kill stalled
+// handshakes so idle/hostile connections can't pin fds + native handles.
 const MAX_NOISE_CONNECTIONS = 64;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 let activeNoiseConnections = 0;
@@ -32,36 +31,25 @@ function withHandshakeTimeout<T>(p: Promise<T>, onTimeout: () => void): Promise<
 }
 
 /**
- * The Noise WebSocket front door. These two routes are the ONLY `/api/*`
- * endpoints that bypass bearer-token auth (they are listed in `PUBLIC_API_PATHS`):
- * the Noise handshake — pairing PSK, then a pinned static key on reconnect — IS
- * their authentication.
- *
- * Both routes are pure byte pipes: `onMessage` feeds the raw binary frame into a
- * `WsFrameIO`, the handshake/session logic pulls frames with `io.recv()` and
- * writes with `io.send()`, and `onClose` fails any pending `recv` so the driver
- * unwinds.
+ * The Noise WebSocket front door: the ONLY /api/* routes that bypass bearer auth
+ * (in PUBLIC_API_PATHS) — the Noise handshake IS their authentication.
  */
 
-// hono/bun hands WS frames to onMessage as a MessageEvent-like { data }. Binary
-// arrives as an ArrayBuffer (or, in some builds, a typed-array view); a text
-// frame is a protocol error for the binary Noise stream and is ignored.
+// Binary WS frames arrive as ArrayBuffer (or a typed-array view in some builds);
+// a text frame is a protocol error for the binary Noise stream and is ignored.
 function pushFrame(io: WsFrameIO, data: unknown): void {
   const bytes = toFrameBytes(data);
   if (bytes) io.push(bytes);
 }
 
-// The WSContext.send accepts a plain Uint8Array; wrap it as the minimal sink the
-// adapter needs. The cast bridges WSContext's `Uint8Array<ArrayBuffer>` param to
-// the adapter's plain `Uint8Array` — seal() output is always ArrayBuffer-backed.
+// Wrap WSContext.send as the sink the adapter needs; the cast bridges its
+// Uint8Array<ArrayBuffer> param to the plain Uint8Array — seal() is always that.
 function sink(ws: { send: (data: Uint8Array<ArrayBuffer>) => void }): WsSender {
   return { send: (data) => ws.send(data as Uint8Array<ArrayBuffer>) };
 }
 
-// GET /api/noise/pair — run the XXpsk2 pairing handshake + host confirm + enroll
-// against the current enrollment window. There is no established channel for the
-// client to read a sealed reply from, so the outcome is a small PLAINTEXT JSON
-// frame ({ ok:true } / { ok:false, error }) followed by a socket close.
+// GET /api/noise/pair — XXpsk2 pairing + host confirm + enroll. No established
+// channel exists yet, so the outcome is a small PLAINTEXT JSON frame, then close.
 noiseRoutes.get(
   '/api/noise/pair',
   upgradeWebSocket(() => {
@@ -77,10 +65,8 @@ noiseRoutes.get(
         activeNoiseConnections += 1;
         const adapter = new WsFrameIO(sink(ws));
         io = adapter;
-        // No outer timeout here: pairing includes a human host-confirm step, so
-        // `acceptPairing` bounds the crypto handshake and the confirm separately
-        // (a short handshake window, a generous confirm window). An outer
-        // handshake timeout would tear down the socket mid-approval.
+        // No outer timeout: pairing includes a human confirm step, so acceptPairing
+        // bounds handshake and confirm separately; an outer one tears down mid-approval.
         handlePairingConnection(adapter)
           .then((res) => {
             logInfo(`Noise pairing enrolled device ${res.pubkey}`);
@@ -112,9 +98,8 @@ noiseRoutes.get(
   }),
 );
 
-// GET /api/noise/session — accept a device's IK reconnect, authorize it against
-// the device registry (an unknown/revoked key is refused before any transport),
-// then run the sealed terminal session protocol over the established channel.
+// GET /api/noise/session — accept a device's IK reconnect, authorize its key
+// against the registry (unknown/revoked refused pre-transport), then run sealed.
 noiseRoutes.get(
   '/api/noise/session',
   upgradeWebSocket(() => {
@@ -159,9 +144,8 @@ noiseRoutes.get(
             }
           })
           .catch((err) => {
-            // Fail closed: an unknown/revoked key never entered transport mode.
-            // Close without a body (1008 Policy Violation) so nothing leaks
-            // whether the key is unknown vs. the handshake simply failed.
+            // Fail closed: close without a body (1008) so nothing leaks whether
+            // the key is unknown vs. the handshake simply failed.
             if (!(err instanceof ChannelError)) {
               logError('Noise session setup failed:', err);
             }

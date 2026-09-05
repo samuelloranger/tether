@@ -9,9 +9,8 @@ export interface ApnsKey {
 const b64url = (input: Buffer | string): string =>
   (typeof input === 'string' ? Buffer.from(input) : input).toString('base64url');
 
-// APNs rejects tokens older than 1 hour and throttles clients that mint a fresh
-// one per push, so the signature is cached and reused. 50 minutes leaves margin
-// for clock skew against Apple's edge.
+// APNs rejects tokens older than 1 hour and throttles per-push minting, so the
+// signature is cached; 50 minutes leaves margin for clock skew against Apple's edge.
 const TOKEN_TTL_SECONDS = 50 * 60;
 
 export function signApnsJwt(key: ApnsKey, nowSeconds: number): string {

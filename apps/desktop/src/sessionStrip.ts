@@ -1,11 +1,6 @@
 /**
- * The screen's status line.
- *
- * Deliberately narrow: the Rust core forwards seven session fields
- * (`SessionRow` in `terminal_session_logic.rs`) and none of them is a live cwd,
- * a shell name, or terminal geometry. Rather than show a plausible-looking
- * value it cannot source, this strip reports only what actually arrives — the
- * PTY key, when output last landed, and the inferred state.
+ * The status line, deliberately narrow: the core forwards no live cwd, shell name,
+ * or geometry, so this reports only what arrives — PTY key, last output, inferred state.
  */
 
 /** Compact age of a timestamp, e.g. `4s`, `12m`, `3h`, `2d`. */

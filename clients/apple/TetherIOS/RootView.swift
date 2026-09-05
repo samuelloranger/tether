@@ -26,18 +26,13 @@ struct RootView: View {
   var body: some View {
 
     ZStack {
-      // The backdrop, as the ZStack's FIRST child rather than a .background()
-      // modifier. As a modifier it did not reach the home-indicator strip even
-      // with ignoresSafeArea, so the window's own darker fill showed through
-      // there and read as a band under the key bar. Measured: (11,11,18) under
-      // the scrim instead of (20,20,30).
+      // Backdrop as the ZStack's FIRST child, not a .background(): as a modifier
+      // it left the home-indicator strip showing the window's darker fill.
       TetherColors.terminalBackground
         .ignoresSafeArea()
 
-      // Atmospheric bloom — the active session's heat colour, soft and inset so
-      // it belongs to the screen rather than washing the whole chrome. The
-      // crossfade between heats, and the single swell on entering `waiting`,
-      // live in the layer itself.
+      // Inset so the bloom belongs to the screen; crossfade + waiting-swell live
+      // in the layer itself.
       LitBloomLayer(chrome: litChrome)
 
       VStack(spacing: 0) {
@@ -60,11 +55,8 @@ struct RootView: View {
           store: store,
           preferences: preferences,
           onAddHost: { showPairing = true },
-          // Anything that covers the terminal has to take the key bar with it.
-          // The bar is an inputAccessoryView, so it lives in the keyboard
-          // window ABOVE the app: an in-app overlay cannot hide it, and it sat
-          // over the presentation, file viewer, and the viewer's loading/error
-          // states, clipping their last lines.
+          // The key bar is an inputAccessoryView in the keyboard window ABOVE the
+          // app; an in-app overlay can't hide it, so covering views must take it.
           overlayPresented: drawerOpen
             || workspace.activePresentation != nil
             || workspace.fileView != nil
@@ -96,24 +88,13 @@ struct RootView: View {
       #endif
 
     }
-    // The terminal is the app's main surface, so the window behind it carries the
-    // terminal's colour. Anything the terminal does not cover — the home
-    // indicator strip below the key bar — then matches instead of showing as a
-    // darker band.
-    // The terminal measures the keyboard itself and applies its own bottom
-    // inset. This has to sit at the ROOT: applied further in, the parent still
-    // got SwiftUI's automatic avoidance and the two insets stacked, collapsing
-    // the terminal to a strip at the top.
+    // The terminal applies its own keyboard inset; this must sit at the ROOT or
+    // SwiftUI's automatic avoidance stacks a second inset, collapsing it to a strip.
     .ignoresSafeArea(.keyboard, edges: .bottom)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .environment(\.litChrome, litChrome)
-    // Chained on the ZStack, not hung off zero-size sibling hosts. The hosts
-    // were an attempt at the dead … button — SwiftUI keeps one presentation slot
-    // per view, so I suspected the sixth modifier was losing it — and they did
-    // not fix it; replacing the confirmationDialog with a Menu did. They cost
-    // all 21 of the app's AttributeGraph dependency cycles, measured by removing
-    // them (21 → 0), so with five presentations left and each verified to open,
-    // they are gone.
+    // Chained on the ZStack, not on zero-size sibling hosts: the hosts cost all
+    // 21 AttributeGraph dependency cycles (21 → 0 when removed) and fixed nothing.
     .sheet(isPresented: $showSettings, onDismiss: { settingsHostId = nil }) {
       ConfigSettingsView(
         store: store,
@@ -164,11 +145,8 @@ struct RootView: View {
     }
   }
 
-  /// The … menu's items.
-  ///
-  /// Same actions the confirmation dialog carried, minus the dialog: a Menu
-  /// builds these itself when tapped, so there is no flag to set and nothing
-  /// that can fail to present.
+  // A Menu builds these when tapped, so there's no flag to set and nothing that
+  // can fail to present — unlike the confirmationDialog this replaced.
   @ViewBuilder
   private var overflowItems: some View {
     if store.activeSessionId != nil {
@@ -203,8 +181,7 @@ struct RootView: View {
       }
       Divider()
     }
-    // Always present, so the menu is never empty — an empty Menu renders as a
-    // disabled control, which would read as the same dead button this replaced.
+    // Always present: an empty Menu renders as a disabled (dead-looking) control.
     Button {
       Task { await store.newTerminal() }
     } label: {
@@ -213,18 +190,15 @@ struct RootView: View {
   }
 
   private func openDrawer() {
-    // Opens NOW, refreshes underneath. Waiting on `refreshDrawer()` first meant
-    // the panel stayed shut for as long as the slowest host took to answer, and
-    // every impatient tap queued another completion that set `drawerOpen = true`
-    // — so one of them re-opened the drawer after the user had closed it.
+    // Open NOW, refresh underneath: waiting on the refresh let a queued tap
+    // re-open the drawer after the user had closed it.
     drawerOpen = true
     store.refreshDrawerInBackground()
   }
 }
 
-/// `sheet(item:)` requires Identifiable and String is not, so the host id is
-/// wrapped rather than reaching for a bare `isPresented` flag plus a separate
-/// optional — which is the version that goes stale.
+// `sheet(item:)` requires Identifiable and String is not; the flag-plus-optional
+// alternative goes stale.
 extension String: @retroactive Identifiable {
   public var id: String { self }
 }

@@ -49,9 +49,8 @@ export function useTetherDesktop() {
   const [sessions, setSessions] = useState<DrawerSession[]>([]);
   const [healthByHost, setHealthByHost] = useState<Record<string, HostHealthStatus>>({});
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
-  // '' means "no terminal open". It used to default to 'term-1', which the WS
-  // open path turns into `startSession` — so a launch with nothing remembered
-  // spawned a shell nobody asked for.
+  // '' means "no terminal open". A default of 'term-1' would hit the WS open path's
+  // `startSession`, spawning a shell nobody asked for on a launch with nothing remembered.
   const [activeSessionId, setActiveSessionId] = useState('');
   const [screen, setScreen] = useState<Screen>('main');
   const [gitOpen, setGitOpen] = useState(false);
@@ -69,13 +68,8 @@ export function useTetherDesktop() {
   activeSessionIdRef.current = activeSessionId;
 
   /**
-   * Open the terminal the user was last in on this host — but only if it is
-   * still running.
-   *
-   * The list is fetched rather than read off the poll because the poll may not
-   * have reached this host yet, and opening a socket for a stopped id calls
-   * `startSession` server-side, resurrecting a shell the user killed. A choice
-   * made while the fetch is in flight wins over the restore.
+   * Open the last terminal on this host, only if still running. The list is fetched
+   * (the poll may lag), since opening a socket for a stopped id resurrects a killed shell.
    */
   const restoreSession = useCallback(async (hostId: string) => {
     const remembered = localStorage.getItem(activeSessionStorageKey(hostId));
@@ -132,9 +126,8 @@ export function useTetherDesktop() {
     void corePollingSetActive(activeHostId);
   }, [ready, activeHostId]);
 
-  // Health: probe reachability over Noise (a reconnect handshake). A success
-  // means up + still authorized; a failure (host down, or this device revoked)
-  // shows unreachable.
+  // Health: probe reachability over Noise. Success = up + authorized; a failure
+  // (host down, or this device revoked) shows unreachable.
   useEffect(() => {
     if (!ready) return undefined;
     let cancelled = false;
@@ -189,13 +182,8 @@ export function useTetherDesktop() {
   }, []);
 
   /**
-   * Start a terminal on one named host.
-   *
-   * The id is allocated against that host's own list, fetched fresh: a host the
-   * drawer has never polled has no rows here, so the next id would come out
-   * `term-1` — and `/api/sessions/start` answers a known id with the EXISTING
-   * session, so the button would silently attach to a running shell instead of
-   * opening a new one. The poll's copy is the fallback when the fetch fails.
+   * Start a terminal on one host. The id is allocated against that host's freshly-fetched
+   * list: `/api/sessions/start` answers a known id with the EXISTING session, not a new one.
    */
   const newSession = useCallback(
     async (hostId: string): Promise<string | null> => {
@@ -212,9 +200,8 @@ export function useTetherDesktop() {
       if (activeHostIdRef.current !== from.host || activeSessionIdRef.current !== from.session) {
         return null;
       }
-      // Show the tab immediately — the drawer/tab strip render off `sessions`,
-      // which otherwise only refreshes on the next poll, so the new terminal
-      // opened in its pane before its own tab appeared. The poll reconciles.
+      // Show the tab immediately — drawer/tab strip render off `sessions`, which
+      // otherwise refreshes only on the next poll. The poll reconciles.
       setSessions((previous) =>
         previous.some((row) => row.hostId === hostId && row.id === nextId)
           ? previous
@@ -273,12 +260,8 @@ export function useTetherDesktop() {
   }, []);
 
   /**
-   * Pair a new host over Noise, then persist it.
-   *
-   * The profile is created FIRST so the pinned device + server keys land under
-   * its real id — reconnect (`coreNoiseReconnect`) namespaces its keys by the
-   * host profile id, so pairing under any other id would strand them. If pairing
-   * itself fails after the profile exists, the orphan profile is removed.
+   * Pair a new host over Noise, then persist it. The profile is created FIRST so pinned
+   * keys land under its real id (reconnect namespaces by profile id); orphan removed on failure.
    */
   const pairHost = useCallback(
     async (
@@ -299,9 +282,8 @@ export function useTetherDesktop() {
       });
       recordHostScheme(profile.id, input.scheme);
       try {
-        // Surface THIS device's fingerprint before the pair call blocks on the
-        // host's confirm, so the pairing screen can show it to read aloud
-        // (parity with iOS). The device key is keyed by the profile id.
+        // Surface THIS device's fingerprint before the pair call blocks on confirm,
+        // so the pairing screen can show it to read aloud (parity with iOS).
         const deviceFingerprint = await coreNoiseDeviceFingerprint(profile.id);
         onProgress?.({ deviceFingerprint });
         const fingerprint = await coreNoisePair({

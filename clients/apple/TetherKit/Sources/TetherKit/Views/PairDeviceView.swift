@@ -8,16 +8,8 @@ import UIKit
 import VisionKit
 #endif
 
-/// Pair a device against a tether host over the Noise XXpsk2 handshake.
-///
-/// Three visual states in one flow, all Aurora-tokened:
-///   1. `enterCode`  — the segmented 12-char code field + host address + Scan QR.
-///   2. `scanning`   — VisionKit `DataScannerViewController` reading the code.
-///   3. `pairing` / `success` / `failure` — the handshake against the server.
-///
-/// This sits on top of the proven `NoiseSessionClient.pair(hostId:url:code:)`:
-/// it pins the server's static key out of the handshake, the host confirms out
-/// of band, and the pinned key comes back for the confirmation screen.
+/// Pair a device against a tether host over the Noise XXpsk2 handshake. One flow,
+/// phases enterCode → scanning → pairing/success/failure over `NoiseSessionClient.pair`.
 public struct PairDeviceView: View {
   public enum Phase: Equatable {
     case enterCode
@@ -29,10 +21,8 @@ public struct PairDeviceView: View {
 
   private let client: NoiseSessionClient
   private let hostId: String
-  /// Called on success with everything the caller needs to persist a Noise
-  /// HostProfile: the pairing id the keys are stored under, the host + port the
-  /// user paired against (split out of the typed address), and the pinned server
-  /// public key.
+  /// Success callback: the pairing id the keys are stored under, the host + port
+  /// (split from the typed address), and the pinned server public key.
   private let onPaired: (
     _ hostId: String,
     _ host: String,
@@ -45,20 +35,12 @@ public struct PairDeviceView: View {
   @State private var phase: Phase = .enterCode
   @State private var errorMessage: String?
   @State private var pinnedKey: Data?
-  /// This device's own full fingerprint, derived from the stored device key once
-  /// pairing starts. Nil until the key exists (a brand-new host creates it at the
-  /// start of `pair()`), so the waiting screen polls briefly for it.
+  /// This device's fingerprint, derived from the stored key once pairing starts.
+  /// Nil until `pair()` creates the key, so the waiting screen polls briefly for it.
   @State private var deviceFingerprint: String?
 
-  /// - Parameters:
-  ///   - client: the transport engine. Injectable so a fake can drive previews;
-  ///     the default owns the real Keychain key store.
-  ///   - hostId: the id the device key + pinned server key are stored under. For
-  ///     a brand-new host this is a fresh UUID; to add this device to an existing
-  ///     host, pass that host's id.
-  ///   - initialHost: pre-filled server address (reuse the host you are adding to).
-  ///   - onPaired: called on success with the pairing id, the paired host + port,
-  ///     and the pinned 32-byte server public key.
+  /// - Parameter hostId: id the device + pinned server keys are stored under —
+  ///   a fresh UUID for a new host, or an existing host's id to add this device.
   public init(
     client: NoiseSessionClient = NoiseSessionClient(),
     hostId: String,
@@ -78,16 +60,8 @@ public struct PairDeviceView: View {
   }
 
   #if DEBUG
-  /// Snapshot-only seam. Forces a specific `Phase` (plus optional pre-filled
-  /// code/host, a pinned server key, and an error message) so each visual state
-  /// renders in a static host snapshot without a live server. This does NOT
-  /// change the production initializer above or the real pairing flow — it only
-  /// seeds the same `@State` the flow would reach. Snapshot tests only.
-  ///
-  /// The device fingerprint shown on the `.pairing` screen is derived here, up
-  /// front, straight from `client.deviceFingerprintFull(hostId:)` — so injecting
-  /// a client whose key store already holds a device key yields the REAL derived
-  /// fingerprint rather than the "deriving…" placeholder.
+  /// Snapshot-only seam: forces a `Phase` and seeds the same `@State` the flow would
+  /// reach, without a live server. Derives the real fingerprint from the injected client.
   init(
     snapshotClient client: NoiseSessionClient,
     hostId: String,
@@ -229,9 +203,8 @@ public struct PairDeviceView: View {
     }
   }
 
-  /// Derive this device's own fingerprint from its stored key. A brand-new host
-  /// creates that key at the start of `pair()`, which may land a beat after the
-  /// waiting screen appears, so poll briefly rather than showing "unavailable".
+  /// `pair()` may create the device key a beat after this screen appears, so poll
+  /// briefly for the fingerprint instead of showing "unavailable".
   private func loadDeviceFingerprint() async {
     for _ in 0 ..< 40 {
       if let fp = try? client.deviceFingerprintFull(hostId: hostId) {
@@ -324,9 +297,8 @@ public struct PairDeviceView: View {
     }
   }
 
-  /// Turn a user-typed address into a base URL. Port implies scheme when none is
-  /// given (`:8085` → http, `:8443`/`:443` → https); a bare host defaults to
-  /// `http://host:8085`. An explicit scheme is kept as typed.
+  /// User-typed address → base URL. Port implies scheme (`:8443`/`:443` → https,
+  /// else http); a bare host defaults to `http://host:8085`. Explicit scheme kept.
   static func serverURL(from raw: String) -> URL? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
@@ -352,11 +324,8 @@ public struct PairDeviceView: View {
     return URL(string: "\(scheme)://\(host):\(finalPort)")
   }
 
-  /// Split the typed address into `(host, port)` for persisting a HostProfile —
-  /// derived from the SAME URL `serverURL` builds, so the stored host matches the
-  /// endpoint that was actually paired. A missing port defaults from the REST
-  /// scheme (`https`/`wss` → 443, `http`/`ws` → 8085). Returns `nil` only when
-  /// no host can be parsed.
+  /// Split the address into `(host, port)` from the SAME URL `serverURL` builds, so
+  /// the stored host matches what was paired. Missing port defaults by scheme.
   static func hostAndPort(from raw: String) -> (host: String, port: String)? {
     guard
       let url = serverURL(from: raw),
@@ -400,12 +369,8 @@ public struct PairDeviceView: View {
 
 // MARK: - Segmented code field
 
-/// A 12-cell code field grouped 4·4·4. A single transparent `TextField` captures
-/// input (so system paste and auto-uppercase Just Work); the visible cells are a
-/// non-interactive overlay driven off the sanitized text. `PairingCode.sanitize`
-/// folds case, dashes, and the ambiguous glyphs and caps at 12, so paste of a
-/// whole `7QF4-KM9P-X3TV` lands correctly and out-of-alphabet keystrokes are
-/// dropped. The next empty cell carries the accent to show where input goes.
+/// 12-cell code field: one transparent `TextField` captures input (paste + auto-uppercase),
+/// the visible cells are a non-interactive overlay off `PairingCode.sanitize`d text.
 private struct CodeEntryField: View {
   @Binding var text: String
   @FocusState private var focused: Bool
@@ -480,9 +445,8 @@ private struct CodeEntryField: View {
 // MARK: - QR scanner (iOS 16+ VisionKit)
 
 #if os(iOS)
-/// `DataScannerViewController` wrapped for SwiftUI. Reports the first QR payload
-/// it reads, once, through `onCode`. Availability is gated by `isAvailable` so
-/// the Scan button degrades gracefully where the camera is missing or denied.
+/// `DataScannerViewController` wrapped for SwiftUI; reports the first QR payload once
+/// via `onCode`. `isAvailable` gates the Scan button (camera missing or denied).
 struct DataScannerView: UIViewControllerRepresentable {
   let onCode: (String) -> Void
 

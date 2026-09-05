@@ -25,10 +25,8 @@ export async function confirmDiscardSettings(dirty: boolean): Promise<boolean> {
   });
 }
 
-/**
- * Save server settings. Identity rename is applied ONLY when the patch
- * contains an `identity` key — matching the iOS fix in 46c1c78.
- */
+/** Save server settings. Identity rename applies ONLY when the patch has an
+ *  `identity` key — matching the iOS fix in 46c1c78. */
 export async function saveServerDraft(opts: {
   hostId: string;
   config: ServerConfig;

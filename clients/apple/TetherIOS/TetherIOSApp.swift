@@ -18,9 +18,8 @@ struct TetherIOSApp: App {
   var body: some Scene {
     WindowGroup {
       RootView(store: store, preferences: preferences)
-        // One accent for the whole app. Settings and pairing are SwiftUI Forms,
-        // so without this they render with the system blue while every terminal
-        // surface uses TetherColors.accent — two identities in one product.
+        // Without this, the SwiftUI Forms (settings, pairing) render system blue
+        // while terminal surfaces use TetherColors.accent — two identities.
         .tint(TetherColors.accent)
         .onOpenURL { url in
           store.handleDeepLink(url)

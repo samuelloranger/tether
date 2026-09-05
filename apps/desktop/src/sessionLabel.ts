@@ -20,13 +20,8 @@ export function sessionLabel(s: Labelled): string {
 }
 
 /**
- * Labels for one host's sessions, with collisions broken.
- *
- * `auto_title` falls back to the working directory's name, so every session
- * started in the same repo shows the same word and the drawer becomes a list of
- * identical rows with no way to tell them apart. Only colliding labels get the
- * session id appended — a label that is already unique is left exactly as it is,
- * including one the user typed.
+ * Labels for one host's sessions, collisions broken. `auto_title` falls back to the
+ * dir name, so same-repo sessions collide; only colliding labels get the id appended.
  */
 export function sessionLabels(sessions: Labelled[]): Map<string, string> {
   const seen = new Map<string, number>();
@@ -42,13 +37,8 @@ export function sessionLabels(sessions: Labelled[]): Map<string, string> {
   return labels;
 }
 
-/**
- * Labels for a flat tab strip spanning every host.
- *
- * Within one host, colliding titles still get the session id (same as the
- * drawer). If that result then collides across hosts — two servers both
- * running a session called "tether" — the host name is appended.
- */
+/** Labels for a flat tab strip across hosts: per-host collisions get the id (like the
+ *  drawer); if the result still collides across hosts, the host name is appended. */
 export function tabLabels(sessions: TabSession[], hosts: HostNamed[]): Map<string, string> {
   const nameByHost = new Map(hosts.map((host) => [host.id, host.name]));
   const byHost = new Map<string, Labelled[]>();

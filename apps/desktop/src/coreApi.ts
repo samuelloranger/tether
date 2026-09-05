@@ -4,9 +4,8 @@ import { normalizeInvokeError } from './invokeError';
 import type { ServerConfig, ServerConfigPatch } from './serverSettingsModel';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 
-/// Every core command goes through here so a failure arrives as an Error with
-/// the Rust message intact. Tauri rejects with a bare string, which the UI's
-/// `err instanceof Error` checks silently discarded.
+/// Every core command routes through here so a failure arrives as an Error
+/// with the Rust message intact — Tauri otherwise rejects with a bare string.
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await tauriInvoke<T>(command, args);
@@ -83,10 +82,8 @@ export async function coreHostRetry(hostId: string): Promise<void> {
 }
 
 /**
- * Run the Noise XXpsk2 pairing handshake against a host and pin its static key.
- * Returns the pinned server fingerprint (hex sha256). Keys are stored in the OS
- * keyring under `hostId`, so `hostId` must be the host profile's id for
- * `coreNoiseReconnect` to find them later.
+ * Runs the Noise pairing handshake and pins the server key. `hostId` must be
+ * the host profile's id — that's the keyring key `coreNoiseReconnect` looks up later.
  */
 export async function coreNoisePair(input: {
   hostId: string;
@@ -101,10 +98,8 @@ export async function coreNoisePair(input: {
 }
 
 /**
- * This device's own Noise fingerprint for `hostId` (lowercase 64-hex sha256 of
- * the device public key — same shape as the pinned server fingerprint).
- * Generates the device keypair if it does not exist yet, so it can be shown on
- * the pairing screen for the user to read aloud, matching the iOS client.
+ * This device's Noise fingerprint for `hostId`; generates the device keypair
+ * if missing so it can be read aloud on the pairing screen, matching iOS.
  */
 export async function coreNoiseDeviceFingerprint(hostId: string): Promise<string> {
   return invoke<string>('core_noise_device_fingerprint', { hostId });
@@ -116,9 +111,8 @@ export async function coreNoiseReconnect(hostId: string, address: string): Promi
 }
 
 /**
- * Reachability check for a Noise host: `true` when the IK reconnect handshake
- * succeeds (host up AND this device still authorized). Used for the health badge
- * instead of the password `/api/status` probe, which always 401s a Noise host.
+ * Reachability check for a Noise host via the IK reconnect handshake. Used
+ * instead of `/api/status`, which always 401s a Noise host.
  */
 export async function coreNoisePing(hostId: string, address: string): Promise<boolean> {
   return invoke<boolean>('core_noise_ping', { hostId, address });
@@ -133,9 +127,8 @@ export async function coreNoiseToken(
 }
 
 /**
- * One device paired with a Noise host, as the server reports it. camelCase keys
- * match the sealed `devices` reply byte-for-byte (the Rust side re-serializes
- * with `rename_all = "camelCase"`), so this reads straight off the wire.
+ * One paired device as the server reports it. camelCase keys match the wire
+ * reply byte-for-byte (Rust re-serializes with `rename_all = "camelCase"`).
  */
 export interface DeviceInfo {
   id: string;
@@ -148,9 +141,8 @@ export interface DeviceInfo {
 }
 
 /**
- * List the devices paired with a Noise host, over a short-lived management
- * session on the same authenticated Noise channel the terminal uses. Rejects if
- * the reconnect/handshake fails (this device was revoked, or is unknown).
+ * Lists devices paired with a Noise host over a short-lived management session
+ * on the same channel the terminal uses. Rejects if this device was revoked.
  */
 export async function coreNoiseDevicesList(hostId: string, address: string): Promise<DeviceInfo[]> {
   return invoke<DeviceInfo[]>('core_noise_devices_list', { hostId, address });
@@ -189,9 +181,8 @@ export async function coreHostsSaveNoise(input: {
 }
 
 /**
- * Open a terminal session over Noise. Keeps the sealed channel alive and emits
- * `core-message-{connId}` / `core-closed-{connId}` in WS-JSON. Drive input/resize
- * with `coreNoiseSend` (WS-JSON text) and end it with `coreNoiseClose`.
+ * Opens a terminal session over Noise, emitting `core-message-{connId}` /
+ * `core-closed-{connId}`. Drive it with `coreNoiseSend`/`coreNoiseClose`.
  */
 export async function coreNoiseConnect(input: {
   connId: string;

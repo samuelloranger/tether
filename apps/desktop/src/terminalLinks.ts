@@ -59,9 +59,8 @@ export function registerTetherLinks(
   const disposable = terminal.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
       const { texts, wrapped } = snapshot();
-      // Resolve spans for this call — a debounced side cache left clicks racing
-      // the detector with an empty map, so the underline never appeared and
-      // activate never ran.
+      // Resolve spans for this call: a debounced side cache left clicks racing the
+      // detector with an empty map, so the underline never appeared nor activate ran.
       void coreDetectLinks(texts, wrapped)
         .then((spans) => {
           const links: ILink[] = rendererLinksForRow(texts, spans, bufferLineNumber - 1).map(

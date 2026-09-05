@@ -16,12 +16,10 @@ const IS_WINDOWS = process.platform === 'win32';
  */
 const PS_TIMEOUT_MS = 30_000;
 
-// ---------------------------------------------------------------------------
 // Pure argument shaping. Runs on every platform, which is the whole reason
 // icaclsArgs and currentUserPrincipal are exported separately from the spawn:
 // the command that protects the TLS key should not be reviewable only on the
 // one OS where it runs.
-// ---------------------------------------------------------------------------
 
 test('currentUserPrincipal qualifies the user with its domain', () => {
   expect(currentUserPrincipal({ USERNAME: 'sam', USERDOMAIN: 'CORP' })).toBe('CORP\\sam');
@@ -77,7 +75,6 @@ test('secureWindowsPath is inert off Windows', () => {
   }
 });
 
-// ---------------------------------------------------------------------------
 // End-to-end, Windows only.
 //
 // test-preload.ts sets TETHER_SKIP_WINDOWS_ACL=1 for the whole suite, so
@@ -91,7 +88,6 @@ test('secureWindowsPath is inert off Windows', () => {
 // explicitly cleared), imports the real module, and exits — nothing about the
 // suite's own environment is touched, and what is exercised is the genuine
 // module rather than a re-implementation of it.
-// ---------------------------------------------------------------------------
 
 /** Runs secureWindowsPath in a child that has the suite-wide opt-out cleared. */
 function secureInChild(target: string, isDir: boolean): string {

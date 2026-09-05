@@ -1,16 +1,8 @@
 import type { HolderDialect } from './holderFrame';
 
 /**
- * After a CWDREQ times out, skip further asks for this long.
- *
- * Five seconds is long enough that a silent/broken holder does not tax every
- * git or file request with another 250ms wait, and short enough that a holder
- * which recovers (or was merely busy) is asked again within one human
- * interaction cycle — without restarting the session.
- *
- * Legacy holders never reach this path: `dialect === 'legacy'` is rejected
- * before any request is sent, so the cooldown is only for transient silence
- * on a negotiated binary link.
+ * After a CWDREQ times out, skip further asks for this long — long enough to spare
+ * a broken holder repeated 250ms waits, short enough to retry within a human interaction.
  */
 export const CWD_REFRESH_COOLDOWN_MS = 5_000;
 
@@ -28,9 +20,8 @@ export type CwdRefreshContext = {
 };
 
 /**
- * Decide whether `refreshLiveCwd` should return immediately, share an in-flight
- * wait, or send a new CWDREQ. Pure so the cooldown / coalesce rules can be
- * tested without a holder socket.
+ * Decide whether `refreshLiveCwd` returns immediately, shares an in-flight wait, or
+ * sends a new CWDREQ. Pure so cooldown/coalesce rules are testable without a holder socket.
  */
 export function planCwdRefresh(ctx: CwdRefreshContext): CwdRefreshPlan {
   if (!ctx.hasLink || ctx.exited) return 'skip';

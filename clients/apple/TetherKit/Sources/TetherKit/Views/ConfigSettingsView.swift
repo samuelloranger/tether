@@ -8,9 +8,8 @@ public struct ConfigSettingsView: View {
   public var initialHostId: String?
   @State private var path: NavigationPath
   @State private var pairDevice = false
-  /// A fresh id the Noise device key + pinned server key are stored under for
-  /// this pairing. Regenerated each time the sheet opens so a cancelled attempt
-  /// never reuses a half-set-up id.
+  /// Fresh id the Noise device + pinned server keys are stored under. Regenerated
+  /// each open so a cancelled attempt never reuses a half-set-up id.
   @State private var pairHostId = UUID().uuidString
 
   public init(
@@ -111,9 +110,8 @@ public struct ConfigSettingsView: View {
       .sheet(isPresented: $pairDevice) {
         NavigationStack {
           PairDeviceView(hostId: pairHostId) { pairId, host, port, _ in
-            // Keys are pinned in the Keychain under `pairId`. Persist a
-            // password-less HostProfile for the paired device; `createNoiseHost`
-            // migrates the Noise keys onto the profile's real id and selects it.
+            // Keys are pinned in the Keychain under `pairId`; `createNoiseHost`
+            // migrates them onto the profile's real id and selects it.
             do {
               try store.createNoiseHost(
                 name: "",

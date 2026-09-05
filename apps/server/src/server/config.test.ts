@@ -33,9 +33,8 @@ test('config rejects unknown keys', async () => {
 });
 
 test('a settings row left by a removed section does not break config reads', () => {
-  // Servers upgrading from before native push still have `config.notify`
-  // stored. getConfig reads only the keys it knows, so the leftover row must
-  // be inert rather than a strict-parse failure that takes the server down.
+  // Servers upgrading from before native push still have `config.notify` stored;
+  // getConfig must treat the leftover row as inert, not a strict-parse failure.
   db.query('INSERT OR REPLACE INTO settings (key, value) VALUES ($key, $value)').run({
     $key: 'config.notify',
     $value: JSON.stringify({ enabled: true, url: 'https://ntfy.sh', topic: 'old' }),
@@ -50,9 +49,8 @@ test('the done trigger is off by default', () => {
 });
 
 test('the exit trigger is off by default', () => {
-  // A tab you closed (or a shell that exited while you were looking) is not a
-  // reason to wake the phone. Users who want "something died in the background"
-  // can still turn it on.
+  // A tab you closed (or a shell that exited while looking) isn't a reason to
+  // wake the phone; users who want that can still turn it on.
   expect(DEFAULT_CONFIG.triggers.exit).toBe(false);
 });
 
@@ -63,9 +61,8 @@ test('the done trigger can be patched on', async () => {
 });
 
 test('a stored row written before done existed keeps the choices it does have', () => {
-  // readTopLevel falls back to the WHOLE default block on a parse failure, so a
-  // required `done` would silently flip a user's `waiting: false` back on when
-  // they upgrade. The zod default is what keeps the old row parseable.
+  // readTopLevel falls back to the WHOLE default block on parse failure, so a
+  // required `done` would silently flip `waiting: false` back on; the zod default avoids that.
   setSetting(
     'config.triggers',
     JSON.stringify({ waiting: false, oscNotify: true, exit: true, longJob: true }),
@@ -75,12 +72,8 @@ test('a stored row written before done existed keeps the choices it does have', 
   expect(getConfig().triggers.done).toBe(false);
 });
 
-// session.defaultShell is free text a client may PATCH to anything, and one of
-// those anythings (an MSYS/Git-for-Windows bash) silently disables the git,
-// file-tree and upload features. The setting is deliberately still accepted —
-// an advanced user may want it — so the classification is what makes the cost
-// visible. Derived state about a setting, like pushDevices and tls: reported,
-// never patchable.
+// defaultShell is free text; an MSYS/Git-for-Windows bash silently disables git,
+// file-tree and upload — still accepted, so the shell report is what surfaces the cost.
 test('the shell report follows the configured default shell', async () => {
   expect(getShellSupport().shell).toBe(
     describeShellSupport(DEFAULT_CONFIG.session.defaultShell).shell,
@@ -91,7 +84,6 @@ test('the shell report follows the configured default shell', async () => {
 
 test('a known-broken shell is accepted, but reported as broken', async () => {
   const next = await patchConfig({ session: { defaultShell: 'bash.exe' } });
-  // Not rejected: the PATCH goes through and the value is stored.
   expect(next.session.defaultShell).toBe('bash.exe');
   const support = describeShellSupport('bash.exe', true);
   expect(support.integration).toBe('broken');

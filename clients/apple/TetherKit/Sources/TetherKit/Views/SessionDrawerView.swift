@@ -53,8 +53,7 @@ public struct SessionDrawerView: View {
               },
               onNewTerminal: {
                 // Closes on the tap, not when the server answers: awaiting
-                // `newTerminal` left the drawer sitting open over a terminal
-                // that was already being opened behind it.
+                // `newTerminal` left the drawer open over the terminal opening behind it.
                 onClose()
                 Task { await store.newTerminal(hostId: host.id) }
               },
@@ -108,14 +107,12 @@ private struct HostDrawerSection: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
-        // The host's own colour, which the store has carried all along and the
-        // drawer never showed.
+        // The host's own colour the store carried but the drawer never showed.
         Circle()
           .fill(Color(hex: host.color))
           .frame(width: 8, height: 8)
-        // Two servers that never got a custom name are both called by their
-        // identity — "Tether" and "Tether" — so the name alone cannot say which
-        // machine a session is about to open on. The address can.
+        // Two unnamed servers are both "Tether", so the name alone can't say which
+        // machine a session opens on. The address can.
         VStack(alignment: .leading, spacing: 1) {
           Text(host.name)
             .font(.caption.weight(.semibold))
@@ -153,17 +150,13 @@ private struct HostDrawerSection: View {
             onSelect: { onSelectSession(host.id, session.id) },
             onKill: { onKillSession(session.id) }
           )
-          // A killed session is gone the moment the server says so, and a new
-          // terminal appears the same way. Fading the row, and letting the rest
-          // of the list close the gap, keeps the reader's place in a list where
-          // every row looks like its neighbours.
+          // Fade the row and let the list close the gap, so a kill/add keeps the
+          // reader's place in a list of look-alike rows.
           .transition(.opacity)
         }
 
-        // One per host, not one at the bottom of the drawer. A single global
-        // button can only mean "on the active host", so reaching a second
-        // server took selecting one of its sessions first — impossible when it
-        // has none, which is exactly when you want a new terminal.
+        // One per host: a single global button only means "active host", so a
+        // second server with no sessions could never get its first terminal.
         NewTerminalRow(hostName: host.name, action: onNewTerminal)
           .disabled(isUnavailable)
       }
@@ -179,9 +172,8 @@ private struct HostDrawerSection: View {
       }
     }
     .opacity(isUnavailable ? 0.55 : 1)
-    // Keyed coarsely on purpose: `unreachable` carries a failure count that
-    // ticks up every poll, and animating on the raw value would re-run the
-    // crossfade on a host that has not changed state at all.
+    // Keyed coarsely: `unreachable`'s failure count ticks every poll, and animating
+    // the raw value would re-run the crossfade on an unchanged host.
     .animation(
       TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion),
       value: healthKey
@@ -202,10 +194,8 @@ private struct HostDrawerSection: View {
   @ViewBuilder
   private var statusView: some View {
     switch health {
-    // A plain state is a dot, matching the title bar and the session rows below
-    // — three spellings of "reachable" in one panel was one too many. A state
-    // you can DO something about keeps its words, because the label is the fix
-    // rather than a status.
+    // A plain state is a dot (matching the title bar and rows); a state you can
+    // act on keeps its words, because the label is the fix rather than a status.
     case .unknown:
       ProgressView()
         .controlSize(.mini)
@@ -227,10 +217,8 @@ private struct HostDrawerSection: View {
   }
 }
 
-/// "New terminal" as a list row under one host's sessions.
-///
-/// Deliberately quieter than a session row — dashed rim, no fill — so it reads
-/// as the end of the list rather than as another running terminal.
+/// "New terminal" list row, quieter than a session row (dashed rim, no fill) so
+/// it reads as the end of the list, not another running terminal.
 private struct NewTerminalRow: View {
   let hostName: String
   let action: () -> Void
@@ -339,9 +327,8 @@ private struct SessionDrawerRow: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // Selection moves between rows: the outgoing row lets go of its fill and
-    // rim over the same beat the incoming one takes them on, so the highlight
-    // reads as one thing travelling rather than two rows blinking.
+    // Outgoing and incoming rows trade fill and rim over the same beat, so the
+    // highlight reads as one thing travelling rather than two rows blinking.
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: active)
     // A row's own heat follows the chrome's curve, so the drawer and the bloom
     // can never disagree about how fast a session went quiet.

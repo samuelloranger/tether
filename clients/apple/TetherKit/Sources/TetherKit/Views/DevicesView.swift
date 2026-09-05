@@ -1,12 +1,7 @@
 import SwiftUI
 
-/// Device management for ONE Noise host, over a dedicated short-lived management
-/// session (`NoiseSessionClient.reconnect`). Lists the host's paired devices and
-/// revokes them, mirroring the `tether devices` CLI. Aurora-tokened throughout;
-/// only surfaced for `.noise` hosts (see `HostSettingsView`).
-///
-/// The session rides the same authenticated Noise channel the terminal uses; it
-/// is opened on appear and CLOSED on disappear so no socket/task leaks.
+/// Device management for ONE Noise host over a short-lived management session,
+/// opened on appear and closed on disappear so no socket/task leaks.
 public struct DevicesView: View {
   @State private var model: DevicesModel
   @State private var pendingRevoke: DeviceInfo?
@@ -15,12 +10,8 @@ public struct DevicesView: View {
   /// phase stays put in a static render. Always false in production.
   private let skipAutoLoad: Bool
 
-  /// - Parameters:
-  ///   - store: source of the host's address/port and name.
-  ///   - hostId: the Noise host whose devices are managed.
-  ///   - client: the transport engine. Injectable for previews/tests; the
-  ///     default owns the real Keychain key store (the same keys the host paired
-  ///     with), so `isSelf` and reconnect resolve correctly.
+  /// - Parameter client: transport engine; the default owns the real Keychain keys
+  ///   the host paired with, so `isSelf` and reconnect resolve correctly.
   public init(
     store: SessionStore,
     hostId: String,
@@ -34,9 +25,8 @@ public struct DevicesView: View {
   }
 
   #if DEBUG
-  /// Snapshot-only seam. Hosts a preset `DevicesModel` directly, bypassing the
-  /// store/reconnect wiring, and skips the on-appear auto-load so the preset
-  /// phase renders as-is in a static host snapshot. Snapshot tests only.
+  /// Snapshot-only seam: hosts a preset `DevicesModel` and skips the auto-load so
+  /// the preset phase renders as-is, bypassing store/reconnect wiring.
   init(snapshotModel model: DevicesModel, hostName: String = "homelab") {
     _model = State(initialValue: model)
     self.hostName = hostName
@@ -217,9 +207,8 @@ public struct DevicesView: View {
   }
 }
 
-/// Drives one `DevicesView`: owns the management channel and the list/revoke
-/// state. `@MainActor` so the view reads its state without hopping actors; the
-/// channel is opened lazily and torn down on `disconnect()`.
+/// Drives one `DevicesView`: owns the management channel and list/revoke state.
+/// `@MainActor` for the view; channel opened lazily, torn down on `disconnect()`.
 @MainActor
 @Observable
 final class DevicesModel {
@@ -247,11 +236,8 @@ final class DevicesModel {
   }
 
   #if DEBUG
-  /// Snapshot-only seam. Builds a model already parked in a given `phase` with a
-  /// preset roster (and optional action error), so `DevicesView` renders each
-  /// state without opening a real management channel. It reuses the normal init
-  /// with a throwaway client/url — nothing here calls the network. Snapshot
-  /// tests only; the production flow still goes through `load()`.
+  /// Snapshot-only seam: a model parked in a given `phase` with a preset roster,
+  /// so `DevicesView` renders each state without opening a real channel.
   @MainActor
   convenience init(
     snapshotPhase phase: Phase,
@@ -335,9 +321,8 @@ final class DevicesModel {
     await channel?.close()
   }
 
-  /// Read frames until the roster arrives. A dedicated management session only
-  /// ever gets `devices` / `devices.revoked`, but loop so an unrelated frame
-  /// can't derail the wait.
+  /// Read frames until the roster arrives; loop so an unrelated frame can't
+  /// derail the wait.
   private func awaitDevices(on channel: NoiseChannel) async throws -> [DeviceInfo] {
     while true {
       if case let .devices(items) = try await channel.receive() {

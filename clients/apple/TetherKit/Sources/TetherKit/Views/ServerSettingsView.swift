@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Server-side settings (`/api/config` + `/api/admin/*`), ported from
-/// `apps/mobile/src/ServerSettings*.tsx`. Client-only prefs stay in
-/// `ConfigSettingsView`; this form is pushed per host.
+/// Server-side settings (`/api/config` + `/api/admin/*`), pushed per host.
+/// Client-only prefs stay in `ConfigSettingsView`.
 public struct ServerSettingsView: View {
   @Bindable public var store: SessionStore
   public let hostId: String
@@ -149,9 +148,8 @@ public struct ServerSettingsView: View {
       Text("Shown on every client and used in notifications.")
         .font(.caption)
         .foregroundStyle(TetherColors.textSecondary)
-      // Spacing 0: the 44pt targets already leave 22pt of air between the
-      // 22pt swatches. Keeping the old 12pt gap on top of them spread the row
-      // out until the colours stopped reading as one control.
+      // Spacing 0: the 44pt targets already leave 22pt of air between the 22pt
+      // swatches; an extra gap spread the row until the colours stopped reading as one.
       HStack(spacing: 0) {
         ForEach(Self.hostColors, id: \.self) { color in
           Button {
@@ -384,7 +382,7 @@ public struct ServerSettingsView: View {
     async let ver = store.loadServerVersion(hostId: hostId)
     version = await ver
     if var next = await loaded {
-      // Prefer the local profile name (RN useSettingsLoad hostName overlay).
+      // Prefer the local profile name over the server's.
       if let hostName = host?.name, !hostName.isEmpty {
         next.identity.name = hostName
       }

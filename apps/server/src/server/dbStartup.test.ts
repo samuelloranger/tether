@@ -4,12 +4,8 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-// These two tests import db.ts in a child process, because its startup work
-// (auto_vacuum upgrade, WAL truncate) is module-level and only runs once per
-// process. Everything below exists to make sure a child that misbehaves fails
-// the test *loudly* instead of hanging: an unreaped child holding a piped
-// stdout keeps the whole test runner alive, which is how one bad run stalled CI
-// for 23 minutes and then reported nothing.
+// Import db.ts in a child process — its startup work runs once per process. An
+// unreaped child holding piped stdout once stalled CI 23 minutes silently; fail loudly instead.
 
 /** Per-test ceiling. Generous for a slow runner, still bounded. */
 const TEST_TIMEOUT_MS = 30_000;

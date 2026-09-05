@@ -1,7 +1,5 @@
-// Pure per-platform decisions for the custom title bar. macOS keeps its native
-// traffic lights (drawn by the OS via titleBarStyle: Overlay), so we render no
-// custom window controls there and instead reserve a left inset the toolbar
-// content leaves clear. Windows/Linux are frameless — we draw the controls.
+// Pure per-platform title-bar decisions. macOS keeps native traffic lights (we
+// reserve a left inset instead); Windows/Linux are frameless and draw the controls.
 
 // Width reserved on macOS for the three native traffic-light buttons. Empirical;
 // confirm against the real Overlay geometry during manual testing.

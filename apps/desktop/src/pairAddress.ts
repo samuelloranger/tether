@@ -5,14 +5,8 @@ const DEFAULT_HTTP_PORT = '8085';
 const DEFAULT_HTTPS_PORT = '443';
 
 /**
- * Turn a host address the user typed on the pairing screen into the pieces the
- * flow needs: the host + port for the persisted profile, and the WebSocket URL
- * the Noise pairing handshake connects to (`core_noise_pair`'s `address`, which
- * `NoiseWs::connect` hands straight to tokio-tungstenite).
- *
  * Accepts `host`, `host:port`, or a `ws://` / `http://` URL with an optional
- * path; the path is dropped and replaced with the pairing endpoint. Port
- * defaults to 8085. Reuses `validateAddress` so the rules match the host form.
+ * path; the path is dropped and replaced with the pairing endpoint.
  */
 export function parsePairAddress(
   input: string,

@@ -12,10 +12,8 @@ const createdDbDir = mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
 try {
   chmodSync(DB_DIR, 0o700);
 } catch {}
-// Both lines above are silent no-ops on Windows (node maps chmod onto the
-// read-only attribute), which would leave sensitive DB files on whatever
-// ACL ~/.tether inherited. secureCreatedDir applies the equivalent grant on the
-// boot that actually created the directory — see winAcl.ts.
+// Both lines above are silent no-ops on Windows (chmod maps to read-only attr);
+// secureCreatedDir applies the equivalent ACL grant on the boot that created the dir.
 secureCreatedDir(createdDbDir);
 
 // One-time migration: pre-binary installs kept the DB in the ~/.tether/app
@@ -48,7 +46,6 @@ if (autoVacuum !== 2) {
 // keystroke echo). Default rollback-journal fsyncs per insert, adding latency to
 // the echo path. WAL removes per-write fsync — much lower input latency.
 db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
-// --- Migrations System ---
 const migrations = [
   {
     version: 1,
@@ -180,13 +177,10 @@ export function runMigrations() {
   transaction();
 }
 
-// Initialize database schema
 runMigrations();
 // A previous process can leave a large high-water WAL even after all readers
 // are gone. Startup is the safe point to checkpoint it, after migration writes.
 db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-
-// --- DB Helper Functions ---
 
 const LOG_CAP = 2000;
 /** Hard ceiling on retained scrollback bytes per session (see pruneLogs). */
@@ -375,7 +369,6 @@ export function renameSession(id: string, name: string | null) {
   db.query('UPDATE sessions SET name = $name WHERE id = $id').run({ $id: id, $name: name });
 }
 
-// --- Settings (key/value) ---
 export function getSetting(key: string): string | null {
   const row = db.query('SELECT value FROM settings WHERE key = $key').get({ $key: key }) as {
     value: string;

@@ -6,9 +6,8 @@ export function resizeFrame(dims: { cols: number; rows: number } | undefined): {
   return { type: 'resize', cols: dims?.cols ?? 80, rows: dims?.rows ?? 24 };
 }
 
-/** Frames to send the moment a terminal socket is live. Fit often runs before
- *  the socket exists, so connect-time `start` can be 80×24 while the pane is
- *  already 132×43; without an immediate resize a TUI never sees SIGWINCH. */
+/** Frames to send the moment a socket is live: connect-time `start` may be 80×24
+ *  while the pane is already larger, and without a resize a TUI never sees SIGWINCH. */
 export function socketOpenFrames(
   dims: { cols: number; rows: number } | undefined,
   focused: boolean,

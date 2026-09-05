@@ -38,9 +38,8 @@ public struct SessionActivityBadge: View {
         Text("waiting")
           .font(.caption2)
           .foregroundStyle(TetherColors.heatWaiting)
-          // The word arrives with the dot's colour rather than after it: the
-          // row is answering one question — does this shell need me — and two
-          // separately-timed answers read as two events.
+          // Word and dot colour arrive together: the row answers one question,
+          // and two separately-timed answers read as two events.
           .transition(.opacity)
       }
     }

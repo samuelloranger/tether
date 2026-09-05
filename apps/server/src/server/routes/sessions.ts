@@ -81,15 +81,12 @@ async function hydrateTerminalSocket(
   codec: TerminalCodec,
 ): Promise<void> {
   try {
-    // Ensure the PTY process is active (auto-start or holder reattach).
-    // Everything after this await runs synchronously, so no PTY frame can
-    // slip in between the replay read and the subscribe below.
+    // Auto-start or reattach the PTY. Everything after this await runs
+    // synchronously, so no frame slips between the replay read and subscribe.
     await startSession(sessionId, undefined, cols, rows);
 
-    // Bound the catch-up by bytes. A row-capped scrollback is not a size cap
-    // (one TUI repaint frame can be >100 KB), and an unbounded replay kills
-    // the client mid-stream — it reconnects with a barely advanced position
-    // and the next replay is bigger still.
+    // Bound catch-up by bytes: a row-capped scrollback is not a size cap (one
+    // TUI repaint can be >100 KB), and an unbounded replay kills the client.
     const plan = getReplayLogs(sessionId, sinceId, REPLAY_BYTE_BUDGET);
     const missedLogs = plan.logs;
 
@@ -114,14 +111,12 @@ async function hydrateTerminalSocket(
       }
     }
 
-    // Skip if the client already disconnected during the awaits above —
-    // onClose already ran (unsubscribe was still the no-op), so a late
-    // subscribe here would never get cleaned up.
+    // Client disconnected during the awaits above: onClose already ran, so a
+    // late subscribe here would never be cleaned up.
     if (state.closed) return;
     state.unsubscribe = subscribeToSession(sessionId, state.onData, cols, rows);
-    // If the session exited during the awaits above, subscribe returned
-    // the no-op and no exit will ever arrive — tell the client now so it
-    // doesn't render a dead terminal as live.
+    // Session exited during the awaits: subscribe returned the no-op and no exit
+    // will arrive — tell the client now so it doesn't render a dead terminal.
     if (!getActiveSession(sessionId)) {
       ws.send(codec.exit());
     }
@@ -220,9 +215,8 @@ function createTerminalWsHandlers(c: Context) {
   };
 }
 
-// List all sessions (active or stopped) from DB, annotated with the live
-// activity classification (null when the server hasn't seen output yet —
-// e.g. a detached holder after a server restart).
+// Sessions from DB, annotated with live activity (null when the server hasn't
+// seen output yet — e.g. a detached holder after a server restart).
 sessionsRoutes.get('/api/sessions', (c) => {
   return c.json(
     listSessions().map((s) => ({

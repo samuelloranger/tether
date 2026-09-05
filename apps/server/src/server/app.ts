@@ -39,9 +39,8 @@ export type AppEnv = {
 
 const app = new Hono<AppEnv>();
 
-// Rate-limit key is the SOCKET peer, never a client-controlled header. When the
-// peer is unknown (tests without a real socket, rare Bun edge cases), every such
-// request shares one bucket — over-limiting is the safe direction.
+// Rate-limit key is the SOCKET peer, never a client-controlled header. Unknown
+// peers share one bucket — over-limiting is the safe direction.
 function clientKey(c: Context<AppEnv>): string {
   return c.get('peerAddress') || 'unknown';
 }
@@ -65,22 +64,12 @@ app.use('*', async (c, next) => {
 // Health/root — liveness only, no data. Left open so `tether status` can probe it.
 app.get('/', (c) => c.json({ ok: true, service: 'tether' }));
 
-// Everything under /api/* requires a per-device bearer token, EXCEPT the
-// unauthenticated discovery and Noise handshake endpoints the middleware
-// exempts (/api/status, /api/noise/*).
+// Everything under /api/* requires a per-device bearer token, except the
+// unauthenticated discovery and Noise handshake endpoints (/api/status, /api/noise/*).
 app.use('/api/*', authMiddleware);
 
-// Unauthenticated discovery: how should the client reach us?
-//
-// `tls.fingerprint` is what a client pins for REST. Pinning on first contact
-// is only as good as that first contact, so two things matter here:
-//   - `secure` reports whether THIS response came over the TLS listener. It is
-//     derived from the socket, never from a header. A client must only pin a
-//     fingerprint it read over TLS, and must compare it against the certificate
-//     it actually saw on that connection — self-reported bytes over plaintext
-//     are a MITM's to rewrite, and are advisory discovery only.
-//   - A mismatch between the pinned value and the observed peer certificate is
-//     a hard failure, not a re-pair prompt.
+// Unauthenticated discovery. `secure` reflects the actual socket (TLS vs
+// plaintext), never a header — a client may only pin a fingerprint read over TLS.
 app.get('/api/status', (c) =>
   c.json({
     secure: isSecureRequest(c.req.url),
@@ -132,10 +121,8 @@ app.post('/api/admin/test-notification', async (c) => {
   }
 });
 
-// The device generates its own AES key and hands it over here. This rides the
-// normal token-authed API, so its confidentiality is bounded by the transport —
-// the same channel already streams the terminal itself, so this adds no new
-// exposure, but it is another reason to run Tether behind a tunnel.
+// The device generates its own AES key here; confidentiality is bounded by the
+// transport — same channel that streams the terminal, so run Tether behind a tunnel.
 app.post('/api/push/register', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const deviceToken = typeof body.deviceToken === 'string' ? body.deviceToken.trim() : '';

@@ -8,7 +8,6 @@ describe('groupFingerprint', () => {
     expect(grouped).toBe(
       '6668 7aad f862 bd77 6c8f c18b 8e9f 8e20 0897 1485 6ee2 33b3 902a 591d 0d5f 2925',
     );
-    // 16 blocks of 4 chars for a 64-char fingerprint.
     expect(grouped.split(' ')).toHaveLength(16);
   });
 

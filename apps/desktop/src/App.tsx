@@ -293,9 +293,8 @@ export function App() {
       ),
     );
   };
-  // Pointer-driven tab→pane drag. HTML5 DnD can't be used: Tauri's native
-  // drag-drop handler (kept on for OS file-drop upload) swallows in-webview
-  // drags on Windows/WebView2. See useTabDrag.
+  // Pointer-driven drag: Tauri's native drag-drop handler (kept for OS
+  // file-drop upload) swallows in-webview HTML5 DnD on Windows/WebView2.
   const tabDrag = useTabDrag(dropSessionIntoPane);
 
   const openView = (viewId: string) => {
@@ -367,9 +366,8 @@ export function App() {
   );
   const litState = litStateFor(activeDot);
 
-  // A file viewer or presentation owns the whole terminal pane while it is up, so
-  // the git overlays stand down rather than stacking over one — opening a file
-  // with git open used to look like a no-op. Git returns when the viewer closes.
+  // A file viewer/presentation owns the pane while up, so git overlays stand
+  // down rather than stack — git returns when the viewer closes.
   const fileOrPreviewUp = Boolean(
     workspace.fileView || workspace.fileLoading || workspace.activePresentation,
   );

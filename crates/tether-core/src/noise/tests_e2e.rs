@@ -6,11 +6,9 @@ use super::{code, pairing, psk, reconnect};
 
 #[test]
 fn pair_then_reconnect_then_stream() {
-    // --- server + device long-term keys ---
     let server = pairing::generate_static_keypair().unwrap();
     let device = pairing::generate_static_keypair().unwrap();
 
-    // --- pairing: server prints a code, device types it ---
     let printed = code::generate();
     let typed = code::normalize(&code::grouped(&printed)).unwrap();
     let psk_server = psk::derive(&code::normalize(&printed).unwrap()).unwrap();
@@ -31,7 +29,6 @@ fn pair_then_reconnect_then_stream() {
     assert_eq!(pinned_server_pub, server.public);
     assert_eq!(enrolled_device_pub, device.public);
 
-    // --- reconnect later: IK with the pinned server key ---
     let mut ri = reconnect::ReconnectInitiator::new(&device.private, &pinned_server_pub).unwrap();
     let mut rr = reconnect::ReconnectResponder::new(&server.private).unwrap();
     let n = ri.write_message(&[], &mut b).unwrap();
@@ -42,7 +39,6 @@ fn pair_then_reconnect_then_stream() {
     // server would look this up in its registry to authorize:
     assert_eq!(rr.remote_static().unwrap(), device.public);
 
-    // --- stream a large payload over the transport ---
     let mut cs = ri.into_transport().unwrap();
     let mut ss = rr.into_transport().unwrap();
     let payload = vec![0x42u8; 200_000];

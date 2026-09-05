@@ -1,9 +1,7 @@
 import { z } from 'zod';
 
-// A push is either Phase 1 (cleartext generic text, no NSE required) or Phase 2
-// (ciphertext the Notification Service Extension decrypts on-device). The relay
-// must never be handed both — that would mean a caller leaked readable text
-// alongside the encrypted copy it was supposed to replace.
+// A push is either Phase 1 (cleartext) or Phase 2 (ciphertext the NSE decrypts);
+// never both, or a caller leaked readable text alongside the encrypted copy.
 export const pushRequestSchema = z
   .object({
     token: z.string().regex(/^[0-9a-fA-F]{64}$/, 'token must be a 64-char hex APNs device token'),
@@ -24,9 +22,8 @@ export interface ApnsPayload {
   [key: string]: unknown;
 }
 
-// APNs caps a notification payload at 4KB. Ciphertext is the only caller-sized
-// field, and the schema bounds it well under that, so this is a guard rather
-// than a limit callers are expected to hit.
+// APNs caps a payload at 4KB. Ciphertext is the only caller-sized field and the
+// schema bounds it well under that, so this is a guard, not a limit callers hit.
 export const APNS_MAX_PAYLOAD_BYTES = 4096;
 
 export function buildApnsPayload(req: PushRequest): ApnsPayload {
@@ -52,9 +49,8 @@ export function buildApnsPayload(req: PushRequest): ApnsPayload {
   };
 }
 
-// APNs status codes the caller can act on. 410 means the app was uninstalled;
-// the relay is stateless, so it reports that upstream and the Tether server
-// prunes its own registration.
+// APNs status codes the caller can act on. 410 = app uninstalled; the stateless
+// relay reports it upstream so the Tether server prunes its own registration.
 export function classifyApnsStatus(
   status: number,
 ): 'ok' | 'unregistered' | 'bad-request' | 'retry' {

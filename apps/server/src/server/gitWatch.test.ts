@@ -10,17 +10,8 @@ import { GitWatch } from './gitWatch';
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/**
- * Remove a fixture directory, retrying while Windows still has it open.
- *
- * `dispose()` closes the fs.watch handles, but on Windows closing a
- * ReadDirectoryChangesW handle only *queues* the cancellation — the kernel
- * drops the directory's reference a moment later, and until it does, deleting
- * that directory fails with EBUSY. rmSync then threw out of the fixture's
- * teardown and failed a test whose assertions had every one of them passed.
- * POSIX unlinks a watched directory happily, so it takes the first pass and
- * never sleeps.
- */
+// On Windows, closing a ReadDirectoryChangesW handle only queues the
+// cancellation — the directory stays EBUSY briefly after dispose(). Retry.
 async function removeFixture(root: string): Promise<void> {
   // ~500ms of headroom in 25ms steps; observed to clear on the first retry.
   for (let attempt = 0; ; attempt++) {
@@ -34,16 +25,8 @@ async function removeFixture(root: string): Promise<void> {
   }
 }
 
-/**
- * Runs git without blocking the event loop.
- *
- * These tests used to shell out synchronously, which pins the JS thread for the
- * whole call — so when git was slow on a loaded runner, bun's per-test timeout
- * could never fire and the worker simply stopped. On CI that stalled the
- * server-test step indefinitely after every other file had already reported.
- * gitWatch.ts had the same bug in production and moved to Bun.spawn; this test
- * helper kept it.
- */
+// Async on purpose: a synchronous shell-out pins the JS thread, so a slow git
+// under load prevents bun's per-test timeout from ever firing.
 async function git(cwd: string, ...args: string[]): Promise<void> {
   const proc = Bun.spawn(['git', ...args], { cwd, stdout: 'ignore', stderr: 'pipe' });
   const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
@@ -65,29 +48,12 @@ async function withRepo(fn: (root: string) => void | Promise<void>) {
   }
 }
 
-// Ignore-pruning spawns a real `git ls-files` per watcher. Only the
-// gitignore test below actually needs it, and under `bun test --parallel` the
-// extra subprocess per test pushed several past the 5s timeout. Stub it
-// everywhere else so the suite is deterministic (and faster).
+// Only the gitignore test below needs the real `git ls-files` ignore-pruning
+// spawn; stub it elsewhere so the suite stays deterministic and fast.
 const noIgnoredDirs = async () => new Set<string>();
 
-/**
- * Windows pays for every test in this file twice over.
- *
- * Once on the fixture: `withRepo` spawns git five times, and CreateProcess plus
- * the antimalware scan of git.exe costs ~30ms a call on an idle box and
- * 200-380ms once several `bun test --parallel` workers overlap — measured here
- * at 250ms for the whole fixture idle against 1.6s under that load, where Linux
- * pays ~5ms a spawn. Then again on the delivery: worktree events come from
- * ReadDirectoryChangesW, whose completion packets are handed over by a kernel
- * worker thread instead of being read inline the way an inotify fd is, so the
- * debounce window opens later and a single write can arrive as several events.
- *
- * bun's default 5s per test left no room for either: the git-backed tests below
- * measured 4.4-5.0s under load and died as "timed out after 5000ms" without
- * ever reaching an assertion. 20s is a backstop, not a delay — the same tests
- * finish in a few hundred milliseconds on an idle machine.
- */
+// Windows pays double: git spawns cost 200-380ms under parallel load (vs ~5ms
+// on Linux), and event delivery is slower too. 5s isn't enough; 20s is a backstop, not a delay.
 const REPO_TEST_TIMEOUT_MS = IS_WINDOWS ? 20_000 : 5_000;
 
 async function waitFor(condition: () => boolean, timeout = IS_WINDOWS ? 8_000 : 2_000) {
@@ -138,13 +104,8 @@ test(
 
       await git(root, 'add', 'main.ts');
       await git(root, 'commit', '-q', '-m', 'update');
-      // Committing must bring the summary back to empty. Asserted on the
-      // settled value rather than on `seen[2]`, because how many summaries the
-      // pair of commands produces is a process-spawn artifact, not the
-      // property: on Windows `git add` and `git commit` are two ~200ms spawns,
-      // so the 150ms debounce closes between them and publishes the
-      // intermediate "staged" state as a summary of its own. On Linux both
-      // spawns land inside one window and there is only ever a third.
+      // Assert on the settled value, not `seen[2]`: how many summaries the
+      // add+commit pair produces is a process-spawn timing artifact (Windows can split them).
       await waitFor(() => seen.length > 2 && seen[seen.length - 1].files.length === 0);
       expect(seen[seen.length - 1]).toEqual({ files: [] });
       watch.dispose();

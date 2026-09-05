@@ -1,13 +1,6 @@
 /**
- * The two WebSocket codecs that sit in front of one set of domain handlers.
- *
- * - `proto=1` (default) is today's JSON protocol, byte-for-byte. The shipping
- *   Expo client speaks it, so every `JSON.stringify` here — key order included —
- *   is a compatibility surface, not a style choice. It does not send `title`
- *   frames, because it never did.
- * - `proto=2` is length-prefixed binary (see proto/frame.ts): raw PTY bytes for
- *   output, protobuf for everything structural, and an opaque replay cursor
- *   instead of the integer `sinceId`.
+ * Two WebSocket codecs over one handler set. proto=1 (default) is today's JSON
+ * protocol byte-for-byte — key order is a compat surface, not style; proto=2 is binary.
  */
 
 import type { DiffSummary } from '../gitDiff';
@@ -50,7 +43,6 @@ export interface TerminalCodec {
   ping(): WireData;
   /** Decodes an inbound socket message; may yield several frames per message. */
   decode(data: unknown): ClientMessage[];
-  /** Where this client's replay should resume from. */
   replayFrom(query: { sinceId: string | null; cursor: string | null }, sessionId: string): number;
 }
 
@@ -110,9 +102,8 @@ class JsonCodec implements TerminalCodec {
 
 class BinaryCodec implements TerminalCodec {
   readonly proto = 2 as const;
-  // One decoder per socket: a WS message is already a whole message, but a
-  // client is free to pack several frames into one, and nothing stops it from
-  // splitting one across two.
+  // One decoder per socket: a client is free to pack several frames into one WS
+  // message, or split one frame across two.
   private readonly decoder = new FrameDecoder();
 
   constructor(private readonly sessionId: string) {}

@@ -30,11 +30,8 @@ interface SessionDrawerProps {
   onBeginDrag?: BeginTabDrag;
 }
 
-// The app icon's glyph at toolbar size: the prompt chevron and the cursor
-// block, in the icon's own green and indigo. Drawn rather than imported so it
-// stays crisp at 20px and needs no asset pipeline. The icon's dark tile is
-// dropped — the drawer is already that colour — and the glyph grown to fill the
-// space the tile used to take, or it reads as a speck next to the wordmark.
+// The app icon's glyph at toolbar size, drawn (not imported) so it stays crisp at
+// 20px. The dark tile is dropped and the glyph grown to fill it, or it reads as a speck.
 function TetherMark() {
   return (
     <svg className="drawer-mark" viewBox="0 0 24 24" fill="none" aria-hidden>

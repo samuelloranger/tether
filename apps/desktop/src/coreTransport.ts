@@ -24,10 +24,7 @@ export function nextConnId(): string {
 
 /**
  * Streams a session over the sealed Noise channel via `core_noise_connect`,
- * which emits `core-message-{connId}` / `core-closed-{connId}` events in
- * WS-JSON. Input/resize go out as WS-JSON through `coreNoiseSend` (the Rust
- * command translates them to the Noise session protocol); close ends the
- * channel. `address` is the `ws://host:port/api/noise/session` endpoint.
+ * emitting `core-message-{connId}` / `core-closed-{connId}` events.
  */
 export async function openNoiseSocket(
   connId: string,

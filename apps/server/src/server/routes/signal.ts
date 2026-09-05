@@ -16,13 +16,8 @@ function words(value: unknown, limit: number): string | undefined {
 export const signalRoutes = new Hono();
 
 /**
- * A program telling the server what it is doing.
- *
- * Authed by the same loopback control token as `/control/presentations`, and
- * with the same reach — the server binds every interface, so this is not
- * loopback-only, but it is no wider than the control surface that already
- * exists. The session id comes from `TETHER_SESSION_ID`, which `pty.ts` exports
- * into every shell, so a hook two processes deep can still name its own tab.
+ * A program telling the server what it is doing. Authed by the same control
+ * token as /control/presentations; sessionId comes from TETHER_SESSION_ID.
  */
 signalRoutes.post('/control/signal', async (c) => {
   if (!hasControlToken(c.req.header('X-Tether-Present-Control')))

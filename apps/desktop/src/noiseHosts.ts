@@ -1,7 +1,5 @@
-// Which hosts authenticate over Noise. There is no `authMode` field on HostProfile
-// yet, so we record a host as "noise" when it is created through the pairing flow
-// and read it back where a terminal connection must pick its transport. Backed by
-// localStorage so it survives reloads; a future persisted authMode can replace it.
+// There is no `authMode` field on HostProfile yet, so we record a host as
+// "noise" here when paired, and read it back to pick the transport.
 const KEY = 'tether_noise_hosts';
 
 function read(): Set<string> {

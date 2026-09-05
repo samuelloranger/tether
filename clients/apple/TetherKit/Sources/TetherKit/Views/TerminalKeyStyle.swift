@@ -1,25 +1,15 @@
 #if canImport(UIKit)
 import SwiftUI
 
-/// The utility bar's key.
-///
-/// These were `.buttonStyle(.plain)` with the fill baked into the label, which
-/// left them with **no pressed state at all** — the one row of controls whose
-/// entire job is to send a byte you cannot see arrive gave no sign it had been
-/// hit. A key now takes a lit face and a small press under the finger, both
-/// short enough to land before the shell's echo does.
-///
-/// Under Reduce Motion the key still lights: a fill change is feedback, not
-/// movement. Only the travel goes away.
+/// The utility bar's key. Lit face + brief press so the one row whose job is to
+/// send an invisible byte shows it landed. Under Reduce Motion it lights but doesn't travel.
 struct TerminalKeyStyle: ButtonStyle {
   /// Latched state — Ctrl, which stays on until it is spent.
   var armed = false
 
   func makeBody(configuration: Configuration) -> some View {
-    // A nested View, not the style itself, because `@Environment` read directly
-    // on a ButtonStyle is not kept up to date — the style is a value the button
-    // re-invokes, not a view in the graph. Reading it one level down puts
-    // Reduce Motion where SwiftUI actually tracks it.
+    // A nested View, not the style itself: `@Environment` read directly on a
+    // ButtonStyle isn't kept up to date (a style is a value, not a graph view).
     KeyFace(armed: armed, pressed: configuration.isPressed) {
       configuration.label
     }

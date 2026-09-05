@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Nested folder tree — port of `apps/mobile/src/FileTree.tsx`.
+/// Nested folder tree.
 public struct FileTreeView: View {
   public var nodes: [FileTreeNode]
   public var depth: Int

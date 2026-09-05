@@ -2,12 +2,8 @@ import CryptoKit
 import Security
 import UserNotifications
 
-/// Decrypts Tether push payloads before iOS displays them.
-///
-/// The relay only ever sees `e` — base64( nonce[12] || ciphertext || tag[16] ) —
-/// so the readable title and body exist only here, on the device. If anything
-/// below fails we fall through to the generic text the relay set, which reveals
-/// nothing.
+// Decrypts push payloads on-device — the relay only sees `e`, base64(nonce[12]
+// || ciphertext || tag[16]). On any failure we keep the relay's generic fallback.
 class NotificationService: UNNotificationServiceExtension {
   private var contentHandler: ((UNNotificationContent) -> Void)?
   private var bestAttempt: UNMutableNotificationContent?
@@ -56,15 +52,11 @@ class NotificationService: UNNotificationServiceExtension {
     let link: String?
   }
 
-  /// Reads the AES key `PushRegistrar` wrote in the app, via the shared
-  /// keychain access group. The extension has its own bundle id, so without
-  /// that shared group this lookup returns nothing and every push shows the
-  /// fallback.
+  // Reads the AES key PushRegistrar wrote, via the shared keychain group. The
+  // extension has its own bundle id, so without that group this returns nothing.
   private static func loadSecretKey() -> SymmetricKey? {
-    // Match PushRegistrar's service + account. kSecAttrAccessGroup is omitted
-    // on purpose: a query without it searches every group this binary is
-    // entitled to (including the shared app group). Naming the group would
-    // hardcode the team-id prefix that only resolves at signing time.
+    // kSecAttrAccessGroup omitted on purpose: without it the query searches every
+    // entitled group; naming it would hardcode the signing-time team-id prefix.
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: "dev.tether.app",
