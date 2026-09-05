@@ -401,7 +401,7 @@ public enum ConfigClientError: Error, LocalizedError {
 // MARK: - NativeHostClient config + admin API
 //
 // Mirrors GitClient.swift / PushClient.swift: request construction is duplicated
-// from the public `profile` + Keychain (password is file-private on the actor).
+// from the public `profile` + bearer source (file-private on the actor).
 
 extension NativeHostClient {
   public func fetchServerConfig() async throws -> ServerConfig {

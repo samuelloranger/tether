@@ -8,7 +8,7 @@ import UserNotifications
 #endif
 
 /// Requests notification permission, obtains the APNs device token, and
-/// registers it with every host profile that has a stored password.
+/// registers it with every paired host profile.
 ///
 /// Failures are logged and swallowed — push must never block or throw into UI.
 @MainActor
@@ -91,7 +91,7 @@ public final class PushRegistrar {
     )
   }
 
-  /// Re-POST the stored token to every host that has a password. Safe to call
+  /// Re-POST the stored token to every paired host. Safe to call
   /// after adding a host mid-session.
   public func registerStoredTokenWithAllHosts() async {
     guard let token = storedDeviceToken else { return }

@@ -8,6 +8,16 @@ tether update
 
 Downloads the latest release binary for your platform, verifies it, atomically swaps it in, and restarts the daemon if it was running. No reinstall, no git.
 
+## 3.x → 4.0 cutover
+
+Version 4.0 replaces the old shared password with per-device Noise pairing. After you `tether update` the server:
+
+- Every already-connected client gets **401** until you pair again with `tether pair` on that device.
+- The old password is **ignored** — there is nothing to type at connect time anymore.
+- Update the **desktop and iOS apps** too; older clients do not speak the new auth model.
+
+Pair each device once (`tether pair` → enter or scan the code in the app → confirm on the server). Existing shells on the server keep running through the upgrade; only the client's trust credential changes.
+
 ## The `tether` CLI
 
 One binary is the whole CLI:

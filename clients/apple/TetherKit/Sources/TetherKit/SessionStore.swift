@@ -40,15 +40,15 @@ public final class SessionStore {
   @ObservationIgnored private var hasRestoredSession = false
 
   private let hostStore: HostStoreAdapter
-  /// Per-host Noise key material (device key + pinned server key). Used both to
-  /// DERIVE a host's auth mode (`authMode(for:)`) and to drive the Noise
-  /// transport. Injectable so tests can pass an in-memory fake.
+  /// Per-host Noise key material (device key + pinned server key). Drives the
+  /// Noise transport and REST bearer minting for paired hosts. Injectable so
+  /// tests can pass an in-memory fake.
   private let noiseKeyStore: NoiseKeyStore
   /// The Noise transport engine, sharing `noiseKeyStore` so the keys a host was
   /// paired with are the keys its reconnect uses.
   @ObservationIgnored private let noiseClient: NoiseSessionClient
-  /// In-memory per-device REST token cache for Noise hosts. A Noise host has no
-  /// password, so its REST `Authorization: Bearer` value is a token minted over
+  /// In-memory per-device REST token cache for Noise hosts. Its REST
+  /// `Authorization: Bearer` value is a token minted over
   /// the Noise channel (`mintNoiseToken`), cached until near expiry and
   /// re-minted on a 401. Lazy so the mint closure can capture `self` after init.
   @ObservationIgnored private lazy var noiseTokenCache = NoiseTokenCache(
@@ -172,8 +172,7 @@ public final class SessionStore {
     let displayName = name.isEmpty ? host : name
     // Load BOTH paired keys up front — before creating any profile. If either is
     // missing, pairing did not complete; throw without persisting anything, so we
-    // never leave a keyless profile that would silently reclassify as a password
-    // host on the next launch. (`try?` on a throwing `-> Data?` yields `Data??`;
+    // never leave a keyless profile that would look paired on the next launch. (`try?` on a throwing `-> Data?` yields `Data??`;
     // flatten with `?? nil`.)
     guard let device = (try? noiseKeyStore.loadDevicePrivateKey(hostId: pairHostId)) ?? nil,
           let server = (try? noiseKeyStore.loadServerPublicKey(hostId: pairHostId)) ?? nil
@@ -188,7 +187,7 @@ public final class SessionStore {
       identityName: displayName
     )
     // Migrate the keys onto the profile id atomically: if either save fails, roll
-    // the profile back so we don't persist an orphan mis-typed as a password host.
+    // the profile back so we don't persist an orphan without its keys.
     do {
       try noiseKeyStore.saveDevicePrivateKey(device, hostId: profile.id)
       try noiseKeyStore.saveServerPublicKey(server, hostId: profile.id)
@@ -280,7 +279,7 @@ public final class SessionStore {
     }
   }
 
-  /// Re-checks one host after Retry or password save.
+  /// Re-checks one host after Retry or re-pair.
   public func refreshHost(hostId: String) async {
     isLoading = true
     defer { isLoading = false }
@@ -460,12 +459,7 @@ public final class SessionStore {
     }
   }
 
-  /// Whether a password is already stored for this host.
-  ///
-  /// A host can exist without one — restored from storage, or created before
-  /// pairing completed — and in that state every authenticated request will
-  /// fail. The UI needs to know so it can ask, rather than silently doing
-  /// nothing when the host is selected.
+  /// Switches the active terminal tab and opens its live stream.
   public func selectSession(hostId: String, sessionId: String) async {
     // The user has chosen a terminal, so the cold-launch restore has no more
     // work to do. Without this the latch could still be unspent — a launch whose

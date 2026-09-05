@@ -62,4 +62,4 @@ It listens on port `8085` (or `process.env.TETHER_PORT`). For distribution, CI c
 
 ## 🔒 Security
 
-The password gates **access**, not the wire — traffic is unencrypted (`0.0.0.0`, open CORS). Run tether behind a tunnel (Tailscale / WireGuard / SSH) for encryption, or keep it LAN-only. With no password set, every client is rejected.
+All `/api/*` routes require a per-device bearer token minted over Noise (`tether pair`). Traffic on the default plaintext port (`8085`) is unencrypted (`0.0.0.0`, open CORS). Run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only. With no paired devices, every client is rejected until you enroll one.

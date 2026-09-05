@@ -14,19 +14,19 @@ use tether_core::store::ReplayStore;
 
 /// Auth is the whole security model: a wrong bearer must not reach any route.
 #[tokio::test]
-async fn rejects_a_wrong_password_and_accepts_the_paired_one() {
+async fn rejects_a_wrong_bearer_and_accepts_the_paired_one() {
     let server = Server::start().await;
 
     let (status, _) = server
         .exec(&server.client().get("/api/health", server.auth()))
         .await;
-    assert_eq!(status, 200, "the paired password should be accepted");
+    assert_eq!(status, 200, "the paired bearer should be accepted");
 
-    let bad = server.client_with("not-the-password");
+    let bad = server.client_with("not-the-bearer");
     let (status, _) = server
         .exec(&bad.get("/api/health", bad.auth_header()))
         .await;
-    assert_eq!(status, 401, "a wrong password must be refused");
+    assert_eq!(status, 401, "a wrong bearer must be refused");
 }
 
 // `setup_refuses_a_second_pairing` was removed with `/api/setup`: pairing is no

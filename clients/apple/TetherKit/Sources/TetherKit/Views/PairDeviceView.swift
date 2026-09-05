@@ -17,8 +17,7 @@ import VisionKit
 ///
 /// This sits on top of the proven `NoiseSessionClient.pair(hostId:url:code:)`:
 /// it pins the server's static key out of the handshake, the host confirms out
-/// of band, and the pinned key comes back for the confirmation screen. This is
-/// additive — the password `PairingView` is untouched.
+/// of band, and the pinned key comes back for the confirmation screen.
 public struct PairDeviceView: View {
   public enum Phase: Equatable {
     case enterCode

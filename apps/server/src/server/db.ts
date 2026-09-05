@@ -7,15 +7,15 @@ import { COMPILED } from './runtime';
 import { secureCreatedDir } from './winAcl';
 
 const DB_DIR = path.dirname(DB_PATH);
-// The DB holds the argon2 password hash — keep the dir owner-only.
+// The DB holds sessions, the device registry, and bearer tokens — keep the dir owner-only.
 const createdDbDir = mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
 try {
   chmodSync(DB_DIR, 0o700);
 } catch {}
 // Both lines above are silent no-ops on Windows (node maps chmod onto the
-// read-only attribute), which would leave the password hash resting on whatever
-// ACL ~/.tether inherited. secureCreatedDir applies the equivalent grant, and
-// only on the boot that actually created the directory — see winAcl.ts.
+// read-only attribute), which would leave sensitive DB files on whatever
+// ACL ~/.tether inherited. secureCreatedDir applies the equivalent grant on the
+// boot that actually created the directory — see winAcl.ts.
 secureCreatedDir(createdDbDir);
 
 // One-time migration: pre-binary installs kept the DB in the ~/.tether/app
@@ -23,8 +23,8 @@ secureCreatedDir(createdDbDir);
 // run or a TETHER_DB_PATH override), and only if the new DB doesn't exist yet.
 if (COMPILED && USING_DEFAULT_DB && !existsSync(DB_PATH) && existsSync(OLD_DB_PATH)) {
   logInfo(`Migrating database from ${OLD_DB_PATH} to ${DB_PATH}`);
-  // The old DB runs in WAL mode; recently-committed rows (schema, sessions, the
-  // password) may still live only in the -wal file. Copy the whole set so the
+  // The old DB runs in WAL mode; recently-committed rows (schema, sessions,
+  // registry) may still live only in the -wal file. Copy the whole set so the
   // new DB replays the WAL on first open instead of losing that data.
   for (const suffix of ['', '-wal', '-shm']) {
     if (existsSync(OLD_DB_PATH + suffix)) {
