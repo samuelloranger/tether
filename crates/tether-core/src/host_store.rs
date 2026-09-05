@@ -51,8 +51,6 @@ pub enum HostStoreError {
     Secret(String),
     #[error("unknown host profile: {0}")]
     UnknownProfile(String),
-    #[error("migrated host password could not be read back")]
-    PasswordVerification,
     #[error("migrated host profile could not be read back")]
     ProfileVerification,
 }
@@ -64,31 +62,19 @@ pub trait HostStorage {
     fn remove_item(&self, key: &str) -> Result<(), HostStoreError>;
 }
 
-/// Platform secret-storage seam, preserving the legacy-password migration.
-pub trait HostSecrets {
-    fn get(&self, host_id: &str) -> Result<Option<String>, HostStoreError>;
-    fn set(&self, host_id: &str, password: &str) -> Result<(), HostStoreError>;
-    fn clear(&self, host_id: &str) -> Result<(), HostStoreError>;
-    fn get_legacy(&self) -> Result<Option<String>, HostStoreError>;
-    fn clear_legacy(&self) -> Result<(), HostStoreError>;
-}
-
-pub struct HostStore<S, H, I> {
+pub struct HostStore<S, I> {
     storage: S,
-    secrets: H,
     make_id: Mutex<I>,
 }
 
-impl<S, H, I> HostStore<S, H, I>
+impl<S, I> HostStore<S, I>
 where
     S: HostStorage,
-    H: HostSecrets,
     I: FnMut() -> String,
 {
-    pub fn new(storage: S, secrets: H, make_id: I) -> Self {
+    pub fn new(storage: S, make_id: I) -> Self {
         Self {
             storage,
-            secrets,
             make_id: Mutex::new(make_id),
         }
     }
@@ -132,13 +118,6 @@ where
             profile
         };
 
-        if let Some(password) = self.secrets.get_legacy()? {
-            self.secrets.set(&profile.id, &password)?;
-            if self.secrets.get(&profile.id)?.as_deref() != Some(password.as_str()) {
-                return Err(HostStoreError::PasswordVerification);
-            }
-        }
-
         let reread = parse_profiles(self.storage.get_item(HOST_PROFILES_KEY)?.as_deref());
         if !reread.iter().any(|candidate| candidate.id == profile.id) {
             return Err(HostStoreError::ProfileVerification);
@@ -148,7 +127,6 @@ where
         // An interrupted migration will verify the same state on next launch.
         let _ = self.storage.remove_item(LEGACY_SERVER_IP_KEY);
         let _ = self.storage.remove_item(LEGACY_PORT_KEY);
-        let _ = self.secrets.clear_legacy();
         Ok(reread)
     }
 
@@ -204,7 +182,6 @@ where
         if !profiles.iter().any(|profile| profile.id == id) {
             return Ok(());
         }
-        self.secrets.clear(id)?;
         let next = profiles
             .into_iter()
             .filter(|profile| profile.id != id)
@@ -240,9 +217,9 @@ where
     /// The injected generator cannot know what is persisted — the iOS one is a
     /// counter that restarts at zero on every launch, so the first host added in
     /// a later run was handed `host-0` again, the id the first host already had.
-    /// That collision is not cosmetic: the keychain entry and the session cache
+    /// That collision is not cosmetic: the Noise keys and the session cache
     /// are both keyed by host id, so the new host silently took over the older
-    /// one's password (leaving it permanently 401) and its cached sessions.
+    /// one's pairing and its cached sessions.
     ///
     /// Uniqueness is this store's invariant, so it is enforced here instead of
     /// being trusted to whoever supplied the generator. Suffixing rather than
@@ -266,39 +243,24 @@ where
     /// forward untangles that — the drawer collapses them into one row and every
     /// request for the second one authenticates as the first. Renaming the later
     /// profile splits them apart.
-    ///
-    /// Secrets are deliberately left alone. The stored password sits under the
-    /// shared id, so after the split the first profile keeps it and the second
-    /// has none, which makes the app ask for that host's password. That is the
-    /// visible version of what was already happening silently.
     fn repair_duplicate_ids(
         &self,
         profiles: Vec<HostProfile>,
     ) -> Result<Vec<HostProfile>, HostStoreError> {
         let mut seen: HashSet<String> = HashSet::with_capacity(profiles.len());
-        let mut ambiguous: Vec<String> = Vec::new();
+        let mut changed = false;
         let mut out = Vec::with_capacity(profiles.len());
         for mut profile in profiles {
             if !seen.insert(profile.id.clone()) {
-                // The colliding id's stored secret belongs to whichever host
-                // wrote it LAST, and nothing records which that was. Leaving it
-                // in place is not merely untidy: the profile that keeps the id
-                // would then send the other host's password to its own server.
-                // Both sides therefore have to re-authenticate.
-                ambiguous.push(profile.id.clone());
                 let fresh = self.unique_id(&seen);
                 seen.insert(fresh.clone());
                 profile.id = fresh;
+                changed = true;
             }
             out.push(profile);
         }
-        if !ambiguous.is_empty() {
+        if changed {
             self.write(&out)?;
-            // After the profiles are persisted, so an interrupted repair leaves
-            // a password to re-enter rather than a duplicate id still in place.
-            for id in ambiguous {
-                self.secrets.clear(&id)?;
-            }
         }
         Ok(out)
     }
@@ -406,51 +368,6 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Default)]
-    struct MemorySecrets(Arc<Mutex<HashMap<String, String>>>);
-
-    impl MemorySecrets {
-        fn seeded(values: &[(&str, &str)]) -> Self {
-            Self(Arc::new(Mutex::new(
-                values
-                    .iter()
-                    .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
-                    .collect(),
-            )))
-        }
-
-        fn get_value(&self, key: &str) -> Option<String> {
-            self.0.lock().unwrap().get(key).cloned()
-        }
-    }
-
-    impl HostSecrets for MemorySecrets {
-        fn get(&self, host_id: &str) -> Result<Option<String>, HostStoreError> {
-            Ok(self.get_value(host_id))
-        }
-
-        fn set(&self, host_id: &str, password: &str) -> Result<(), HostStoreError> {
-            self.0
-                .lock()
-                .unwrap()
-                .insert(host_id.to_string(), password.to_string());
-            Ok(())
-        }
-
-        fn clear(&self, host_id: &str) -> Result<(), HostStoreError> {
-            self.0.lock().unwrap().remove(host_id);
-            Ok(())
-        }
-
-        fn get_legacy(&self) -> Result<Option<String>, HostStoreError> {
-            Ok(self.get_value("legacy"))
-        }
-
-        fn clear_legacy(&self) -> Result<(), HostStoreError> {
-            self.clear("legacy")
-        }
-    }
-
     fn profile_input(id: &str) -> NewHostProfile {
         NewHostProfile {
             name: id.to_string(),
@@ -466,11 +383,7 @@ mod tests {
         // Exactly what the simulator had on disk after adding a second host.
         let stored = r##"[{"id":"host-0","name":"first","color":"#89b4fa","host":"10.0.0.1","port":"8097","identityName":"first","order":0},{"id":"host-0","name":"second","color":"#89b4fa","host":"10.0.0.2","port":"8100","identityName":"second","order":1}]"##;
         let storage = MemoryStorage::seeded(&[(HOST_PROFILES_KEY, stored)]);
-        // The secret the collision left behind. It was written by whichever host
-        // saved last, so it belongs to neither profile in particular — the whole
-        // point of the assertion below.
-        let secrets = MemorySecrets::seeded(&[("host-0", "second-hosts-password")]);
-        let store = HostStore::new(storage.clone(), secrets.clone(), || "host-0".to_string());
+        let store = HostStore::new(storage.clone(), || "host-0".to_string());
 
         let profiles = store.list().unwrap();
         assert_eq!(profiles.len(), 2);
@@ -482,12 +395,6 @@ mod tests {
         // Persisted, so the split survives the next launch.
         let reread = parse_profiles(storage.get(HOST_PROFILES_KEY).as_deref());
         assert_eq!(reread, profiles);
-
-        // The ambiguous secret is GONE for both ids. Keeping it under the
-        // profile that retained the id would have sent the second host's
-        // password to the first host's server.
-        assert_eq!(secrets.get_value("host-0"), None);
-        assert_eq!(secrets.get_value(&profiles[1].id), None);
     }
 
     #[test]
@@ -495,7 +402,7 @@ mod tests {
         // The iOS generator is a counter built at launch, so a second app run
         // starts back at `host-0`. A constant generator is that bug at its worst.
         let storage = MemoryStorage::default();
-        let store = HostStore::new(storage, MemorySecrets::default(), || "host-0".to_string());
+        let store = HostStore::new(storage, || "host-0".to_string());
 
         let first = store
             .create(NewHostProfile {
@@ -519,9 +426,9 @@ mod tests {
         assert_ne!(first.id, second.id);
         assert_eq!(store.list().unwrap().len(), 2);
 
-        // The reason the invariant matters: the keychain and the session cache
+        // The reason the invariant matters: Noise keys and the session cache
         // are both keyed by this id, so a duplicate makes the newer host take
-        // over the older one's password and cached sessions.
+        // over the older one's pairing and cached sessions.
         let ids: Vec<String> = store.list().unwrap().into_iter().map(|p| p.id).collect();
         assert_eq!(
             ids.iter().collect::<std::collections::HashSet<_>>().len(),
@@ -530,13 +437,12 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_address_and_password_only_after_the_new_profile_is_readable() {
+    fn migrates_legacy_address_only_after_the_new_profile_is_readable() {
         let storage = MemoryStorage::seeded(&[
             (LEGACY_SERVER_IP_KEY, "agent.local"),
             (LEGACY_PORT_KEY, "9000"),
         ]);
-        let secrets = MemorySecrets::seeded(&[("legacy", "correct horse battery staple")]);
-        let store = HostStore::new(storage.clone(), secrets.clone(), || "host-1".to_string());
+        let store = HostStore::new(storage.clone(), || "host-1".to_string());
 
         assert_eq!(
             store.list().unwrap(),
@@ -553,45 +459,30 @@ mod tests {
         assert!(storage.get(HOST_PROFILES_KEY).unwrap().contains("host-1"));
         assert_eq!(storage.get(LEGACY_SERVER_IP_KEY), None);
         assert_eq!(storage.get(LEGACY_PORT_KEY), None);
-        assert_eq!(
-            secrets.get_value("host-1").as_deref(),
-            Some("correct horse battery staple")
-        );
-        assert_eq!(secrets.get_value("legacy"), None);
     }
 
     #[test]
-    fn does_not_create_a_profile_or_consume_a_password_without_a_legacy_address() {
+    fn does_not_create_a_profile_without_a_legacy_address() {
         let storage = MemoryStorage::default();
-        let secrets = MemorySecrets::seeded(&[("legacy", "orphaned-password")]);
-        let store = HostStore::new(storage, secrets.clone(), || "unused".to_string());
+        let store = HostStore::new(storage, || "unused".to_string());
 
         assert_eq!(store.list().unwrap(), Vec::<HostProfile>::new());
-        assert_eq!(
-            secrets.get_value("legacy").as_deref(),
-            Some("orphaned-password")
-        );
     }
 
     #[test]
     fn treats_an_empty_legacy_address_as_absent() {
         let storage = MemoryStorage::seeded(&[(LEGACY_SERVER_IP_KEY, "")]);
-        let secrets = MemorySecrets::seeded(&[("legacy", "orphaned-password")]);
-        let store = HostStore::new(storage.clone(), secrets.clone(), || "unused".to_string());
+        let store = HostStore::new(storage.clone(), || "unused".to_string());
 
         assert_eq!(store.list().unwrap(), Vec::<HostProfile>::new());
         assert_eq!(storage.get(LEGACY_SERVER_IP_KEY).as_deref(), Some(""));
-        assert_eq!(
-            secrets.get_value("legacy").as_deref(),
-            Some("orphaned-password")
-        );
     }
 
     #[test]
     fn defaults_an_empty_legacy_port_to_8085() {
         let storage =
             MemoryStorage::seeded(&[(LEGACY_SERVER_IP_KEY, "agent.local"), (LEGACY_PORT_KEY, "")]);
-        let store = HostStore::new(storage, MemorySecrets::default(), || "host-1".to_string());
+        let store = HostStore::new(storage, || "host-1".to_string());
 
         assert_eq!(store.list().unwrap()[0].port, "8085");
     }
@@ -605,8 +496,7 @@ mod tests {
                 (LEGACY_PORT_KEY, "8085"),
             ])
         };
-        let secrets = MemorySecrets::seeded(&[("legacy", "legacy-password")]);
-        let store = HostStore::new(storage.clone(), secrets, || "host-1".to_string());
+        let store = HostStore::new(storage.clone(), || "host-1".to_string());
 
         assert_eq!(
             store.list(),
@@ -622,14 +512,10 @@ mod tests {
     #[test]
     fn creates_updates_deletes_and_reorders_profiles_with_sequential_order_values() {
         let mut next_id = 0;
-        let store = HostStore::new(
-            MemoryStorage::default(),
-            MemorySecrets::default(),
-            move || {
-                next_id += 1;
-                format!("host-{next_id}")
-            },
-        );
+        let store = HostStore::new(MemoryStorage::default(), move || {
+            next_id += 1;
+            format!("host-{next_id}")
+        });
 
         let first = store.create(profile_input("ignored")).unwrap();
         let second = store.create(profile_input("ignored")).unwrap();

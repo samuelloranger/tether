@@ -56,7 +56,7 @@ pub struct AppState {
     pub poll_generation: AtomicU64,
     pub http: reqwest::Client,
     pub session_cache: Mutex<SessionCache<()>>,
-    /// Per-host Noise REST bearers. Password hosts never touch this map.
+    /// Per-host Noise REST bearers.
     pub noise_tokens: Mutex<HashMap<String, CachedToken>>,
 }
 

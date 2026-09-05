@@ -9,11 +9,7 @@ import Foundation
 extension SessionStore {
   public func makeGitClient() -> NativeHostClient? {
     guard let host = activeHost else { return nil }
-    let adapter = HostStoreAdapter()
-    guard let password = try? adapter.password(for: host.id), !password.isEmpty else {
-      return nil
-    }
-    return NativeHostClient(profile: host, password: password)
+    return client(for: host.id)
   }
 
   public func loadDiffSummary() async -> DiffSummary? {
@@ -179,7 +175,7 @@ public enum GitLoadError: LocalizedError {
   public var errorDescription: String? {
     switch self {
     case .noSession: "Open a terminal to see its changes."
-    case .noCredentials: "This server needs its password again."
+    case .noCredentials: "This host needs pairing again."
     }
   }
 }

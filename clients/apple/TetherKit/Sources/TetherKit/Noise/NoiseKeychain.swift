@@ -4,9 +4,8 @@ import Foundation
 /// pinned server static public key learned at pairing time. Kept behind a
 /// protocol so unit tests can drive a fake instead of the real Keychain.
 ///
-/// Keys are raw curve bytes (`Data`), never UTF-8 strings — the password store
-/// (`KeychainSecretStore`) is a separate item namespace, so the two never
-/// collide even though both live under the same Keychain service.
+/// Keys are raw curve bytes (`Data`), never UTF-8 strings. They live in their
+/// own Keychain item namespace so they never collide with other host records.
 public protocol NoiseKeyStore {
   func loadDevicePrivateKey(hostId: String) throws -> Data?
   func saveDevicePrivateKey(_ key: Data, hostId: String) throws

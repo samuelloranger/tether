@@ -405,47 +405,36 @@ public enum ConfigClientError: Error, LocalizedError {
 
 extension NativeHostClient {
   public func fetchServerConfig() async throws -> ServerConfig {
-    let request = try configRequest(path: "/api/config")
+    let request = try await configRequest(path: "/api/config")
     return try await decodeConfig(ServerConfig.self, request: request)
   }
 
   public func patchServerConfig(_ patch: ServerConfigPatch) async throws -> ServerConfig {
     let body = try JSONSerialization.data(withJSONObject: patch.jsonObject())
-    let request = try configRequest(path: "/api/config", method: "PATCH", body: body)
+    let request = try await configRequest(path: "/api/config", method: "PATCH", body: body)
     return try await decodeConfig(ServerConfig.self, request: request)
   }
 
   public func fetchServerVersion() async throws -> String? {
-    let request = try configRequest(path: "/api/health")
+    let request = try await configRequest(path: "/api/health")
     let body = try await decodeConfig(HealthVersionResponse.self, request: request)
     return body.version
   }
 
-  public func changeServerPassword(current: String, next: String) async throws {
-    let body = try JSONSerialization.data(withJSONObject: [
-      "current": current,
-      "next": next,
-    ])
-    let request = try configRequest(path: "/api/admin/password", method: "POST", body: body)
-    _ = try await decodeConfig(AdminOkResponse.self, request: request)
-  }
-
-  public func updateServer(current: String) async throws -> AdminOkResponse {
-    let body = try JSONSerialization.data(withJSONObject: ["current": current])
-    let request = try configRequest(path: "/api/admin/update", method: "POST", body: body)
+  public func updateServer() async throws -> AdminOkResponse {
+    let request = try await configRequest(path: "/api/admin/update", method: "POST")
     return try await decodeConfig(AdminOkResponse.self, request: request)
   }
 
-  public func restartServer(current: String) async throws {
-    let body = try JSONSerialization.data(withJSONObject: ["current": current])
-    let request = try configRequest(path: "/api/admin/restart", method: "POST", body: body)
+  public func restartServer() async throws {
+    let request = try await configRequest(path: "/api/admin/restart", method: "POST")
     _ = try await decodeConfig(AdminOkResponse.self, request: request)
   }
 
   public func sendTestNotification() async throws {
     let empty: [String: Any] = [:]
     let body = try JSONSerialization.data(withJSONObject: empty)
-    let request = try configRequest(
+    let request = try await configRequest(
       path: "/api/admin/test-notification",
       method: "POST",
       body: body)
@@ -463,20 +452,14 @@ extension NativeHostClient {
     path: String,
     method: String = "GET",
     body: Data? = nil
-  ) throws -> URLRequest {
+  ) async throws -> URLRequest {
     guard let base = profile.baseHTTPURL else { throw HostClientError.invalidURL }
     let url = base.appendingPathComponent(
       path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     )
-    guard
-      let password = try KeychainSecretStore().get(hostId: profile.id),
-      !password.isEmpty
-    else {
-      throw HostClientError.missingPassword
-    }
     var request = URLRequest(url: url)
     request.httpMethod = method
-    request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let body {
       request.httpBody = body

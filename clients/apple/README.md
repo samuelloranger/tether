@@ -34,7 +34,7 @@ The XCFramework and Swift binding paths are fixed contracts — do not relocate 
 
 ## Architecture
 
-- **TetherKit** wraps UniFFI types, implements `KeychainSecretStore` / `UserDefaultsHostStorage`, and exposes `@Observable SessionStore`.
+- **TetherKit** wraps UniFFI types, implements `UserDefaultsHostStorage`, and exposes `@Observable SessionStore`.
 - **TetherSurfaceView** decodes packed TGRD grid snapshots and draws with CoreText (generation-gated redraw).
 - **TetherIOS** is the app shell: NavigationSplitView (hosts + sessions drawer, terminal detail), deep links (`tether://session/<id>?host=<identityName>`), native keyboard.
 

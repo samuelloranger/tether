@@ -47,7 +47,7 @@ Allow it for the network profiles you actually connect over. If you dismissed th
 New-NetFirewallRule -DisplayName 'Tether' -Direction Inbound -Program "$env:LOCALAPPDATA\Programs\tether\tether.exe" -Action Allow
 ```
 
-This only decides who can *reach* the port. Who can *use* it is still the password — see [Security & networking](/security).
+This only decides who can *reach* the port. Who can *use* it is per-device Noise pairing (`tether pair`) — see [Security & networking](/security).
 
 ## Shells
 
@@ -99,4 +99,4 @@ The release matrix builds Windows x64 only. Both the installer and `tether updat
 
 ## Everything else
 
-Data lives in `%USERPROFILE%\.tether` — `config\tether.db` holds the password and sessions, and the pid and log files sit beside it, exactly as `~/.tether` does elsewhere. `TETHER_DB_PATH`, `TETHER_PORT`, `TETHER_TLS`, `TETHER_TLS_PORT` and `TETHER_REPO_SLUG` all behave the same; see [Updating & data](/updating).
+Data lives in `%USERPROFILE%\.tether` — `config\tether.db` holds sessions, and the pid and log files sit beside it, exactly as `~/.tether` does elsewhere. `TETHER_DB_PATH`, `TETHER_PORT`, `TETHER_TLS`, `TETHER_TLS_PORT` and `TETHER_REPO_SLUG` all behave the same; see [Updating & data](/updating).

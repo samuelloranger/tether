@@ -140,7 +140,7 @@ public struct ConfigSettingsView: View {
 public struct HostSettingsView: View {
   @Bindable public var store: SessionStore
   public let hostId: String
-  @State private var password = ""
+  @State private var nameDraft = ""
   @State private var confirmRemove = false
 
   public init(store: SessionStore, hostId: String) {
@@ -161,30 +161,28 @@ public struct HostSettingsView: View {
           } label: {
             Label("Server settings", systemImage: "server.rack")
           }
-          // Device management rides the authenticated Noise session, so only
-          // Noise hosts get it — a password host has no device roster.
-          if store.authMode(for: hostId) == .noise {
-            NavigationLink {
-              DevicesView(store: store, hostId: hostId)
-            } label: {
-              Label("Devices", systemImage: "lock.laptopcomputer")
-            }
+          NavigationLink {
+            DevicesView(store: store, hostId: hostId)
+          } label: {
+            Label("Devices", systemImage: "lock.laptopcomputer")
           }
+        }
+
+        Section("Name") {
+          TextField("Name", text: $nameDraft)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+          Button("Rename") {
+            Task { await store.renameHost(hostId: hostId, name: nameDraft) }
+          }
+          .disabled(
+            nameDraft.trimmingCharacters(in: .whitespaces).isEmpty || nameDraft == host.name
+          )
         }
 
         Section("Connection") {
           LabeledContent("Host", value: host.host)
           LabeledContent("Port", value: host.port)
-          SecureField("New password", text: $password)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-          Button("Save password") {
-            Task {
-              await store.savePassword(password, for: hostId)
-              password = ""
-            }
-          }
-          .disabled(password.isEmpty || store.isLoading)
         }
 
         Section {
@@ -194,6 +192,7 @@ public struct HostSettingsView: View {
         }
       }
     }
+    .task { nameDraft = host?.name ?? "" }
     .navigationTitle(host?.name ?? "Host")
     .confirmationDialog(
       "Remove this host?",

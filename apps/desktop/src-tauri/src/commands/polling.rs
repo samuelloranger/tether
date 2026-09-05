@@ -1,20 +1,17 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tether_core::host_client::HostClient;
 use tether_core::host_health::{host_health_status_label, initial_host_health, HostHealth};
 use tether_core::host_polling::poll_host_sessions;
 use tether_core::host_polling::HostPollInput;
 use tether_core::host_store::HostProfile;
-use tether_core::host_store::HostSecrets;
 use tether_core::session_host_ops::{
     health_after_poll, reduce_session_list_response, PollResult, RefreshOutcome,
 };
 use tether_core::terminal_session_logic::SessionRow;
 
-use crate::http;
+use crate::commands::noise::execute_authed;
 use crate::state::{shared_from_app, SharedState};
-use crate::storage::KeyringHostSecrets;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,25 +72,11 @@ async fn poll_one_host(app: AppHandle, profile: HostProfile, generation: u64) {
             .or_insert_with(initial_host_health)
     };
 
-    let password = match KeyringHostSecrets.get(&profile.id) {
-        Ok(Some(password)) => password,
-        _ => {
-            finish_poll(
-                &app,
-                &state,
-                &profile,
-                previous_health,
-                PollResult::Failure,
-                None,
-                generation,
-            );
-            return;
-        }
-    };
-
-    let client = HostClient::new(profile.clone(), password);
-    let request = client.get("/api/sessions", Default::default());
-    let input = match http::execute(&state.http, &request).await {
+    let input = match execute_authed(&state, &profile, |client| {
+        client.get("/api/sessions", Default::default())
+    })
+    .await
+    {
         Ok(response) => HostPollInput::Http {
             status: response.status,
             body: response.body,

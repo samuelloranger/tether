@@ -10,6 +10,7 @@ import {
   resolveTarget,
   revokeDevice,
   touchDevice,
+  upsertDevice,
 } from './deviceRegistry';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -56,6 +57,29 @@ test('getDeviceByPubkey finds an inserted device and returns null for unknown', 
   expect(found?.id).toBe(inserted.id);
   expect(found?.label).toBe('laptop');
   expect(getDeviceByPubkey(pubkeyFill(3))).toBeNull();
+});
+
+test('upsertDevice inserts a new pubkey like addDevice', () => {
+  const pubkey = pubkeyFill(5);
+  const device = upsertDevice({ label: 'iphone', pubkey, address: '10.0.0.1' });
+  expect(device.pubkey).toBe(pubkey);
+  expect(device.label).toBe('iphone');
+  expect(device.id).toMatch(UUID_V4);
+  expect(device.lastAddress).toBe('10.0.0.1');
+  expect(listDevices()).toHaveLength(1);
+});
+
+test('upsertDevice re-pairs an existing pubkey in place — no duplicate, updates label/address', () => {
+  const pubkey = pubkeyFill(6);
+  const first = upsertDevice({ label: 'iphone', pubkey, address: '10.0.0.1' });
+  const second = upsertDevice({ label: 'iphone-2', pubkey, address: '10.0.0.2' });
+  // Same identity (pubkey) → exactly one row, updated in place.
+  expect(listDevices()).toHaveLength(1);
+  expect(second.id).toBe(first.id);
+  expect(second.pubkey).toBe(pubkey);
+  expect(second.label).toBe('iphone-2');
+  expect(second.lastAddress).toBe('10.0.0.2');
+  expect(getDeviceByPubkey(pubkey)?.label).toBe('iphone-2');
 });
 
 test('a duplicate pubkey throws RegistryError duplicate', () => {

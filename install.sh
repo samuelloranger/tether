@@ -92,7 +92,7 @@ if [ -f "$PID_FILE" ]; then
     kill "$oldpid" 2>/dev/null || true
     # SIGTERM returns immediately; wait for the process to actually exit so it has
     # released the SQLite DB before the first-run migration copies it (else the
-    # copy can be torn / lose the password or sessions). Escalate after ~5s.
+    # copy can be torn / lose sessions). Escalate after ~5s.
     i=0
     while kill -0 "$oldpid" 2>/dev/null; do
       i=$((i + 1))
@@ -117,7 +117,7 @@ case ":${PATH}:" in
     ;;
 esac
 if [ -d "${HOME}/.tether/app" ]; then
-  echo "Note: old ~/.tether/app detected. Your database (password + sessions) migrates automatically on first run; delete ~/.tether/app afterward. Live PTY sessions from the old server won't reattach across the upgrade."
+  echo "Note: old ~/.tether/app detected. Your database (sessions) migrates automatically on first run; delete ~/.tether/app afterward. Live PTY sessions from the old server won't reattach across the upgrade."
 fi
-echo "Next: $cmd set-password && $cmd start"
-echo "SECURITY: a password gates access. TLS is served on :8443 (self-signed, pinned by the client) alongside plaintext :8085 for older clients — still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only."
+echo "Next: $cmd start && $cmd pair"
+echo "SECURITY: pair a device with \`$cmd pair\`. TLS is served on :8443 (self-signed, pinned by the client) alongside plaintext :8085 for older clients — still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only."

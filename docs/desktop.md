@@ -21,7 +21,7 @@ The macOS and Windows builds aren't code-signed yet, so the OS may warn on first
 
 ## Connecting
 
-Same as iOS: on the setup screen enter your server's **host/IP**, **port** (default `8085`), and **password**, then **Test connection** and **Save & connect**. The password is stored locally by the app. See [Getting started](/getting-started#_4-connect) for what each test result means, and [Security & networking](/security) — the password gates access but does not encrypt traffic, so run Tether behind a tunnel.
+Same as iOS: on the setup screen enter your server's **host/IP** and **port** (default `8085`), then the **12-char code** from `tether pair` (or scan the QR). The device enrolls over Noise — there is no password. Repeat `tether pair` once per device. See [Getting started](/getting-started#_4-pair-the-device). The cert is self-signed, so still run Tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only — see [Security & networking](/security).
 
 ## Updating
 

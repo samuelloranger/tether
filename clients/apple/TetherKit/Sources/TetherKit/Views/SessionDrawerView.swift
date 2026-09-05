@@ -3,20 +3,17 @@ import SwiftUI
 public struct SessionDrawerView: View {
   @Bindable public var store: SessionStore
   public var onSelectSession: (String, String) -> Void
-  public var onReenterPassword: (String) -> Void
   public var onHostSettings: (String) -> Void
   public var onClose: () -> Void
 
   public init(
     store: SessionStore,
     onSelectSession: @escaping (String, String) -> Void,
-    onReenterPassword: @escaping (String) -> Void,
     onHostSettings: @escaping (String) -> Void,
     onClose: @escaping () -> Void
   ) {
     self.store = store
     self.onSelectSession = onSelectSession
-    self.onReenterPassword = onReenterPassword
     self.onHostSettings = onHostSettings
     self.onClose = onClose
   }
@@ -61,7 +58,6 @@ public struct SessionDrawerView: View {
                 onClose()
                 Task { await store.newTerminal(hostId: host.id) }
               },
-              onReenterPassword: onReenterPassword,
               onHostSettings: onHostSettings
             )
           }
@@ -106,7 +102,6 @@ private struct HostDrawerSection: View {
   let onKillSession: (String) -> Void
   let onRetryHost: () -> Void
   let onNewTerminal: () -> Void
-  let onReenterPassword: (String) -> Void
   let onHostSettings: (String) -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -225,11 +220,9 @@ private struct HostDrawerSection: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(TetherColors.accent)
     case .unauthorized:
-      Button("Re-enter password") {
-        onReenterPassword(host.id)
-      }
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(TetherColors.accent)
+      Button("Pair again", action: onRetryHost)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(TetherColors.accent)
     }
   }
 }

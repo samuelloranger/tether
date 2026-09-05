@@ -3,7 +3,7 @@ import { coreCacheDelete, coreCacheIds, coreCacheTouch } from './coreApi';
 import { EmptyPanePicker } from './EmptyPanePicker';
 import type { FrameApplyResult } from './frameHandler';
 import { layoutTree } from './layoutRects';
-import { isNoiseHost, noiseSessionAddress } from './noiseHosts';
+import { noiseSessionAddress } from './noiseHosts';
 import { PaneDivider } from './PaneDivider';
 import type { PaneDir, PaneNode, PaneSide } from './paneTree';
 import type { UI_THEMES } from './preferences';
@@ -12,12 +12,10 @@ import { SplitPreviewOverlay } from './SplitPreviewOverlay';
 import { sessionKey } from './sessionKey';
 import { TerminalPane } from './TerminalPane';
 import type { DrawerSession, HostProfile } from './types';
-import { wsOriginFor } from './types';
 import type { TabDropTarget } from './useTabDrag';
 
 export interface ResidentTerminalsProps {
   hosts: HostProfile[];
-  passwords: Record<string, string>;
   sessions: DrawerSession[];
   tree: PaneNode;
   focusedPaneId: string;
@@ -151,11 +149,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
               hostId={session.hostId}
               sessionId={session.sessionId}
               interactive={leaf.paneId === props.focusedPaneId}
-              wsOrigin={wsOriginFor(host)}
-              password={props.passwords[session.hostId] ?? ''}
-              noiseAddress={
-                isNoiseHost(session.hostId) ? noiseSessionAddress(host.host, host.port) : undefined
-              }
+              noiseAddress={noiseSessionAddress(host.host, host.port)}
               terminalTheme={props.terminalTheme}
               fontFamily={props.fontFamily}
               fontSize={props.fontSize}

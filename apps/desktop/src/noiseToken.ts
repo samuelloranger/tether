@@ -1,5 +1,3 @@
-import { isNoiseHost, noiseSessionAddress } from './noiseHosts';
-
 export type MintedToken = { token: string; expiresAt: string };
 export type MintFn = (hostId: string, address: string) => Promise<MintedToken>;
 
@@ -89,20 +87,4 @@ export function getToken(hostId: string, address: string): Promise<string> {
 /** Drop the cached token so the next `getToken` remints (the 401 path). */
 export function invalidateToken(hostId: string): void {
   defaultTokenCache().invalidate(hostId);
-}
-
-/**
- * Bearer value for a REST call: a minted device token on a Noise host, the
- * shared password otherwise. Additive — password hosts are unchanged.
- */
-export async function restBearer(
-  hostId: string,
-  host: string,
-  port: string,
-  password: string,
-): Promise<string> {
-  if (isNoiseHost(hostId)) {
-    return getToken(hostId, noiseSessionAddress(host, port));
-  }
-  return password;
 }

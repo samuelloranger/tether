@@ -10,7 +10,6 @@ import { setFileOpenListener } from './fileOpenBus';
 import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
-import { HostFormScreen } from './HostFormScreen';
 import { HostsScreen } from './HostsScreen';
 import { activeSessionDot, litStateFor, shellVars } from './litTheme';
 import { PairDeviceScreen } from './PairDeviceScreen';
@@ -45,7 +44,6 @@ import { SessionDrawer } from './SessionDrawer';
 import { SessionModalHost, useSessionModals } from './SessionModals';
 import { SessionChrome } from './SessionTabBar';
 import { LocalSettingsScreen } from './SettingsScreen';
-import { hostSecrets } from './secureConfig';
 import { sessionKey } from './sessionKey';
 import { TerminalEmpty } from './TerminalEmpty';
 import { type DrawerSession, type HostHealthStatus, httpOriginFor } from './types';
@@ -356,11 +354,6 @@ export function App() {
     onSession: openSession,
   });
 
-  const editingHost = useMemo(
-    () => app.hosts.find((host) => host.id === app.editingHostId) ?? null,
-    [app.hosts, app.editingHostId],
-  );
-
   const settingsHost = useMemo(
     () => app.hosts.find((host) => host.id === app.settingsHostId) ?? app.activeHost,
     [app.hosts, app.settingsHostId, app.activeHost],
@@ -395,7 +388,7 @@ export function App() {
     );
   }
 
-  if (app.screen === 'pair-device') {
+  if (app.hosts.length === 0 || app.screen === 'pair-device') {
     return (
       <div className="app-shell centered" {...shellProps}>
         <PairDeviceScreen
@@ -423,29 +416,6 @@ export function App() {
     );
   }
 
-  if (app.hosts.length === 0 || app.screen === 'host-form') {
-    return (
-      <div className="app-shell centered" {...shellProps}>
-        <HostFormScreen
-          editing={editingHost}
-          onCancel={() => {
-            if (app.hosts.length === 0) return;
-            app.setScreen('main');
-            app.setEditingHostId(null);
-          }}
-          onSave={async (input) => {
-            let password = input.password;
-            if (input.id && !password) {
-              password = (await hostSecrets.get(input.id)) ?? '';
-            }
-            await app.saveHost({ ...input, password });
-          }}
-        />
-        <AlertModal />
-      </div>
-    );
-  }
-
   if (app.screen === 'hosts') {
     return (
       <div className="app-shell centered" {...shellProps}>
@@ -453,15 +423,7 @@ export function App() {
           hosts={app.hosts}
           healthByHost={app.healthByHost}
           onBack={() => app.setScreen('main')}
-          onAdd={() => {
-            app.setEditingHostId(null);
-            app.setScreen('host-form');
-          }}
-          onPairDevice={() => app.setScreen('pair-device')}
-          onEdit={(hostId) => {
-            app.setEditingHostId(hostId);
-            app.setScreen('host-form');
-          }}
+          onAdd={() => app.setScreen('pair-device')}
           onDevices={(hostId) => {
             app.setSettingsHostId(hostId);
             app.setScreen('devices');
@@ -498,18 +460,11 @@ export function App() {
             app.setScreen('main');
           }}
           onRetry={() => app.retryHost(settingsHost.id)}
-          onUnauthorized={() => {
-            app.setEditingHostId(settingsHost.id);
-            app.setScreen('host-form');
-          }}
           onIdentitySaved={(identity) => {
             void app.updateHostIdentity(settingsHost.id, identity);
           }}
-          onPasswordChanged={async (password) => {
-            await app.updateHostPassword(settingsHost.id, password);
-          }}
-          onConnectionSaved={async (changes, replacementPassword) => {
-            await app.updateHostConnection(settingsHost.id, changes, replacementPassword);
+          onConnectionSaved={async (changes) => {
+            await app.updateHostConnection(settingsHost.id, changes);
           }}
           onRemoveHost={async () => {
             await app.removeHost(settingsHost.id);
@@ -565,10 +520,6 @@ export function App() {
             onRequestKill={modals.openKill}
             onRequestRename={modals.openRename}
             onRetryHost={app.retryHost}
-            onReenterPassword={(hostId) => {
-              app.setEditingHostId(hostId);
-              app.setScreen('host-form');
-            }}
             onOpenHosts={() => app.setScreen('hosts')}
             onOpenSettings={() => openOverflow('start')}
             onOpenHostSettings={(hostId) => {
@@ -621,7 +572,6 @@ export function App() {
                   />
                   <ResidentTerminals
                     hosts={app.hosts}
-                    passwords={app.passwords}
                     sessions={app.sessions}
                     tree={tree}
                     focusedPaneId={focusedPaneId}

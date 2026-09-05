@@ -85,6 +85,33 @@ export function addDevice(input: { label: string; pubkey: string; address?: stri
   };
 }
 
+/**
+ * Enrol a device, idempotently. A brand-new pubkey is inserted like
+ * `addDevice`; an already-registered pubkey (the same physical device pairing
+ * again — e.g. after a client-side hiccup where the server enrolled but the
+ * device never saw the verdict) is updated in place rather than rejected as a
+ * duplicate. This is what the pairing flow uses so a re-pair always succeeds.
+ */
+export function upsertDevice(input: {
+  label: string;
+  pubkey: string;
+  address?: string;
+}): AuthDevice {
+  const existing = getDeviceByPubkey(input.pubkey);
+  if (!existing) return addDevice(input);
+  const pairedAt = new Date().toISOString();
+  db.query(
+    `UPDATE auth_devices SET label = $label, last_address = $lastAddress, paired_at = $pairedAt
+       WHERE pubkey = $pubkey`,
+  ).run({
+    $label: input.label,
+    $lastAddress: input.address ?? null,
+    $pairedAt: pairedAt,
+    $pubkey: input.pubkey,
+  });
+  return { ...existing, label: input.label, lastAddress: input.address ?? null, pairedAt };
+}
+
 export function listDevices(): AuthDevice[] {
   const rows = db
     .query(

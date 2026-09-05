@@ -23,7 +23,6 @@ pub use grid_snapshot::{
 pub use host_health::FfiHostHealth;
 pub use host_store::{
     FfiHostProfile, FfiHostProfileChanges, FfiNewHostProfile, HostStorage, HostStoreHandle,
-    SecretStore,
 };
 pub use noise::{
     noise_derive_psk, noise_gen_keypair, FfiNoiseError, FfiNoiseKeypair, FfiNoiseSession,

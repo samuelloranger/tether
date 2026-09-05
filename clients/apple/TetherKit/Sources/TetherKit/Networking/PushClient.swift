@@ -33,18 +33,10 @@ extension NativeHostClient {
     let url = base.appendingPathComponent(
       path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     )
-    // Password is file-private on the actor; re-read from the same Keychain
-    // account NativeHostClient was built with (`tether_password_<hostId>`).
-    guard
-      let password = try KeychainSecretStore().get(hostId: profile.id),
-      !password.isEmpty
-    else {
-      throw HostClientError.missingPassword
-    }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.httpBody = body
-    request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     let (_, response) = try await URLSession.shared.data(for: request)

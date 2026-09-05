@@ -27,7 +27,7 @@ pub struct HttpRequest {
 #[derive(Clone)]
 pub struct HostClient {
     pub profile: HostProfile,
-    password: String,
+    bearer: String,
 }
 
 impl fmt::Debug for HostClient {
@@ -35,16 +35,16 @@ impl fmt::Debug for HostClient {
         formatter
             .debug_struct("HostClient")
             .field("profile", &self.profile)
-            .field("password", &"[redacted]")
+            .field("bearer", &"[redacted]")
             .finish()
     }
 }
 
 impl HostClient {
-    pub fn new(profile: HostProfile, password: impl Into<String>) -> Self {
+    pub fn new(profile: HostProfile, bearer: impl Into<String>) -> Self {
         Self {
             profile,
-            password: password.into(),
+            bearer: bearer.into(),
         }
     }
 
@@ -55,7 +55,7 @@ impl HostClient {
     pub fn auth_header(&self) -> BTreeMap<String, String> {
         BTreeMap::from([(
             "Authorization".to_string(),
-            format!("Bearer {}", self.password),
+            format!("Bearer {}", self.bearer),
         )])
     }
 
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_http_and_websocket_urls_without_putting_the_password_in_them() {
+    fn builds_http_and_websocket_urls_without_putting_the_bearer_in_them() {
         let client = HostClient::new(profile(), "not-in-a-url");
         assert_eq!(
             client.url("/api/sessions?status=running"),

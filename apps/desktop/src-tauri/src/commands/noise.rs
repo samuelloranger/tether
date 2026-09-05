@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tether_core::host_client::{HostClient, HttpRequest};
-use tether_core::host_store::{HostProfile, HostSecrets};
+use tether_core::host_store::HostProfile;
 use tether_core::noise::driver::{client_pair, client_reconnect, Transport};
 use tether_core::noise::pairing::{derive_public, generate_static_keypair};
 use tether_core::noise::{code, psk, NoiseSession};
@@ -27,7 +27,6 @@ use crate::noise_token::{
 };
 use crate::noise_ws::{NoiseWs, NoiseWsRx, NoiseWsTx};
 use crate::state::{AppState, NoiseHandle, SharedState};
-use crate::storage::KeyringHostSecrets;
 use tether_core::workspace::UploadPlan;
 
 fn fingerprint(key: &[u8]) -> String {
@@ -249,8 +248,7 @@ pub async fn core_noise_revoke(
 }
 
 /// Mint a per-device REST bearer over a dedicated management session. Fail-closed:
-/// a reconnect/handshake failure (revoked or unknown device) errors rather than
-/// falling back to the shared password.
+/// a reconnect/handshake failure (revoked or unknown device) errors.
 pub(crate) async fn mint_noise_token(
     host_id: &str,
     address: &str,
@@ -294,45 +292,40 @@ pub(crate) fn invalidate_cached_token(state: &AppState, host_id: &str) {
     }
 }
 
-/// REST bearer for `profile`: a cached-or-freshly-minted Noise token when the
-/// host is paired, otherwise the keyring password (unchanged).
+/// REST bearer for `profile`: a cached-or-freshly-minted Noise token.
 pub(crate) async fn bearer_for_host(
     state: &AppState,
     profile: &HostProfile,
 ) -> Result<String, String> {
-    if is_noise_host(&profile.id)? {
-        {
-            let cache = state
-                .noise_tokens
-                .lock()
-                .map_err(|error| error.to_string())?;
-            if let Some(token) = cached_token_if_fresh(&cache, &profile.id, Instant::now()) {
-                return Ok(token);
-            }
-        }
-        let address = noise_session_address(profile);
-        let (token, expires_at) = mint_noise_token(&profile.id, &address).await?;
-        {
-            let mut cache = state
-                .noise_tokens
-                .lock()
-                .map_err(|error| error.to_string())?;
-            store_token(
-                &mut cache,
-                &profile.id,
-                token.clone(),
-                &expires_at,
-                Instant::now(),
-                SystemTime::now(),
-            );
-        }
-        Ok(token)
-    } else {
-        Ok(KeyringHostSecrets
-            .get(&profile.id)
-            .map_err(|error| error.to_string())?
-            .unwrap_or_default())
+    if !is_noise_host(&profile.id)? {
+        return Err("host is not Noise-paired".to_string());
     }
+    {
+        let cache = state
+            .noise_tokens
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if let Some(token) = cached_token_if_fresh(&cache, &profile.id, Instant::now()) {
+            return Ok(token);
+        }
+    }
+    let address = noise_session_address(profile);
+    let (token, expires_at) = mint_noise_token(&profile.id, &address).await?;
+    {
+        let mut cache = state
+            .noise_tokens
+            .lock()
+            .map_err(|error| error.to_string())?;
+        store_token(
+            &mut cache,
+            &profile.id,
+            token.clone(),
+            &expires_at,
+            Instant::now(),
+            SystemTime::now(),
+        );
+    }
+    Ok(token)
 }
 
 pub(crate) async fn host_client(
@@ -422,14 +415,14 @@ async fn reconnect_terminal_session(
     Ok((ws, session))
 }
 
-/// Reconnect the live pump after an unexpected socket drop, mirroring the
-/// password path's backoff loop (`core_connect`). Emits `"reconnecting"`, then
-/// retries `NoiseWs::connect` + `client_reconnect` with capped exponential
-/// backoff until it succeeds — swapping in the new socket/session and emitting
-/// `"connected"` — or the cancel flag is set (returns `false`, meaning give up
-/// and let the pump emit close). There is no max-attempt cap on purpose: a
-/// paired terminal should ride out a long server restart the way the password
-/// path does. The cancel flag is checked on both sides of each backoff sleep so
+/// Reconnect the live pump after an unexpected socket drop, using the same
+/// backoff helpers as `commands::connect` (`HEALTHY_MS`, `now_ms`, `random_unit`).
+/// Emits `"reconnecting"`, then retries `NoiseWs::connect` + `client_reconnect`
+/// with capped exponential backoff until it succeeds — swapping in the new
+/// socket/session and emitting `"connected"` — or the cancel flag is set
+/// (returns `false`, meaning give up and let the pump emit close). There is no
+/// max-attempt cap on purpose: a paired terminal should ride out a long server
+/// restart. The cancel flag is checked on both sides of each backoff sleep so
 /// `core_noise_close` stops it promptly.
 #[allow(clippy::too_many_arguments)]
 async fn reconnect(
@@ -491,13 +484,12 @@ async fn reconnect(
 /// - outgoing frontend WS-JSON on the handle's channel → translated + sealed onto
 ///   the socket (`input`/`resize`; `focus` and unknowns dropped).
 ///
-/// **Reconnect (parity with the password path `core_connect`):** an *unexpected*
-/// socket drop while the user has NOT closed the session triggers a
-/// backoff+replay reconnect — rebuild a fresh Noise session to the same
-/// `address`, re-send `start` (the server replays the whole tail, so the
-/// terminal catches up), swap the live socket/session the pump uses, and keep
+/// **Reconnect:** an *unexpected* socket drop while the user has NOT closed the
+/// session triggers a backoff+replay reconnect — rebuild a fresh Noise session
+/// to the same `address`, re-send `start` (the server replays the whole tail, so
+/// the terminal catches up), swap the live socket/session the pump uses, and keep
 /// pumping. `core-status-{conn_id}` emits `"reconnecting"` before each attempt
-/// and `"connected"` on success, mirroring the password path. A user close (the
+/// and `"connected"` on success. A user close (the
 /// cancel flag set by `core_noise_close`, which also drops the outgoing sender)
 /// and a remote `exit` both end the pump and emit `core-closed-{conn_id}`.
 ///
@@ -506,11 +498,10 @@ async fn reconnect(
 /// make the replayed tail (and every later frame) be silently discarded. Keeping
 /// it climbing lets the replayed tail apply and the terminal catch up.
 ///
-/// Retry policy mirrors `core_connect`: reconnect indefinitely with capped
-/// exponential backoff, giving up ONLY when the cancel flag is set (no max
-/// attempts) — a paired terminal should survive a long server restart the same
-/// way the password path does. The cancel flag is honored between retries so
-/// `core_noise_close` stops it promptly.
+/// Retry policy: reconnect indefinitely with capped exponential backoff, giving
+/// up ONLY when the cancel flag is set (no max attempts) — a paired terminal
+/// should survive a long server restart. The cancel flag is honored between
+/// retries so `core_noise_close` stops it promptly.
 ///
 /// TODO: server→client `title`/`activity`/`diff`/`reset` WS message types do not
 /// flow over Noise yet — only `output`/`exit` are translated.

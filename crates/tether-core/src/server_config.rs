@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::host_client::{HostClient, HttpRequest};
@@ -166,21 +166,12 @@ pub fn parse_health_version(
         .map(str::to_string))
 }
 
-/// Admin password change. `current` and `next` go in the JSON body only —
-/// never log or echo them.
-pub fn change_password_request(client: &HostClient, current: &str, next: &str) -> HttpRequest {
-    let body = json!({ "current": current, "next": next }).to_string();
-    client.post("/api/admin/password", json_headers(), Some(body))
+pub fn update_server_request(client: &HostClient) -> HttpRequest {
+    client.post("/api/admin/update", json_headers(), Some("{}".to_string()))
 }
 
-pub fn update_server_request(client: &HostClient, current: &str) -> HttpRequest {
-    let body = json!({ "current": current }).to_string();
-    client.post("/api/admin/update", json_headers(), Some(body))
-}
-
-pub fn restart_server_request(client: &HostClient, current: &str) -> HttpRequest {
-    let body = json!({ "current": current }).to_string();
-    client.post("/api/admin/restart", json_headers(), Some(body))
+pub fn restart_server_request(client: &HostClient) -> HttpRequest {
+    client.post("/api/admin/restart", json_headers(), Some("{}".to_string()))
 }
 
 /// Test notification — token auth only; no password in the body.
@@ -212,6 +203,7 @@ fn api_error(body: &Value, status: u16) -> ServerConfigError {
 mod tests {
     use super::*;
     use crate::host_store::HostProfile;
+    use serde_json::json;
 
     fn client() -> HostClient {
         HostClient::new(
@@ -264,27 +256,14 @@ mod tests {
     }
 
     #[test]
-    fn admin_password_routes_put_current_in_body_not_url() {
-        let req = change_password_request(&client(), "old-secret", "new-secret");
-        assert_eq!(req.url, "http://studio.local:8085/api/admin/password");
-        assert!(!req.url.contains("old-secret"));
-        assert!(!req.url.contains("new-secret"));
-        let body = req.body.as_deref().unwrap();
-        assert!(body.contains(r#""current":"old-secret""#));
-        assert!(body.contains(r#""next":"new-secret""#));
-    }
-
-    #[test]
-    fn update_and_restart_require_current_password_in_body() {
+    fn update_and_restart_are_token_authed_posts_with_empty_json_body() {
         for (req, path) in [
-            (update_server_request(&client(), "pw"), "/api/admin/update"),
-            (
-                restart_server_request(&client(), "pw"),
-                "/api/admin/restart",
-            ),
+            (update_server_request(&client()), "/api/admin/update"),
+            (restart_server_request(&client()), "/api/admin/restart"),
         ] {
             assert!(req.url.ends_with(path));
-            assert_eq!(req.body.as_deref(), Some(r#"{"current":"pw"}"#));
+            assert_eq!(req.body.as_deref(), Some("{}"));
+            assert!(!req.body.as_deref().unwrap().contains("current"));
         }
     }
 

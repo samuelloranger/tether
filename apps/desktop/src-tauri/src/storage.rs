@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tether_core::host_store::{HostSecrets, HostStorage, HostStore, HostStoreError};
+use tether_core::host_store::{HostStorage, HostStore, HostStoreError};
 
 pub struct FileHostStorage {
     path: PathBuf,
@@ -92,79 +92,29 @@ pub fn secret_error_message(error: &keyring::Error) -> String {
 
 fn locked_store_hint() -> &'static str {
     if cfg!(target_os = "macos") {
-        "Your login keychain is locked, so the password could not be saved. \
+        "Your login keychain is locked, so the host keys could not be saved. \
 Unlock it in Keychain Access — select the login keychain, then File → Unlock \
 Keychain — and try again."
     } else {
-        "The system secret store is locked, so the password could not be saved. \
+        "The system secret store is locked, so the host keys could not be saved. \
 Unlock your keyring and try again."
     }
 }
 
 fn no_store_hint() -> &'static str {
     if cfg!(target_os = "macos") {
-        "macOS would not give this app access to the keychain, so the password \
+        "macOS would not give this app access to the keychain, so the host keys \
 could not be saved."
     } else {
-        "No secret service is running, so the password could not be saved. Start \
+        "No secret service is running, so the host keys could not be saved. Start \
 a keyring service (gnome-keyring or kwallet) and try again."
     }
 }
 
-pub struct KeyringHostSecrets;
-
-fn secure_entry(host_id: &str) -> Result<keyring::Entry, HostStoreError> {
-    keyring::Entry::new("tether-desktop", &format!("server-password-{host_id}"))
-        .map_err(|error| HostStoreError::Secret(secret_error_message(&error)))
-}
-
-fn legacy_secure_entry() -> Result<keyring::Entry, HostStoreError> {
-    keyring::Entry::new("tether-desktop", "server-password")
-        .map_err(|error| HostStoreError::Secret(secret_error_message(&error)))
-}
-
-impl HostSecrets for KeyringHostSecrets {
-    fn get(&self, host_id: &str) -> Result<Option<String>, HostStoreError> {
-        match secure_entry(host_id)?.get_password() {
-            Ok(password) => Ok(Some(password)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(HostStoreError::Secret(secret_error_message(&error))),
-        }
-    }
-
-    fn set(&self, host_id: &str, password: &str) -> Result<(), HostStoreError> {
-        secure_entry(host_id)?
-            .set_password(password)
-            .map_err(|error| HostStoreError::Secret(secret_error_message(&error)))
-    }
-
-    fn clear(&self, host_id: &str) -> Result<(), HostStoreError> {
-        match secure_entry(host_id)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(HostStoreError::Secret(secret_error_message(&error))),
-        }
-    }
-
-    fn get_legacy(&self) -> Result<Option<String>, HostStoreError> {
-        match legacy_secure_entry()?.get_password() {
-            Ok(password) => Ok(Some(password)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(HostStoreError::Secret(secret_error_message(&error))),
-        }
-    }
-
-    fn clear_legacy(&self) -> Result<(), HostStoreError> {
-        match legacy_secure_entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(HostStoreError::Secret(secret_error_message(&error))),
-        }
-    }
-}
-
-pub type DesktopHostStore = HostStore<FileHostStorage, KeyringHostSecrets, fn() -> String>;
+pub type DesktopHostStore = HostStore<FileHostStorage, fn() -> String>;
 
 pub fn new_host_store(path: PathBuf) -> DesktopHostStore {
-    HostStore::new(FileHostStorage::new(path), KeyringHostSecrets, || {
+    HostStore::new(FileHostStorage::new(path), || {
         uuid::Uuid::new_v4().to_string()
     })
 }

@@ -108,7 +108,7 @@ async fn round_trips_input_through_a_live_pty() {
     let handle = open_session(
         SessionConfig {
             base_ws_url: server.ws_base(),
-            password: server.token.clone(),
+            bearer: server.token.clone(),
             session_id: "pty1".to_string(),
             cols: 80,
             rows: 24,

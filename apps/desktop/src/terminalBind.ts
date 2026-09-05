@@ -4,7 +4,6 @@ import type { Terminal } from '@xterm/xterm';
 import {
   forgetCoreSession,
   nextConnId,
-  openCoreSocket,
   openNoiseSocket,
   sendJson,
   type TerminalSocket,
@@ -89,13 +88,7 @@ function openSocket(
     fit: FitAddon;
     hostId: string;
     sessionId: string;
-    wsOrigin: string;
-    password: string;
-    // When set, this host streams over Noise: connect via `core_noise_connect`
-    // to this `ws://host:port/api/noise/session` endpoint instead of the
-    // password WS. The frames it emits are the same WS-JSON, so the handlers
-    // below are unchanged.
-    noiseAddress?: string;
+    noiseAddress: string;
     isInteractive: () => boolean;
     onFrame: (hostId: string, sessionId: string, frame: FrameApplyResult) => void;
     onDisconnected: () => void;
@@ -125,9 +118,7 @@ function openSocket(
     },
     onClose,
   };
-  const socket = input.noiseAddress
-    ? openNoiseSocket(connId, input.hostId, input.noiseAddress, params, handlers)
-    : openCoreSocket(connId, input.wsOrigin, input.password, params, handlers);
+  const socket = openNoiseSocket(connId, input.hostId, input.noiseAddress, params, handlers);
   void socket.then((s) => {
     if (state.closed) {
       s.close();
@@ -146,10 +137,8 @@ export function bindTerminalSession(input: {
   search: SearchAddon;
   hostId: string;
   sessionId: string;
-  wsOrigin: string;
-  password: string;
-  /** Set for a Noise host: the `ws://host:port/api/noise/session` endpoint. */
-  noiseAddress?: string;
+  /** `ws://host:port/api/noise/session` — every host streams over Noise. */
+  noiseAddress: string;
   isInteractive: () => boolean;
   onFrame: (hostId: string, sessionId: string, frame: FrameApplyResult) => void;
   onDisconnected: () => void;

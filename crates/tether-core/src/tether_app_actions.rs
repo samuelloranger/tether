@@ -91,7 +91,6 @@ pub struct SaveHostConnectionPlan {
     pub host_id: String,
     pub host: String,
     pub port: String,
-    pub replacement_password: Option<String>,
     pub reset_sessions_and_health: bool,
 }
 
@@ -100,20 +99,13 @@ pub fn save_host_connection_plan(
     host_id: &str,
     host: &str,
     port: &str,
-    replacement_password: Option<&str>,
 ) -> Option<SaveHostConnectionPlan> {
     let current = profiles.iter().find(|profile| profile.id == host_id)?;
-    let replacement_password = replacement_password
-        .filter(|password| !password.is_empty())
-        .map(str::to_string);
     Some(SaveHostConnectionPlan {
         host_id: host_id.to_string(),
         host: host.to_string(),
         port: port.to_string(),
-        reset_sessions_and_health: current.host != host
-            || current.port != port
-            || replacement_password.is_some(),
-        replacement_password,
+        reset_sessions_and_health: current.host != host || current.port != port,
     })
 }
 
@@ -356,30 +348,23 @@ mod tests {
     }
 
     #[test]
-    fn host_connection_changes_reset_sessions_only_for_endpoint_or_password_changes() {
+    fn host_connection_changes_reset_sessions_only_for_endpoint_changes() {
         assert_eq!(
-            save_host_connection_plan(
-                &[profile()],
-                "host-1",
-                "other.local",
-                "8085",
-                Some("new-secret"),
-            ),
+            save_host_connection_plan(&[profile()], "host-1", "other.local", "8085"),
             Some(SaveHostConnectionPlan {
                 host_id: "host-1".to_string(),
                 host: "other.local".to_string(),
                 port: "8085".to_string(),
-                replacement_password: Some("new-secret".to_string()),
                 reset_sessions_and_health: true,
             })
         );
         assert!(
-            !save_host_connection_plan(&[profile()], "host-1", "studio.local", "8085", Some(""),)
+            !save_host_connection_plan(&[profile()], "host-1", "studio.local", "8085")
                 .unwrap()
                 .reset_sessions_and_health
         );
         assert_eq!(
-            save_host_connection_plan(&[profile()], "missing", "x", "1", None),
+            save_host_connection_plan(&[profile()], "missing", "x", "1"),
             None
         );
     }

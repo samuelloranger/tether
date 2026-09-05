@@ -298,6 +298,7 @@ public struct PairDeviceView: View {
     phase = .pairing
     do {
       let serverKey = try await client.pair(hostId: hostId, url: url, code: canonical)
+      HostScheme.record(url.scheme ?? "http", forHost: hostId)
       pinnedKey = serverKey
       phase = .success
       let (parsedHost, parsedPort) = Self.hostAndPort(from: host)

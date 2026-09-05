@@ -1,5 +1,5 @@
 import { type Context, Hono } from 'hono';
-import { addDevice as registryAddDevice } from './deviceRegistry';
+import { upsertDevice as registryAddDevice } from './deviceRegistry';
 import { EnrollmentWindow, type PairingDeps, runPairing } from './enrollment';
 import type { FrameIO } from './noiseChannel';
 import { loadOrCreateServerKeypair, serverFingerprint } from './noiseIdentity';

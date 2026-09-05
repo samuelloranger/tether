@@ -78,7 +78,10 @@ public final class NoiseSessionClient {
   private let keyStore: NoiseKeyStore
   private let session: URLSession
 
-  public init(keyStore: NoiseKeyStore = KeychainNoiseKeyStore(), session: URLSession = .shared) {
+  public init(
+    keyStore: NoiseKeyStore = KeychainNoiseKeyStore(),
+    session: URLSession = NoiseURLSession.shared
+  ) {
     self.keyStore = keyStore
     self.session = session
   }

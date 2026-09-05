@@ -99,7 +99,7 @@ final class NoiseLiveE2ETests: XCTestCase {
       configuration: .ephemeral, delegate: InsecureTrustDelegate(), delegateQueue: nil)
     let client = NoiseSessionClient(keyStore: keys, session: urlSession)
     let store = SessionStore(
-      hostStore: HostStoreAdapter(storage: LiveInMemoryHostStorage(), secrets: LiveInMemorySecretStore()),
+      hostStore: HostStoreAdapter(storage: LiveInMemoryHostStorage()),
       noiseKeyStore: keys)
 
     // 1. Pair under a throwaway id — exactly what PairDeviceView leaves behind.
@@ -110,7 +110,6 @@ final class NoiseLiveE2ETests: XCTestCase {
     // 2. Persist a real Noise HostProfile — migrates the keys onto the profile id.
     let profile = try store.createNoiseHost(
       name: "E2E box", host: url.host ?? "", port: "\(url.port ?? 8443)", pairHostId: pairId)
-    XCTAssertEqual(store.authMode(for: profile.id), .noise, "persisted host must derive as Noise")
 
     // 3. Reconnect BY THE PERSISTED PROFILE ID (proves the migration) and stream.
     let channel = try await client.reconnect(hostId: profile.id, url: url)
@@ -204,14 +203,4 @@ private final class LiveInMemoryHostStorage: HostStorage {
   func getItem(key: String) throws -> String? { items[key] }
   func setItem(key: String, value: String) throws { items[key] = value }
   func removeItem(key: String) throws { items[key] = nil }
-}
-
-/// In-memory `SecretStore` double for the live test.
-private final class LiveInMemorySecretStore: SecretStore {
-  private var secrets: [String: String] = [:]
-  func get(hostId: String) throws -> String? { secrets[hostId] }
-  func set(hostId: String, password: String) throws { secrets[hostId] = password }
-  func clear(hostId: String) throws { secrets[hostId] = nil }
-  func getLegacy() throws -> String? { nil }
-  func clearLegacy() throws {}
 }

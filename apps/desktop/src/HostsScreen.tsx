@@ -1,12 +1,11 @@
 import { confirmAction } from './dialog';
-import { isNoiseHost } from './noiseHosts';
 import type { HostHealthStatus, HostProfile } from './types';
 
 const HEALTH_LABEL: Record<HostHealthStatus, string> = {
   unknown: 'Checking…',
   reachable: 'online',
   unreachable: 'Unreachable · retrying',
-  unauthorized: 'Needs password',
+  unauthorized: 'Unauthorized',
 };
 
 interface HostsScreenProps {
@@ -14,8 +13,6 @@ interface HostsScreenProps {
   healthByHost: Record<string, HostHealthStatus>;
   onBack: () => void;
   onAdd: () => void;
-  onPairDevice: () => void;
-  onEdit: (hostId: string) => void;
   onDevices: (hostId: string) => void;
   onRemove: (hostId: string) => void;
   onSelect: (hostId: string) => void;
@@ -26,8 +23,6 @@ export function HostsScreen({
   healthByHost,
   onBack,
   onAdd,
-  onPairDevice,
-  onEdit,
   onDevices,
   onRemove,
   onSelect,
@@ -40,9 +35,6 @@ export function HostsScreen({
       <header className="hosts-header">
         <h1>Hosts</h1>
         <div className="hosts-header-actions">
-          <button type="button" className="secondary" onClick={onPairDevice}>
-            Pair a device
-          </button>
           <button type="button" onClick={onAdd}>
             Add host
           </button>
@@ -59,17 +51,8 @@ export function HostsScreen({
                   {host.host}:{host.port} · {HEALTH_LABEL[health]}
                 </span>
               </button>
-              {isNoiseHost(host.id) ? (
-                <button
-                  type="button"
-                  className="secondary small"
-                  onClick={() => onDevices(host.id)}
-                >
-                  Devices
-                </button>
-              ) : null}
-              <button type="button" className="secondary small" onClick={() => onEdit(host.id)}>
-                Edit
+              <button type="button" className="secondary small" onClick={() => onDevices(host.id)}>
+                Devices
               </button>
               <button
                 type="button"
@@ -78,7 +61,7 @@ export function HostsScreen({
                   void (async () => {
                     const ok = await confirmAction(
                       'Remove host',
-                      `Remove ${host.name}? Saved credentials will be deleted.`,
+                      `Remove ${host.name}? Its pairing and cached sessions will be deleted.`,
                       { confirmLabel: 'Remove', destructive: true },
                     );
                     if (ok) await onRemove(host.id);

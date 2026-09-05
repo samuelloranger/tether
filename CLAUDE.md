@@ -55,7 +55,7 @@ Per workspace:
 - iOS: see `clients/apple/README.md` (`scripts/build-xcframework.sh`, then `xcodebuild -project clients/apple/Tether.xcodeproj -scheme TetherIOS …`)
 - Desktop: `bun --cwd apps/desktop run tauri:dev` / `tauri:build`
 
-**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | set-password | present | signal | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
+**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | pair | present | signal | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
 
 ## Runtime requirement (important)
 
@@ -95,7 +95,7 @@ marks the tab busy. That fallback exists for configs written before
 
 Because the holder is a separate detached process, **the shell survives both client disconnects and server restarts** — `reattachHolders()` re-adopts live sockets on boot. Killing is explicit (`POST /api/sessions/kill`).
 
-**Multi-host:** the client holds N host profiles in the Rust core (`host_store`); passwords on iOS live in Keychain, on desktop in the OS keyring under service `tether-desktop`, account `server-password-<hostId>` (falling back to localStorage when no Secret Service is running). The drawer groups sessions by host. Cache and connection keys are `"<hostId>:<sessionId>"` — session ids are only unique per host. Every host is independently failable. `tether://session/<id>?host=<identityName>` deep links resolve a notification tap to the right host.
+**Multi-host:** the client holds N host profiles in the Rust core (`host_store`). Pairing is per-device Noise (`tether pair`); REST uses a short-lived bearer minted over the Noise session. Noise key bytes live in Keychain (iOS) or the OS keyring (desktop, service `tether-desktop`, accounts `noise-device-key-<hostId>` / `noise-server-key-<hostId>`). The drawer groups sessions by host. Cache and connection keys are `"<hostId>:<sessionId>"` — session ids are only unique per host. Every host is independently failable. `tether://session/<id>?host=<identityName>` deep links resolve a notification tap to the right host.
 
 **Session model:** sessions are drawer tabs; `GET /api/sessions` is the source of truth. Resident sessions keep live sockets and stream in the background — only input and clipboard are gated to the active tab. Evicted sessions drop their socket; the PTY keeps running, and reattaching replays from `sinceId`. `terminal_logs` is capped per session (~2000 rows, pruned every 200 inserts).
 
@@ -103,10 +103,11 @@ Because the holder is a separate detached process, **the shell survives both cli
 
 ## HTTP API surface (`app.ts`)
 
-`/api/status` + `/api/setup` (TOFU pairing) · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/control/signal` for program-declared session state, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices` and `tls`) · `/api/push/{register,unregister}` · `/api/admin/{password,update,restart,test-notification}` (the first three require the current password in the body, on top of the token).
+`/api/status` · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/control/signal` for program-declared session state, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices` and `tls`) · `/api/push/{register,unregister}` · `/api/admin/{update,restart,test-notification}` (token-authed; no password in the body) · `/api/noise/*` (pairing + session + device management).
 
 ## Conventions & gotchas
 
+- Comments: keep them minimal. Only comment what the code can't say itself — a non-obvious "why", a gotcha. No restating what the line does, no multi-line prose on simple functions. Prefer none over noise.
 - Formatting is Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100. Run `bun format` before committing.
 - `bun:sqlite` uses `$name` named params. Schema changes append a new entry to the `migrations` array in `db.ts` — never edit an applied migration.
 - Tests are colocated (`foo.ts` + `foo.test.ts`). New server logic is expected to come with tests; keep pure logic in its own module so it's testable without a PTY.
@@ -115,9 +116,9 @@ Because the holder is a separate detached process, **the shell survives both cli
 
 ## Security note
 
-All `/api/*` routes (HTTP + WS upgrade) require a shared password — argon2 hash in the DB, set via `tether set-password` or first-run TOFU pairing (`GET /api/status` + one-time `POST /api/setup`), exchanged for a token. No password ⇒ every client is rejected (401).
+All `/api/*` routes (HTTP + WS upgrade) require a per-device bearer token, minted over an already-authenticated Noise session (`{t:'auth.token'}`) and presented as `Authorization: Bearer <token>`. Pair a device with `tether pair`. There is no shared password, no `tether set-password`, and no `/api/setup` TOFU flow. Revoking a device is enough: the next request with its token is 401. Public exceptions are `/api/status` (discovery) and the `/api/noise/*` handshake sockets — those authenticate via Noise itself.
 
-**Transport:** the server opens two listeners — plaintext on `TETHER_PORT` (8085) and TLS on `TETHER_TLS_PORT` (8443), both `0.0.0.0`, `cors origin: '*'`. A self-signed P-256 certificate is generated on first boot into `~/.tether/config/tls/` (key `0600`, dir `0700`) and **never rotated automatically** — clients pin its fingerprint. `/api/status` and `/api/setup` report `secure` (was *this response* on the TLS socket? derived from the socket, never from a header) plus `tls.fingerprint` (`sha256:<hex>` over the cert DER); a client may only pin what it read with `secure: true`, and must match it against the cert that actually terminated the connection.
+**Transport:** the server opens two listeners — plaintext on `TETHER_PORT` (8085) and TLS on `TETHER_TLS_PORT` (8443), both `0.0.0.0`, `cors origin: '*'`. A self-signed P-256 certificate is generated on first boot into `~/.tether/config/tls/` (key `0600`, dir `0700`) and **never rotated automatically** — clients pin its fingerprint. `/api/status` reports `secure` (was *this response* on the TLS socket? derived from the socket, never from a header) plus `tls.fingerprint` (`sha256:<hex>` over the cert DER); a client may only pin what it read with `secure: true`, and must match it against the cert that actually terminated the connection.
 
 `TETHER_TLS` = `both` (default) | `only` (closes plaintext) | `off`. It is host-side env config on purpose and is **not** in `/api/config` — a client that could close the plaintext port would lock out every other client. Default `both` means `tether update` strands nobody; `only` is the operator's deliberate cutover.
 
