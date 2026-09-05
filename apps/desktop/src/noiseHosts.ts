@@ -1,3 +1,6 @@
+import { hostScheme } from './hostScheme';
+import type { HostProfile } from './types';
+
 // Which hosts authenticate over Noise. There is no `authMode` field on HostProfile
 // yet, so we record a host as "noise" when it is created through the pairing flow
 // and read it back where a terminal connection must pick its transport. Backed by
@@ -35,7 +38,14 @@ export function unmarkNoiseHost(hostId: string): void {
   if (ids.delete(hostId)) write(ids);
 }
 
-/** The Noise session endpoint for a host — where `core_noise_connect` reconnects. */
-export function noiseSessionAddress(host: string, port: string): string {
-  return `ws://${host}:${port}/api/noise/session`;
+/**
+ * The Noise session endpoint for a host — where `core_noise_connect` reconnects.
+ *
+ * Pairing already picks its scheme (`parsePairAddress` emits `wss://` for a TLS
+ * host); reconnect has to make the same choice or a host paired over TLS is
+ * dialled in plaintext and the upgrade is rejected.
+ */
+export function noiseSessionAddress(profile: HostProfile): string {
+  const proto = hostScheme(profile.id, profile.port) === 'https' ? 'wss' : 'ws';
+  return `${proto}://${profile.host}:${profile.port}/api/noise/session`;
 }

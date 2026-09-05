@@ -26,7 +26,7 @@ export function DevicesScreen({ host, onBack }: DevicesScreenProps) {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [revoking, setRevoking] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const address = noiseSessionAddress(host.host, host.port);
+  const address = noiseSessionAddress(host);
 
   const load = useCallback(async () => {
     setPhase({ kind: 'loading' });

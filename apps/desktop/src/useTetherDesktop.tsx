@@ -142,7 +142,7 @@ export function useTetherDesktop() {
       for (const host of hostsRef.current) {
         let ok = false;
         try {
-          ok = await coreNoisePing(host.id, noiseSessionAddress(host.host, host.port));
+          ok = await coreNoisePing(host.id, noiseSessionAddress(host));
         } catch {
           ok = false;
         }
