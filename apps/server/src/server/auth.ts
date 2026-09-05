@@ -16,7 +16,9 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
   if (PUBLIC_API_PATHS.has(c.req.path)) return next();
   const header = c.req.header('Authorization') ?? '';
   const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (bearer && looksLikeToken(bearer) && verifyToken(bearer)) {
+  const verified = verifyToken(bearer);
+  if (bearer && looksLikeToken(bearer) && verified) {
+    c.set('deviceId', verified.deviceId);
     await next();
     return;
   }

@@ -23,6 +23,7 @@ function appWithAuth(): Hono {
   h.use('*', authMiddleware);
   h.get('/api/health', (c) => c.json({ ok: true }));
   h.get('/api/status', (c) => c.json({ public: true }));
+  h.get('/api/whoami', (c) => c.json({ deviceId: c.get('deviceId') }));
   return h;
 }
 
@@ -66,4 +67,14 @@ test('authMiddleware: a public path is exempt', async () => {
   const res = await appWithAuth().request('/api/status');
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ public: true });
+});
+
+test('authMiddleware: minted token sets deviceId on context', async () => {
+  const device = addDevice({ label: 'phone', pubkey: pubkeyFill(3) });
+  const token = mintToken(device.id);
+  const res = await appWithAuth().request('/api/whoami', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ deviceId: device.id });
 });

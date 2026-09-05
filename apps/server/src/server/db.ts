@@ -145,6 +145,11 @@ const migrations = [
       );
     `,
   },
+  {
+    version: 10,
+    name: 'push_devices_auth_device_id',
+    up: `ALTER TABLE push_devices ADD COLUMN auth_device_id TEXT;`,
+  },
 ];
 
 export function runMigrations() {
