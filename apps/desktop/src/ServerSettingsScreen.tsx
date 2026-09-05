@@ -11,9 +11,9 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
           ← Back
         </button>
         <h1>{props.host.name}</h1>
-        <p className="error">Unauthorized. Re-enter the password.</p>
-        <button type="button" onClick={props.onUnauthorized}>
-          Re-enter password
+        <p className="error">Unauthorized. This device may have been revoked.</p>
+        <button type="button" onClick={props.onRetry}>
+          Retry
         </button>
       </div>
     );
@@ -56,15 +56,6 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
           Port
           <input value={s.connectionPort} onChange={(e) => s.setConnectionPort(e.target.value)} />
         </label>
-        <label>
-          Replace saved password
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={s.replacementPassword}
-            onChange={(e) => s.setReplacementPassword(e.target.value)}
-          />
-        </label>
         {!s.connectionOk && s.connectionReason ? (
           <p className="error">{s.connectionReason}</p>
         ) : null}
@@ -82,9 +73,6 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
       <section className="settings-section">
         <h2>Admin</h2>
         <div className="admin-actions">
-          <button type="button" className="secondary" onClick={() => s.setAdmin('password')}>
-            Change password
-          </button>
           <button type="button" className="secondary" onClick={() => s.setAdmin('update')}>
             Update server
           </button>
@@ -94,47 +82,18 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
         </div>
         {s.admin ? (
           <div className="admin-form">
-            <label>
-              Current password
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={s.currentPassword}
-                onChange={(e) => s.setCurrentPassword(e.target.value)}
-              />
-            </label>
-            {s.admin === 'password' ? (
-              <>
-                <label>
-                  New password
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={s.nextPassword}
-                    onChange={(e) => s.setNextPassword(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Confirm new password
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={s.confirmPassword}
-                    onChange={(e) => s.setConfirmPassword(e.target.value)}
-                  />
-                </label>
-              </>
-            ) : null}
+            <p>
+              {s.admin === 'update'
+                ? 'Update the server to the latest release?'
+                : 'Restart the server?'}
+            </p>
+            <p className="hint">Holder-backed sessions survive and reconnect.</p>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => s.setAdmin(null)}>
                 Cancel
               </button>
-              <button
-                type="button"
-                disabled={s.adminBusy || !s.currentPassword}
-                onClick={() => void s.runAdmin()}
-              >
-                {s.admin === 'password' ? 'Change' : s.admin === 'update' ? 'Update' : 'Restart'}
+              <button type="button" disabled={s.adminBusy} onClick={() => void s.runAdmin()}>
+                {s.adminBusy ? 'Working…' : s.admin === 'update' ? 'Update' : 'Restart'}
               </button>
             </div>
           </div>

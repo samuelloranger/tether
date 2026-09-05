@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tether_core::host_client::HostClient;
-use tether_core::host_store::{HostProfile, HostProfileChanges, HostSecrets};
+use tether_core::host_store::{HostProfile, HostProfileChanges};
 use tether_core::server_config::{self, ServerConfig, ServerConfigPatch};
 
 use crate::commands::noise::execute_authed;
 use crate::state::shared_from_app;
-use crate::storage::KeyringHostSecrets;
 
 fn profile_for(app: &AppHandle, host_id: &str) -> Result<HostProfile, String> {
     shared_from_app(app)
@@ -43,20 +42,6 @@ pub async fn core_config_patch(
     })
     .await?;
     server_config::parse_config_response(response.status, &response.body).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn core_admin_change_password(
-    app: AppHandle,
-    host_id: String,
-    current: String,
-    next: String,
-) -> Result<(), String> {
-    let response = exec_config(&app, &host_id, |client| {
-        server_config::change_password_request(client, &current, &next)
-    })
-    .await?;
-    server_config::parse_admin_ok(response.status, &response.body).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -135,7 +120,6 @@ pub fn core_hosts_update_identity(
 pub struct ConnectionUpdate {
     pub host: String,
     pub port: String,
-    pub replacement_password: Option<String>,
 }
 
 #[tauri::command]
@@ -145,25 +129,17 @@ pub fn core_hosts_update_connection(
     update: ConnectionUpdate,
 ) -> Result<HostProfile, String> {
     let state = shared_from_app(&app);
-    let profile = {
-        let store = state.hosts.lock().map_err(|error| error.to_string())?;
-        store
-            .update(
-                &host_id,
-                HostProfileChanges {
-                    host: Some(update.host),
-                    port: Some(update.port),
-                    ..HostProfileChanges::default()
-                },
-            )
-            .map_err(|error| error.to_string())?
-    };
-    if let Some(password) = update.replacement_password.filter(|p| !p.is_empty()) {
-        KeyringHostSecrets
-            .set(&host_id, &password)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(profile)
+    let store = state.hosts.lock().map_err(|error| error.to_string())?;
+    store
+        .update(
+            &host_id,
+            HostProfileChanges {
+                host: Some(update.host),
+                port: Some(update.port),
+                ..HostProfileChanges::default()
+            },
+        )
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Serialize)]

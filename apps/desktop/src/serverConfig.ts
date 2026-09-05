@@ -1,5 +1,4 @@
 import {
-  coreAdminChangePassword,
   coreAdminRestart,
   coreAdminTestNotification,
   coreAdminUpdate,
@@ -22,14 +21,6 @@ export async function patchServerConfig(
 
 export async function sendServerNotificationTest(hostId: string): Promise<void> {
   await coreAdminTestNotification(hostId);
-}
-
-export async function changeServerPassword(
-  hostId: string,
-  current: string,
-  next: string,
-): Promise<void> {
-  await coreAdminChangePassword(hostId, current, next);
 }
 
 export async function updateServer(hostId: string, current: string): Promise<void> {

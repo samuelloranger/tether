@@ -25,40 +25,8 @@ export async function coreHostsList(): Promise<HostProfile[]> {
   return invoke<HostProfile[]>('core_hosts_list');
 }
 
-export async function coreHostsSave(input: {
-  id?: string;
-  name: string;
-  host: string;
-  port: string;
-  password: string;
-  confirmPassword?: string;
-}): Promise<HostProfile> {
-  return invoke<HostProfile>('core_hosts_save', {
-    id: input.id ?? null,
-    name: input.name,
-    host: input.host,
-    port: input.port,
-    password: input.password,
-    confirmPassword: input.confirmPassword ?? '',
-  });
-}
-
 export async function coreHostsRemove(hostId: string): Promise<void> {
   await invoke('core_hosts_remove', { hostId });
-}
-
-export async function coreTestConnection(input: {
-  host: string;
-  port: string;
-  password: string;
-  confirmPassword?: string;
-}): Promise<{ ok: boolean; msg?: string; needsSetup?: boolean }> {
-  return invoke('core_test_connection', {
-    host: input.host,
-    port: input.port,
-    password: input.password,
-    confirmPassword: input.confirmPassword ?? '',
-  });
 }
 
 export async function coreNextTermId(existing: string[]): Promise<string> {
@@ -205,9 +173,8 @@ export async function coreNoiseRevoke(
 }
 
 /**
- * Persist a Noise-paired host WITHOUT the password connection test / keyring
- * password `core_hosts_save` runs — a Noise host has no password. The password
- * save path is unchanged; this is its sibling for the pairing flow.
+ * Persist a Noise-paired host without a connection test. Pairing
+ * (`coreNoisePair`) is the trust step; this only records the profile.
  */
 export async function coreHostsSaveNoise(input: {
   name: string;
@@ -223,9 +190,8 @@ export async function coreHostsSaveNoise(input: {
 
 /**
  * Open a terminal session over Noise. Keeps the sealed channel alive and emits
- * `core-message-{connId}` / `core-closed-{connId}` in the SAME WS-JSON shape the
- * password path uses, so the terminal frontend consumes it identically. Drive
- * input/resize with `coreNoiseSend` (WS-JSON text) and end it with `coreNoiseClose`.
+ * `core-message-{connId}` / `core-closed-{connId}` in WS-JSON. Drive input/resize
+ * with `coreNoiseSend` (WS-JSON text) and end it with `coreNoiseClose`.
  */
 export async function coreNoiseConnect(input: {
   connId: string;
@@ -340,14 +306,6 @@ export async function coreConfigPatch(
   return invoke<ServerConfig>('core_config_patch', { hostId, patch });
 }
 
-export async function coreAdminChangePassword(
-  hostId: string,
-  current: string,
-  next: string,
-): Promise<void> {
-  await invoke('core_admin_change_password', { hostId, current, next });
-}
-
 export async function coreAdminUpdate(hostId: string, current: string): Promise<void> {
   await invoke('core_admin_update', { hostId, current });
 }
@@ -373,14 +331,13 @@ export async function coreHostsUpdateIdentity(
 
 export async function coreHostsUpdateConnection(
   hostId: string,
-  update: { host: string; port: string; replacementPassword?: string },
+  update: { host: string; port: string },
 ): Promise<HostProfile> {
   return invoke<HostProfile>('core_hosts_update_connection', {
     hostId,
     update: {
       host: update.host,
       port: update.port,
-      replacementPassword: update.replacementPassword ?? null,
     },
   });
 }

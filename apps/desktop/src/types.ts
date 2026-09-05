@@ -29,10 +29,6 @@ export function activeSessionStorageKey(hostId: string): string {
   return `tether_session_id_${hostId}`;
 }
 
-export function wsOriginFor(profile: HostProfile): string {
-  return `ws://${profile.host}:${profile.port}`;
-}
-
 export function httpOriginFor(profile: HostProfile): string {
   return `http://${profile.host}:${profile.port}`;
 }

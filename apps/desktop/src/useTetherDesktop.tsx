@@ -6,7 +6,6 @@ import {
   coreHostsList,
   coreHostsMigrate,
   coreHostsRemove,
-  coreHostsSave,
   coreHostsSaveNoise,
   coreHostsUpdateConnection,
   coreHostsUpdateIdentity,
@@ -22,12 +21,10 @@ import {
   coreSessionsKill,
   coreSessionsList,
   coreSessionsRename,
-  listenHostHealth,
   listenSessions,
 } from './coreApi';
 import type { FrameApplyResult } from './frameHandler';
-import { isNoiseHost, markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
-import { hostSecrets } from './secureConfig';
+import { markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
 import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
 import { pickResume, restorableIds } from './sessionResume';
@@ -42,20 +39,12 @@ import {
 
 export type { DrawerSession } from './types';
 
-type Screen =
-  | 'main'
-  | 'hosts'
-  | 'host-form'
-  | 'pair-device'
-  | 'settings'
-  | 'local-settings'
-  | 'devices';
+type Screen = 'main' | 'hosts' | 'pair-device' | 'settings' | 'local-settings' | 'devices';
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: desktop app state hook mirrors mobile session runtime scope
 export function useTetherDesktop() {
   const [ready, setReady] = useState(false);
   const [hosts, setHosts] = useState<HostProfile[]>([]);
-  const [passwords, setPasswords] = useState<Record<string, string>>({});
   const [sessions, setSessions] = useState<DrawerSession[]>([]);
   const [healthByHost, setHealthByHost] = useState<Record<string, HostHealthStatus>>({});
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
@@ -64,7 +53,6 @@ export function useTetherDesktop() {
   // spawned a shell nobody asked for.
   const [activeSessionId, setActiveSessionId] = useState('');
   const [screen, setScreen] = useState<Screen>('main');
-  const [editingHostId, setEditingHostId] = useState<string | null>(null);
   const [gitOpen, setGitOpen] = useState(false);
   const [gitMode, setGitMode] = useState<'drawer' | 'review'>('drawer');
   const [settingsHostId, setSettingsHostId] = useState<string | null>(null);
@@ -103,20 +91,13 @@ export function useTetherDesktop() {
 
   useEffect(() => {
     let cancelled = false;
-    let unlistenHealth: (() => void) | undefined;
     let unlistenSessions: (() => void) | undefined;
     void (async () => {
       const legacy = localStorage.getItem(HOST_PROFILES_KEY);
       const listed = await coreHostsMigrate(legacy);
       if (legacy) localStorage.removeItem(HOST_PROFILES_KEY);
-      const loaded: Record<string, string> = {};
-      for (const profile of listed) {
-        const password = await hostSecrets.get(profile.id);
-        if (password) loaded[profile.id] = password;
-      }
       if (cancelled) return;
       setHosts(listed);
-      setPasswords(loaded);
       for (const profile of listed) {
         setHealthByHost((current) => ({ ...current, [profile.id]: 'unknown' }));
       }
@@ -132,12 +113,6 @@ export function useTetherDesktop() {
         await corePollingSetActive(initialHost);
         void restoreSession(initialHost);
       }
-      unlistenHealth = await listenHostHealth((hostId, status) => {
-        // A Noise host has no password, so the poll's `/api/status` probe always
-        // 401s it — ignore that here; its health comes from the Noise ping below.
-        if (isNoiseHost(hostId)) return;
-        setHealthByHost((current) => ({ ...current, [hostId]: status }));
-      });
       unlistenSessions = await listenSessions((hostId, rows) => {
         setSessions((previous) => [...previous.filter((row) => row.hostId !== hostId), ...rows]);
       });
@@ -146,7 +121,6 @@ export function useTetherDesktop() {
     })();
     return () => {
       cancelled = true;
-      unlistenHealth?.();
       unlistenSessions?.();
       void corePollingStop();
     };
@@ -157,8 +131,7 @@ export function useTetherDesktop() {
     void corePollingSetActive(activeHostId);
   }, [ready, activeHostId]);
 
-  // Health for Noise hosts: the password poll can't authenticate them, so probe
-  // reachability over the Noise path (a reconnect handshake) instead. A success
+  // Health: probe reachability over Noise (a reconnect handshake). A success
   // means up + still authorized; a failure (host down, or this device revoked)
   // shows unreachable.
   useEffect(() => {
@@ -166,7 +139,6 @@ export function useTetherDesktop() {
     let cancelled = false;
     const pingAll = async () => {
       for (const host of hostsRef.current) {
-        if (!isNoiseHost(host.id)) continue;
         let ok = false;
         try {
           ok = await coreNoisePing(host.id, noiseSessionAddress(host.host, host.port));
@@ -189,7 +161,6 @@ export function useTetherDesktop() {
   }, [ready]);
 
   const activeHost = hosts.find((host) => host.id === activeHostId) ?? null;
-  const activePassword = activeHost ? (passwords[activeHost.id] ?? '') : '';
 
   const selectHost = useCallback(
     (hostId: string) => {
@@ -300,41 +271,12 @@ export function useTetherDesktop() {
     void coreHostRetry(hostId);
   }, []);
 
-  const saveHost = useCallback(
-    async (input: {
-      id?: string;
-      name: string;
-      host: string;
-      port: string;
-      password: string;
-      confirmPassword?: string;
-    }) => {
-      const profile = await coreHostsSave(input);
-      setPasswords((current) => ({ ...current, [profile.id]: input.password }));
-      const listed = await coreHostsList();
-      setHosts(listed);
-      setActiveHostId(profile.id);
-      localStorage.setItem(KEY_ACTIVE_HOST, profile.id);
-      setScreen('main');
-      setEditingHostId(null);
-    },
-    [],
-  );
-
   /**
    * Pair a new host over Noise, then persist it.
    *
    * The profile is created FIRST so the pinned device + server keys land under
    * its real id — reconnect (`coreNoiseReconnect`) namespaces its keys by the
-   * host profile id, so pairing under any other id would strand them. This
-   * mirrors HostFormScreen's save path (`coreHostsSave` → refresh → activate),
-   * minus the routing, so the pairing screen can show the fingerprint before it
-   * navigates on.
-   *
-   * NOTE: `coreHostsSave` still runs a password connection test and stores a
-   * password in the keyring — the password-TOFU auth and Noise pairing are
-   * separate systems today. A Noise-only server with no password will reject
-   * this create; a password-less save path is a backend follow-up. If pairing
+   * host profile id, so pairing under any other id would strand them. If pairing
    * itself fails after the profile exists, the orphan profile is removed.
    */
   const pairHost = useCallback(
@@ -348,8 +290,6 @@ export function useTetherDesktop() {
       },
       onProgress?: (progress: { deviceFingerprint: string }) => void,
     ): Promise<{ fingerprint: string }> => {
-      // Password-less save: a Noise host has no password, so it must NOT go
-      // through the password connection test in `coreHostsSave`.
       const profile = await coreHostsSaveNoise({
         name: input.name,
         host: input.host,
@@ -368,7 +308,6 @@ export function useTetherDesktop() {
         });
         // Mark it a Noise host so its terminal streams over the Noise channel.
         markNoiseHost(profile.id);
-        setPasswords((current) => ({ ...current, [profile.id]: '' }));
         setHosts(await coreHostsList());
         setActiveHostId(profile.id);
         localStorage.setItem(KEY_ACTIVE_HOST, profile.id);
@@ -387,11 +326,6 @@ export function useTetherDesktop() {
       await coreHostsRemove(hostId);
       unmarkNoiseHost(hostId);
       setHosts(await coreHostsList());
-      setPasswords((current) => {
-        const next = { ...current };
-        delete next[hostId];
-        return next;
-      });
       setSessions((current) => current.filter((row) => row.hostId !== hostId));
       setHealthByHost((current) => {
         const next = { ...current };
@@ -416,29 +350,15 @@ export function useTetherDesktop() {
   );
 
   const updateHostConnection = useCallback(
-    async (
-      hostId: string,
-      changes: Pick<HostProfile, 'host' | 'port'>,
-      replacementPassword?: string,
-    ) => {
+    async (hostId: string, changes: Pick<HostProfile, 'host' | 'port'>) => {
       await coreHostsUpdateConnection(hostId, {
         host: changes.host,
         port: changes.port,
-        replacementPassword,
       });
-      if (replacementPassword) {
-        setPasswords((current) => ({ ...current, [hostId]: replacementPassword }));
-        await hostSecrets.set(hostId, replacementPassword);
-      }
       setHosts(await coreHostsList());
     },
     [],
   );
-
-  const updateHostPassword = useCallback(async (hostId: string, password: string) => {
-    await hostSecrets.set(hostId, password);
-    setPasswords((current) => ({ ...current, [hostId]: password }));
-  }, []);
 
   const handleWsFrame = useCallback(
     (hostId: string, sessionId: string, frame: FrameApplyResult) => {
@@ -489,20 +409,16 @@ export function useTetherDesktop() {
   return {
     ready,
     hosts,
-    passwords,
     sessions,
     healthByHost,
     activeHost,
     activeHostId,
     activeSessionId,
-    activePassword,
     activeSessionLabel,
     screen,
-    editingHostId,
     gitOpen,
     gitMode,
     setScreen,
-    setEditingHostId,
     setGitOpen,
     setGitMode,
     settingsHostId,
@@ -513,12 +429,10 @@ export function useTetherDesktop() {
     killSessionById,
     renameSessionById,
     retryHost,
-    saveHost,
     pairHost,
     removeHost,
     updateHostIdentity,
     updateHostConnection,
-    updateHostPassword,
     handleWsFrame,
   };
 }

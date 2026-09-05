@@ -23,7 +23,6 @@ interface SessionDrawerProps {
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
   onRetryHost: (hostId: string) => void;
-  onReenterPassword: (hostId: string) => void;
   onOpenHosts: () => void;
   onOpenSettings: () => void;
   onOpenHostSettings: (hostId: string) => void;
@@ -73,14 +72,12 @@ function HostHeader({
   health,
   count,
   onRetryHost,
-  onReenterPassword,
   onOpenHostSettings,
 }: {
   host: HostProfile;
   health: HostHealthStatus;
   count: number;
   onRetryHost: (hostId: string) => void;
-  onReenterPassword: (hostId: string) => void;
   onOpenHostSettings: (hostId: string) => void;
 }) {
   return (
@@ -101,8 +98,8 @@ function HostHeader({
         </button>
       ) : null}
       {health === 'unauthorized' ? (
-        <button type="button" className="linkish danger" onClick={() => onReenterPassword(host.id)}>
-          Re-enter password
+        <button type="button" className="linkish" onClick={() => onRetryHost(host.id)}>
+          Retry
         </button>
       ) : null}
     </div>
@@ -209,7 +206,6 @@ export function SessionDrawer({
   onRequestKill,
   onRequestRename,
   onRetryHost,
-  onReenterPassword,
   onOpenHosts,
   onOpenSettings,
   onOpenHostSettings,
@@ -267,7 +263,6 @@ export function SessionDrawer({
                 health={health}
                 count={hostSessions.length}
                 onRetryHost={onRetryHost}
-                onReenterPassword={onReenterPassword}
                 onOpenHostSettings={onOpenHostSettings}
               />
               {hostSessions.length === 0 ? (

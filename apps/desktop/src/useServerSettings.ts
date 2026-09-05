@@ -24,13 +24,8 @@ export type ServerSettingsProps = {
   health: HostHealthStatus;
   onBack: () => void;
   onRetry: () => void;
-  onUnauthorized: () => void;
   onIdentitySaved: (identity: ServerConfig['identity']) => void;
-  onPasswordChanged: (password: string) => Promise<void>;
-  onConnectionSaved: (
-    changes: Pick<HostProfile, 'host' | 'port'>,
-    replacementPassword?: string,
-  ) => Promise<void>;
+  onConnectionSaved: (changes: Pick<HostProfile, 'host' | 'port'>) => Promise<void>;
   onRemoveHost: () => Promise<void>;
 };
 
@@ -47,22 +42,17 @@ const IDENTITY_COLORS = [
 function useConnectionFields(host: HostProfile) {
   const [connectionHost, setConnectionHost] = useState(host.host);
   const [connectionPort, setConnectionPort] = useState(host.port);
-  const [replacementPassword, setReplacementPassword] = useState('');
   useEffect(() => {
     setConnectionHost(host.host);
     setConnectionPort(host.port);
-    setReplacementPassword('');
   }, [host]);
-  const connectionDirty =
-    connectionHost !== host.host || connectionPort !== host.port || replacementPassword.length > 0;
+  const connectionDirty = connectionHost !== host.host || connectionPort !== host.port;
   const connectionValidation = validateAddress(connectionHost, connectionPort);
   return {
     connectionHost,
     setConnectionHost,
     connectionPort,
     setConnectionPort,
-    replacementPassword,
-    setReplacementPassword,
     connectionDirty,
     connectionOk: connectionValidation.ok,
     connectionReason: !connectionValidation.ok ? connectionValidation.reason : undefined,
@@ -106,25 +96,13 @@ function useSettingsLoad(host: HostProfile, health: HostHealthStatus) {
 
 function useAdminFields() {
   const [admin, setAdmin] = useState<AdminOperation>(null);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [nextPassword, setNextPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [adminBusy, setAdminBusy] = useState(false);
   const resetAdmin = () => {
     setAdmin(null);
-    setCurrentPassword('');
-    setNextPassword('');
-    setConfirmPassword('');
   };
   return {
     admin,
     setAdmin,
-    currentPassword,
-    setCurrentPassword,
-    nextPassword,
-    setNextPassword,
-    confirmPassword,
-    setConfirmPassword,
     adminBusy,
     setAdminBusy,
     resetAdmin,
@@ -184,11 +162,10 @@ export function useServerSettings(p: ServerSettingsProps) {
       setSaving(true);
       load.setMessage(null);
       try {
-        await p.onConnectionSaved(
-          { host: connection.connectionHost.trim(), port: connection.connectionPort.trim() },
-          connection.replacementPassword || undefined,
-        );
-        connection.setReplacementPassword('');
+        await p.onConnectionSaved({
+          host: connection.connectionHost.trim(),
+          port: connection.connectionPort.trim(),
+        });
         load.setMessage({ kind: 'success', text: 'Connection saved.' });
       } catch (error) {
         load.setMessage({
@@ -209,10 +186,6 @@ export function useServerSettings(p: ServerSettingsProps) {
       runAdminOperation({
         hostId: p.host.id,
         admin: admin.admin,
-        currentPassword: admin.currentPassword,
-        nextPassword: admin.nextPassword,
-        confirmPassword: admin.confirmPassword,
-        onPasswordChanged: p.onPasswordChanged,
         onRetry: p.onRetry,
         setMessage: load.setMessage,
         setAdminBusy: admin.setAdminBusy,
