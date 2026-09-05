@@ -39,8 +39,7 @@ extension NativeHostClient {
     request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    let (_, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (_, status) = try await sendAuthorized(request: request)
     guard status != 401 else { throw HostClientError.unauthorized }
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
   }
