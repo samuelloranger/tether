@@ -247,8 +247,8 @@ pub async fn core_noise_revoke(
     }
 }
 
-    /// Mint a per-device REST bearer over a dedicated management session. Fail-closed:
-    /// a reconnect/handshake failure (revoked or unknown device) errors.
+/// Mint a per-device REST bearer over a dedicated management session. Fail-closed:
+/// a reconnect/handshake failure (revoked or unknown device) errors.
 pub(crate) async fn mint_noise_token(
     host_id: &str,
     address: &str,
@@ -292,41 +292,41 @@ pub(crate) fn invalidate_cached_token(state: &AppState, host_id: &str) {
     }
 }
 
-    /// REST bearer for `profile`: a cached-or-freshly-minted Noise token.
-    pub(crate) async fn bearer_for_host(
-        state: &AppState,
-        profile: &HostProfile,
-    ) -> Result<String, String> {
-        if !is_noise_host(&profile.id)? {
-            return Err("host is not Noise-paired".to_string());
-        }
-        {
-            let cache = state
-                .noise_tokens
-                .lock()
-                .map_err(|error| error.to_string())?;
-            if let Some(token) = cached_token_if_fresh(&cache, &profile.id, Instant::now()) {
-                return Ok(token);
-            }
-        }
-        let address = noise_session_address(profile);
-        let (token, expires_at) = mint_noise_token(&profile.id, &address).await?;
-        {
-            let mut cache = state
-                .noise_tokens
-                .lock()
-                .map_err(|error| error.to_string())?;
-            store_token(
-                &mut cache,
-                &profile.id,
-                token.clone(),
-                &expires_at,
-                Instant::now(),
-                SystemTime::now(),
-            );
-        }
-        Ok(token)
+/// REST bearer for `profile`: a cached-or-freshly-minted Noise token.
+pub(crate) async fn bearer_for_host(
+    state: &AppState,
+    profile: &HostProfile,
+) -> Result<String, String> {
+    if !is_noise_host(&profile.id)? {
+        return Err("host is not Noise-paired".to_string());
     }
+    {
+        let cache = state
+            .noise_tokens
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if let Some(token) = cached_token_if_fresh(&cache, &profile.id, Instant::now()) {
+            return Ok(token);
+        }
+    }
+    let address = noise_session_address(profile);
+    let (token, expires_at) = mint_noise_token(&profile.id, &address).await?;
+    {
+        let mut cache = state
+            .noise_tokens
+            .lock()
+            .map_err(|error| error.to_string())?;
+        store_token(
+            &mut cache,
+            &profile.id,
+            token.clone(),
+            &expires_at,
+            Instant::now(),
+            SystemTime::now(),
+        );
+    }
+    Ok(token)
+}
 
 pub(crate) async fn host_client(
     state: &AppState,

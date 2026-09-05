@@ -15,6 +15,7 @@ use tether_core::store::ReplayStore;
 
 /// Starts a WS server that sends `to_send` on connect, then reports the request
 /// path and the first client frame it receives.
+#[allow(clippy::result_large_err)] // tungstenite's handshake callback signature
 async fn spawn_server(
     to_send: Vec<String>,
 ) -> (

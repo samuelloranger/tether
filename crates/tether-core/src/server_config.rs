@@ -171,11 +171,7 @@ pub fn update_server_request(client: &HostClient) -> HttpRequest {
 }
 
 pub fn restart_server_request(client: &HostClient) -> HttpRequest {
-    client.post(
-        "/api/admin/restart",
-        json_headers(),
-        Some("{}".to_string()),
-    )
+    client.post("/api/admin/restart", json_headers(), Some("{}".to_string()))
 }
 
 /// Test notification — token auth only; no password in the body.
