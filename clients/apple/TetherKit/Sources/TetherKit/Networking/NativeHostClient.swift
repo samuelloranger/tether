@@ -104,7 +104,7 @@ public actor NativeHostClient {
     return base.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
   }
 
-  private func bearerValue() async throws -> String {
+  func bearerValue() async throws -> String {
     try await bearerSource.currentBearer()
   }
 

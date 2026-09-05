@@ -461,7 +461,7 @@ public struct ServerSettingsView: View {
         kind: .success,
         text: "Updating… Sessions survive the restart and will reconnect."
       )
-      ok = await store.requestServerUpdate(hostId: hostId, current: "")
+      ok = await store.requestServerUpdate(hostId: hostId)
       if ok {
         var actual: String?
         for _ in 0..<10 {
@@ -481,7 +481,7 @@ public struct ServerSettingsView: View {
         kind: .success,
         text: "Restarting… Sessions survive and will reconnect."
       )
-      ok = await store.requestServerRestart(hostId: hostId, current: "")
+      ok = await store.requestServerRestart(hostId: hostId)
     }
     if ok {
       admin = nil

@@ -128,10 +128,10 @@ extension SessionStore {
   }
 
 
-  public func requestServerUpdate(hostId: String, current: String) async -> Bool {
+  public func requestServerUpdate(hostId: String) async -> Bool {
     guard let client = makeConfigClient(hostId: hostId) else { return false }
     do {
-      _ = try await client.updateServer(current: current)
+      _ = try await client.updateServer()
       errorMessage = nil
       await refreshHost(hostId: hostId)
       return true
@@ -141,10 +141,10 @@ extension SessionStore {
     }
   }
 
-  public func requestServerRestart(hostId: String, current: String) async -> Bool {
+  public func requestServerRestart(hostId: String) async -> Bool {
     guard let client = makeConfigClient(hostId: hostId) else { return false }
     do {
-      try await client.restartServer(current: current)
+      try await client.restartServer()
       errorMessage = nil
       await refreshHost(hostId: hostId)
       return true

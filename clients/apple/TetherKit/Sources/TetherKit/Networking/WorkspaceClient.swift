@@ -235,7 +235,7 @@ extension NativeHostClient {
     sessionId: String,
     path: String
   ) async throws -> WorkspaceFileContent {
-    let request = try workspaceRequest(
+    let request = try await workspaceRequest(
       path: "/api/sessions/\(sessionId)/file",
       queryItems: [URLQueryItem(name: "path", value: path)]
     )
@@ -257,7 +257,7 @@ extension NativeHostClient {
       mimeType: mimeType,
       boundary: boundary
     )
-    var request = try workspaceRequest(
+    var request = try await workspaceRequest(
       path: "/api/sessions/\(sessionId)/upload",
       method: "POST"
     )
@@ -296,12 +296,12 @@ extension NativeHostClient {
   }
 
   public func listPresentations() async throws -> [Presentation] {
-    let request = try workspaceRequest(path: "/api/presentations")
+    let request = try await workspaceRequest(path: "/api/presentations")
     return try await decodeWorkspace([Presentation].self, request: request)
   }
 
   public func closePresentation(id: String) async throws -> Bool {
-    let request = try workspaceRequest(
+    let request = try await workspaceRequest(
       path: "/api/presentations/\(id)",
       method: "DELETE"
     )
@@ -316,7 +316,7 @@ extension NativeHostClient {
     method: String = "GET",
     body: Data? = nil,
     queryItems: [URLQueryItem]? = nil
-  ) throws -> URLRequest {
+  ) async throws -> URLRequest {
     guard let base = profile.baseHTTPURL else { throw WorkspaceClientError.invalidURL }
     var url = base.appendingPathComponent(
       path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -329,15 +329,9 @@ extension NativeHostClient {
       guard let withQuery = components.url else { throw WorkspaceClientError.invalidURL }
       url = withQuery
     }
-    guard
-      let password = try KeychainSecretStore().get(hostId: profile.id),
-      !password.isEmpty
-    else {
-      throw WorkspaceClientError.missingPassword
-    }
     var request = URLRequest(url: url)
     request.httpMethod = method
-    request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let body {
       request.httpBody = body

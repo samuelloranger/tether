@@ -96,7 +96,7 @@ public enum DiffBlobSide: String, Sendable, Hashable {
 
 extension NativeHostClient {
   public func fetchDiffSummary(sessionId: String) async throws -> DiffSummary {
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/diff/summary")
     return try await decode(DiffSummary.self, request: request)
   }
@@ -114,7 +114,7 @@ extension NativeHostClient {
     if mode != .head {
       items.append(URLQueryItem(name: "mode", value: mode.rawValue))
     }
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/diff",
       queryItems: items.isEmpty ? nil : items)
     return try await decode(DiffTextResponse.self, request: request)
@@ -145,7 +145,7 @@ extension NativeHostClient {
   }
 
   public func fetchGitLog(sessionId: String, limit: Int = 50) async throws -> [GitLogEntry] {
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/git/log",
       queryItems: [URLQueryItem(name: "limit", value: String(limit))])
     return try await decode([GitLogEntry].self, request: request)
@@ -161,7 +161,7 @@ extension NativeHostClient {
     if let path {
       items.append(URLQueryItem(name: "path", value: path))
     }
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/git/commit/\(sha)/diff",
       queryItems: items.isEmpty ? nil : items)
     return try await decode(DiffTextResponse.self, request: request)
@@ -174,7 +174,7 @@ extension NativeHostClient {
     path: String,
     side: DiffBlobSide
   ) async throws -> Data? {
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/diff/file",
       queryItems: [
         URLQueryItem(name: "path", value: path),
@@ -195,7 +195,7 @@ extension NativeHostClient {
     var payload: [String: Any] = ["message": message]
     if amend { payload["amend"] = true }
     let body = try JSONSerialization.data(withJSONObject: payload)
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/git/commit",
       method: "POST",
       body: body)
@@ -222,7 +222,7 @@ extension NativeHostClient {
 
   private func postGitOp(sessionId: String, op: String, path: String) async throws {
     let body = try JSONSerialization.data(withJSONObject: ["path": path])
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/git/\(op)",
       method: "POST",
       body: body)
@@ -239,7 +239,7 @@ extension NativeHostClient {
       "path": path,
       "hunkIndex": hunkIndex,
     ])
-    let request = try gitRequest(
+    let request = try await gitRequest(
       path: "/api/sessions/\(sessionId)/git/\(op)",
       method: "POST",
       body: body)
@@ -247,7 +247,7 @@ extension NativeHostClient {
   }
 
   private func postEmpty(path: String) async throws {
-    let request = try gitRequest(path: path, method: "POST")
+    let request = try await gitRequest(path: path, method: "POST")
     _ = try await decode(GitOkResponse.self, request: request)
   }
 
@@ -256,7 +256,7 @@ extension NativeHostClient {
     method: String = "GET",
     body: Data? = nil,
     queryItems: [URLQueryItem]? = nil
-  ) throws -> URLRequest {
+  ) async throws -> URLRequest {
     guard let base = profile.baseHTTPURL else { throw HostClientError.invalidURL }
     var url = base.appendingPathComponent(
       path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -269,15 +269,9 @@ extension NativeHostClient {
       guard let withQuery = components.url else { throw HostClientError.invalidURL }
       url = withQuery
     }
-    guard
-      let password = try KeychainSecretStore().get(hostId: profile.id),
-      !password.isEmpty
-    else {
-      throw HostClientError.missingPassword
-    }
     var request = URLRequest(url: url)
     request.httpMethod = method
-    request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let body {
       request.httpBody = body

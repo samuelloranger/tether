@@ -197,9 +197,12 @@ public final class SessionStore {
       try? noiseKeyStore.clear(hostId: profile.id)
       throw error
     }
+    // Carry the transport scheme captured at pairing onto the profile id.
+    HostScheme.record(HostScheme.scheme(forHost: pairHostId, port: port), forHost: profile.id)
     // Both keys now live under the profile id; drop the throwaway pairing id.
     if pairHostId != profile.id {
       try? noiseKeyStore.clear(hostId: pairHostId)
+      HostScheme.forget(pairHostId)
     }
     reloadHosts()
     healthByHost[profile.id] = .reachable
