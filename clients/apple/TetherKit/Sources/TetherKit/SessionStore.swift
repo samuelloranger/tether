@@ -34,7 +34,6 @@ public final class SessionStore {
   /// Whether the last probe reached a server, so the UI can confirm a success
   /// rather than leaving the button looking inert.
   public var probeSucceeded = false
-  public var pairingNeedsSetup = false
   /// Whether the app scene is foreground — gates `{type:focus}` and resume.
   public private(set) var isAppActive = true
   /// Cold-launch restore is a one-shot; see `restoreSessionIfNeeded`.
@@ -132,9 +131,6 @@ public final class SessionStore {
   }
 
   public func bootstrap() async {
-    #if DEBUG
-    await seedDebugHostIfRequested()
-    #endif
     do {
       hosts = try hostStore.list()
       for host in hosts {
@@ -153,51 +149,6 @@ public final class SessionStore {
     }
   }
 
-  #if DEBUG
-  /// Pairs a host from the launch environment, for driving the simulator.
-  ///
-  /// iOS refuses synthetic taps and keystrokes in a SecureField, so a scripted
-  /// design or E2E pass could never get past the password on the pairing screen
-  /// without a human at the keyboard. This lets the harness pass credentials in
-  /// directly:
-  ///
-  ///   xcrun simctl launch --console booted <bundle> \
-  ///     -TETHER_DEBUG_HOST 192.168.1.10 -TETHER_DEBUG_PORT 8097 \
-  ///     -TETHER_DEBUG_PASSWORD hunter2
-  ///
-  /// DEBUG only, so it cannot exist in a Release build — which is what every
-  /// TestFlight and App Store archive is. It also does nothing unless all three
-  /// values are present, and it skips a host that is already paired.
-  private func seedDebugHostIfRequested() async {
-    let env = ProcessInfo.processInfo
-    guard
-      let host = env.environment["TETHER_DEBUG_HOST"]
-        ?? UserDefaults.standard.string(forKey: "TETHER_DEBUG_HOST"),
-      let password = env.environment["TETHER_DEBUG_PASSWORD"]
-        ?? UserDefaults.standard.string(forKey: "TETHER_DEBUG_PASSWORD"),
-      !host.isEmpty, !password.isEmpty
-    else { return }
-    let port = env.environment["TETHER_DEBUG_PORT"]
-      ?? UserDefaults.standard.string(forKey: "TETHER_DEBUG_PORT") ?? "8085"
-
-    let existing = (try? hostStore.list()) ?? []
-    if existing.contains(where: { $0.host == host && $0.port == port }) { return }
-    do {
-      // TOFU: a server with no password yet rejects every authenticated call,
-      // so the password has to be established first. `createHost` alone only
-      // ever worked against a server that was already paired once — against a
-      // fresh one it failed with 401, which made this look like an auth bug
-      // rather than a missing setup step.
-      if let status = try? await unauthenticatedStatus(host: host, port: port), status.needsSetup {
-        try await setupPassword(host: host, port: port, password: password)
-      }
-      _ = try await createHost(name: "", host: host, port: port, password: password)
-      print("[TETHER_DEBUG] paired \(host):\(port)")
-    } catch {
-      print("[TETHER_DEBUG] seed failed: \(error.localizedDescription)")
-    }
-  }
-  #endif
 
   public func reloadHosts() {
     do {
@@ -207,56 +158,9 @@ public final class SessionStore {
     }
   }
 
-  public func createHost(
-    name: String,
-    host: String,
-    port: String,
-    password: String,
-    color: String = "#89b4fa"
-  ) async throws -> HostProfileModel {
-    let identity = try await probeIdentity(host: host, port: port, password: password)
-    let profile = try hostStore.create(
-      name: name.isEmpty ? identity.name : name,
-      color: color.isEmpty ? identity.color : color,
-      host: host,
-      port: port,
-      identityName: identity.name
-    )
-    try hostStore.setPassword(password, for: profile.id)
-    reloadHosts()
-    healthByHost[profile.id] = .reachable
-    activeHostId = profile.id
-    return profile
-  }
-
-  /// The DERIVED auth mode for a host — see `HostAuthModeResolver`. Interim: a
-  /// host is a Noise host iff a pinned Noise server key exists for it and it has
-  /// no stored password.
-  public func authMode(for hostId: String) -> HostAuthMode {
-    // `try?` flattens the throwing `-> Data?` / `-> String?` to a single
-    // optional (same idiom as `client(for:)`). Both Noise keys are required to
-    // classify `.noise` — reconnect needs the device key too, so a host missing
-    // it must fall back to the password path rather than fail mid-handshake.
-    let pinned = try? noiseKeyStore.loadServerPublicKey(hostId: hostId)
-    let device = try? noiseKeyStore.loadDevicePrivateKey(hostId: hostId)
-    let password = try? hostStore.password(for: hostId)
-    return HostAuthModeResolver.resolve(
-      hasPinnedNoiseKey: (pinned ?? nil) != nil,
-      hasDeviceKey: (device ?? nil) != nil,
-      hasPassword: !((password ?? "").isEmpty)
-    )
-  }
-
-  /// Persists a HostProfile for a device that paired over Noise — the
-  /// password-less sibling of `createHost`.
-  ///
-  /// A Noise host has no password, so it cannot `probeIdentity` (authenticated
-  /// GET /api/config) and must not `setPassword`. It is created straight through
-  /// the pure `hostStore.create(...)`, then the Noise key material — which the
-  /// pairing sheet stored under the throwaway `pairHostId` — is migrated onto the
-  /// profile's real (FFI-generated) id so `authMode(for:)` and
-  /// `NoiseSessionClient.reconnect` resolve it. Additive: the password path in
-  /// `createHost` is untouched.
+  /// Persists a HostProfile for a device that paired over Noise. The Noise key
+  /// material stored under the throwaway `pairHostId` is migrated onto the
+  /// profile's real (FFI-generated) id so `NoiseSessionClient.reconnect` resolves it.
   @discardableResult
   public func createNoiseHost(
     name: String,
@@ -320,46 +224,6 @@ public final class SessionStore {
     }
   }
 
-  public func beginPairing(host: String, port: String) async {
-    isPairing = true
-    pairingNeedsSetup = false
-    errorMessage = nil
-    // Without this the flag stayed true after the first probe, so any UI gated
-    // on it could never leave the probing state.
-    defer { isPairing = false }
-    do {
-      let status = try await unauthenticatedStatus(host: host, port: port)
-      pairingNeedsSetup = status.needsSetup
-      probeSucceeded = true
-    } catch {
-      probeSucceeded = false
-      errorMessage = error.localizedDescription
-    }
-  }
-
-  public func completePairing(
-    host: String,
-    port: String,
-    password: String,
-    confirmPassword: String,
-    displayName: String
-  ) async {
-    guard password == confirmPassword else {
-      errorMessage = "Passwords do not match"
-      return
-    }
-    isLoading = true
-    defer { isLoading = false }
-    do {
-      if pairingNeedsSetup {
-        try await setupPassword(host: host, port: port, password: password)
-      }
-      _ = try await createHost(name: displayName, host: host, port: port, password: password)
-      isPairing = false
-    } catch {
-      errorMessage = error.localizedDescription
-    }
-  }
 
   public func refreshSessions() async {
     guard let hostId = activeHostId else { return }
@@ -458,40 +322,7 @@ public final class SessionStore {
   /// host happens to be active" — reaching a second server took selecting one
   /// of its sessions first, which is impossible when it has none.
   public func newTerminal(hostId: String) async {
-    if authMode(for: hostId) == .noise {
-      await newNoiseTerminal(hostId: hostId)
-      return
-    }
-    guard let client = client(for: hostId) else { return }
-    // THIS host's list, fetched fresh, before an id is picked. A host the
-    // drawer has never loaded has no `sessionsByHost` entry, so allocating
-    // from the cache would pick `term-1` for a host that already runs one —
-    // and `/api/sessions/start` returns the EXISTING session for a known id
-    // (apps/server/src/server/pty.ts), so the button would silently attach to
-    // a running terminal instead of opening a new one.
-    let known = await fetchSessions(for: hostId)
-    sessionsByHost[hostId] = known
-    if activeHostId == hostId {
-      sessions = known
-    }
-    let id = nextSessionId(among: known)
-    // Explicit, so the cold-launch restore is spent — see `selectSession`.
-    hasRestoredSession = true
-    do {
-      _ = try await client.startSession(id: id)
-      if activeHostId != hostId || activeSessionId != id {
-        await pipeline.sendFocus(focused: false)
-      }
-      activeHostId = hostId
-      activeSessionId = id
-      // Connect FIRST. Refreshing every host before opening the socket meant a
-      // terminal started on a healthy host stayed disconnected for as long as
-      // the slowest host took to time out.
-      await connectTerminal(sessionId: id)
-      refreshDrawerInBackground()
-    } catch {
-      errorMessage = error.localizedDescription
-    }
+    await newNoiseTerminal(hostId: hostId)
   }
 
   /// Opens a terminal on a Noise host. There is no REST `startSession` for a
@@ -632,25 +463,6 @@ public final class SessionStore {
   /// pairing completed — and in that state every authenticated request will
   /// fail. The UI needs to know so it can ask, rather than silently doing
   /// nothing when the host is selected.
-  public func hasPassword(hostId: String) -> Bool {
-    guard let password = try? hostStore.password(for: hostId) else { return false }
-    return !(password ?? "").isEmpty
-  }
-
-  /// Stores a password for an existing host and immediately re-checks the host.
-  ///
-  /// Distinct from pairing, which CREATES a host. This attaches a credential to
-  /// one that is already saved.
-  public func savePassword(_ password: String, for hostId: String) async {
-    do {
-      try hostStore.setPassword(password, for: hostId)
-      errorMessage = nil
-      await refreshSessions()
-    } catch {
-      errorMessage = error.localizedDescription
-    }
-  }
-
   public func selectSession(hostId: String, sessionId: String) async {
     // The user has chosen a terminal, so the cold-launch restore has no more
     // work to do. Without this the latch could still be unspent — a launch whose
@@ -765,25 +577,12 @@ public final class SessionStore {
     return client(for: hostId)
   }
 
-  private func client(for hostId: String) -> NativeHostClient? {
+  func client(for hostId: String) -> NativeHostClient? {
     guard let profile = hosts.first(where: { $0.id == hostId }) else { return nil }
-    // A Noise host has no password: its REST Bearer is a device token minted
-    // over the Noise channel and cached (re-minted on 401). Additive — password
-    // hosts are unchanged below.
-    if authMode(for: hostId) == .noise {
-      return NativeHostClient(
-        profile: profile,
-        bearerSource: NoiseTokenBearerSource(cache: noiseTokenCache, hostId: hostId)
-      )
-    }
-    // `try?` on a throwing call that already returns String? flattens in
-    // Swift 5+, so `password` binds as a non-optional String here — a second
-    // `let` to unwrap it does not compile.
-    guard
-      let password = try? hostStore.password(for: hostId),
-      !password.isEmpty
-    else { return nil }
-    return NativeHostClient(profile: profile, password: password)
+    return NativeHostClient(
+      profile: profile,
+      bearerSource: NoiseTokenBearerSource(cache: noiseTokenCache, hostId: hostId)
+    )
   }
 
   /// Mint a REST device token for a Noise host over its Noise channel. Backs
@@ -792,7 +591,7 @@ public final class SessionStore {
   private func mintNoiseToken(hostId: String) async throws -> (token: String, expiresAt: Date) {
     guard
       let host = hosts.first(where: { $0.id == hostId }),
-      let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+      let url = SessionStore.noiseBaseURL(for: host)
     else {
       throw HostClientError.invalidURL
     }
@@ -800,47 +599,10 @@ public final class SessionStore {
   }
 
   private func fetchSessions(for hostId: String) async -> [RemoteSession] {
-    // A Noise host has no Bearer credential and no REST session list — its
-    // sessions live only over the Noise channel. Report it reachable and keep
-    // whatever tabs were synthesized locally, so the 3-second poll neither marks
-    // it auth-failed nor wipes an open Noise terminal out from under the stream.
-    // TODO: a `GET /api/noise/sessions`-equivalent would let the drawer show a
-    // Noise host's real server-side session list.
-    if authMode(for: hostId) == .noise {
-      // No Bearer credential + no REST list — probe reachability over the Noise
-      // path (a reconnect handshake) instead of the password `/api/config`, which
-      // would always 401 it. Throttled so the 3s poll doesn't hammer a handshake.
-      // Keep the locally-synthesized tabs either way.
-      await pingNoiseHealth(hostId)
-      return sessionsByHost[hostId] ?? []
-    }
-    guard let client = client(for: hostId) else {
-      // No usable password for this host. Returning early without touching
-      // health left it at `.unknown`, which the drawer renders as
-      // "connecting…" — so a host that could never connect looked identical to
-      // one about to succeed, forever. Report it as an auth failure, which is
-      // what it is, and which offers the user "Re-enter password".
-      updateHealth(for: hostId, status: 401)
-      return []
-    }
-    do {
-      let list = try await client.listSessions()
-      let status = try await client.testConnection()
-      updateHealth(for: hostId, status: UInt16(status))
-      return list
-    } catch HostClientError.unauthorized {
-      updateHealth(for: hostId, status: 401)
-      if activeHostId == hostId {
-        errorMessage = HostClientError.unauthorized.localizedDescription
-      }
-      return []
-    } catch {
-      markHostFailure(hostId)
-      if activeHostId == hostId {
-        errorMessage = error.localizedDescription
-      }
-      return []
-    }
+    // Sessions live over the Noise channel, not REST — probe reachability with a
+    // reconnect handshake (throttled) and keep the locally-synthesized tabs.
+    await pingNoiseHealth(hostId)
+    return sessionsByHost[hostId] ?? []
   }
 
   /// Last time each Noise host's reachability was probed, so the 3s session poll
@@ -856,7 +618,7 @@ public final class SessionStore {
     lastNoisePingAt[hostId] = now
 
     guard let host = hosts.first(where: { $0.id == hostId }),
-          let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+          let url = SessionStore.noiseBaseURL(for: host)
     else {
       markHostFailure(hostId)
       return
@@ -914,21 +676,7 @@ public final class SessionStore {
     // believing a session is on screen.
     await pipeline.disconnect()
     guard let hostId = activeHostId else { return }
-    // Branch ONCE on the derived auth mode: a Noise host drives the sealed
-    // channel, a password host drives the Bearer WebSocket. Both feed the same
-    // emulator inside the pipeline.
-    switch authMode(for: hostId) {
-    case .noise:
-      await connectTerminalNoise(hostId: hostId, sessionId: sessionId)
-    case .password:
-      guard let client = client(for: hostId) else { return }
-      await pipeline.connect(
-        client: client,
-        sessionId: sessionId,
-        key: terminalKey(sessionId),
-        focused: isAppActive
-      )
-    }
+    await connectTerminalNoise(hostId: hostId, sessionId: sessionId)
   }
 
   /// Establishes the Noise transport for a session and hands the pipeline a live
@@ -938,7 +686,7 @@ public final class SessionStore {
   private func connectTerminalNoise(hostId: String, sessionId: String) async {
     guard
       let host = hosts.first(where: { $0.id == hostId }),
-      let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+      let url = SessionStore.noiseBaseURL(for: host)
     else {
       errorMessage = HostClientError.invalidURL.localizedDescription
       return
@@ -952,10 +700,11 @@ public final class SessionStore {
     )
   }
 
-  /// Base URL for the Noise handshake. Noise runs over TLS (`wss`), so this is
-  /// `https://…`; the port is the host's stored port.
-  static func noiseBaseURL(host: String, port: String) -> URL? {
-    URL(string: "https://\(host):\(port)")
+  /// `http`/`https` base for the Noise handshake, matching the host's scheme;
+  /// `NoiseSessionClient` maps it to `ws`/`wss`.
+  nonisolated static func noiseBaseURL(for host: HostProfileModel) -> URL? {
+    let scheme = HostScheme.scheme(forHost: host.id, port: host.port)
+    return URL(string: "\(scheme)://\(host.host):\(host.port)")
   }
 
   private func updateHealth(for hostId: String, status: UInt16) {
@@ -968,49 +717,4 @@ public final class SessionStore {
     healthByHost[hostId] = HostHealthLogic.afterFailure(current)
   }
 
-  private func probeIdentity(host: String, port: String, password: String) async throws -> ServerIdentity {
-    let profile = HostProfileModel(
-      FfiHostProfile(
-        id: "probe",
-        name: host,
-        color: "#89b4fa",
-        host: host,
-        port: port,
-        identityName: host,
-        order: 0
-      )
-    )
-    let client = NativeHostClient(profile: profile, password: password)
-    return try await client.loadIdentity()
-  }
-
-  private func unauthenticatedStatus(host: String, port: String) async throws -> ServerStatus {
-    guard let url = URL(string: "http://\(host):\(port)/api/status") else {
-      throw HostClientError.invalidURL
-    }
-    // A bounded timeout matters here: URLSession's 60s default made a blocked or
-    // unroutable host look like a dead button rather than a failure.
-    var request = URLRequest(url: url)
-    request.timeoutInterval = 10
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-    guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
-    guard let decoded = try? JSONDecoder().decode(ServerStatus.self, from: data) else {
-      throw HostClientError.decodeFailed
-    }
-    return decoded
-  }
-
-  private func setupPassword(host: String, port: String, password: String) async throws {
-    guard let url = URL(string: "http://\(host):\(port)/api/setup") else {
-      throw HostClientError.invalidURL
-    }
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try JSONEncoder().encode(["password": password])
-    let (_, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-    guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
-  }
 }

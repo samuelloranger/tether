@@ -21,6 +21,7 @@ public final class PushRegistrar {
 
   private let hostStore: HostStoreAdapter
   private let defaults: UserDefaults
+  private let noiseClient = NoiseSessionClient()
 
   public init(
     hostStore: HostStoreAdapter = HostStoreAdapter(),
@@ -28,6 +29,22 @@ public final class PushRegistrar {
   ) {
     self.hostStore = hostStore
     self.defaults = defaults
+  }
+
+  private lazy var tokenCache = NoiseTokenCache(mint: { [weak self] hostId in
+    guard
+      let self,
+      let host = (try? self.hostStore.list())?.first(where: { $0.id == hostId }),
+      let url = SessionStore.noiseBaseURL(for: host)
+    else { throw HostClientError.invalidURL }
+    return try await self.noiseClient.requestToken(hostId: hostId, url: url)
+  })
+
+  private func tokenClient(for host: HostProfileModel) -> NativeHostClient {
+    NativeHostClient(
+      profile: host,
+      bearerSource: NoiseTokenBearerSource(cache: tokenCache, hostId: host.id)
+    )
   }
 
   /// Persisted APNs token (lowercase 64-hex), if any.
@@ -86,11 +103,9 @@ public final class PushRegistrar {
     guard let token = storedDeviceToken else { return }
     guard
       let hosts = try? hostStore.list(),
-      let profile = hosts.first(where: { $0.id == hostId }),
-      let password = try? hostStore.password(for: hostId),
-      !password.isEmpty
+      let profile = hosts.first(where: { $0.id == hostId })
     else { return }
-    let client = NativeHostClient(profile: profile, password: password)
+    let client = tokenClient(for: profile)
     do {
       try await client.unregisterPushDevice(deviceToken: token)
     } catch {
@@ -129,12 +144,7 @@ public final class PushRegistrar {
     }
 
     for host in hosts {
-      // `try?` on throws→String? flattens to String? (see SessionStore.client).
-      guard
-        let password = try? hostStore.password(for: host.id),
-        !password.isEmpty
-      else { continue }
-      let client = NativeHostClient(profile: host, password: password)
+      let client = tokenClient(for: host)
       do {
         try await client.registerPushDevice(
           deviceToken: deviceToken,

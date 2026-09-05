@@ -225,11 +225,9 @@ private struct HostDrawerSection: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(TetherColors.accent)
     case .unauthorized:
-      Button("Re-enter password") {
-        onReenterPassword(host.id)
-      }
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(TetherColors.accent)
+      Button("Pair again", action: onRetryHost)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(TetherColors.accent)
     }
   }
 }

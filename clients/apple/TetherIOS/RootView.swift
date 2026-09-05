@@ -13,9 +13,6 @@ struct RootView: View {
   @State private var showRename = false
   @State private var renameText = ""
   @State private var settingsHostId: String?
-  /// Set when a selected host has no stored password, so the app can ask for
-  /// one instead of appearing to do nothing on tap.
-  @State private var passwordPromptHostId: String?
 
   private var litChrome: LitChrome {
     let session = store.activeSession
@@ -87,17 +84,11 @@ struct RootView: View {
         isPresented: $drawerOpen,
         store: store,
         onSelectSession: { hostId, sessionId in
-          if !store.hasPassword(hostId: hostId) {
-            passwordPromptHostId = hostId
-            return
-          }
           Task {
             await store.selectSession(hostId: hostId, sessionId: sessionId)
           }
         },
-        onReenterPassword: { hostId in
-          passwordPromptHostId = hostId
-        },
+        onReenterPassword: { _ in },
         onHostSettings: { hostId in
           settingsHostId = hostId
           showSettings = true
@@ -145,29 +136,21 @@ struct RootView: View {
       GitDrawerView(store: store, onDismiss: { showGit = false })
         .presentationDetents([.large, .medium])
     }
-    .sheet(item: $passwordPromptHostId) { hostId in
-      NavigationStack {
-        HostPasswordView(
-          store: store,
-          hostId: hostId,
-          hostLabel: store.hosts.first(where: { $0.id == hostId })?.name ?? hostId,
-          onDone: { passwordPromptHostId = nil }
-        )
-        .toolbar {
-          ToolbarItem(placement: .cancellationAction) {
-            Button("Cancel") { passwordPromptHostId = nil }
-          }
-        }
-      }
-    }
     .sheet(isPresented: $showPairing) {
       NavigationStack {
-        PairingView(store: store)
-          .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-              Button("Cancel") { showPairing = false }
-            }
+        PairDeviceView(hostId: UUID().uuidString) { pairId, host, port, _ in
+          do {
+            try store.createNoiseHost(name: "", host: host, port: port, pairHostId: pairId)
+          } catch {
+            store.errorMessage = error.localizedDescription
           }
+          showPairing = false
+        }
+        .toolbar {
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { showPairing = false }
+          }
+        }
       }
     }
     .alert("Rename session", isPresented: $showRename) {

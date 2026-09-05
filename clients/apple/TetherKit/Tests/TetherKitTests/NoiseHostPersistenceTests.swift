@@ -32,49 +32,6 @@ private final class InMemorySecretStore: SecretStore {
 /// the password-less create path (`SessionStore.createNoiseHost`). No UI here —
 /// pure logic + the storage doubles.
 final class NoiseHostPersistenceTests: XCTestCase {
-  // MARK: - Auth-mode derivation (pure)
-
-  func testResolveNoiseWhenBothKeysAndNoPassword() {
-    XCTAssertEqual(
-      HostAuthModeResolver.resolve(hasPinnedNoiseKey: true, hasDeviceKey: true, hasPassword: false),
-      .noise
-    )
-  }
-
-  func testResolvePasswordWhenEitherKeyMissing() {
-    // Both Noise keys are required — one alone (a half-finished migration) must
-    // fall back to the password path, not classify `.noise` and fail mid-handshake.
-    XCTAssertEqual(
-      HostAuthModeResolver.resolve(hasPinnedNoiseKey: true, hasDeviceKey: false, hasPassword: false),
-      .password
-    )
-    XCTAssertEqual(
-      HostAuthModeResolver.resolve(hasPinnedNoiseKey: false, hasDeviceKey: true, hasPassword: false),
-      .password
-    )
-  }
-
-  func testResolvePasswordWhenPasswordPresent() {
-    // A password always wins — even if stale pinned keys also exist.
-    XCTAssertEqual(
-      HostAuthModeResolver.resolve(hasPinnedNoiseKey: true, hasDeviceKey: true, hasPassword: true),
-      .password
-    )
-    XCTAssertEqual(
-      HostAuthModeResolver.resolve(hasPinnedNoiseKey: false, hasDeviceKey: false, hasPassword: true),
-      .password
-    )
-  }
-
-  func testResolvePasswordWhenNeitherPresent() {
-    // Neither key nor password → password path, the safe default for every
-    // pre-Noise / half-set-up host.
-    XCTAssertEqual(
-      HostAuthModeResolver.resolve(hasPinnedNoiseKey: false, hasDeviceKey: false, hasPassword: false),
-      .password
-    )
-  }
-
   // MARK: - Password-less create path
 
   @MainActor
@@ -108,18 +65,11 @@ final class NoiseHostPersistenceTests: XCTestCase {
     // Selected as the active host.
     XCTAssertEqual(store.activeHostId, profile.id)
 
-    // NO password was stored for it — the whole point of the Noise path.
-    XCTAssertFalseOrNilPassword(secrets, hostId: profile.id)
-    XCTAssertFalse(store.hasPassword(hostId: profile.id))
-
     // Keys migrated onto the profile id; the throwaway pairing id was cleared.
     XCTAssertEqual(try noiseKeys.loadDevicePrivateKey(hostId: profile.id), device.private)
     XCTAssertEqual(try noiseKeys.loadServerPublicKey(hostId: profile.id), server.public)
     XCTAssertNil(try noiseKeys.loadDevicePrivateKey(hostId: pairId))
     XCTAssertNil(try noiseKeys.loadServerPublicKey(hostId: pairId))
-
-    // And it derives as a Noise host (both keys present, no password).
-    XCTAssertEqual(store.authMode(for: profile.id), .noise)
   }
 
   @MainActor
@@ -140,23 +90,6 @@ final class NoiseHostPersistenceTests: XCTestCase {
     XCTAssertTrue(store.hosts.isEmpty)
   }
 
-  @MainActor
-  func testPasswordHostDerivesPasswordMode() async throws {
-    let secrets = InMemorySecretStore()
-    let hostStore = HostStoreAdapter(storage: InMemoryHostStorage(), secrets: secrets)
-    let store = SessionStore(hostStore: hostStore, noiseKeyStore: FakeNoiseKeyStore())
-
-    // A plain password host, created straight through the pure store (no probe).
-    let profile = try hostStore.create(
-      name: "box", color: "#89b4fa", host: "box", port: "8085", identityName: "box"
-    )
-    try hostStore.setPassword("hunter2", for: profile.id)
-    store.reloadHosts()
-
-    XCTAssertTrue(store.hasPassword(hostId: profile.id))
-    XCTAssertEqual(store.authMode(for: profile.id), .password)
-  }
-
   // MARK: - Address parsing feeding the create path
 
   func testHostAndPortSplitsTypedAddress() {
@@ -166,13 +99,4 @@ final class NoiseHostPersistenceTests: XCTestCase {
     XCTAssertTrue(PairDeviceView.hostAndPort(from: "box")! == ("box", "8443"))
     XCTAssertNil(PairDeviceView.hostAndPort(from: "   "))
   }
-}
-
-private func XCTAssertFalseOrNilPassword(
-  _ secrets: InMemorySecretStore,
-  hostId: String,
-  file: StaticString = #filePath,
-  line: UInt = #line
-) {
-  XCTAssertFalse(secrets.storedHostIds.contains(hostId), "expected no stored password", file: file, line: line)
 }
