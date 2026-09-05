@@ -84,13 +84,17 @@ public final class SessionStore {
   /// Only `pullTerminalSnapshot` uses this now — the render path's own
   /// generation check lives inside `TerminalPipeline`.
   @ObservationIgnored private var lastRenderedGeneration: UInt64?
+  /// Test seam: production lists via `NativeHostClient.listSessions`.
+  @ObservationIgnored private let remoteSessions: ((String) async throws -> [RemoteSession])?
 
   public init(
     hostStore: HostStoreAdapter = HostStoreAdapter(),
-    noiseKeyStore: NoiseKeyStore = KeychainNoiseKeyStore()
+    noiseKeyStore: NoiseKeyStore = KeychainNoiseKeyStore(),
+    remoteSessions: ((String) async throws -> [RemoteSession])? = nil
   ) {
     self.hostStore = hostStore
     self.noiseKeyStore = noiseKeyStore
+    self.remoteSessions = remoteSessions
     noiseClient = NoiseSessionClient(keyStore: noiseKeyStore)
     observePipeline()
   }
@@ -237,10 +241,9 @@ public final class SessionStore {
   public func refreshDrawer() async {
     isLoading = true
     defer { isLoading = false }
-    // Concurrently, not one host after another. Each host costs two round
-    // trips (`listSessions` + `testConnection`), so the serial version made
-    // the drawer's refresh time the SUM over every host — and one unreachable
-    // host held up every reachable one behind it.
+    // Concurrently, not one host after another. Each host is a `listSessions`
+    // round trip, so the serial version made the drawer's refresh time the SUM
+    // over every host — and one unreachable host held up every reachable one.
     let ids = hosts.map(\.id)
     let nextSessions = await withTaskGroup(
       of: (String, [RemoteSession]).self,
@@ -596,36 +599,19 @@ public final class SessionStore {
   }
 
   private func fetchSessions(for hostId: String) async -> [RemoteSession] {
-    // Sessions live over the Noise channel, not REST — probe reachability with a
-    // reconnect handshake (throttled) and keep the locally-synthesized tabs.
-    await pingNoiseHealth(hostId)
-    return sessionsByHost[hostId] ?? []
-  }
-
-  /// Last time each Noise host's reachability was probed, so the 3s session poll
-  /// runs the (heavier) Noise handshake at most every 8s.
-  private var lastNoisePingAt: [String: Date] = [:]
-
-  /// Reachability for a Noise host: attempt the IK reconnect handshake. Success =
-  /// up AND this device still authorized → `.reachable`; any failure (host down,
-  /// or this device revoked) → `.unreachable`. Throttled to ~8s.
-  private func pingNoiseHealth(_ hostId: String) async {
-    let now = Date()
-    if let last = lastNoisePingAt[hostId], now.timeIntervalSince(last) < 8 { return }
-    lastNoisePingAt[hostId] = now
-
-    guard let host = hosts.first(where: { $0.id == hostId }),
-          let url = SessionStore.noiseBaseURL(for: host)
-    else {
-      markHostFailure(hostId)
-      return
-    }
     do {
-      let channel = try await noiseClient.reconnect(hostId: hostId, url: url)
-      await channel.close()
+      let listed: [RemoteSession]
+      if let remoteSessions {
+        listed = try await remoteSessions(hostId)
+      } else {
+        guard let client = client(for: hostId) else { throw HostClientError.invalidURL }
+        listed = try await client.listSessions()
+      }
       healthByHost[hostId] = .reachable
+      return listed
     } catch {
       markHostFailure(hostId)
+      return sessionsByHost[hostId] ?? []
     }
   }
 
