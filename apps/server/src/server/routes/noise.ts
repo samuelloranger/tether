@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { runReconnect } from '../authGate';
+import { trackDeviceChannel } from '../deviceChannels';
 import { getDeviceByPubkey, touchDevice } from '../deviceRegistry';
 import { logError, logInfo } from '../log';
 import { ChannelError } from '../noiseChannel';
@@ -137,11 +138,20 @@ noiseRoutes.get(
         )
           .then(async ({ channel, device }) => {
             logInfo(`Noise session authorized device ${device.id}`);
+            const untrack = trackDeviceChannel(device.id, () => {
+              try {
+                adapter.close();
+              } catch {}
+              try {
+                ws.close();
+              } catch {}
+            });
             try {
               // Thread the authorized device's id in so `devices.list` can flag
               // the caller's own row (`isSelf`); registry fns default to live.
               await runNoiseSession(channel, adapter, { identity: { deviceId: device.id } });
             } finally {
+              untrack();
               channel.free();
               try {
                 ws.close();

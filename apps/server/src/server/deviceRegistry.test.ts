@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { trackDeviceChannel } from './deviceChannels';
 import { db } from './db';
 import {
   addDevice,
@@ -126,6 +127,16 @@ test('revokeDevice removes the row and a second revoke throws not_found', () => 
   expect(removed.id).toBe(device.id);
   expect(getDeviceByPubkey(device.pubkey)).toBeNull();
   expectCode(() => revokeDevice('doomed'), 'not_found');
+});
+
+test('revokeDevice closes tracked live channels for that device only', () => {
+  const deviceA = addDevice({ label: 'phone-a', pubkey: pubkeyFill(32) });
+  const deviceB = addDevice({ label: 'phone-b', pubkey: pubkeyFill(33) });
+  const closed: string[] = [];
+  trackDeviceChannel(deviceA.id, () => closed.push('a'));
+  trackDeviceChannel(deviceB.id, () => closed.push('b'));
+  revokeDevice(deviceA.id);
+  expect(closed).toEqual(['a']);
 });
 
 test('renameDevice changes the label and returns the updated device', () => {

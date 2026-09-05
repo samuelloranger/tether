@@ -1,4 +1,5 @@
 import { db } from './db';
+import { closeDeviceChannels } from './deviceChannels';
 import { removePushDevicesForAuthDevice } from './pushDevices';
 
 export interface AuthDevice {
@@ -163,6 +164,7 @@ export function revokeDevice(target: string): AuthDevice {
   const device = resolveTarget(target);
   db.query('DELETE FROM auth_devices WHERE id = $id').run({ $id: device.id });
   removePushDevicesForAuthDevice(device.id);
+  closeDeviceChannels(device.id);
   return device;
 }
 
