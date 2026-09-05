@@ -5054,7 +5054,7 @@ dependencies = [
 
 [[package]]
 name = "tether-desktop-native"
-version = "4.0.2"
+version = "4.0.3"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
