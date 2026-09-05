@@ -8,7 +8,9 @@ export function resizeFrame(dims: { cols: number; rows: number } | undefined): {
 
 /** Frames to send the moment a terminal socket is live. Fit often runs before
  *  the socket exists, so connect-time `start` can be 80×24 while the pane is
- *  already 132×43; without an immediate resize a TUI never sees SIGWINCH. */
+ *  already 132×43; without an immediate resize a TUI never sees SIGWINCH.
+ *  Window focus-in uses the same pair: always resize even if local geometry
+ *  already matches, because the PTY can still be the old ioctl size. */
 export function socketOpenFrames(
   dims: { cols: number; rows: number } | undefined,
   focused: boolean,
