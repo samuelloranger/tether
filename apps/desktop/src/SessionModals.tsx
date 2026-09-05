@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { killConfirmCopy } from './killConfirmCopy';
 
 export function RenameModal({
   visible,
@@ -58,27 +59,26 @@ export function RenameModal({
 
 export function KillConfirmModal({
   visible,
-  sessionLabel,
+  memberLabels,
   onCancel,
   onConfirm,
 }: {
   visible: boolean;
-  sessionLabel: string;
+  memberLabels: string[];
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   if (!visible) return null;
+  const { title, body } = killConfirmCopy(memberLabels);
   return (
     <div className="modal-backdrop">
       <button type="button" className="modal-scrim" aria-label="Dismiss" onClick={onCancel} />
       <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="kill-title">
         <h2 id="kill-title" className="modal-title">
-          Kill this terminal?
+          {title}
         </h2>
-        <p className="modal-body">
-          {sessionLabel
-            ? `“${sessionLabel}” — the process and saved output will be deleted.`
-            : 'The process and saved output will be deleted.'}
+        <p className="modal-body" style={{ whiteSpace: 'pre-line' }}>
+          {body}
         </p>
         <div className="modal-actions">
           <button type="button" className="secondary" onClick={onCancel}>
@@ -102,7 +102,7 @@ export function useSessionModals() {
   } | null>(null);
   const [kill, setKill] = useState<{
     members: Array<{ hostId: string; sessionId: string }>;
-    label: string;
+    memberLabels: string[];
   } | null>(null);
 
   return {
@@ -111,9 +111,11 @@ export function useSessionModals() {
     openRename: (hostId: string, sessionId: string, text: string, placeholder: string) =>
       setRename({ hostId, sessionId, text, placeholder }),
     openKill: (hostId: string, sessionId: string, label: string) =>
-      setKill({ members: [{ hostId, sessionId }], label }),
-    openKillMembers: (members: Array<{ hostId: string; sessionId: string }>, label: string) =>
-      setKill({ members, label }),
+      setKill({ members: [{ hostId, sessionId }], memberLabels: [label] }),
+    openKillMembers: (
+      members: Array<{ hostId: string; sessionId: string }>,
+      memberLabels: string[],
+    ) => setKill({ members, memberLabels }),
     closeRename: () => setRename(null),
     closeKill: () => setKill(null),
     setRenameText: (text: string) =>
@@ -152,7 +154,7 @@ export function SessionModalHost({
       />
       <KillConfirmModal
         visible={!!modals.kill}
-        sessionLabel={modals.kill?.label ?? ''}
+        memberLabels={modals.kill?.memberLabels ?? []}
         onCancel={modals.closeKill}
         onConfirm={() => {
           if (!modals.kill) return;

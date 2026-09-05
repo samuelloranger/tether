@@ -30,7 +30,7 @@ interface SessionTabBarProps {
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestKillMembers: (
     members: Array<{ hostId: string; sessionId: string }>,
-    label: string,
+    memberLabels: string[],
   ) => void;
   onOpenHosts: () => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
@@ -127,6 +127,7 @@ function GroupTab({
   healthByHost,
   active,
   label,
+  labels,
   onSelect,
   onRequestKillMembers,
 }: {
@@ -136,10 +137,11 @@ function GroupTab({
   healthByHost: Record<string, HostHealthStatus>;
   active: boolean;
   label: string;
+  labels: Map<string, string>;
   onSelect: () => void;
   onRequestKillMembers: (
     members: Array<{ hostId: string; sessionId: string }>,
-    label: string,
+    memberLabels: string[],
   ) => void;
 }) {
   const dot = aggregateDot(view, sessions);
@@ -152,7 +154,13 @@ function GroupTab({
     const health = healthByHost[id] ?? 'unknown';
     return health === 'unreachable' || health === 'unauthorized';
   });
-  const members = viewMemberKeys(view).map(parseSessionKey);
+  const memberKeys = viewMemberKeys(view);
+  const members = memberKeys.map(parseSessionKey);
+  const memberLabels = memberKeys.map((key) => {
+    const { hostId, sessionId } = parseSessionKey(key);
+    const session = sessions.find((row) => row.hostId === hostId && row.id === sessionId);
+    return labels.get(key) ?? (session ? sessionLabel(session) : sessionId);
+  });
 
   return (
     <div
@@ -184,7 +192,7 @@ function GroupTab({
         title="Kill sessions"
         aria-label={`Kill ${label}`}
         data-tab-action
-        onClick={() => onRequestKillMembers(members, label)}
+        onClick={() => onRequestKillMembers(members, memberLabels)}
       >
         ×
       </button>
@@ -232,6 +240,7 @@ export function SessionTabBar({
                 healthByHost={healthByHost}
                 active={view.id === activeViewId}
                 label={groupLabel(view, sessions, hosts)}
+                labels={labels}
                 onSelect={() => onSelectView(view.id)}
                 onRequestKillMembers={onRequestKillMembers}
               />
@@ -306,7 +315,10 @@ export function SessionChrome({
   hasSession: boolean;
   onNew: (hostId: string) => void;
   onKill: (hostId: string, sessionId: string, label: string) => void;
-  onKillMembers: (members: Array<{ hostId: string; sessionId: string }>, label: string) => void;
+  onKillMembers: (
+    members: Array<{ hostId: string; sessionId: string }>,
+    memberLabels: string[],
+  ) => void;
   onWorkspace: () => void;
   onUpload: () => void;
   onOverflow: () => void;
