@@ -28,6 +28,7 @@ import { forgetHostScheme, type PairScheme, recordHostScheme } from './hostSchem
 import { markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
 import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
+import { applyKillTombstones, dropSession, rememberKill, replaceHostSessions } from './sessionList';
 import { pickResume, restorableIds } from './sessionResume';
 import {
   activeSessionStorageKey,
@@ -62,11 +63,39 @@ export function useTetherDesktop() {
   const hostsRef = useRef<HostProfile[]>([]);
   const sessionsRef = useRef<DrawerSession[]>([]);
   const activeSessionIdRef = useRef(activeSessionId);
+  const locallyKilledRef = useRef<Record<string, Set<string>>>({});
 
   activeHostIdRef.current = activeHostId;
   hostsRef.current = hosts;
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
+
+  const ingestHostSessions = useCallback((hostId: string, rows: DrawerSession[]) => {
+    const applied = applyKillTombstones(hostId, rows, locallyKilledRef.current);
+    locallyKilledRef.current = applied.killed;
+    setSessions((previous) => replaceHostSessions(previous, hostId, applied.rows));
+    return applied.rows;
+  }, []);
+
+  /**
+   * Pull `/api/sessions` into drawer state now, not on the next poll tick.
+   *
+   * iOS used to leave the drawer blank until New terminal; desktop fetched the
+   * list to pick a resume id but never wrote it into `sessions`, so tabs stayed
+   * empty until polling landed.
+   */
+  const hydrateHost = useCallback(
+    async (hostId: string): Promise<DrawerSession[]> => {
+      let rows = sessionsRef.current.filter((row) => row.hostId === hostId);
+      try {
+        rows = await coreSessionsList(hostId);
+      } catch {
+        return rows;
+      }
+      return ingestHostSessions(hostId, rows);
+    },
+    [ingestHostSessions],
+  );
 
   /**
    * Open the terminal the user was last in on this host — but only if it is
@@ -77,18 +106,16 @@ export function useTetherDesktop() {
    * `startSession` server-side, resurrecting a shell the user killed. A choice
    * made while the fetch is in flight wins over the restore.
    */
-  const restoreSession = useCallback(async (hostId: string) => {
-    const remembered = localStorage.getItem(activeSessionStorageKey(hostId));
-    let rows = sessionsRef.current.filter((row) => row.hostId === hostId);
-    try {
-      rows = await coreSessionsList(hostId);
-    } catch {
-      // the poll's copy stands in
-    }
-    if (activeHostIdRef.current !== hostId || activeSessionIdRef.current !== '') return;
-    const picked = pickResume(remembered, restorableIds(rows, hostId));
-    if (picked) setActiveSessionId(picked);
-  }, []);
+  const restoreSession = useCallback(
+    async (hostId: string) => {
+      const remembered = localStorage.getItem(activeSessionStorageKey(hostId));
+      const rows = await hydrateHost(hostId);
+      if (activeHostIdRef.current !== hostId || activeSessionIdRef.current !== '') return;
+      const picked = pickResume(remembered, restorableIds(rows, hostId));
+      if (picked) setActiveSessionId(picked);
+    },
+    [hydrateHost],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +132,12 @@ export function useTetherDesktop() {
       const savedHost = localStorage.getItem(KEY_ACTIVE_HOST);
       const initialHost =
         listed.find((profile) => profile.id === savedHost)?.id ?? listed[0]?.id ?? null;
+      unlistenSessions = await listenSessions((hostId, rows) => {
+        ingestHostSessions(hostId, rows);
+      });
+      if (cancelled) return;
+      await Promise.all(listed.map((profile) => hydrateHost(profile.id)));
+      if (cancelled) return;
       if (initialHost) {
         setActiveHostId(initialHost);
         // Eagerly, because restoreSession checks the refs to see whether its
@@ -114,9 +147,6 @@ export function useTetherDesktop() {
         await corePollingSetActive(initialHost);
         void restoreSession(initialHost);
       }
-      unlistenSessions = await listenSessions((hostId, rows) => {
-        setSessions((previous) => [...previous.filter((row) => row.hostId !== hostId), ...rows]);
-      });
       if (listed.length > 0) await corePollingStart();
       setReady(true);
     })();
@@ -125,7 +155,7 @@ export function useTetherDesktop() {
       unlistenSessions?.();
       void corePollingStop();
     };
-  }, [restoreSession]);
+  }, [restoreSession, hydrateHost, ingestHostSessions]);
 
   useEffect(() => {
     if (!ready) return;
@@ -200,12 +230,7 @@ export function useTetherDesktop() {
   const newSession = useCallback(
     async (hostId: string): Promise<string | null> => {
       const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
-      let ids = sessionsRef.current.filter((row) => row.hostId === hostId).map((row) => row.id);
-      try {
-        ids = (await coreSessionsList(hostId)).map((row) => row.id);
-      } catch {
-        // the poll's copy stands in
-      }
+      const ids = (await hydrateHost(hostId)).map((row) => row.id);
       const nextId = await coreNextTermId(ids);
       // A slow host must not take the screen from wherever the user went while
       // it was answering — the same trade the restore path makes.
@@ -231,7 +256,7 @@ export function useTetherDesktop() {
       selectSession(hostId, nextId);
       return nextId;
     },
-    [selectSession],
+    [hydrateHost, selectSession],
   );
 
   const killSessionById = useCallback(
@@ -248,6 +273,8 @@ export function useTetherDesktop() {
           })),
         });
         await coreCacheDelete(sessionKey(hostId, sessionId));
+        locallyKilledRef.current = rememberKill(locallyKilledRef.current, hostId, sessionId);
+        setSessions((previous) => dropSession(previous, hostId, sessionId));
         if (switchTo !== null && switchTo !== undefined) {
           selectSession(hostId, switchTo);
         }
