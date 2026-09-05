@@ -191,7 +191,9 @@ export function TerminalPane(props: TerminalPaneProps) {
     term.options.fontFamily = `${props.fontFamily}, ui-monospace, monospace`;
     term.options.fontSize = props.fontSize ?? 14;
     fitRef.current?.fit();
-  }, [props.terminalTheme, props.fontFamily, props.fontSize, termRef, fitRef]);
+    const socket = getSocketRef.current?.() ?? null;
+    if (socket) sendJson(socket, resizeFrame(fitRef.current?.proposeDimensions()));
+  }, [props.terminalTheme, props.fontFamily, props.fontSize, termRef, fitRef, getSocketRef]);
 
   // Sprint D's paste bridge, gated to the active tab: every resident session
   // keeps a live socket, but only the focused one may receive a paste.

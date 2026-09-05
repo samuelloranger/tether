@@ -119,6 +119,12 @@ actor TerminalPipeline {
       try await channel.sendStart(id: sessionId, cols: cols, rows: rows)
       noiseChannel = channel
       noiseSessionId = sessionId
+      // Layout often reports a size while the channel is still nil; start may
+      // have used 80×24. Send the current grid so a TUI gets SIGWINCH.
+      try? await channel.sendResize(id: sessionId, cols: cols, rows: rows)
+      if let focused = lastFocusSent {
+        try? await channel.sendFocus(id: sessionId, focused: focused)
+      }
       noteTraffic()
       noiseReadTask = Task { [weak self] in
         await self?.readLoopNoise(key: key, channel: channel)
@@ -219,20 +225,20 @@ actor TerminalPipeline {
   }
 
   private func handleOutbound(_ frame: OutboundFrame) async {
-    guard let channel = noiseChannel, let id = noiseSessionId else { return }
     switch frame {
     case let .input(text, key):
-      guard stillCurrent(key) else { return }
+      guard let channel = noiseChannel, let id = noiseSessionId, stillCurrent(key) else { return }
       try? await channel.sendInput(id: id, text: text)
     case let .paste(text, key):
-      guard stillCurrent(key) else { return }
+      guard let channel = noiseChannel, let id = noiseSessionId, stillCurrent(key) else { return }
       try? await channel.sendInput(id: id, text: emulator?.pastePayload(text: text) ?? text)
     case let .focus(focused):
+      guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendFocus(id: id, focused: focused)
     case let .resize(newCols, newRows):
-      if applyLocalResize(cols: newCols, rows: newRows) {
-        try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
-      }
+      let changed = applyLocalResize(cols: newCols, rows: newRows)
+      guard changed, let channel = noiseChannel, let id = noiseSessionId else { return }
+      try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
     }
   }
 
