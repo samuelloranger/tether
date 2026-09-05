@@ -2,11 +2,8 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Banner announcing a pushed preview for the active session.
-///
-/// Deliberately NOT part of WorkspaceChromeView: that is a ZStack overlay above
-/// the whole app, so a banner inside it drew on top of the title bar. This one
-/// belongs in the layout flow, directly under the title bar.
+/// Sits in the layout flow under the title bar, NOT inside WorkspaceChromeView's
+/// full-app ZStack overlay — a banner there drew on top of the title bar.
 public struct PresentationBannerSlot: View {
   @Bindable public var store: SessionStore
   @Bindable public var workspace: WorkspaceController
@@ -34,7 +31,6 @@ public struct PresentationBannerSlot: View {
   }
 }
 
-/// Overlay chrome for workspace file viewer, presentations, and uploads.
 public struct WorkspaceChromeView: View {
   @Bindable public var store: SessionStore
   @Bindable public var workspace: WorkspaceController
@@ -67,9 +63,8 @@ public struct WorkspaceChromeView: View {
           onBack: { workspace.closeFile() },
           pathLabel: workspace.lastOpenPath
         )
-        // The viewer covers the terminal, so it comes from the side the way a
-        // pushed screen does. It already declared this transition and never got
-        // an animation to run it on, so the file viewer appeared by hard cut.
+        // Comes from the side like a pushed screen; without an explicit animation
+        // the declared transition never ran and the viewer appeared by hard cut.
         .transition(reduceMotion ? .opacity : .move(edge: .trailing))
       }
 

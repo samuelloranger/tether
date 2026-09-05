@@ -121,8 +121,6 @@ function eq(actual: unknown, expected: unknown, msg: string) {
   eq(inv.env, undefined, 'unknown shell: no env override');
 }
 
-// --- describeShellSupport -----------------------------------------------
-//
 // session.defaultShell is client-editable through PATCH /api/config, so the
 // $SHELL defence in getDefaultWindowsShell() only ever covered the default: a
 // user can still type "bash.exe" and get MSYS paths no Windows API resolves.

@@ -4,13 +4,9 @@ import SwiftUI
 import UIKit
 #endif
 
-/// Aurora chrome tokens, resolved per appearance.
-///
-/// Hex values match desktop `default-dark` / `default-light` in
-/// `apps/desktop/src/preferences.ts`. Call sites keep the existing property
-/// names (`textPrimary`, `onAccent`, …) so the restyle is mostly a palette swap.
+/// Aurora chrome tokens, resolved per appearance. Hex values match desktop
+/// `default-dark` / `default-light` in `apps/desktop/src/preferences.ts` — keep in step.
 public enum TetherColors {
-  // ── Aurora defaults (dark / light) ──────────────────────────────────────
   public static let background = dynamic(dark: 0x08_08_0E, light: 0xF1_F1_F6)
   public static let surface = dynamic(dark: 0x12_12_1D, light: 0xFF_FF_FF)
   public static let surfaceRaised = dynamic(dark: 0x19_19_26, light: 0xE9_E9_F2)
@@ -39,18 +35,8 @@ public enum TetherColors {
   public static let heatDone = dynamic(dark: 0x6E_E7_A8, light: 0x1C_7A_4F)
   public static let heatCool = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
 
-  /// Deliberately NOT dynamic. Backing behind the terminal grid; must stay in
-  /// step with `TetherSurfaceView.backgroundColor`. A light backing would show
-  /// as a bright seam around a dark grid.
-  /// The terminal's own background, and it must equal the one the emulator
-  /// paints into its cells — `theme.background` in
-  /// `crates/tether-core/src/terminal/alacritty.rs` (0x1E1E2E).
-  ///
-  /// It used to be 0B0B13, two shades darker than the grid. Every area the grid
-  /// does not cover showed it: the gutter either side, the slack above the first
-  /// row, and the strip reserved for the key bar. The result was a frame drawn
-  /// around the terminal on all four sides, which reads as padding rather than
-  /// as terminal.
+  /// NOT dynamic. Must equal the emulator's cell background — `theme.background` in
+  /// `crates/tether-core/src/terminal/alacritty.rs` (0x1E1E2E) — or a seam shows.
   public static let terminalBackgroundHex: UInt32 = 0x1E1E2E
   public static let terminalBackground = Color(hex: "1E1E2E")
 

@@ -2,32 +2,16 @@
 import SwiftUI
 import UIKit
 
-/// Full utility key row for touch input — horizontally scrollable instead of RN paging.
-/// Mutable state of the key bar.
-///
-/// An @Observable class rather than a Binding, because the bar is hosted in a
-/// UIHostingController for use as an inputAccessoryView. A Binding does not
-/// publish into that separate SwiftUI graph, so the only way to refresh the bar
-/// was to reassign the controller's rootView on every updateUIView — and
-/// reassigning it made reloadInputViews() rebuild SwiftUI content INSIDE a
-/// SwiftUI update. That re-entrancy is what let any focus change spin the main
-/// thread at 100% CPU. Observing an object instead lets the bar update on its
-/// own, so rootView is assigned exactly once.
+/// Mutable state of the key bar. An @Observable class, not a Binding: the bar is
+/// hosted in a UIHostingController accessory, and reassigning rootView to refresh it spun the main thread.
 @Observable
 public final class TerminalAccessoryModel {
   public var ctrlArmed = false
-  /// Drives the bar's own slide-out. UIKit's accessory dismissal only travels
-  /// the bar's height, which reads as a short hop; this carries it fully off the
-  /// bottom before UIKit removes the view.
+  /// Drives the bar's own slide-out — UIKit's dismissal only travels the bar's
+  /// height (a short hop); this carries it fully off the bottom first.
   public var visible = true
-  /// Distance from the window's bottom edge to the TOP of the docked bar, as
-  /// the bar itself measures it.
-  ///
-  /// `barHeight` is only a first-frame fallback (keySize + padding either side).
-  /// UIKit docks the bar ~15pt above the screen edge rather than above the 34pt
-  /// home indicator, so a fixed constant left dead space between the last
-  /// terminal row and the keys. Measuring removes that arithmetic: whatever the
-  /// bar actually occupies is what the terminal gives up.
+  /// Window-bottom to the TOP of the docked bar, measured. UIKit docks ~15pt above
+  /// the edge, not above the 34pt indicator, so a fixed constant left dead space.
   public var dockedHeight: CGFloat = 0
   public init() {}
 }
@@ -59,17 +43,14 @@ public struct TerminalAccessoryBar: View {
   /// taller than its neighbours reads as a different kind of thing.
   static let keySize: CGFloat = 40
   static let barVerticalPadding: CGFloat = 8
-  /// How far above the screen's bottom edge UIKit docks the bar when the
-  /// keyboard is down. Not the home-indicator inset (34pt) — UIKit uses its own,
-  /// smaller gap, and the terminal has to reserve the difference.
+  /// How far above the bottom edge UIKit docks the bar. Not the 34pt indicator
+  /// inset — UIKit uses a smaller gap, and the terminal reserves the difference.
   static let dockedGap: CGFloat = 15
   /// First-frame fallback before GeometryReader reports the real docked height.
   /// Derived from key + padding so it cannot drift from the row's layout again.
   public static let barHeight: CGFloat = keySize + barVerticalPadding * 2
 
-  /// Key order matches `UTILITY_BAR_KEYS` in the RN client. There are no arrow
-  /// keys: the D-pad is one square key in the row and covers all four
-  /// directions, which is why four separate arrows would be redundant.
+  /// No arrow keys: the D-pad is one square key covering all four directions.
   public var body: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
@@ -89,14 +70,11 @@ public struct TerminalAccessoryBar: View {
       .padding(.horizontal, 12)
       .padding(.vertical, Self.barVerticalPadding)
     }
-    // ignoresSafeAreaEdges defaults to .all, so the material bled down into the
-    // home-indicator strip and the bar read as half again as tall. Confined to
-    // its own bounds, the strip below shows the window colour instead — which is
-    // the terminal's colour, so it reads as terminal rather than as chrome.
+    // Confine the material to its bounds: the default .all bled into the indicator
+    // strip and the bar read half again as tall.
     .background(.ultraThinMaterial, ignoresSafeAreaEdges: [])
-    // The bar lives in the keyboard window, so `.global` here is that window's
-    // space — which shares the screen's geometry. Reporting its top edge lets
-    // the terminal reserve the real height instead of a constant.
+    // The bar lives in the keyboard window, so `.global` is that window's space
+    // (screen geometry). Reporting its top edge lets the terminal reserve the real height.
     .background(
       GeometryReader { proxy in
         Color.clear
@@ -104,9 +82,8 @@ public struct TerminalAccessoryBar: View {
           .onChange(of: proxy.frame(in: .global)) { _, _ in report(proxy) }
       }
     )
-    // Slide the whole row clear of the bottom edge rather than letting UIKit
-    // nudge it by its own height. Reduce Motion keeps the fade and drops the
-    // travel — the bar is a full row leaving the bottom of the screen.
+    // Slide the whole row clear of the bottom edge, not just UIKit's own-height
+    // nudge. Reduce Motion keeps the fade and drops the travel.
     .offset(y: model.visible || reduceMotion ? 0 : Self.keySize * 2.4)
     .opacity(model.visible ? 1 : 0)
     .animation(
@@ -116,9 +93,8 @@ public struct TerminalAccessoryBar: View {
   }
 
 
-  /// Publishes the bar's docked height, skipping the slide-out frames — while
-  /// the bar is animating away its top edge is off-screen, and reporting that
-  /// would tell the terminal the bar is taller than it is.
+  /// Publishes the bar's docked height, skipping slide-out frames — mid-animation
+  /// its top edge is off-screen and would report the bar as taller than it is.
   private func report(_ proxy: GeometryProxy) {
     guard model.visible else { return }
     let frame = proxy.frame(in: .global)
@@ -126,22 +102,14 @@ public struct TerminalAccessoryBar: View {
       .compactMap({ ($0 as? UIWindowScene)?.screen })
       .first
     else { return }
-    // While the keyboard window tears down it hands out frames that start ABOVE
-    // the screen (minY < 0), and `screen.maxY - minY` then reads as taller than
-    // the display. The old code believed one: a final -17 frame reported a 949pt
-    // bar on a 932pt screen, the terminal reserved 915pt of bottom padding, and
-    // the whole VStack — title bar included — was squeezed off screen with no
-    // later frame to correct it. A bar cannot start off the top of the screen
-    // nor be taller than the screen, so those frames are dismissal artefacts.
+    // A tearing-down keyboard window hands out frames starting above the screen
+    // (minY < 0), reading as taller than the display — reject those dismissal artefacts.
     guard frame.minY >= 0 else { return }
     let height = max(0, screen.bounds.maxY - frame.minY)
     guard height <= screen.bounds.height else { return }
     guard abs(height - model.dockedHeight) > 0.5 else { return }
-    // Deferred by one runloop turn on purpose. The terminal's padding reads this
-    // value, and the padding changes the layout that this GeometryReader is
-    // measuring — writing it inline is a dependency cycle, which AttributeGraph
-    // duly logged. Handing the write to the next turn keeps the measurement and
-    // breaks the loop.
+    // Deferred one runloop turn: the terminal's padding reads this and changes the
+    // layout this GeometryReader measures, so an inline write is a dependency cycle.
     DispatchQueue.main.async { model.dockedHeight = height }
   }
 
@@ -149,11 +117,8 @@ public struct TerminalAccessoryBar: View {
   /// the shell echoes them, so the tap needs its own confirmation.
   private static let pasteFeedback = UIImpactFeedbackGenerator(style: .light)
 
-  /// The system paste control.
-  ///
-  /// Reading `UIPasteboard.general` directly is denied unless the user
-  /// confirms, and the denial is silent — the button appeared to do nothing.
-  /// `PasteButton` is granted access without a prompt.
+  /// The system paste control. Reading `UIPasteboard.general` directly is denied
+  /// silently; `PasteButton` is granted access without a prompt.
   private var pasteButton: some View {
     PasteButton(payloadType: String.self) { strings in
       guard let text = strings.first else { return }
@@ -166,9 +131,8 @@ public struct TerminalAccessoryBar: View {
     .frame(minWidth: Self.keySize, minHeight: Self.keySize)
   }
 
-  /// Arming Ctrl changes what the *next* key does, and nothing on screen moves
-  /// except this one face — so it gets the same confirmation the D-pad and the
-  /// paste key get.
+  /// Arming Ctrl changes what the next key does with nothing else moving on screen,
+  /// so it gets its own haptic confirmation.
   private static let armFeedback = UISelectionFeedbackGenerator()
 
   private var ctrlButton: some View {
@@ -213,10 +177,8 @@ public struct TerminalAccessoryBar: View {
 public struct TerminalInputBridge: UIViewRepresentable {
   @Binding public var text: String
   public var accessory: AnyView
-  /// Whether to offer the key bar at all. Gating the ACCESSORY is safe; gating
-  /// the bridge's existence was not — a view carrying .focused() that appears
-  /// and disappears makes SwiftUI's FocusStore and UIKit's first-responder
-  /// machinery loop against each other, and the app spins at 100% CPU.
+  /// Gate the ACCESSORY, never the bridge's existence: a `.focused()` view that
+  /// appears and disappears makes SwiftUI and UIKit focus machinery loop at 100% CPU.
   public var showsAccessory: Bool = true
   public var onSubmitBytes: (String) -> Void
   public var isFocused: Binding<Bool>
@@ -239,12 +201,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
     Coordinator(onSubmitBytes: onSubmitBytes, isFocused: isFocused)
   }
 
-  /// Connects a view's byte hooks to the PTY.
-  ///
-  /// Shared with the tests on purpose. When this lived inline in `makeUIView`,
-  /// a test could build the view and the coordinator, drive a real keypress,
-  /// and watch nothing come out — not because the code was wrong but because
-  /// the test had wired it differently from the app.
+  /// Connects a view's byte hooks to the PTY. Shared with tests on purpose: inline in
+  /// `makeUIView`, a test could wire it differently from the app and silently pass.
   static func wire(_ view: TerminalInputTextView, onSubmitBytes: @escaping (String) -> Void) {
     // 0x7F (DEL) is what terminals and readline expect from backspace.
     view.onBackspace = { onSubmitBytes("\u{7F}") }
@@ -275,9 +233,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
       uiView.showsAccessory = showsAccessory
       uiView.reloadInputViews()
     }
-    // The document is not user-visible text — it is invisible filler that keeps
-    // the delete key repeating (see `refillFiller`). Syncing the binding here
-    // would wipe that filler on every SwiftUI update.
+    // The document is invisible filler that keeps the delete key repeating (see
+    // `refillFiller`); syncing the binding here would wipe it on every update.
     uiView.refillFiller()
     if isFocused.wrappedValue, !uiView.isFirstResponder {
       uiView.becomeFirstResponder()
@@ -300,19 +257,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
         onSubmitBytes("\r")
         return false
       }
-      // An EMPTY replacement is a deletion. UIKit reports the software backspace
-      // here rather than through `deleteBackward()`, so the previous code — which
-      // only forwarded non-empty text — silently dropped every backspace.
-      //
-      // The deletion is ALLOWED through (unlike every other edit) so the hidden
-      // document actually shrinks: UIKit stops auto-repeating a held delete key
-      // the moment a press changes nothing. A held key can also escalate to a
-      // word deletion, so send one DEL per character removed.
-      // Deletions are the one edit allowed through, so the hidden document
-      // actually shrinks — UIKit stops auto-repeating a held delete key the
-      // moment a press changes nothing. The byte is REQUESTED rather than sent:
-      // UIKit reports one press through both this delegate and
-      // `deleteBackward()`, and the view coalesces them.
+      // An EMPTY replacement is a deletion (UIKit reports backspace here, not via
+      // `deleteBackward()`). Allowed through so the document shrinks; the flush coalesces DELs.
       if text.isEmpty {
         (textView as? TerminalInputTextView)?.requestDeletionFlush()
         return true
@@ -322,12 +268,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
     }
 
     public func textViewDidEndEditing(_ textView: UITextView) {
-      // `updateUIView` can arrive here synchronously from
-      // `resignFirstResponder()`. Writing the binding in that callback re-enters
-      // SwiftUI while it is still updating this representable and UIKit is
-      // tearing down the input accessory view. If SwiftUI already requested the
-      // resignation there is nothing to synchronize. Otherwise defer the UIKit-
-      // initiated focus loss until both stacks have unwound.
+      // This can arrive synchronously from `resignFirstResponder()` mid-update;
+      // defer the UIKit-initiated focus loss so it doesn't re-enter SwiftUI.
       guard isFocused.wrappedValue else { return }
       DispatchQueue.main.async { [weak textView, isFocused] in
         guard
@@ -341,12 +283,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
   }
 }
 
-/// Translates hardware key presses into the bytes a PTY expects.
-///
-/// Keys that produce no text — backspace on an empty buffer, arrows, Ctrl
-/// combos, Esc — never reach `UITextViewDelegate`, because there is no text
-/// change for UIKit to report. `pressesBegan` sees them all, so the terminal
-/// key handling lives here and the delegate is left to handle plain typing.
+/// Translates hardware key presses into PTY bytes. Text-less keys (arrows, Ctrl combos,
+/// Esc, empty-buffer backspace) never reach `UITextViewDelegate`, so `pressesBegan` handles them here.
 enum TerminalKeyMap {
   static func bytes(for key: UIKey) -> String? {
     let mods = key.modifierFlags
@@ -371,21 +309,15 @@ enum TerminalKeyMap {
     return "\u{1B}" + String(ch)
   }
 
-  /// Applies the Ctrl latch to an accessory-bar key.
-  ///
-  /// A CSI sequence carries its modifier as a parameter. Masking its final
-  /// byte instead produced a control code from the wrong character entirely:
-  /// Ctrl+Left became 0x04 (EOF) and killed the shell, and Ctrl+Up became
-  /// 0x01 (start of line).
+  /// Applies the Ctrl latch to an accessory-bar key. A CSI sequence carries its modifier
+  /// as a parameter — masking the final byte instead made Ctrl+Left 0x04 (EOF) and killed the shell.
   static func ctrlModified(_ sequence: String) -> String {
     guard sequence.hasPrefix("\u{1B}["), let final = sequence.last else { return sequence }
     return "\u{1B}[1;5\(final)"
   }
 
-  /// Folds a latched Ctrl into the next typed character.
-  ///
-  /// Only printable ASCII has a control form; applying the mask to Return or
-  /// DEL would corrupt them.
+  /// Folds a latched Ctrl into the next typed character. Only printable ASCII has
+  /// a control form — masking Return or DEL would corrupt them.
   static func ctrlFolded(_ text: String) -> String? {
     guard text.count == 1, let ch = text.first, let ascii = ch.asciiValue,
           (0x20...0x7E).contains(ascii)
@@ -394,10 +326,8 @@ enum TerminalKeyMap {
     return String(UnicodeScalar(upper & 0x1F))
   }
 
-  /// xterm's modifier parameter: 1 + shift(1) + alt(2) + ctrl(4).
-  /// The keys whose bytes depend only on the key and its modifier parameter.
-  ///
-  /// Split out so it is reachable from a test: `UIKey` cannot be constructed.
+  /// Keys whose bytes depend only on the key and its modifier parameter. Split out
+  /// so it is reachable from a test: `UIKey` cannot be constructed.
   static func specialKeyBytes(keyCode: UIKeyboardHIDUsage, mod: Int) -> String? {
     switch keyCode {
     case .keyboardUpArrow: return csi("A", mod)
@@ -409,11 +339,8 @@ enum TerminalKeyMap {
     case .keyboardPageUp: return "\u{1B}[5~"
     case .keyboardPageDown: return "\u{1B}[6~"
     case .keyboardDeleteForward: return "\u{1B}[3~"
-    // Backspace is deliberately absent. Left to UIKit it reaches
-    // `deleteBackward()` and shows up as the document shrinking, which is the
-    // one deletion signal the view trusts. Claimed here it was a THIRD emitter
-    // alongside `deleteBackward()` and the delegate, outside the measurement —
-    // which is why one press still deleted two characters.
+    // Backspace deliberately absent: left to UIKit it reaches `deleteBackward()`,
+    // the one deletion signal the view trusts. Claimed here it double-emitted.
     case .keyboardEscape: return "\u{1B}"
     default: return nil
     }
@@ -441,18 +368,12 @@ public final class TerminalInputTextView: UITextView {
   /// Emits one DEL. Called only from the coalesced deletion flush.
   var onBackspace: (() -> Void)?
 
-  /// UIKit only routes the software delete key to `deleteBackward()` while the
-  /// input view reports that it has something to delete. This view's text is
-  /// always empty — the delegate refuses every change and forwards bytes to the
-  /// PTY instead — so `hasText` was always false and the on-screen backspace
-  /// did nothing at all. Claiming text unconditionally restores the key.
+  /// UIKit routes the software delete key to `deleteBackward()` only while the view
+  /// `hasText`; this view's text is always empty, so claim text unconditionally.
   public override var hasText: Bool { true }
 
-  /// The hidden document is kept stocked with invisible filler so the system
-  /// keyboard's delete key always has something to consume. Holding the key
-  /// only auto-repeats while each press actually shortens the document; a view
-  /// that refuses every edit gets one `deleteBackward()` and the repeat stalls
-  /// after it, which is why holding backspace deleted a single character.
+  /// Invisible filler so the delete key always has something to consume: holding it
+  /// auto-repeats only while each press shortens the document.
   private static let filler = "\u{00A0}"
   private static let fillerCount = 64
 
@@ -478,19 +399,8 @@ public final class TerminalInputTextView: UITextView {
   private var documentLength = 0
   private var deletionFlushScheduled = false
 
-  /// Notes that SOMETHING may have deleted, and schedules the measurement.
-  ///
-  /// Counting callbacks does not work. UIKit reports one delete key through
-  /// several independent paths — `deleteBackward()`, the delegate's
-  /// `shouldChangeTextIn`, and (until now) `pressesBegan` — none of them
-  /// guaranteed, and `shouldChangeTextIn` is documented to fire twice for a
-  /// single press with some keyboards. Every version of "emit here, suppress
-  /// there" either sent two DELs or none.
-  ///
-  /// So nothing emits on a callback. They only schedule a measurement, and the
-  /// flush sends one DEL per character the document ACTUALLY lost. Duplicate
-  /// notifications for one press measure the same single deletion; a held key
-  /// escalating to a word delete measures the whole word.
+  /// Schedules a measurement instead of emitting: UIKit reports one delete through
+  /// several unguaranteed paths, so the flush sends one DEL per character actually lost.
   func requestDeletionFlush() {
     guard !deletionFlushScheduled else { return }
     deletionFlushScheduled = true
@@ -505,9 +415,8 @@ public final class TerminalInputTextView: UITextView {
     let current = (text as NSString).length
     let removed = max(0, documentLength - current)
     guard removed > 0 else {
-      // A callback that changed nothing — a duplicate for a press already
-      // measured, or an edit UIKit declined. Nothing happened, so nothing goes
-      // on the wire.
+      // Changed nothing — a duplicate for an already-measured press, or a declined
+      // edit — so nothing goes on the wire.
       documentLength = current
       return
     }
@@ -534,14 +443,11 @@ public final class TerminalInputTextView: UITextView {
     }
   }
 
-  /// Configured once rather than on every getter call — the previous version
-  /// mutated the hosting view's frame and background each time UIKit asked for
-  /// the accessory, which UIKit does often.
+  /// Configured once, not on every getter call — UIKit asks for the accessory often.
   private lazy var accessoryContainer: UIView = {
     let view = accessoryHosting.view!
-    // Ask the bar how tall it is instead of asserting 52pt. The keys are 40pt
-    // with 8pt padding either side, so the assertion clipped 4pt off the row and
-    // then reserved the wrong amount of terminal for it.
+    // Ask the bar its height rather than asserting 52pt: a fixed assertion clipped
+    // 4pt off the row and reserved the wrong amount of terminal.
     let width = view.window?.bounds.width
       ?? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width
       ?? 390
@@ -555,13 +461,6 @@ public final class TerminalInputTextView: UITextView {
 
   private var assignedAccessoryView: UIView?
 
-  /// UIKit declares `inputAccessoryView` as settable, so an override must
-  /// supply a setter as well — a get-only override fails to compile with
-  /// "cannot override mutable property with read-only property".
-  ///
-  /// The keyboard accessory is owned by this view; an explicit assignment from
-  /// outside still wins, which keeps the property honest rather than silently
-  /// ignoring the setter.
   /// Set false when there is no session, so the key bar does not sit on screen
   /// with nothing to act on.
   var showsAccessory = true
@@ -576,10 +475,8 @@ public final class TerminalInputTextView: UITextView {
 
   public override var canBecomeFirstResponder: Bool { true }
 
-  /// With a hardware keyboard attached (and on iPad generally) UIKit renders the
-  /// system input-assistant shortcuts bar for the first responder. This view has
-  /// no shortcuts to offer, so it showed up as an empty strip along the bottom.
-  /// Emptying both groups removes the bar rather than leaving it blank.
+  /// Empty both input-assistant groups: with a hardware keyboard UIKit renders a
+  /// shortcuts bar this view has nothing to offer, leaving an empty strip.
   public override init(frame: CGRect, textContainer: NSTextContainer?) {
     super.init(frame: frame, textContainer: textContainer)
     inputAssistantItem.leadingBarButtonGroups = []
@@ -593,11 +490,8 @@ public final class TerminalInputTextView: UITextView {
   }
 }
 
-/// What the terminal area should show when there is nothing to stream.
-///
-/// A void with a live key bar above it is not an empty state — it gives the
-/// reader nothing to do and no idea what is missing. Each case names the thing
-/// that is absent and offers the one action that resolves it.
+/// What the terminal area shows when there is nothing to stream: each case names
+/// what is absent and offers the one action that resolves it.
 struct TerminalPlaceholder: View {
   enum Reason {
     case noHost
@@ -648,12 +542,8 @@ public struct TerminalView: View {
   @Bindable public var preferences: AppPreferences
   /// Routed from RootView so the empty state can open pairing.
   public var onAddHost: () -> Void = {}
-  /// True while an in-app overlay (the session drawer) is covering the terminal.
-  ///
-  /// The key bar is an inputAccessoryView, so it lives in the KEYBOARD window —
-  /// above the app's own window. An in-app overlay cannot cover it, and the bar
-  /// drew across the drawer, clipping its "New terminal" button. A sheet does not
-  /// have this problem because presenting one takes first responder away.
+  /// True while an in-app overlay (the drawer) covers the terminal. The key bar is
+  /// an inputAccessoryView in the keyboard window, above it, so it must be hidden.
   public var overlayPresented: Bool = false
   /// Opens a workspace file path detected in the terminal grid.
   public var onOpenFile: (String, Int?, Int?) -> Void = { _, _, _ in }
@@ -664,19 +554,11 @@ public struct TerminalView: View {
   /// Held while the scrollback thumb is under a finger — see ScrollPositionIndicator.
   @State private var isScrubbingScroll = false
   @State private var selectionText: String?
-  /// How far the keyboard (plus its accessory bar) overlaps this view.
-  ///
-  /// Measured rather than left to SwiftUI's automatic avoidance: the first
-  /// responder here is a UIKit UITextView carrying its own inputAccessoryView,
-  /// not a SwiftUI field, and the implicit avoidance does not engage for it —
-  /// the terminal simply stayed full height and the keyboard covered the last
-  /// rows. Shrinking the view also makes TetherSurfaceView.reportGridSize fire,
-  /// so the PTY learns the new row count.
+  /// Keyboard+accessory overlap, measured: SwiftUI's automatic avoidance doesn't
+  /// engage for a UIKit UITextView, and shrinking fires reportGridSize for the PTY.
   @State private var keyboardInset: CGFloat = 0
-  // UIKit is the single owner of first-responder changes through
-  // TerminalInputBridge. Combining this binding with SwiftUI's `.focused`
-  // modifier created two focus controllers that could both resign the text view
-  // and feed state back while its inputAccessoryView was being removed.
+  // UIKit is the single owner of first-responder changes via TerminalInputBridge;
+  // adding SwiftUI's `.focused` made two controllers fight over the text view.
   @State private var keyboardFocused = false
 
   public init(
@@ -723,14 +605,11 @@ public struct TerminalView: View {
           mouseMode: store.terminalMouseMode,
           mouseSgr: store.terminalMouseSgr
         )
-        // No inset. The gutter that used to be here cost two columns and, being
-        // a different colour from the grid, was itself half of the frame the
-        // terminal appeared to sit inside.
+        // No inset: the old gutter cost two columns and, a different colour from
+        // the grid, was itself half the frame the terminal appeared to sit inside.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Must match TetherSurfaceView's own backgroundColor. Any area the grid
-        // does not cover — the remainder below the last whole row, and the
-        // home-indicator inset — shows this through, and Color.black read as a
-        // dead strip against the terminal's navy.
+        // Must match TetherSurfaceView's backgroundColor: any area the grid doesn't
+        // cover shows this through, and Color.black read as a dead strip.
         .background(TetherColors.terminalBackground)
 
         }
@@ -752,9 +631,8 @@ public struct TerminalView: View {
           )
           .padding(.trailing, 4)
           .padding(.top, 8)
-          // Fades in when you leave the live tail and out when you catch up.
-          // It appeared and vanished mid-scroll, which read as a rendering
-          // artefact of the scroll rather than as an answer to "where am I".
+          // Fades in when you leave the live tail and out when you catch up; a hard
+          // appear/vanish mid-scroll read as a rendering artefact.
           .transition(.opacity)
         }
 
@@ -787,14 +665,8 @@ public struct TerminalView: View {
             onKey: { store.sendInput($0) },
             onPaste: { store.sendPaste($0) },
             onArrow: { store.sendInput($0.escapeSequence) },
-            // Deferred by one runloop turn, like `report` above and for the
-            // same reason. This button lives inside the accessory bar, which is
-            // the inputAccessoryView's own UIHostingController. Dropping focus
-            // synchronously makes UIKit dismiss the keyboard and tear that
-            // hosting view down while the touch that triggered it is still being
-            // delivered to it — the view is deallocated underneath its own
-            // handler, which crashes the app. One turn later the touch is
-            // finished and the teardown has nothing live to pull out from under.
+            // Deferred one runloop turn: this button lives in the accessory bar's own
+            // hosting view; dropping focus synchronously deallocs it mid-touch and crashes.
             onHideKeyboard: { DispatchQueue.main.async { keyboardFocused = false } }
           )
         ),
@@ -807,24 +679,14 @@ public struct TerminalView: View {
       )
       .frame(height: 1)
     }
-    // The terminal's own colour, not the chrome colour. .background() bleeds into
-    // the safe area by default, so this painted #11111b over the window backdrop
-    // in the home-indicator strip — which is exactly the band that showed on the
-    // startup screen and with the sidebar open, the two states where the key bar
-    // is not there to cover it.
+    // Terminal colour, not chrome: .background() bleeds into the safe area, and this
+    // band shows on the startup screen and with the sidebar open, where the bar can't cover it.
     .background(TetherColors.terminalBackground)
-    // The bar is an inputAccessoryView: it floats above the app, and it stays
-    // docked when the keyboard is down. Padding by the keyboard alone left the
-    // last terminal rows underneath it, because keyboardWillHide zeroes the
-    // inset while the bar is still on screen. Reserve whichever is taller.
-    // The bar's measured height, minus the container's own bottom inset — this
-    // padding is applied INSIDE the safe area, so not subtracting it stacks the
-    // two and leaves a home-indicator-sized band above the keys.
+    // Reserve whichever is taller: keyboardWillHide zeroes the inset while the docked
+    // bar is still on screen. `accessoryReserve` subtracts the container's own inset.
     .padding(.bottom, max(keyboardInset, accessoryVisible ? accessoryReserve : 0))
-    // keyboardWillChangeFrame already carries the END frame, so go straight to the
-    // final height. Animating this padding would walk the view through
-    // intermediate heights, and every one of those is a grid size the surface
-    // would otherwise report.
+    // Go straight to the END frame keyboardWillChangeFrame carries: animating this
+    // padding walks the view through intermediate grid sizes the surface would report.
     .animation(nil, value: keyboardInset)
     .onReceive(
       NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)
@@ -836,9 +698,8 @@ public struct TerminalView: View {
     ) { _ in
       keyboardInset = 0
     }
-    // Animate the bar out BEFORE UIKit removes it, so it leaves downward instead
-    // of blinking. Only the model is written here — no focus, no input views —
-    // so this cannot re-enter the update the way the earlier attempts did.
+    // Animate the bar out BEFORE UIKit removes it, so it leaves downward not blinking.
+    // Only the model is written here, so this cannot re-enter the update.
     .onChange(of: accessoryVisible, initial: true) { _, shown in
       accessory.visible = shown
     }
@@ -851,10 +712,8 @@ public struct TerminalView: View {
       scrollOffsetFromBottom = 0
       selectionText = nil
     }
-    // An overlay (presentation, file viewer, drawer) hides the accessory bar but
-    // does not on its own resign first responder, so the raw keyboard stayed up
-    // behind the presentation. Drop focus when one appears; reclaim it when the
-    // overlay dismisses and there is still a session to type into.
+    // An overlay hides the accessory bar but doesn't resign first responder, so the
+    // raw keyboard stayed up behind it. Drop focus on appear, reclaim it on dismiss.
     .onChange(of: overlayPresented) { _, presented in
       if presented {
         keyboardFocused = false
@@ -908,26 +767,19 @@ public struct TerminalView: View {
       let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
       let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
     else { return 0 }
-    // The container's bottom inset is ALREADY reserved by the layout, and this
-    // padding is applied inside it. Without subtracting it the two stack and
-    // leave a dead band the height of the home indicator between the last
-    // terminal row and the key bar.
+    // Subtract the bottom inset the layout already reserves; otherwise the two stack
+    // and leave a home-indicator-sized dead band above the key bar.
     return max(0, window.bounds.maxY - end.minY - window.safeAreaInsets.bottom)
   }
 
   private var accessoryVisible: Bool { placeholderReason == nil && !overlayPresented }
 
-  /// Padding that puts the last terminal row exactly on the bar's top edge.
-  /// Falls back to the constant only for the first frame, before the bar has
-  /// laid out and measured itself.
+  /// Padding that puts the last terminal row on the bar's top edge; falls back to
+  /// the constant only for the first frame, before the bar has measured itself.
   private var accessoryReserve: CGFloat {
     let inset = Self.bottomSafeInset()
-    // The bar always covers at least itself plus the gap UIKit docks it above
-    // the screen edge, and it can never cover more than the keyboard plus that.
-    // Both ends matter: the measurement is taken in the keyboard's own window,
-    // which reports garbage while that window is being torn down, and a single
-    // believed outlier (949pt on a 932pt screen) once padded the whole VStack —
-    // title bar included — off the display with no later frame to correct it.
+    // Clamp to [floor, ceiling]: the keyboard window reports garbage while tearing
+    // down, and one believed outlier (949pt on a 932pt screen) once padded the VStack off-screen.
     let floor = TerminalAccessoryBar.barHeight + TerminalAccessoryBar.dockedGap
     let ceiling = keyboardInset + floor
     let measured = accessory.dockedHeight
@@ -950,10 +802,8 @@ public struct TerminalView: View {
     return nil
   }
 
-  /// Sends typed input, folding in a latched Ctrl.
-  ///
-  /// The Ctrl button used to affect only the five keys that routed through
-  /// `send`, so the on-screen keyboard could not produce Ctrl+C at all.
+  /// Sends typed input, folding in a latched Ctrl — previously Ctrl only affected
+  /// the five keys routed through `send`, so the keyboard couldn't produce Ctrl+C.
   private func submit(_ text: String) {
     if accessory.ctrlArmed, let folded = TerminalKeyMap.ctrlFolded(text) {
       accessory.ctrlArmed = false
@@ -964,22 +814,11 @@ public struct TerminalView: View {
   }
 }
 
-/// Thin thumb on the trailing edge while scrolled into history.
-/// Scrollback position, and the handle for moving it.
-///
-/// This was `allowsHitTesting(false)` — it looked exactly like a scrollbar and
-/// answered nothing when you grabbed it. It is a control now: the thumb carries
-/// a 28pt-wide hit area (the bar itself is 3pt, far under the 44pt touch
-/// target), and dragging it scrubs the viewport.
-///
-/// Only the thumb takes touches. The track deliberately does not: it spans the
-/// full height of the terminal, and swallowing touches there would cost the
-/// terminal its own pan along the whole right edge.
+/// Scrollback position and its drag handle: the 3pt thumb carries a 28pt hit area.
+/// Only the thumb takes touches, not the full-height track — that would cost the terminal its pan.
 struct ScrollPositionIndicator: View {
-  /// Lines from the live bottom that put the thumb at the top of its travel.
-  /// The emulator does not report how much scrollback it holds, so the travel
-  /// is capped rather than proportional — the same cap the thumb has always
-  /// been drawn with.
+  /// Lines from the live bottom that put the thumb at the top of its travel. Capped,
+  /// not proportional, because the emulator doesn't report how much scrollback it holds.
   static let maxOffset = 200
 
   private static let thumbHeight: CGFloat = 36
@@ -990,10 +829,8 @@ struct ScrollPositionIndicator: View {
   @Binding var isScrubbing: Bool
   var onScrub: (Int) -> Void
 
-  /// Offset the drag started from. The thumb's travel only represents
-  /// `maxOffset` lines, so mapping a pointer position straight onto an absolute
-  /// offset would teleport anyone deeper than that back to 200 the instant they
-  /// touched the thumb. The drag moves RELATIVE to where it began instead.
+  /// Offset the drag started from. The thumb's travel only spans `maxOffset` lines,
+  /// so the drag moves RELATIVE to where it began rather than teleporting deeper scrolls.
   @State private var scrubOrigin: Int?
 
   var body: some View {
@@ -1032,11 +869,8 @@ struct ScrollPositionIndicator: View {
 
   private static let space = "tether.scroll-track"
 
-  /// Maps the drag's travel onto a scrollback offset.
-  ///
-  /// Full travel covers `maxOffset` lines, or the offset the drag started from
-  /// when that is deeper — so a drag that begins 1,000 lines back can still
-  /// reach the live bottom in one sweep rather than jumping to 200 on contact.
+  /// Maps the drag's travel onto a scrollback offset. Full travel covers `maxOffset`
+  /// lines, or the deeper start offset, so a deep drag can reach the bottom in one sweep.
   private func target(for value: DragGesture.Value, travel: CGFloat) -> Int {
     let origin = scrubOrigin ?? offset
     let span = CGFloat(max(Self.maxOffset, origin))

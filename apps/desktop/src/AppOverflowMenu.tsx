@@ -4,11 +4,8 @@ import { OverflowMenu } from './OverflowMenu';
 import { type AppPreferences, savePreferences } from './preferences';
 
 /**
- * The overflow menu's wiring, lifted out of `App` so the shell stays readable.
- *
- * Every item except the notifications toggle dismisses the menu first: the
- * toggle is the one action whose result you read *in* the menu, since the row's
- * own label is what changes.
+ * Every item dismisses the menu except the notifications toggle, whose
+ * own label is the result you read, so it stays open.
  */
 export function AppOverflowMenu({
   visible,

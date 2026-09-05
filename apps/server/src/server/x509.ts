@@ -12,8 +12,6 @@
 
 import { createHash, createSign, generateKeyPairSync, type KeyObject } from 'node:crypto';
 
-// --- DER primitives ---------------------------------------------------------
-
 function len(n: number): Uint8Array {
   if (n < 0x80) return Uint8Array.of(n);
   const bytes: number[] = [];
@@ -107,8 +105,6 @@ export function utcTime(date: Date): Uint8Array {
   return tlv(0x17, new TextEncoder().encode(s));
 }
 
-// --- SAN --------------------------------------------------------------------
-
 export function parseIpv4(text: string): Uint8Array | null {
   const parts = text.split('.');
   if (parts.length !== 4) return null;
@@ -153,8 +149,6 @@ function generalName(name: string): Uint8Array {
   if (v6) return tlv(0x87, v6);
   return tlv(0x82, ia5String(name).subarray(2));
 }
-
-// --- Certificate ------------------------------------------------------------
 
 export type SelfSignedInput = {
   commonName: string;

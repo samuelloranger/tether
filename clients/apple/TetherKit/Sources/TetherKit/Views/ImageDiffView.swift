@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 #endif
 
-/// Port of `apps/mobile/src/ImageDiff.tsx` — side-by-side before/after images.
+/// Side-by-side before/after images.
 public struct ImageDiffView: View {
   public var oldData: Data?
   public var newData: Data?

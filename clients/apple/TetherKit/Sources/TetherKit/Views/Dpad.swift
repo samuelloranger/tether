@@ -3,9 +3,7 @@ import SwiftUI
 import UIKit
 
 /// Terminal D-pad: one bar key, drag for a locked cardinal + capped auto-repeat.
-///
-/// Port of `apps/mobile/src/Dpad.tsx`. Position is owned by the parent so the
-/// pad can be dragged around the terminal surface.
+/// Position is owned by the parent so the pad can be dragged around the surface.
 public struct DpadView: View {
   public var size: CGFloat
   public var onArrow: (DPadDirection) -> Void
@@ -110,8 +108,7 @@ public struct DpadView: View {
     active = nil
     grantOrigin = .zero
     gestureLive = false
-    // The thumb springs back to centre — the one place in the app a spring is
-    // right, because the glyph is a physical thing the finger just let go of.
+    // Springs back to centre — the glyph is a physical thing the finger let go of.
     // Reduce Motion returns it without the travel.
     withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.7)) {
       thumb = .zero

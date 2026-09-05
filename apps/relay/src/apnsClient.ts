@@ -18,9 +18,8 @@ export interface ApnsSendOptions {
 }
 
 /**
- * APNs speaks HTTP/2 only, so this cannot use fetch. One session is kept open
- * and multiplexed across requests — Apple throttles clients that reconnect per
- * push, and connection setup dominates the cost of sending otherwise.
+ * APNs is HTTP/2 only, so no fetch. One session is kept open and multiplexed —
+ * Apple throttles clients that reconnect per push, and setup dominates otherwise.
  */
 export class ApnsClient {
   private session: http2.ClientHttp2Session | null = null;

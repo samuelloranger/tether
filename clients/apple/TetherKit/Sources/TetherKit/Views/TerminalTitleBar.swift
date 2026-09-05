@@ -6,13 +6,8 @@ public struct TerminalTitleBar<Overflow: View>: View {
   public var onNewSession: () -> Void
   public var onGit: () -> Void
   public var onSettings: () -> Void
-  /// The … menu's items, supplied by the caller.
-  ///
-  /// This was a plain action that set a flag for a `confirmationDialog`, and the
-  /// dialog never presented — so the button read as a dead spot no amount of
-  /// tap-target work could fix. A `Menu` presents itself from the button, with
-  /// no presentation state to lose, and an anchored menu is the iOS idiom for an
-  /// overflow control anyway.
+  /// The … menu's items. Presented via `Menu`, not a flag-driven
+  /// `confirmationDialog` — that never presented and left a dead spot.
   @ViewBuilder public var overflow: () -> Overflow
 
   @Environment(\.litChrome) private var lit
@@ -58,10 +53,8 @@ public struct TerminalTitleBar<Overflow: View>: View {
           .padding(.vertical, 4)
           .background(lit.color.opacity(0.14), in: Capsule())
           .accessibilityLabel("Session \(LitTheme.label(for: lit.state))")
-          // The word changes with the state, so the pill is one element that
-          // re-reads rather than three that swap: it fades through instead of
-          // cutting, and only grows in from the trailing edge — where it
-          // actually sits — when it first appears.
+          // One pill that re-reads rather than three that swap: it fades through
+          // instead of cutting, and grows in from the trailing edge on first appear.
           .contentTransition(.opacity)
           .transition(
             reduceMotion
@@ -74,10 +67,8 @@ public struct TerminalTitleBar<Overflow: View>: View {
         ConnectionBadge(status: store.connectionStatus(for: hostId))
       }
 
-      // No spacing inside the cluster: the 44pt targets already sit their glyphs
-      // 44pt apart, and adding gaps on top pushed the row wide enough to
-      // truncate the session title — the one thing in the bar that carries
-      // information.
+      // No spacing: the 44pt targets already sit glyphs 44pt apart; extra gaps
+      // pushed the row wide enough to truncate the session title.
       HStack(spacing: 0) {
         iconButton("plus", label: "New terminal", action: onNewSession)
         iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
@@ -112,11 +103,8 @@ public struct TerminalTitleBar<Overflow: View>: View {
     .animation(TetherMotion.heat(to: lit.state, reduceMotion: reduceMotion), value: lit.state)
   }
 
-  /// An icon on a 44pt target — see `tapTarget()`. These were 32pt frames (36
-  /// for the drawer), so a third of each button's area was dead. `ellipsis` was
-  /// the worst of them: it sits at the trailing edge, where a thumb naturally
-  /// lands slightly outside the frame, and its glyph is a thin horizontal strip
-  /// that gives no clue where the target ends.
+  /// An icon on a 44pt target — see `tapTarget()`. The old 32pt frames left a
+  /// third of each button dead, worst on the trailing-edge `ellipsis`.
   private func iconButton(
     _ systemName: String,
     label: String,
@@ -150,15 +138,8 @@ private struct ConnectionBadge: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  /// A dot, not a word.
-  ///
-  /// The label ("online" / "offline" / "connecting") cost roughly a fifth of the
-  /// bar's width and pushed the session title into truncation, and the title is
-  /// the thing the reader actually needs — you can only be looking at one
-  /// session, and its name tells you which. Colour carries the state at a
-  /// glance; a spinner replaces the dot while connecting, because "in progress"
-  /// is the one state a static colour cannot express. The words survive for
-  /// VoiceOver, which is where they were doing real work.
+  /// A dot, not a word: a status label truncated the session title. Colour carries
+  /// the state, a spinner marks connecting, and the words survive for VoiceOver.
   var body: some View {
     ZStack {
       if status == .connecting {
@@ -172,9 +153,8 @@ private struct ConnectionBadge: View {
           .overlay(
             Circle().stroke(tint.opacity(0.35), lineWidth: 3).blur(radius: 1)
           )
-          // Keyed on the status, not just on dot-vs-spinner: reconnecting and
-          // then dropping again are different events, and a colour that cuts
-          // between them looks like a render bug rather than a state.
+          // Keyed on status, not just dot-vs-spinner: reconnect-then-drop are
+          // distinct events, and a colour that cuts between them looks like a bug.
           .id(status)
           .transition(.opacity)
       }

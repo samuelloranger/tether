@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Read-only workspace file viewer — port of `apps/mobile/src/FileViewer.tsx`.
+/// Read-only workspace file viewer.
 public struct FileViewerView: View {
   public var file: WorkspaceFileView?
   /// Why the last open failed, if it did. Distinct from an empty file:

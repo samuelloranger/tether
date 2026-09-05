@@ -43,9 +43,8 @@ function mountTerminal(
 } {
   const term = new Terminal({
     cursorBlink: true,
-    // Mount with the real theme and face. Booting from a fixed Catppuccin
-    // Mocha constant flashed the wrong background for a frame on every other
-    // flavour — visibly so on the light ones.
+    // Boot with the real theme/face: a fixed Catppuccin Mocha constant flashed the
+    // wrong background for a frame on other flavours, visibly on the light ones.
     fontFamily: `${fontFamily}, ui-monospace, monospace`,
     fontSize,
     theme: boot,
@@ -60,9 +59,7 @@ function mountTerminal(
   fit.fit();
   try {
     term.loadAddon(new WebglAddon());
-  } catch {
-    // Software renderer fallback.
-  }
+  } catch {}
   return { term, fit, search, dispose: () => term.dispose() };
 }
 
@@ -227,9 +224,8 @@ export function TerminalPane(props: TerminalPaneProps) {
     }
   }, [props.interactive, termRef, fitRef, getSocketRef, sendFocusRef, setFindOpen]);
 
-  // A pane in a split is smaller than full-screen and its box changes on divider
-  // drag, split, close, and window resize. Refit the emulator and tell the server
-  // the new grid whenever the host element resizes.
+  // A split pane's box changes on divider drag, split, close, and window resize;
+  // refit and tell the server the new grid whenever the host element resizes.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;

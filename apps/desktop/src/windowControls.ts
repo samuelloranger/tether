@@ -1,6 +1,5 @@
-// Custom-title-bar window controls. Thin wrapper over @tauri-apps/api's window
-// API. Used on Windows/Linux, where we draw our own min/max/close; macOS keeps
-// its native traffic lights (titleBarStyle: Overlay) and does not call these.
+// Thin wrapper over Tauri's window API for our custom min/max/close. Used on
+// Windows/Linux; macOS keeps native traffic lights and doesn't call these.
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 

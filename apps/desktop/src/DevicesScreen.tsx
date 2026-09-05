@@ -17,10 +17,8 @@ type Phase =
   | { kind: 'selfRevoked' };
 
 /**
- * Device management for ONE Noise host, mirroring the iOS `DevicesView`. Lists
- * the host's paired devices over the same authenticated Noise channel the
- * terminal uses (a fresh short-lived management session per action) and revokes
- * them. Only reachable for Noise hosts — see the entry point in HostsScreen.
+ * Device management for one Noise host, mirroring iOS `DevicesView`. Only
+ * reachable for Noise hosts — see the entry point in HostsScreen.
  */
 export function DevicesScreen({ host, onBack }: DevicesScreenProps) {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });

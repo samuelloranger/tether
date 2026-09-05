@@ -11,9 +11,8 @@ export interface ReconnectDeps {
 }
 
 /**
- * Accept a device's IK reconnect over `io`, authorize it against the registry,
- * and mark it seen. On an unknown/revoked key, `acceptReconnect` has already
- * refused before any transport — this rethrows that.
+ * Accepts a device's IK reconnect, authorizes it against the registry, and marks it seen.
+ * On an unknown/revoked key, `acceptReconnect` already refused — this rethrows that.
  */
 export async function runReconnect(
   io: FrameIO,

@@ -3,15 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { type DropIntent, dropIntent } from './dropZone';
 
 /**
- * Pointer-driven "drag a session tab into a pane".
- *
- * Why not HTML5 drag-and-drop: Tauri's native drag-drop handler
- * (`dragDropEnabled`, on by default and required for the OS file-drop upload in
- * `useWorkspaceFiles`) is a window-level OS drop target that swallows every drag
- * over the WebView2 window — the in-page `dragover`/`drop` DOM events never fire
- * on Windows, so the split preview and drop were dead (not-allowed cursor). The
- * tab drag is entirely in-app, so it needs no OS drag channel: we track the
- * pointer ourselves and hit-test panes by `data-pane-id`.
+ * Pointer-driven "drag a session tab into a pane". Not HTML5 DnD: Tauri's native drag-drop
+ * handler swallows in-webview drags on Windows, so we track the pointer and hit-test panes.
  */
 
 const DRAG_THRESHOLD_PX = 5;
@@ -38,11 +31,8 @@ export interface TabDragState {
   target: TabDropTarget | null;
 }
 
-/**
- * Where does a point land inside one pane? Pure so the geometry is testable.
- * An empty pane only ever accepts a full replace; a filled pane splits at its
- * edges (via `dropIntent`) or replaces near the center.
- */
+/** Where a point lands inside one pane (pure/testable): an empty pane only
+ *  replaces; a filled pane splits at its edges or replaces near the center. */
 export function paneDropTarget(
   paneId: string,
   rect: { left: number; top: number; width: number; height: number },

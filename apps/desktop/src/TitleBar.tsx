@@ -1,9 +1,5 @@
-// Custom window title bar for the frameless desktop build. Replaces the OS
-// titlebar: the title strip is a Tauri drag region (drag to move, double-click
-// to maximize). The control cluster is a sibling of that strip, not a child, so
-// its button clicks are never turned into window drags. macOS keeps native
-// traffic lights (we reserve a left inset via titlebarChrome); Windows/Linux get
-// the custom min/max/close cluster on the right.
+// Custom title bar for the frameless build. The title strip is a Tauri drag region;
+// the control cluster is its sibling (not child) so button clicks aren't turned into drags.
 
 import { useEffect, useState } from 'react';
 import { titlebarChrome } from './titlebarChrome';
@@ -30,9 +26,8 @@ export function TitleBar({ title }: TitleBarProps) {
 
   useEffect(() => {
     if (!showControls) return;
-    // `cancelled` guards the async gap: under StrictMode the cleanup can run
-    // before the listener promise resolves, so we both unlisten a listener that
-    // already resolved and skip keeping one that resolves after teardown.
+    // `cancelled` guards the async gap: under StrictMode the cleanup can run before
+    // the listener promise resolves, so unlisten an already-resolved one either way.
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     onMaximizeChange(setMaximized).then((fn) => {
@@ -63,10 +58,8 @@ export function TitleBar({ title }: TitleBarProps) {
   return (
     <div className="titlebar">
       {leftInset > 0 ? <div style={{ width: leftInset }} /> : null}
-      {/* Only the title strip is the drag handle. Keeping the controls OUT of any
-          data-tauri-drag-region subtree (they are siblings, not children) is the
-          documented way to stop button clicks turning into window drags. The
-          strip has flex:1, so it also covers the empty gap up to the controls. */}
+      {/* Only the title strip is the drag handle: keeping controls OUT of the
+          data-tauri-drag-region subtree stops button clicks becoming window drags. */}
       <span className="titlebar-title" data-tauri-drag-region>
         {title}
       </span>

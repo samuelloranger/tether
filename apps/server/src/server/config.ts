@@ -8,18 +8,13 @@ const nonNegativeInt = z.number().int().nonnegative();
 
 export const configSchema = z
   .object({
-    // Native push, delivered through the relay in `pushRelay.ts`. There is no
-    // URL here on purpose: the relay is fixed by the app's signing identity,
-    // not chosen per server. See pushRelay.ts.
+    // Native push via the relay (pushRelay.ts). No URL here on purpose — the
+    // relay is fixed by the app's signing identity, not chosen per server.
     push: z.object({ enabled: z.boolean() }),
     triggers: z.object({
       waiting: z.boolean(),
-      // `.default(false)` rather than a bare boolean, and not for style: every
-      // stored `config.triggers` row predates this key, and `readTopLevel`
-      // reacts to a parse failure by discarding the WHOLE section for defaults.
-      // A required key would silently flip a user's `waiting: false` back on.
-      // The default makes the key optional on input while the parsed type stays
-      // `boolean`, so nothing downstream changes.
+      // `.default(false)`, not a bare boolean: old stored rows predate this key, and
+      // a required key would fail parsing and silently flip `waiting: false` back on.
       done: z.boolean().default(false),
       oscNotify: z.boolean(),
       exit: z.boolean(),
@@ -45,11 +40,8 @@ export const DEFAULT_CONFIG: Config = {
   longJobSeconds: 300,
   identity: { name: process.env.HOSTNAME || 'Tether', color: '#89b4fa' },
   session: {
-    // getDefaultShell() rather than $SHELL directly: on Windows there is no
-    // login shell to read, and Git for Windows exports SHELL=<its bash.exe> to
-    // everything it launches — so a daemon started from a Git Bash prompt used
-    // to hand every session an MSYS shell reporting /c/Users/... paths that no
-    // Windows API can resolve. On POSIX it still resolves to the user's shell.
+    // getDefaultShell(), not $SHELL: Windows has no login shell, and Git Bash
+    // exports SHELL=<its bash.exe>, handing sessions an MSYS shell with unresolvable paths.
     defaultShell: getDefaultShell(),
     // homedir() honours USERPROFILE on Windows, where HOME is usually unset —
     // the old `|| '/'` fallback was not a directory that exists there.
@@ -86,11 +78,8 @@ function readScalar<K extends 'longJobSeconds'>(key: K): Config[K] {
 export function getConfig(): Config {
   if (!cached) {
     cached = configSchema.parse({
-      // Only the keys named here are read, so rows left behind by removed
-      // sections (`config.notify` on servers that predate native push) are
-      // inert rather than a parse failure that would take getConfig — and
-      // therefore the server — down. Same reason `push` tolerates a missing
-      // row: it did not exist before v2.8.
+      // Only the keys named here are read, so rows from removed sections
+      // (`config.notify`) are inert rather than a parse failure that takes getConfig down.
       push: readTopLevel('push'),
       triggers: readTopLevel('triggers'),
       longJobSeconds: readScalar('longJobSeconds'),
@@ -133,15 +122,8 @@ export function resetConfigCache(): void {
 }
 
 /**
- * How well the *currently configured* default shell integrates with tether —
- * derived state about a setting, in the same family as `pushDevices` and `tls`:
- * reported so a client can explain itself, never patchable.
- *
- * `session.defaultShell` is a free-text field a client may set to anything, and
- * one of those anythings (an MSYS/Git-for-Windows bash) silently disables the
- * git, file-tree and upload features — see describeShellSupport in ptyShell.ts.
- * The choice is deliberately not rejected: an advanced user may want that shell
- * and accept the cost. This is how they find out they are paying it.
+ * Derived state about the configured shell — reported, never patchable. A free-text
+ * shell choice (e.g. Git Bash) can silently disable git/file-tree/upload; this surfaces that cost.
  */
 export function getShellSupport(): ShellSupport {
   return describeShellSupport(getConfig().session.defaultShell);

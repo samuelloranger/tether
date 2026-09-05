@@ -263,12 +263,9 @@ describe('readLog / readCommitDiff', () => {
 
 describe('readDiffSummary staged split', () => {
   test('marks staged and unstaged entries; partially staged file appears twice', () => {
-    // staged-only change
     writeFileSync(path.join(root, 'staged.txt'), 's\n');
     git('add staged.txt');
-    // unstaged-only change (untracked)
     writeFileSync(path.join(root, 'unstaged.txt'), 'u\n');
-    // partially staged: stage one edit, then edit again
     writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\nthree\nstaged-edit\n');
     git('add a.txt');
     writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\nthree\nstaged-edit\nunstaged-edit\n');

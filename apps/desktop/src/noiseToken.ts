@@ -20,10 +20,8 @@ export type TokenCache = {
   invalidate(hostId: string): void;
 };
 
-/**
- * In-memory per-host device-token cache. Reuses a minted token until 90% of
- * its lifetime (by `expiresAt`), then remints. `invalidate` is the 401 path.
- */
+/** Reuses a minted token until 90% of its lifetime (by `expiresAt`), then
+ * remints. `invalidate` is the 401 path. */
 export function createTokenCache(opts: TokenCacheOptions): TokenCache {
   const now = opts.now ?? Date.now;
   const refreshAt = opts.refreshAt ?? 0.9;

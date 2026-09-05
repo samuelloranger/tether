@@ -55,7 +55,6 @@ test('an unanswered request arms a cooldown; calls during it skip without waitin
 
   const first = gate.wait();
   gate.onTimeout(1_000);
-  // Resolves false, does not throw.
   expect(await first).toBe(false);
   expect(gate.waiterCount).toBe(0);
   expect(gate.cooldownUntil).toBe(1_000 + CWD_REFRESH_COOLDOWN_MS);

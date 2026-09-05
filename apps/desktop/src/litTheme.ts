@@ -4,18 +4,13 @@ import type { UiTheme } from './preferences';
 import type { DrawerSession } from './types';
 
 /**
- * What the chrome is currently wearing.
- *
  * `none` is not "idle": a stopped session, or no session at all, must not tint
  * the app warm or cool — a dead shell that keeps glowing reads as a live one.
  */
 export type LitState = 'working' | 'waiting' | 'done' | 'idle' | 'none';
 
-/**
- * The session the chrome is currently wearing, classified exactly as the drawer
- * classifies its own rows — so the row and the chrome can never disagree about
- * what a session is doing.
- */
+/** Classified exactly as the drawer classifies its own rows, so the row and
+ * the chrome can never disagree about what a session is doing. */
 export function activeSessionDot(
   sessions: DrawerSession[],
   hostId: string | null,
@@ -46,13 +41,8 @@ export function litStateFor(dot: DotKey | null): LitState {
   }
 }
 
-/**
- * Bloom alphas are per-state rather than one shared value on purpose.
- *
- * Ember reads considerably hotter than amber at the same alpha — at parity the
- * waiting state stopped looking like a state and started looking like an alarm.
- * Idle is quieter than both: it should register as "alive" and nothing more.
- */
+/** Per-state rather than one shared alpha: ember reads much hotter than amber
+ * at parity, which made waiting look like an alarm rather than a state. */
 const BLOOM: Record<LitState, { b1: string; b2: string; b3: string; rim: string }> = {
   working: { b1: '13%', b2: '6%', b3: '2%', rim: '55%' },
   waiting: { b1: '9%', b2: '4%', b3: '1.5%', rim: '46%' },
@@ -78,38 +68,18 @@ export function litColor(theme: UiTheme, state: LitState): string {
   }
 }
 
-/**
- * How long the arrival swell is on screen, matching the `heat-arrive` keyframe
- * in `index.css` plus a little slack so the attribute outlives the animation
- * rather than cutting it off.
- */
+/** Matches the `heat-arrive` keyframe in `index.css` plus slack so the
+ * attribute outlives the animation rather than cutting it off. */
 export const ARRIVAL_MS = 800;
 
-/**
- * Whether moving from `prev` to `next` should fire the app's one authored
- * moment: the single swell of the bloom when a shell stops and asks for input.
- *
- * On ENTERING waiting only. The drawer re-reports session state on every poll,
- * and a swell per poll would turn the one thing in the app allowed to move on
- * its own into a strobe.
- *
- * `settled` is what keeps startup quiet. The app boots with no sessions loaded,
- * so the chrome is `none` until the first poll answers — and a session that was
- * already waiting when you opened the app arrives as a `none → waiting` change
- * that is indistinguishable, here, from a shell that just stopped to ask you
- * something. It is not one: nothing happened, the app merely finished loading.
- * So the swell waits until the chrome has shown one live state.
- */
+/** Fires only on ENTERING waiting, since the drawer re-reports state every poll
+ * and `settled` keeps the swell from firing on startup's initial `none → waiting`. */
 export function shouldAnnounceArrival(prev: LitState, next: LitState, settled: boolean): boolean {
   return settled && next === 'waiting' && prev !== 'waiting';
 }
 
-/**
- * The CSS custom properties the whole visual language reads from. Everything
- * tinted in `index.css` — the mark, the selected card, its edge light, the
- * toolbar chip, the screen rim, the atmospheric bloom — resolves through these,
- * so re-tinting the app on a session switch is four variable writes.
- */
+/** Everything tinted in `index.css` resolves through these, so re-tinting the
+ * app on a session switch is four variable writes. */
 export function litVars(theme: UiTheme, state: LitState): Record<string, string> {
   const bloom = BLOOM[state];
   return {
@@ -121,13 +91,8 @@ export function litVars(theme: UiTheme, state: LitState): Record<string, string>
   };
 }
 
-/**
- * The complete custom-property set for the app shell.
- *
- * Every token the flavour defines is published — the previous version emitted
- * nine of sixteen, which is why so many rules in `index.css` used to carry a
- * hard-coded Catppuccin fallback that silently won under other flavours.
- */
+/** Every token the flavour defines is published — the previous version emitted
+ * nine of sixteen, so many `index.css` rules carried a hard-coded fallback. */
 export function shellVars(theme: UiTheme, state: LitState): Record<string, string> {
   const c = theme.colors;
   return {
@@ -147,10 +112,8 @@ export function shellVars(theme: UiTheme, state: LitState): Record<string, strin
     '--warning': c.warning,
     '--danger': c.danger,
     '--info': c.info,
-    // The terminal's own background, so the padding around the emulator can
-    // match it. `--input` is close enough to be invisible in a dark flavour and
-    // obviously wrong in a light one, which showed up as a pale gutter down the
-    // left edge of the terminal.
+    // So padding around the emulator matches it; `--input` was close enough to
+    // be invisible in dark but showed up as a pale gutter in light flavours.
     '--term-bg': theme.terminal.background,
     ...litVars(theme, state),
   };

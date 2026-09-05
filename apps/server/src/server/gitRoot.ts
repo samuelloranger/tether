@@ -2,10 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { HIDE_CONSOLE } from './spawnWindow';
 
-// A session's cwd can stop existing while the shell still sits in it — a
-// `git worktree remove`, an `rm -rf` of the current directory, a branch switch
-// that drops it. That is an ordinary state, not a server fault, so it carries
-// a status rather than escaping as a raw ENOENT and becoming a 500.
+// A session's cwd can stop existing while the shell still sits in it (worktree
+// removed, rm -rf'd, branch switch). Ordinary state, not a 500.
 export class GitRootError extends Error {
   constructor(
     readonly status: 404 | 409,
@@ -35,10 +33,8 @@ export function resolveGitDir(root: string): string {
   return realpathSync(gitDir);
 }
 
-// Resolves the nearest git repository root containing `cwd`, or `cwd` itself
-// if it isn't inside a git working tree. Recomputed on every call — a
-// session's cwd can point at a different project between requests (the user
-// just `cd`'d), so nothing here is cached.
+// Recomputed on every call — a session's cwd can point at a different project
+// between requests (the user just `cd`'d), so nothing here is cached.
 export function resolveGitRoot(cwd: string): string {
   const root = findGitRoot(cwd);
   if (root) return root;

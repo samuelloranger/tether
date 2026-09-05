@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Port of `apps/mobile/src/SideBySideDiff.tsx`.
 public struct SideBySideDiffView: View {
   public var lines: [DiffLine]
   public var path: String

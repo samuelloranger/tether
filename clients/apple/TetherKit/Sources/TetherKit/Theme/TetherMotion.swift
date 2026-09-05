@@ -1,18 +1,7 @@
 import SwiftUI
 
-/// Motion tokens for the lit chrome.
-///
-/// One idea runs through all of them: **heat rises fast and cools slowly**. A
-/// session that starts working, or that stops to ask you something, is news —
-/// it arrives quickly. A session going quiet is not news, so the chrome lets go
-/// of the colour over most of a second instead of snapping to grey. The
-/// asymmetry is the whole point; equal durations in both directions would make
-/// the two events read as the same event.
-///
-/// Durations are deliberately short everywhere else. This is an Operate
-/// surface sitting on top of a live PTY: motion here acknowledges an action or
-/// explains a state change, and anything longer than the change it describes
-/// reads as latency.
+/// Motion tokens for the lit chrome. One principle: heat rises fast and cools slowly,
+/// so arriving and leaving read as different events. Durations stay short — this sits on a live PTY.
 public enum TetherMotion {
   /// Heat arriving: idle → working.
   public static let ignite: Double = 0.26
@@ -36,12 +25,8 @@ public enum TetherMotion {
     .timingCurve(0.16, 1, 0.3, 1, duration: duration)
   }
 
-  /// The animation the chrome uses to reach `state`.
-  ///
-  /// Resolved from the destination rather than the transition, because SwiftUI
-  /// reads `.animation(_:value:)` against the new value — and because the
-  /// destination is what the duration is about: arriving at heat is fast,
-  /// arriving at cold is slow, whichever state you came from.
+  /// The animation the chrome uses to reach `state`. Resolved from the destination:
+  /// arriving at heat is fast, arriving at cold slow, whichever state you came from.
   public static func heat(to state: LitState, reduceMotion: Bool) -> Animation {
     if reduceMotion { return .easeOut(duration: crossfade) }
     switch state {
@@ -57,20 +42,8 @@ public enum TetherMotion {
     reduceMotion ? .easeOut(duration: crossfade) : decelerate(duration)
   }
 
-  /// Whether the chrome should fire its one authored moment: the single,
-  /// non-repeating swell when a session stops and asks for input.
-  ///
-  /// Only on *entering* waiting, so a drawer refresh that re-reports the same
-  /// state cannot pulse again, and never under Reduce Motion — a change in
-  /// brightness that the user did not cause is exactly what that setting is
-  /// asking the app not to do.
-  ///
-  /// `settled` is what keeps launch quiet. The store has no sessions until the
-  /// first fetch answers, so the chrome starts at `none` and every session
-  /// arrives as a change — and a session that was already waiting when the app
-  /// opened would announce itself as though it had just stopped to ask a
-  /// question. Nothing happened; loading finished. The swell waits until the
-  /// chrome has shown one live state.
+  /// Fire the one authored swell only on entering `waiting` (never a re-report, never
+  /// under Reduce Motion). `settled` keeps launch quiet: a session already waiting at open isn't news.
   public static func pulses(
     from old: LitState,
     to new: LitState,
@@ -81,8 +54,7 @@ public enum TetherMotion {
   }
 
   /// How fast a swell interrupted by the session moving on gets out of the way.
-  /// Short: the chrome underneath has already changed colour, and the leftover
-  /// brightness belongs to a state that is over.
+  /// Short: the chrome underneath has already changed colour.
   public static let pulseCancel: Double = 0.2
 
   /// Swell up, then let go. Up is faster than down for the same reason ignite
@@ -92,13 +64,8 @@ public enum TetherMotion {
 }
 
 extension LitBloom {
-  /// How much brighter the bloom goes at the peak of the waiting swell.
-  ///
-  /// The gradient is *built* at this gain and the layer sits at
-  /// `restOpacity` when nothing is happening, so at rest it renders exactly the
-  /// alphas `LitBloom` documents. This indirection exists because SwiftUI does
-  /// not interpolate the colours inside a gradient — layer opacity is the one
-  /// handle on a gradient that does animate smoothly.
+  /// How much brighter the bloom goes at the swell's peak. The gradient is built at this
+  /// gain and sits at `restOpacity` otherwise — SwiftUI animates layer opacity, not gradient colours.
   public static let pulseGain: Double = 1.6
   public static var restOpacity: Double { 1 / pulseGain }
 }

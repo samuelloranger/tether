@@ -1,17 +1,12 @@
-// The 12-char Crockford base32 enrollment code, on the desktop side. Mirrors
-// `crates/tether-core/src/noise/code.rs` (normalize + grouped) so the code the
-// user types here folds to exactly what the Rust `code::normalize` expects
-// before it reaches `core_noise_pair`. Desktop has no camera, so this is the
-// only way a code arrives — keep it forgiving on input, strict on submit.
+// Mirrors `crates/tether-core/src/noise/code.rs` (normalize + grouped) so the
+// code the user types here folds to exactly what Rust's `code::normalize` expects.
 
 // Crockford base32: A–Z minus the ambiguous I, L, O, U, plus the digits.
 export const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_LEN = 12;
 
-// Uppercase, then fold the look-alikes the way Crockford reading does: O→0 and
-// I/L→1. Everything else is returned uppercased and checked against the alphabet
-// by the caller. Matches the Rust folding exactly (U is not folded — it is not
-// in the alphabet, so it is simply rejected).
+// Fold look-alikes the way Crockford reading does: O→0, I/L→1. Matches the
+// Rust folding exactly (U is not folded, so it is simply rejected).
 function foldChar(ch: string): string {
   const upper = ch.toUpperCase();
   if (upper === 'O') return '0';
@@ -21,8 +16,7 @@ function foldChar(ch: string): string {
 
 /**
  * Strict normalization for submit: fold case + look-alikes, strip dashes and
- * spaces, and require exactly 12 in-alphabet characters. Returns the canonical
- * 12-char code, or `null` if the input is not a complete, valid code.
+ * spaces, require exactly 12 in-alphabet characters.
  */
 export function normalizePairingCode(input: string): string | null {
   let out = '';
@@ -46,9 +40,7 @@ export function groupPairingCode(code: string): string {
 
 /**
  * Forgiving live formatting for the input box: fold case + look-alikes, drop
- * anything not in the alphabet (including half-typed dashes/spaces), cap at 12
- * characters, and regroup 4·4·4. Lets the user paste `7qf4km9px3tv`, `7QF4 KM9P
- * X3TV`, or type freely and always see the grouped, uppercased form.
+ * anything not in the alphabet, cap at 12 characters, and regroup 4·4·4.
  */
 export function formatPairingInput(input: string): string {
   let cleaned = '';

@@ -1,8 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 // Bundled, not system-resolved: a packaged desktop build cannot assume either
-// face is installed. This box had neither, which is why the previous default
-// terminal font silently fell back to a mono with no box-drawing coverage.
+// face is installed.
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import { App } from './App';

@@ -1,15 +1,6 @@
 /**
- * Pick the rate-limit key from X-Forwarded-For.
- *
- * XFF is "client, proxy1, proxy2…": each proxy APPENDS the address it received
- * the request from. Everything to the left of our own trusted hops is
- * attacker-supplied — a caller can send `X-Forwarded-For: 1.2.3.4` and our
- * proxy will simply append the real address after it. Trusting the leftmost
- * entry therefore lets anyone rotate the header and bypass the limiter
- * entirely, so we count from the RIGHT instead.
- *
- * `trustedHops` is how many proxies sit in front of the relay (1 for a single
- * reverse proxy). The entry that proxy appended is the real peer.
+ * Rate-limit key from X-Forwarded-For. Each proxy APPENDS the peer it saw, so anything
+ * left of our `trustedHops` is attacker-supplied — count from the RIGHT for the real peer.
  */
 export function clientIpFromForwarded(
   forwardedFor: string | undefined,

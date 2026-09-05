@@ -20,9 +20,8 @@ describe('createReplayGate', () => {
     gate.dispose();
   });
 
-  // The bug this guards: re-arming on every output frame with no ceiling means
-  // a busy LIVE session keeps the gate shut forever, so a TUI asking for the
-  // cursor position mid-render waits for an answer that never comes.
+  // Guards the bug where re-arming per output frame with no ceiling keeps the gate
+  // shut on a busy live session, so a TUI's cursor-position query never gets answered.
   it('opens despite continuous output once the absolute window elapses', async () => {
     const gate = createReplayGate(1000, 40);
     gate.onConnect();

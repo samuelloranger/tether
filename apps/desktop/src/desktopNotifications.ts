@@ -18,7 +18,6 @@ export async function ensureNotificationPermission(): Promise<void> {
   }
 }
 
-/** Desktop OS notification via tauri-plugin-notification, called directly. */
 export async function sendOsNotification(title: string, body: string): Promise<void> {
   try {
     if (permissionGranted === null) await ensureNotificationPermission();

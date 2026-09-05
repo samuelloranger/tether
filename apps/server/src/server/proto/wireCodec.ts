@@ -116,7 +116,7 @@ export function decodeClientFrame(frame: DecodedFrame): ClientMessage | null {
   }
 }
 
-// --- decoders for the far side of the wire, used by conformance tests and by
+// Decoders for the far side of the wire, used by conformance tests and by
 // any TypeScript client (the Rust client reads the same schema).
 
 export function decodeCursorFrame(payload: Uint8Array): string {
