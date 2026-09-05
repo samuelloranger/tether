@@ -112,9 +112,7 @@ test('prints advertise URL and QR when advertiseUrl is set', async () => {
     expect(logs).toContain('http://10.0.0.5:8085');
     expect(logs.some((line) => line.startsWith('QR:tether://pair?'))).toBe(true);
     expect(
-      logs.some((line) =>
-        line.includes('code=7QF4-KM9P-X3TV&host=http%3A%2F%2F10.0.0.5%3A8085'),
-      ),
+      logs.some((line) => line.includes('code=7QF4-KM9P-X3TV&host=http%3A%2F%2F10.0.0.5%3A8085')),
     ).toBe(true);
   } finally {
     rmSync(root, { recursive: true, force: true });

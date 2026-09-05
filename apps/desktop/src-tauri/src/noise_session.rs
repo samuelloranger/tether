@@ -178,7 +178,10 @@ pub fn translate_frontend(session_id: &str, ws_json: &str) -> Option<Vec<u8>> {
             Some(encode_resize(session_id, cols, rows))
         }
         "focus" => {
-            let focused = value.get("focused").and_then(Value::as_bool).unwrap_or(false);
+            let focused = value
+                .get("focused")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             Some(encode_focus(session_id, focused))
         }
         _ => None,
@@ -304,7 +307,10 @@ mod tests {
             &translate_frontend("sess-1", r#"{"type":"focus","focused":true}"#).unwrap(),
         )
         .unwrap();
-        assert_eq!(value, json!({ "t": "focus", "id": "sess-1", "focused": true }));
+        assert_eq!(
+            value,
+            json!({ "t": "focus", "id": "sess-1", "focused": true })
+        );
     }
 
     #[test]

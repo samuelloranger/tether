@@ -18,8 +18,8 @@ function pubkeyFill(byte: number): string {
 }
 
 /** Tiny app so we invoke authMiddleware without the rest of the route table. */
-function appWithAuth(): Hono {
-  const h = new Hono();
+function appWithAuth(): Hono<{ Variables: { deviceId?: string } }> {
+  const h = new Hono<{ Variables: { deviceId?: string } }>();
   h.use('*', authMiddleware);
   h.get('/api/health', (c) => c.json({ ok: true }));
   h.get('/api/status', (c) => c.json({ public: true }));

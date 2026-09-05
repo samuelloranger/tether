@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { trackDeviceChannel } from './deviceChannels';
 import { db } from './db';
+import { trackDeviceChannel } from './deviceChannels';
 import {
   addDevice,
   deviceCount,
