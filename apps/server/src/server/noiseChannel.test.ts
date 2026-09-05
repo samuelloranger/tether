@@ -105,3 +105,83 @@ describe('noise channel — pairing', () => {
     i.free();
   });
 });
+
+describe('noise channel — pairing timeouts', () => {
+  // A crypto handshake that stalls (device never sends its final message) must
+  // fail fast, bounded by handshakeTimeoutMs — not hang holding the socket.
+  test('a stalled crypto handshake fails within handshakeTimeoutMs', async () => {
+    const server = genKeypair();
+    const device = genKeypair();
+    const psk = derivePsk('011B-2345-6789');
+    const [serverIo, clientIo] = pipe();
+
+    const serverPromise = acceptPairing(serverIo, server.priv, {
+      psk,
+      confirm: () => true,
+      handshakeTimeoutMs: 50,
+      confirmTimeoutMs: 5_000,
+    });
+
+    const i = pairInitiator(device.priv, psk);
+    await clientIo.send(i.writeMessage()); // -> e
+    i.readMessage(await clientIo.recv()); // <- e, ee, s, es
+    // Never send the third message — the crypto handshake stalls here.
+
+    await expect(serverPromise).rejects.toMatchObject({ code: 'handshake' });
+    i.free();
+  });
+
+  // The user-facing bug: a host-confirm that takes LONGER than the crypto
+  // handshake timeout (a human reading a code and typing 'y') must still pair.
+  // The handshake timeout bounds only the crypto exchange, never the confirm.
+  test('a host-confirm slower than handshakeTimeoutMs still pairs', async () => {
+    const server = genKeypair();
+    const device = genKeypair();
+    const devPubB64 = Buffer.from(device.pub).toString('base64');
+    const psk = derivePsk('011B-2345-6789');
+    const [serverIo, clientIo] = pipe();
+
+    const serverPromise = acceptPairing(serverIo, server.priv, {
+      psk,
+      // Resolves well after the 60ms handshake window, within the confirm window.
+      confirm: () => new Promise((r) => setTimeout(() => r(true), 150)),
+      handshakeTimeoutMs: 60,
+      confirmTimeoutMs: 2_000,
+    });
+
+    const i = pairInitiator(device.priv, psk);
+    await clientIo.send(i.writeMessage()); // -> e
+    i.readMessage(await clientIo.recv()); // <- e, ee, s, es
+    await clientIo.send(i.writeMessage()); // -> s, se
+    i.intoTransport();
+
+    const { devicePubkey } = await serverPromise;
+    expect(devicePubkey).toBe(devPubB64);
+    i.free();
+  });
+
+  // A confirm that never arrives (operator walked away) must not pin the socket
+  // forever — it fails, bounded by confirmTimeoutMs.
+  test('a host-confirm that never answers fails within confirmTimeoutMs', async () => {
+    const server = genKeypair();
+    const device = genKeypair();
+    const psk = derivePsk('011B-2345-6789');
+    const [serverIo, clientIo] = pipe();
+
+    const serverPromise = acceptPairing(serverIo, server.priv, {
+      psk,
+      confirm: () => new Promise<boolean>(() => {}), // never resolves
+      handshakeTimeoutMs: 5_000,
+      confirmTimeoutMs: 50,
+    });
+
+    const i = pairInitiator(device.priv, psk);
+    await clientIo.send(i.writeMessage()); // -> e
+    i.readMessage(await clientIo.recv()); // <- e, ee, s, es
+    await clientIo.send(i.writeMessage()); // -> s, se
+    i.intoTransport();
+
+    await expect(serverPromise).rejects.toMatchObject({ code: 'handshake' });
+    i.free();
+  });
+});
