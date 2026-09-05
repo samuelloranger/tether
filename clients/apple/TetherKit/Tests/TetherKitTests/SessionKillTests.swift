@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 
+import TetherFFIBindings
 @testable import TetherKit
 
 @MainActor
