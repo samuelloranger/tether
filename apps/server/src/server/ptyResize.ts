@@ -31,6 +31,17 @@ export function clampDims(cols: unknown, rows: unknown): Dims {
  * identical dims, so returning from another app repainted every resident tab
  * twice for no reason, interleaving stale-geometry frames with the replay.
  */
+/** Kick the PTY (SIGWINCH at current dims) when a viewer looks at the session
+ *  again. Skip the first focus-true on a subscriber so reconnect does not
+ *  full-repaint every resident tab. */
+export function shouldKickPtyOnFocus(args: {
+  wasFocused: boolean | undefined;
+  sawFocus: boolean;
+  focused: boolean;
+}): boolean {
+  return args.focused && args.sawFocus && args.wasFocused === false;
+}
+
 export function planPtyResize(current: Dims | null, clients: Iterable<Dims>): Dims | null {
   let cols = Number.POSITIVE_INFINITY;
   let rows = Number.POSITIVE_INFINITY;

@@ -86,15 +86,23 @@ public final class SessionStore {
   @ObservationIgnored private var lastRenderedGeneration: UInt64?
   /// Test seam: production lists via `NativeHostClient.listSessions`.
   @ObservationIgnored private let remoteSessions: ((String) async throws -> [RemoteSession])?
+  /// Test seam: production kills via `NativeHostClient.killSession`.
+  @ObservationIgnored private let remoteKill: ((String, String) async throws -> Void)?
+  /// Session ids removed locally after a successful kill, keyed by host. A
+  /// stale `GET /api/sessions` (or a test double that still returns the row)
+  /// must not put a just-killed tab back in the drawer.
+  @ObservationIgnored private var locallyKilled: [String: Set<String>] = [:]
 
   public init(
     hostStore: HostStoreAdapter = HostStoreAdapter(),
     noiseKeyStore: NoiseKeyStore = KeychainNoiseKeyStore(),
-    remoteSessions: ((String) async throws -> [RemoteSession])? = nil
+    remoteSessions: ((String) async throws -> [RemoteSession])? = nil,
+    remoteKill: ((String, String) async throws -> Void)? = nil
   ) {
     self.hostStore = hostStore
     self.noiseKeyStore = noiseKeyStore
     self.remoteSessions = remoteSessions
+    self.remoteKill = remoteKill
     noiseClient = NoiseSessionClient(keyStore: noiseKeyStore)
     observePipeline()
   }
@@ -401,18 +409,33 @@ public final class SessionStore {
     }
   }
 
-  public func killSession(id: String) async {
-    guard let client = await activeClient() else { return }
+  public func killSession(id: String, hostId: String? = nil) async {
+    let hostId = hostId ?? activeHostId
+    guard let hostId else { return }
     do {
-      try await client.killSession(id: id)
-      await pipeline.forget(key: terminalKey(id))
-      if activeSessionId == id {
+      if let remoteKill {
+        try await remoteKill(hostId, id)
+      } else {
+        guard let client = client(for: hostId) else { return }
+        try await client.killSession(id: id)
+      }
+      locallyKilled[hostId, default: []].insert(id)
+      dropSession(id: id, hostId: hostId)
+      await pipeline.forget(key: terminalKey(id, hostId: hostId))
+      if activeSessionId == id, activeHostId == hostId {
         await pipeline.release()
         activeSessionId = nil
       }
       await refreshSessions()
     } catch {
       errorMessage = error.localizedDescription
+    }
+  }
+
+  private func dropSession(id: String, hostId: String) {
+    sessionsByHost[hostId] = (sessionsByHost[hostId] ?? []).filter { $0.id != id }
+    if activeHostId == hostId {
+      sessions = sessionsByHost[hostId] ?? []
     }
   }
 
@@ -608,7 +631,10 @@ public final class SessionStore {
         listed = try await client.listSessions()
       }
       healthByHost[hostId] = .reachable
-      return listed
+      let hidden = locallyKilled[hostId] ?? []
+      let visible = listed.filter { !hidden.contains($0.id) }
+      locallyKilled[hostId] = hidden.intersection(listed.map(\.id))
+      return visible
     } catch {
       markHostFailure(hostId)
       return sessionsByHost[hostId] ?? []

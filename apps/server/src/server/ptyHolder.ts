@@ -56,7 +56,7 @@ export type SessionFrame =
   | { type: 'activity'; activity: Activity };
 
 export type Subscriber = (data: SessionFrame) => void;
-export type FocusSubscriber = Subscriber & { focused?: boolean };
+export type FocusSubscriber = Subscriber & { focused?: boolean; sawFocus?: boolean };
 
 export interface SessionInstance {
   sock: Socket;

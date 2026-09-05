@@ -236,8 +236,12 @@ actor TerminalPipeline {
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendFocus(id: id, focused: focused)
     case let .resize(newCols, newRows):
-      let changed = applyLocalResize(cols: newCols, rows: newRows)
-      guard changed, let channel = noiseChannel, let id = noiseSessionId else { return }
+      // Always tell the PTY when the channel is live. Gating on "local size
+      // changed" dropped the grow after keyboard-hide: the emulator was already
+      // the new size (applied while the socket was nil) and cursor-agent stayed
+      // painted at the short PTY geometry.
+      applyLocalResize(cols: newCols, rows: newRows)
+      guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
     }
   }

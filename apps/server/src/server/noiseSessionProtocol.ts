@@ -180,7 +180,6 @@ async function applyMessage(
   } else if (msg.t === 'focus') {
     const attachment = attachments.get(msg.id);
     if (attachment && typeof msg.focused === 'boolean') {
-      attachment.sub.focused = msg.focused;
       d.setSessionFocus(msg.id, attachment.sub, msg.focused);
     }
   } else if (msg.t === 'devices.list' || msg.t === 'devices.revoke') {

@@ -1,7 +1,7 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
-import { trackDeviceChannel } from '../deviceChannels';
 import { getSession, listSessions, renameSession } from '../db';
+import { trackDeviceChannel } from '../deviceChannels';
 import { getLiveCwd } from '../liveCwd';
 import { logError, logInfo, logWarn } from '../log';
 import {
@@ -166,7 +166,6 @@ function handleTerminalWsMessage(
       } else if (msg.type === 'resize') {
         resizeSession(sessionId, onData, msg.cols, msg.rows);
       } else if (msg.type === 'focus') {
-        onData.focused = msg.focused;
         setSessionFocus(sessionId, onData, msg.focused);
       }
     }

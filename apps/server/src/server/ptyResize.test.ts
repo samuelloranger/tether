@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { clampDims, type Dims, planPtyResize } from './ptyResize';
+import { clampDims, type Dims, planPtyResize, shouldKickPtyOnFocus } from './ptyResize';
 
 test('clampDims passes sane values through', () => {
   expect(clampDims(80, 24)).toEqual({ cols: 80, rows: 24 });
@@ -64,4 +64,18 @@ test('reconnect churn at steady dims is silent, a real change is not', () => {
 test('the smallest client leaving grows the PTY back', () => {
   const pty = { cols: 90, rows: 30 };
   expect(planPtyResize(pty, [{ cols: 120, rows: 45 }])).toEqual({ cols: 120, rows: 45 });
+});
+
+// Ink / cursor-agent only redraw on SIGWINCH (they do not enable DECSET 1004).
+// Reconnect sends focus true on a fresh subscriber — that must NOT SIGWINCH or
+// every app-switch repaints every resident tab. Looking at the session again
+// after an explicit unfocus (tab switch, keyboard) must kick.
+test('first focus on a subscriber is silent; a later focus-in kicks', () => {
+  expect(shouldKickPtyOnFocus({ wasFocused: false, sawFocus: false, focused: true })).toBe(false);
+  expect(shouldKickPtyOnFocus({ wasFocused: undefined, sawFocus: false, focused: true })).toBe(
+    false,
+  );
+  expect(shouldKickPtyOnFocus({ wasFocused: true, sawFocus: true, focused: true })).toBe(false);
+  expect(shouldKickPtyOnFocus({ wasFocused: true, sawFocus: true, focused: false })).toBe(false);
+  expect(shouldKickPtyOnFocus({ wasFocused: false, sawFocus: true, focused: true })).toBe(true);
 });

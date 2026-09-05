@@ -46,7 +46,7 @@ public struct SessionDrawerView: View {
               activeSessionId: store.activeSessionId,
               onSelectSession: onSelectSession,
               onKillSession: { id in
-                Task { await store.killSession(id: id) }
+                Task { await store.killSession(id: id, hostId: host.id) }
               },
               onRetryHost: {
                 Task { await store.refreshHost(hostId: host.id) }
@@ -273,7 +273,6 @@ private struct SessionDrawerRow: View {
   let lastOutputAt: String?
   let onSelect: () -> Void
   let onKill: () -> Void
-  @State private var confirmKill = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var wantsAttention: Bool {
@@ -327,8 +326,10 @@ private struct SessionDrawerRow: View {
       }
       .buttonStyle(.plain)
 
-      Button {
-        confirmKill = true
+      // confirmationDialog on these rows never presented (same SwiftUI hole the
+      // title-bar overflow used to hit). A Menu presents from the button.
+      Menu {
+        Button("Kill terminal", role: .destructive, action: onKill)
       } label: {
         Image(systemName: "xmark")
           .foregroundStyle(TetherColors.danger)
@@ -345,16 +346,6 @@ private struct SessionDrawerRow: View {
     // A row's own heat follows the chrome's curve, so the drawer and the bloom
     // can never disagree about how fast a session went quiet.
     .animation(TetherMotion.heat(to: rowLit.state, reduceMotion: reduceMotion), value: rowLit)
-    .confirmationDialog(
-      "Kill this terminal?",
-      isPresented: $confirmKill,
-      titleVisibility: .visible
-    ) {
-      Button("Kill", role: .destructive, action: onKill)
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("The process and its saved output will be deleted. This can't be undone.")
-    }
   }
 
   private var rowBackground: Color {
