@@ -18,10 +18,8 @@ import '@xterm/xterm/css/xterm.css';
 const LOCAL_SCROLLBACK = 5000;
 
 export interface TerminalPaneProps {
-  wsOrigin: string;
-  password: string;
-  /** Set for a Noise host: the `ws://host:port/api/noise/session` endpoint. */
-  noiseAddress?: string;
+  /** `ws://host:port/api/noise/session` — every host streams over Noise. */
+  noiseAddress: string;
   sessionId: string;
   hostId: string;
   interactive: boolean;
@@ -79,9 +77,7 @@ function bindMountedTerminal(input: {
   boot: BootOpts;
   hostId: string;
   sessionId: string;
-  wsOrigin: string;
-  password: string;
-  noiseAddress?: string;
+  noiseAddress: string;
   isInteractive: () => boolean;
   onFrame: TerminalPaneProps['onFrame'];
   onDisconnected: () => void;
@@ -106,8 +102,6 @@ function bindMountedTerminal(input: {
     search: mounted.search,
     hostId: input.hostId,
     sessionId: input.sessionId,
-    wsOrigin: input.wsOrigin,
-    password: input.password,
     noiseAddress: input.noiseAddress,
     isInteractive: input.isInteractive,
     onFrame: input.onFrame,
@@ -159,8 +153,6 @@ function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: b
       boot: bootRef.current,
       hostId: props.hostId,
       sessionId: props.sessionId,
-      wsOrigin: props.wsOrigin,
-      password: props.password,
       noiseAddress: props.noiseAddress,
       isInteractive: () => interactiveRef.current,
       onFrame: (hostId, sessionId, frame) => onFrameRef.current(hostId, sessionId, frame),
@@ -180,14 +172,7 @@ function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: b
       fitRef.current = null;
       setSearch(null);
     };
-  }, [
-    props.sessionId,
-    props.hostId,
-    props.wsOrigin,
-    props.password,
-    props.noiseAddress,
-    interactiveRef,
-  ]);
+  }, [props.sessionId, props.hostId, props.noiseAddress, interactiveRef]);
 
   return { hostRef, termRef, fitRef, getSocketRef, sendFocusRef, search, findOpen, setFindOpen };
 }
