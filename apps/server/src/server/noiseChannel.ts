@@ -19,6 +19,34 @@ export type Authorizer = (pubkeyBase64: string) => unknown | null;
 export interface PairingHooks {
   psk: Uint8Array;
   confirm: (proposal: { pubkeyBase64: string }) => boolean | Promise<boolean>;
+  /**
+   * How long the crypto handshake exchange may take before it is abandoned as a
+   * stalled/hostile connection. Bounds ONLY the message exchange, never the
+   * host-confirm — a human reading a code and typing 'y' is legitimately slow.
+   */
+  handshakeTimeoutMs?: number;
+  /** How long to wait for the host-confirm hook before giving up. */
+  confirmTimeoutMs?: number;
+}
+
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
+const DEFAULT_CONFIRM_TIMEOUT_MS = 120_000;
+
+/** Reject with a `handshake` ChannelError if `p` does not settle within `ms`. */
+function withTimeout<T>(ms: number, p: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new ChannelError('handshake')), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
 export class ChannelError extends Error {
@@ -98,11 +126,19 @@ export async function acceptPairing(
   serverPriv: Uint8Array,
   hooks: PairingHooks,
 ): Promise<{ channel: ServerChannel; devicePubkey: string }> {
+  const handshakeMs = hooks.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
+  const confirmMs = hooks.confirmTimeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS;
   const handle = pairResponder(serverPriv, hooks.psk);
   try {
-    handle.readMessage(await io.recv()); // -> e
-    await io.send(handle.writeMessage()); // <- e, ee, s, es
-    handle.readMessage(await io.recv()); // -> s, se
+    // Only the crypto exchange is bounded by the (short) handshake timeout.
+    await withTimeout(
+      handshakeMs,
+      (async () => {
+        handle.readMessage(await io.recv()); // -> e
+        await io.send(handle.writeMessage()); // <- e, ee, s, es
+        handle.readMessage(await io.recv()); // -> s, se
+      })(),
+    );
   } catch {
     handle.free();
     throw new ChannelError('handshake');
@@ -113,7 +149,18 @@ export async function acceptPairing(
   }
 
   const devicePubkey = pubkeyBase64(handle);
-  const ok = await hooks.confirm({ pubkeyBase64: devicePubkey });
+  // The host-confirm is a human step, bounded by its own (generous) timeout so a
+  // slow 'y' never tears down the socket the device is waiting on for its verdict.
+  let ok: boolean;
+  try {
+    ok = await withTimeout(
+      confirmMs,
+      Promise.resolve(hooks.confirm({ pubkeyBase64: devicePubkey })),
+    );
+  } catch {
+    handle.free();
+    throw new ChannelError('handshake');
+  }
   if (!ok) {
     handle.free();
     throw new ChannelError('rejected');

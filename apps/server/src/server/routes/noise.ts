@@ -76,7 +76,11 @@ noiseRoutes.get(
         activeNoiseConnections += 1;
         const adapter = new WsFrameIO(sink(ws));
         io = adapter;
-        withHandshakeTimeout(handlePairingConnection(adapter), () => adapter.close())
+        // No outer timeout here: pairing includes a human host-confirm step, so
+        // `acceptPairing` bounds the crypto handshake and the confirm separately
+        // (a short handshake window, a generous confirm window). An outer
+        // handshake timeout would tear down the socket mid-approval.
+        handlePairingConnection(adapter)
           .then((res) => {
             logInfo(`Noise pairing enrolled device ${res.pubkey}`);
             ws.send(JSON.stringify({ ok: true }));
