@@ -107,6 +107,7 @@ Because the holder is a separate detached process, **the shell survives both cli
 
 ## Conventions & gotchas
 
+- Comments: keep them minimal. Only comment what the code can't say itself — a non-obvious "why", a gotcha. No restating what the line does, no multi-line prose on simple functions. Prefer none over noise.
 - Formatting is Biome: 2-space indent, single quotes, semicolons, trailing commas, width 100. Run `bun format` before committing.
 - `bun:sqlite` uses `$name` named params. Schema changes append a new entry to the `migrations` array in `db.ts` — never edit an applied migration.
 - Tests are colocated (`foo.ts` + `foo.test.ts`). New server logic is expected to come with tests; keep pure logic in its own module so it's testable without a PTY.
