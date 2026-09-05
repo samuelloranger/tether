@@ -61,7 +61,7 @@ describe('runReconnect', () => {
     const i = reconnectInitiator(device.priv, server.pub);
     await clientIo.send(i.writeMessage());
 
-    await expect(serverPromise).rejects.toMatchObject({ code: 'unauthorized' });
+    await expect(serverPromise).rejects.toMatchObject({ code: 'handshake' });
     expect(touchCount).toBe(0);
     i.free();
   });

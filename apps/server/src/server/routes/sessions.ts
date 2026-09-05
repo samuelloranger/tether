@@ -1,6 +1,7 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { getSession, listSessions, renameSession } from '../db';
+import { trackDeviceChannel } from '../deviceChannels';
 import { getLiveCwd } from '../liveCwd';
 import { logError, logInfo, logWarn } from '../log';
 import {
@@ -165,7 +166,6 @@ function handleTerminalWsMessage(
       } else if (msg.type === 'resize') {
         resizeSession(sessionId, onData, msg.cols, msg.rows);
       } else if (msg.type === 'focus') {
-        onData.focused = msg.focused;
         setSessionFocus(sessionId, onData, msg.focused);
       }
     }
@@ -176,6 +176,7 @@ function handleTerminalWsMessage(
 
 function createTerminalWsHandlers(c: Context) {
   const sessionId = c.req.query('sessionId') || 'default';
+  const deviceId = c.get('deviceId');
   const codec = codecFor(c.req.query('proto') ?? null, sessionId);
   const sinceId = codec.replayFrom(
     { sinceId: c.req.query('sinceId') ?? null, cursor: c.req.query('cursor') ?? null },
@@ -189,8 +190,21 @@ function createTerminalWsHandlers(c: Context) {
     onData: () => {},
     keepAlive: null,
   };
+  let untrack: (() => void) | undefined;
   return {
     onOpen(_event: unknown, ws: WsSink) {
+      if (deviceId) {
+        untrack = trackDeviceChannel(deviceId, () => {
+          if (!state.closed) {
+            state.closed = true;
+            if (state.keepAlive) clearInterval(state.keepAlive);
+            state.unsubscribe();
+          }
+          try {
+            ws.close();
+          } catch {}
+        });
+      }
       openTerminalSocket(ws, sessionId, sinceId, cols, rows, state, codec);
     },
     onMessage(event: { data: unknown }, _ws: unknown) {
@@ -201,6 +215,7 @@ function createTerminalWsHandlers(c: Context) {
       state.closed = true;
       if (state.keepAlive) clearInterval(state.keepAlive);
       state.unsubscribe();
+      untrack?.();
     },
   };
 }

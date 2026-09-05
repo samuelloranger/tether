@@ -17,8 +17,7 @@ import VisionKit
 ///
 /// This sits on top of the proven `NoiseSessionClient.pair(hostId:url:code:)`:
 /// it pins the server's static key out of the handshake, the host confirms out
-/// of band, and the pinned key comes back for the confirmation screen. This is
-/// additive — the password `PairingView` is untouched.
+/// of band, and the pinned key comes back for the confirmation screen.
 public struct PairDeviceView: View {
   public enum Phase: Equatable {
     case enterCode
@@ -298,11 +297,11 @@ public struct PairDeviceView: View {
     phase = .pairing
     do {
       let serverKey = try await client.pair(hostId: hostId, url: url, code: canonical)
-      HostScheme.record(url.scheme ?? "http", forHost: hostId)
+      HostScheme.record(Self.restScheme(from: url.scheme), forHost: hostId)
       pinnedKey = serverKey
       phase = .success
       let (parsedHost, parsedPort) = Self.hostAndPort(from: host)
-        ?? (host.trimmingCharacters(in: .whitespaces), "8443")
+        ?? (host.trimmingCharacters(in: .whitespaces), "8085")
       onPaired(hostId, parsedHost, parsedPort, serverKey)
     } catch {
       errorMessage = error.localizedDescription
@@ -315,29 +314,58 @@ public struct PairDeviceView: View {
     return trimmed.isEmpty ? "the host" : trimmed
   }
 
-  /// Turn a user-typed address into a base URL. A bare `box:8085` or
-  /// `192.168.1.9:8085` gets `https://` — the Noise handshake needs wss, and
-  /// `NoiseSessionClient` maps https→wss. An explicit scheme is kept as typed.
+  /// Map `http`/`https`/`ws`/`wss` to the REST scheme persisted on the host profile.
+  static func restScheme(from raw: String?) -> String {
+    switch raw?.lowercased() {
+    case "https", "wss":
+      return "https"
+    default:
+      return "http"
+    }
+  }
+
+  /// Turn a user-typed address into a base URL. Port implies scheme when none is
+  /// given (`:8085` → http, `:8443`/`:443` → https); a bare host defaults to
+  /// `http://host:8085`. An explicit scheme is kept as typed.
   static func serverURL(from raw: String) -> URL? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
     if trimmed.contains("://") {
       return URL(string: trimmed)
     }
-    return URL(string: "https://\(trimmed)")
+
+    var host = trimmed
+    var port: String?
+    if let colon = trimmed.lastIndex(of: ":") {
+      host = String(trimmed[..<colon])
+      port = String(trimmed[trimmed.index(after: colon)...])
+    }
+    guard !host.isEmpty else { return nil }
+
+    let scheme: String
+    if let port {
+      scheme = port == "443" || port == "8443" ? "https" : "http"
+    } else {
+      scheme = "http"
+    }
+    let finalPort = port ?? (scheme == "https" ? "443" : "8085")
+    return URL(string: "\(scheme)://\(host):\(finalPort)")
   }
 
   /// Split the typed address into `(host, port)` for persisting a HostProfile —
   /// derived from the SAME URL `serverURL` builds, so the stored host matches the
-  /// endpoint that was actually paired. A missing port defaults to `8443` (Noise
-  /// runs over TLS). Returns `nil` only when no host can be parsed at all.
+  /// endpoint that was actually paired. A missing port defaults from the REST
+  /// scheme (`https`/`wss` → 443, `http`/`ws` → 8085). Returns `nil` only when
+  /// no host can be parsed.
   static func hostAndPort(from raw: String) -> (host: String, port: String)? {
     guard
       let url = serverURL(from: raw),
       let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
       let host = components.host, !host.isEmpty
     else { return nil }
-    let port = components.port.map(String.init) ?? "8443"
+    let scheme = restScheme(from: url.scheme)
+    let defaultPort = scheme == "https" ? "443" : "8085"
+    let port = components.port.map(String.init) ?? defaultPort
     return (host, port)
   }
 

@@ -50,7 +50,7 @@ function withTimeout<T>(ms: number, p: Promise<T>): Promise<T> {
 }
 
 export class ChannelError extends Error {
-  constructor(public code: 'handshake' | 'unauthorized' | 'rejected') {
+  constructor(public code: 'handshake' | 'rejected') {
     super(code);
     this.name = 'ChannelError';
   }
@@ -109,7 +109,7 @@ export async function acceptReconnect(
   if (device == null) {
     // Fail-closed: never enter transport mode, never read/write an app frame.
     handle.free();
-    throw new ChannelError('unauthorized');
+    throw new ChannelError('handshake');
   }
 
   handle.intoTransport();

@@ -72,6 +72,103 @@ test('opens a window, prints the grouped code, and posts the TTY decision', asyn
   }
 });
 
+test('prints advertise URL and QR when advertiseUrl is set', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'tether-pair-qr-'));
+  try {
+    const tokenFile = path.join(root, 'token');
+    await Bun.write(tokenFile, 'local-token');
+    const logs: string[] = [];
+
+    await runPair({
+      port: '8085',
+      tokenFile,
+      advertiseUrl: 'http://10.0.0.5:8085',
+      qr: async (p) => `QR:${p}`,
+      log: (msg) => logs.push(msg),
+      readLine: async () => 'y',
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        const pathName = new URL(request.url).pathname;
+        if (pathName === '/control/pair/open') {
+          return Response.json({
+            code: '7QF4KM9PX3TV',
+            expiresAt: Date.now() + 60_000,
+            fingerprint: 'aa'.repeat(32),
+          });
+        }
+        if (pathName === '/control/pair/pending') {
+          return Response.json({
+            pending: { label: 'device', pubkeyBase64: 'k', fingerprint: 'bb'.repeat(32) },
+          });
+        }
+        if (pathName === '/control/pair/confirm') {
+          return Response.json({ approved: true });
+        }
+        return Response.json({ ok: true });
+      },
+    });
+
+    expect(logs).toContain('Pairing code: 7QF4-KM9P-X3TV');
+    expect(logs).toContain('http://10.0.0.5:8085');
+    expect(logs.some((line) => line.startsWith('QR:tether://pair?'))).toBe(true);
+    expect(
+      logs.some((line) => line.includes('code=7QF4-KM9P-X3TV&host=http%3A%2F%2F10.0.0.5%3A8085')),
+    ).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('skips QR when advertiseUrl is null but still prints the code', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'tether-pair-no-qr-'));
+  try {
+    const tokenFile = path.join(root, 'token');
+    await Bun.write(tokenFile, 'local-token');
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const origError = console.error;
+    console.error = (msg: string) => errors.push(msg);
+
+    try {
+      await runPair({
+        port: '8085',
+        tokenFile,
+        advertiseUrl: null,
+        log: (msg) => logs.push(msg),
+        readLine: async () => 'y',
+        fetch: async (input, init) => {
+          const request = new Request(input, init);
+          const pathName = new URL(request.url).pathname;
+          if (pathName === '/control/pair/open') {
+            return Response.json({
+              code: '0123456789AB',
+              expiresAt: Date.now() + 60_000,
+              fingerprint: 'aa'.repeat(32),
+            });
+          }
+          if (pathName === '/control/pair/pending') {
+            return Response.json({
+              pending: { label: 'device', pubkeyBase64: 'k', fingerprint: 'bb'.repeat(32) },
+            });
+          }
+          if (pathName === '/control/pair/confirm') {
+            return Response.json({ approved: true });
+          }
+          return Response.json({ ok: true });
+        },
+      });
+    } finally {
+      console.error = origError;
+    }
+
+    expect(logs).toContain('Pairing code: 0123-4567-89AB');
+    expect(errors.some((line) => line.includes('scan skipped'))).toBe(true);
+    expect(logs.some((line) => line.startsWith('QR:'))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('posts approve:false when the TTY answers n', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-pair-n-'));
   try {

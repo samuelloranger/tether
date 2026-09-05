@@ -119,6 +119,12 @@ actor TerminalPipeline {
       try await channel.sendStart(id: sessionId, cols: cols, rows: rows)
       noiseChannel = channel
       noiseSessionId = sessionId
+      // Layout often reports a size while the channel is still nil; start may
+      // have used 80×24. Send the current grid so a TUI gets SIGWINCH.
+      try? await channel.sendResize(id: sessionId, cols: cols, rows: rows)
+      if let focused = lastFocusSent {
+        try? await channel.sendFocus(id: sessionId, focused: focused)
+      }
       noteTraffic()
       noiseReadTask = Task { [weak self] in
         await self?.readLoopNoise(key: key, channel: channel)
@@ -219,22 +225,24 @@ actor TerminalPipeline {
   }
 
   private func handleOutbound(_ frame: OutboundFrame) async {
-    // `focus` has no Noise frame — the server treats a Noise client as the sole,
-    // always-focused viewer of its session.
-    guard let channel = noiseChannel, let id = noiseSessionId else { return }
     switch frame {
     case let .input(text, key):
-      guard stillCurrent(key) else { return }
+      guard let channel = noiseChannel, let id = noiseSessionId, stillCurrent(key) else { return }
       try? await channel.sendInput(id: id, text: text)
     case let .paste(text, key):
-      guard stillCurrent(key) else { return }
+      guard let channel = noiseChannel, let id = noiseSessionId, stillCurrent(key) else { return }
       try? await channel.sendInput(id: id, text: emulator?.pastePayload(text: text) ?? text)
-    case .focus:
-      break
+    case let .focus(focused):
+      guard let channel = noiseChannel, let id = noiseSessionId else { return }
+      try? await channel.sendFocus(id: id, focused: focused)
     case let .resize(newCols, newRows):
-      if applyLocalResize(cols: newCols, rows: newRows) {
-        try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
-      }
+      // Always tell the PTY when the channel is live. Gating on "local size
+      // changed" dropped the grow after keyboard-hide: the emulator was already
+      // the new size (applied while the socket was nil) and cursor-agent stayed
+      // painted at the short PTY geometry.
+      applyLocalResize(cols: newCols, rows: newRows)
+      guard let channel = noiseChannel, let id = noiseSessionId else { return }
+      try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
     }
   }
 
@@ -261,10 +269,11 @@ actor TerminalPipeline {
   }
 
   /// Tracks the last focus value so `.inactive` then `.background` for one
-  /// scenePhase transition is not treated as two events. Noise has no focus
-  /// frame — the server treats a Noise client as always-focused.
+  /// scenePhase transition is not treated as two events.
   func sendFocus(focused: Bool) {
+    guard lastFocusSent != focused else { return }
     lastFocusSent = focused
+    outbound.yield(.focus(focused))
   }
 
   // MARK: - Publishing

@@ -10,7 +10,7 @@
 //! Directions:
 //! - Outbound (frontend → Noise): [`translate_frontend`] parses one WS-JSON line
 //!   and produces the plaintext bytes to `seal` onto the channel, or `None` when
-//!   the message is dropped (`focus`, or anything unrecognized).
+//!   the message is dropped (anything unrecognized).
 //! - Inbound (Noise → frontend): [`decode_server`] parses one opened plaintext
 //!   frame into a [`ServerMsg`]; [`encode_frontend_output`] renders the WS-JSON
 //!   `output` line the frontend consumes, stamping the synthesized numeric id.
@@ -81,6 +81,14 @@ struct ResizeMsg<'a> {
     rows: u16,
 }
 
+/// Serialized shape of a client → server `focus`.
+#[derive(Serialize)]
+struct FocusMsg<'a> {
+    t: &'a str,
+    id: &'a str,
+    focused: bool,
+}
+
 /// Serialized shape of the WS-JSON `output` line the frontend consumes.
 #[derive(Serialize)]
 struct FrontendOutput<'a> {
@@ -141,13 +149,22 @@ pub fn encode_resize(session_id: &str, cols: u16, rows: u16) -> Vec<u8> {
     .expect("resize serializes")
 }
 
+/// Encode a `{"t":"focus",…}` plaintext.
+pub fn encode_focus(session_id: &str, focused: bool) -> Vec<u8> {
+    serde_json::to_vec(&FocusMsg {
+        t: "focus",
+        id: session_id,
+        focused,
+    })
+    .expect("focus serializes")
+}
+
 /// Translate one WS-JSON line from the frontend into the plaintext bytes to
-/// `seal` onto the Noise channel. Returns `None` for `focus` and anything
-/// unrecognized (dropped, per the mapping rules).
+/// `seal` onto the Noise channel. Returns `None` for anything unrecognized.
 ///
 /// - `{"type":"input","text":…}`   → `{"t":"input","id":session,"text":…}`
 /// - `{"type":"resize","cols","rows"}` → `{"t":"resize","id":session,"cols","rows"}`
-/// - `{"type":"focus",…}`          → dropped
+/// - `{"type":"focus","focused":…}` → `{"t":"focus","id":session,"focused":…}`
 pub fn translate_frontend(session_id: &str, ws_json: &str) -> Option<Vec<u8>> {
     let value: Value = serde_json::from_str(ws_json).ok()?;
     match value.get("type").and_then(Value::as_str)? {
@@ -160,7 +177,13 @@ pub fn translate_frontend(session_id: &str, ws_json: &str) -> Option<Vec<u8>> {
             let rows = value.get("rows").and_then(Value::as_u64).unwrap_or(24) as u16;
             Some(encode_resize(session_id, cols, rows))
         }
-        // "focus" and any other type are dropped.
+        "focus" => {
+            let focused = value
+                .get("focused")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Some(encode_focus(session_id, focused))
+        }
         _ => None,
     }
 }
@@ -279,8 +302,15 @@ mod tests {
     }
 
     #[test]
-    fn frontend_focus_is_dropped() {
-        assert!(translate_frontend("sess-1", r#"{"type":"focus","focused":true}"#).is_none());
+    fn translate_frontend_focus_carries_session_id() {
+        let value: Value = serde_json::from_slice(
+            &translate_frontend("sess-1", r#"{"type":"focus","focused":true}"#).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            value,
+            json!({ "t": "focus", "id": "sess-1", "focused": true })
+        );
     }
 
     #[test]

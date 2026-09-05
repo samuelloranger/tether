@@ -19,7 +19,7 @@ import {
   sendHolderResize,
   sockPathFor,
 } from './ptyHolder';
-import { clampDims, planPtyResize } from './ptyResize';
+import { clampDims, planPtyResize, shouldKickPtyOnFocus } from './ptyResize';
 import { getDefaultShell, shellInvocation } from './ptyShell';
 import { COMPILED, selfArgv } from './runtime';
 import { clearActivity, recordInput } from './sessionActivity';
@@ -274,9 +274,25 @@ export function subscribeToSession(
   return () => {};
 }
 
+/** Re-send the current PTY size so the holder raises SIGWINCH even when the
+ *  fit did not move. Ink/cursor-agent only redraw on SIGWINCH. */
+function kickPtySize(id: string): void {
+  const inst = instances.get(id);
+  if (!inst) return;
+  const dims = inst.ptyDims ?? planPtyResize(null, inst.clientDims.values());
+  if (!dims) return;
+  sendHolderResize(id, dims.cols, dims.rows);
+}
+
 export function setSessionFocus(id: string, client: FocusSubscriber, focused: boolean): void {
   const instance = instances.get(id);
-  if (instance?.subscribers.has(client)) client.focused = focused;
+  if (!instance?.subscribers.has(client)) return;
+  const was = client.focused;
+  client.focused = focused;
+  if (shouldKickPtyOnFocus({ wasFocused: was, sawFocus: client.sawFocus === true, focused })) {
+    kickPtySize(id);
+  }
+  if (focused) client.sawFocus = true;
 }
 
 /** After HTTP git write ops, push a fresh diff summary without waiting on inotify. */

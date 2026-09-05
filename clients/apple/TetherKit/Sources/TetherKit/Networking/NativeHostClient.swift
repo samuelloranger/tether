@@ -102,10 +102,15 @@ public actor NativeHostClient {
     await bearerSource.invalidateBearer()
   }
 
-  private func authorizedRequest(url: URL, method: String = "GET", body: Data? = nil) async throws -> URLRequest {
+  private func authorizedRequest(
+    url: URL,
+    method: String = "GET",
+    body: Data? = nil,
+    bearer: String
+  ) -> URLRequest {
     var request = URLRequest(url: url)
     request.httpMethod = method
-    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let body {
       request.httpBody = body
@@ -116,22 +121,59 @@ public actor NativeHostClient {
 
   /// A 401 triggers exactly one silent re-mint (invalidate the cached token,
   /// mint a fresh one) and retry; a second 401 surfaces to the caller.
-  private func sendAuthorized(
+  func sendAuthorized(
     url: URL,
     method: String = "GET",
     body: Data? = nil
   ) async throws -> (Data, Int) {
-    let request = try await authorizedRequest(url: url, method: method, body: body)
-    let (data, response) = try await session.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-    guard status == 401 else {
-      return (data, status)
-    }
-    await invalidateBearer()
-    let retry = try await authorizedRequest(url: url, method: method, body: body)
-    let (retryData, retryResponse) = try await session.data(for: retry)
-    let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? 0
-    return (retryData, retryStatus)
+    try await AuthorizedHTTP.sendAuthorizedOnce(
+      bearer: { try await self.bearerValue() },
+      invalidate: { await self.invalidateBearer() },
+      makeRequest: { token in
+        self.authorizedRequest(url: url, method: method, body: body, bearer: token)
+      },
+      data: { request in
+        let (data, response) = try await self.session.data(for: request)
+        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+      }
+    )
+  }
+
+  func sendAuthorized(request template: URLRequest) async throws -> (Data, Int) {
+    try await AuthorizedHTTP.sendAuthorizedOnce(
+      bearer: { try await self.bearerValue() },
+      invalidate: { await self.invalidateBearer() },
+      makeRequest: { token in
+        var request = template
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return request
+      },
+      data: { request in
+        let (data, response) = try await self.session.data(for: request)
+        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+      }
+    )
+  }
+
+  func sendAuthorizedUpload(
+    request template: URLRequest,
+    body: Data,
+    uploadSession: URLSession? = nil
+  ) async throws -> (Data, Int) {
+    let uploadSession = uploadSession ?? session
+    return try await AuthorizedHTTP.sendAuthorizedOnce(
+      bearer: { try await self.bearerValue() },
+      invalidate: { await self.invalidateBearer() },
+      makeRequest: { token in
+        var request = template
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return request
+      },
+      data: { request in
+        let (data, response) = try await uploadSession.upload(for: request, from: body)
+        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+      }
+    )
   }
 
   public func fetchStatus() async throws -> ServerStatus {

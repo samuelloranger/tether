@@ -33,6 +33,7 @@ export type AppEnv = {
   };
   Variables: {
     peerAddress: string;
+    deviceId?: string;
   };
 };
 
@@ -146,7 +147,7 @@ app.post('/api/push/register', async (c) => {
     return c.json({ ok: false, error: 'secretKey must be 32 bytes, base64' }, 400);
   }
   const label = typeof body.label === 'string' ? body.label.slice(0, 100) : undefined;
-  registerPushDevice(deviceToken, secretKey, label);
+  registerPushDevice(deviceToken, secretKey, label, c.get('deviceId'));
   return c.json({ ok: true });
 });
 

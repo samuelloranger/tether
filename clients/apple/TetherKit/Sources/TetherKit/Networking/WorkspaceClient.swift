@@ -264,21 +264,24 @@ extension NativeHostClient {
     )
     // Body is passed to upload(for:from:) — do not also set httpBody.
 
-    let (responseData, response): (Data, URLResponse)
+    let (responseData, status): (Data, Int)
     if let onProgress {
       let delegate = UploadProgressDelegate(onProgress: onProgress)
-      let session = URLSession(
+      let uploadSession = URLSession(
         configuration: .ephemeral,
         delegate: delegate,
         delegateQueue: nil
       )
-      defer { session.finishTasksAndInvalidate() }
-      (responseData, response) = try await session.upload(for: request, from: body)
+      defer { uploadSession.finishTasksAndInvalidate() }
+      (responseData, status) = try await sendAuthorizedUpload(
+        request: request,
+        body: body,
+        uploadSession: uploadSession
+      )
     } else {
-      (responseData, response) = try await URLSession.shared.upload(for: request, from: body)
+      (responseData, status) = try await sendAuthorizedUpload(request: request, body: body)
     }
 
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
     guard status != 401 else { throw WorkspaceClientError.unauthorized }
     guard let decoded = try? JSONDecoder().decode(UploadResponse.self, from: responseData) else {
       throw WorkspaceClientError.decodeFailed
@@ -341,8 +344,8 @@ extension NativeHostClient {
     _ type: T.Type,
     request: URLRequest
   ) async throws -> T {
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (data, status) = try await sendAuthorized(request: request)
+    guard status != 401 else { throw WorkspaceClientError.unauthorized }
     guard (200..<300).contains(status) else {
       // Same reader as the git/host path — one place that knows `{"error":…}`.
       switch hostClientError(status: status, data: data) {

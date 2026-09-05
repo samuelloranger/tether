@@ -54,7 +54,23 @@ describe('noise channel — reconnect', () => {
     const i = reconnectInitiator(device.priv, server.pub);
     await clientIo.send(i.writeMessage());
 
-    await expect(serverPromise).rejects.toMatchObject({ code: 'unauthorized' });
+    await expect(serverPromise).rejects.toMatchObject({ code: 'handshake' });
+    i.free();
+  });
+
+  test('unknown device and a garbage handshake reject with the same ChannelError code', async () => {
+    const server = genKeypair();
+    const device = genKeypair();
+    const [ioA, clientA] = pipe();
+    const unknown = acceptReconnect(ioA, server.priv, () => null);
+    const i = reconnectInitiator(device.priv, server.pub);
+    await clientA.send(i.writeMessage());
+    const [ioB, clientB] = pipe();
+    const garbage = acceptReconnect(ioB, server.priv, () => ({ ok: true }));
+    await clientB.send(new Uint8Array([1, 2, 3, 4])); // truncated/garbage
+    const [errUnknown, errGarbage] = await Promise.allSettled([unknown, garbage]);
+    expect(errUnknown).toMatchObject({ status: 'rejected', reason: { code: 'handshake' } });
+    expect(errGarbage).toMatchObject({ status: 'rejected', reason: { code: 'handshake' } });
     i.free();
   });
 });

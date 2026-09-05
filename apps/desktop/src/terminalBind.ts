@@ -11,6 +11,7 @@ import {
 import { applyServerFrame, createFrameSink, type FrameApplyResult } from './frameHandler';
 import { shouldSendOutbound } from './ptyOutbound';
 import { createReplayGate, type ReplayGate } from './replayGate';
+import { focusReportBytes, socketOpenFrames } from './resizeFrame';
 import { copyTerminalSelection, isCopyChord, writeSystemClipboard } from './terminalClipboard';
 import { registerTetherLinks } from './terminalLinks';
 import { attachTerminalMouse } from './terminalMouse';
@@ -28,11 +29,15 @@ function sendFocusFrame(
   socket: TerminalSocket | null,
   focused: boolean,
   last: { value: boolean | null },
+  term?: Terminal,
 ): void {
   if (!socket) return;
   if (last.value === focused) return;
   last.value = focused;
   sendJson(socket, { type: 'focus', focused });
+  if (term?.modes.sendFocusMode) {
+    sendJson(socket, { type: 'input', text: focusReportBytes(focused) });
+  }
 }
 
 function attachFeatures(
@@ -85,6 +90,7 @@ function attachFeatures(
 
 function openSocket(
   input: {
+    term: Terminal;
     fit: FitAddon;
     hostId: string;
     sessionId: string;
@@ -125,9 +131,15 @@ function openSocket(
       return;
     }
     state.socket = s;
-    // Fresh socket: tell the server whether this pane is the focused subscriber
-    // so push suppression matches iOS.
-    sendFocusFrame(s, input.isInteractive(), lastFocus);
+    // Fit often ran while `state.socket` was still null, so those observer
+    // resizes were dropped. Re-fit now and send resize+focus so a TUI
+    // (cursor-agent) gets SIGWINCH / DECSET 1004 instead of staying at the
+    // 80×24 `start` geometry.
+    input.fit.fit();
+    const [resize, focus] = socketOpenFrames(input.fit.proposeDimensions(), input.isInteractive());
+    sendJson(s, resize);
+    lastFocus.value = null;
+    sendFocusFrame(s, focus.focused, lastFocus, input.term);
   });
 }
 
@@ -187,7 +199,7 @@ export function bindTerminalSession(input: {
 
   return {
     socket: () => state.socket,
-    sendFocus: (focused: boolean) => sendFocusFrame(state.socket, focused, lastFocus),
+    sendFocus: (focused: boolean) => sendFocusFrame(state.socket, focused, lastFocus, input.term),
     dispose: () => {
       state.closed = true;
       replay.dispose();

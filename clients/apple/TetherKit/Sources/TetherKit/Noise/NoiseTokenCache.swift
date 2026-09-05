@@ -79,8 +79,7 @@ public actor NoiseTokenCache {
 }
 
 /// Supplies the REST bearer for a host and lets the REST layer invalidate it on
-/// a 401. Abstract so `NativeHostClient` need not know whether the value is a
-/// password (never invalidated) or a Noise-minted token.
+/// a 401. Abstract so `NativeHostClient` need not know how the bearer is sourced.
 public protocol HostBearerSource: Sendable {
   func currentBearer() async throws -> String
   func invalidateBearer() async

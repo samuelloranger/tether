@@ -1,4 +1,6 @@
 import { db } from './db';
+import { closeDeviceChannels } from './deviceChannels';
+import { removePushDevicesForAuthDevice } from './pushDevices';
 
 export interface AuthDevice {
   id: string; // uuid v4
@@ -161,7 +163,8 @@ export function resolveTarget(target: string): AuthDevice {
 export function revokeDevice(target: string): AuthDevice {
   const device = resolveTarget(target);
   db.query('DELETE FROM auth_devices WHERE id = $id').run({ $id: device.id });
-  // Plan 2c: tear down the device's live connection and delete its push_devices row.
+  removePushDevicesForAuthDevice(device.id);
+  closeDeviceChannels(device.id);
   return device;
 }
 

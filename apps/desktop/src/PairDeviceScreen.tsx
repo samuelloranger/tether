@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { groupFingerprint } from './groupFingerprint';
+import type { PairScheme } from './hostScheme';
 import { parsePairAddress } from './pairAddress';
 import { formatPairingInput, normalizePairingCode } from './pairingCode';
 
@@ -15,6 +16,7 @@ interface PairDeviceScreenProps {
       name: string;
       host: string;
       port: string;
+      scheme: PairScheme;
       address: string;
       code: string;
     },
@@ -55,6 +57,7 @@ export function PairDeviceScreen({ onPair, onDone, onCancel }: PairDeviceScreenP
           name: parsed.host,
           host: parsed.host,
           port: parsed.port,
+          scheme: parsed.scheme,
           address: parsed.wsAddress,
           code: normalized,
         },

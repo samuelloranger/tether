@@ -284,6 +284,10 @@ public final class NoiseChannel {
     try await sendSealed(["t": "resize", "id": id, "cols": Int(cols), "rows": Int(rows)])
   }
 
+  public func sendFocus(id: String, focused: Bool) async throws {
+    try await sendSealed(Self.focusRequest(id: id, focused: focused))
+  }
+
   /// Ask the host for its full device roster (`{t:"devices.list"}`). The reply
   /// arrives through `receive()` as `.devices`.
   public func sendDevicesList() async throws {
@@ -318,6 +322,11 @@ public final class NoiseChannel {
   /// The `devices.revoke` request body. Pure + static, as above.
   static func devicesRevokeRequest(target: String) -> [String: Any] {
     ["t": "devices.revoke", "target": target]
+  }
+
+  /// The `focus` request body. Pure + static, as above.
+  static func focusRequest(id: String, focused: Bool) -> [String: Any] {
+    ["t": "focus", "id": id, "focused": focused]
   }
 
   /// Open the next sealed frame from the server into an application message.

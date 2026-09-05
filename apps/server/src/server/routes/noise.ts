@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
 import { runReconnect } from '../authGate';
+import { trackDeviceChannel } from '../deviceChannels';
 import { getDeviceByPubkey, touchDevice } from '../deviceRegistry';
 import { logError, logInfo } from '../log';
 import { ChannelError } from '../noiseChannel';
@@ -32,9 +33,9 @@ function withHandshakeTimeout<T>(p: Promise<T>, onTimeout: () => void): Promise<
 
 /**
  * The Noise WebSocket front door. These two routes are the ONLY `/api/*`
- * endpoints that bypass the shared-password `authMiddleware` (they are listed in
- * `PUBLIC_API_PATHS`): the Noise handshake — pairing PSK, then a pinned static
- * key on reconnect — IS their authentication, so there is no password here.
+ * endpoints that bypass bearer-token auth (they are listed in `PUBLIC_API_PATHS`):
+ * the Noise handshake — pairing PSK, then a pinned static key on reconnect — IS
+ * their authentication.
  *
  * Both routes are pure byte pipes: `onMessage` feeds the raw binary frame into a
  * `WsFrameIO`, the handshake/session logic pulls frames with `io.recv()` and
@@ -137,11 +138,20 @@ noiseRoutes.get(
         )
           .then(async ({ channel, device }) => {
             logInfo(`Noise session authorized device ${device.id}`);
+            const untrack = trackDeviceChannel(device.id, () => {
+              try {
+                adapter.close();
+              } catch {}
+              try {
+                ws.close();
+              } catch {}
+            });
             try {
               // Thread the authorized device's id in so `devices.list` can flag
               // the caller's own row (`isSelf`); registry fns default to live.
               await runNoiseSession(channel, adapter, { identity: { deviceId: device.id } });
             } finally {
+              untrack();
               channel.free();
               try {
                 ws.close();

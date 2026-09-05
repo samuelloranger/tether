@@ -180,8 +180,8 @@ extension NativeHostClient {
         URLQueryItem(name: "path", value: path),
         URLQueryItem(name: "side", value: side.rawValue),
       ])
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (data, status) = try await sendAuthorized(request: request)
+    guard status != 401 else { throw HostClientError.unauthorized }
     if status == 404 { return nil }
     guard (200..<300).contains(status) else { throw hostClientError(status: status, data: data) }
     return data
@@ -281,8 +281,8 @@ extension NativeHostClient {
   }
 
   private func decode<T: Decodable>(_ type: T.Type, request: URLRequest) async throws -> T {
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (data, status) = try await sendAuthorized(request: request)
+    guard status != 401 else { throw HostClientError.unauthorized }
     guard (200..<300).contains(status) else { throw hostClientError(status: status, data: data) }
     guard let decoded = try? JSONDecoder().decode(type, from: data) else {
       throw HostClientError.decodeFailed

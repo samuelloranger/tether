@@ -401,7 +401,7 @@ public enum ConfigClientError: Error, LocalizedError {
 // MARK: - NativeHostClient config + admin API
 //
 // Mirrors GitClient.swift / PushClient.swift: request construction is duplicated
-// from the public `profile` + Keychain (password is file-private on the actor).
+// from the public `profile` + bearer source (file-private on the actor).
 
 extension NativeHostClient {
   public func fetchServerConfig() async throws -> ServerConfig {
@@ -469,13 +469,12 @@ extension NativeHostClient {
   }
 
   private func decodeConfig<T: Decodable>(_ type: T.Type, request: URLRequest) async throws -> T {
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let (data, status) = try await sendAuthorized(request: request)
+    guard status != 401 else { throw HostClientError.unauthorized }
     if !(200..<300).contains(status) {
       if let message = Self.serverErrorMessage(from: data) {
         throw ConfigClientError.serverMessage(message)
       }
-      guard status != 401 else { throw HostClientError.unauthorized }
       throw HostClientError.httpStatus(status)
     }
     guard let decoded = try? JSONDecoder().decode(type, from: data) else {

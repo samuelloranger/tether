@@ -49,7 +49,7 @@ On the **server**, open an enrollment window:
 tether pair              # prints a 12-char code (and a QR) valid ~5 min
 ```
 
-In the app's setup screen, enter your server's **host/IP** and **port** (default `8085`), then enter the **12-char code** (or scan the QR on a phone). The device generates its own key and enrolls over an encrypted handshake. Back on the server, `tether pair` shows the new device's name + fingerprint and asks you to confirm — press **y** to authorize it.
+In the app's setup screen, enter your server's **host/IP** and **port**. A bare address like `192.168.1.9:8085` uses plaintext HTTP on the default port — say `https://…:8443` if you run TLS-only. Then either **type** the **12-char code** from the terminal or **scan** the QR `tether pair` printed (iOS: tap **Scan QR** in the pairing screen). The device generates its own key and enrolls over an encrypted handshake. Back on the server, `tether pair` shows the new device's name + fingerprint and asks you to confirm — press **y** to authorize it.
 
 That's it: the device is now paired. It reconnects on its own key from then on — no code, no password. Repeat `tether pair` once per device.
 

@@ -23,12 +23,25 @@ const toDevice = (row: Row): PushDevice => ({
  * re-registers on every launch, so this is an upsert keyed on the token rather
  * than an insert that would accumulate duplicates.
  */
-export function registerPushDevice(deviceToken: string, secretKey: string, label?: string): void {
+export function registerPushDevice(
+  deviceToken: string,
+  secretKey: string,
+  label?: string,
+  authDeviceId?: string | null,
+): void {
   db.query(
-    `INSERT INTO push_devices (device_token, secret_key, label)
-     VALUES ($token, $key, $label)
-     ON CONFLICT(device_token) DO UPDATE SET secret_key = $key, label = $label`,
-  ).run({ $token: deviceToken, $key: secretKey, $label: label ?? null });
+    `INSERT INTO push_devices (device_token, secret_key, label, auth_device_id)
+     VALUES ($token, $key, $label, $authDeviceId)
+     ON CONFLICT(device_token) DO UPDATE SET
+       secret_key = $key,
+       label = $label,
+       auth_device_id = COALESCE($authDeviceId, push_devices.auth_device_id)`,
+  ).run({
+    $token: deviceToken,
+    $key: secretKey,
+    $label: label ?? null,
+    $authDeviceId: authDeviceId ?? null,
+  });
 }
 
 export function listPushDevices(): PushDevice[] {
@@ -47,6 +60,13 @@ export function countPushDevices(): number {
  */
 export function removePushDevice(deviceToken: string): void {
   db.query('DELETE FROM push_devices WHERE device_token = $token').run({ $token: deviceToken });
+}
+
+export function removePushDevicesForAuthDevice(authDeviceId: string): number {
+  const result = db
+    .query('DELETE FROM push_devices WHERE auth_device_id = $id')
+    .run({ $id: authDeviceId });
+  return result.changes;
 }
 
 export function markPushDeviceUsed(deviceToken: string): void {

@@ -40,15 +40,15 @@ public final class SessionStore {
   @ObservationIgnored private var hasRestoredSession = false
 
   private let hostStore: HostStoreAdapter
-  /// Per-host Noise key material (device key + pinned server key). Used both to
-  /// DERIVE a host's auth mode (`authMode(for:)`) and to drive the Noise
-  /// transport. Injectable so tests can pass an in-memory fake.
+  /// Per-host Noise key material (device key + pinned server key). Drives the
+  /// Noise transport and REST bearer minting for paired hosts. Injectable so
+  /// tests can pass an in-memory fake.
   private let noiseKeyStore: NoiseKeyStore
   /// The Noise transport engine, sharing `noiseKeyStore` so the keys a host was
   /// paired with are the keys its reconnect uses.
   @ObservationIgnored private let noiseClient: NoiseSessionClient
-  /// In-memory per-device REST token cache for Noise hosts. A Noise host has no
-  /// password, so its REST `Authorization: Bearer` value is a token minted over
+  /// In-memory per-device REST token cache for Noise hosts. Its REST
+  /// `Authorization: Bearer` value is a token minted over
   /// the Noise channel (`mintNoiseToken`), cached until near expiry and
   /// re-minted on a 401. Lazy so the mint closure can capture `self` after init.
   @ObservationIgnored private lazy var noiseTokenCache = NoiseTokenCache(
@@ -84,13 +84,25 @@ public final class SessionStore {
   /// Only `pullTerminalSnapshot` uses this now — the render path's own
   /// generation check lives inside `TerminalPipeline`.
   @ObservationIgnored private var lastRenderedGeneration: UInt64?
+  /// Test seam: production lists via `NativeHostClient.listSessions`.
+  @ObservationIgnored private let remoteSessions: ((String) async throws -> [RemoteSession])?
+  /// Test seam: production kills via `NativeHostClient.killSession`.
+  @ObservationIgnored private let remoteKill: ((String, String) async throws -> Void)?
+  /// Session ids removed locally after a successful kill, keyed by host. A
+  /// stale `GET /api/sessions` (or a test double that still returns the row)
+  /// must not put a just-killed tab back in the drawer.
+  @ObservationIgnored private var locallyKilled: [String: Set<String>] = [:]
 
   public init(
     hostStore: HostStoreAdapter = HostStoreAdapter(),
-    noiseKeyStore: NoiseKeyStore = KeychainNoiseKeyStore()
+    noiseKeyStore: NoiseKeyStore = KeychainNoiseKeyStore(),
+    remoteSessions: ((String) async throws -> [RemoteSession])? = nil,
+    remoteKill: ((String, String) async throws -> Void)? = nil
   ) {
     self.hostStore = hostStore
     self.noiseKeyStore = noiseKeyStore
+    self.remoteSessions = remoteSessions
+    self.remoteKill = remoteKill
     noiseClient = NoiseSessionClient(keyStore: noiseKeyStore)
     observePipeline()
   }
@@ -172,8 +184,7 @@ public final class SessionStore {
     let displayName = name.isEmpty ? host : name
     // Load BOTH paired keys up front — before creating any profile. If either is
     // missing, pairing did not complete; throw without persisting anything, so we
-    // never leave a keyless profile that would silently reclassify as a password
-    // host on the next launch. (`try?` on a throwing `-> Data?` yields `Data??`;
+    // never leave a keyless profile that would look paired on the next launch. (`try?` on a throwing `-> Data?` yields `Data??`;
     // flatten with `?? nil`.)
     guard let device = (try? noiseKeyStore.loadDevicePrivateKey(hostId: pairHostId)) ?? nil,
           let server = (try? noiseKeyStore.loadServerPublicKey(hostId: pairHostId)) ?? nil
@@ -188,7 +199,7 @@ public final class SessionStore {
       identityName: displayName
     )
     // Migrate the keys onto the profile id atomically: if either save fails, roll
-    // the profile back so we don't persist an orphan mis-typed as a password host.
+    // the profile back so we don't persist an orphan without its keys.
     do {
       try noiseKeyStore.saveDevicePrivateKey(device, hostId: profile.id)
       try noiseKeyStore.saveServerPublicKey(server, hostId: profile.id)
@@ -238,10 +249,9 @@ public final class SessionStore {
   public func refreshDrawer() async {
     isLoading = true
     defer { isLoading = false }
-    // Concurrently, not one host after another. Each host costs two round
-    // trips (`listSessions` + `testConnection`), so the serial version made
-    // the drawer's refresh time the SUM over every host — and one unreachable
-    // host held up every reachable one behind it.
+    // Concurrently, not one host after another. Each host is a `listSessions`
+    // round trip, so the serial version made the drawer's refresh time the SUM
+    // over every host — and one unreachable host held up every reachable one.
     let ids = hosts.map(\.id)
     let nextSessions = await withTaskGroup(
       of: (String, [RemoteSession]).self,
@@ -280,7 +290,7 @@ public final class SessionStore {
     }
   }
 
-  /// Re-checks one host after Retry or password save.
+  /// Re-checks one host after Retry or re-pair.
   public func refreshHost(hostId: String) async {
     isLoading = true
     defer { isLoading = false }
@@ -399,18 +409,32 @@ public final class SessionStore {
     }
   }
 
-  public func killSession(id: String) async {
-    guard let client = await activeClient() else { return }
+  public func killSession(id: String, hostId: String? = nil) async {
+    guard let targetHostId = hostId ?? activeHostId else { return }
     do {
-      try await client.killSession(id: id)
-      await pipeline.forget(key: terminalKey(id))
-      if activeSessionId == id {
+      if let remoteKill {
+        try await remoteKill(targetHostId, id)
+      } else {
+        guard let client = client(for: targetHostId) else { return }
+        try await client.killSession(id: id)
+      }
+      locallyKilled[targetHostId, default: []].insert(id)
+      dropSession(id: id, hostId: targetHostId)
+      await pipeline.forget(key: terminalKey(id, hostId: targetHostId))
+      if activeSessionId == id, activeHostId == targetHostId {
         await pipeline.release()
         activeSessionId = nil
       }
       await refreshSessions()
     } catch {
       errorMessage = error.localizedDescription
+    }
+  }
+
+  private func dropSession(id: String, hostId: String) {
+    sessionsByHost[hostId] = (sessionsByHost[hostId] ?? []).filter { $0.id != id }
+    if activeHostId == hostId {
+      sessions = sessionsByHost[hostId] ?? []
     }
   }
 
@@ -460,12 +484,7 @@ public final class SessionStore {
     }
   }
 
-  /// Whether a password is already stored for this host.
-  ///
-  /// A host can exist without one — restored from storage, or created before
-  /// pairing completed — and in that state every authenticated request will
-  /// fail. The UI needs to know so it can ask, rather than silently doing
-  /// nothing when the host is selected.
+  /// Switches the active terminal tab and opens its live stream.
   public func selectSession(hostId: String, sessionId: String) async {
     // The user has chosen a terminal, so the cold-launch restore has no more
     // work to do. Without this the latch could still be unspent — a launch whose
@@ -602,36 +621,22 @@ public final class SessionStore {
   }
 
   private func fetchSessions(for hostId: String) async -> [RemoteSession] {
-    // Sessions live over the Noise channel, not REST — probe reachability with a
-    // reconnect handshake (throttled) and keep the locally-synthesized tabs.
-    await pingNoiseHealth(hostId)
-    return sessionsByHost[hostId] ?? []
-  }
-
-  /// Last time each Noise host's reachability was probed, so the 3s session poll
-  /// runs the (heavier) Noise handshake at most every 8s.
-  private var lastNoisePingAt: [String: Date] = [:]
-
-  /// Reachability for a Noise host: attempt the IK reconnect handshake. Success =
-  /// up AND this device still authorized → `.reachable`; any failure (host down,
-  /// or this device revoked) → `.unreachable`. Throttled to ~8s.
-  private func pingNoiseHealth(_ hostId: String) async {
-    let now = Date()
-    if let last = lastNoisePingAt[hostId], now.timeIntervalSince(last) < 8 { return }
-    lastNoisePingAt[hostId] = now
-
-    guard let host = hosts.first(where: { $0.id == hostId }),
-          let url = SessionStore.noiseBaseURL(for: host)
-    else {
-      markHostFailure(hostId)
-      return
-    }
     do {
-      let channel = try await noiseClient.reconnect(hostId: hostId, url: url)
-      await channel.close()
+      let listed: [RemoteSession]
+      if let remoteSessions {
+        listed = try await remoteSessions(hostId)
+      } else {
+        guard let client = client(for: hostId) else { throw HostClientError.invalidURL }
+        listed = try await client.listSessions()
+      }
       healthByHost[hostId] = .reachable
+      let hidden = locallyKilled[hostId] ?? []
+      let visible = listed.filter { !hidden.contains($0.id) }
+      locallyKilled[hostId] = hidden.intersection(listed.map(\.id))
+      return visible
     } catch {
       markHostFailure(hostId)
+      return sessionsByHost[hostId] ?? []
     }
   }
 

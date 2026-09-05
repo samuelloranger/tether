@@ -41,6 +41,16 @@ final class NoiseAuthTokenTests: XCTestCase {
     XCTAssertEqual(obj, ["t": "auth.token"])
   }
 
+  func testFocusRequestShape() throws {
+    let data = try JSONSerialization.data(
+      withJSONObject: NoiseChannel.focusRequest(id: "sess-1", focused: true)
+    )
+    let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    XCTAssertEqual(obj["t"] as? String, "focus")
+    XCTAssertEqual(obj["id"] as? String, "sess-1")
+    XCTAssertEqual(obj["focused"] as? Bool, true)
+  }
+
   /// `expiresAt` parses both with and without fractional seconds
   /// (`Date().toISOString()` emits milliseconds).
   func testParseISO8601() throws {

@@ -410,9 +410,10 @@ public final class TetherSurfaceView: UIView {
     guard let size = currentGridSize() else { return }
     guard reportedGrid?.cols != size.cols || reportedGrid?.rows != size.rows else { return }
 
-    // The very first size is sent straight through, so connecting is not delayed
-    // by the settle window.
-    if reportedGrid == nil {
+    // Keyboard show/hide jumps many rows. Waiting out the settle window (or
+    // cancelling it every animation frame) left cursor-agent at the short size.
+    if GridReport.shouldCommitImmediately(previous: reportedGrid, next: size) {
+      gridSettleWork?.cancel()
       commitGridSize(size)
       return
     }
