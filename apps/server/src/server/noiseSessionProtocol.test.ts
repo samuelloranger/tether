@@ -61,6 +61,7 @@ interface FakePty {
   starts: Array<{ id: string; command?: string; cols: number; rows: number }>;
   writes: Array<{ id: string; text: string }>;
   resizes: Array<{ id: string; cols: number; rows: number }>;
+  focuses: Array<{ id: string; focused: boolean }>;
   subscriptions: Array<{ id: string; sub: FocusSubscriber }>;
   unsubscribed: number;
 }
@@ -87,6 +88,7 @@ function fakePty(): FakePty {
     starts: [],
     writes: [],
     resizes: [],
+    focuses: [],
     subscriptions: [],
     unsubscribed: 0,
     deps: {} as SessionDeps,
@@ -108,6 +110,10 @@ function fakePty(): FakePty {
     resizeSession: ((id, _client, cols, rows) => {
       state.resizes.push({ id, cols, rows });
     }) as SessionDeps['resizeSession'],
+    setSessionFocus: ((id, client, focused) => {
+      state.focuses.push({ id, focused });
+      client.focused = focused;
+    }) as SessionDeps['setSessionFocus'],
     ...emptyRegistry(),
     identity: { deviceId: '' },
   };
@@ -199,6 +205,45 @@ describe('runNoiseSession', () => {
     await new Promise((r) => setTimeout(r, 5));
 
     expect(pty.writes).toEqual([{ id: 's1', text: 'ls\r' }]);
+  });
+
+  test('subscriber starts unfocused', async () => {
+    const pty = fakePty();
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1' })]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(pty.subscriptions[0].sub.focused).toBe(false);
+  });
+
+  test('subscriber starts unfocused; focus true then false is per-id', async () => {
+    const pty = fakePty();
+    const io = scriptedIo([
+      jsonFrame({ t: 'start', id: 's1' }),
+      jsonFrame({ t: 'start', id: 's2' }),
+      jsonFrame({ t: 'focus', id: 's1', focused: true }),
+    ]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    const s1 = pty.subscriptions.find((s) => s.id === 's1')!.sub;
+    const s2 = pty.subscriptions.find((s) => s.id === 's2')!.sub;
+    expect(s1.focused).toBe(true);
+    expect(s2.focused).toBe(false);
+    expect(pty.focuses).toEqual([{ id: 's1', focused: true }]);
+
+    io.deliver(jsonFrame({ t: 'focus', id: 's1', focused: false }));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(s1.focused).toBe(false);
+
+    io.deliver(jsonFrame({ t: 'focus', id: 'nope', focused: true }));
+    io.deliver(jsonFrame({ t: 'focus', id: 's1' }));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(s1.focused).toBe(false);
+    expect(pty.focuses).toEqual([
+      { id: 's1', focused: true },
+      { id: 's1', focused: false },
+    ]);
   });
 
   test("'resize' refits an attached session", async () => {

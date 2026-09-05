@@ -6,6 +6,7 @@ import type { FrameIO, ServerChannel } from './noiseChannel';
 import {
   type FocusSubscriber,
   resizeSession,
+  setSessionFocus,
   startSession,
   subscribeToSession,
   writeToSession,
@@ -32,6 +33,7 @@ export interface SessionDeps {
   subscribeToSession: typeof subscribeToSession;
   writeToSession: typeof writeToSession;
   resizeSession: typeof resizeSession;
+  setSessionFocus: typeof setSessionFocus;
   listDevices: typeof listDevices;
   revokeDevice: typeof revokeDevice;
   resolveTarget: typeof resolveTarget;
@@ -52,6 +54,7 @@ const defaultDeps: SessionDeps = {
   subscribeToSession,
   writeToSession,
   resizeSession,
+  setSessionFocus,
   listDevices,
   revokeDevice,
   resolveTarget,
@@ -64,6 +67,7 @@ type ClientMessage =
   | { t: 'start'; id: string; command?: string; cols?: number; rows?: number }
   | { t: 'input'; id: string; text: string }
   | { t: 'resize'; id: string; cols: number; rows: number }
+  | { t: 'focus'; id: string; focused: boolean }
   | { t: 'devices.list' }
   | { t: 'devices.revoke'; target: string }
   | { t: 'auth.token' };
@@ -173,6 +177,12 @@ async function applyMessage(
     // resize a session this channel actually subscribed to.
     const attachment = attachments.get(msg.id);
     if (attachment) d.resizeSession(msg.id, attachment.sub, msg.cols, msg.rows);
+  } else if (msg.t === 'focus') {
+    const attachment = attachments.get(msg.id);
+    if (attachment && typeof msg.focused === 'boolean') {
+      attachment.sub.focused = msg.focused;
+      d.setSessionFocus(msg.id, attachment.sub, msg.focused);
+    }
   } else if (msg.t === 'devices.list' || msg.t === 'devices.revoke') {
     applyDevicesMessage(msg, d, sendSealed);
   } else if (msg.t === 'auth.token') {
@@ -253,9 +263,7 @@ export async function runNoiseSession(
         sendSealed({ t: 'exit', id, exitCode: data.exitCode });
       }
     };
-    // A remote Noise client is the sole viewer of its own session; treat it as
-    // focused so activity/notification gating matches the terminal WS path.
-    onData.focused = true;
+    onData.focused = false;
     return onData;
   };
 
