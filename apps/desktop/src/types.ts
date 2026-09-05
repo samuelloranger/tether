@@ -1,4 +1,5 @@
 import type { SessionActivity } from './activity';
+import { hostScheme } from './hostScheme';
 
 export const KEY_ACTIVE_HOST = 'tether_active_host';
 export const HOST_PROFILES_KEY = 'tether_host_profiles';
@@ -30,5 +31,5 @@ export function activeSessionStorageKey(hostId: string): string {
 }
 
 export function httpOriginFor(profile: HostProfile): string {
-  return `http://${profile.host}:${profile.port}`;
+  return `${hostScheme(profile.id, profile.port)}://${profile.host}:${profile.port}`;
 }

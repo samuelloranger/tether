@@ -24,6 +24,7 @@ import {
   listenSessions,
 } from './coreApi';
 import type { FrameApplyResult } from './frameHandler';
+import { forgetHostScheme, type PairScheme, recordHostScheme } from './hostScheme';
 import { markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
 import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
@@ -285,6 +286,7 @@ export function useTetherDesktop() {
         name: string;
         host: string;
         port: string;
+        scheme: PairScheme;
         address: string;
         code: string;
       },
@@ -295,6 +297,7 @@ export function useTetherDesktop() {
         host: input.host,
         port: input.port,
       });
+      recordHostScheme(profile.id, input.scheme);
       try {
         // Surface THIS device's fingerprint before the pair call blocks on the
         // host's confirm, so the pairing screen can show it to read aloud
@@ -314,6 +317,7 @@ export function useTetherDesktop() {
         return { fingerprint };
       } catch (error) {
         await coreHostsRemove(profile.id).catch(() => undefined);
+        forgetHostScheme(profile.id);
         unmarkNoiseHost(profile.id);
         throw error;
       }
@@ -324,6 +328,7 @@ export function useTetherDesktop() {
   const removeHost = useCallback(
     async (hostId: string) => {
       await coreHostsRemove(hostId);
+      forgetHostScheme(hostId);
       unmarkNoiseHost(hostId);
       setHosts(await coreHostsList());
       setSessions((current) => current.filter((row) => row.hostId !== hostId));
