@@ -218,7 +218,7 @@ Usage: tether <command>
   pair             Open an enrollment window and confirm a device
   signal           Tell tether this session is working / waiting / done
   devices          List authorized devices
-  device <cmd>     Manage a device: revoke <target> | rename <target> <name>
+  device <cmd>     Manage a device: revoke <target> | rename <target> <name> | token [name]
   update           Download the latest release binary and restart
   version          Print the version
   help             Show this help

@@ -21,6 +21,15 @@ test('parseDeviceArgs throws a usage message for malformed argv', () => {
   expect(() => parseDeviceArgs(['rename', '7q4k'])).toThrow(/usage/i);
 });
 
+test('parseDeviceArgs token is listed and defaults the label', () => {
+  expect(parseDeviceArgs(['token'])).toEqual({ kind: 'token', label: 'cli-token' });
+  expect(parseDeviceArgs(['token', 'ci'])).toEqual({ kind: 'token', label: 'ci' });
+});
+
+test('parseDeviceArgs bogus includes token in usage', () => {
+  expect(() => parseDeviceArgs(['bogus'])).toThrow(/token/);
+});
+
 function sampleDevice(overrides: Partial<AuthDevice> = {}): AuthDevice {
   return {
     id: '00000000-0000-4000-8000-000000000001',
@@ -79,6 +88,60 @@ test('runDevice lists, reports not-found revoke, and succeeds on rename', () => 
     const renamed = runDevice({ kind: 'rename', target: 'sam-iphone', label: 'laptop' }, deps);
     expect(renamed).toEqual({ ok: true });
     expect(logs.join('\n')).toContain('Renamed to laptop.');
+  } finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
+});
+
+test('runDevice token writes token on stdout and id on stderr', () => {
+  const deps = {
+    issueToken: () => ({ token: 'tok.sig', id: 'dev-1', label: 'ci' }),
+  };
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const origLog = console.log;
+  const origErr = console.error;
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map(String).join(' '));
+  };
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(' '));
+  };
+  try {
+    expect(runDevice({ kind: 'token', label: 'ci' }, deps)).toEqual({ ok: true });
+    expect(logs.join('\n').trim()).toBe('tok.sig');
+    expect(errors.join('\n')).toMatch(/dev-1/);
+    expect(errors.join('\n')).toMatch(/tether device revoke dev-1/);
+  } finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
+});
+
+test('runDevice revoke of the last device warns on stderr', () => {
+  const device = sampleDevice();
+  let remaining: AuthDevice[] = [device];
+  const deps = {
+    listDevices: () => remaining,
+    revokeDevice: () => {
+      remaining = [];
+      return device;
+    },
+  };
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const origLog = console.log;
+  const origErr = console.error;
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map(String).join(' '));
+  };
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(' '));
+  };
+  try {
+    runDevice({ kind: 'revoke', target: device.label }, deps);
+    expect(errors.join('\n')).toMatch(/last authorized device/i);
   } finally {
     console.log = origLog;
     console.error = origErr;

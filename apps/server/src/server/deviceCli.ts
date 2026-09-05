@@ -72,10 +72,10 @@ export interface DeviceCliDeps {
   // Registers a fresh synthetic device and returns a bearer token for it. The
   // default wiring generates a Noise keypair, enrolls it, and mints a token;
   // injectable so the CLI's parse/format logic stays testable without the FFI.
-  issueToken?: (label: string) => string;
+  issueToken?: (label: string) => { token: string; id: string; label: string };
 }
 
-function defaultIssueToken(label: string): string {
+function defaultIssueToken(label: string): { token: string; id: string; label: string } {
   // Lazy: keep the native FFI (genKeypair) and the token secret off the import
   // path of `list`/`revoke`/`rename` and their unit tests.
   const { genKeypair } = require('./noiseFfi') as typeof import('./noiseFfi');
@@ -83,7 +83,7 @@ function defaultIssueToken(label: string): string {
   const { mintToken } = require('./deviceToken') as typeof import('./deviceToken');
   const { pub } = genKeypair();
   const device = addDevice({ label, pubkey: Buffer.from(pub).toString('base64') });
-  return mintToken(device.id);
+  return { token: mintToken(device.id), id: device.id, label: device.label };
 }
 
 export function runDevice(args: DeviceArgs, deps: DeviceCliDeps = {}): { ok: boolean } {
@@ -99,11 +99,16 @@ export function runDevice(args: DeviceArgs, deps: DeviceCliDeps = {}): { ok: boo
     if (args.kind === 'revoke') {
       const device = revoke(args.target);
       console.log(`Revoked ${device.label} (${device.fingerprint.slice(0, 8)}).`);
+      if (list().length === 0) {
+        console.error('That was the last authorized device. Recover with: tether pair');
+      }
       return { ok: true };
     }
     if (args.kind === 'token') {
       // Only the token on stdout, so `tether device token` is pipe-friendly.
-      console.log(issueToken(args.label));
+      const { token, id, label } = issueToken(args.label);
+      console.log(token);
+      console.error(`Issued token for ${id} (${label}). Revoke with: tether device revoke ${id}`);
       return { ok: true };
     }
     const device = rename(args.target, args.label);
