@@ -60,6 +60,27 @@ extension SessionStore {
     }
   }
 
+  public func renameHost(hostId: String, name: String) async {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    let adapter = HostStoreAdapter()
+    do {
+      _ = try adapter.update(
+        id: hostId,
+        changes: FfiHostProfileChanges(
+          name: trimmed,
+          color: nil,
+          host: nil,
+          port: nil,
+          identityName: nil
+        )
+      )
+      reloadHosts()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
   public func applyServerIdentity(hostId: String, identity: ServerIdentityConfig) {
     let adapter = HostStoreAdapter()
     do {

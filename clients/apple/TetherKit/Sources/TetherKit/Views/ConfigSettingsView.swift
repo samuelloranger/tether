@@ -140,7 +140,7 @@ public struct ConfigSettingsView: View {
 public struct HostSettingsView: View {
   @Bindable public var store: SessionStore
   public let hostId: String
-  @State private var password = ""
+  @State private var nameDraft = ""
   @State private var confirmRemove = false
 
   public init(store: SessionStore, hostId: String) {
@@ -168,6 +168,18 @@ public struct HostSettingsView: View {
           }
         }
 
+        Section("Name") {
+          TextField("Name", text: $nameDraft)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+          Button("Rename") {
+            Task { await store.renameHost(hostId: hostId, name: nameDraft) }
+          }
+          .disabled(
+            nameDraft.trimmingCharacters(in: .whitespaces).isEmpty || nameDraft == host.name
+          )
+        }
+
         Section("Connection") {
           LabeledContent("Host", value: host.host)
           LabeledContent("Port", value: host.port)
@@ -180,6 +192,7 @@ public struct HostSettingsView: View {
         }
       }
     }
+    .task { nameDraft = host?.name ?? "" }
     .navigationTitle(host?.name ?? "Host")
     .confirmationDialog(
       "Remove this host?",
