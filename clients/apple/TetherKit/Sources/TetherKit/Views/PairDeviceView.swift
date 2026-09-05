@@ -298,7 +298,7 @@ public struct PairDeviceView: View {
     phase = .pairing
     do {
       let serverKey = try await client.pair(hostId: hostId, url: url, code: canonical)
-      HostScheme.record(url.scheme ?? "http", forHost: hostId)
+      HostScheme.record(Self.restScheme(from: url.scheme), forHost: hostId)
       pinnedKey = serverKey
       phase = .success
       let (parsedHost, parsedPort) = Self.hostAndPort(from: host)
@@ -313,6 +313,16 @@ public struct PairDeviceView: View {
   private var hostLabel: String {
     let trimmed = host.trimmingCharacters(in: .whitespaces)
     return trimmed.isEmpty ? "the host" : trimmed
+  }
+
+  /// Map `http`/`https`/`ws`/`wss` to the REST scheme persisted on the host profile.
+  static func restScheme(from raw: String?) -> String {
+    switch raw?.lowercased() {
+    case "https", "wss":
+      return "https"
+    default:
+      return "http"
+    }
   }
 
   /// Turn a user-typed address into a base URL. Port implies scheme when none is
@@ -345,15 +355,16 @@ public struct PairDeviceView: View {
 
   /// Split the typed address into `(host, port)` for persisting a HostProfile —
   /// derived from the SAME URL `serverURL` builds, so the stored host matches the
-  /// endpoint that was actually paired. A missing port defaults from the scheme
-  /// (`https` → 443, `http` → 8085). Returns `nil` only when no host can be parsed.
+  /// endpoint that was actually paired. A missing port defaults from the REST
+  /// scheme (`https`/`wss` → 443, `http`/`ws` → 8085). Returns `nil` only when
+  /// no host can be parsed.
   static func hostAndPort(from raw: String) -> (host: String, port: String)? {
     guard
       let url = serverURL(from: raw),
       let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
       let host = components.host, !host.isEmpty
     else { return nil }
-    let scheme = url.scheme?.lowercased() ?? "http"
+    let scheme = restScheme(from: url.scheme)
     let defaultPort = scheme == "https" ? "443" : "8085"
     let port = components.port.map(String.init) ?? defaultPort
     return (host, port)
