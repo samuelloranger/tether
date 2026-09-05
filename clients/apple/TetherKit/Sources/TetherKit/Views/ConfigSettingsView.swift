@@ -161,30 +161,16 @@ public struct HostSettingsView: View {
           } label: {
             Label("Server settings", systemImage: "server.rack")
           }
-          // Device management rides the authenticated Noise session, so only
-          // Noise hosts get it — a password host has no device roster.
-          if store.authMode(for: hostId) == .noise {
-            NavigationLink {
-              DevicesView(store: store, hostId: hostId)
-            } label: {
-              Label("Devices", systemImage: "lock.laptopcomputer")
-            }
+          NavigationLink {
+            DevicesView(store: store, hostId: hostId)
+          } label: {
+            Label("Devices", systemImage: "lock.laptopcomputer")
           }
         }
 
         Section("Connection") {
           LabeledContent("Host", value: host.host)
           LabeledContent("Port", value: host.port)
-          SecureField("New password", text: $password)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-          Button("Save password") {
-            Task {
-              await store.savePassword(password, for: hostId)
-              password = ""
-            }
-          }
-          .disabled(password.isEmpty || store.isLoading)
         }
 
         Section {

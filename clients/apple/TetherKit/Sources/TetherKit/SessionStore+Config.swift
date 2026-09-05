@@ -6,12 +6,7 @@ import TetherFFIBindings
 /// so we never touch SessionStore's private `hostStore` / `client(for:)`.
 extension SessionStore {
   public func makeConfigClient(hostId: String) -> NativeHostClient? {
-    guard let host = hosts.first(where: { $0.id == hostId }) else { return nil }
-    let adapter = HostStoreAdapter()
-    guard let password = try? adapter.password(for: host.id), !password.isEmpty else {
-      return nil
-    }
-    return NativeHostClient(profile: host, password: password)
+    client(for: hostId)
   }
 
   public func loadServerConfig(hostId: String) async -> ServerConfig? {
@@ -87,8 +82,7 @@ extension SessionStore {
   public func saveHostConnection(
     hostId: String,
     host: String,
-    port: String,
-    replacementPassword: String?
+    port: String
   ) async -> Bool {
     let adapter = HostStoreAdapter()
     do {
@@ -102,9 +96,6 @@ extension SessionStore {
           identityName: nil
         )
       )
-      if let replacementPassword, !replacementPassword.isEmpty {
-        try adapter.setPassword(replacementPassword, for: hostId)
-      }
       reloadHosts()
       errorMessage = nil
       await refreshHost(hostId: hostId)
@@ -115,23 +106,6 @@ extension SessionStore {
     }
   }
 
-  public func changeServerPassword(
-    hostId: String,
-    current: String,
-    next: String
-  ) async -> Bool {
-    guard let client = makeConfigClient(hostId: hostId) else { return false }
-    do {
-      try await client.changeServerPassword(current: current, next: next)
-      let adapter = HostStoreAdapter()
-      try adapter.setPassword(next, for: hostId)
-      errorMessage = nil
-      return true
-    } catch {
-      errorMessage = error.localizedDescription
-      return false
-    }
-  }
 
   public func requestServerUpdate(hostId: String, current: String) async -> Bool {
     guard let client = makeConfigClient(hostId: hostId) else { return false }

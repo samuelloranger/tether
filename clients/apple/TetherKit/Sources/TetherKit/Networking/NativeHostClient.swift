@@ -86,38 +86,16 @@ public enum HostClientError: Error, LocalizedError {
 /// tether-ffi as the core exports expand; this stays in the shell transport layer.
 public actor NativeHostClient {
   public let profile: HostProfileModel
-  /// Where the `Authorization: Bearer` value comes from: a stored password
-  /// (password hosts) or a Noise-minted device token (Noise hosts). Additive —
-  /// the password init is unchanged; Noise hosts use the new token init.
-  private enum AuthSource {
-    case password(String)
-    case token(HostBearerSource)
-  }
-
-  private let auth: AuthSource
-  /// The bearer the WebSocket path uses. Only password hosts open this REST WS
-  /// (a Noise host's terminal rides its own Noise channel), so an empty string
-  /// for a token host is never sent.
-  private let webSocketBearer: String
+  private let bearerSource: HostBearerSource
   private let session: URLSession
 
-  public init(profile: HostProfileModel, password: String, session: URLSession = .shared) {
-    self.profile = profile
-    self.auth = .password(password)
-    self.webSocketBearer = password
-    self.session = session
-  }
-
-  /// Token-authed variant for a Noise host: the Bearer is minted (and cached +
-  /// re-minted on 401) through `bearerSource` instead of a stored password.
   public init(
     profile: HostProfileModel,
     bearerSource: HostBearerSource,
     session: URLSession = .shared
   ) {
     self.profile = profile
-    self.auth = .token(bearerSource)
-    self.webSocketBearer = ""
+    self.bearerSource = bearerSource
     self.session = session
   }
 
@@ -127,18 +105,11 @@ public actor NativeHostClient {
   }
 
   private func bearerValue() async throws -> String {
-    switch auth {
-    case let .password(password):
-      return password
-    case let .token(source):
-      return try await source.currentBearer()
-    }
+    try await bearerSource.currentBearer()
   }
 
   private func invalidateBearer() async {
-    if case let .token(source) = auth {
-      await source.invalidateBearer()
-    }
+    await bearerSource.invalidateBearer()
   }
 
   private func authorizedRequest(url: URL, method: String = "GET", body: Data? = nil) async throws -> URLRequest {
@@ -153,10 +124,8 @@ public actor NativeHostClient {
     return request
   }
 
-  /// Send an authorized request and return its body + status. For a token host,
-  /// a 401 triggers exactly one silent re-mint (invalidate the cached token,
-  /// mint a fresh one) and retry; a second 401 surfaces to the caller. Password
-  /// hosts never retry — a 401 is a wrong password, not a stale token.
+  /// A 401 triggers exactly one silent re-mint (invalidate the cached token,
+  /// mint a fresh one) and retry; a second 401 surfaces to the caller.
   private func sendAuthorized(
     url: URL,
     method: String = "GET",
@@ -165,7 +134,7 @@ public actor NativeHostClient {
     let request = try await authorizedRequest(url: url, method: method, body: body)
     let (data, response) = try await session.data(for: request)
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-    guard status == 401, case .token = auth else {
+    guard status == 401 else {
       return (data, status)
     }
     await invalidateBearer()
@@ -184,12 +153,6 @@ public actor NativeHostClient {
       throw HostClientError.decodeFailed
     }
     return decoded
-  }
-
-  public func setup(password newPassword: String) async throws {
-    let body = try JSONEncoder().encode(["password": newPassword])
-    let (_, status) = try await sendAuthorized(url: try url(path: "/api/setup"), method: "POST", body: body)
-    guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
   }
 
   public func testConnection() async throws -> Int {
@@ -256,7 +219,7 @@ public actor NativeHostClient {
     sinceId: UInt64,
     cols: UInt16,
     rows: UInt16
-  ) throws -> URLSessionWebSocketTask {
+  ) async throws -> URLSessionWebSocketTask {
     guard var components = profile.baseWSURL.flatMap({
       URLComponents(url: $0.appendingPathComponent("/api/ws"), resolvingAgainstBaseURL: false)
     }) else {
@@ -270,7 +233,7 @@ public actor NativeHostClient {
     ]
     guard let wsURL = components.url else { throw HostClientError.invalidURL }
     var request = URLRequest(url: wsURL)
-    request.setValue("Bearer \(webSocketBearer)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(try await bearerValue())", forHTTPHeaderField: "Authorization")
     return session.webSocketTask(with: request)
   }
 }

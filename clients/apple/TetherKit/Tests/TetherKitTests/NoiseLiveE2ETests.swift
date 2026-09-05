@@ -110,7 +110,6 @@ final class NoiseLiveE2ETests: XCTestCase {
     // 2. Persist a real Noise HostProfile — migrates the keys onto the profile id.
     let profile = try store.createNoiseHost(
       name: "E2E box", host: url.host ?? "", port: "\(url.port ?? 8443)", pairHostId: pairId)
-    XCTAssertEqual(store.authMode(for: profile.id), .noise, "persisted host must derive as Noise")
 
     // 3. Reconnect BY THE PERSISTED PROFILE ID (proves the migration) and stream.
     let channel = try await client.reconnect(hostId: profile.id, url: url)

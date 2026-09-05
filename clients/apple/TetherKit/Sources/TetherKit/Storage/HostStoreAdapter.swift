@@ -74,12 +74,4 @@ public final class HostStoreAdapter {
   public func reorder(ids: [String]) throws -> [HostProfileModel] {
     try handle.reorder(ids: ids).map(HostProfileModel.init)
   }
-
-  public func password(for hostId: String) throws -> String? {
-    try secrets.get(hostId: hostId)
-  }
-
-  public func setPassword(_ password: String, for hostId: String) throws {
-    try secrets.set(hostId: hostId, password: password)
-  }
 }

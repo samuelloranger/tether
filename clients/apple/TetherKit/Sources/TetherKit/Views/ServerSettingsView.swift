@@ -15,7 +15,6 @@ public struct ServerSettingsView: View {
   @State private var message: SettingsMessage?
   @State private var connectionHost = ""
   @State private var connectionPort = ""
-  @State private var replacementPassword = ""
   @State private var admin: AdminSheet?
   @State private var confirmTest = false
   @State private var adminBusy = false
@@ -55,7 +54,6 @@ public struct ServerSettingsView: View {
     guard let host else { return false }
     return connectionHost != host.host
       || connectionPort != host.port
-      || !replacementPassword.isEmpty
   }
 
   public var body: some View {
@@ -104,9 +102,7 @@ public struct ServerSettingsView: View {
         operation: sheet,
         busy: adminBusy,
         onCancel: { admin = nil },
-        onConfirm: { current, next, confirm in
-          Task { await runAdmin(sheet, current: current, next: next, confirm: confirm) }
-        }
+        onConfirm: { Task { await runAdmin(sheet) } }
       )
     }
     .confirmationDialog(
@@ -132,9 +128,6 @@ public struct ServerSettingsView: View {
       TextField("Port", text: $connectionPort)
         .keyboardType(.numberPad)
         .disabled(saving)
-      SecureField("Replace saved password", text: $replacementPassword)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
       if let version {
         LabeledContent("Version", value: version)
           .foregroundStyle(TetherColors.textSecondary)
@@ -312,9 +305,6 @@ public struct ServerSettingsView: View {
       )
       .font(.caption)
       .foregroundStyle(TetherColors.textSecondary)
-      Button("Change password", role: .destructive) {
-        admin = .password
-      }
       Button("Check for update", role: .destructive) {
         admin = .update
       }
@@ -385,7 +375,6 @@ public struct ServerSettingsView: View {
       connectionHost = host.host
       connectionPort = host.port
     }
-    replacementPassword = ""
     defer { loading = false }
     guard !health.isUnavailable else {
       message = SettingsMessage(kind: .error, text: "Host unreachable. Settings are read-only.")
@@ -436,11 +425,9 @@ public struct ServerSettingsView: View {
     let ok = await store.saveHostConnection(
       hostId: hostId,
       host: connectionHost.trimmingCharacters(in: .whitespacesAndNewlines),
-      port: connectionPort.trimmingCharacters(in: .whitespacesAndNewlines),
-      replacementPassword: replacementPassword.isEmpty ? nil : replacementPassword
+      port: connectionPort.trimmingCharacters(in: .whitespacesAndNewlines)
     )
     if ok {
-      replacementPassword = ""
       message = SettingsMessage(kind: .success, text: "Connection saved.")
       await reload()
     } else {
@@ -463,38 +450,18 @@ public struct ServerSettingsView: View {
     }
   }
 
-  private func runAdmin(
-    _ op: AdminSheet,
-    current: String,
-    next: String,
-    confirm: String
-  ) async {
-    guard !current.isEmpty else { return }
-    if op == .password {
-      guard !next.isEmpty, next == confirm else {
-        message = SettingsMessage(kind: .error, text: "New passwords must match.")
-        return
-      }
-    }
+  private func runAdmin(_ op: AdminSheet) async {
     adminBusy = true
     message = nil
     defer { adminBusy = false }
     let ok: Bool
     switch op {
-    case .password:
-      ok = await store.changeServerPassword(hostId: hostId, current: current, next: next)
-      if ok {
-        message = SettingsMessage(
-          kind: .success,
-          text: "Password changed. Existing token sessions remain connected."
-        )
-      }
     case .update:
       message = SettingsMessage(
         kind: .success,
         text: "Updating… Sessions survive the restart and will reconnect."
       )
-      ok = await store.requestServerUpdate(hostId: hostId, current: current)
+      ok = await store.requestServerUpdate(hostId: hostId, current: "")
       if ok {
         var actual: String?
         for _ in 0..<10 {
@@ -514,7 +481,7 @@ public struct ServerSettingsView: View {
         kind: .success,
         text: "Restarting… Sessions survive and will reconnect."
       )
-      ok = await store.requestServerRestart(hostId: hostId, current: current)
+      ok = await store.requestServerRestart(hostId: hostId, current: "")
     }
     if ok {
       admin = nil
@@ -540,7 +507,6 @@ private struct SettingsMessage {
 }
 
 private enum AdminSheet: String, Identifiable {
-  case password
   case update
   case restart
 
@@ -548,9 +514,15 @@ private enum AdminSheet: String, Identifiable {
 
   var title: String {
     switch self {
-    case .password: "Change password"
     case .update: "Update server"
     case .restart: "Restart server"
+    }
+  }
+
+  var prompt: String {
+    switch self {
+    case .update: "Update the server to the latest release?"
+    case .restart: "Restart the server?"
     }
   }
 }
@@ -559,29 +531,15 @@ private struct AdminConfirmSheet: View {
   let operation: AdminSheet
   let busy: Bool
   let onCancel: () -> Void
-  let onConfirm: (_ current: String, _ next: String, _ confirm: String) -> Void
-
-  @State private var currentPassword = ""
-  @State private var nextPassword = ""
-  @State private var confirmPassword = ""
+  let onConfirm: () -> Void
 
   var body: some View {
     NavigationStack {
       Form {
         Section {
-          SecureField("Current password", text: $currentPassword)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-          if operation == .password {
-            SecureField("New password", text: $nextPassword)
-              .textInputAutocapitalization(.never)
-              .autocorrectionDisabled()
-            SecureField("Confirm new password", text: $confirmPassword)
-              .textInputAutocapitalization(.never)
-              .autocorrectionDisabled()
-          }
+          Text(operation.prompt)
         } footer: {
-          Text("These actions require the current server password.")
+          Text("Holder-backed sessions survive and reconnect.")
             .foregroundStyle(TetherColors.textSecondary)
         }
       }
@@ -593,10 +551,8 @@ private struct AdminConfirmSheet: View {
             .disabled(busy)
         }
         ToolbarItem(placement: .confirmationAction) {
-          Button(busy ? "Working…" : "Confirm") {
-            onConfirm(currentPassword, nextPassword, confirmPassword)
-          }
-          .disabled(busy || currentPassword.isEmpty)
+          Button(busy ? "Working…" : "Confirm", action: onConfirm)
+            .disabled(busy)
         }
       }
     }
