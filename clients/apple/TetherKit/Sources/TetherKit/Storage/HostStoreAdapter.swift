@@ -32,14 +32,9 @@ public struct HostProfileModel: Identifiable, Equatable, Sendable {
 
 public final class HostStoreAdapter {
   private let handle: HostStoreHandle
-  private let secrets: SecretStore
 
-  public init(
-    storage: HostStorage = UserDefaultsHostStorage(),
-    secrets: SecretStore = KeychainSecretStore()
-  ) {
-    handle = HostStoreHandle(storage: storage, secrets: secrets)
-    self.secrets = secrets
+  public init(storage: HostStorage = UserDefaultsHostStorage()) {
+    handle = HostStoreHandle(storage: storage)
   }
 
   public func list() throws -> [HostProfileModel] {

@@ -117,7 +117,7 @@ case ":${PATH}:" in
     ;;
 esac
 if [ -d "${HOME}/.tether/app" ]; then
-  echo "Note: old ~/.tether/app detected. Your database (password + sessions) migrates automatically on first run; delete ~/.tether/app afterward. Live PTY sessions from the old server won't reattach across the upgrade."
+  echo "Note: old ~/.tether/app detected. Your database (sessions) migrates automatically on first run; delete ~/.tether/app afterward. Live PTY sessions from the old server won't reattach across the upgrade."
 fi
-echo "Next: $cmd set-password && $cmd start"
-echo "SECURITY: a password gates access. TLS is served on :8443 (self-signed, pinned by the client) alongside plaintext :8085 for older clients — still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only."
+echo "Next: $cmd start && $cmd pair"
+echo "SECURITY: pair a device with \`$cmd pair\`. TLS is served on :8443 (self-signed, pinned by the client) alongside plaintext :8085 for older clients — still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only."

@@ -82,17 +82,6 @@ pub trait HostStorage: Send + Sync {
     fn remove_item(&self, key: String) -> Result<(), FfiHostStoreError>;
 }
 
-/// Platform secret store. Swift implements this against Keychain using
-/// `tether_password_<hostId>` keys — the core never performs platform I/O.
-#[uniffi::export(callback_interface)]
-pub trait SecretStore: Send + Sync {
-    fn get(&self, host_id: String) -> Result<Option<String>, FfiHostStoreError>;
-    fn set(&self, host_id: String, password: String) -> Result<(), FfiHostStoreError>;
-    fn clear(&self, host_id: String) -> Result<(), FfiHostStoreError>;
-    fn get_legacy(&self) -> Result<Option<String>, FfiHostStoreError>;
-    fn clear_legacy(&self) -> Result<(), FfiHostStoreError>;
-}
-
 struct StorageAdapter(Box<dyn HostStorage>);
 
 impl tether_core::host_store::HostStorage for StorageAdapter {
@@ -109,43 +98,17 @@ impl tether_core::host_store::HostStorage for StorageAdapter {
     }
 }
 
-struct SecretsAdapter(Box<dyn SecretStore>);
-
-impl tether_core::host_store::HostSecrets for SecretsAdapter {
-    fn get(&self, host_id: &str) -> Result<Option<String>, HostStoreError> {
-        self.0.get(host_id.to_string()).map_err(Into::into)
-    }
-
-    fn set(&self, host_id: &str, password: &str) -> Result<(), HostStoreError> {
-        self.0
-            .set(host_id.to_string(), password.to_string())
-            .map_err(Into::into)
-    }
-
-    fn clear(&self, host_id: &str) -> Result<(), HostStoreError> {
-        self.0.clear(host_id.to_string()).map_err(Into::into)
-    }
-
-    fn get_legacy(&self) -> Result<Option<String>, HostStoreError> {
-        self.0.get_legacy().map_err(Into::into)
-    }
-
-    fn clear_legacy(&self) -> Result<(), HostStoreError> {
-        self.0.clear_legacy().map_err(Into::into)
-    }
-}
-
 #[derive(uniffi::Object)]
 pub struct HostStoreHandle {
-    inner: HostStore<StorageAdapter, SecretsAdapter, Box<dyn FnMut() -> String + Send>>,
+    inner: HostStore<StorageAdapter, Box<dyn FnMut() -> String + Send>>,
 }
 
 #[uniffi::export]
 impl HostStoreHandle {
     #[uniffi::constructor]
-    pub fn new(storage: Box<dyn HostStorage>, secrets: Box<dyn SecretStore>) -> Arc<Self> {
+    pub fn new(storage: Box<dyn HostStorage>) -> Arc<Self> {
         let next_id = Arc::new(AtomicU64::new(0));
-        let store = HostStore::new(StorageAdapter(storage), SecretsAdapter(secrets), {
+        let store = HostStore::new(StorageAdapter(storage), {
             let next_id = Arc::clone(&next_id);
             Box::new(move || format!("host-{}", next_id.fetch_add(1, Ordering::Relaxed)))
                 as Box<dyn FnMut() -> String + Send>
@@ -212,39 +175,9 @@ mod tests {
         }
     }
 
-    struct MemorySecrets(Mutex<HashMap<String, String>>);
-
-    impl SecretStore for MemorySecrets {
-        fn get(&self, host_id: String) -> Result<Option<String>, FfiHostStoreError> {
-            Ok(self.0.lock().unwrap().get(&host_id).cloned())
-        }
-
-        fn set(&self, host_id: String, password: String) -> Result<(), FfiHostStoreError> {
-            self.0.lock().unwrap().insert(host_id, password);
-            Ok(())
-        }
-
-        fn clear(&self, host_id: String) -> Result<(), FfiHostStoreError> {
-            self.0.lock().unwrap().remove(&host_id);
-            Ok(())
-        }
-
-        fn get_legacy(&self) -> Result<Option<String>, FfiHostStoreError> {
-            Ok(self.0.lock().unwrap().get("legacy").cloned())
-        }
-
-        fn clear_legacy(&self) -> Result<(), FfiHostStoreError> {
-            self.0.lock().unwrap().remove("legacy");
-            Ok(())
-        }
-    }
-
     #[test]
     fn host_store_round_trips_through_ffi_adapters() {
-        let store = HostStoreHandle::new(
-            Box::new(MemoryStorage(Mutex::new(HashMap::new()))),
-            Box::new(MemorySecrets(Mutex::new(HashMap::new()))),
-        );
+        let store = HostStoreHandle::new(Box::new(MemoryStorage(Mutex::new(HashMap::new()))));
         let profile = store
             .create(FfiNewHostProfile {
                 name: "Dev".to_string(),

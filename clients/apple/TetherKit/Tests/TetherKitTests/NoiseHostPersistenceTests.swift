@@ -13,31 +13,14 @@ private final class InMemoryHostStorage: HostStorage {
   func removeItem(key: String) throws { items[key] = nil }
 }
 
-/// In-memory `SecretStore` double — the per-host password store, so a test can
-/// assert a host was persisted WITHOUT a password.
-private final class InMemorySecretStore: SecretStore {
-  private var secrets: [String: String] = [:]
-  private var legacy: String?
-  func get(hostId: String) throws -> String? { secrets[hostId] }
-  func set(hostId: String, password: String) throws { secrets[hostId] = password }
-  func clear(hostId: String) throws { secrets[hostId] = nil }
-  func getLegacy() throws -> String? { legacy }
-  func clearLegacy() throws { legacy = nil }
-
-  /// Test-only visibility into whether any password was ever stored.
-  var storedHostIds: [String] { Array(secrets.keys) }
-}
-
-/// Covers the Noise-host interim auth scheme: the DERIVED auth-mode helper and
-/// the password-less create path (`SessionStore.createNoiseHost`). No UI here —
+/// Covers the Noise-host create path (`SessionStore.createNoiseHost`). No UI here —
 /// pure logic + the storage doubles.
 final class NoiseHostPersistenceTests: XCTestCase {
   // MARK: - Password-less create path
 
   @MainActor
   func testCreateNoiseHostPersistsWithoutPasswordAndDerivesNoiseMode() async throws {
-    let secrets = InMemorySecretStore()
-    let hostStore = HostStoreAdapter(storage: InMemoryHostStorage(), secrets: secrets)
+    let hostStore = HostStoreAdapter(storage: InMemoryHostStorage())
     let noiseKeys = FakeNoiseKeyStore()
     let store = SessionStore(hostStore: hostStore, noiseKeyStore: noiseKeys)
 
@@ -74,7 +57,7 @@ final class NoiseHostPersistenceTests: XCTestCase {
 
   @MainActor
   func testCreateNoiseHostThrowsAndPersistsNothingWhenKeysMissing() async throws {
-    let hostStore = HostStoreAdapter(storage: InMemoryHostStorage(), secrets: InMemorySecretStore())
+    let hostStore = HostStoreAdapter(storage: InMemoryHostStorage())
     let noiseKeys = FakeNoiseKeyStore()
     let store = SessionStore(hostStore: hostStore, noiseKeyStore: noiseKeys)
 
@@ -86,7 +69,7 @@ final class NoiseHostPersistenceTests: XCTestCase {
     } catch let error as NoiseHostError {
       XCTAssertEqual(error, .missingPairedKeys)
     }
-    // No orphan profile was left behind — nothing to reclassify as a password host.
+    // No orphan profile was left behind.
     XCTAssertTrue(store.hosts.isEmpty)
   }
 

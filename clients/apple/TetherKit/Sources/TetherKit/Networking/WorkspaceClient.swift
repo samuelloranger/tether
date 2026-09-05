@@ -69,7 +69,6 @@ public struct PresentationCloseResponse: Codable, Equatable, Sendable {
 
 public enum WorkspaceClientError: Error, LocalizedError, Sendable {
   case invalidURL
-  case missingPassword
   case unauthorized
   case httpStatus(Int)
   case decodeFailed
@@ -84,10 +83,8 @@ public enum WorkspaceClientError: Error, LocalizedError, Sendable {
     switch self {
     case .invalidURL:
       "Invalid server URL"
-    case .missingPassword:
-      "No password stored for this host"
     case .unauthorized:
-      "Unauthorized — check the password"
+      "Unauthorized"
     case let .httpStatus(code):
       "Server returned HTTP \(code)"
     case .decodeFailed:

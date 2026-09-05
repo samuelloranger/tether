@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tether_core::host_client::{HostClient, HttpRequest};
-use tether_core::host_store::{HostProfile, HostSecrets};
+use tether_core::host_store::HostProfile;
 use tether_core::noise::driver::{client_pair, client_reconnect, Transport};
 use tether_core::noise::pairing::{derive_public, generate_static_keypair};
 use tether_core::noise::{code, psk, NoiseSession};
@@ -27,7 +27,6 @@ use crate::noise_token::{
 };
 use crate::noise_ws::{NoiseWs, NoiseWsRx, NoiseWsTx};
 use crate::state::{AppState, NoiseHandle, SharedState};
-use crate::storage::KeyringHostSecrets;
 use tether_core::workspace::UploadPlan;
 
 fn fingerprint(key: &[u8]) -> String {
@@ -248,9 +247,8 @@ pub async fn core_noise_revoke(
     }
 }
 
-/// Mint a per-device REST bearer over a dedicated management session. Fail-closed:
-/// a reconnect/handshake failure (revoked or unknown device) errors rather than
-/// falling back to the shared password.
+    /// Mint a per-device REST bearer over a dedicated management session. Fail-closed:
+    /// a reconnect/handshake failure (revoked or unknown device) errors.
 pub(crate) async fn mint_noise_token(
     host_id: &str,
     address: &str,
@@ -294,13 +292,14 @@ pub(crate) fn invalidate_cached_token(state: &AppState, host_id: &str) {
     }
 }
 
-/// REST bearer for `profile`: a cached-or-freshly-minted Noise token when the
-/// host is paired, otherwise the keyring password (unchanged).
-pub(crate) async fn bearer_for_host(
-    state: &AppState,
-    profile: &HostProfile,
-) -> Result<String, String> {
-    if is_noise_host(&profile.id)? {
+    /// REST bearer for `profile`: a cached-or-freshly-minted Noise token.
+    pub(crate) async fn bearer_for_host(
+        state: &AppState,
+        profile: &HostProfile,
+    ) -> Result<String, String> {
+        if !is_noise_host(&profile.id)? {
+            return Err("host is not Noise-paired".to_string());
+        }
         {
             let cache = state
                 .noise_tokens
@@ -327,13 +326,7 @@ pub(crate) async fn bearer_for_host(
             );
         }
         Ok(token)
-    } else {
-        Ok(KeyringHostSecrets
-            .get(&profile.id)
-            .map_err(|error| error.to_string())?
-            .unwrap_or_default())
     }
-}
 
 pub(crate) async fn host_client(
     state: &AppState,

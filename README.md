@@ -39,8 +39,8 @@ Linux / macOS:
 
 ```bash
 curl -fsSL https://samlo.cloud/tether/install.sh | sh
-tether set-password
 tether start
+tether pair
 ```
 
 The installer detects your OS/arch and downloads a single self-contained binary (no bun, git, or node_modules needed) from the latest release into `~/.local/bin/tether`. If `tether` isn't found afterward, add `~/.local/bin` to your PATH (the installer prints the exact line, and the commands it prints use the full path meanwhile).
@@ -49,22 +49,22 @@ Windows (PowerShell, x64 only):
 
 ```powershell
 irm https://samlo.cloud/tether/install.ps1 | iex
-tether set-password
 tether start
+tether pair
 ```
 
 Same single binary, installed to `%LOCALAPPDATA%\Programs\tether\tether.exe` without an admin prompt, with that directory added to your user PATH — open a new terminal for it to take effect. See [the Windows server page](https://samlo.cloud/tether/windows) for supported shells, the firewall prompt on first start, and the platform's known limitations.
 
 ```bash
-tether serve | start | stop | restart | status | logs | present | set-password | update | version
+tether serve | start | stop | restart | status | logs | present | pair | update | version
 ```
 
 - **Update later:** `tether update` downloads the newest release binary and restarts.
 - **macOS** binaries are unsigned — the first run may need: `xattr -d com.apple.quarantine ~/.local/bin/tether`.
-- **Data** (sessions + password) lives in `~/.tether/config/tether.db`; override with `TETHER_DB_PATH`.
+- **Data** (sessions + device registry) lives in `~/.tether/config/tether.db`; override with `TETHER_DB_PATH`.
 - Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`, `TETHER_REPO_SLUG`.
 
-> **Security:** a password gates all access (set it on first install). The server serves TLS on `:8443` from a self-signed certificate clients pin on first pairing, alongside the plaintext `:8085` older clients use. The certificate is self-signed and CORS is open, so still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only.
+> **Security:** access is per-device. Pair with `tether pair`; clients mint a short-lived bearer over Noise. The server serves TLS on `:8443` from a self-signed certificate clients pin on first pairing, alongside the plaintext `:8085` older clients use. The certificate is self-signed and CORS is open, so still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only.
 
 ## What you get
 

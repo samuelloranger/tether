@@ -10,7 +10,7 @@ Tether is a Bun + TypeScript monorepo (Bun workspaces).
 - `crates/tether-core/` — the shared Rust core both native clients are built on: host profiles, health, WebSocket session + replay cursor, diff model, git and workspace requests. Plus `tether-proto` (wire types) and `tether-ffi` (the Swift bridge).
 - `apps/relay/` — a separate Bun service that routes encrypted push payloads to APNs. It cannot read them.
 
-There is no in-browser client: a browser can't attach the shared secret to the WebSocket upgrade.
+There is no in-browser client: a browser can't attach the Noise bearer to the WebSocket upgrade.
 
 Android is no longer supported — builds were discontinued after v2.8.12. The Expo/RN client has been removed from the tree.
 
@@ -19,13 +19,13 @@ Android is no longer supported — builds were discontinued after v2.8.12. The E
 - **PTY:** shells are spawned with `Bun.spawn(..., { terminal })` — requires **Bun ≥ 1.3.14**. On older Bun, `proc.terminal` is undefined and sessions die instantly.
 - **Holder processes:** each session's PTY runs in its own detached *holder* (`tether holder …`) that owns a unix socket. The server attaches over that socket, so the shell outlives server restarts; on boot the server reattaches to survivors.
 - **SQLite log cache:** every output chunk is written to `bun:sqlite` with an incrementing id, capped per session and pruned periodically.
-- **Auth:** a Hono middleware requires the shared password on all `/api/*` routes and the WS upgrade.
+- **Auth:** a Hono middleware requires a per-device Noise bearer token on all `/api/*` routes and the WS upgrade. Pairing is `tether pair`; there is no shared password.
 
 ## Clients
 
 Both native clients drive the same Rust core, so session handling, replay and the git/workspace views behave identically; only the shell around them differs.
 
-- **Transport:** the core opens the WebSocket itself and sends `Authorization: Bearer <token>`, which is what a browser cannot do.
+- **Transport:** the core opens the WebSocket itself and sends `Authorization: Bearer <token>` (a per-device Noise token), which is what a browser cannot do.
 - **Sessions:** every session is a tab. Each resident session keeps its own live socket and keeps streaming in the background; input and clipboard are gated to the active one. An LRU cache makes switching instant, and an evicted session's shell keeps running — reattaching replays from the cursor.
 - **Replay cursor:** the client remembers the last row id it saw and sends it as `sinceId`, so a reconnect costs only what it missed.
 - **Terminal:** desktop renders with xterm.js in the Tauri webview; iOS renders natively. Both are fed by the same parsed output.

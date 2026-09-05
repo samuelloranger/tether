@@ -306,12 +306,12 @@ export async function coreConfigPatch(
   return invoke<ServerConfig>('core_config_patch', { hostId, patch });
 }
 
-export async function coreAdminUpdate(hostId: string, current: string): Promise<void> {
-  await invoke('core_admin_update', { hostId, current });
+export async function coreAdminUpdate(hostId: string): Promise<void> {
+  await invoke('core_admin_update', { hostId });
 }
 
-export async function coreAdminRestart(hostId: string, current: string): Promise<void> {
-  await invoke('core_admin_restart', { hostId, current });
+export async function coreAdminRestart(hostId: string): Promise<void> {
+  await invoke('core_admin_restart', { hostId });
 }
 
 export async function coreAdminTestNotification(hostId: string): Promise<void> {

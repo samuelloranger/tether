@@ -8,8 +8,6 @@ pub enum FfiHostStoreError {
     Secret { message: String },
     #[error("unknown host profile: {id}")]
     UnknownProfile { id: String },
-    #[error("migrated host password could not be read back")]
-    PasswordVerification,
     #[error("migrated host profile could not be read back")]
     ProfileVerification,
 }
@@ -21,9 +19,6 @@ impl From<tether_core::host_store::HostStoreError> for FfiHostStoreError {
             tether_core::host_store::HostStoreError::Secret(message) => Self::Secret { message },
             tether_core::host_store::HostStoreError::UnknownProfile(id) => {
                 Self::UnknownProfile { id }
-            }
-            tether_core::host_store::HostStoreError::PasswordVerification => {
-                Self::PasswordVerification
             }
             tether_core::host_store::HostStoreError::ProfileVerification => {
                 Self::ProfileVerification
@@ -38,7 +33,6 @@ impl From<FfiHostStoreError> for tether_core::host_store::HostStoreError {
             FfiHostStoreError::Storage { message } => Self::Storage(message),
             FfiHostStoreError::Secret { message } => Self::Secret(message),
             FfiHostStoreError::UnknownProfile { id } => Self::UnknownProfile(id),
-            FfiHostStoreError::PasswordVerification => Self::PasswordVerification,
             FfiHostStoreError::ProfileVerification => Self::ProfileVerification,
         }
     }

@@ -49,8 +49,8 @@ pub struct Server {
     pub port: u16,
     /// A per-device bearer token minted through `tether device token`. The auth
     /// model is token-only (the shared password was removed), so this is the
-    /// credential every client request carries — `HostClient`/`SessionConfig`
-    /// still name the field `password`, but the value is a bearer token.
+    /// credential every client request carries. `SessionConfig` still names its
+    /// field `password`, but the value is a bearer token.
     pub token: String,
     pub state_dir: tempfile::TempDir,
     pub http: reqwest::Client,
@@ -214,7 +214,7 @@ impl Server {
 
     /// A client pointed at this server with an arbitrary bearer token, for the
     /// tests that assert what an unknown or malformed credential does.
-    pub fn client_with(&self, password: &str) -> HostClient {
+    pub fn client_with(&self, bearer: &str) -> HostClient {
         HostClient::new(
             HostProfile {
                 id: "e2e-alt".to_string(),
@@ -225,7 +225,7 @@ impl Server {
                 identity_name: "e2e-alt".to_string(),
                 order: 0,
             },
-            password.to_string(),
+            bearer.to_string(),
         )
     }
 

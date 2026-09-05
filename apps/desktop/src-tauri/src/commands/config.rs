@@ -45,28 +45,14 @@ pub async fn core_config_patch(
 }
 
 #[tauri::command]
-pub async fn core_admin_update(
-    app: AppHandle,
-    host_id: String,
-    current: String,
-) -> Result<(), String> {
-    let response = exec_config(&app, &host_id, |client| {
-        server_config::update_server_request(client, &current)
-    })
-    .await?;
+pub async fn core_admin_update(app: AppHandle, host_id: String) -> Result<(), String> {
+    let response = exec_config(&app, &host_id, server_config::update_server_request).await?;
     server_config::parse_admin_ok(response.status, &response.body).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn core_admin_restart(
-    app: AppHandle,
-    host_id: String,
-    current: String,
-) -> Result<(), String> {
-    let response = exec_config(&app, &host_id, |client| {
-        server_config::restart_server_request(client, &current)
-    })
-    .await?;
+pub async fn core_admin_restart(app: AppHandle, host_id: String) -> Result<(), String> {
+    let response = exec_config(&app, &host_id, server_config::restart_server_request).await?;
     server_config::parse_admin_ok(response.status, &response.body).map_err(|e| e.to_string())
 }
 

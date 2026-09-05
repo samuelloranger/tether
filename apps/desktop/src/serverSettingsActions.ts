@@ -114,7 +114,7 @@ export async function runAdminOperation(opts: {
         kind: 'success',
         text: 'Updating… Sessions survive the restart and will reconnect.',
       });
-      await updateServer(opts.hostId, '');
+      await updateServer(opts.hostId);
       opts.onRetry();
       const actual = await waitForVersion(opts.hostId);
       opts.setVersion(actual);
@@ -129,7 +129,7 @@ export async function runAdminOperation(opts: {
         kind: 'success',
         text: 'Restarting… Sessions survive and will reconnect.',
       });
-      await restartServer(opts.hostId, '');
+      await restartServer(opts.hostId);
       opts.onRetry();
     }
     opts.resetAdmin();

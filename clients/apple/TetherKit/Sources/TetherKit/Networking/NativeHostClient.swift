@@ -62,7 +62,6 @@ public enum HostClientError: Error, LocalizedError {
   case server(status: Int, message: String)
   case decodeFailed
   case unauthorized
-  case missingPassword
 
   public var errorDescription: String? {
     switch self {
@@ -75,9 +74,7 @@ public enum HostClientError: Error, LocalizedError {
     case .decodeFailed:
       "Could not decode server response"
     case .unauthorized:
-      "Unauthorized — check the password"
-    case .missingPassword:
-      "No password stored for this host"
+      "Unauthorized"
     }
   }
 }
