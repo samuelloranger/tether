@@ -49,7 +49,7 @@ public final class HostStoreAdapter {
     host: String,
     port: String,
     identityName: String,
-    scheme: String?
+    scheme: String? = nil
   ) throws -> HostProfileModel {
     let input = FfiNewHostProfile(
       name: name,

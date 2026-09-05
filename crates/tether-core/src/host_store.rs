@@ -427,7 +427,11 @@ mod tests {
         let profiles = store.list().unwrap();
         assert_eq!(profiles.len(), 1, "a scheme-less profile still loads");
         assert_eq!(profiles[0].scheme, None);
-        assert_eq!(profiles[0].scheme_or_guess(), "https", "falls back to the port");
+        assert_eq!(
+            profiles[0].scheme_or_guess(),
+            "https",
+            "falls back to the port"
+        );
     }
 
     #[test]
