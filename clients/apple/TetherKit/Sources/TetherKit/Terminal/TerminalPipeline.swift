@@ -219,8 +219,6 @@ actor TerminalPipeline {
   }
 
   private func handleOutbound(_ frame: OutboundFrame) async {
-    // `focus` has no Noise frame — the server treats a Noise client as the sole,
-    // always-focused viewer of its session.
     guard let channel = noiseChannel, let id = noiseSessionId else { return }
     switch frame {
     case let .input(text, key):
@@ -229,8 +227,8 @@ actor TerminalPipeline {
     case let .paste(text, key):
       guard stillCurrent(key) else { return }
       try? await channel.sendInput(id: id, text: emulator?.pastePayload(text: text) ?? text)
-    case .focus:
-      break
+    case let .focus(focused):
+      try? await channel.sendFocus(id: id, focused: focused)
     case let .resize(newCols, newRows):
       if applyLocalResize(cols: newCols, rows: newRows) {
         try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
@@ -261,10 +259,11 @@ actor TerminalPipeline {
   }
 
   /// Tracks the last focus value so `.inactive` then `.background` for one
-  /// scenePhase transition is not treated as two events. Noise has no focus
-  /// frame — the server treats a Noise client as always-focused.
+  /// scenePhase transition is not treated as two events.
   func sendFocus(focused: Bool) {
+    guard lastFocusSent != focused else { return }
     lastFocusSent = focused
+    outbound.yield(.focus(focused))
   }
 
   // MARK: - Publishing
