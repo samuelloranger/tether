@@ -99,11 +99,32 @@ final class PairDeviceLogicTests: XCTestCase {
 
   // MARK: - serverURL helper
 
-  func testServerURLAddsHTTPSWhenSchemeMissing() {
+  func testServerURLBareHostPort8085IsHTTP() {
     XCTAssertEqual(
       PairDeviceView.serverURL(from: "192.168.1.9:8085")?.absoluteString,
-      "https://192.168.1.9:8085"
+      "http://192.168.1.9:8085"
     )
+  }
+
+  func testServerURLBareHostNoPortIs8085HTTP() {
+    XCTAssertEqual(
+      PairDeviceView.serverURL(from: "box")?.absoluteString,
+      "http://box:8085"
+    )
+  }
+
+  func testServerURLPort8443IsHTTPS() {
+    XCTAssertEqual(
+      PairDeviceView.serverURL(from: "box:8443")?.absoluteString,
+      "https://box:8443"
+    )
+  }
+
+  func testServerURLHTTPSWithoutPortIs443() {
+    let url = PairDeviceView.serverURL(from: "https://box")
+    XCTAssertEqual(url?.scheme, "https")
+    XCTAssertEqual(url?.host, "box")
+    XCTAssertTrue(PairDeviceView.hostAndPort(from: "https://box")! == ("box", "443"))
   }
 
   func testServerURLKeepsExplicitScheme() {

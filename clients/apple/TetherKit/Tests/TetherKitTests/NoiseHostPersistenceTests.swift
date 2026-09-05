@@ -78,8 +78,8 @@ final class NoiseHostPersistenceTests: XCTestCase {
   func testHostAndPortSplitsTypedAddress() {
     XCTAssertTrue(PairDeviceView.hostAndPort(from: "192.168.1.9:8443")! == ("192.168.1.9", "8443"))
     XCTAssertTrue(PairDeviceView.hostAndPort(from: "https://box:9000")! == ("box", "9000"))
-    // Missing port defaults to the Noise TLS port.
-    XCTAssertTrue(PairDeviceView.hostAndPort(from: "box")! == ("box", "8443"))
+    // Missing port defaults to the plaintext listener.
+    XCTAssertTrue(PairDeviceView.hostAndPort(from: "box")! == ("box", "8085"))
     XCTAssertNil(PairDeviceView.hostAndPort(from: "   "))
   }
 }
