@@ -195,9 +195,12 @@ async function applyMessage(
 /**
  * The application protocol that runs OVER an already-established `ServerChannel`
  * (the Noise handshake + authorization happened before this is called). It is a
- * sealed mirror of the password-authed `/api/ws` terminal protocol: `start`
+ * sealed mirror of the bearer-authed `/api/ws` terminal protocol: `start`
  * spawns/attaches a session and streams its output back sealed, `input` writes
- * keystrokes, `resize` refits the PTY.
+ * keystrokes, `resize` refits the PTY, `focus` suppresses push while attached.
+ * The PTY subset matches REST, but subscribers here start unfocused — a Noise
+ * session is a background channel until the client sends `{t:'focus', focused:true}`;
+ * REST `/api/ws` marks its sole subscriber focused on attach.
  *
  * Every server->client frame is `channel.seal(JSON.stringify(...))`; every
  * client->server frame is `JSON.parse(channel.open(wire))`. The loop ends — and

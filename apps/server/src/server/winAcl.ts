@@ -4,7 +4,7 @@
 // Node maps `chmod` on Windows onto the read-only attribute: a 0o600 request
 // reads back as 0o666 and grants nothing. So every `mkdirSync(dir, {mode})` and
 // `chmodSync(path, 0o600)` in this codebase is a silent no-op there, and the
-// TLS private key, the SQLite DB holding the argon2 password hash, the holder
+// TLS private key, the SQLite DB (device registry and bearer tokens), the holder
 // IPC sockets and the present-control token rest entirely on whatever ACL they
 // inherit from the user profile.
 //
