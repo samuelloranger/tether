@@ -792,7 +792,7 @@ public final class SessionStore {
   private func mintNoiseToken(hostId: String) async throws -> (token: String, expiresAt: Date) {
     guard
       let host = hosts.first(where: { $0.id == hostId }),
-      let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+      let url = SessionStore.noiseBaseURL(for: host)
     else {
       throw HostClientError.invalidURL
     }
@@ -856,7 +856,7 @@ public final class SessionStore {
     lastNoisePingAt[hostId] = now
 
     guard let host = hosts.first(where: { $0.id == hostId }),
-          let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+          let url = SessionStore.noiseBaseURL(for: host)
     else {
       markHostFailure(hostId)
       return
@@ -938,7 +938,7 @@ public final class SessionStore {
   private func connectTerminalNoise(hostId: String, sessionId: String) async {
     guard
       let host = hosts.first(where: { $0.id == hostId }),
-      let url = SessionStore.noiseBaseURL(host: host.host, port: host.port)
+      let url = SessionStore.noiseBaseURL(for: host)
     else {
       errorMessage = HostClientError.invalidURL.localizedDescription
       return
@@ -952,10 +952,11 @@ public final class SessionStore {
     )
   }
 
-  /// Base URL for the Noise handshake. Noise runs over TLS (`wss`), so this is
-  /// `https://…`; the port is the host's stored port.
-  static func noiseBaseURL(host: String, port: String) -> URL? {
-    URL(string: "https://\(host):\(port)")
+  /// `http`/`https` base for the Noise handshake, matching the host's scheme;
+  /// `NoiseSessionClient` maps it to `ws`/`wss`.
+  static func noiseBaseURL(for host: HostProfileModel) -> URL? {
+    let scheme = HostScheme.scheme(forHost: host.id, port: host.port)
+    return URL(string: "\(scheme)://\(host.host):\(host.port)")
   }
 
   private func updateHealth(for hostId: String, status: UInt16) {

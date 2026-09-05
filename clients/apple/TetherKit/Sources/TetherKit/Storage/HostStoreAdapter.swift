@@ -21,11 +21,12 @@ public struct HostProfileModel: Identifiable, Equatable, Sendable {
   }
 
   public var baseHTTPURL: URL? {
-    URL(string: "http://\(host):\(port)")
+    URL(string: "\(HostScheme.scheme(forHost: id, port: port))://\(host):\(port)")
   }
 
   public var baseWSURL: URL? {
-    URL(string: "ws://\(host):\(port)")
+    let ws = HostScheme.isSecure(forHost: id, port: port) ? "wss" : "ws"
+    return URL(string: "\(ws)://\(host):\(port)")
   }
 }
 

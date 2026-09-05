@@ -27,8 +27,7 @@ public struct DevicesView: View {
     client: NoiseSessionClient = NoiseSessionClient()
   ) {
     let host = store.hosts.first(where: { $0.id == hostId })
-    let url = SessionStore.noiseBaseURL(host: host?.host ?? "", port: host?.port ?? "8443")
-      ?? URL(string: "https://localhost")!
+    let url = host.flatMap { SessionStore.noiseBaseURL(for: $0) } ?? URL(string: "https://localhost")!
     _model = State(initialValue: DevicesModel(client: client, hostId: hostId, url: url))
     hostName = host?.name ?? "this host"
     skipAutoLoad = false
