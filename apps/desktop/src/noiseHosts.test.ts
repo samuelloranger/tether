@@ -1,29 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { recordHostScheme } from './hostScheme';
+import { describe, expect, it } from 'bun:test';
 import { noiseSessionAddress } from './noiseHosts';
 import type { HostProfile } from './types';
 
-function memoryStorage(): Storage {
-  const map = new Map<string, string>();
-  return {
-    getItem: (key) => map.get(key) ?? null,
-    setItem: (key, value) => {
-      map.set(key, value);
-    },
-    removeItem: (key) => {
-      map.delete(key);
-    },
-    clear: () => {
-      map.clear();
-    },
-    key: (i) => [...map.keys()][i] ?? null,
-    get length() {
-      return map.size;
-    },
-  };
-}
-
-function profile(port: string): HostProfile {
+function profile(port: string, scheme?: 'http' | 'https'): HostProfile {
   return {
     id: 'host-1',
     name: 'box',
@@ -32,18 +11,11 @@ function profile(port: string): HostProfile {
     port,
     identityName: '',
     order: 0,
+    scheme,
   };
 }
 
 describe('noiseSessionAddress', () => {
-  beforeEach(() => {
-    (globalThis as { localStorage?: Storage }).localStorage = memoryStorage();
-  });
-
-  afterEach(() => {
-    delete (globalThis as { localStorage?: Storage }).localStorage;
-  });
-
   it('dials wss on the TLS ports', () => {
     expect(noiseSessionAddress(profile('443'))).toBe('wss://tether.example:443/api/noise/session');
     expect(noiseSessionAddress(profile('8443'))).toBe(
@@ -56,8 +28,7 @@ describe('noiseSessionAddress', () => {
   });
 
   it('honours a recorded https scheme on a non-standard port', () => {
-    recordHostScheme('host-1', 'https');
-    expect(noiseSessionAddress(profile('9999'))).toBe(
+    expect(noiseSessionAddress(profile('9999', 'https'))).toBe(
       'wss://tether.example:9999/api/noise/session',
     );
   });

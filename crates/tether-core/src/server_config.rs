@@ -215,6 +215,7 @@ mod tests {
                 port: "8085".into(),
                 identity_name: "studio".into(),
                 order: 0,
+                scheme: None,
             },
             "secret-token",
         )

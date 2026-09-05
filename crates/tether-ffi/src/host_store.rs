@@ -16,6 +16,7 @@ pub struct FfiHostProfile {
     pub port: String,
     pub identity_name: String,
     pub order: u32,
+    pub scheme: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -25,6 +26,7 @@ pub struct FfiNewHostProfile {
     pub host: String,
     pub port: String,
     pub identity_name: String,
+    pub scheme: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
@@ -46,6 +48,7 @@ impl From<HostProfile> for FfiHostProfile {
             port: profile.port,
             identity_name: profile.identity_name,
             order: profile.order as u32,
+            scheme: profile.scheme,
         }
     }
 }
@@ -58,6 +61,7 @@ impl From<FfiNewHostProfile> for NewHostProfile {
             host: input.host,
             port: input.port,
             identity_name: input.identity_name,
+            scheme: input.scheme,
         }
     }
 }
@@ -185,6 +189,7 @@ mod tests {
                 host: "dev.local".to_string(),
                 port: "8085".to_string(),
                 identity_name: "dev".to_string(),
+                scheme: None,
             })
             .unwrap();
         assert_eq!(store.list().unwrap(), vec![profile]);

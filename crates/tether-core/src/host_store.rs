@@ -22,6 +22,23 @@ pub struct HostProfile {
     pub port: String,
     pub identity_name: String,
     pub order: usize,
+    /// Transport recorded at pairing: `"http"` or `"https"`. `None` on profiles
+    /// stored before the field existed — `scheme_or_guess` falls back to the
+    /// port. Both REST and the Noise socket read it, so a TLS-fronted host on a
+    /// non-standard port is dialled correctly instead of guessed from the port.
+    #[serde(default)]
+    pub scheme: Option<String>,
+}
+
+impl HostProfile {
+    /// Recorded scheme, else a port guess (443/8443 → `https`) for pre-field hosts.
+    pub fn scheme_or_guess(&self) -> &str {
+        match self.scheme.as_deref() {
+            Some(scheme) => scheme,
+            None if self.port == "443" || self.port == "8443" => "https",
+            None => "http",
+        }
+    }
 }
 
 /// Creation input deliberately excludes core-owned identity and ordering.
@@ -32,6 +49,7 @@ pub struct NewHostProfile {
     pub host: String,
     pub port: String,
     pub identity_name: String,
+    pub scheme: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -112,6 +130,7 @@ where
                 port: legacy_port,
                 identity_name: String::new(),
                 order: profiles.len(),
+                scheme: None,
             };
             profiles.push(profile.clone());
             self.write(&profiles)?;
@@ -155,6 +174,7 @@ where
             port: input.port,
             identity_name: input.identity_name,
             order: profiles.len(),
+            scheme: input.scheme,
         };
         profiles.push(profile.clone());
         self.write(&profiles)?;
@@ -375,7 +395,39 @@ mod tests {
             host: format!("{id}.local"),
             port: "8085".to_string(),
             identity_name: id.to_string(),
+            scheme: None,
         }
+    }
+
+    #[test]
+    fn scheme_or_guess_prefers_recorded_then_port() {
+        let mut profile = HostProfile {
+            id: "h".to_string(),
+            name: "n".to_string(),
+            color: "#000".to_string(),
+            host: "h.local".to_string(),
+            port: "8085".to_string(),
+            identity_name: String::new(),
+            order: 0,
+            scheme: None,
+        };
+        assert_eq!(profile.scheme_or_guess(), "http");
+        profile.port = "443".to_string();
+        assert_eq!(profile.scheme_or_guess(), "https");
+        profile.port = "9999".to_string();
+        profile.scheme = Some("https".to_string());
+        assert_eq!(profile.scheme_or_guess(), "https");
+    }
+
+    #[test]
+    fn profile_stored_without_scheme_reads_back_as_none() {
+        let stored = r##"[{"id":"h","name":"n","color":"#000","host":"h.local","port":"443","identityName":"","order":0}]"##;
+        let storage = MemoryStorage::seeded(&[(HOST_PROFILES_KEY, stored)]);
+        let store = HostStore::new(storage, || "h".to_string());
+        let profiles = store.list().unwrap();
+        assert_eq!(profiles.len(), 1, "a scheme-less profile still loads");
+        assert_eq!(profiles[0].scheme, None);
+        assert_eq!(profiles[0].scheme_or_guess(), "https", "falls back to the port");
     }
 
     #[test]
@@ -411,6 +463,7 @@ mod tests {
                 host: "10.0.0.1".to_string(),
                 port: "8085".to_string(),
                 identity_name: "first".to_string(),
+                scheme: None,
             })
             .unwrap();
         let second = store
@@ -420,6 +473,7 @@ mod tests {
                 host: "10.0.0.2".to_string(),
                 port: "8085".to_string(),
                 identity_name: "second".to_string(),
+                scheme: None,
             })
             .unwrap();
 
@@ -454,6 +508,7 @@ mod tests {
                 port: "9000".to_string(),
                 identity_name: String::new(),
                 order: 0,
+                scheme: None,
             }]
         );
         assert!(storage.get(HOST_PROFILES_KEY).unwrap().contains("host-1"));

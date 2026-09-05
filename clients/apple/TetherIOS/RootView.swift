@@ -137,9 +137,15 @@ struct RootView: View {
     }
     .sheet(isPresented: $showPairing) {
       NavigationStack {
-        PairDeviceView(hostId: UUID().uuidString) { pairId, host, port, _ in
+        PairDeviceView(hostId: UUID().uuidString) { pairId, host, port, scheme, _ in
           do {
-            try store.createNoiseHost(name: "", host: host, port: port, pairHostId: pairId)
+            try store.createNoiseHost(
+              name: "",
+              host: host,
+              port: port,
+              pairHostId: pairId,
+              scheme: scheme
+            )
           } catch {
             store.errorMessage = error.localizedDescription
           }

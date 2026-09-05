@@ -276,11 +276,7 @@ pub async fn core_noise_token(host_id: String, address: String) -> Result<TokenR
 }
 
 pub(crate) fn noise_session_address(profile: &HostProfile) -> String {
-    // ponytail: mirrors the port fallback in the webview's `hostScheme()`. A
-    // scheme the user recorded for a TLS host on a non-standard port lives in
-    // localStorage, which this side cannot read — move it onto HostProfile if
-    // that case shows up.
-    let proto = if profile.port == "443" || profile.port == "8443" {
+    let proto = if profile.scheme_or_guess() == "https" {
         "wss"
     } else {
         "ws"
@@ -766,6 +762,7 @@ mod tests {
             port: port.to_string(),
             identity_name: String::new(),
             order: 0,
+            scheme: None,
         }
     }
 
@@ -782,6 +779,16 @@ mod tests {
         assert_eq!(
             noise_session_address(&profile_on_port("8085")),
             "ws://tether.example:8085/api/noise/session"
+        );
+    }
+
+    #[test]
+    fn session_address_honours_recorded_scheme_on_nonstandard_port() {
+        let mut profile = profile_on_port("9999");
+        profile.scheme = Some("https".to_string());
+        assert_eq!(
+            noise_session_address(&profile),
+            "wss://tether.example:9999/api/noise/session"
         );
     }
 
