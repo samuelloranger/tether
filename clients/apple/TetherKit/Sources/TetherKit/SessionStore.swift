@@ -143,6 +143,29 @@ public final class SessionStore {
   }
 
   #if DEBUG
+  /// Test-only: the visible terminal grid as plain text, so an XCUITest can read
+  /// what the CLIENT actually renders (the server oracle cannot see this). Rows
+  /// are joined with newlines and trailing blanks trimmed.
+  public var terminalGridText: String {
+    guard let bytes = terminalSnapshot,
+          let (header, cells) = try? GridSnapshotDecoder.decode(bytes)
+    else { return "" }
+    let cols = Int(header.cols)
+    let rows = Int(header.rows)
+    guard cols > 0, cells.count >= cols * rows else { return "" }
+    var out = ""
+    for r in 0..<rows {
+      var line = ""
+      for c in 0..<cols {
+        let cp = cells[r * cols + c].codepoint
+        line.append(cp == 0 ? " " : Character(UnicodeScalar(cp) ?? " "))
+      }
+      while line.hasSuffix(" ") { line.removeLast() }
+      out += line + "\n"
+    }
+    return out
+  }
+
   private struct PreseedHost: Decodable {
     let name: String
     let host: String

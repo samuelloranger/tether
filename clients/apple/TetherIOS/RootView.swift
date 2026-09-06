@@ -95,6 +95,15 @@ struct RootView: View {
       )
       #endif
 
+      #if DEBUG
+      // A hidden text mirror of the terminal grid so an XCUITest can read what
+      // the client actually renders. Near-zero visual footprint.
+      Text(verbatim: store.terminalGridText)
+        .frame(width: 1, height: 1)
+        .opacity(0.001)
+        .accessibilityIdentifier("terminalGrid")
+      #endif
+
     }
     // The terminal is the app's main surface, so the window behind it carries the
     // terminal's colour. Anything the terminal does not cover — the home
