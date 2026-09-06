@@ -125,6 +125,7 @@ function fakePty(): FakePty {
       state.focuses.push({ id, focused });
       client.focused = focused;
     }) as SessionDeps['setSessionFocus'],
+    getReplayLogs: () => ({ reset: false, logs: [] }),
     ...emptyRegistry(),
     identity: { deviceId: '' },
   };
@@ -208,6 +209,73 @@ describe('runNoiseSession', () => {
     await new Promise((r) => setTimeout(r, 5));
 
     expect(pty.kicks).toEqual([]);
+  });
+
+  // Switch-back (and kill-relaunch, long-background) drop the Noise socket.
+  // SIGWINCH is a no-op when the TUI is idle, so missed terminal_logs must
+  // be replayed. Old clients omit sinceId and keep the SIGWINCH-only path.
+  test("'start' with sinceId replays missed logs as sealed output before live subscribe", async () => {
+    const pty = fakePty();
+    pty.live.add('s1');
+    const replayed: Array<{ sessionId: string; sinceId: number }> = [];
+    pty.deps.getReplayLogs = (sessionId, sinceId) => {
+      replayed.push({ sessionId, sinceId });
+      return {
+        reset: false,
+        logs: [
+          { id: 11, chunk: 'LINE_011\n' },
+          { id: 12, chunk: 'LINE_012\n' },
+        ],
+      };
+    };
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1', cols: 80, rows: 24, sinceId: 10 })]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(replayed).toEqual([{ sessionId: 's1', sinceId: 10 }]);
+    const msgs = io.sent.map(
+      (f) => JSON.parse(dec.decode(f)) as { t: string; chunk?: string; id?: number },
+    );
+    expect(msgs.filter((m) => m.t === 'output')).toEqual([
+      { t: 'output', chunk: 'LINE_011\nLINE_012\n', id: 12 },
+    ]);
+    expect(pty.subscriptions).toHaveLength(1);
+    expect(pty.kicks).toEqual(['s1']);
+  });
+
+  test("'start' without sinceId does not replay (old clients)", async () => {
+    const pty = fakePty();
+    pty.live.add('s1');
+    let called = 0;
+    pty.deps.getReplayLogs = () => {
+      called += 1;
+      return { reset: false, logs: [{ id: 1, chunk: 'secret\n' }] };
+    };
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1' })]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(called).toBe(0);
+    expect(io.sent).toHaveLength(0);
+    expect(pty.kicks).toEqual(['s1']);
+  });
+
+  test("'start' sends reset before replay when the catch-up was trimmed", async () => {
+    const pty = fakePty();
+    pty.deps.getReplayLogs = () => ({
+      reset: true,
+      logs: [{ id: 99, chunk: 'TAIL\n' }],
+    });
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1', sinceId: 0 })]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent.map(
+      (f) => JSON.parse(dec.decode(f)) as { t: string; id?: string | number; chunk?: string },
+    );
+    expect(msgs.map((m) => m.t)).toEqual(['reset', 'output']);
+    expect(msgs[0]).toEqual({ t: 'reset', id: 's1' });
+    expect(msgs[1]).toEqual({ t: 'output', chunk: 'TAIL\n', id: 99 });
   });
 
   test("a PTY 'output' event is sent back sealed to the client", async () => {

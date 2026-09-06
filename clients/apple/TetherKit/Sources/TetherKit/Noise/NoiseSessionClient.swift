@@ -29,6 +29,9 @@ public enum NoiseClientError: Error, LocalizedError {
 public enum NoiseServerMessage: Sendable, Equatable {
   case output(id: String, chunk: String)
   case exit(id: String, exitCode: Int?)
+  /// Server wiped the catch-up window; the client must clear its emulator
+  /// before applying the replay that follows.
+  case reset(id: String)
   /// Reply to `devices.list`: the full roster for this host.
   case devices([DeviceInfo])
   /// Reply to `devices.revoke`: the verdict for one target.
@@ -267,13 +270,11 @@ public final class NoiseChannel {
     id: String,
     command: String? = nil,
     cols: UInt16? = nil,
-    rows: UInt16? = nil
+    rows: UInt16? = nil,
+    sinceId: UInt64 = 0
   ) async throws {
-    var obj: [String: Any] = ["t": "start", "id": id]
-    if let command { obj["command"] = command }
-    if let cols { obj["cols"] = Int(cols) }
-    if let rows { obj["rows"] = Int(rows) }
-    try await sendSealed(obj)
+    try await sendSealed(Self.startRequest(
+      id: id, command: command, cols: cols, rows: rows, sinceId: sinceId))
   }
 
   public func sendInput(id: String, text: String) async throws {
@@ -324,6 +325,22 @@ public final class NoiseChannel {
     ["t": "devices.revoke", "target": target]
   }
 
+  /// The `start` request body. Always carries `sinceId` (0 = full retained
+  /// tail) so the server can replay what this client missed.
+  static func startRequest(
+    id: String,
+    command: String?,
+    cols: UInt16?,
+    rows: UInt16?,
+    sinceId: UInt64
+  ) -> [String: Any] {
+    var obj: [String: Any] = ["t": "start", "id": id, "sinceId": Int(sinceId)]
+    if let command { obj["command"] = command }
+    if let cols { obj["cols"] = Int(cols) }
+    if let rows { obj["rows"] = Int(rows) }
+    return obj
+  }
+
   /// The `focus` request body. Pure + static, as above.
   static func focusRequest(id: String, focused: Bool) -> [String: Any] {
     ["t": "focus", "id": id, "focused": focused]
@@ -362,6 +379,8 @@ extension NoiseServerMessage: Decodable {
     case "exit":
       let exitCode = try container.decodeIfPresent(Int.self, forKey: .exitCode)
       self = .exit(id: try Self.decodeId(from: container), exitCode: exitCode)
+    case "reset":
+      self = .reset(id: try Self.decodeId(from: container))
     case "devices":
       let items = try container.decode([DeviceInfo].self, forKey: .items)
       self = .devices(items)
