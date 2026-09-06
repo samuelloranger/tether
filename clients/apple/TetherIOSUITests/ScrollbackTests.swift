@@ -41,7 +41,12 @@ final class ScrollbackTests: XCTestCase {
     surfaceA.tap()
     _ = app.textViews["terminalInput"].firstMatch.waitForExistence(timeout: 5)
     app.typeText("for i in $(seq 1 120); do printf 'SCROLL_LINE_%03d\\n' $i; sleep 0.12; done\n")
-    sleep(2)
+    sleep(4)
+
+    // CONTROL: prove A is actually rendering the lines WHILE ACTIVE, before any
+    // switch. If this shows SCROLL_LINE_* and the post-switch dump does not, the
+    // loss is caused by the switch — not by A never rendering.
+    dumpGrid(app, "PRESWITCH")
 
     // Switch AWAY to a new tab while A is still printing.
     newBtn.tap()

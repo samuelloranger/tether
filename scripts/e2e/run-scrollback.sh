@@ -51,14 +51,19 @@ TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
   >"$XLOG" 2>&1 || true
 
 dump() { awk "/GRID_$1_START/{f=1;next} /GRID_$1_END/{f=0} f" "$XLOG" 2>/dev/null || true; }
+PRESWITCH="$(dump PRESWITCH)"
 SWITCHBACK="$(dump SWITCHBACK)"
 SCROLLUP="$(dump SCROLLUP)"
+PRE_HAS=0; echo "$PRESWITCH" | grep -q "SCROLL_LINE_" && PRE_HAS=1
 
 SERVER_LATE="$(TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts SCROLL_LINE_118 2>/dev/null || echo 0)"
 SERVER_EARLY="$(TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts SCROLL_LINE_005 2>/dev/null || echo 0)"
 CB_LATE=0; echo "$SWITCHBACK" | grep -q "SCROLL_LINE_118" && CB_LATE=1
 CB_EARLY=0; echo "$SCROLLUP" | grep -q "SCROLL_LINE_005" && CB_EARLY=1
 
+echo "=== grid BEFORE switch (control: A while active) ==="
+echo "$PRESWITCH"
+echo "control: A rendered SCROLL_LINE while active: $PRE_HAS"
 echo "=== grid at switch-back ==="
 echo "$SWITCHBACK"
 echo "=== grid after scroll-up ==="
@@ -73,6 +78,11 @@ if [ "$SERVER_LATE" -eq 0 ]; then
   tail -30 "$XLOG"
   exit 1
 fi
+if [ "$PRE_HAS" -eq 0 ]; then
+  echo "INCONCLUSIVE: A did not render SCROLL_LINE even WHILE ACTIVE — cannot attribute the empty switch-back to the switch (grid seam or driving issue, not proven loss-on-switch)"
+  exit 1
+fi
+echo "CONTROL OK: A rendered the lines while active; any loss after the switch is caused by the switch."
 if [ "$CB_LATE" -eq 0 ]; then
   echo "FINDING: after switch-back the client is MISSING even the latest output produced while inactive (SCROLL_LINE_118 absent) — inactive-tab streaming is broken"
 elif [ "$CB_EARLY" -eq 0 ]; then
