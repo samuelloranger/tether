@@ -125,6 +125,29 @@ final class NoiseSessionClientTests: XCTestCase {
       try JSONDecoder().decode(NoiseServerMessage.self, from: exit),
       .exit(id: "sess-1", exitCode: 0)
     )
+
+    let reset = Data(#"{"t":"reset","id":"term-1"}"#.utf8)
+    XCTAssertEqual(
+      try JSONDecoder().decode(NoiseServerMessage.self, from: reset),
+      .reset(id: "term-1")
+    )
+  }
+
+  func testStartRequestCarriesSinceId() {
+    let obj = NoiseChannel.startRequest(
+      id: "term-1", command: nil, cols: 80, rows: 24, sinceId: 42)
+    XCTAssertEqual(obj["t"] as? String, "start")
+    XCTAssertEqual(obj["id"] as? String, "term-1")
+    XCTAssertEqual(obj["cols"] as? Int, 80)
+    XCTAssertEqual(obj["rows"] as? Int, 24)
+    XCTAssertEqual((obj["sinceId"] as? NSNumber)?.intValue, 42)
+  }
+
+  func testOutputCursorAppliesSameIdAsChunkContinuation() {
+    XCTAssertTrue(NoiseOutputCursor.shouldApply(id: 1, cursor: 0))
+    XCTAssertTrue(NoiseOutputCursor.shouldApply(id: 120, cursor: 10))
+    XCTAssertTrue(NoiseOutputCursor.shouldApply(id: 120, cursor: 120))
+    XCTAssertFalse(NoiseOutputCursor.shouldApply(id: 9, cursor: 10))
   }
 
   func testWebSocketURLSchemeMapping() {

@@ -1,3 +1,4 @@
+import { getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
@@ -13,6 +14,8 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { REPLAY_BYTE_BUDGET, replayOutputFrames } from './replayPlan';
+import { getReplayLogs as readReplayLogs } from './replayRead';
 import { testEvent } from './testEvents';
 
 /**
@@ -39,11 +42,23 @@ export interface SessionDeps {
   setSessionFocus: typeof setSessionFocus;
   kickPtySize: typeof kickPtySize;
   isSessionLive: (id: string) => boolean;
+  /** Byte-bounded catch-up for a Noise `start` that carries `sinceId`. */
+  getReplayLogs: (
+    sessionId: string,
+    sinceId: number,
+  ) => { reset: boolean; logs: Array<{ id: number; chunk: string }> };
   listDevices: typeof listDevices;
   revokeDevice: typeof revokeDevice;
   resolveTarget: typeof resolveTarget;
   identity: SessionIdentity;
   mintToken?: (deviceId: string) => { token: string; expiresAt: string };
+}
+
+function defaultGetReplayLogs(sessionId: string, sinceId: number) {
+  const plan = readReplayLogs(sessionId, sinceId, REPLAY_BYTE_BUDGET);
+  const sess = getSession(sessionId);
+  const pruned = sinceId > 0 && sess !== null && sinceId < sess.pruned_before;
+  return { reset: plan.reset || pruned, logs: plan.logs };
 }
 
 function defaultMintToken(deviceId: string): { token: string; expiresAt: string } {
@@ -62,6 +77,7 @@ const defaultDeps: SessionDeps = {
   setSessionFocus,
   kickPtySize,
   isSessionLive: (id) => getActiveSession(id) !== undefined,
+  getReplayLogs: defaultGetReplayLogs,
   listDevices,
   revokeDevice,
   resolveTarget,
@@ -71,7 +87,7 @@ const defaultDeps: SessionDeps = {
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
 type ClientMessage =
-  | { t: 'start'; id: string; command?: string; cols?: number; rows?: number }
+  | { t: 'start'; id: string; command?: string; cols?: number; rows?: number; sinceId?: number }
   | { t: 'input'; id: string; text: string }
   | { t: 'resize'; id: string; cols: number; rows: number }
   | { t: 'focus'; id: string; focused: boolean }
@@ -115,6 +131,25 @@ const decoder = new TextDecoder();
 // AFTER the nonce advanced, desyncing the cipher — so we chunk, and also treat
 // any seal/send failure as fatal (below).
 const MAX_OUTPUT_CHARS = 16 * 1024;
+
+function sendOutputChunks(
+  sendSealed: (obj: unknown) => boolean,
+  id: number,
+  chunk: string,
+): boolean {
+  for (let i = 0; i < chunk.length; i += MAX_OUTPUT_CHARS) {
+    if (
+      !sendSealed({
+        t: 'output',
+        chunk: chunk.slice(i, i + MAX_OUTPUT_CHARS),
+        id,
+      })
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 /**
  * Handle the device-management control messages (`devices.list` /
@@ -167,11 +202,10 @@ async function applyMessage(
   if (msg.t === 'start') {
     const cols = msg.cols ?? 80;
     const rows = msg.rows ?? 24;
-    // A switch-back reattaches to a PTY that is already running. The fit does not
-    // move (so recomputeSize stays silent) and Noise does not replay logs, so
-    // nothing repaints — a full-screen TUI (Ink/cursor-agent redraws only on
-    // SIGWINCH) would show a frozen frame. Kick one SIGWINCH after subscribing.
-    // A fresh spawn draws itself, so only kick when the session was already live.
+    // A switch-back reattaches to a PTY that is already running. The fit does
+    // not move (so recomputeSize stays silent). SIGWINCH is a no-op when the
+    // TUI is idle, so a client that sends sinceId also gets a log replay.
+    // Old clients omit sinceId and keep the SIGWINCH-only path.
     const wasLive = d.isSessionLive(msg.id);
     try {
       await d.startSession(msg.id, msg.command, cols, rows);
@@ -180,13 +214,28 @@ async function applyMessage(
       return;
     }
     attachments.get(msg.id)?.unsub(); // replace any prior subscription (a re-start)
+
+    const sinceId =
+      typeof msg.sinceId === 'number' && Number.isFinite(msg.sinceId) ? msg.sinceId : undefined;
+    if (sinceId !== undefined) {
+      const plan = d.getReplayLogs(msg.id, sinceId);
+      if (plan.reset && !sendSealed({ t: 'reset', id: msg.id })) return;
+      for (const frame of replayOutputFrames(plan.logs)) {
+        if (!sendOutputChunks(sendSealed, frame.id, frame.chunk)) return;
+      }
+      testEvent('replay', {
+        session: msg.id,
+        count: plan.logs.length,
+        bytes: plan.logs.reduce((n, log) => n + Buffer.byteLength(log.chunk), 0),
+        reset: plan.reset,
+      });
+    }
+
     const sub = makeSubscriber(msg.id);
     const unsub = d.subscribeToSession(msg.id, sub, cols, rows);
     attachments.set(msg.id, { unsub, sub });
     if (wasLive) d.kickPtySize(msg.id);
-    // No sinceId/replay on this path — the oracle records that a reattach
-    // subscribed live only (wasLive) and whether a SIGWINCH kick followed.
-    testEvent('noise_start', { session: msg.id, wasLive, cols, rows });
+    testEvent('noise_start', { session: msg.id, wasLive, cols, rows, sinceId: sinceId ?? null });
   } else if (msg.t === 'input') {
     testEvent('noise_input', { session: msg.id, bytes: msg.text.length });
     d.writeToSession(msg.id, msg.text);
@@ -272,17 +321,7 @@ export async function runNoiseSession(
   const makeSubscriber = (id: string): FocusSubscriber => {
     const onData: FocusSubscriber = (data) => {
       if (data.type === 'output') {
-        // Chunk so each sealed frame's plaintext stays under the FFI buffer.
-        for (let i = 0; i < data.chunk.length; i += MAX_OUTPUT_CHARS) {
-          if (
-            !sendSealed({
-              t: 'output',
-              chunk: data.chunk.slice(i, i + MAX_OUTPUT_CHARS),
-              id: data.id,
-            })
-          )
-            break;
-        }
+        sendOutputChunks(sendSealed, data.id, data.chunk);
       } else if (data.type === 'exit') {
         sendSealed({ t: 'exit', id, exitCode: data.exitCode });
       }

@@ -5,7 +5,8 @@ import XCTest
 /// second marker after a delay (which fires while backgrounded, once iOS has
 /// suspended the socket). After reopening it dumps the client's rendered grid so
 /// the orchestration can compare what the CLIENT shows against the server's
-/// terminal_logs — the Noise path does no replay, so this measures the gap.
+/// terminal_logs. Noise `start` now replays from `sinceId`, so GAP_AFTER should
+/// land on reopen rather than staying missing.
 final class ReconnectReplayTests: XCTestCase {
   override func setUpWithError() throws {
     continueAfterFailure = false

@@ -1,10 +1,10 @@
 import XCTest
 
-/// Test #14 — the faithful repro: run REAL Claude Code (a TUI agent) in a session,
-/// have it print pages of output, switch away, switch back BY IDENTITY, and
-/// capture SCREENSHOTS at each step. Assertions are made by a human/vision review
-/// of the screenshots (ground truth of what the surface renders) — never the
-/// store.terminalSnapshot seam, which proved unreliable.
+/// Test #14 — the faithful repro: run a REAL agent TUI (cursor-agent; Claude Code
+/// hits the user's session limit) in a session, have it print pages of output,
+/// switch away, switch back BY IDENTITY, and capture SCREENSHOTS at each step.
+/// Assertions are made by a human/vision review of the screenshots (ground truth
+/// of what the surface renders) — never the store.terminalSnapshot seam.
 final class AgentScrollbackTests: XCTestCase {
   override func setUpWithError() throws {
     continueAfterFailure = false
@@ -47,28 +47,23 @@ final class AgentScrollbackTests: XCTestCase {
     let aId = activeId(app)
     print("A_ID=\(aId)")
 
-    // Launch Claude Code. The folder is pre-trusted (orchestration sets
-    // hasTrustDialogAccepted), so no trust prompt should appear.
-    app.typeText("claude\n")
-    sleep(20) // claude TUI boot
+    // Slow printer lives at ~/.tether-e2e/slowprint.py (dropped by the
+    // orchestration script). A one-shot 120-line dump finishes before we can
+    // switch (11:31 run: agent-ready already showed 097–120).
+    app.typeText(
+      "cursor-agent -f Run python3 $HOME/.tether-e2e/slowprint.py and stream its live "
+        + "stdout. Do not write any other files.\n")
+    sleep(12) // TUI boot + first lines
     surface(app).tap()
     shot(app, "agent-ready")
 
-    // Deterministic, paged request.
-    app.typeText(
-      "Print exactly the lines SCROLL_LINE_001 through SCROLL_LINE_120, one per line, "
-        + "zero-padded to three digits, and nothing else.")
-    sleep(1)
-    app.typeText("\r")
-    sleep(45) // let it stream pages of output
-    shot(app, "agent-active")
-
-    // Switch away to B while output is on A.
+    // Switch away to B while A is still printing (~48s of output).
     newBtn.tap()
     sleep(2)
     let bId = activeId(app)
     print("B_ID=\(bId)")
-    sleep(15)
+    shot(app, "agent-away")
+    sleep(50)
 
     // Switch back to A by identity.
     var switched = false

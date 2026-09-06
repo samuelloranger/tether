@@ -1,10 +1,10 @@
 import XCTest
 
-/// Test #5 — switching between session tabs must repaint. A full-screen TUI only
-/// redraws on SIGWINCH, and the Noise reattach does not replay, so on switch-back
-/// to a live session the server must kick the PTY size. This drives two sessions,
-/// switches between them via the drawer, and the orchestration asserts the server
-/// emitted `sigwinch` + a `noise_start` with wasLive=true.
+/// Test #5 — switching between session tabs must repaint. Switch-back drops the
+/// Noise socket; `start` now replays missed logs and still kicks SIGWINCH so a
+/// live TUI can repaint. This drives two sessions, switches between them via
+/// the drawer, and the orchestration asserts `sigwinch` + `noise_start` with
+/// wasLive=true.
 final class TabSwitchTests: XCTestCase {
   override func setUpWithError() throws {
     continueAfterFailure = false

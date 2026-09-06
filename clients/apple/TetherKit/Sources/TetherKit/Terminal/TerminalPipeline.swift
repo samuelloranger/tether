@@ -94,19 +94,15 @@ actor TerminalPipeline {
   /// Establishes a Noise session and pumps it into the emulator/snapshot sink.
   /// The outbound pump routes input/resize to `noiseChannel` once it is set.
   ///
-  /// Noise `start` does **not** replay `terminal_logs` — that is the REST
-  /// `/api/ws` path. After subscribe the server only sends live bytes. Cursor
-  /// Agent's follow-up SIGWINCH is a dirty CUP of the composer, not a full
-  /// redraw. Rebuilding an empty emulator on every attach therefore publishes
-  /// the composer floating in a void. Keep the per-session grid and feed live
-  /// bytes onto it.
+  /// Inactive tabs drop their Noise socket (`disconnect` then reconnect), so
+  /// `start` carries `sinceId` and the server replays missed `terminal_logs`
+  /// onto the reused per-session grid. Do not rewind the emulator on A→B→A:
+  /// SIGWINCH-only is a composer CUP into a void when the TUI is idle.
   ///
   /// Reduced-robustness TODOs for a later pass:
   ///   - No auto-reconnect/backoff. An unexpected drop surfaces an error; the
   ///     next foreground resume (or a manual reselect) re-runs `reconnect` +
   ///     `sendStart`.
-  ///   - First attach this launch to a session we have never shown still
-  ///     starts empty until the program redraws.
   func connectNoise(
     client: NoiseSessionClient,
     hostId: String,
@@ -138,7 +134,12 @@ actor TerminalPipeline {
     resetMouseModes()
     do {
       let channel = try await client.reconnect(hostId: hostId, url: url)
-      try await channel.sendStart(id: sessionId, cols: cols, rows: rows)
+      try await channel.sendStart(
+        id: sessionId,
+        cols: cols,
+        rows: rows,
+        sinceId: replayStore.sinceId(sessionId: key)
+      )
       noiseChannel = channel
       noiseSessionId = sessionId
       // Layout often reports a size while the channel is still nil; start may
@@ -164,10 +165,21 @@ actor TerminalPipeline {
         guard key == emulatorKey else { continue }
         noteTraffic()
         switch message {
-        case let .output(_, chunk):
+        case let .output(id, chunk):
+          if let nid = UInt64(id) {
+            let cursor = replayStore.sinceId(sessionId: key)
+            guard NoiseOutputCursor.shouldApply(id: nid, cursor: cursor) else { continue }
+            _ = replayStore.acceptOutput(sessionId: key, id: nid)
+          }
           if let bytes = chunk.data(using: .utf8) {
             applyOutput(bytes)
           }
+        case .reset:
+          replayStore.reset(sessionId: key)
+          currentGrid?.reset(cols: cols, rows: rows)
+          lastRenderedGeneration = nil
+          lastAltScreen = false
+          publishSnapshot()
         case .exit:
           eventSink.yield(.sessionsChanged)
         case .devices, .devicesRevoked, .authToken:
@@ -373,5 +385,15 @@ actor TerminalPipeline {
 
   private func noteTraffic() {
     lastTrafficMs = Int64(Date().timeIntervalSince1970 * 1000)
+  }
+}
+
+/// Whether an `output` frame's log id should be fed to the emulator.
+///
+/// Same-id frames are 16KiB splits of one log row (`sendOutputChunks`), not
+/// replay overlap. Skip only strictly older ids.
+enum NoiseOutputCursor {
+  static func shouldApply(id: UInt64, cursor: UInt64) -> Bool {
+    id >= cursor
   }
 }

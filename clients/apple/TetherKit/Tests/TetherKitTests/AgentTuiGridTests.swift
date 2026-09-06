@@ -152,9 +152,9 @@ final class AgentTuiGridTests: XCTestCase {
     XCTAssertEqual(rowText(snapshot, 11), row12)
   }
 
-  /// Noise `start` does not replay logs. Switching sessions used to install a
-  /// fresh emulator, then Cursor Agent's SIGWINCH redraw only CUP-paints the
-  /// composer. That is the void under the input box.
+  /// A SIGWINCH CUP into a fresh emulator still leaves the void: Cursor Agent
+  /// only repaints the composer. Keep the grid (and replay missed bytes onto
+  /// it) so the rest of the TUI survives the switch.
   func testAPartialRepaintIntoAFreshEmulatorLeavesTheVoid() throws {
     let emulator = FfiTerminalEmulator(cols: cols, rows: grownRows)
     emulator.feed(bytes: composerLineBytes())
