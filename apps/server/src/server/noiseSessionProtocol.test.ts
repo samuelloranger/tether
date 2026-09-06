@@ -64,6 +64,10 @@ interface FakePty {
   focuses: Array<{ id: string; focused: boolean }>;
   subscriptions: Array<{ id: string; sub: FocusSubscriber }>;
   unsubscribed: number;
+  // Sessions already running server-side before this channel's `start` — a
+  // switch-back reattach, as opposed to a fresh spawn.
+  live: Set<string>;
+  kicks: string[];
 }
 
 /**
@@ -91,13 +95,20 @@ function fakePty(): FakePty {
     focuses: [],
     subscriptions: [],
     unsubscribed: 0,
+    live: new Set<string>(),
+    kicks: [],
     deps: {} as SessionDeps,
   };
   state.deps = {
     startSession: (async (id, command, cols = 80, rows = 24) => {
       state.starts.push({ id, command, cols, rows });
+      state.live.add(id); // a started session is now live
       return {} as never;
     }) as SessionDeps['startSession'],
+    isSessionLive: ((id: string) => state.live.has(id)) as SessionDeps['isSessionLive'],
+    kickPtySize: ((id: string) => {
+      state.kicks.push(id);
+    }) as SessionDeps['kickPtySize'],
     subscribeToSession: ((id, sub) => {
       state.subscriptions.push({ id, sub });
       return () => {
@@ -173,6 +184,30 @@ describe('runNoiseSession', () => {
     expect(pty.starts).toEqual([{ id: 's1', command: 'bash', cols: 100, rows: 40 }]);
     expect(pty.subscriptions).toHaveLength(1);
     expect(pty.subscriptions[0].id).toBe('s1');
+  });
+
+  // Switch-back over Noise: the PTY is already running, the fit does not move, and
+  // Noise does not replay logs — so nothing paints unless we raise one SIGWINCH.
+  // Ink/cursor-agent only full-redraw on SIGWINCH; without this the reused emulator
+  // shows a frozen frame after the next send.
+  test("'start' on an already-running session kicks the PTY (SIGWINCH) so a TUI repaints", async () => {
+    const pty = fakePty();
+    pty.live.add('s1'); // resident session, kept alive across the tab switch
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1', cols: 100, rows: 40 })]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(pty.subscriptions).toHaveLength(1);
+    expect(pty.kicks).toEqual(['s1']);
+  });
+
+  test("'start' on a fresh session does not kick (the initial draw paints it)", async () => {
+    const pty = fakePty();
+    const io = scriptedIo([jsonFrame({ t: 'start', id: 's1' })]);
+    void runNoiseSession(identityChannel(), io, pty.deps);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(pty.kicks).toEqual([]);
   });
 
   test("a PTY 'output' event is sent back sealed to the client", async () => {

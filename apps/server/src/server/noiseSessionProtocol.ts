@@ -5,6 +5,8 @@ import { logError } from './log';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import {
   type FocusSubscriber,
+  getActiveSession,
+  kickPtySize,
   resizeSession,
   setSessionFocus,
   startSession,
@@ -34,6 +36,8 @@ export interface SessionDeps {
   writeToSession: typeof writeToSession;
   resizeSession: typeof resizeSession;
   setSessionFocus: typeof setSessionFocus;
+  kickPtySize: typeof kickPtySize;
+  isSessionLive: (id: string) => boolean;
   listDevices: typeof listDevices;
   revokeDevice: typeof revokeDevice;
   resolveTarget: typeof resolveTarget;
@@ -55,6 +59,8 @@ const defaultDeps: SessionDeps = {
   writeToSession,
   resizeSession,
   setSessionFocus,
+  kickPtySize,
+  isSessionLive: (id) => getActiveSession(id) !== undefined,
   listDevices,
   revokeDevice,
   resolveTarget,
@@ -160,6 +166,12 @@ async function applyMessage(
   if (msg.t === 'start') {
     const cols = msg.cols ?? 80;
     const rows = msg.rows ?? 24;
+    // A switch-back reattaches to a PTY that is already running. The fit does not
+    // move (so recomputeSize stays silent) and Noise does not replay logs, so
+    // nothing repaints — a full-screen TUI (Ink/cursor-agent redraws only on
+    // SIGWINCH) would show a frozen frame. Kick one SIGWINCH after subscribing.
+    // A fresh spawn draws itself, so only kick when the session was already live.
+    const wasLive = d.isSessionLive(msg.id);
     try {
       await d.startSession(msg.id, msg.command, cols, rows);
     } catch (err) {
@@ -170,6 +182,7 @@ async function applyMessage(
     const sub = makeSubscriber(msg.id);
     const unsub = d.subscribeToSession(msg.id, sub, cols, rows);
     attachments.set(msg.id, { unsub, sub });
+    if (wasLive) d.kickPtySize(msg.id);
   } else if (msg.t === 'input') {
     d.writeToSession(msg.id, msg.text);
   } else if (msg.t === 'resize') {
