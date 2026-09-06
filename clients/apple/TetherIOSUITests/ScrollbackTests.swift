@@ -47,6 +47,12 @@ final class ScrollbackTests: XCTestCase {
     // switch. If this shows SCROLL_LINE_* and the post-switch dump does not, the
     // loss is caused by the switch — not by A never rendering.
     dumpGrid(app, "PRESWITCH")
+    // Keyboard-up screenshot of the active terminal (visual check: content shown,
+    // gap between keyboard and the prompt).
+    let active = XCTAttachment(screenshot: app.screenshot())
+    active.name = "active-keyboard"
+    active.lifetime = .keepAlways
+    add(active)
 
     // Switch AWAY to a new tab while A is still printing.
     newBtn.tap()

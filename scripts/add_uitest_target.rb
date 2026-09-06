@@ -48,6 +48,11 @@ scheme = File.exist?(scheme_path) ? Xcodeproj::XCScheme.new(scheme_path) : Xcode
 unless scheme.build_action.entries.any? { |e| e.buildable_references.any? { |r| r.target_name == APP } }
   scheme.add_build_target(app)
 end
+# Clear existing testables first — otherwise re-runs accumulate duplicate
+# TestableReference entries and xcodebuild runs the whole suite once PER copy.
+if (testables_el = scheme.test_action.xml_element.elements['Testables'])
+  testables_el.elements.to_a.each { |e| testables_el.delete_element(e) }
+end
 scheme.add_test_target(test)
 scheme.set_launch_target(app) rescue nil
 FileUtils.mkdir_p(scheme_dir.to_s)
