@@ -153,6 +153,7 @@ private struct HostDrawerSection: View {
             onSelect: { onSelectSession(host.id, session.id) },
             onKill: { onKillSession(session.id) }
           )
+          .accessibilityIdentifier("sessionRow")
           // A killed session is gone the moment the server says so, and a new
           // terminal appears the same way. Fading the row, and letting the rest
           // of the list close the gap, keeps the reader's place in a list where
