@@ -12,8 +12,11 @@ public struct DpadView: View {
 
   @State private var thumb = CGSize.zero
   @State private var active: DPadDirection?
-  @State private var grantOrigin = CGPoint.zero
+  @State private var sampleDx: CGFloat = 0
+  @State private var sampleDy: CGFloat = 0
+  @State private var sampled = false
   @State private var gestureLive = false
+  @State private var sampleTask: Task<Void, Never>?
   @State private var repeatTask: Task<Void, Never>?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -40,7 +43,10 @@ public struct DpadView: View {
     .accessibilityAction(named: Text("Down")) { onArrow(.B) }
     .accessibilityAction(named: Text("Left")) { onArrow(.D) }
     .accessibilityAction(named: Text("Right")) { onArrow(.C) }
-    .onDisappear { stopRepeat() }
+    .onDisappear {
+      sampleTask?.cancel()
+      stopRepeat()
+    }
   }
 
   private var glyph: some View {
@@ -65,22 +71,57 @@ public struct DpadView: View {
       .onChanged { value in
         if !gestureLive {
           gestureLive = true
-          grantOrigin = DPadModel.grantOffset(
-            locationX: value.startLocation.x,
-            locationY: value.startLocation.y,
-            size: size
-          )
+          armSample()
         }
-        let x = grantOrigin.x + value.translation.width
-        let y = grantOrigin.y + value.translation.height
-        let next = DPadModel.resolveDirection(dx: x, dy: y, active: active)
-        let offset = DPadModel.thumbOffset(dx: x, dy: y, direction: next)
-        thumb = CGSize(width: offset.x, height: offset.y)
-        activate(next)
+        sampleDx = value.translation.width
+        sampleDy = value.translation.height
+        guard sampled || active != nil else { return }
+        applyCurrent()
       }
       .onEnded { _ in
+        commitIfNeeded()
         finish()
       }
+  }
+
+  /// Finger translation only — where the thumb landed on the puck is not a vote.
+  private func applyCurrent() {
+    let next = DPadModel.resolveDirection(
+      dx: sampleDx,
+      dy: sampleDy,
+      active: active,
+      sampled: sampled
+    )
+    let offset = DPadModel.thumbOffset(dx: sampleDx, dy: sampleDy, direction: next)
+    thumb = CGSize(width: offset.x, height: offset.y)
+    activate(next)
+  }
+
+  private func armSample() {
+    sampleTask?.cancel()
+    sampled = false
+    sampleTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(DPadModel.sampleMs))
+      guard !Task.isCancelled, gestureLive else { return }
+      sampled = true
+      applyCurrent()
+    }
+  }
+
+  /// A swipe that lifts before the sample timer still sends the measured axis once.
+  private func commitIfNeeded() {
+    sampleTask?.cancel()
+    sampleTask = nil
+    guard active == nil else { return }
+    let next = DPadModel.resolveDirection(
+      dx: sampleDx,
+      dy: sampleDy,
+      active: nil,
+      sampled: true
+    )
+    guard let next else { return }
+    Self.feedback.impactOccurred()
+    onArrow(next)
   }
 
   private func activate(_ next: DPadDirection?) {
@@ -106,9 +147,13 @@ public struct DpadView: View {
   }
 
   private func finish() {
+    sampleTask?.cancel()
+    sampleTask = nil
     stopRepeat()
     active = nil
-    grantOrigin = .zero
+    sampleDx = 0
+    sampleDy = 0
+    sampled = false
     gestureLive = false
     // The thumb springs back to centre — the one place in the app a spring is
     // right, because the glyph is a physical thing the finger just let go of.
