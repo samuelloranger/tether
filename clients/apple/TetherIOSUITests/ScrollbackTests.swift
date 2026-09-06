@@ -51,9 +51,11 @@ final class ScrollbackTests: XCTestCase {
     let drawer = app.buttons["Open session list"].firstMatch
     XCTAssertTrue(drawer.waitForExistence(timeout: 10), "no drawer button")
     drawer.tap()
+    // Sessions list newest-first (created_at DESC), so the busy terminal A — made
+    // before B — is row 1. Switching to it is the whole point of the test.
     let rows = app.descendants(matching: .any).matching(identifier: "sessionRow")
-    XCTAssertTrue(rows.element(boundBy: 0).waitForExistence(timeout: 10), "no session row 0")
-    rows.element(boundBy: 0).tap()
+    XCTAssertTrue(rows.element(boundBy: 1).waitForExistence(timeout: 10), "no session row 1 (A)")
+    rows.element(boundBy: 1).tap()
     sleep(3)
 
     // Keyboard up, like the real repro.
