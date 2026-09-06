@@ -23,9 +23,14 @@ final class ReconnectInputTests: XCTestCase {
   }
 
   private func focusAndType(_ app: XCUIApplication, _ text: String) {
-    let input = app.textViews["terminalInput"]
-    XCTAssertTrue(input.waitForExistence(timeout: 15), "terminal input never appeared")
-    input.tap()
+    // Tapping the surface runs the app's onTap -> keyboardFocused = true, which
+    // makes the hidden input the first responder (keyboard up). Tapping the 1pt
+    // input directly does not, so type only after the surface tap.
+    let surface = app.descendants(matching: .any)["terminalSurface"].firstMatch
+    XCTAssertTrue(surface.waitForExistence(timeout: 15), "terminal surface never appeared")
+    surface.tap()
+    let input = app.textViews["terminalInput"].firstMatch
+    _ = input.waitForExistence(timeout: 5)
     app.typeText(text)
   }
 
