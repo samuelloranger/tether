@@ -47,7 +47,9 @@ curl -sf "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1 || {
 FIXTURE="$(TETHER_DB_PATH="$DB" FIX_PORT="$PORT" FIX_SCHEME=ws bun scripts/e2e/preseed-fixture.ts)"
 echo "fixture: $FIXTURE"
 
-ruby scripts/add_uitest_target.rb clients/apple/Tether.xcodeproj >/dev/null
+# System ruby (/usr/bin/ruby) is the one with the xcodeproj gem; a homebrew ruby
+# on PATH would not have it.
+/usr/bin/ruby scripts/add_uitest_target.rb clients/apple/Tether.xcodeproj >/dev/null
 
 : >"$EVT" # count only events produced by the app run below
 xcodebuild test \
