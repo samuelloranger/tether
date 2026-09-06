@@ -5,6 +5,8 @@
 # Noise session (noise_auth ok). UI driving is the XCUITest; the protocol
 # assertion is here, against the oracle log on this host.
 set -euo pipefail
+# ssh non-interactive shells miss the user PATH; bun lives here.
+export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
