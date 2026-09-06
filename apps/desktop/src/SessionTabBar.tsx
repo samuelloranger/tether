@@ -150,6 +150,10 @@ function GroupTab({
     const host = hosts.find((h) => h.id === id);
     return host ? [{ id, color: host.color }] : [];
   });
+  // The rail is 2px wide; more than a few host bands crush into an unreadable
+  // stack. Cap it — the tab label already names the members.
+  const MAX_HOST_CHIPS = 3;
+  const shownColors = colors.slice(0, MAX_HOST_CHIPS);
   const dimmed = groupHostIds(view).every((id) => {
     const health = healthByHost[id] ?? 'unknown';
     return health === 'unreachable' || health === 'unauthorized';
@@ -167,7 +171,7 @@ function GroupTab({
       className={`session-tab session-tab-group${active ? ' active' : ''}${wants ? ' wants' : ''}${dimmed ? ' dimmed' : ''}`}
     >
       <span className="session-tab-hosts" aria-hidden>
-        {colors.map((chip) => (
+        {shownColors.map((chip) => (
           <span
             key={chip.id}
             className="session-tab-host-chip"

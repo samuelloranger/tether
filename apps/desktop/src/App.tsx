@@ -383,7 +383,10 @@ export function App() {
   if (!app.ready) {
     return (
       <div className="app-shell" {...shellProps}>
-        <p className="muted boot-message">Loading…</p>
+        <div className="boot-message">
+          <span className="boot-mark">tether</span>
+          <span className="boot-status">starting</span>
+        </div>
       </div>
     );
   }
