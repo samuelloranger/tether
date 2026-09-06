@@ -41,6 +41,11 @@ xcrun simctl terminate "$SIM_ID" "$BID" 2>/dev/null || true
 xcrun simctl uninstall "$SIM_ID" "$BID" 2>/dev/null || true
 
 : >"$EVT"
+# Stream the app's unified log so we can SEE the client connect/disconnect trace.
+APPLOG="$E2E_DIR/applog.txt"
+xcrun simctl spawn "$SIM_ID" log stream --level debug \
+  --predicate 'process == "TetherIOS"' >"$APPLOG" 2>&1 &
+LOGPID=$!
 TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
   xcodebuild test \
   -project clients/apple/Tether.xcodeproj -scheme TetherIOS \
@@ -49,6 +54,7 @@ TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
   CODE_SIGNING_ALLOWED=YES AD_HOC_CODE_SIGNING_ALLOWED=YES \
   >"$XLOG" 2>&1 || true
+kill "$LOGPID" 2>/dev/null || true
 
 dump() { awk "/GRID_$1_START/{f=1;next} /GRID_$1_END/{f=0} f" "$XLOG" 2>/dev/null || true; }
 PRESWITCH="$(dump PRESWITCH)"
@@ -61,6 +67,8 @@ SERVER_EARLY="$(TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts SCROLL_
 CB_LATE=0; echo "$SWITCHBACK" | grep -q "SCROLL_LINE_118" && CB_LATE=1
 CB_EARLY=0; echo "$SCROLLUP" | grep -q "SCROLL_LINE_005" && CB_EARLY=1
 
+echo "=== CLIENT connect/disconnect trace (proof of mechanism) ==="
+grep "TETHERTRACE" "$APPLOG" 2>/dev/null | sed 's/.*TETHERTRACE/TETHERTRACE/' || echo "(no trace captured)"
 echo "=== grid BEFORE switch (control: A while active) ==="
 echo "$PRESWITCH"
 echo "control: A rendered SCROLL_LINE while active: $PRE_HAS"

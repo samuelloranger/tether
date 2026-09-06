@@ -117,6 +117,12 @@ actor TerminalPipeline {
     disconnect()
     startOutboundPumpIfNeeded()
     let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
+    #if DEBUG
+    NSLog(
+      "TETHERTRACE connectNoise session=%@ key=%@ gridReused=%@ cachedSnapshot=%@",
+      sessionId, key, attached.reused ? "true" : "false",
+      snapshotCache.openingSnapshot(for: key) != nil ? "true" : "false")
+    #endif
     currentGrid = attached.grid
     emulatorKey = key
     lastRenderedGeneration = nil
@@ -186,6 +192,9 @@ actor TerminalPipeline {
   /// `connectNoise`, so clearing it here would defeat scrollback reuse on a
   /// foreground reconnect.
   func disconnect() {
+    #if DEBUG
+    NSLog("TETHERTRACE disconnect session=%@ key=%@", noiseSessionId ?? "-", emulatorKey ?? "-")
+    #endif
     sendFocus(focused: false)
     lastFocusSent = nil
     noiseReadTask?.cancel()

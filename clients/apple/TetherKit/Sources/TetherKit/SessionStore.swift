@@ -746,6 +746,9 @@ public final class SessionStore {
   }
 
   private func connectTerminal(sessionId: String) async {
+    #if DEBUG
+    NSLog("TETHERTRACE switch connectTerminal session=%@", sessionId)
+    #endif
     // Disconnect first even when there is no usable client: leaving the old
     // socket open under a host that cannot be reached is how the server keeps
     // believing a session is on screen.
