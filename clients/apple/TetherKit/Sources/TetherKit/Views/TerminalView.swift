@@ -261,6 +261,9 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.backgroundColor = .clear
     view.textColor = .clear
     view.tintColor = .clear
+    // Lets an XCUITest target the input to type into a session. Harmless in prod.
+    view.accessibilityIdentifier = "terminalInput"
+    view.isAccessibilityElement = true
     view.accessoryHosting.rootView = accessory
     view.showsAccessory = showsAccessory
     Self.wire(view, onSubmitBytes: onSubmitBytes)
