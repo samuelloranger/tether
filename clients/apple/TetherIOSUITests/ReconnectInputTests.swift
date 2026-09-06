@@ -32,7 +32,7 @@ final class ReconnectInputTests: XCTestCase {
   func testTypeAfterBackgroundReopen() throws {
     let app = launch()
 
-    let newBtn = app.buttons["New terminal"]
+    let newBtn = app.buttons["newTerminalButton"].firstMatch
     XCTAssertTrue(newBtn.waitForExistence(timeout: 15), "no New terminal button")
     newBtn.tap()
 
