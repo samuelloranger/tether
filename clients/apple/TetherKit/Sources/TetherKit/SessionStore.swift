@@ -179,6 +179,7 @@ public final class SessionStore {
     host: String,
     port: String,
     pairHostId: String,
+    scheme: String? = nil,
     color: String = "#89b4fa"
   ) throws -> HostProfileModel {
     let displayName = name.isEmpty ? host : name
@@ -196,7 +197,8 @@ public final class SessionStore {
       color: color.isEmpty ? "#89b4fa" : color,
       host: host,
       port: port,
-      identityName: displayName
+      identityName: displayName,
+      scheme: scheme
     )
     // Migrate the keys onto the profile id atomically: if either save fails, roll
     // the profile back so we don't persist an orphan without its keys.
@@ -208,12 +210,9 @@ public final class SessionStore {
       try? noiseKeyStore.clear(hostId: profile.id)
       throw error
     }
-    // Carry the transport scheme captured at pairing onto the profile id.
-    HostScheme.record(HostScheme.scheme(forHost: pairHostId, port: port), forHost: profile.id)
     // Both keys now live under the profile id; drop the throwaway pairing id.
     if pairHostId != profile.id {
       try? noiseKeyStore.clear(hostId: pairHostId)
-      HostScheme.forget(pairHostId)
     }
     reloadHosts()
     healthByHost[profile.id] = .reachable
@@ -711,7 +710,7 @@ public final class SessionStore {
   /// `http`/`https` base for the Noise handshake, matching the host's scheme;
   /// `NoiseSessionClient` maps it to `ws`/`wss`.
   nonisolated static func noiseBaseURL(for host: HostProfileModel) -> URL? {
-    let scheme = HostScheme.scheme(forHost: host.id, port: host.port)
+    let scheme = HostScheme.resolve(host.scheme, port: host.port)
     return URL(string: "\(scheme)://\(host.host):\(host.port)")
   }
 

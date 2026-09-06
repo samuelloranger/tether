@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { PairScheme } from './hostScheme';
 import { normalizeInvokeError } from './invokeError';
 import type { ServerConfig, ServerConfigPatch } from './serverSettingsModel';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
@@ -180,11 +181,13 @@ export async function coreHostsSaveNoise(input: {
   name: string;
   host: string;
   port: string;
+  scheme?: PairScheme;
 }): Promise<HostProfile> {
   return invoke<HostProfile>('core_hosts_save_noise', {
     name: input.name,
     host: input.host,
     port: input.port,
+    scheme: input.scheme ?? null,
   });
 }
 

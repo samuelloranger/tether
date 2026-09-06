@@ -9,6 +9,7 @@ public struct HostProfileModel: Identifiable, Equatable, Sendable {
   public var port: String
   public var identityName: String
   public var order: UInt32
+  public var scheme: String?
 
   public init(_ ffi: FfiHostProfile) {
     id = ffi.id
@@ -18,14 +19,15 @@ public struct HostProfileModel: Identifiable, Equatable, Sendable {
     port = ffi.port
     identityName = ffi.identityName
     order = ffi.order
+    scheme = ffi.scheme
   }
 
   public var baseHTTPURL: URL? {
-    URL(string: "\(HostScheme.scheme(forHost: id, port: port))://\(host):\(port)")
+    URL(string: "\(HostScheme.resolve(scheme, port: port))://\(host):\(port)")
   }
 
   public var baseWSURL: URL? {
-    let ws = HostScheme.isSecure(forHost: id, port: port) ? "wss" : "ws"
+    let ws = HostScheme.isSecure(scheme, port: port) ? "wss" : "ws"
     return URL(string: "\(ws)://\(host):\(port)")
   }
 }
@@ -46,14 +48,16 @@ public final class HostStoreAdapter {
     color: String,
     host: String,
     port: String,
-    identityName: String
+    identityName: String,
+    scheme: String? = nil
   ) throws -> HostProfileModel {
     let input = FfiNewHostProfile(
       name: name,
       color: color,
       host: host,
       port: port,
-      identityName: identityName
+      identityName: identityName,
+      scheme: scheme
     )
     return HostProfileModel(try handle.create(input: input))
   }

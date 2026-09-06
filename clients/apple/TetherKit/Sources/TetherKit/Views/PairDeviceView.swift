@@ -37,6 +37,7 @@ public struct PairDeviceView: View {
     _ hostId: String,
     _ host: String,
     _ port: String,
+    _ scheme: String,
     _ pinnedServerKey: Data
   ) -> Void
 
@@ -67,6 +68,7 @@ public struct PairDeviceView: View {
       _ hostId: String,
       _ host: String,
       _ port: String,
+      _ scheme: String,
       _ pinnedServerKey: Data
     ) -> Void
   ) {
@@ -100,8 +102,9 @@ public struct PairDeviceView: View {
       _ hostId: String,
       _ host: String,
       _ port: String,
+      _ scheme: String,
       _ pinnedServerKey: Data
-    ) -> Void = { _, _, _, _ in }
+    ) -> Void = { _, _, _, _, _ in }
   ) {
     self.client = client
     self.hostId = hostId
@@ -297,12 +300,11 @@ public struct PairDeviceView: View {
     phase = .pairing
     do {
       let serverKey = try await client.pair(hostId: hostId, url: url, code: canonical)
-      HostScheme.record(Self.restScheme(from: url.scheme), forHost: hostId)
       pinnedKey = serverKey
       phase = .success
       let (parsedHost, parsedPort) = Self.hostAndPort(from: host)
         ?? (host.trimmingCharacters(in: .whitespaces), "8085")
-      onPaired(hostId, parsedHost, parsedPort, serverKey)
+      onPaired(hostId, parsedHost, parsedPort, Self.restScheme(from: url.scheme), serverKey)
     } catch {
       errorMessage = error.localizedDescription
       phase = .failure

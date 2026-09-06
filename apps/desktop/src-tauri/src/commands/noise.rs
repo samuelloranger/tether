@@ -276,7 +276,15 @@ pub async fn core_noise_token(host_id: String, address: String) -> Result<TokenR
 }
 
 pub(crate) fn noise_session_address(profile: &HostProfile) -> String {
-    format!("ws://{}:{}/api/noise/session", profile.host, profile.port)
+    let proto = if profile.scheme_or_guess() == "https" {
+        "wss"
+    } else {
+        "ws"
+    };
+    format!(
+        "{proto}://{}:{}/api/noise/session",
+        profile.host, profile.port
+    )
 }
 
 /// True iff this host has a pinned Noise server key (i.e. it was paired).
@@ -744,6 +752,45 @@ mod tests {
     use tether_core::noise::pairing::{generate_static_keypair, PairingResponder};
     use tether_core::noise::reconnect::ReconnectResponder;
     use tether_core::noise::{psk, NoiseError};
+
+    fn profile_on_port(port: &str) -> HostProfile {
+        HostProfile {
+            id: "host-1".to_string(),
+            name: "box".to_string(),
+            color: "#000".to_string(),
+            host: "tether.example".to_string(),
+            port: port.to_string(),
+            identity_name: String::new(),
+            order: 0,
+            scheme: None,
+        }
+    }
+
+    #[test]
+    fn session_address_uses_wss_on_tls_ports() {
+        assert_eq!(
+            noise_session_address(&profile_on_port("443")),
+            "wss://tether.example:443/api/noise/session"
+        );
+        assert_eq!(
+            noise_session_address(&profile_on_port("8443")),
+            "wss://tether.example:8443/api/noise/session"
+        );
+        assert_eq!(
+            noise_session_address(&profile_on_port("8085")),
+            "ws://tether.example:8085/api/noise/session"
+        );
+    }
+
+    #[test]
+    fn session_address_honours_recorded_scheme_on_nonstandard_port() {
+        let mut profile = profile_on_port("9999");
+        profile.scheme = Some("https".to_string());
+        assert_eq!(
+            noise_session_address(&profile),
+            "wss://tether.example:9999/api/noise/session"
+        );
+    }
 
     type Queue = Arc<Mutex<VecDeque<Vec<u8>>>>;
 

@@ -149,7 +149,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
               hostId={session.hostId}
               sessionId={session.sessionId}
               interactive={leaf.paneId === props.focusedPaneId}
-              noiseAddress={noiseSessionAddress(host.host, host.port)}
+              noiseAddress={noiseSessionAddress(host)}
               terminalTheme={props.terminalTheme}
               fontFamily={props.fontFamily}
               fontSize={props.fontSize}

@@ -302,6 +302,7 @@ mod tests {
                 port: "8085".into(),
                 identity_name: "local".into(),
                 order: 0,
+                scheme: None,
             },
             "secret",
         )
