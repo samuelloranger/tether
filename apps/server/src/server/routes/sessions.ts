@@ -18,6 +18,7 @@ import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '../replayPlan';
 import { getReplayLogs } from '../replayRead';
 import { getActivity } from '../sessionActivity';
 import { autoTitle, getOscTitle } from '../sessionTitle';
+import { testEvent } from '../testEvents';
 import { codecFor, type TerminalCodec, type WireData } from './terminalCodec';
 
 export const sessionsRoutes = new Hono();
@@ -42,6 +43,7 @@ function ptySubscriber(ws: WsSink, codec: TerminalCodec, sessionId: string): Foc
     const raw = ws.raw as { getBufferedAmount?: () => number } | undefined;
     const buffered = raw?.getBufferedAmount?.();
     if (buffered !== undefined && buffered > 4_000_000) {
+      testEvent('ws_close', { session: sessionId, reason: 'backpressure', buffered });
       logWarn(
         `WebSocket backpressure: closing session "${sessionId}" (bufferedAmount=${buffered})`,
       );
@@ -101,6 +103,12 @@ async function hydrateTerminalSocket(
       ws.send(codec.reset());
     }
 
+    testEvent('replay', {
+      session: sessionId,
+      count: missedLogs.length,
+      bytes: plan.bytes,
+      reset: pruned || plan.reset,
+    });
     logInfo(
       `Streaming ${missedLogs.length} missed logs (${plan.bytes} bytes) to client...` +
         (plan.reset ? ' [trimmed to byte budget, sent reset]' : ''),
@@ -139,6 +147,7 @@ function openTerminalSocket(
   state: WsSessionState,
   codec: TerminalCodec,
 ): void {
+  testEvent('ws_open', { session: sessionId, sinceId });
   logInfo(`WebSocket opened for session "${sessionId}" since log ID: ${sinceId}`);
   // 20s < the client's 30s watchdog, so a quiet session never trips it.
   state.keepAlive = setInterval(() => {

@@ -25,6 +25,7 @@ import { COMPILED, selfArgv } from './runtime';
 import { clearActivity, recordInput } from './sessionActivity';
 import { clearTitle } from './sessionTitle';
 import { killWindowsTree } from './spawnWindow';
+import { testEvent } from './testEvents';
 
 export type { FocusSubscriber, SessionFrame, Subscriber } from './ptyHolder';
 export { sockPathFor } from './ptyHolder';
@@ -281,6 +282,7 @@ export function kickPtySize(id: string): void {
   if (!inst) return;
   const dims = inst.ptyDims ?? planPtyResize(null, inst.clientDims.values());
   if (!dims) return;
+  testEvent('sigwinch', { session: id, cols: dims.cols, rows: dims.rows });
   sendHolderResize(id, dims.cols, dims.rows);
 }
 

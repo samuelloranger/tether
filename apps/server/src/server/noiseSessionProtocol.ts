@@ -13,6 +13,7 @@ import {
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { testEvent } from './testEvents';
 
 /**
  * The identity of the device on the far end of this Noise session — already
@@ -183,16 +184,24 @@ async function applyMessage(
     const unsub = d.subscribeToSession(msg.id, sub, cols, rows);
     attachments.set(msg.id, { unsub, sub });
     if (wasLive) d.kickPtySize(msg.id);
+    // No sinceId/replay on this path — the oracle records that a reattach
+    // subscribed live only (wasLive) and whether a SIGWINCH kick followed.
+    testEvent('noise_start', { session: msg.id, wasLive, cols, rows });
   } else if (msg.t === 'input') {
+    testEvent('noise_input', { session: msg.id, bytes: msg.text.length });
     d.writeToSession(msg.id, msg.text);
   } else if (msg.t === 'resize') {
     // resizeSession keys the PTY-fit off the exact subscriber object, so only
     // resize a session this channel actually subscribed to.
     const attachment = attachments.get(msg.id);
-    if (attachment) d.resizeSession(msg.id, attachment.sub, msg.cols, msg.rows);
+    if (attachment) {
+      testEvent('noise_resize', { session: msg.id, cols: msg.cols, rows: msg.rows });
+      d.resizeSession(msg.id, attachment.sub, msg.cols, msg.rows);
+    }
   } else if (msg.t === 'focus') {
     const attachment = attachments.get(msg.id);
     if (attachment && typeof msg.focused === 'boolean') {
+      testEvent('noise_focus', { session: msg.id, focused: msg.focused });
       d.setSessionFocus(msg.id, attachment.sub, msg.focused);
     }
   } else if (msg.t === 'devices.list' || msg.t === 'devices.revoke') {

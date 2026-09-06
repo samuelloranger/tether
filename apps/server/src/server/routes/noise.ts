@@ -9,6 +9,7 @@ import { loadOrCreateServerKeypair } from '../noiseIdentity';
 import { runNoiseSession } from '../noiseSessionProtocol';
 import { toFrameBytes, WsFrameIO, type WsSender } from '../noiseWsAdapter';
 import { handlePairingConnection } from '../pairControl';
+import { testEvent } from '../testEvents';
 
 export const noiseRoutes = new Hono();
 
@@ -138,6 +139,7 @@ noiseRoutes.get(
         )
           .then(async ({ channel, device }) => {
             logInfo(`Noise session authorized device ${device.id}`);
+            testEvent('noise_auth', { ok: true, device: device.id });
             const untrack = trackDeviceChannel(device.id, () => {
               try {
                 adapter.close();
@@ -162,6 +164,8 @@ noiseRoutes.get(
             // Fail closed: an unknown/revoked key never entered transport mode.
             // Close without a body (1008 Policy Violation) so nothing leaks
             // whether the key is unknown vs. the handshake simply failed.
+            const reason = err instanceof ChannelError ? err.code : 'error';
+            testEvent('noise_auth', { ok: false, reason });
             if (!(err instanceof ChannelError)) {
               logError('Noise session setup failed:', err);
             }
