@@ -2,9 +2,8 @@ import Foundation
 
 /// Last packed grid shown for each host-qualified session.
 ///
-/// Noise `start` always full-replays, so the live emulator cannot be reused
-/// across a switch (that would double-apply bytes). The last TGRD frame can:
-/// showing it on attach is what stops the surface going blank until replay lands.
+/// Used on a first attach this launch when the live emulator has not been
+/// built yet. Switch-back reuses `TerminalSessionGrids` instead of this.
 final class TerminalSnapshotCache {
   private var grids: [String: Data] = [:]
 

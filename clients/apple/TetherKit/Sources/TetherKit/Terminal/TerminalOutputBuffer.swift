@@ -3,7 +3,7 @@ import TetherFFIBindings
 
 /// Bytes fed into the current emulator, so a later size change can rebuild the
 /// grid from scratch instead of `resize()`-ing a clamped alt-screen paint.
-struct TerminalOutputBuffer {
+final class TerminalOutputBuffer {
   private(set) var data = Data()
   var byteBudget: Int
 
@@ -11,7 +11,7 @@ struct TerminalOutputBuffer {
     self.byteBudget = byteBudget
   }
 
-  mutating func append(_ bytes: Data) {
+  func append(_ bytes: Data) {
     guard !bytes.isEmpty else { return }
     data.append(bytes)
     if data.count > byteBudget {
@@ -19,7 +19,7 @@ struct TerminalOutputBuffer {
     }
   }
 
-  mutating func reset() {
+  func reset() {
     data.removeAll(keepingCapacity: true)
   }
 

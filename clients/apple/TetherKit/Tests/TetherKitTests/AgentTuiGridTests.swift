@@ -152,6 +152,28 @@ final class AgentTuiGridTests: XCTestCase {
     XCTAssertEqual(rowText(snapshot, 11), row12)
   }
 
+  /// Noise `start` does not replay logs. Switching sessions used to install a
+  /// fresh emulator, then Cursor Agent's SIGWINCH redraw only CUP-paints the
+  /// composer. That is the void under the input box.
+  func testAPartialRepaintIntoAFreshEmulatorLeavesTheVoid() throws {
+    let emulator = FfiTerminalEmulator(cols: cols, rows: grownRows)
+    emulator.feed(bytes: composerLineBytes())
+    let snapshot = try decode(emulator)
+    XCTAssertEqual(rowText(snapshot, 0), "helloxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(snapshot, 11), "")
+  }
+
+  /// Keep the emulator across the switch and the same composer CUP overlays
+  /// row 1 without wiping the rest of the TUI.
+  func testAPartialRepaintIntoAKeptEmulatorKeepsTheTui() throws {
+    let emulator = FfiTerminalEmulator(cols: cols, rows: grownRows)
+    emulator.feed(bytes: altScreenBytes(cols: cols, rows: grownRows))
+    emulator.feed(bytes: composerLineBytes())
+    let snapshot = try decode(emulator)
+    XCTAssertEqual(rowText(snapshot, 0), "helloxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(snapshot, 11), row12)
+  }
+
   // MARK: - Helpers
 
   private struct Decoded {
@@ -167,6 +189,13 @@ final class AgentTuiGridTests: XCTestCase {
       bytes.append(contentsOf: "\u{1B}[\(row);1H\(label)\(fill)".utf8)
     }
     return bytes
+  }
+
+  /// One CUP-addressed line at row 1 — what a TUI sends on SIGWINCH when it
+  /// only dirty-paints the composer.
+  private func composerLineBytes() -> Data {
+    let fill = String(repeating: "x", count: 15)
+    return Data("\u{1B}[1;1Hhello\(fill)".utf8)
   }
 
   private func decode(_ emulator: FfiTerminalEmulator) throws -> Decoded {

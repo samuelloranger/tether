@@ -55,8 +55,10 @@ actor TerminalPipeline {
 
   private let replayStore = FfiReplayStore()
   private let snapshotCache = TerminalSnapshotCache()
-  private var outputBuffer = TerminalOutputBuffer()
-  private var emulator: FfiTerminalEmulator?
+  private let sessionGrids = TerminalSessionGrids()
+  private var currentGrid: TerminalSessionGrid?
+  private var emulator: FfiTerminalEmulator? { currentGrid?.emulator }
+  private var outputBuffer: TerminalOutputBuffer { currentGrid?.buffer ?? TerminalOutputBuffer() }
   /// Which HOST-QUALIFIED session key `emulator` holds the scrollback for.
   private var emulatorKey: String?
   /// Live Noise transport. `connectNoise` calls `disconnect()` first; the
@@ -92,18 +94,19 @@ actor TerminalPipeline {
   /// Establishes a Noise session and pumps it into the emulator/snapshot sink.
   /// The outbound pump routes input/resize to `noiseChannel` once it is set.
   ///
-  /// The server replays a session's whole retained tail in response to `start`
-  /// (`subscribeToSession`), so there is no `sinceId` cursor: the emulator is
-  /// always rebuilt fresh and refilled from that replay. The last TGRD frame
-  /// for this key stays on screen until that replay publishes, so a session
-  /// switch is not a blank flash.
+  /// Noise `start` does **not** replay `terminal_logs` — that is the REST
+  /// `/api/ws` path. After subscribe the server only sends live bytes. Cursor
+  /// Agent's follow-up SIGWINCH is a dirty CUP of the composer, not a full
+  /// redraw. Rebuilding an empty emulator on every attach therefore publishes
+  /// the composer floating in a void. Keep the per-session grid and feed live
+  /// bytes onto it.
   ///
   /// Reduced-robustness TODOs for a later pass:
   ///   - No auto-reconnect/backoff. An unexpected drop surfaces an error; the
   ///     next foreground resume (or a manual reselect) re-runs `reconnect` +
   ///     `sendStart`.
-  ///   - No replay de-dup guard (relies on the fresh-emulator + full-replay
-  ///     model above).
+  ///   - First attach this launch to a session we have never shown still
+  ///     starts empty until the program redraws.
   func connectNoise(
     client: NoiseSessionClient,
     hostId: String,
@@ -113,12 +116,14 @@ actor TerminalPipeline {
   ) async {
     disconnect()
     startOutboundPumpIfNeeded()
-    outputBuffer.reset()
-    emulator = FfiTerminalEmulator(cols: cols, rows: rows)
+    let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
+    currentGrid = attached.grid
     emulatorKey = key
     lastRenderedGeneration = nil
-    lastAltScreen = false
-    if let cached = snapshotCache.openingSnapshot(for: key) {
+    lastAltScreen = attached.grid.lastAltScreen
+    if attached.reused {
+      publishSnapshot()
+    } else if let cached = snapshotCache.openingSnapshot(for: key) {
       lastAltScreen = (try? GridSnapshotDecoder.peekHeader(cached))?.altScreen ?? false
       snapshotSink.yield(cached)
     } else {
@@ -196,7 +201,7 @@ actor TerminalPipeline {
   /// session: the emulator and its scrollback go too.
   func release() {
     disconnect()
-    emulator = nil
+    currentGrid = nil
     emulatorKey = nil
     lastRenderedGeneration = nil
     snapshotSink.yield(nil)
@@ -206,6 +211,11 @@ actor TerminalPipeline {
   func forget(key: String) {
     replayStore.forget(sessionId: key)
     snapshotCache.forget(key)
+    sessionGrids.forget(key)
+    if emulatorKey == key {
+      currentGrid = nil
+      emulatorKey = nil
+    }
   }
 
   /// What to do with this channel after the app came back to the foreground.
@@ -280,7 +290,7 @@ actor TerminalPipeline {
       altScreen: lastAltScreen,
       oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
     ), !outputBuffer.data.isEmpty {
-      emulator = outputBuffer.replay(cols: newCols, rows: newRows)
+      currentGrid?.emulator = outputBuffer.replay(cols: newCols, rows: newRows)
       lastRenderedGeneration = nil
       publishSnapshot()
       return true
@@ -329,6 +339,7 @@ actor TerminalPipeline {
     let packed = emulator.snapshot()
     if let header = try? GridSnapshotDecoder.peekHeader(packed) {
       lastAltScreen = header.altScreen
+      currentGrid?.lastAltScreen = header.altScreen
     }
     if let emulatorKey {
       snapshotCache.remember(packed, for: emulatorKey)

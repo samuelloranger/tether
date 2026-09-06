@@ -4,21 +4,21 @@ import XCTest
 
 final class TerminalOutputBufferTests: XCTestCase {
   func testAppendAccumulatesBytes() {
-    var buffer = TerminalOutputBuffer()
+    let buffer = TerminalOutputBuffer()
     buffer.append(Data("ab".utf8))
     buffer.append(Data("cd".utf8))
     XCTAssertEqual(buffer.data, Data("abcd".utf8))
   }
 
   func testResetClearsTheBytes() {
-    var buffer = TerminalOutputBuffer()
+    let buffer = TerminalOutputBuffer()
     buffer.append(Data("ab".utf8))
     buffer.reset()
     XCTAssertTrue(buffer.data.isEmpty)
   }
 
   func testOverBudgetKeepsTheNewestSuffix() {
-    var buffer = TerminalOutputBuffer(byteBudget: 4)
+    let buffer = TerminalOutputBuffer(byteBudget: 4)
     buffer.append(Data("abcdef".utf8))
     XCTAssertEqual(buffer.data, Data("cdef".utf8))
   }
