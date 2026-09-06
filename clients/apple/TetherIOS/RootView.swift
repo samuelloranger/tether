@@ -102,6 +102,11 @@ struct RootView: View {
         .frame(width: 1, height: 1)
         .opacity(0.001)
         .accessibilityIdentifier("terminalGrid")
+      // The active session id, so a test can verify WHICH tab it is reading.
+      Text(verbatim: store.activeSessionId ?? "-")
+        .frame(width: 1, height: 1)
+        .opacity(0.001)
+        .accessibilityIdentifier("activeSession")
       #endif
 
     }

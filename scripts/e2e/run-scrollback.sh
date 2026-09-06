@@ -90,7 +90,15 @@ if [ "$PRE_HAS" -eq 0 ]; then
   echo "INCONCLUSIVE: A did not render SCROLL_LINE even WHILE ACTIVE — cannot attribute the empty switch-back to the switch (grid seam or driving issue, not proven loss-on-switch)"
   exit 1
 fi
-echo "CONTROL OK: A rendered the lines while active; any loss after the switch is caused by the switch."
+# Identity gate: the switch-back grid must belong to A, or the result is meaningless.
+AID="$(grep -oE 'A_ID=[^ ]+' "$XLOG" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r')"
+SBACT="$(grep -oE 'SWITCHBACK_ACTIVE=[^ ]+' "$XLOG" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r')"
+echo "identity: A=$AID  switch-back active=$SBACT"
+if [ -z "$AID" ] || [ "$AID" != "$SBACT" ]; then
+  echo "INCONCLUSIVE: switch-back did not land on A (active=$SBACT wanted=$AID) — cannot trust the grid reading"
+  exit 1
+fi
+echo "CONTROL OK: A rendered while active AND the switch-back grid IS A (active==A_ID). Any loss is caused by the switch."
 if [ "$CB_LATE" -eq 0 ]; then
   echo "FINDING: after switch-back the client is MISSING even the latest output produced while inactive (SCROLL_LINE_118 absent) — inactive-tab streaming is broken"
 elif [ "$CB_EARLY" -eq 0 ]; then

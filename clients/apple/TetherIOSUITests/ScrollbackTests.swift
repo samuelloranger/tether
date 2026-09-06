@@ -2,9 +2,9 @@ import XCTest
 
 /// Test #13 — the real-device symptom: after a tab produces pages of output WHILE
 /// INACTIVE, switching back shows only the current viewport and scrollback is
-/// gone (can't scroll up). Terminal A prints 120 numbered lines over ~15s; we
-/// switch to B while it prints, wait for it to finish, switch back to A with the
-/// keyboard up, read the grid, scroll up, and read again. The orchestration
+/// gone. Terminal A prints 120 numbered lines; we switch to B while it prints,
+/// wait, then switch back TO A BY IDENTITY (verified via the activeSession
+/// element, not a fragile row index) and read the grid. The orchestration
 /// compares the client's rendered grid against the server's terminal_logs.
 final class ScrollbackTests: XCTestCase {
   override func setUpWithError() throws {
@@ -13,6 +13,12 @@ final class ScrollbackTests: XCTestCase {
 
   private func surface(_ app: XCUIApplication) -> XCUIElement {
     app.descendants(matching: .any)["terminalSurface"].firstMatch
+  }
+
+  private func activeId(_ app: XCUIApplication) -> String {
+    let el = app.staticTexts["activeSession"].firstMatch
+    _ = el.waitForExistence(timeout: 5)
+    return el.label
   }
 
   private func dumpGrid(_ app: XCUIApplication, _ tag: String) {
@@ -34,50 +40,53 @@ final class ScrollbackTests: XCTestCase {
     let newBtn = app.buttons["newTerminalButton"].firstMatch
     XCTAssertTrue(newBtn.waitForExistence(timeout: 15), "no New terminal button")
 
-    // Terminal A: start a slow loop that scrolls ~120 lines over ~15s.
+    // Terminal A + its id.
     newBtn.tap()
     let surfaceA = surface(app)
     XCTAssertTrue(surfaceA.waitForExistence(timeout: 15), "session A never opened")
     surfaceA.tap()
     _ = app.textViews["terminalInput"].firstMatch.waitForExistence(timeout: 5)
+    sleep(1)
+    let aId = activeId(app)
+    print("A_ID=\(aId)")
+    XCTAssertFalse(aId.isEmpty && aId == "-", "no active session for A")
+
     app.typeText("for i in $(seq 1 120); do printf 'SCROLL_LINE_%03d\\n' $i; sleep 0.12; done\n")
     sleep(4)
-
-    // CONTROL: prove A is actually rendering the lines WHILE ACTIVE, before any
-    // switch. If this shows SCROLL_LINE_* and the post-switch dump does not, the
-    // loss is caused by the switch — not by A never rendering.
     dumpGrid(app, "PRESWITCH")
-    // Keyboard-up screenshot of the active terminal (visual check: content shown,
-    // gap between keyboard and the prompt).
     let active = XCTAttachment(screenshot: app.screenshot())
     active.name = "active-keyboard"
     active.lifetime = .keepAlways
     add(active)
 
-    // Switch AWAY to a new tab while A is still printing.
+    // Switch AWAY to B while A prints.
     newBtn.tap()
-    sleep(20) // A keeps producing lines while inactive, then finishes
+    sleep(2)
+    let bId = activeId(app)
+    print("B_ID=\(bId)")
+    XCTAssertNotEqual(aId, bId, "B did not become a distinct active session")
+    sleep(18) // A keeps producing while inactive
 
-    // Switch BACK to A via the drawer.
-    let drawer = app.buttons["Open session list"].firstMatch
-    XCTAssertTrue(drawer.waitForExistence(timeout: 10), "no drawer button")
-    drawer.tap()
-    // Sessions list newest-first (created_at DESC), so the busy terminal A — made
-    // before B — is row 1. Switching to it is the whole point of the test.
-    let rows = app.descendants(matching: .any).matching(identifier: "sessionRow")
-    XCTAssertTrue(rows.element(boundBy: 1).waitForExistence(timeout: 10), "no session row 1 (A)")
-    rows.element(boundBy: 1).tap()
-    sleep(3)
+    // Switch BACK to A BY IDENTITY: tap each drawer row until active == aId.
+    var switched = false
+    for attempt in 0..<4 where !switched {
+      app.buttons["Open session list"].firstMatch.tap()
+      let rows = app.descendants(matching: .any).matching(identifier: "sessionRow")
+      XCTAssertTrue(rows.element(boundBy: 0).waitForExistence(timeout: 10), "no session rows")
+      let count = rows.count
+      let idx = attempt % max(count, 1)
+      rows.element(boundBy: idx).tap()
+      sleep(2)
+      if activeId(app) == aId { switched = true }
+    }
+    XCTAssertTrue(switched, "could not switch back to A (active=\(activeId(app)) wanted=\(aId))")
 
-    // Keyboard up, like the real repro.
     surface(app).tap()
     sleep(1)
+    print("SWITCHBACK_ACTIVE=\(activeId(app))")
     dumpGrid(app, "SWITCHBACK")
 
-    // Try to scroll up into scrollback.
-    for _ in 0..<10 {
-      surface(app).swipeDown()
-    }
+    for _ in 0..<10 { surface(app).swipeDown() }
     sleep(1)
     dumpGrid(app, "SCROLLUP")
 
