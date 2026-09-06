@@ -52,12 +52,15 @@ echo "fixture: $FIXTURE"
 /usr/bin/ruby scripts/add_uitest_target.rb clients/apple/Tether.xcodeproj >/dev/null
 
 : >"$EVT" # count only events produced by the app run below
-xcodebuild test \
+# TEST_RUNNER_-prefixed vars must be in xcodebuild's ENVIRONMENT (XCTest strips
+# the prefix and forwards them to the runner) — as a trailing KEY=val arg they
+# become an ignored build setting instead.
+TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
+  xcodebuild test \
   -project clients/apple/Tether.xcodeproj -scheme TetherIOS \
   -destination "platform=iOS Simulator,id=$SIM_ID" \
   -only-testing:TetherIOSUITests/PreseedConnectTests \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-  TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
   >"$E2E_DIR/xcodebuild.log" 2>&1 || true
 
 echo "=== oracle events ==="
