@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-Bun **≥ 1.3.14** (PTY support). Install workspaces from the repo root:
+Bun **≥ 1.3.14** (PTY support; 1.4.x in development and CI). Install workspaces from the repo root:
 
 ```sh
 bun install
@@ -18,7 +18,8 @@ bun dev:desktop    # the Tauri desktop client (apps/desktop)
 The iOS client is a native Xcode project (`clients/apple`). It links the Rust
 core as a prebuilt XCFramework, so run `scripts/build-xcframework.sh` after any
 change under `crates/` — otherwise Xcode links the previous binary and your
-change is simply absent from the app.
+change is simply absent from the app. Desktop signing and the updater manifest
+are documented in [Desktop signing](/development/desktop-signing).
 
 Source runs use a repo-local `apps/server/config/tether.db`, isolated from any installed binary. Override with `TETHER_DB_PATH`.
 

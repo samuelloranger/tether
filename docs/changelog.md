@@ -1,6 +1,48 @@
 # Changelog
 
-Newest first. Full notes on each [GitHub release](https://github.com/samuelloranger/tether/releases).
+Newest first. Full notes on each [GitHub release](https://github.com/samuelloranger/tether/releases). Patch releases between the versions below are folded into the nearest feature heading; the GitHub tag has the exact list.
+
+## v4.0 — Noise pairing
+
+- **Per-device Noise authentication** replaces the shared server password. Pair once with `tether pair` (12-char code + host confirmation); the device reconnects on its own key. Existing hosts must be re-paired after the upgrade — see [3.x → 4.0 cutover](/updating#_3-x-4-0-cutover).
+- **End-to-end encryption** of the terminal stream (Noise IK reconnect). REST uses a short-lived bearer minted over that channel.
+- **Device management** — `tether devices` / `tether device revoke|rename|token`, plus a devices list in the apps.
+- **Terminal groups (desktop)** — a split creates a group tab; an ungrouped terminal still runs full-space.
+- 4.0.1–4.0.10 are replay, focus, split, and iOS session-switch fixes on top of that cutover.
+
+## v3.3 — desktop split view
+
+- Tile multiple live terminals in one window (hover split, drag a tab onto a pane, right-click a tab). Layout persists.
+
+## v3.2 — Windows server
+
+- The server runs natively on Windows (ConPTY). See [Windows server](/windows).
+- iOS: the session drawer stays usable while the terminal is streaming.
+
+## v3.1 — agent `done` vs `waiting`
+
+- A finished agent turn (`done`) is distinct from a session that is blocked on you (`waiting`). `tether signal` lets a program declare the state; `tether signal hooks` prints the Claude Code snippet.
+- Expo/RN client (`apps/mobile`) removed from the tree.
+
+## v3.0 — native clients
+
+- **Desktop** ships as `apps/desktop` (Tauri + xterm.js over a shared Rust core).
+- **iOS** ships as `clients/apple` (SwiftUI + the same core via UniFFI). iPad layout (pinnable sidebar, hardware keyboard) lands here.
+- The Expo release path is retired. Android stays discontinued after v2.8.12.
+
+## v2.8 — TestFlight & native push
+
+- Public [TestFlight](https://testflight.apple.com/join/j7rPkfhq) builds, signed in CI.
+- Native iOS notifications via an encrypted relay the operator cannot read. Sideloading dropped — Apple only issues push entitlements to signed apps.
+- Privacy policy published.
+
+## v2.7 — default themes
+
+- Default dark/light themes and bezel chrome (Catppuccin flavours remain).
+
+## v2.0 — terminal engine
+
+- Parser swapped to `@xterm/headless`, so escape handling, scrollback, and modes match a real xterm. OSC 8 hyperlinks, inverse video, caret visibility, and the rest of the VT surface ride the new engine.
 
 ## v1.16 — mouse click & drag
 
@@ -86,7 +128,7 @@ Newest first. Full notes on each [GitHub release](https://github.com/samuelloran
 
 ## v1.0.7 — trust, recovery & honesty
 
-- Shared-password authentication with first-run TOFU pairing, a verifiable connection-test setup flow, and honest connection-status copy.
+- Shared-password authentication with first-run TOFU pairing, a verifiable connection-test setup flow, and honest connection-status copy. Replaced in v4.0 by per-device Noise pairing.
 
 ## v1.0.0 – v1.0.6
 
