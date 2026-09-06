@@ -1,4 +1,5 @@
 import type { PaneDir, PaneSide } from './paneTree';
+import { MOD_LABEL } from './platform';
 
 export function TabContextMenu({
   x,
@@ -11,7 +12,7 @@ export function TabContextMenu({
   onSplit: (dir: PaneDir, side: PaneSide) => void;
   onClose: () => void;
 }) {
-  const item = (label: string, dir: PaneDir, side: PaneSide) => (
+  const item = (label: string, dir: PaneDir, side: PaneSide, shortcut?: string) => (
     <button
       type="button"
       className="tab-menu-item"
@@ -20,7 +21,8 @@ export function TabContextMenu({
         onClose();
       }}
     >
-      {label}
+      <span>{label}</span>
+      {shortcut ? <span className="tab-menu-key">{shortcut}</span> : null}
     </button>
   );
   return (
@@ -33,10 +35,10 @@ export function TabContextMenu({
         onContextMenu={(e) => e.preventDefault()}
       />
       <div className="tab-menu" style={{ left: x, top: y }}>
-        {item('Split right', 'row', 'b')}
+        {item('Split right', 'row', 'b', `${MOD_LABEL}D`)}
         {item('Split left', 'row', 'a')}
         {item('Split up', 'col', 'a')}
-        {item('Split down', 'col', 'b')}
+        {item('Split down', 'col', 'b', `${MOD_LABEL}E`)}
       </div>
     </>
   );

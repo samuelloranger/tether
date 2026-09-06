@@ -4,6 +4,7 @@ import { EmptyPanePicker } from './EmptyPanePicker';
 import type { FrameApplyResult } from './frameHandler';
 import { layoutTree } from './layoutRects';
 import { noiseSessionAddress } from './noiseHosts';
+import { PaneControls } from './PaneControls';
 import { PaneDivider } from './PaneDivider';
 import type { PaneDir, PaneNode, PaneSide } from './paneTree';
 import type { UI_THEMES } from './preferences';
@@ -121,29 +122,11 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
             onPointerDownCapture={() => props.onFocusPane(leaf.paneId)}
           >
             {leaf.paneId === props.focusedPaneId && (
-              <div className="pane-controls">
-                <button
-                  type="button"
-                  title="Split right"
-                  onClick={() => props.onSplit(leaf.paneId, 'row', 'b')}
-                >
-                  ⬒
-                </button>
-                <button
-                  type="button"
-                  title="Split down"
-                  onClick={() => props.onSplit(leaf.paneId, 'col', 'b')}
-                >
-                  ⬓
-                </button>
-                <button
-                  type="button"
-                  title="Close pane"
-                  onClick={() => props.onClosePane(leaf.paneId)}
-                >
-                  ✕
-                </button>
-              </div>
+              <PaneControls
+                paneId={leaf.paneId}
+                onSplit={props.onSplit}
+                onClose={props.onClosePane}
+              />
             )}
             <TerminalPane
               hostId={session.hostId}

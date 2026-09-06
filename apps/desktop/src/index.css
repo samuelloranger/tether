@@ -25,7 +25,7 @@
 @property --lit {
   syntax: '<color>';
   inherits: true;
-  initial-value: #7c8cf8;
+  initial-value: #4d8dff;
 }
 @property --b1 {
   syntax: '<percentage>';
@@ -60,22 +60,22 @@
   --border: #232333;
   --overlay: #08080ecc;
   --selected: #191926;
-  --accent: #7c8cf8;
+  --accent: #3ddc97;
   --accent-text: #08080e;
   --success: #6ee7a8;
   --warning: #f2b34c;
   --danger: #ff7050;
-  --info: #7c8cf8;
-  --lit: #7c8cf8;
+  --info: #4d8dff;
+  --lit: #4d8dff;
   --b1: 0%;
   --b2: 0%;
   --b3: 0%;
   --rim: 0%;
 
-  /* geometry */
-  --r-control: 8px;
-  --r-panel: 12px;
-  --r-screen: 12px;
+  /* geometry — instrument bezel: tight controls, hard-edged screen */
+  --r-control: 2px;
+  --r-panel: 4px;
+  --r-screen: 0;
 
   /* motion — see the block at the foot of this file.
      Heat rises fast and cools slow; everything else is short enough to land
@@ -84,7 +84,7 @@
   --t-press: 90ms;
   --t-fast: 140ms;
   --t-state: 200ms;
-  --t-overlay: 260ms;
+  --t-overlay: 280ms;
   --heat-in: 260ms;
   --heat-wait: 340ms;
   --heat-done: 300ms;
@@ -244,6 +244,26 @@ body {
 
 .boot-message {
   margin: auto;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+
+.boot-mark {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.boot-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 /* ── controls ──────────────────────────────────────────────────────────── */
@@ -669,16 +689,13 @@ label > textarea {
   color: var(--text);
 }
 
-/* Accent-tinted chip — same grammar as the primary button's tint, not a slab. */
+/* An uppercase eyebrow word, not a pill — same status grammar as .git-review-mode. */
 .devices-self-badge {
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.11em;
   text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 999px;
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .devices-row-fp {
@@ -899,7 +916,7 @@ label > textarea {
   align-items: center;
   gap: 2px;
   height: 40px;
-  border-radius: 9px;
+  border-radius: var(--r-control);
   color: var(--text-muted);
   /* Selection used to swap four things at once — fill, edge light, shadow and
      text — on the frame the click landed. Moving them together over one beat
@@ -973,7 +990,7 @@ label > textarea {
   padding: 0 4px 0 12px;
   background: none;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-control);
   color: inherit;
   font-weight: inherit;
   text-align: left;
@@ -1139,8 +1156,25 @@ label > textarea {
   margin: auto;
   text-align: center;
   display: grid;
-  gap: 14px;
+  gap: 6px;
   justify-items: center;
+}
+
+.empty-main-host {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.empty-main-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.empty-main > button {
+  margin-top: 10px;
 }
 
 /* ── toolbar ───────────────────────────────────────────────────────────── */
@@ -1204,7 +1238,7 @@ label > textarea {
   min-width: 120px;
   max-width: 200px;
   flex: 1 1 140px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   color: var(--text-muted);
   overflow: hidden;
   transition:
@@ -1249,7 +1283,7 @@ label > textarea {
   padding: 0 4px 0 12px;
   background: none;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   color: inherit;
   font-weight: inherit;
   text-align: left;
@@ -1332,8 +1366,8 @@ label > textarea {
   margin: 4px 4px 0;
   padding: 0;
   flex-shrink: 0;
-  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: var(--r-control);
   background: transparent;
   color: var(--text-faint);
   font-size: 16px;
@@ -1357,16 +1391,18 @@ label > textarea {
   white-space: nowrap;
 }
 
-/* the state word travels with the session name */
+/* A tabular status word with a left rule, not a pill — the state reads as a
+   label on the instrument, and the rule carries the heat colour. */
 .session-state {
   flex-shrink: 0;
-  padding: 3px 8px;
-  border-radius: 6px;
+  padding: 2px 0 2px 8px;
+  border-left: 2px solid var(--lit);
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--lit);
-  background: color-mix(in srgb, var(--lit) 12%, transparent);
 }
 
 /* one segmented control, not four floating pills */
@@ -1375,7 +1411,7 @@ label > textarea {
   margin-left: auto;
   flex-shrink: 0;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-control);
   overflow: hidden;
   background: color-mix(in srgb, var(--surface-raised) 55%, transparent);
 }
@@ -1503,15 +1539,23 @@ label > textarea {
 
 .empty-pane {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
   align-items: center;
   justify-content: center;
   height: 100%;
   background: var(--term-bg);
 }
 
+.empty-pane-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
 .empty-pane-button {
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--input) 80%, transparent);
   color: var(--text);
 }
@@ -1537,13 +1581,20 @@ label > textarea {
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--input) 80%, transparent);
   color: var(--text);
 }
 
 .pane-controls button:hover {
   background: color-mix(in srgb, var(--lit) 30%, transparent);
+}
+
+.pane-controls button svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  stroke-linecap: round;
 }
 
 .pane-picker-scrim {
@@ -1566,7 +1617,7 @@ label > textarea {
   max-width: 420px;
   max-height: 70vh;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: var(--r-panel);
   background: var(--input);
   box-shadow: 0 18px 48px rgb(0 0 0 / 50%);
 }
@@ -1586,7 +1637,7 @@ label > textarea {
 .pane-picker-new {
   text-align: left;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--input) 60%, transparent);
   color: var(--text);
 }
@@ -1611,18 +1662,30 @@ label > textarea {
   z-index: 51;
   display: flex;
   flex-direction: column;
-  min-width: 150px;
+  min-width: 210px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: var(--r-panel);
   background: var(--input);
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
 }
 
 .tab-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  white-space: nowrap;
   text-align: left;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   color: var(--text);
+}
+
+/* The accelerator, right-aligned like a native menu — mono so it reads as keys. */
+.tab-menu-key {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .tab-menu-item:hover {
@@ -1634,7 +1697,7 @@ label > textarea {
   pointer-events: none;
   background: color-mix(in srgb, var(--lit) 30%, transparent);
   outline: 2px solid color-mix(in srgb, var(--lit) 70%, transparent);
-  border-radius: 8px;
+  border-radius: var(--r-control);
 }
 
 /* Floating label that follows the cursor while dragging a session tab into a
@@ -1648,7 +1711,7 @@ label > textarea {
   overflow: hidden;
   padding: 4px 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--accent) 22%, var(--surface-raised));
   color: var(--text);
   font-size: 12px;
@@ -1822,7 +1885,9 @@ label > textarea {
   flex: 1;
   width: 100%;
   border: 0;
-  background: #fff;
+  /* Match the chrome while the framed HTML loads so there is no white flash
+     inside the dark bezel; the presentation paints its own background over this. */
+  background: var(--surface);
 }
 
 /* ══ WORKSPACE PANEL ══════════════════════════════════════════════════════ */
@@ -1887,7 +1952,7 @@ label > textarea {
   gap: 7px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
   text-align: left;
@@ -1983,7 +2048,7 @@ label > textarea {
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
   font-size: 12px;
@@ -2066,7 +2131,7 @@ label > textarea {
   display: flex;
   align-items: center;
   gap: 4px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
 }
 
 .git-file-row:hover {
@@ -2164,7 +2229,7 @@ label > textarea {
   text-align: left;
   padding: 8px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
 }
@@ -2429,7 +2494,7 @@ label > textarea {
   min-width: 232px;
   padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--surface);
   box-shadow: 0 24px 60px -24px rgb(0 0 0 / 70%);
   display: grid;
@@ -2441,7 +2506,7 @@ label > textarea {
   justify-content: flex-start;
   padding: 0 11px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
   text-align: left;

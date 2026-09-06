@@ -10,7 +10,8 @@ export function TerminalEmpty(props: { open: boolean; hostName: string; onNew: (
   if (!open) return null;
   return (
     <div className="empty-main">
-      <p>No terminal open on {hostName}.</p>
+      <p className="empty-main-host mono">{hostName}</p>
+      <p className="empty-main-title">No session on this screen</p>
       <button type="button" onClick={onNew}>
         New terminal
       </button>
