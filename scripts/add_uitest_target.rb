@@ -18,8 +18,11 @@ if (g = proj.main_group[TEST]); g.remove_from_project; end
 test = proj.new_target(:ui_test_bundle, TEST, :ios, '17.0')
 
 group = proj.main_group.new_group(TEST, TEST)
-src = group.new_file('SmokeTests.swift')
-test.add_file_references([src])
+# Compile every .swift in the TetherIOSUITests dir so new test files are picked
+# up without editing this script.
+Dir.glob(File.join(File.dirname(proj_path), TEST, '*.swift')).sort.each do |f|
+  test.add_file_references([group.new_file(File.basename(f))])
+end
 
 test.build_configurations.each do |c|
   bs = c.build_settings

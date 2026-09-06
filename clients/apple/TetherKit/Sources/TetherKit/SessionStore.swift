@@ -142,7 +142,52 @@ public final class SessionStore {
     }
   }
 
+  #if DEBUG
+  private struct PreseedHost: Decodable {
+    let name: String
+    let host: String
+    let port: String
+    let scheme: String?
+    let devicePrivB64: String
+    let serverPubB64: String
+  }
+
+  /// Test-only: seed a paired host from JSON in `TETHER_UITEST_PRESEED` so an
+  /// XCUITest launches already paired, skipping the interactive pairing UI. It
+  /// mirrors `createNoiseHost` but with key material supplied by the fixture
+  /// (which enrolled the matching device pubkey on the server). No-op unless the
+  /// env var is set, so it never affects a normal launch.
+  func preseedHostFromEnvironmentForTesting() {
+    guard let raw = ProcessInfo.processInfo.environment["TETHER_UITEST_PRESEED"],
+          let data = raw.data(using: .utf8),
+          let seed = try? JSONDecoder().decode(PreseedHost.self, from: data),
+          let devicePriv = Data(base64Encoded: seed.devicePrivB64),
+          let serverPub = Data(base64Encoded: seed.serverPubB64)
+    else { return }
+    let displayName = seed.name.isEmpty ? seed.host : seed.name
+    do {
+      let already = try hostStore.list()
+      if already.contains(where: { $0.host == seed.host && $0.port == seed.port }) { return }
+      let profile = try hostStore.create(
+        name: displayName,
+        color: "#89b4fa",
+        host: seed.host,
+        port: seed.port,
+        identityName: displayName,
+        scheme: seed.scheme
+      )
+      try noiseKeyStore.saveDevicePrivateKey(devicePriv, hostId: profile.id)
+      try noiseKeyStore.saveServerPublicKey(serverPub, hostId: profile.id)
+    } catch {
+      // Best-effort in tests; a failed preseed surfaces as an unpaired app.
+    }
+  }
+  #endif
+
   public func bootstrap() async {
+    #if DEBUG
+    preseedHostFromEnvironmentForTesting()
+    #endif
     do {
       hosts = try hostStore.list()
       for host in hosts {
