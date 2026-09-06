@@ -128,6 +128,7 @@ noiseRoutes.get(
           } catch {}
           return;
         }
+        testEvent('noise_socket_open', { route: 'session' });
         activeNoiseConnections += 1;
         const adapter = new WsFrameIO(sink(ws));
         io = adapter;

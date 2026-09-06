@@ -20,6 +20,7 @@ import {
 import { sessionsRoutes } from './routes/sessions';
 import { signalRoutes } from './routes/signal';
 import { VERSION } from './runtime';
+import { testEvent } from './testEvents';
 import { getTlsReport, isSecureRequest } from './tlsRuntime';
 
 export { hasControlToken, presentationControlToken };
@@ -81,12 +82,13 @@ app.use('/api/*', authMiddleware);
 //     are a MITM's to rewrite, and are advisory discovery only.
 //   - A mismatch between the pinned value and the observed peer certificate is
 //     a hard failure, not a re-pair prompt.
-app.get('/api/status', (c) =>
-  c.json({
+app.get('/api/status', (c) => {
+  testEvent('status', { secure: isSecureRequest(c.req.url) });
+  return c.json({
     secure: isSecureRequest(c.req.url),
     tls: getTlsReport(),
-  }),
-);
+  });
+});
 
 // Lightweight authed reachability probe for the client's Test connection.
 app.get('/api/health', (c) => c.json({ ok: true, version: VERSION }));
