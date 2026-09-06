@@ -47,16 +47,11 @@ final class AgentScrollbackTests: XCTestCase {
     let aId = activeId(app)
     print("A_ID=\(aId)")
 
-    // Launch Claude Code.
+    // Launch Claude Code. The folder is pre-trusted (orchestration sets
+    // hasTrustDialogAccepted), so no trust prompt should appear.
     app.typeText("claude\n")
-    sleep(18) // claude TUI boot + trust prompt appears
+    sleep(20) // claude TUI boot
     surface(app).tap()
-    // Accept the "trust this folder?" prompt: the cursor defaults to "No, exit",
-    // so move down to "Yes, I trust this folder" and confirm.
-    app.typeText(XCUIKeyboardKey.downArrow.rawValue)
-    sleep(1)
-    app.typeText("\r")
-    sleep(8) // claude ready for input
     shot(app, "agent-ready")
 
     // Deterministic, paged request.

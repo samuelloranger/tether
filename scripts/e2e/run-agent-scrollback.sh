@@ -37,6 +37,23 @@ for _ in $(seq 1 40); do
   sleep 0.5
 done
 
+# Pre-trust the session's working dir so Claude Code skips its "trust this
+# folder?" prompt (backed up first).
+CJSON="$HOME/.claude.json"
+if [ -f "$CJSON" ]; then
+  cp "$CJSON" "$CJSON.e2ebak"
+  python3 - "$CJSON" "$HOME" <<'PY' || true
+import json, sys
+path, home = sys.argv[1], sys.argv[2]
+d = json.load(open(path))
+d.setdefault("projects", {}).setdefault(home, {})["hasTrustDialogAccepted"] = True
+tmp = path + ".tmp"
+json.dump(d, open(tmp, "w"))
+import os; os.replace(tmp, path)
+print("pre-trusted", home)
+PY
+fi
+
 FIXTURE="$(TETHER_DB_PATH="$DB" FIX_PORT="$PORT" FIX_SCHEME=ws bun scripts/e2e/preseed-fixture.ts)"
 /usr/bin/ruby scripts/add_uitest_target.rb clients/apple/Tether.xcodeproj >/dev/null
 xcrun simctl terminate "$SIM_ID" "$BID" 2>/dev/null || true
