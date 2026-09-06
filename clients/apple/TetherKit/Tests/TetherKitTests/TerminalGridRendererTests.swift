@@ -19,7 +19,7 @@ final class TerminalGridRendererTests: XCTestCase {
   private let backgroundARGB: UInt32 = 0xFF00_0000
   private let foregroundARGB: UInt32 = 0xFFFF_FFFF
 
-  private func metrics(cols: Int, rows: Int) -> TerminalRenderMetrics {
+  private func metrics(cols: Int, rows: Int, viewRows: Int? = nil) -> TerminalRenderMetrics {
     let font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     let bold = UIFont.monospacedSystemFont(ofSize: 14, weight: .bold)
     let cellWidth = ceil(("M" as NSString).size(withAttributes: [.font: font]).width)
@@ -27,7 +27,10 @@ final class TerminalGridRendererTests: XCTestCase {
     return TerminalRenderMetrics(
       cellWidth: cellWidth,
       cellHeight: cellHeight,
-      size: CGSize(width: cellWidth * CGFloat(cols), height: cellHeight * CGFloat(rows)),
+      size: CGSize(
+        width: cellWidth * CGFloat(cols),
+        height: cellHeight * CGFloat(viewRows ?? rows)
+      ),
       scale: 2,
       font: font,
       boldFont: bold,
@@ -51,14 +54,17 @@ final class TerminalGridRendererTests: XCTestCase {
     return cells
   }
 
-  private func header(cols: Int, rows: Int, generation: UInt64) -> GridSnapshot.Header {
+  private func header(cols: Int, rows: Int, generation: UInt64, altScreen: Bool = false)
+    -> GridSnapshot.Header
+  {
     GridSnapshot.Header(
       cols: UInt16(cols),
       rows: UInt16(rows),
       cursorCol: 0,
       cursorRow: 0,
       generation: generation,
-      cursorVisible: false
+      cursorVisible: false,
+      altScreen: altScreen
     )
   }
 
@@ -147,6 +153,96 @@ final class TerminalGridRendererTests: XCTestCase {
 
     XCTAssertEqual(inkedPixels(top), 0, "ink bled into the empty first row")
     XCTAssertGreaterThan(inkedPixels(bottom), 0, "the second row's glyph never landed")
+  }
+
+  /// On the primary screen, empty rows under a prompt are the grid. They must
+  /// stay at the bottom — pulling them up would move a new shell's prompt.
+  func testEmptyTrailingRowsOnThePrimaryScreenStayAtTheBottom() {
+    let renderer = TerminalGridRenderer()
+    let cols = 8
+    let rows = 8
+    let filled = 5
+    let m = metrics(cols: cols, rows: rows)
+    var cells = grid("", cols: cols, rows: rows)
+    for row in 0..<filled {
+      cells[row * cols].codepoint = 0x48  // 'H'
+    }
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: rows, generation: 1), cells: cells, metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let rowHeightPx = Int((m.cellHeight * m.scale).rounded())
+    let gapTop = rowHeightPx * filled
+    guard
+      let gap = image.cropping(
+        to: CGRect(x: 0, y: gapTop, width: image.width, height: image.height - gapTop)
+      )
+    else { return XCTFail("crop failed") }
+    XCTAssertEqual(inkedPixels(gap), 0)
+  }
+
+  /// Alt-screen TUI after a grow: trailing empty rows are unpainted, not
+  /// content. They must sit as slack against the title bar so the painted TUI
+  /// stays on the key bar — otherwise the whole screen looks pushed up.
+  func testAltScreenTrailingEmptyRowsSitAsSlackAtTheTop() {
+    let renderer = TerminalGridRenderer()
+    let cols = 8
+    let rows = 8
+    let filled = 5
+    let m = metrics(cols: cols, rows: rows)
+    var cells = grid("", cols: cols, rows: rows)
+    for row in 0..<filled {
+      cells[row * cols].codepoint = 0x48  // 'H'
+    }
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: rows, generation: 1, altScreen: true),
+        cells: cells,
+        metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let rowHeightPx = Int((m.cellHeight * m.scale).rounded())
+    let slack = rowHeightPx * (rows - filled)
+    guard
+      let top = image.cropping(to: CGRect(x: 0, y: 0, width: image.width, height: slack)),
+      let content = image.cropping(
+        to: CGRect(x: 0, y: slack, width: image.width, height: image.height - slack)
+      )
+    else { return XCTFail("crop failed") }
+    XCTAssertEqual(inkedPixels(top), 0, "unpainted alt-screen rows must not occupy the bottom")
+    XCTAssertGreaterThan(inkedPixels(content), 0, "the painted TUI never landed")
+  }
+
+  /// When the snapshot has fewer rows than the view, slack belongs at the TOP
+  /// (against the title bar), not under the last line. A regression here is
+  /// the other way to get a gap at the bottom: content top-aligned in a tall view.
+  func testAShortGridInATallViewPutsSlackAtTheTop() {
+    let renderer = TerminalGridRenderer()
+    let cols = 8
+    let gridRows = 5
+    let viewRows = 8
+    let m = metrics(cols: cols, rows: gridRows, viewRows: viewRows)
+    var cells = grid("", cols: cols, rows: gridRows)
+    cells[0].codepoint = 0x48  // 'H' on the first grid row
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: gridRows, generation: 1), cells: cells, metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let rowHeightPx = Int((m.cellHeight * m.scale).rounded())
+    let slack = rowHeightPx * (viewRows - gridRows)
+    guard
+      let top = image.cropping(to: CGRect(x: 0, y: 0, width: image.width, height: slack)),
+      let content = image.cropping(
+        to: CGRect(x: 0, y: slack, width: image.width, height: image.height - slack)
+      )
+    else { return XCTFail("crop failed") }
+    XCTAssertEqual(inkedPixels(top), 0, "slack must sit above the grid, not below it")
+    XCTAssertGreaterThan(inkedPixels(content), 0, "the short grid's glyph never landed")
   }
 }
 #endif

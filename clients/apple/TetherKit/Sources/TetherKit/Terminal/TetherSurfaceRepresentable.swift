@@ -4,6 +4,7 @@ import UIKit
 
 public struct TetherSurfaceRepresentable: UIViewRepresentable {
   @Binding public var snapshot: Data?
+  public var sessionKey: String
   public var fontName: String
   public var fontSize: CGFloat
   public var onGridSizeChange: (UInt16, UInt16) -> Void
@@ -18,6 +19,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
 
   public init(
     snapshot: Binding<Data?>,
+    sessionKey: String = "",
     fontName: String,
     fontSize: CGFloat,
     onGridSizeChange: @escaping (UInt16, UInt16) -> Void,
@@ -31,6 +33,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     mouseSgr: Bool = true
   ) {
     _snapshot = snapshot
+    self.sessionKey = sessionKey
     self.fontName = fontName
     self.fontSize = fontSize
     self.onGridSizeChange = onGridSizeChange
@@ -66,6 +69,12 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     uiView.mouseMode = mouseMode
     uiView.mouseSgr = mouseSgr
     bindCallbacks(uiView, context: context)
+    if context.coordinator.sessionKey != sessionKey {
+      context.coordinator.sessionKey = sessionKey
+      if !sessionKey.isEmpty {
+        uiView.prepareForSessionChange()
+      }
+    }
     if let snapshot {
       uiView.updateSnapshot(snapshot)
     } else {
@@ -100,6 +109,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
 
   public final class Coordinator {
     var parent: TetherSurfaceRepresentable
+    var sessionKey: String = ""
 
     init(parent: TetherSurfaceRepresentable) {
       self.parent = parent

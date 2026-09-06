@@ -207,6 +207,17 @@ public final class TetherSurfaceView: UIView {
     }
   }
 
+  /// A session switch that has a cached grid to show. Clears the generation
+  /// gate so the next frame paints, but leaves the current image up until it
+  /// does — `clearSnapshot` is the blank flash.
+  public func prepareForSessionChange() {
+    frameEpoch &+= 1
+    isRendering = false
+    renderQueue.async { [worker] in
+      worker.forgetGeneration()
+    }
+  }
+
   /// Plain text of each visible row (trailing spaces trimmed).
   public func rowTexts() -> [String] {
     cachedRowTexts
@@ -385,7 +396,12 @@ public final class TetherSurfaceView: UIView {
   /// bar, where it is indistinguishable from empty scrollback.
   private var gridOriginY: CGFloat {
     guard let header else { return 0 }
-    let drawn = CGFloat(header.rows) * cellHeight
+    let cols = Int(header.cols)
+    let rows = Int(header.rows)
+    let drawRows = TerminalGridLayout.paintedRows(
+      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen
+    )
+    let drawn = CGFloat(drawRows) * cellHeight
     return max(0, bounds.height - drawn)
   }
 

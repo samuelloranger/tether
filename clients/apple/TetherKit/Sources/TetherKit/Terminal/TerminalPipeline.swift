@@ -54,6 +54,8 @@ actor TerminalPipeline {
   private let outboundFrames: AsyncStream<OutboundFrame>
 
   private let replayStore = FfiReplayStore()
+  private let snapshotCache = TerminalSnapshotCache()
+  private var outputBuffer = TerminalOutputBuffer()
   private var emulator: FfiTerminalEmulator?
   /// Which HOST-QUALIFIED session key `emulator` holds the scrollback for.
   private var emulatorKey: String?
@@ -70,6 +72,7 @@ actor TerminalPipeline {
   private var lastFocusSent: Bool?
   private var lastMouseMode: MouseMode = .off
   private var lastMouseSgr = true
+  private var lastAltScreen = false
   /// One source of truth for the grid size: the channel, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
   private var cols: UInt16 = 80
@@ -91,7 +94,9 @@ actor TerminalPipeline {
   ///
   /// The server replays a session's whole retained tail in response to `start`
   /// (`subscribeToSession`), so there is no `sinceId` cursor: the emulator is
-  /// always rebuilt fresh and refilled from that replay.
+  /// always rebuilt fresh and refilled from that replay. The last TGRD frame
+  /// for this key stays on screen until that replay publishes, so a session
+  /// switch is not a blank flash.
   ///
   /// Reduced-robustness TODOs for a later pass:
   ///   - No auto-reconnect/backoff. An unexpected drop surfaces an error; the
@@ -108,11 +113,17 @@ actor TerminalPipeline {
   ) async {
     disconnect()
     startOutboundPumpIfNeeded()
-    // Always a fresh grid: the server replays the whole tail on `start`.
+    outputBuffer.reset()
     emulator = FfiTerminalEmulator(cols: cols, rows: rows)
     emulatorKey = key
     lastRenderedGeneration = nil
-    snapshotSink.yield(nil)
+    lastAltScreen = false
+    if let cached = snapshotCache.openingSnapshot(for: key) {
+      lastAltScreen = (try? GridSnapshotDecoder.peekHeader(cached))?.altScreen ?? false
+      snapshotSink.yield(cached)
+    } else {
+      snapshotSink.yield(nil)
+    }
     resetMouseModes()
     do {
       let channel = try await client.reconnect(hostId: hostId, url: url)
@@ -144,8 +155,7 @@ actor TerminalPipeline {
         switch message {
         case let .output(_, chunk):
           if let bytes = chunk.data(using: .utf8) {
-            emulator?.feed(bytes: bytes)
-            publishSnapshot()
+            applyOutput(bytes)
           }
         case .exit:
           eventSink.yield(.sessionsChanged)
@@ -195,6 +205,7 @@ actor TerminalPipeline {
 
   func forget(key: String) {
     replayStore.forget(sessionId: key)
+    snapshotCache.forget(key)
   }
 
   /// What to do with this channel after the app came back to the foreground.
@@ -260,12 +271,36 @@ actor TerminalPipeline {
   /// wire when it did.
   @discardableResult
   private func applyLocalResize(cols newCols: UInt16, rows newRows: UInt16) -> Bool {
+    let oldCols = cols
+    let oldRows = rows
     guard newCols != cols || newRows != rows else { return false }
     cols = newCols
     rows = newRows
+    if TerminalResizeStrategy.shouldRebuildFromBuffer(
+      altScreen: lastAltScreen,
+      oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
+    ), !outputBuffer.data.isEmpty {
+      emulator = outputBuffer.replay(cols: newCols, rows: newRows)
+      lastRenderedGeneration = nil
+      publishSnapshot()
+      return true
+    }
     emulator?.resize(cols: newCols, rows: newRows)
-    publishSnapshot()
+    // An empty buffer means we are still waiting on replay and a cached grid
+    // is on screen — publishing the empty emulator would flash blank.
+    if outputBuffer.data.isEmpty { return true }
+    if TerminalResizePublish.shouldPublishAfterResize(
+      oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
+    ) {
+      publishSnapshot()
+    }
     return true
+  }
+
+  private func applyOutput(_ bytes: Data) {
+    outputBuffer.append(bytes)
+    emulator?.feed(bytes: bytes)
+    publishSnapshot()
   }
 
   /// Tracks the last focus value so `.inactive` then `.background` for one
@@ -291,7 +326,14 @@ actor TerminalPipeline {
     syncMouseModes(from: emulator)
     guard generation != lastRenderedGeneration else { return }
     lastRenderedGeneration = generation
-    snapshotSink.yield(emulator.snapshot())
+    let packed = emulator.snapshot()
+    if let header = try? GridSnapshotDecoder.peekHeader(packed) {
+      lastAltScreen = header.altScreen
+    }
+    if let emulatorKey {
+      snapshotCache.remember(packed, for: emulatorKey)
+    }
+    snapshotSink.yield(packed)
   }
 
   private func syncMouseModes(from emulator: FfiTerminalEmulator) {

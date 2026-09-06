@@ -14,10 +14,47 @@ public enum GridSnapshotDecoder {
     }
   }
 
+  /// Header only — used on the attach path to read alt-screen without copying cells.
+  public static func peekHeader(_ bytes: Data) throws -> GridSnapshot.Header {
+    guard bytes.count >= GridSnapshot.headerSize else {
+      throw GridSnapshot.DecodeError.tooShort
+    }
+    return try bytes.withUnsafeBytes { raw in
+      try readHeader(raw: raw, count: bytes.count)
+    }
+  }
+
   private static func decode(
     raw: UnsafeRawBufferPointer,
     count: Int
   ) throws -> (GridSnapshot.Header, [GridSnapshot.Cell]) {
+    let header = try readHeader(raw: raw, count: count)
+
+    let cellCount = Int(header.cols) * Int(header.rows)
+    // Written straight into uninitialized storage: the cell count is known
+    // exactly, so `append` per cell only buys a capacity check per iteration.
+    let cells = [GridSnapshot.Cell](unsafeUninitializedCapacity: cellCount) { buffer, initialized in
+      for index in 0..<cellCount {
+        let offset = GridSnapshot.headerSize + index * GridSnapshot.cellStride
+        buffer.baseAddress?.advanced(by: index).initialize(
+          to: GridSnapshot.Cell(
+            codepoint: raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self).littleEndian,
+            foreground: raw.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self).littleEndian,
+            background: raw.loadUnaligned(fromByteOffset: offset + 8, as: UInt32.self).littleEndian,
+            attrs: raw.loadUnaligned(fromByteOffset: offset + 12, as: UInt32.self).littleEndian
+          )
+        )
+      }
+      initialized = cellCount
+    }
+
+    return (header, cells)
+  }
+
+  private static func readHeader(
+    raw: UnsafeRawBufferPointer,
+    count: Int
+  ) throws -> GridSnapshot.Header {
     let magic = raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self).littleEndian
     guard magic == GridSnapshot.magic else {
       throw GridSnapshot.DecodeError.badMagic
@@ -40,33 +77,14 @@ public enum GridSnapshotDecoder {
       throw GridSnapshot.DecodeError.sizeMismatch(length: count, cols: cols, rows: rows)
     }
 
-    let header = GridSnapshot.Header(
+    return GridSnapshot.Header(
       cols: cols,
       rows: rows,
       cursorCol: cursorCol,
       cursorRow: cursorRow,
       generation: generation,
-      cursorVisible: flags & GridSnapshot.flagCursorVisible != 0
+      cursorVisible: flags & GridSnapshot.flagCursorVisible != 0,
+      altScreen: flags & GridSnapshot.flagAltScreen != 0
     )
-
-    let cellCount = Int(cols) * Int(rows)
-    // Written straight into uninitialized storage: the cell count is known
-    // exactly, so `append` per cell only buys a capacity check per iteration.
-    let cells = [GridSnapshot.Cell](unsafeUninitializedCapacity: cellCount) { buffer, initialized in
-      for index in 0..<cellCount {
-        let offset = GridSnapshot.headerSize + index * GridSnapshot.cellStride
-        buffer.baseAddress?.advanced(by: index).initialize(
-          to: GridSnapshot.Cell(
-            codepoint: raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self).littleEndian,
-            foreground: raw.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self).littleEndian,
-            background: raw.loadUnaligned(fromByteOffset: offset + 8, as: UInt32.self).littleEndian,
-            attrs: raw.loadUnaligned(fromByteOffset: offset + 12, as: UInt32.self).littleEndian
-          )
-        )
-      }
-      initialized = cellCount
-    }
-
-    return (header, cells)
   }
 }

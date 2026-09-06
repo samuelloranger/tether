@@ -79,22 +79,27 @@ final class TerminalGridRenderer {
     }
     guard let context, let glyphCache else { return nil }
 
+    let drawRows = TerminalGridLayout.paintedRows(
+      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen
+    )
     // The grid is anchored to the bottom of the view (newest output nearest the
-    // key bar), so a row-count change moves every row on screen.
-    let originY = max(0, metrics.size.height - CGFloat(rows) * metrics.cellHeight)
+    // key bar), so a row-count change moves every row on screen. Alt-screen
+    // trailing empties are omitted from the draw height so they become slack
+    // at the top rather than a gap under the TUI.
+    let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
     if cols != lastCols || rows != lastRows || originY != lastOriginY {
       repaintAll = true
     }
 
     let dirty: [Int]
     if repaintAll {
-      dirty = Array(0..<rows)
+      dirty = Array(0..<max(drawRows, 0))
     } else if let changed = GridDiff.dirtyRows(
       previous: lastCells, current: cells, cols: cols, rows: rows
     ) {
-      dirty = changed
+      dirty = changed.filter { $0 < drawRows }
     } else {
-      dirty = Array(0..<rows)
+      dirty = Array(0..<max(drawRows, 0))
     }
 
     lastCells = cells

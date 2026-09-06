@@ -178,6 +178,7 @@ impl AlacrittyParser {
             cursor_row,
             generation: self.generation,
             cursor_visible,
+            alt_screen: self.term.mode().contains(TermMode::ALT_SCREEN),
             cells,
         }
     }
@@ -675,6 +676,124 @@ mod tests {
         assert!(
             joined.contains("uvwxyz0123456789XXXX"),
             "missing second line in {joined}"
+        );
+    }
+
+    fn alt_screen_bytes(cols: u16, rows: u16) -> Vec<u8> {
+        let mut buf = b"\x1b[?1049h\x1b[2J".to_vec();
+        for row in 1..=rows {
+            let label = format!("R{row}");
+            let fill = "x".repeat((cols as usize).saturating_sub(label.len()));
+            buf.extend(format!("\x1b[{row};1H{label}{fill}").as_bytes());
+        }
+        buf
+    }
+
+    fn paint_alt_screen(parser: &mut AlacrittyParser, cols: u16, rows: u16) {
+        parser.feed(&alt_screen_bytes(cols, rows));
+    }
+
+    #[test]
+    fn alt_screen_full_paint_fills_every_row() {
+        let mut parser = AlacrittyParser::new(20, 8);
+        paint_alt_screen(&mut parser, 20, 8);
+        let snapshot = parser.snapshot();
+        assert_eq!(cell_text(&snapshot, 0), "R1xxxxxxxxxxxxxxxxxx");
+        assert_eq!(cell_text(&snapshot, 7), "R8xxxxxxxxxxxxxxxxxx");
+    }
+
+    #[test]
+    fn alt_screen_sets_the_snapshot_flag() {
+        let mut parser = AlacrittyParser::new(20, 8);
+        assert!(!parser.snapshot().alt_screen);
+        parser.feed(b"\x1b[?1049h");
+        assert!(parser.snapshot().alt_screen);
+        parser.feed(b"\x1b[?1049l");
+        assert!(!parser.snapshot().alt_screen);
+    }
+
+    /// The iOS "big gap at the bottom / terminal pushed" look: the TUI painted
+    /// the old height, then the local emulator grew. Empty rows land under the
+    /// content. Claude Code / Codex / Cursor sit on the alt-screen, so this is
+    /// the grid the surface shows after a session switch that rebuilds then
+    /// resizes.
+    #[test]
+    fn alt_screen_resize_up_leaves_trailing_empty_rows() {
+        let mut parser = AlacrittyParser::new(20, 8);
+        paint_alt_screen(&mut parser, 20, 8);
+        parser.resize(20, 12);
+        let snapshot = parser.snapshot();
+        assert_eq!(snapshot.rows, 12);
+        assert!(snapshot.alt_screen);
+        assert_eq!(cell_text(&snapshot, 0), "R1xxxxxxxxxxxxxxxxxx");
+        assert_eq!(cell_text(&snapshot, 7), "R8xxxxxxxxxxxxxxxxxx");
+        assert_eq!(cell_text(&snapshot, 8), "");
+        assert_eq!(cell_text(&snapshot, 11), "");
+    }
+
+    /// Why pan does nothing until the agent writes: alt-screen has no scrollback.
+    #[test]
+    fn alt_screen_scroll_does_not_move_the_gap() {
+        let mut parser = AlacrittyParser::new(20, 8);
+        paint_alt_screen(&mut parser, 20, 8);
+        parser.resize(20, 12);
+        let before = parser.snapshot();
+        parser.scroll_viewport(40);
+        parser.scroll_viewport(-40);
+        let after = parser.snapshot();
+        assert_eq!(
+            cell_text(&after, 0),
+            cell_text(&before, 0),
+            "scroll must not pull alt-screen content into the empty rows"
+        );
+        assert_eq!(cell_text(&after, 11), "");
+    }
+
+    #[test]
+    fn alt_screen_repaint_at_new_size_fills_the_gap() {
+        let mut parser = AlacrittyParser::new(20, 8);
+        paint_alt_screen(&mut parser, 20, 8);
+        parser.resize(20, 12);
+        paint_alt_screen(&mut parser, 20, 12);
+        let snapshot = parser.snapshot();
+        assert_eq!(cell_text(&snapshot, 0), "R1xxxxxxxxxxxxxxxxxx");
+        assert_eq!(cell_text(&snapshot, 11), "R12xxxxxxxxxxxxxxxxx");
+    }
+
+    /// Session switch rebuilds a fresh emulator and replays the retained bytes.
+    /// At the SAME size the TUI painted, the last row must come back filled —
+    /// otherwise the surface is blank until the agent writes again.
+    #[test]
+    fn alt_screen_replay_at_the_same_size_restores_the_last_row() {
+        let mut replayed = AlacrittyParser::new(20, 8);
+        replayed.feed(&alt_screen_bytes(20, 8));
+        assert_eq!(cell_text(&replayed.snapshot(), 7), "R8xxxxxxxxxxxxxxxxxx");
+    }
+
+    /// Session switch rebuilds at the view size, then replays bytes the TUI
+    /// emitted at a *different* PTY size (start used 80×24, layout then grew).
+    /// CUP past the bottom clamps, so the last visible row is the TUI's last
+    /// line sitting on row 8, and growing the grid does not recover the missing
+    /// rows — that is the garbled TUI plus the gap the user cannot scroll away.
+    #[test]
+    fn alt_screen_replay_into_a_shorter_grid_then_grow_drops_the_bottom() {
+        let bytes = alt_screen_bytes(20, 12);
+        let mut replayed = AlacrittyParser::new(20, 8);
+        replayed.feed(&bytes);
+        let short = replayed.snapshot();
+        assert_eq!(cell_text(&short, 0), "R1xxxxxxxxxxxxxxxxxx");
+        assert_eq!(
+            cell_text(&short, 7),
+            "R12xxxxxxxxxxxxxxxxx",
+            "CUP past the last row overwrites it — the middle of the TUI is gone"
+        );
+        replayed.resize(20, 12);
+        let grown = replayed.snapshot();
+        assert_eq!(cell_text(&grown, 7), "R12xxxxxxxxxxxxxxxxx");
+        assert_eq!(
+            cell_text(&grown, 11),
+            "",
+            "growing after a short replay leaves the gap the user cannot scroll away"
         );
     }
 }

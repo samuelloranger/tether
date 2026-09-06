@@ -708,6 +708,7 @@ public struct TerminalView: View {
         } else {
         TetherSurfaceRepresentable(
           snapshot: $store.terminalSnapshot,
+          sessionKey: [store.activeHostId, store.activeSessionId].compactMap { $0 }.joined(separator: ":"),
           fontName: preferences.terminalFont.postScriptName,
           fontSize: preferences.terminalFontSize,
           onGridSizeChange: { cols, rows in store.updateGrid(cols: cols, rows: rows) },

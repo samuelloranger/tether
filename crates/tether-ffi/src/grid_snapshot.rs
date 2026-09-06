@@ -12,7 +12,7 @@
 //!   cursor_col:     u16
 //!   cursor_row:     u16
 //!   generation:     u64  monotonic; shell skips redraw when unchanged
-//!   flags:          u16  bit 0 = cursor visible; remainder reserved
+//!   flags:          u16  bit 0 = cursor visible; bit 1 = alt screen; remainder reserved
 //!
 //! Cell (16 bytes):
 //!   codepoint: u32  Unicode scalar value (space for empty)
@@ -29,6 +29,7 @@ pub const GRID_HEADER_SIZE: usize = 24;
 pub const GRID_CELL_STRIDE: usize = 16;
 
 pub const GRID_FLAG_CURSOR_VISIBLE: u16 = 1 << 0;
+pub const GRID_FLAG_ALT_SCREEN: u16 = 1 << 1;
 pub const GRID_ATTR_BOLD: u32 = 1 << 0;
 pub const GRID_ATTR_ITALIC: u32 = 1 << 1;
 pub const GRID_ATTR_UNDERLINE: u32 = 1 << 2;
@@ -44,6 +45,7 @@ pub struct GridSnapshotHeader {
     pub cursor_row: u16,
     pub generation: u64,
     pub cursor_visible: bool,
+    pub alt_screen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
@@ -104,7 +106,13 @@ pub fn encode_grid_snapshot(header: GridSnapshotHeader, cells: &[GridCell]) -> V
     out.extend_from_slice(&header.cursor_col.to_le_bytes());
     out.extend_from_slice(&header.cursor_row.to_le_bytes());
     out.extend_from_slice(&header.generation.to_le_bytes());
-    let flags = u16::from(header.cursor_visible) & GRID_FLAG_CURSOR_VISIBLE;
+    let mut flags = 0_u16;
+    if header.cursor_visible {
+        flags |= GRID_FLAG_CURSOR_VISIBLE;
+    }
+    if header.alt_screen {
+        flags |= GRID_FLAG_ALT_SCREEN;
+    }
     out.extend_from_slice(&flags.to_le_bytes());
 
     let mut cell_out = vec![0_u8; cell_bytes];
@@ -143,6 +151,7 @@ pub fn decode_grid_snapshot(
     let generation = u64::from_le_bytes(bytes[14..22].try_into().expect("eight bytes"));
     let flags = u16::from_le_bytes(bytes[22..24].try_into().expect("two bytes"));
     let cursor_visible = flags & GRID_FLAG_CURSOR_VISIBLE != 0;
+    let alt_screen = flags & GRID_FLAG_ALT_SCREEN != 0;
 
     let expected = grid_snapshot_buffer_size(cols, rows) as usize;
     if bytes.len() != expected {
@@ -160,6 +169,7 @@ pub fn decode_grid_snapshot(
         cursor_row,
         generation,
         cursor_visible,
+        alt_screen,
     };
 
     let cell_count = usize::from(cols) * usize::from(rows);
@@ -214,6 +224,7 @@ mod tests {
             cursor_row: 2,
             generation: 99,
             cursor_visible: true,
+            alt_screen: false,
         };
         let encoded = encode_grid_snapshot(header, &cells);
         assert_eq!(
@@ -236,6 +247,7 @@ mod tests {
             cursor_row: 0,
             generation: 1,
             cursor_visible: false,
+            alt_screen: false,
         };
         let cells = vec![
             GridCell {
