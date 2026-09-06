@@ -15,8 +15,9 @@ use tokio::sync::mpsc;
 use crate::commands::connect::{now_ms, random_unit, HEALTHY_MS};
 use crate::http::{self, HttpBytesResponse, HttpResponse};
 use crate::noise_session::{
-    decode_server, encode_auth_token_request, encode_devices_list, encode_devices_revoke,
-    encode_frontend_output, encode_start, translate_frontend, DeviceInfo, ServerMsg,
+    apply_log_id, decode_server, encode_auth_token_request, encode_devices_list,
+    encode_devices_revoke, encode_frontend_output, encode_frontend_reset, encode_start,
+    translate_frontend, DeviceInfo, ServerMsg,
 };
 use crate::noise_store::{
     load_device_keypair_in, load_pinned_server_key_in, save_device_keypair_in,
@@ -484,35 +485,37 @@ async fn reconnect(
 /// handshake, the pump owns the socket + [`NoiseSession`] and translates between
 /// the two protocols:
 ///
-/// - inbound sealed `{"t":"output","chunk"}` → `core-message-{conn_id}` carrying
+/// - inbound sealed `{"t":"output","chunk","id"}` → `core-message-{conn_id}` carrying
 ///   `{"type":"output","id":<n>,"chunk"}`, `<n>` a per-connection monotonic
-///   counter (Noise reconnect replays the whole tail on `start`, so a fresh
-///   counter is correct);
+///   counter (the Noise log id is tracked separately as `sinceId` on `start`);
 /// - inbound sealed `{"t":"exit",…}` → end the pump, emit `core-closed-{conn_id}`;
+/// - inbound sealed `{"t":"reset"}` → `{"type":"reset"}` so xterm wipes before
+///   a trimmed replay;
 /// - outgoing frontend WS-JSON on the handle's channel → translated + sealed onto
 ///   the socket (`input`/`resize`; `focus` and unknowns dropped).
 ///
 /// **Reconnect:** an *unexpected* socket drop while the user has NOT closed the
 /// session triggers a backoff+replay reconnect — rebuild a fresh Noise session
-/// to the same `address`, re-send `start` (the server replays the whole tail, so
-/// the terminal catches up), swap the live socket/session the pump uses, and keep
-/// pumping. `core-status-{conn_id}` emits `"reconnecting"` before each attempt
-/// and `"connected"` on success. A user close (the
+/// to the same `address`, re-send `start` with the last applied log id (the
+/// server replays only what this client missed), swap the live socket/session
+/// the pump uses, and keep pumping. `core-status-{conn_id}` emits `"reconnecting"`
+/// before each attempt and `"connected"` on success. A user close (the
 /// cancel flag set by `core_noise_close`, which also drops the outgoing sender)
 /// and a remote `exit` both end the pump and emit `core-closed-{conn_id}`.
 ///
-/// The `id` counter is monotonic ACROSS reconnects on purpose: the frontend
-/// drops any `output` frame with `id <= lastAppliedId`, so a reset counter would
-/// make the replayed tail (and every later frame) be silently discarded. Keeping
-/// it climbing lets the replayed tail apply and the terminal catch up.
+/// The frontend `id` counter is monotonic ACROSS reconnects on purpose: the
+/// frontend drops any `output` frame with `id <= lastAppliedId`, so a reset
+/// counter would make the replayed tail (and every later frame) be silently
+/// discarded. The *server* log cursor (`sinceId`) is what makes reconnect
+/// incremental instead of duplicating into an uncleared xterm.
 ///
 /// Retry policy: reconnect indefinitely with capped exponential backoff, giving
 /// up ONLY when the cancel flag is set (no max attempts) — a paired terminal
 /// should survive a long server restart. The cancel flag is honored between
 /// retries so `core_noise_close` stops it promptly.
 ///
-/// TODO: server→client `title`/`activity`/`diff`/`reset` WS message types do not
-/// flow over Noise yet — only `output`/`exit` are translated.
+/// TODO: server→client `title`/`activity`/`diff` WS message types do not
+/// flow over Noise yet — only `output`/`exit`/`reset` are translated.
 /// TODO: cols/rows are captured at connect time and reused verbatim on the
 /// reconnect `start`. If the terminal was resized mid-session the replayed
 /// geometry is momentarily stale, but the frontend re-sends `resize` on the new
@@ -563,16 +566,16 @@ pub async fn core_noise_connect(
 
     tauri::async_runtime::spawn(async move {
         let state = app.state::<SharedState>();
-        // Monotonic ACROSS reconnects: the frontend drops `output` frames whose
-        // id is <= the last it applied, so resetting per reconnect would discard
-        // the replayed tail and everything after it.
+        // Frontend ids stay monotonic across reconnects (xterm duplicate gate).
+        // Server log cursor is what `start` sends as sinceId so reconnect is
+        // incremental instead of duplicating into an uncleared xterm.
         let mut counter: u64 = 0;
+        let mut since_id: u64 = 0;
         let mut retry: u32 = 0;
         let mut opened_at = now_ms();
 
         'outer: loop {
-            // (Re)open the remote session by replaying the whole tail from `start`.
-            match session.seal(&encode_start(&session_id, cols, rows)) {
+            match session.seal(&encode_start(&session_id, cols, rows, since_id)) {
                 Ok(wire) => {
                     if tx.send(wire).await.is_err() {
                         // The just-swapped socket already failed; fall through to
@@ -635,9 +638,18 @@ pub async fn core_noise_connect(
                             Err(_) => break false, // decrypt failure ends the session
                         };
                         match decode_server(&plain) {
-                            Ok(ServerMsg::Output { chunk }) => {
+                            Ok(ServerMsg::Output { id, chunk }) => {
+                                if let Some(nid) = id {
+                                    if !apply_log_id(nid, &mut since_id) {
+                                        continue;
+                                    }
+                                }
                                 counter += 1;
                                 let _ = app.emit(&msg_evt, encode_frontend_output(counter, &chunk));
+                            }
+                            Ok(ServerMsg::Reset) => {
+                                since_id = 0;
+                                let _ = app.emit(&msg_evt, encode_frontend_reset());
                             }
                             Ok(ServerMsg::Exit { .. }) => break false, // remote exit → close
                             // devices.* / auth.token replies + anything else the terminal ignores.
@@ -1043,7 +1055,7 @@ mod live_e2e {
                 }
             };
             // start + input over the sealed channel.
-            sock.send(session.seal(&encode_start("d1", 80, 24)).unwrap())
+            sock.send(session.seal(&encode_start("d1", 80, 24, 0)).unwrap())
                 .await
                 .unwrap();
             tokio::time::sleep(Duration::from_millis(400)).await;
@@ -1064,7 +1076,7 @@ mod live_e2e {
                     Ok(p) => p,
                     Err(_) => break,
                 };
-                if let Ok(ServerMsg::Output { chunk }) = decode_server(&plaintext) {
+                if let Ok(ServerMsg::Output { chunk, .. }) = decode_server(&plaintext) {
                     if chunk.contains("desktop-e2e-marker") {
                         saw = true;
                         break 'attempts;
