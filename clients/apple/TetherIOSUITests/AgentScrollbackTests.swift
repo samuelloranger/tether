@@ -47,14 +47,25 @@ final class AgentScrollbackTests: XCTestCase {
     let aId = activeId(app)
     print("A_ID=\(aId)")
 
-    // Launch Claude Code and give it a deterministic, paged request.
+    // Launch Claude Code.
     app.typeText("claude\n")
-    sleep(18) // claude TUI boot + trust prompt settle
+    sleep(18) // claude TUI boot + trust prompt appears
     surface(app).tap()
+    // Accept the "trust this folder?" prompt: the cursor defaults to "No, exit",
+    // so move down to "Yes, I trust this folder" and confirm.
+    app.typeText(XCUIKeyboardKey.downArrow.rawValue)
+    sleep(1)
+    app.typeText("\r")
+    sleep(8) // claude ready for input
+    shot(app, "agent-ready")
+
+    // Deterministic, paged request.
     app.typeText(
       "Print exactly the lines SCROLL_LINE_001 through SCROLL_LINE_120, one per line, "
-        + "zero-padded to three digits, and nothing else.\n")
-    sleep(40) // let it stream pages of output
+        + "zero-padded to three digits, and nothing else.")
+    sleep(1)
+    app.typeText("\r")
+    sleep(45) // let it stream pages of output
     shot(app, "agent-active")
 
     // Switch away to B while output is on A.
