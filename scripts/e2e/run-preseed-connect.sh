@@ -60,7 +60,8 @@ TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
   -project clients/apple/Tether.xcodeproj -scheme TetherIOS \
   -destination "platform=iOS Simulator,id=$SIM_ID" \
   -only-testing:TetherIOSUITests/PreseedConnectTests \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGNING_ALLOWED=YES AD_HOC_CODE_SIGNING_ALLOWED=YES \
   >"$E2E_DIR/xcodebuild.log" 2>&1 || true
 
 echo "=== oracle events ==="
