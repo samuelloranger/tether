@@ -262,6 +262,7 @@ sessionsRoutes.post('/api/sessions/kill', async (c) => {
   const sessionId = body.id || 'default';
 
   const killed = killSession(sessionId);
+  testEvent('session_kill', { session: sessionId, killed });
   return c.json({ ok: killed });
 });
 

@@ -181,8 +181,15 @@ public final class SessionStore {
   /// (which enrolled the matching device pubkey on the server). No-op unless the
   /// env var is set, so it never affects a normal launch.
   func preseedHostFromEnvironmentForTesting() {
-    guard let raw = ProcessInfo.processInfo.environment["TETHER_UITEST_PRESEED"],
-          let data = raw.data(using: .utf8),
+    // TETHER_UITEST_PRESEED seeds the first host; TETHER_UITEST_PRESEED2 an
+    // optional second one for the multi-host test.
+    for key in ["TETHER_UITEST_PRESEED", "TETHER_UITEST_PRESEED2"] {
+      if let raw = ProcessInfo.processInfo.environment[key] { preseedOneHostForTesting(raw) }
+    }
+  }
+
+  private func preseedOneHostForTesting(_ raw: String) {
+    guard let data = raw.data(using: .utf8),
           let seed = try? JSONDecoder().decode(PreseedHost.self, from: data),
           let devicePriv = Data(base64Encoded: seed.devicePrivB64),
           let serverPub = Data(base64Encoded: seed.serverPubB64)
@@ -224,6 +231,16 @@ public final class SessionStore {
       }
       startPolling()
       rememberSessionTitle()
+      #if DEBUG
+      // Test-only: replay a `tether://` deep link at launch the same way a
+      // notification tap would (NotificationTapRouter also funnels into
+      // handleDeepLink), so an XCUITest can exercise tap-to-session routing
+      // without APNs. No-op unless the env var is set.
+      if let raw = ProcessInfo.processInfo.environment["TETHER_UITEST_DEEPLINK"],
+         let url = URL(string: raw) {
+        handleDeepLink(url)
+      }
+      #endif
     } catch {
       errorMessage = error.localizedDescription
     }
