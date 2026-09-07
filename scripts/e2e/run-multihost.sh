@@ -31,10 +31,12 @@ HOME="$HOME2" TETHER_DB_PATH="$DB2" TETHER_PORT="$PORT2" TETHER_TLS=off TETHER_T
 PIDS+=($!)
 
 for port in "$PORT1" "$PORT2"; do
+  ready=0
   for _ in $(seq 1 40); do
-    curl -sf "http://127.0.0.1:$port/api/status" >/dev/null 2>&1 && break
+    curl -sf "http://127.0.0.1:$port/api/status" >/dev/null 2>&1 && { ready=1; break; }
     sleep 0.5
   done
+  [ "$ready" -eq 1 ] || { echo "FAIL: server never became ready on :$port"; tail -20 "$E2E_DIR/server1.log" "$E2E_DIR/server2.log" 2>/dev/null; exit 1; }
 done
 
 FIXTURE="$(TETHER_DB_PATH="$DB1" FIX_PORT="$PORT1" FIX_NAME=e2e FIX_SCHEME=ws bun scripts/e2e/preseed-fixture.ts)"
@@ -65,6 +67,9 @@ echo "host1: noise_auth=$AUTH1 noise_start=$START1   host2: noise_auth=$AUTH2 no
 echo "=== verdict ==="
 if [ "$XC_PASS" -ne 1 ]; then
   echo "FAIL: drawer did not show/drive both hosts (in-test assertion)"; tail -30 "$XLOG"; exit 1
+fi
+if [ "${AUTH1:-0}" -eq 0 ] || [ "${AUTH2:-0}" -eq 0 ]; then
+  echo "FAIL: a host never completed Noise auth (host1 auth=$AUTH1 host2 auth=$AUTH2)"; tail -30 "$XLOG"; exit 1
 fi
 if [ "${START1:-0}" -eq 0 ] || [ "${START2:-0}" -eq 0 ]; then
   echo "FAIL: a host never got its own session (host1 starts=$START1 host2 starts=$START2)"; tail -30 "$XLOG"; exit 1

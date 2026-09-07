@@ -36,10 +36,12 @@ cleanup() {
 trap cleanup EXIT
 
 start_server
+ready=0
 for _ in $(seq 1 40); do
-  curl -sf "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1 && break
+  curl -sf "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1 && { ready=1; break; }
   sleep 0.5
 done
+[ "$ready" -eq 1 ] || { echo "FAIL: server never became ready on :$PORT"; tail -20 "$E2E_DIR/server.log" 2>/dev/null; exit 1; }
 
 # Background watcher: on the trigger, restart the daemon once.
 (

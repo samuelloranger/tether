@@ -32,10 +32,12 @@ trap cleanup EXIT
 TETHER_DB_PATH="$DB" TETHER_PORT="$PORT" TETHER_TLS=off TETHER_TEST_LOG="$EVT" \
   bun apps/server/src/server/main.ts serve >"$E2E_DIR/server.log" 2>&1 &
 SERVER_PID=$!
+ready=0
 for _ in $(seq 1 40); do
-  curl -sf "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1 && break
+  curl -sf "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1 && { ready=1; break; }
   sleep 0.5
 done
+[ "$ready" -eq 1 ] || { echo "FAIL: server never became ready on :$PORT"; tail -20 "$E2E_DIR/server.log" 2>/dev/null; exit 1; }
 
 FIXTURE="$(TETHER_DB_PATH="$DB" FIX_PORT="$PORT" FIX_SCHEME=ws bun scripts/e2e/preseed-fixture.ts)"
 /usr/bin/ruby scripts/add_uitest_target.rb clients/apple/Tether.xcodeproj >/dev/null
@@ -54,6 +56,7 @@ TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
 
 # grep -c prints "0" AND exits 1 on zero matches, so `|| echo 0` would append a
 # SECOND "0" and break the numeric guards. `|| true` keeps the single count.
+XC_PASS=0; grep -q "Test Suite 'BackgroundAccumulationRenderTests' passed" "$E2E_DIR/xcodebuild.log" 2>/dev/null && XC_PASS=1
 SENT_A="$(TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts AGENT_A_DONE_SENTINEL 2>/dev/null || echo 0)"
 SENT_B="$(TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts AGENT_B_DONE_SENTINEL 2>/dev/null || echo 0)"
 WASLIVE_BACK="$(grep -c '"wasLive":true' "$EVT" 2>/dev/null || true)"
@@ -65,12 +68,17 @@ grep -E '"ev":"replay"|"ev":"noise_start"|"ev":"sigwinch"' "$EVT" 2>/dev/null | 
 echo "=== counts ==="
 echo "AGENT_A sentinel chunks: $SENT_A   AGENT_B sentinel chunks: $SENT_B"
 echo "switch-back re-subscribe (wasLive:true): $WASLIVE_BACK   sigwinch(repaint kick): $SIGWINCH   replay-with-content: $REPLAY_BYTES"
+echo "xcodebuild suite passed: $XC_PASS"
 echo "=== verdict ==="
 # Two sessions stay RESIDENT, so a backgrounded tab streams live — nothing is
 # missed and replay is empty by design (replay-with-content is informational,
 # not required). The return path proven here is: the agent's 30s of output
 # persisted (sentinels), switch-back re-subscribed to the LIVE session, and the
 # server kicked a SIGWINCH so a full-screen TUI repaints its current frame.
+if [ "$XC_PASS" -ne 1 ]; then
+  echo "FAIL: the sim suite did not pass — incidental events do not count"
+  echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
+fi
 if [ "$SENT_A" -eq 0 ] || [ "$SENT_B" -eq 0 ]; then
   echo "FAIL: an agent's 30s run never reached its sentinel in terminal_logs (A=$SENT_A B=$SENT_B)"
   echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1

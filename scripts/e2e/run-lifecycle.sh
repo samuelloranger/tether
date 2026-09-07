@@ -35,10 +35,14 @@ trap cleanup EXIT
 TETHER_DB_PATH="$DB" TETHER_PORT="$PORT" TETHER_TLS=off TETHER_TEST_LOG="$EVT" \
   bun apps/server/src/server/main.ts serve >"$E2E_DIR/server.log" 2>&1 &
 SERVER_PID=$!
+ready=0
 for _ in $(seq 1 40); do
-  curl -sf "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1 && break
+  curl -sf "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1 && { ready=1; break; }
   sleep 0.5
 done
+if [ "$ready" -ne 1 ]; then
+  echo "FAIL: server never became ready on :$PORT"; tail -20 "$E2E_DIR/server.log" 2>/dev/null; exit 1
+fi
 
 FIXTURE="$(TETHER_DB_PATH="$DB" FIX_PORT="$PORT" FIX_SCHEME=ws bun scripts/e2e/preseed-fixture.ts)"
 /usr/bin/ruby scripts/add_uitest_target.rb clients/apple/Tether.xcodeproj >/dev/null
@@ -60,6 +64,11 @@ XC_PASS=0; grep -q "Test Suite '$CLASS' passed" "$XLOG" 2>/dev/null && XC_PASS=1
 
 marker() { TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts "$1" 2>/dev/null || echo 0; }
 gridhas() { echo "$GRID" | grep -q "$1" && echo 1 || echo 0; }
+# Every verdict below also requires the sim suite to have actually passed — a
+# crashed/aborted run can still leave incidental markers or a partial grid.
+require_xcpass() {
+  [ "$XC_PASS" -eq 1 ] || { echo "FAIL: xcodebuild suite did not pass"; tail -30 "$XLOG"; exit 1; }
+}
 
 echo "=== $CLASS ==="
 echo "--- client grid dump ---"; echo "$GRID"; echo "--- end grid ---"
@@ -71,6 +80,7 @@ case "$CLASS" in
     CG_BEFORE="$(gridhas BEFORE_QUIT)"; CG_AFTER="$(gridhas AFTER_QUIT_MARK)"
     echo "server AFTER_QUIT_MARK=$SRV_AFTER   client grid BEFORE_QUIT=$CG_BEFORE AFTER_QUIT_MARK=$CG_AFTER"
     echo "=== verdict ==="
+    require_xcpass
     if [ "$SRV_AFTER" -eq 0 ]; then
       echo "FAIL: AFTER_QUIT_MARK never produced server-side — setup invalid (did the holder die with the app?)"
       tail -30 "$XLOG"; exit 1
@@ -85,6 +95,7 @@ case "$CLASS" in
     CG_TARGET="$(gridhas ROUTE_TARGET_A)"; CG_OTHER="$(gridhas OTHER_SESSION_B)"
     echo "client grid ROUTE_TARGET_A=$CG_TARGET   OTHER_SESSION_B=$CG_OTHER"
     echo "=== verdict ==="
+    require_xcpass
     if [ "$CG_TARGET" -ne 1 ]; then
       echo "FAIL: notification tap did not open the named session (target marker absent from grid)"
       tail -30 "$XLOG"; exit 1
@@ -111,6 +122,7 @@ case "$CLASS" in
     REPLAY_CONTENT="$(grep '"ev":"replay"' "$EVT" 2>/dev/null | grep -cE '"reset":true|"bytes":[1-9]' || true)"
     echo "server SUSPENDED_GAP=$SRV_GAP   client grid SUSPENDED_GAP=$CG_GAP   replay-with-content(info)=$REPLAY_CONTENT"
     echo "=== verdict ==="
+    require_xcpass
     if [ "$SRV_GAP" -eq 0 ]; then
       echo "FAIL: SUSPENDED_GAP never produced server-side — setup invalid"; tail -30 "$XLOG"; exit 1
     fi
@@ -122,15 +134,19 @@ case "$CLASS" in
   RotateResizeTests)
     # PTY resize sends SIGWINCH to the child at the OS level automatically; the
     # `sigwinch` testEvent is a SEPARATE reattach-kick, so it need not appear.
-    # The invariant is that a settled new width reached the PTY.
-    DISTINCT_COLS="$(grep '"ev":"noise_resize"' "$EVT" 2>/dev/null | grep -oE '"cols":[0-9]+' | sort -u | wc -l | tr -d ' ')"
-    echo "distinct resize widths reported to PTY: $DISTINCT_COLS"
+    # Landscape is WIDER, so proving rotation (not just the initial layout
+    # settle) means a later reported width strictly exceeds the first one.
+    COLS_SEQ="$(grep '"ev":"noise_resize"' "$EVT" 2>/dev/null | grep -oE '"cols":[0-9]+' | grep -oE '[0-9]+')"
+    FIRST_COLS="$(echo "$COLS_SEQ" | head -1)"
+    MAX_COLS="$(echo "$COLS_SEQ" | sort -n | tail -1)"
+    echo "first width=$FIRST_COLS   max width=$MAX_COLS"
     echo "=== verdict ==="
-    if [ "${DISTINCT_COLS:-0}" -lt 2 ]; then
-      echo "FAIL: rotation did not report a new grid size to the PTY (distinct cols=$DISTINCT_COLS)"
+    require_xcpass
+    if [ -z "$FIRST_COLS" ] || [ "${MAX_COLS:-0}" -le "${FIRST_COLS:-0}" ]; then
+      echo "FAIL: rotation never widened the grid (first=$FIRST_COLS max=$MAX_COLS)"
       tail -30 "$XLOG"; exit 1
     fi
-    echo "PASS: rotation reported a new (settled) grid width to the PTY"
+    echo "PASS: rotation to landscape reported a wider grid to the PTY ($FIRST_COLS -> $MAX_COLS cols)"
     ;;
   UnicodeRenderTests)
     # A wide (CJK) glyph occupies TWO grid cells — glyph + spacer — so the row
@@ -141,6 +157,7 @@ case "$CLASS" in
     SRV_CJK="$(marker 你)"; SRV_START="$(marker UNI_START)"
     echo "server: UNI_START=$SRV_START 你=$SRV_CJK   client grid: UNI_START=$S UNI_END=$E 你=$NI 好=$HAO café=$CAFE"
     echo "=== verdict ==="
+    require_xcpass
     if [ "$SRV_START" -eq 0 ] || [ "$SRV_CJK" -eq 0 ]; then
       echo "FAIL: the shell never emitted the unicode (printf \\u unsupported here?) — setup invalid"
       tail -30 "$XLOG"; exit 1
@@ -188,16 +205,18 @@ case "$CLASS" in
     echo "PASS: 5 rapid taps spawned exactly 5 live sessions, app stayed usable"
     ;;
   DrawerKillSessionTests)
-    KILLS="$(grep -c '"ev":"session_kill"' "$EVT" 2>/dev/null || true)"
-    echo "server session_kill events: $KILLS   xcodebuild passed=$XC_PASS"
+    # Require killed:true — the kill route logs session_kill even when the id
+    # matched nothing, so a bare event count would pass on a no-op kill.
+    KILLS_OK="$(grep -cE '"ev":"session_kill".*"killed":true' "$EVT" 2>/dev/null || true)"
+    echo "server session_kill(killed:true) events: $KILLS_OK   xcodebuild passed=$XC_PASS"
     echo "=== verdict ==="
-    if [ "${KILLS:-0}" -eq 0 ]; then
-      echo "FAIL: no session_kill reached the server — the drawer kill did not fire"; tail -30 "$XLOG"; exit 1
+    require_xcpass
+    if [ "${KILLS_OK:-0}" -eq 0 ]; then
+      echo "FAIL: no successful session_kill reached the server — the drawer kill did not fire"; tail -30 "$XLOG"; exit 1
     fi
-    if [ "$XC_PASS" -ne 1 ]; then
-      echo "FAIL: the killed row was not removed from the drawer (in-test assertion)"; tail -30 "$XLOG"; exit 1
-    fi
-    echo "PASS: drawer kill ended the session server-side and removed the row (2 -> 1)"
+    # The Swift test asserts the app stays usable after the kill; exact row
+    # removal is not re-asserted here (a SwiftUI a11y id on a row double-counts).
+    echo "PASS: drawer kill ended a live session server-side (killed:true) and the app stayed usable"
     ;;
   *)
     echo "no oracle for $CLASS — xcodebuild passed: $XC_PASS"
