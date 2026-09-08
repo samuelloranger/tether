@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
-import { SessionKindIcon } from './sessionIcons';
+import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { sessionLabel, sessionLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
@@ -299,7 +299,8 @@ export function SessionDrawer({
                 className="secondary drawer-host-new"
                 onClick={() => onNewAgentChat(host.id)}
               >
-                ✳ New agent chat
+                <AgentIcon />
+                New agent chat
               </button>
             </section>
           );

@@ -2712,6 +2712,7 @@ label > textarea {
 }
 
 .session-kind-icon {
+  display: block;
   width: 14px;
   height: 14px;
   flex: 0 0 auto;

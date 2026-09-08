@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
-import { SessionKindIcon } from './sessionIcons';
+import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { parseSessionKey, sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
@@ -294,7 +294,7 @@ export function SessionTabBar({
       </button>
       <button
         type="button"
-        className="session-tab-new-agent"
+        className="session-tab-new session-tab-new-agent"
         aria-label="New agent chat"
         title="New agent chat"
         disabled={!activeHostId}
@@ -302,7 +302,7 @@ export function SessionTabBar({
           if (activeHostId) onNewAgentChat(activeHostId);
         }}
       >
-        ✳
+        <AgentIcon />
       </button>
     </div>
   );

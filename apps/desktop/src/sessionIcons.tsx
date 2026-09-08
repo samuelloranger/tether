@@ -17,7 +17,7 @@ function TerminalIcon() {
 }
 
 /** A chat bubble — marks an agent chat session. */
-function AgentIcon() {
+export function AgentIcon() {
   return (
     <svg
       className="session-kind-icon"
