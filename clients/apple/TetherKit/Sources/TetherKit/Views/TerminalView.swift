@@ -869,7 +869,9 @@ public struct TerminalView: View {
     .onChange(of: overlayPresented) { _, presented in
       if presented {
         keyboardFocused = false
-      } else if placeholderReason == nil {
+      } else if placeholderReason == nil, store.activeAgentModel == nil {
+        // Never reclaim when the overlay closed to hand off to an agent chat —
+        // reclaiming here re-docks the key bar over the chat composer.
         keyboardFocused = true
       }
     }

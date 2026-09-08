@@ -9,11 +9,8 @@ import SwiftUI
 /// composer. Auto-scrolls to the newest content as it streams.
 public struct AgentChatView: View {
   @Bindable public var model: AgentChatModel
-  @State private var draft = ""
   @State private var keyboardInset: CGFloat = 0
   @FocusState private var composerFocused: Bool
-
-  private let bottomID = "agent-chat-bottom"
 
   public init(model: AgentChatModel) { self.model = model }
 
@@ -60,33 +57,36 @@ public struct AgentChatView: View {
   #endif
 
   private var transcript: some View {
-    ScrollViewReader { proxy in
-      ScrollView(.vertical) {
-        if model.messages.isEmpty {
-          emptyState.padding(.top, 80)
-        } else {
-          LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(model.messages) { message in
-              AgentMessageRow(message: message)
-                .id(message.id)
-            }
-            if model.turn == .thinking { ThinkingRow() }
-            Color.clear.frame(height: 1).id(bottomID)
+    // `.defaultScrollAnchor(.bottom)` owns BOTH jobs: it opens an existing chat
+    // at its foot AND keeps the foot pinned as content grows (new turns, streamed
+    // deltas). An earlier version drove that by hand with `withAnimation
+    // scrollTo` on four onChange handlers; on send they raced each other and the
+    // anchor and overshot past the content into the window backdrop before an
+    // update pulled it back. One anchor, no manual scrolling, no fight.
+    ScrollView(.vertical) {
+      if model.messages.isEmpty {
+        emptyState.padding(.top, 80)
+      } else {
+        LazyVStack(alignment: .leading, spacing: 16) {
+          ForEach(model.messages) { message in
+            AgentMessageRow(message: message)
+              .id(message.id)
           }
-          .padding(.horizontal, 16)
-          .padding(.vertical, 18)
+          if model.turn == .thinking { ThinkingRow() }
+          ForEach(Array(model.queued.enumerated()), id: \.offset) { index, text in
+            QueuedRow(text: text) { model.cancelQueued(at: index) }
+          }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 18)
       }
-      .onChange(of: model.messages.count) { _, _ in scrollToBottom(proxy) }
-      .onChange(of: model.messages.last?.plainText) { _, _ in scrollToBottom(proxy) }
-      .onChange(of: model.turn) { _, _ in scrollToBottom(proxy) }
     }
-  }
-
-  // Scroll in the change handler, never inline in the same update — SwiftUI
-  // can't scroll to an item added in the pass that adds it.
-  private func scrollToBottom(_ proxy: ScrollViewProxy) {
-    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+    .defaultScrollAnchor(.bottom)
+    // A drag through the transcript pulls the keyboard down with the finger; a
+    // plain tap dismisses it outright. Without either, the composer keyboard
+    // stayed up over the transcript with no way down but the send button.
+    .scrollDismissesKeyboard(.interactively)
+    .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
   }
 
   private var emptyState: some View {
@@ -110,7 +110,7 @@ public struct AgentChatView: View {
 
   private var composer: some View {
     HStack(alignment: .bottom, spacing: 10) {
-      TextField("Message Claude Code…", text: $draft, axis: .vertical)
+      TextField("Message Claude Code…", text: $model.draft, axis: .vertical)
         .lineLimit(1...5)
         .font(.body)
         .foregroundStyle(TetherColors.textPrimary)
@@ -124,14 +124,21 @@ public struct AgentChatView: View {
             .stroke(TetherColors.border, lineWidth: 1)
         )
       Button(action: sendOrStop) {
-        Image(systemName: model.turn == .idle ? "arrow.up" : "stop.fill")
-          .font(.system(size: 15, weight: .bold))
-          .foregroundStyle(TetherColors.onAccent)
-          .frame(width: 38, height: 38)
-          .background(sendEnabled ? TetherColors.accent : TetherColors.textFaint)
-          .clipShape(Circle())
+        Group {
+          if showSpinner {
+            ProgressView().controlSize(.small)
+          } else {
+            Image(systemName: isStop ? "stop.fill" : "arrow.up")
+              .font(.system(size: 15, weight: .bold))
+          }
+        }
+        .foregroundStyle(TetherColors.onAccent)
+        .tint(TetherColors.onAccent)
+        .frame(width: 38, height: 38)
+        .background(sendEnabled ? TetherColors.accent : TetherColors.textFaint)
+        .clipShape(Circle())
       }
-      .disabled(!sendEnabled)
+      .disabled(!sendEnabled || showSpinner)
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 10)
@@ -139,17 +146,27 @@ public struct AgentChatView: View {
     .overlay(alignment: .top) { Divider().overlay(TetherColors.border) }
   }
 
-  private var sendEnabled: Bool {
-    model.turn != .idle || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  private var hasDraft: Bool {
+    !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
+  /// Empty composer while the agent works → the button stops the turn. With text
+  /// in it, the button always sends: immediately when idle, queued when busy.
+  private var isStop: Bool { model.turn != .idle && !hasDraft }
+
+  /// Stop was tapped and the turn hasn't ended yet — the button shows the
+  /// interrupt in flight. Typing overrides it (the button becomes send/queue).
+  private var showSpinner: Bool { model.interrupting && !hasDraft }
+
+  private var sendEnabled: Bool { isStop || hasDraft }
+
   private func sendOrStop() {
-    if model.turn != .idle {
+    if isStop {
       model.interrupt()
       return
     }
-    model.sendPrompt(draft)
-    draft = ""
+    model.submit(model.draft)
+    model.draft = ""
   }
 }
 
@@ -222,6 +239,39 @@ struct AgentMessageRow: View {
   }
 }
 
+// MARK: - Queued (pending) message
+
+/// A prompt typed while the agent was busy: styled like a user bubble but muted
+/// and dashed, with a clock, to read as "waiting its turn". Tap to drop it.
+struct QueuedRow: View {
+  let text: String
+  let onCancel: () -> Void
+
+  var body: some View {
+    HStack {
+      Spacer(minLength: 40)
+      HStack(alignment: .top, spacing: 6) {
+        Image(systemName: "clock")
+          .font(.caption2)
+          .foregroundStyle(TetherColors.textFaint)
+        Text(text)
+          .font(.body)
+          .foregroundStyle(TetherColors.textSecondary)
+      }
+      .padding(.horizontal, 13)
+      .padding(.vertical, 9)
+      .background(TetherColors.accent.opacity(0.08))
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .overlay(
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .stroke(TetherColors.accent.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4]))
+      )
+      .onTapGesture(perform: onCancel)
+      .accessibilityHint("Queued. Tap to remove.")
+    }
+  }
+}
+
 // MARK: - Prose + code
 
 struct ProseText: View {
@@ -229,14 +279,60 @@ struct ProseText: View {
   init(_ text: String) { self.text = text }
 
   var body: some View {
-    attributed
-      .font(.body)
-      .foregroundStyle(TetherColors.textPrimary)
-      .textSelection(.enabled)
-      .frame(maxWidth: .infinity, alignment: .leading)
+    VStack(alignment: .leading, spacing: 4) {
+      ForEach(Array(parseProse(text).enumerated()), id: \.offset) { _, element in
+        row(for: element)
+      }
+    }
+    .textSelection(.enabled)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
-  private var attributed: Text {
+  @ViewBuilder
+  private func row(for element: ProseElement) -> some View {
+    switch element {
+    case let .heading(level, text):
+      Self.inline(text)
+        .font(Self.headingFont(level))
+        .foregroundStyle(TetherColors.textPrimary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    case let .bullet(text):
+      marker("•", Self.inline(text))
+    case let .ordered(number, text):
+      marker("\(number).", Self.inline(text))
+    case let .paragraph(text):
+      Self.inline(text)
+        .font(.callout)
+        .foregroundStyle(TetherColors.textPrimary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private func marker(_ glyph: String, _ content: Text) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(glyph)
+        .font(.callout)
+        .foregroundStyle(TetherColors.textSecondary)
+        .frame(minWidth: 16, alignment: .trailing)
+      content
+        .font(.callout)
+        .foregroundStyle(TetherColors.textPrimary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private static func headingFont(_ level: Int) -> Font {
+    switch level {
+    case 1: return .title2.weight(.bold)
+    case 2: return .title3.weight(.bold)
+    case 3: return .headline
+    default: return .subheadline.weight(.semibold)
+    }
+  }
+
+  /// Inline markdown only (bold/italic/code spans/links); block structure is
+  /// already resolved by `parseProse`.
+  static func inline(_ text: String) -> Text {
     let options = AttributedString.MarkdownParsingOptions(
       interpretedSyntax: .inlineOnlyPreservingWhitespace
     )

@@ -93,16 +93,18 @@ public struct AgentToolCard: View {
         .font(.system(size: 10, weight: .bold, design: .monospaced))
         .tracking(0.8)
         .foregroundStyle(call.isError ? TetherColors.danger : TetherColors.textFaint)
-      ScrollView(.vertical) {
-        Text(result)
-          .font(.system(.caption2, design: .monospaced))
-          .foregroundStyle(
-            call.isError ? TetherColors.danger : TetherColors.textSecondary
-          )
-          .textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      .frame(maxHeight: 180)
+      // No inner ScrollView: a vertical scroller nested in the transcript's own
+      // vertical scroller fought it for the drag. The output flows inline and the
+      // whole transcript scrolls; very long results are clamped so one tool can't
+      // swamp the thread. The card is already behind an explicit expand.
+      Text(result)
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(
+          call.isError ? TetherColors.danger : TetherColors.textSecondary
+        )
+        .textSelection(.enabled)
+        .lineLimit(40)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.horizontal, 12)
   }

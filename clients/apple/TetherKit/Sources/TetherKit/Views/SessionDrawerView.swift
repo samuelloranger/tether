@@ -104,8 +104,10 @@ public struct SessionDrawerView: View {
       if let hostId = agentChatHostId {
         AgentDirBrowserView(store: store, hostId: hostId) { path in
           agentChatHostId = nil
+          // Flip the tab BEFORE closing the drawer, in one transaction, so the
+          // terminal is already gone and never reclaims the keyboard mid-switch.
+          store.newAgentChat(hostId: hostId, cwd: path)
           onClose()
-          Task { await store.newAgentChat(hostId: hostId, cwd: path) }
         }
       }
     }

@@ -93,9 +93,11 @@ struct RootView: View {
         isPresented: $drawerOpen,
         store: store,
         onSelectSession: { hostId, sessionId in
-          Task {
-            await store.selectSession(hostId: hostId, sessionId: sessionId)
-          }
+          // Flip the tab synchronously, in the same transaction the drawer
+          // closes — a terminal→agent switch that trails an await lets the
+          // terminal reclaim the keyboard and strand its key bar over the chat.
+          let changed = store.activateSession(hostId: hostId, sessionId: sessionId)
+          Task { await store.connectActiveSession(changed: changed) }
         },
         onHostSettings: { hostId in
           settingsHostId = hostId
