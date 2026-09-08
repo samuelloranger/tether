@@ -1,8 +1,17 @@
-import { expect, test } from 'bun:test';
+import { beforeEach, expect, test } from 'bun:test';
 import type { AgentDriver, AgentEvent, AgentFrame } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
 import type { AgentMessageInsert } from './agentMessages';
 import { AgentRegistry } from './agentRegistry';
+import { db } from './db';
+
+// Tests using the default persist write rows to the shared per-process DB, and
+// tests using the default seqSeed read MAX(seq) back from it — so without this,
+// one test's `a1` rows shift another's seed and its `seq: 1` assertions fail
+// (only in the full parallel suite, where both run against the same DB).
+beforeEach(() => {
+  db.query('DELETE FROM agent_messages').run();
+});
 
 /** Records close() calls, unlike FakeAgentDriver's no-op — used to verify killAll. */
 class RecordingDriver implements AgentDriver {

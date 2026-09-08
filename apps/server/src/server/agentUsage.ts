@@ -18,6 +18,11 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 // Claude Code sends this beta header on the OAuth usage call.
 const OAUTH_BETA = 'oauth-2025-04-20';
 const TTL_MS = 60_000;
+// Failures cache only briefly, so a missing/expired token or a transient blip
+// doesn't hide usage for a full minute after it recovers.
+const NEG_TTL_MS = 10_000;
+// Bound the outbound call so a hung endpoint can't leak sockets/promises.
+const FETCH_TIMEOUT_MS = 5_000;
 
 /** Pull one window ({utilization, resets_at}) out of the raw endpoint JSON. */
 function toWindow(v: unknown): UsageWindow | null {
@@ -61,10 +66,12 @@ export interface UsageFetchDeps {
 }
 
 let cache: { at: number; val: AgentUsageLimits | null } | null = null;
+let inflight: Promise<AgentUsageLimits | null> | null = null;
 
 /** Reset the module cache — tests only. */
 export function resetUsageCache(): void {
   cache = null;
+  inflight = null;
 }
 
 /**
@@ -78,22 +85,31 @@ export async function fetchAgentUsage(deps: UsageFetchDeps = {}): Promise<AgentU
   const now = deps.now ?? Date.now();
   const fetchImpl = deps.fetchImpl ?? fetch;
   const readToken = deps.readToken ?? readClaudeToken;
-  if (cache && now - cache.at < TTL_MS) return cache.val;
+  if (cache && now - cache.at < (cache.val ? TTL_MS : NEG_TTL_MS)) return cache.val;
+  // Coalesce concurrent callers (every `agent.done` and every attach) onto one
+  // request, so a slow or hung endpoint can't pile up sockets and promises.
+  if (inflight) return inflight;
 
-  const token = readToken();
-  if (!token) {
-    cache = { at: now, val: null };
-    return null;
-  }
-  try {
-    const res = await fetchImpl(USAGE_URL, {
-      headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': OAUTH_BETA },
-    });
-    const val = res.ok ? parseUsageLimits(await res.json()) : null;
-    cache = { at: now, val };
-    return val;
-  } catch {
-    cache = { at: now, val: null };
-    return null;
-  }
+  inflight = (async () => {
+    try {
+      const token = readToken();
+      if (!token) {
+        cache = { at: now, val: null };
+        return null;
+      }
+      const res = await fetchImpl(USAGE_URL, {
+        headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': OAUTH_BETA },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      const val = res.ok ? parseUsageLimits(await res.json()) : null;
+      cache = { at: now, val };
+      return val;
+    } catch {
+      cache = { at: now, val: null };
+      return null;
+    } finally {
+      inflight = null;
+    }
+  })();
+  return inflight;
 }

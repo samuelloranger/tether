@@ -1,7 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AgentDriver } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
 import { AgentRegistry } from './agentRegistry';
+import { db } from './db';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
@@ -9,6 +10,13 @@ import type { FocusSubscriber } from './pty';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+// The agent tests persist prompts to the shared per-process DB and seed the seq
+// from its MAX; clear it before each so a sibling test's rows can't shift seqs
+// (fails only in the full parallel suite, where files share one DB).
+beforeEach(() => {
+  db.query('DELETE FROM agent_messages').run();
+});
 
 /**
  * A fake ServerChannel whose seal/open are identity — the JSON bytes pass

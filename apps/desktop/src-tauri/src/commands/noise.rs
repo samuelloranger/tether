@@ -521,6 +521,9 @@ async fn reconnect(
 /// geometry is momentarily stale, but the frontend re-sends `resize` on the new
 /// socket, so it self-corrects.
 #[tauri::command]
+// Each param is deserialized by name from the JS invoke; a struct would change
+// that contract for no gain. Same allow as `reconnect` above.
+#[allow(clippy::too_many_arguments)]
 pub async fn core_noise_connect(
     app: AppHandle,
     conn_id: String,

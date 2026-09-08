@@ -35,6 +35,10 @@ interface Entry {
 
 export class AgentRegistry {
   private readonly entries = new Map<string, Entry>();
+  /** Ids whose `driver.start` is in flight — closes the await-window where two
+   * concurrent `start(id)` calls could both pass the `entries` guard and spawn
+   * two drivers (the second orphaning the first). */
+  private readonly starting = new Set<string>();
   constructor(
     private readonly driverFactory: () => AgentDriver,
     private readonly persist: PersistFn = defaultPersist,
@@ -42,14 +46,19 @@ export class AgentRegistry {
   ) {}
 
   async start(id: string, cwd: string): Promise<void> {
-    if (this.entries.has(id)) return;
-    const driver = this.driverFactory();
-    await driver.start(cwd);
-    // Continue seq numbering from the persisted max so a server restart never
-    // reuses seqs (which would overwrite stored rows and make clients drop the
-    // new frames as replays).
-    const seq = new FrameSeq(this.seqSeed(id));
-    this.entries.set(id, { driver, seq, sinks: new Set(), deltaBuf: null });
+    if (this.entries.has(id) || this.starting.has(id)) return;
+    this.starting.add(id);
+    try {
+      const driver = this.driverFactory();
+      await driver.start(cwd);
+      // Continue seq numbering from the persisted max so a server restart never
+      // reuses seqs (which would overwrite stored rows and make clients drop the
+      // new frames as replays).
+      const seq = new FrameSeq(this.seqSeed(id));
+      this.entries.set(id, { driver, seq, sinks: new Set(), deltaBuf: null });
+    } finally {
+      this.starting.delete(id);
+    }
   }
 
   attach(id: string, sink: FrameSink): () => void {
