@@ -39,6 +39,19 @@ public enum NoiseServerMessage: Sendable, Equatable {
   /// Reply to `auth.token`: an opaque bearer token for REST calls plus its
   /// ISO8601 expiry (`{t:"auth.token",token,expiresAt}`).
   case authToken(token: String, expiresAt: String)
+  /// Agent chat: one streamed assistant text chunk.
+  case agentDelta(seq: Int, text: String)
+  /// Agent chat: a tool call (auto-run, or already approved). `input` is the
+  /// tool's arguments as a pretty JSON string.
+  case agentTool(seq: Int, name: String, input: String)
+  /// Agent chat: the output of a tool call.
+  case agentToolResult(seq: Int, text: String, isError: Bool)
+  /// Agent chat: a tool wants approval before it runs (P3).
+  case agentPermissionReq(reqId: String, name: String, input: String)
+  /// Agent chat: the turn finished; `cost` is the turn's USD cost.
+  case agentDone(seq: Int, cost: Double)
+  /// Agent chat: the turn failed.
+  case agentError(message: String)
 }
 
 /// One paired device as reported by the server over the authenticated Noise
@@ -289,6 +302,38 @@ public final class NoiseChannel {
     try await sendSealed(Self.focusRequest(id: id, focused: focused))
   }
 
+  /// Starts an agent-chat session on the host (`{t:"agent.start",id,cwd}`).
+  public func sendAgentStart(id: String, cwd: String) async throws {
+    try await sendSealed(Self.agentStartRequest(id: id, cwd: cwd))
+  }
+
+  /// Sends a prompt to the last-started agent (`{t:"agent.prompt",text}`).
+  /// Carries no id — the server tracks the last-started agent id.
+  public func sendAgentPrompt(text: String) async throws {
+    try await sendSealed(Self.agentPromptRequest(text: text))
+  }
+
+  /// Interrupts the running agent (`{t:"agent.interrupt"}`). Carries no id —
+  /// see `sendAgentPrompt`.
+  public func sendAgentInterrupt() async throws {
+    try await sendSealed(Self.agentInterruptRequest())
+  }
+
+  /// The `agent.start` request body. Pure + static, as above.
+  static func agentStartRequest(id: String, cwd: String) -> [String: Any] {
+    ["t": "agent.start", "id": id, "cwd": cwd]
+  }
+
+  /// The `agent.prompt` request body. Pure + static, as above.
+  static func agentPromptRequest(text: String) -> [String: Any] {
+    ["t": "agent.prompt", "text": text]
+  }
+
+  /// The `agent.interrupt` request body. Pure + static, as above.
+  static func agentInterruptRequest() -> [String: Any] {
+    ["t": "agent.interrupt"]
+  }
+
   /// Ask the host for its full device roster (`{t:"devices.list"}`). The reply
   /// arrives through `receive()` as `.devices`.
   public func sendDevicesList() async throws {
@@ -367,6 +412,7 @@ public final class NoiseChannel {
 extension NoiseServerMessage: Decodable {
   private enum CodingKeys: String, CodingKey {
     case t, id, chunk, exitCode, items, target, ok, error, token, expiresAt
+    case seq, text, name, input, isError, reqId, cost, message
   }
 
   public init(from decoder: Decoder) throws {
@@ -393,6 +439,38 @@ extension NoiseServerMessage: Decodable {
       let token = try container.decode(String.self, forKey: .token)
       let expiresAt = try container.decode(String.self, forKey: .expiresAt)
       self = .authToken(token: token, expiresAt: expiresAt)
+    case "agent.delta":
+      self = .agentDelta(
+        seq: try container.decode(Int.self, forKey: .seq),
+        text: try container.decode(String.self, forKey: .text)
+      )
+    case "agent.tool":
+      let input = try container.decode(AgentJSONValue.self, forKey: .input)
+      self = .agentTool(
+        seq: try container.decode(Int.self, forKey: .seq),
+        name: try container.decode(String.self, forKey: .name),
+        input: input.prettyString
+      )
+    case "agent.tool_result":
+      self = .agentToolResult(
+        seq: try container.decode(Int.self, forKey: .seq),
+        text: try container.decode(String.self, forKey: .text),
+        isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false
+      )
+    case "agent.permission_req":
+      let input = try container.decode(AgentJSONValue.self, forKey: .input)
+      self = .agentPermissionReq(
+        reqId: try container.decode(String.self, forKey: .reqId),
+        name: try container.decode(String.self, forKey: .name),
+        input: input.prettyString
+      )
+    case "agent.done":
+      self = .agentDone(
+        seq: try container.decode(Int.self, forKey: .seq),
+        cost: try container.decodeIfPresent(Double.self, forKey: .cost) ?? 0
+      )
+    case "agent.error":
+      self = .agentError(message: try container.decode(String.self, forKey: .message))
     default:
       throw DecodingError.dataCorruptedError(
         forKey: .t,

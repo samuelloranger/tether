@@ -10,6 +10,7 @@ import { isValidSecretKey } from './pushCrypto';
 import { registerPushDevice, removePushDevice } from './pushDevices';
 import { configRoutes } from './routes/config';
 import { filesRoutes } from './routes/files';
+import { fsRoutes } from './routes/fs';
 import { gitRoutes } from './routes/git';
 import { noiseRoutes } from './routes/noise';
 import {
@@ -164,6 +165,7 @@ app.route('/', pairControlRoutes);
 app.route('/', noiseRoutes);
 app.route('/', configRoutes);
 app.route('/', filesRoutes);
+app.route('/', fsRoutes);
 app.route('/', gitRoutes);
 app.route('/', sessionsRoutes);
 app.route('/', signalRoutes);

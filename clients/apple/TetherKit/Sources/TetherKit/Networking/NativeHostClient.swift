@@ -7,6 +7,7 @@ public struct RemoteSession: Identifiable, Equatable, Sendable, Codable {
   public var name: String?
   public var autoTitle: String?
   public var activity: String?
+  public var kind: String?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -15,6 +16,7 @@ public struct RemoteSession: Identifiable, Equatable, Sendable, Codable {
     case name
     case autoTitle = "auto_title"
     case activity
+    case kind
   }
 
   public var displayTitle: String {
@@ -245,6 +247,34 @@ public actor NativeHostClient {
     let (_, status) = try await sendAuthorized(url: try url(path: "/api/sessions/rename"), method: "POST", body: body)
     guard (200..<300).contains(status) else { throw HostClientError.httpStatus(status) }
   }
+
+  /// Lists immediate subdirectories of `path` (server home dir when `nil`) —
+  /// backs the agent-chat folder picker.
+  public func listDirs(path: String? = nil) async throws -> DirListing {
+    var components = URLComponents(url: try url(path: "/api/fs/dirs"), resolvingAgainstBaseURL: false)
+    if let path {
+      components?.queryItems = [URLQueryItem(name: "path", value: path)]
+    }
+    guard let requestURL = components?.url else { throw HostClientError.invalidURL }
+    let (data, status) = try await sendAuthorized(url: requestURL)
+    guard (200..<300).contains(status) else { throw hostClientError(status: status, data: data) }
+    guard let decoded = try? JSONDecoder().decode(DirListing.self, from: data) else {
+      throw HostClientError.decodeFailed
+    }
+    return decoded
+  }
+}
+
+public struct DirListing: Decodable, Sendable {
+  public let path: String
+  public let parent: String?
+  public let dirs: [DirEntry]
+}
+
+public struct DirEntry: Decodable, Identifiable, Sendable {
+  public let name: String
+  public let path: String
+  public var id: String { path }
 }
 
 /// The server's own error text for a failed response, when it sent one.

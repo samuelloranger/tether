@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentDriver } from './agentDriver';
+import { FakeAgentDriver } from './agentDriver';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
@@ -598,5 +600,87 @@ describe('runNoiseSession — device management', () => {
       token: 'tok-from-inject',
       expiresAt: '2026-09-05T00:00:00.000Z',
     });
+  });
+});
+
+describe('runNoiseSession — agent chat', () => {
+  test("'agent.start' then 'agent.prompt' streams the driver's frames back sealed", async () => {
+    const pty = fakePty();
+    const io = scriptedIo([
+      jsonFrame({ t: 'agent.start', id: 'a1', cwd: '/tmp' }),
+      jsonFrame({ t: 'agent.prompt', text: 'hello' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentDriverFactory: () =>
+        new FakeAgentDriver([
+          [
+            { t: 'delta', text: 'Hi' },
+            { t: 'done', cost: 0, usage: {} },
+          ],
+        ]),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    expect(msgs).toEqual([
+      { t: 'agent.delta', seq: 1, text: 'Hi' },
+      { t: 'agent.done', seq: 2, cost: 0, usage: {} },
+    ]);
+  });
+
+  test("'agent.start' whose driver fails to start is caught, not an unhandled rejection, and tells the client", async () => {
+    const pty = fakePty();
+    class BrokenStartDriver implements AgentDriver {
+      async start(_cwd: string): Promise<void> {
+        throw new Error('driver start blew up');
+      }
+      prompt(_text: string): AsyncIterable<never> {
+        return {
+          [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(new Error('unused')) }),
+        };
+      }
+      interrupt(): void {}
+      close(): void {}
+    }
+    const io = scriptedIo([jsonFrame({ t: 'agent.start', id: 'a-broken-start', cwd: '/tmp' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentDriverFactory: () => new BrokenStartDriver(),
+    }); // never throws out of the loop
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    expect(msgs).toEqual([{ t: 'agent.error', message: 'agent start failed' }]);
+  });
+
+  test("'agent.prompt' rejecting mid-stream is caught, not an unhandled rejection", async () => {
+    const pty = fakePty();
+    // A driver whose prompt() throws before yielding anything — stands in for a
+    // driver crash mid-stream.
+    class ThrowingDriver implements AgentDriver {
+      async start(_cwd: string): Promise<void> {}
+      prompt(_text: string): AsyncIterable<never> {
+        return {
+          [Symbol.asyncIterator]: () => ({
+            next: () => Promise.reject(new Error('driver blew up')),
+          }),
+        };
+      }
+      interrupt(): void {}
+      close(): void {}
+    }
+    const io = scriptedIo([
+      jsonFrame({ t: 'agent.start', id: 'a-throw', cwd: '/tmp' }),
+      jsonFrame({ t: 'agent.prompt', text: 'hello' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentDriverFactory: () => new ThrowingDriver(),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    expect(msgs).toEqual([{ t: 'agent.error', message: 'agent prompt failed' }]);
   });
 });

@@ -92,6 +92,17 @@ public final class SessionStore {
   /// stale `GET /api/sessions` (or a test double that still returns the row)
   /// must not put a just-killed tab back in the drawer.
   @ObservationIgnored private var locallyKilled: [String: Set<String>] = [:]
+  /// Live `AgentChatModel`s, keyed the same way scrollback grids are
+  /// (`terminalKey`) — a chat tab keeps its transcript across a drawer
+  /// round-trip the same way a terminal keeps its scrollback.
+  @ObservationIgnored private var agentModels: [String: AgentChatModel] = [:]
+
+  /// The chat model for the ACTIVE tab, when it is an agent tab. `RootView`
+  /// branches on this to decide between `AgentChatView` and `TerminalView`.
+  public var activeAgentModel: AgentChatModel? {
+    guard let activeSessionId else { return nil }
+    return agentModels[terminalKey(activeSessionId)]
+  }
 
   public init(
     hostStore: HostStoreAdapter = HostStoreAdapter(),
@@ -139,6 +150,8 @@ public final class SessionStore {
       Task { await refreshSessions() }
     case let .error(message):
       errorMessage = message
+    case let .agent(msg):
+      activeAgentModel?.apply(msg)
     }
   }
 
@@ -361,6 +374,65 @@ public final class SessionStore {
     await connectTerminal(sessionId: id)
   }
 
+  /// Opens an agent-chat tab on a NAMED host, rooted at `cwd`, and switches to
+  /// it. Mirrors `newNoiseTerminal`: no REST `startSession` for a Noise host —
+  /// the tab is synthesized locally, and `agent.start` (sent AFTER the
+  /// terminal-shaped Noise channel connects, same as a plain terminal's
+  /// `start` frame) both spawns and attaches the agent server-side.
+  public func newAgentChat(hostId: String, cwd: String) async {
+    let known = sessionsByHost[hostId] ?? []
+    let id = nextAgentSessionId(among: known)
+    let synthesized = RemoteSession(
+      id: id, status: "running", lastOutputAt: nil, name: nil, autoTitle: nil, activity: nil,
+      kind: "agent"
+    )
+    var next = known
+    next.append(synthesized)
+    sessionsByHost[hostId] = next
+    hasRestoredSession = true
+    if activeHostId != hostId || activeSessionId != id {
+      await pipeline.sendFocus(focused: false)
+    }
+    activeHostId = hostId
+    activeSessionId = id
+    sessions = next
+    let key = terminalKey(id, hostId: hostId)
+    agentModels[key] = AgentChatModel(
+      sessionId: id, cwd: cwd,
+      send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
+    )
+    await connectAgent(sessionId: id)
+    pipeline.outbound.yield(.agentStart(id: id, cwd: cwd))
+  }
+
+  /// Routes an `AgentChatModel`'s outbound intent onto the pipeline's outbound
+  /// stream, the same FIFO path a keystroke takes — see `OutboundFrame`.
+  private func routeAgentOutbound(_ outbound: AgentOutbound) {
+    switch outbound {
+    case let .prompt(text):
+      pipeline.outbound.yield(.agentPrompt(text))
+    case .interrupt:
+      pipeline.outbound.yield(.agentInterrupt)
+    case .permission:
+      // Approval routing over Noise is a later pass (P3) — the model already
+      // clears `pendingApproval` locally on decision.
+      break
+    }
+  }
+
+  /// Picks a free `agent-N` against ONE host's session list, mirroring
+  /// `nextSessionId` — agent chats and terminals share the id namespace per
+  /// host but use a different prefix so the drawer's two affordances never
+  /// collide.
+  private func nextAgentSessionId(among known: [RemoteSession]) -> String {
+    let existing = Set(known.map(\.id))
+    var index = 1
+    while existing.contains("agent-\(index)") {
+      index += 1
+    }
+    return "agent-\(index)"
+  }
+
   public var activeSession: RemoteSession? {
     guard let activeSessionId else { return nil }
     return sessions.first(where: { $0.id == activeSessionId })
@@ -498,7 +570,25 @@ public final class SessionStore {
     }
     activeHostId = hostId
     activeSessionId = sessionId
-    await connectTerminal(sessionId: sessionId)
+    let isAgent =
+      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
+    if isAgent {
+      await connectAgent(sessionId: sessionId)
+      // The server's AgentRegistry is per-connection — a reconnect gets a
+      // fresh one with no memory of this id, so `agent.start` has to be
+      // re-sent every time a chat tab is reselected, not just on first open.
+      let key = terminalKey(sessionId, hostId: hostId)
+      let cwd = agentModels[key]?.cwd ?? ""
+      if agentModels[key] == nil {
+        agentModels[key] = AgentChatModel(
+          sessionId: sessionId, cwd: cwd,
+          send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
+        )
+      }
+      pipeline.outbound.yield(.agentStart(id: sessionId, cwd: cwd))
+    } else {
+      await connectTerminal(sessionId: sessionId)
+    }
   }
 
   /// Adopts the grid the surface can actually display.
@@ -606,6 +696,14 @@ public final class SessionStore {
     )
   }
 
+  /// Backs the agent-chat folder picker — lists subdirectories of `path` (the
+  /// server's home dir when `nil`) on a named host over the ordinary
+  /// bearer-authed REST path (`GET /api/fs/dirs`), not Noise.
+  public func listDirs(hostId: String, path: String? = nil) async throws -> DirListing {
+    guard let client = client(for: hostId) else { throw HostClientError.invalidURL }
+    return try await client.listDirs(path: path)
+  }
+
   /// Mint a REST device token for a Noise host over its Noise channel. Backs
   /// `noiseTokenCache`; resolves the host's Noise base URL and delegates to
   /// `NoiseSessionClient.requestToken`.
@@ -683,14 +781,28 @@ public final class SessionStore {
     // believing a session is on screen.
     await pipeline.disconnect()
     guard let hostId = activeHostId else { return }
-    await connectTerminalNoise(hostId: hostId, sessionId: sessionId)
+    await connectTerminalNoise(hostId: hostId, sessionId: sessionId, sendStart: true)
+  }
+
+  /// Agent tabs establish the SAME Noise channel + read loop a terminal does —
+  /// `AgentChatModel` needs live `agent.*` frames and a socket to send
+  /// `agent.prompt`/`agent.interrupt` over — but must NEVER send the PTY
+  /// `start` frame `connectTerminal` sends: the id is an `agent-N`, not a PTY
+  /// session, and a `start` for it makes the server spawn a holder for it too
+  /// (double-start, mixed session type). `agent.start` is the only start frame
+  /// an agent tab ever sends — see `newAgentChat` / `selectSession`.
+  private func connectAgent(sessionId: String) async {
+    await pipeline.disconnect()
+    guard let hostId = activeHostId else { return }
+    await connectTerminalNoise(hostId: hostId, sessionId: sessionId, sendStart: false)
   }
 
   /// Establishes the Noise transport for a session and hands the pipeline a live
   /// `NoiseChannel` to pump. The URL is `https://host:port`;
   /// `NoiseSessionClient.reconnect` maps it to `wss` and appends
-  /// `/api/noise/session` itself.
-  private func connectTerminalNoise(hostId: String, sessionId: String) async {
+  /// `/api/noise/session` itself. `sendStart` gates the PTY `start` frame only —
+  /// the channel, read loop, and outbound pump are identical either way.
+  private func connectTerminalNoise(hostId: String, sessionId: String, sendStart: Bool) async {
     guard
       let host = hosts.first(where: { $0.id == hostId }),
       let url = SessionStore.noiseBaseURL(for: host)
@@ -703,7 +815,8 @@ public final class SessionStore {
       hostId: hostId,
       url: url,
       sessionId: sessionId,
-      key: terminalKey(sessionId)
+      key: terminalKey(sessionId),
+      sendStart: sendStart
     )
   }
 
