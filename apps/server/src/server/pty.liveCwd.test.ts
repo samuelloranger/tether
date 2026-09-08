@@ -135,7 +135,10 @@ test(
   PTY_TEST_TIMEOUT_MS,
 );
 
-test(
+// Depends on the live gitWatch, which is off on Windows in production
+// (gitWatch.ts) and no longer forced on there in tests — skip rather than
+// exercise a path that never ships on Windows on a flaky fs.watch.
+test.skipIf(process.platform === 'win32')(
   'starts watching when a repository is initialized without changing cwd',
   async () => {
     const id = 'git-init-in-place';
