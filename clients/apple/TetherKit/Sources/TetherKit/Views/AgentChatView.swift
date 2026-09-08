@@ -102,10 +102,21 @@ struct AgentTranscriptView: View {
           .padding(.vertical, 18)
         }
       }
-      // A drag through the transcript pulls the keyboard down with the finger.
-      // (Dropped the blanket tap-to-dismiss gesture: it also swallowed taps
-      // meant for tool cards and text selection.)
+      // A drag through the transcript pulls the keyboard down with the finger;
+      // a tap anywhere in it lowers the keyboard too. `simultaneousGesture` (not
+      // `onTapGesture`) is the point: the tapped element STILL receives its tap —
+      // tool cards expand, retry fires, text stays selectable — so the dismiss
+      // rides alongside instead of swallowing them (which is why the old blanket
+      // tap gesture was removed).
       .scrollDismissesKeyboard(.interactively)
+      .simultaneousGesture(
+        TapGesture().onEnded {
+          #if canImport(UIKit)
+            UIApplication.shared.sendAction(
+              #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+          #endif
+        }
+      )
       .modifier(NearBottomTracker { following = $0 })
       .onChange(of: model.revision) {
         guard following else { return }
