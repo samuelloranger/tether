@@ -355,7 +355,7 @@ export function App() {
     const hostId = agentChatFor;
     setAgentChatFor(null);
     if (!hostId) return;
-    void app.newAgentChat(hostId, cwd).then((sessionId) => {
+    void app.newAgentChat(hostId).then((sessionId) => {
       if (!sessionId) return;
       const current = viewStateRef.current;
       const solo = newSoloView({ hostId, sessionId, kind: 'agent', cwd });

@@ -261,21 +261,19 @@ export function useTetherDesktop() {
   );
 
   const newAgentChat = useCallback(
-    async (hostId: string, cwd: string): Promise<string | null> => {
+    async (hostId: string): Promise<string | null> => {
       const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
       const ids = (await hydrateHost(hostId)).map((row) => row.id);
       const nextId = nextAgentSessionId(ids);
       if (activeHostIdRef.current !== from.host || activeSessionIdRef.current !== from.session) {
         return null;
       }
-      setSessions((previous) =>
-        previous.some((row) => row.hostId === hostId && row.id === nextId)
-          ? previous
-          : [
-              ...previous,
-              { hostId, id: nextId, status: 'running', last_output_at: null, kind: 'agent', cwd },
-            ],
-      );
+      // Deliberately do NOT add an optimistic session row here. The agent chat's
+      // existence is carried by its kind-tagged view leaf (kept alive by
+      // liveSessionKeys) until the server confirms the session on agent.start.
+      // Adding it to `sessions` would make reconcileViews auto-place a kind-less
+      // duplicate view before startAgentChat's tagged one lands — the tagged
+      // leaf loses the dedup and the next poll prunes the chat.
       selectSession(hostId, nextId);
       return nextId;
     },
