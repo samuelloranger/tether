@@ -1,5 +1,6 @@
+import { deriveDiff } from './agentDiff';
 import type { AgentFrame } from './agentFrames';
-import type { AgentMessage, AgentTurn, AgentUsage } from './agentTypes';
+import type { AgentBlock, AgentMessage, AgentTurn, AgentUsage } from './agentTypes';
 
 export interface PendingApproval {
   id: string;
@@ -123,10 +124,75 @@ export class AgentChatModel {
         this.turn = 'idle';
         break;
       }
+      case 'agent.tool': {
+        const msg = this.streamingAssistant();
+        const tool = {
+          id: frame.id,
+          name: frame.name,
+          summary: frame.summary,
+          inputJson: frame.inputJson,
+          isError: false,
+        };
+        this.replaceLast({ ...msg, blocks: [...msg.blocks, { type: 'tool', tool }] });
+        this.turn = 'thinking';
+        break;
+      }
+      case 'agent.tool_result': {
+        this.attachToolResult(frame.id, frame.result, frame.isError);
+        break;
+      }
+      case 'agent.permission_req': {
+        const req = { id: frame.id, name: frame.name, summary: frame.summary };
+        if (this.pendingApproval) {
+          this.approvalBacklog = [...this.approvalBacklog, req];
+        } else {
+          this.pendingApproval = req;
+        }
+        break;
+      }
       default:
-        // tool / tool_result / permission_req handled in later methods.
         break;
     }
     this.changed();
+  }
+
+  /** Pop the current approval, promote the next, return the id to reply for. */
+  resolvePermission(_allow: boolean): { id: string } | null {
+    const current = this.pendingApproval;
+    if (!current) return null;
+    this.pendingApproval = this.approvalBacklog[0] ?? null;
+    this.approvalBacklog = this.approvalBacklog.slice(1);
+    this.changed();
+    return { id: current.id };
+  }
+
+  setDraft(text: string): void {
+    this.draft = text;
+    this.changed();
+  }
+
+  enqueue(text: string): void {
+    this.queued = [...this.queued, text];
+    this.changed();
+  }
+
+  dequeue(): string | null {
+    if (this.queued.length === 0) return null;
+    const [next, ...rest] = this.queued;
+    this.queued = rest;
+    this.changed();
+    return next;
+  }
+
+  private attachToolResult(id: string, result: string, isError: boolean): void {
+    this.messages = this.messages.map((msg) => {
+      const idx = msg.blocks.findIndex((b) => b.type === 'tool' && b.tool.id === id);
+      if (idx < 0) return msg;
+      const block = msg.blocks[idx] as Extract<AgentBlock, { type: 'tool' }>;
+      const diff = deriveDiff(block.tool.name, block.tool.inputJson);
+      const blocks = [...msg.blocks];
+      blocks[idx] = { type: 'tool', tool: { ...block.tool, result, isError, diff } };
+      return { ...msg, blocks };
+    });
   }
 }

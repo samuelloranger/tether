@@ -43,6 +43,62 @@ describe('AgentChatModel core', () => {
     expect(m.snapshot().messages[0].blocks).toEqual([{ type: 'text', text: 'a' }]);
   });
 
+  test('tool then tool_result attaches result and diff for Edit', () => {
+    const m = new AgentChatModel();
+    m.apply({
+      t: 'agent.tool',
+      seq: 1,
+      id: 't1',
+      name: 'Edit',
+      summary: 'edit foo',
+      inputJson: JSON.stringify({ file_path: '/foo', old_string: 'a', new_string: 'b' }),
+    });
+    m.apply({ t: 'agent.tool_result', seq: 2, id: 't1', result: 'ok', isError: false });
+    const msg = m.snapshot().messages.at(-1)!;
+    const block = msg.blocks.find((b) => b.type === 'tool');
+    expect(block).toBeTruthy();
+    if (block?.type === 'tool') {
+      expect(block.tool.result).toBe('ok');
+      expect(block.tool.diff?.path).toBe('/foo');
+    }
+  });
+
+  test('permission_req sets pendingApproval; resolve promotes backlog', () => {
+    const m = new AgentChatModel();
+    m.apply({
+      t: 'agent.permission_req',
+      seq: 1,
+      id: 'p1',
+      name: 'Bash',
+      summary: 'rm -rf',
+      inputJson: '{}',
+    });
+    m.apply({
+      t: 'agent.permission_req',
+      seq: 2,
+      id: 'p2',
+      name: 'Write',
+      summary: 'x',
+      inputJson: '{}',
+    });
+    expect(m.snapshot().pendingApproval?.id).toBe('p1');
+    expect(m.resolvePermission(true)).toEqual({ id: 'p1' });
+    expect(m.snapshot().pendingApproval?.id).toBe('p2');
+    expect(m.resolvePermission(false)).toEqual({ id: 'p2' });
+    expect(m.snapshot().pendingApproval).toBeNull();
+  });
+
+  test('draft and queue', () => {
+    const m = new AgentChatModel();
+    m.setDraft('hi');
+    expect(m.snapshot().draft).toBe('hi');
+    m.enqueue('one');
+    m.enqueue('two');
+    expect(m.snapshot().queued).toEqual(['one', 'two']);
+    expect(m.dequeue()).toBe('one');
+    expect(m.snapshot().queued).toEqual(['two']);
+  });
+
   test('subscribe fires on apply', () => {
     const m = new AgentChatModel();
     let hits = 0;
