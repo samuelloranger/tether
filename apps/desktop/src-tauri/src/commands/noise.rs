@@ -651,6 +651,9 @@ pub async fn core_noise_connect(
                                 since_id = 0;
                                 let _ = app.emit(&msg_evt, encode_frontend_reset());
                             }
+                            Ok(ServerMsg::Agent(raw)) => {
+                                let _ = app.emit(&msg_evt, raw);
+                            }
                             Ok(ServerMsg::Exit { .. }) => break false, // remote exit → close
                             // devices.* / auth.token replies + anything else the terminal ignores.
                             Ok(
