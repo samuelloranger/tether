@@ -148,6 +148,10 @@ export class AgentClaudeDriver implements AgentDriver {
       stderr: 'pipe',
     });
     this.child = child;
+    // Drain stderr concurrently with stdout: claude's own stdout loop below
+    // can otherwise stall forever once the OS pipe buffer for stderr fills.
+    const stderrText = new Response(child.stderr).text();
+    stderrText.catch(() => {});
 
     try {
       let buf = '';
@@ -180,7 +184,7 @@ export class AgentClaudeDriver implements AgentDriver {
 
       const exitCode = await child.exited;
       if (exitCode !== 0) {
-        const stderr = await new Response(child.stderr).text();
+        const stderr = await stderrText;
         yield { t: 'error', message: stderr.trim() || `claude exited with code ${exitCode}` };
       }
     } catch (err) {
