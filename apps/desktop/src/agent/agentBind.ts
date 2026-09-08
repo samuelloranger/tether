@@ -36,10 +36,15 @@ export function bindAgentSession(input: {
   bindSeq += 1;
   const connId = `agent-${bindSeq}`;
   let socket: TerminalSocket | null = null;
+  let readyPending = false;
   let closed = false;
 
-  const sendStart = () => {
-    if (!socket) return;
+  // `onReady` (the core "connected" event) and the resolved socket race — either
+  // can arrive first. Send agent.start only once both are in hand, or the first
+  // start is dropped on a fresh connect.
+  const trySendStart = () => {
+    if (!socket || !readyPending) return;
+    readyPending = false;
     sendJson(
       socket,
       agentStart({ id: input.sessionId, cwd: input.cwd ?? '', sinceSeq: input.model.lastSeq }),
@@ -55,7 +60,10 @@ export function bindAgentSession(input: {
     onClose: () => {
       socket = null;
     },
-    onReady: sendStart,
+    onReady: () => {
+      readyPending = true;
+      trySendStart();
+    },
   };
 
   const params: CoreConnectParams = { sessionId: input.sessionId, kind: 'agent' };
@@ -65,6 +73,7 @@ export function bindAgentSession(input: {
       return;
     }
     socket = s;
+    trySendStart();
   });
 
   return {

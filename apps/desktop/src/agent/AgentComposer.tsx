@@ -22,6 +22,7 @@ export function AgentComposer({
     if (streaming) {
       model.enqueue(text);
     } else {
+      model.pushUserPrompt(text);
       send(agentPrompt(text));
     }
     model.setDraft('');

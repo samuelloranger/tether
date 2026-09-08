@@ -166,6 +166,22 @@ export class AgentChatModel {
     return { id: current.id };
   }
 
+  /** Echo the user's own prompt into the transcript immediately (the server
+   * never sends it back as a frame). */
+  pushUserPrompt(text: string): void {
+    this.messages = [
+      ...this.messages,
+      {
+        id: `u${this.messages.length}-${Date.now()}`,
+        role: 'user',
+        blocks: [{ type: 'text', text }],
+        isStreaming: false,
+      },
+    ];
+    this.turn = 'thinking';
+    this.changed();
+  }
+
   setDraft(text: string): void {
     this.draft = text;
     this.changed();

@@ -32,7 +32,10 @@ export function AgentChatPane({
   useEffect(() => {
     if (snapshot.turn === 'idle' && snapshot.queued.length > 0) {
       const next = model.dequeue();
-      if (next) send(agentPrompt(next));
+      if (next) {
+        model.pushUserPrompt(next);
+        send(agentPrompt(next));
+      }
     }
   }, [snapshot.turn, snapshot.queued.length, model, send]);
 
