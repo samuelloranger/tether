@@ -65,6 +65,22 @@ export function useTetherDesktop() {
   const sessionsRef = useRef<DrawerSession[]>([]);
   const activeSessionIdRef = useRef(activeSessionId);
   const locallyKilledRef = useRef<Record<string, Set<string>>>({});
+  // Agent chats just created but not yet confirmed in the server's session list.
+  // Their view leaf must stay live across a poll until agent.start registers the
+  // session; bounded so a start that never lands (bad cwd) doesn't leave a zombie.
+  const pendingAgentsRef = useRef<Map<string, number>>(new Map());
+  const AGENT_PENDING_MS = 30_000;
+
+  const pendingAgentKeys = useCallback((): string[] => {
+    const now = Date.now();
+    const confirmed = new Set(sessionsRef.current.map((row) => sessionKey(row.hostId, row.id)));
+    for (const [key, at] of pendingAgentsRef.current) {
+      if (confirmed.has(key) || now - at > AGENT_PENDING_MS) {
+        pendingAgentsRef.current.delete(key);
+      }
+    }
+    return [...pendingAgentsRef.current.keys()];
+  }, []);
 
   activeHostIdRef.current = activeHostId;
   hostsRef.current = hosts;
@@ -263,21 +279,26 @@ export function useTetherDesktop() {
   const newAgentChat = useCallback(
     async (hostId: string): Promise<string | null> => {
       const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
-      const ids = (await hydrateHost(hostId)).map((row) => row.id);
-      const nextId = nextAgentSessionId(ids);
+      const serverIds = (await hydrateHost(hostId)).map((row) => row.id);
+      // Also avoid ids still pending (created, not yet server-confirmed) so a
+      // second new chat doesn't collide with the first and lose the dedup.
+      const pendingIds = pendingAgentKeys()
+        .filter((k) => k.startsWith(`${hostId}:`))
+        .map((k) => k.slice(hostId.length + 1));
+      const nextId = nextAgentSessionId([...serverIds, ...pendingIds]);
       if (activeHostIdRef.current !== from.host || activeSessionIdRef.current !== from.session) {
         return null;
       }
-      // Deliberately do NOT add an optimistic session row here. The agent chat's
-      // existence is carried by its kind-tagged view leaf (kept alive by
-      // liveSessionKeys) until the server confirms the session on agent.start.
+      // No optimistic session row: the kind-tagged view leaf carries the chat's
+      // existence, kept live by `pendingAgentKeys` until the server confirms it
+      // on agent.start (bounded, so a failed start doesn't leave a zombie).
       // Adding it to `sessions` would make reconcileViews auto-place a kind-less
-      // duplicate view before startAgentChat's tagged one lands — the tagged
-      // leaf loses the dedup and the next poll prunes the chat.
+      // duplicate view before startAgentChat's tagged one lands.
+      pendingAgentsRef.current.set(sessionKey(hostId, nextId), Date.now());
       selectSession(hostId, nextId);
       return nextId;
     },
-    [hydrateHost, selectSession],
+    [hydrateHost, selectSession, pendingAgentKeys],
   );
 
   const killSessionById = useCallback(
@@ -478,6 +499,7 @@ export function useTetherDesktop() {
     selectSession,
     newSession,
     newAgentChat,
+    pendingAgentKeys,
     killSessionById,
     renameSessionById,
     retryHost,

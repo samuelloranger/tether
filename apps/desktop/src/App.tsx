@@ -102,11 +102,7 @@ function liveSessionKeys(
   for (const view of views) {
     for (const leaf of leaves(view.tree)) {
       if (!leaf.session) continue;
-      // Keep a leaf live when its host health is still unknown, or when it is an
-      // agent chat: a freshly-created agent session isn't in the server's list
-      // until its first agent.start lands, so the poll must not prune the pane
-      // that sends it.
-      if (!known.has(leaf.session.hostId) || leaf.session.kind === 'agent') {
+      if (!known.has(leaf.session.hostId)) {
         live.add(sessionKey(leaf.session.hostId, leaf.session.sessionId));
       }
     }
@@ -183,7 +179,10 @@ export function App() {
   const tree: PaneNode = activeView?.tree ?? { kind: 'leaf', id: 'empty', session: null };
   const focusedPaneId = activeView?.focusedPaneId ?? firstLeafId(tree);
   const liveKeys = () =>
-    liveSessionKeys(app.sessions, viewStateRef.current.views, app.healthByHost);
+    new Set([
+      ...liveSessionKeys(app.sessions, viewStateRef.current.views, app.healthByHost),
+      ...app.pendingAgentKeys(),
+    ]);
 
   const openSessionKeys = useMemo(
     () => new Set(views.flatMap((view) => viewMemberKeys(view))),
