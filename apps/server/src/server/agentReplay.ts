@@ -1,6 +1,6 @@
 import type { AgentFrame } from './agentDriver';
 import { type AgentMessageRow, getAgentMessages } from './agentMessages';
-import { createAgentSession, db } from './db';
+import { createAgentSession, db, getSession } from './db';
 import { logError } from './log';
 import type { AgentState, SessionDeps } from './noiseSessionProtocol';
 
@@ -54,8 +54,16 @@ export async function applyAgentStart(
     // this is a reconnect — re-attach to the live driver instead of starting
     // a second one. Only a first open creates the DB row + spawns the driver.
     if (!agent.registry.has(msg.id)) {
-      createAgentSession(db, { id: msg.id, workspaceRoot: msg.cwd });
-      await agent.registry.start(msg.id, msg.cwd);
+      // The persisted workspace_root is authoritative for a resumed chat: after
+      // a force-close + relaunch the client rebuilds its model with an empty
+      // cwd (it never learns workspace_root from /api/sessions), so trusting
+      // msg.cwd here would respawn `claude` in the server's own dir ($HOME)
+      // instead of the chat's folder. Fall back to msg.cwd only for a brand-new
+      // chat that has no row yet.
+      const persisted = getSession(msg.id)?.workspace_root ?? null;
+      const cwd = persisted && persisted.length > 0 ? persisted : msg.cwd;
+      createAgentSession(db, { id: msg.id, workspaceRoot: cwd });
+      await agent.registry.start(msg.id, cwd);
     }
   } catch (err) {
     logError(`Noise session: agent.start('${msg.id}') failed:`, err);
