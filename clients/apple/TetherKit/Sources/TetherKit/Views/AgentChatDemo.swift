@@ -132,6 +132,10 @@
           isStreaming: true
         ),
       ]
+      m.applyStatus(
+        model: "claude-opus-4-8",
+        fiveHour: UsageWindow(utilization: 42),
+        sevenDay: UsageWindow(utilization: 78))
       m.turn = .streaming
       return m
     }

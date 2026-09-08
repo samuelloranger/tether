@@ -201,36 +201,40 @@ struct AgentComposerView: View {
   @FocusState private var focused: Bool
 
   var body: some View {
-    HStack(alignment: .bottom, spacing: 10) {
-      TextField("Message Claude Code…", text: $model.draft, axis: .vertical)
-        .lineLimit(1...5)
-        .font(.body)
-        .foregroundStyle(TetherColors.textPrimary)
-        .focused($focused)
-        .padding(.horizontal, 13)
-        .padding(.vertical, 9)
-        .background(TetherColors.input)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(TetherColors.border, lineWidth: 1)
-        )
-      Button(action: sendOrStop) {
-        Group {
-          if showSpinner {
-            ProgressView().controlSize(.small)
-          } else {
-            Image(systemName: isStop ? "stop.fill" : "arrow.up")
-              .font(.system(size: 15, weight: .bold))
+    VStack(spacing: 8) {
+      // Stats strip sits atop the input, sharing the composer's surface.
+      AgentInfoStrip(status: model.status, usage: model.sessionUsage)
+      HStack(alignment: .bottom, spacing: 10) {
+        TextField("Message Claude Code…", text: $model.draft, axis: .vertical)
+          .lineLimit(1...5)
+          .font(.body)
+          .foregroundStyle(TetherColors.textPrimary)
+          .focused($focused)
+          .padding(.horizontal, 13)
+          .padding(.vertical, 9)
+          .background(TetherColors.input)
+          .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+          .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+              .stroke(TetherColors.border, lineWidth: 1)
+          )
+        Button(action: sendOrStop) {
+          Group {
+            if showSpinner {
+              ProgressView().controlSize(.small)
+            } else {
+              Image(systemName: isStop ? "stop.fill" : "arrow.up")
+                .font(.system(size: 15, weight: .bold))
+            }
           }
+          .foregroundStyle(TetherColors.onAccent)
+          .tint(TetherColors.onAccent)
+          .frame(width: 38, height: 38)
+          .background(sendEnabled ? TetherColors.accent : TetherColors.textFaint)
+          .clipShape(Circle())
         }
-        .foregroundStyle(TetherColors.onAccent)
-        .tint(TetherColors.onAccent)
-        .frame(width: 38, height: 38)
-        .background(sendEnabled ? TetherColors.accent : TetherColors.textFaint)
-        .clipShape(Circle())
+        .disabled(!sendEnabled || showSpinner)
       }
-      .disabled(!sendEnabled || showSpinner)
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 10)
@@ -259,6 +263,102 @@ struct AgentComposerView: View {
     }
     model.submit(model.draft)
     model.draft = ""
+  }
+}
+
+// MARK: - Info strip
+
+/// A single-line stats bar atop the composer: the active model, the 5h/7d
+/// account usage gauges, and this chat's running token/cost total. Renders
+/// nothing until at least one datum is known — model + usage windows stay nil
+/// until an `agent.status` frame arrives (server support pending), so today it
+/// typically shows just the session total. Mirrors desktop `AgentInfoStrip`.
+struct AgentInfoStrip: View {
+  let status: AgentStatus?
+  let usage: AgentUsage?
+
+  var body: some View {
+    let model = status?.model
+    let fiveHour = status?.fiveHour
+    let sevenDay = status?.sevenDay
+    let total = Self.totalLabel(usage)
+
+    if model == nil && fiveHour == nil && sevenDay == nil && total == nil {
+      EmptyView()
+    } else {
+      HStack(spacing: 10) {
+        if let model {
+          Text(model)
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(TetherColors.textSecondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+        }
+        Spacer(minLength: 8)
+        if let fiveHour { UsageGauge(label: "5h", window: fiveHour) }
+        if let sevenDay { UsageGauge(label: "7d", window: sevenDay) }
+        if let total {
+          Text(total)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(TetherColors.textFaint)
+            .lineLimit(1)
+        }
+      }
+    }
+  }
+
+  /// "12.0k↑ 480↓ · $0.02", or nil when the turn reported neither.
+  static func totalLabel(_ usage: AgentUsage?) -> String? {
+    guard let usage, !usage.isEmpty else { return nil }
+    var parts: [String] = []
+    if usage.inputTokens > 0 || usage.outputTokens > 0 {
+      parts.append("\(tokens(usage.inputTokens))↑ \(tokens(usage.outputTokens))↓")
+    }
+    if usage.cost > 0 { parts.append(money(usage.cost)) }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+
+  static func tokens(_ n: Int) -> String {
+    n >= 1000 ? String(format: "%.1fk", Double(n) / 1000) : "\(n)"
+  }
+
+  static func money(_ c: Double) -> String {
+    c < 0.01 ? String(format: "$%.4f", c) : String(format: "$%.2f", c)
+  }
+}
+
+/// One usage window: a label, a filled track coloured by how close to the cap
+/// it is (green under 70%, amber under 90%, red at/above), and the percentage.
+struct UsageGauge: View {
+  let label: String
+  let window: UsageWindow
+
+  var body: some View {
+    let pct = max(0, min(100, window.utilization))
+    HStack(spacing: 4) {
+      Text(label)
+        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        .foregroundStyle(TetherColors.textFaint)
+      GeometryReader { geo in
+        ZStack(alignment: .leading) {
+          Capsule().fill(TetherColors.surfaceRaised)
+          Capsule().fill(fillColor(pct))
+            .frame(width: geo.size.width * CGFloat(pct) / 100)
+        }
+      }
+      .frame(width: 34, height: 5)
+      Text("\(pct)%")
+        .font(.system(size: 10, design: .monospaced))
+        .foregroundStyle(TetherColors.textFaint)
+        .monospacedDigit()
+    }
+    .accessibilityLabel("\(label) usage \(pct) percent")
+  }
+
+  private func fillColor(_ pct: Int) -> Color {
+    if pct >= 90 { return TetherColors.danger }
+    if pct >= 70 { return TetherColors.warning }
+    return TetherColors.success
   }
 }
 

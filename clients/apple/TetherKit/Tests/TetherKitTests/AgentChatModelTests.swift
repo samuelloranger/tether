@@ -177,4 +177,60 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(m.messages.last?.role, .error)
     XCTAssertEqual(m.turn, .idle)
   }
+
+  func testSessionUsageSumsFinishedTurns() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    XCTAssertNil(m.sessionUsage)  // nothing reported yet
+
+    m.appendUser("one")
+    m.apply(.agentDelta(seq: 1, text: "a"))
+    m.apply(.agentDone(seq: 2, cost: 0.01, inputTokens: 1000, outputTokens: 200))
+    m.appendUser("two")
+    m.apply(.agentDelta(seq: 3, text: "b"))
+    m.apply(.agentDone(seq: 4, cost: 0.02, inputTokens: 500, outputTokens: 50))
+
+    let total = m.sessionUsage
+    XCTAssertEqual(total?.inputTokens, 1500)
+    XCTAssertEqual(total?.outputTokens, 250)
+    XCTAssertEqual(total?.cost ?? -1, 0.03, accuracy: 1e-9)
+  }
+
+  func testSessionUsageNilWhenTurnsReportedNothing() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    m.appendUser("q")
+    m.apply(.agentDelta(seq: 1, text: "a"))
+    m.apply(.agentDone(seq: 2, cost: 0, inputTokens: 0, outputTokens: 0))
+    XCTAssertNil(m.sessionUsage)  // a subscription turn — nothing worth showing
+  }
+
+  func testApplyStatusMergesFieldsAcrossFrames() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    XCTAssertNil(m.status)
+
+    m.applyStatus(model: "claude-opus-4-8")
+    XCTAssertEqual(m.status?.model, "claude-opus-4-8")
+    XCTAssertNil(m.status?.fiveHour)
+
+    // A later frame carrying only usage keeps the model.
+    m.applyStatus(fiveHour: UsageWindow(utilization: 42))
+    XCTAssertEqual(m.status?.model, "claude-opus-4-8")
+    XCTAssertEqual(m.status?.fiveHour?.utilization, 42)
+
+    // A later model update keeps the window.
+    m.applyStatus(model: "claude-sonnet-5")
+    XCTAssertEqual(m.status?.model, "claude-sonnet-5")
+    XCTAssertEqual(m.status?.fiveHour?.utilization, 42)
+  }
+
+  func testInfoStripTotalLabelFormatsTokensAndCost() {
+    XCTAssertNil(AgentInfoStrip.totalLabel(nil))
+    XCTAssertNil(
+      AgentInfoStrip.totalLabel(AgentUsage(cost: 0, inputTokens: 0, outputTokens: 0)))
+    XCTAssertEqual(
+      AgentInfoStrip.totalLabel(AgentUsage(cost: 0.02, inputTokens: 1200, outputTokens: 480)),
+      "1.2k↑ 480↓ · $0.02")
+    XCTAssertEqual(
+      AgentInfoStrip.totalLabel(AgentUsage(cost: 0.005, inputTokens: 0, outputTokens: 0)),
+      "$0.0050")
+  }
 }
