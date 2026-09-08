@@ -2764,7 +2764,7 @@ label > textarea {
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--r-panel);
-  padding: 8px 12px;
+  padding: 4px 12px;
 }
 .agent-row-assistant {
   align-self: stretch;
@@ -3090,6 +3090,13 @@ label > textarea {
 .agent-send:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.agent-session-meter {
+  margin-top: 6px;
+  text-align: right;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .agent-folder-picker {

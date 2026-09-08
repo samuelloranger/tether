@@ -1,6 +1,17 @@
 import type { KeyboardEvent } from 'react';
 import type { AgentChatModel, AgentSnapshot } from './agentChatModel';
 import { agentInterrupt, agentPermission, agentPrompt } from './agentFrames';
+import { type AgentUsage, formatCost, formatTokens } from './agentTypes';
+
+/** Running session token/cost total, shown at the composer foot. */
+function SessionMeter({ usage }: { usage: AgentUsage }) {
+  const cost = usage.costUsd ? ` · ${formatCost(usage.costUsd)}` : '';
+  return (
+    <div className="agent-session-meter" title="Session tokens and cost">
+      {formatTokens(usage.inputTokens)}↑ {formatTokens(usage.outputTokens)}↓{cost}
+    </div>
+  );
+}
 
 /** Input bar: prompt/queue, send/stop, and permission approve/deny. Port of
  * Swift AgentComposerView + QueuedRow + permission UI. */
@@ -13,7 +24,7 @@ export function AgentComposer({
   snapshot: AgentSnapshot;
   send: (payload: unknown) => void;
 }) {
-  const { draft, turn, queued, pendingApproval } = snapshot;
+  const { draft, turn, queued, pendingApproval, sessionUsage } = snapshot;
   const streaming = turn !== 'idle';
 
   const submit = () => {
@@ -111,6 +122,7 @@ export function AgentComposer({
           </button>
         )}
       </div>
+      {sessionUsage ? <SessionMeter usage={sessionUsage} /> : null}
     </div>
   );
 }

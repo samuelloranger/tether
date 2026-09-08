@@ -17,6 +17,16 @@ function toUsage(cost: number | undefined, usage: unknown): AgentUsage | undefin
   return { inputTokens, outputTokens, costUsd: cost };
 }
 
+/** Fold one turn's usage into the running session total. */
+function addUsage(total: AgentUsage | null, next: AgentUsage): AgentUsage {
+  const cost = (total?.costUsd ?? 0) + (next.costUsd ?? 0);
+  return {
+    inputTokens: (total?.inputTokens ?? 0) + next.inputTokens,
+    outputTokens: (total?.outputTokens ?? 0) + next.outputTokens,
+    costUsd: cost || undefined,
+  };
+}
+
 export interface PendingApproval {
   id: string;
   name: string;
@@ -33,6 +43,8 @@ export interface AgentSnapshot {
   draft: string;
   /** True when the last turn errored and there is a prompt to resend. */
   canRetry: boolean;
+  /** Running total across every turn in this chat; null until the first done. */
+  sessionUsage: AgentUsage | null;
 }
 
 /**
@@ -49,6 +61,7 @@ export class AgentChatModel {
   private approvalBacklog: PendingApproval[] = [];
   private queued: string[] = [];
   private draft = '';
+  private sessionUsage: AgentUsage | null = null;
   private lastUserPrompt: string | null = null;
   private listeners = new Set<() => void>();
   private cached: AgentSnapshot | null = null;
@@ -73,6 +86,7 @@ export class AgentChatModel {
         queued: this.queued,
         draft: this.draft,
         canRetry: this.turn === 'idle' && this.lastUserPrompt != null,
+        sessionUsage: this.sessionUsage,
       };
     }
     return this.cached;
@@ -123,14 +137,12 @@ export class AgentChatModel {
         break;
       }
       case 'agent.done': {
+        const usage = toUsage(frame.cost, frame.usage);
         const last = this.messages.at(-1);
         if (last?.isStreaming) {
-          this.replaceLast({
-            ...last,
-            isStreaming: false,
-            usage: toUsage(frame.cost, frame.usage),
-          });
+          this.replaceLast({ ...last, isStreaming: false, usage });
         }
+        if (usage) this.sessionUsage = addUsage(this.sessionUsage, usage);
         this.turn = 'idle';
         break;
       }

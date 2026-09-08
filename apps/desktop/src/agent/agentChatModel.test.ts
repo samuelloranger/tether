@@ -29,6 +29,30 @@ describe('AgentChatModel core', () => {
     expect(s.turn).toBe('idle');
   });
 
+  test('sessionUsage accumulates across turns', () => {
+    const m = new AgentChatModel();
+    expect(m.snapshot().sessionUsage).toBeNull();
+    m.apply({ t: 'agent.delta', seq: 1, text: 'a' });
+    m.apply({
+      t: 'agent.done',
+      seq: 2,
+      cost: 0.5,
+      usage: { input_tokens: 100, output_tokens: 20 },
+    });
+    m.apply({ t: 'agent.delta', seq: 3, text: 'b' });
+    m.apply({
+      t: 'agent.done',
+      seq: 4,
+      cost: 0.25,
+      usage: { input_tokens: 50, output_tokens: 10 },
+    });
+    expect(m.snapshot().sessionUsage).toEqual({
+      inputTokens: 150,
+      outputTokens: 30,
+      costUsd: 0.75,
+    });
+  });
+
   test('error appends an error message', () => {
     const m = new AgentChatModel();
     m.apply({ t: 'agent.error', seq: 1, message: 'boom' });
