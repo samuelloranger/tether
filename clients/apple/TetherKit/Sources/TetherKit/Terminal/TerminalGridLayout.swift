@@ -1,4 +1,30 @@
+import CoreGraphics
 import Foundation
+
+/// Horizontal breathing room around the grid, so text is not flush against the
+/// screen edges. The grid used to draw from x=0 with the sub-column leftover
+/// dumped entirely on the right, which read as "too much on the left, content
+/// jammed against the right". A fixed inset on each side, with the leftover
+/// split evenly, keeps the two margins equal.
+enum TerminalGridInset {
+  static let horizontal: CGFloat = 8
+
+  /// Columns that fit `viewWidth` once both insets are reserved.
+  static func columns(viewWidth: CGFloat, cellWidth: CGFloat) -> Int {
+    guard cellWidth > 0 else { return 0 }
+    let available = viewWidth - horizontal * 2
+    guard available > 0 else { return 0 }
+    return max(1, Int(available / cellWidth))
+  }
+
+  /// Left edge of the grid: the inset plus half the sub-column leftover, so the
+  /// margins on the two sides are equal.
+  static func originX(viewWidth: CGFloat, cellWidth: CGFloat, cols: Int) -> CGFloat {
+    let available = viewWidth - horizontal * 2
+    let leftover = max(0, available - CGFloat(cols) * cellWidth)
+    return horizontal + leftover / 2
+  }
+}
 
 /// How many rows of a snapshot should consume the bottom of the view.
 enum TerminalGridLayout {
