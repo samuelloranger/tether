@@ -1,11 +1,16 @@
 import SwiftUI
 
+#if canImport(UIKit)
+  import UIKit
+#endif
+
 /// Native agent-chat surface: a scrolling transcript of user turns and streamed
 /// assistant turns (prose + code + tool cards), a thinking indicator, and a
 /// composer. Auto-scrolls to the newest content as it streams.
 public struct AgentChatView: View {
   @Bindable public var model: AgentChatModel
   @State private var draft = ""
+  @State private var keyboardInset: CGFloat = 0
   @FocusState private var composerFocused: Bool
 
   private let bottomID = "agent-chat-bottom"
@@ -17,13 +22,42 @@ public struct AgentChatView: View {
       transcript
       composer
     }
+    // RootView ignores the keyboard safe area at the root (the terminal measures
+    // the keyboard itself), so this surface must lift its own composer above the
+    // keyboard rather than relying on SwiftUI's automatic avoidance.
+    .padding(.bottom, keyboardInset)
     .background(TetherColors.background)
+    #if canImport(UIKit)
+      .onReceive(
+        NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)
+      ) { note in
+        keyboardInset = Self.keyboardOverlap(note)
+      }
+      .onReceive(
+        NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+      ) { _ in
+        keyboardInset = 0
+      }
+    #endif
     .sheet(item: $model.pendingApproval) { call in
       AgentApprovalSheet(call: call) { decision in model.resolveApproval(decision) }
         .presentationDetents([.medium, .large])
         .presentationBackground(TetherColors.surface)
     }
   }
+
+  #if canImport(UIKit)
+    /// Height of the key window the keyboard's end frame covers, minus the
+    /// bottom safe inset the layout already reserves (mirrors the terminal's).
+    private static func keyboardOverlap(_ note: Notification) -> CGFloat {
+      guard
+        let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+        let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
+      else { return 0 }
+      return max(0, window.bounds.maxY - end.minY - window.safeAreaInsets.bottom)
+    }
+  #endif
 
   private var transcript: some View {
     ScrollViewReader { proxy in
