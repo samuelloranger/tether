@@ -136,7 +136,10 @@ export class AgentClaudeDriver implements AgentDriver {
       '--include-partial-messages',
     ];
     if (this.sessionId) args.push('--resume', this.sessionId);
-    args.push('-p', text);
+    // `--` terminates option parsing so a prompt starting with `-` (a pasted
+    // diff line, a flag-like string, a negative number) can't be misread as
+    // an option by the claude CLI.
+    args.push('--', text);
 
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;

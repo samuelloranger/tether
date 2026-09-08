@@ -292,6 +292,7 @@ async function applyMessage(
       await agent.registry.start(msg.id, msg.cwd);
     } catch (err) {
       logError(`Noise session: agent.start('${msg.id}') failed:`, err);
+      sendSealed({ t: 'agent.error', message: 'agent start failed' });
       return;
     }
     agent.attachments.get(msg.id)?.(); // replace any prior subscription (a re-start)
@@ -366,6 +367,7 @@ export async function runNoiseSession(
       } catch {}
     }
     agent.attachments.clear();
+    agent.registry.killAll();
   };
 
   // Returns false (and trips fatal) on any seal/send failure — callers must stop.

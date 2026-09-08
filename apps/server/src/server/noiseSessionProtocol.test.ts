@@ -629,13 +629,29 @@ describe('runNoiseSession — agent chat', () => {
     ]);
   });
 
-  test("'agent.start' with no driver configured fails closed (default factory throws)", async () => {
+  test("'agent.start' whose driver fails to start is caught, not an unhandled rejection, and tells the client", async () => {
     const pty = fakePty();
-    const io = scriptedIo([jsonFrame({ t: 'agent.start', id: 'a1', cwd: '/tmp' })]);
-    void runNoiseSession(identityChannel(), io, { ...pty.deps }); // never throws out of the loop
+    class BrokenStartDriver implements AgentDriver {
+      async start(_cwd: string): Promise<void> {
+        throw new Error('driver start blew up');
+      }
+      prompt(_text: string): AsyncIterable<never> {
+        return {
+          [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(new Error('unused')) }),
+        };
+      }
+      interrupt(): void {}
+      close(): void {}
+    }
+    const io = scriptedIo([jsonFrame({ t: 'agent.start', id: 'a-broken-start', cwd: '/tmp' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentDriverFactory: () => new BrokenStartDriver(),
+    }); // never throws out of the loop
     await new Promise((r) => setTimeout(r, 5));
 
-    expect(io.sent).toHaveLength(0);
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    expect(msgs).toEqual([{ t: 'agent.error', message: 'agent start failed' }]);
   });
 
   test("'agent.prompt' rejecting mid-stream is caught, not an unhandled rejection", async () => {

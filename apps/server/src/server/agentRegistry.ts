@@ -50,4 +50,9 @@ export class AgentRegistry {
   has(id: string): boolean {
     return this.entries.has(id);
   }
+
+  killAll(): void {
+    for (const e of this.entries.values()) e.driver.close();
+    this.entries.clear();
+  }
 }

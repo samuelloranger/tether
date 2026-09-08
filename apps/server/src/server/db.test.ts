@@ -208,4 +208,11 @@ function ok(cond: boolean, msg: string) {
   ok(row?.workspace_root === '/home/u/sites/tether', 'agent session stores workspace_root');
 }
 
+{
+  createAgentSession(db, { id: 'a2', workspaceRoot: '/home/u/sites/tether' });
+  createAgentSession(db, { id: 'a2', workspaceRoot: '/home/u/sites/tether' });
+  const row = getSession('a2');
+  ok(row?.kind === 'agent', 'repeated createAgentSession does not throw and row still reads back');
+}
+
 console.log(`\n  ${pass} assertions passed\n`);

@@ -332,6 +332,7 @@ export function createAgentSession(
   db.query(`
     INSERT INTO sessions (id, command, status, workspace_root, kind)
     VALUES ($id, $command, $status, $workspaceRoot, $kind)
+    ON CONFLICT(id) DO NOTHING
   `).run({
     $id: args.id,
     $command: '<agent>',
