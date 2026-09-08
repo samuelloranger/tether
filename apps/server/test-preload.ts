@@ -36,8 +36,11 @@ process.env.TETHER_PRESENT_CONTROL_TOKEN_FILE ||= path.join(
 // on — see winAcl.ts.
 process.env.TETHER_SKIP_WINDOWS_ACL ||= '1';
 
-// gitWatch does not install filesystem watchers on Windows (see gitWatch.ts).
-// The suite opts back in so the watcher is still exercised there: it is the
-// platform whose notification semantics differ most, so testing the code path
-// only on Linux and macOS would be testing it where it is least likely to break.
-process.env.TETHER_GIT_WATCH ||= '1';
+// gitWatch does not install filesystem watchers on Windows (GIT_WATCH_ENABLED,
+// see gitWatch.ts) — so tests opt the watcher back in to exercise it. NOT on
+// Windows, though: bun's Windows fs.watch is unreliable (`handle.on is not a
+// function`) and forcing the watcher there intermittently hung the CI job to
+// its 15-min cap while testing a path that never ships on Windows anyway. The
+// fs.watch-driven tests skip on Windows to match (see `watchTest` in
+// gitWatch.test.ts); coverage stays on Linux/macOS.
+if (process.platform !== 'win32') process.env.TETHER_GIT_WATCH ||= '1';
