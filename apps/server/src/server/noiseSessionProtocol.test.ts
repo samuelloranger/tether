@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeAgentDriver } from './agentDriver';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
@@ -598,5 +599,41 @@ describe('runNoiseSession — device management', () => {
       token: 'tok-from-inject',
       expiresAt: '2026-09-05T00:00:00.000Z',
     });
+  });
+});
+
+describe('runNoiseSession — agent chat', () => {
+  test("'agent.start' then 'agent.prompt' streams the driver's frames back sealed", async () => {
+    const pty = fakePty();
+    const io = scriptedIo([
+      jsonFrame({ t: 'agent.start', id: 'a1', cwd: '/tmp' }),
+      jsonFrame({ t: 'agent.prompt', text: 'hello' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentDriverFactory: () =>
+        new FakeAgentDriver([
+          [
+            { t: 'delta', text: 'Hi' },
+            { t: 'done', cost: 0, usage: {} },
+          ],
+        ]),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    expect(msgs).toEqual([
+      { t: 'agent.delta', seq: 1, text: 'Hi' },
+      { t: 'agent.done', seq: 2, cost: 0, usage: {} },
+    ]);
+  });
+
+  test("'agent.start' with no driver configured fails closed (default factory throws)", async () => {
+    const pty = fakePty();
+    const io = scriptedIo([jsonFrame({ t: 'agent.start', id: 'a1', cwd: '/tmp' })]);
+    void runNoiseSession(identityChannel(), io, { ...pty.deps }); // never throws out of the loop
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(io.sent).toHaveLength(0);
   });
 });

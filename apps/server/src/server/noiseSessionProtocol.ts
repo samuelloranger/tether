@@ -1,4 +1,6 @@
-import { getSession } from './db';
+import type { AgentDriver } from './agentDriver';
+import { AgentRegistry } from './agentRegistry';
+import { createAgentSession, db, getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
@@ -52,6 +54,12 @@ export interface SessionDeps {
   resolveTarget: typeof resolveTarget;
   identity: SessionIdentity;
   mintToken?: (deviceId: string) => { token: string; expiresAt: string };
+  /** Builds the driver behind a fresh `agent.start` — real driver lands in a later task. */
+  agentDriverFactory?: () => AgentDriver;
+}
+
+function defaultAgentDriverFactory(): AgentDriver {
+  throw new Error('agent driver not configured');
 }
 
 function defaultGetReplayLogs(sessionId: string, sinceId: number) {
@@ -83,6 +91,7 @@ const defaultDeps: SessionDeps = {
   resolveTarget,
   identity: { deviceId: '' },
   mintToken: defaultMintToken,
+  agentDriverFactory: defaultAgentDriverFactory,
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
@@ -93,7 +102,10 @@ type ClientMessage =
   | { t: 'focus'; id: string; focused: boolean }
   | { t: 'devices.list' }
   | { t: 'devices.revoke'; target: string }
-  | { t: 'auth.token' };
+  | { t: 'auth.token' }
+  | { t: 'agent.start'; id: string; cwd: string }
+  | { t: 'agent.prompt'; text: string }
+  | { t: 'agent.interrupt' };
 
 /** One row of the `devices` reply — the wire shape an iOS client mirrors. */
 interface DeviceListItem {
@@ -121,6 +133,19 @@ function toListItem(device: AuthDevice, selfId: string): DeviceListItem {
 interface Attachment {
   unsub: () => void;
   sub: FocusSubscriber;
+}
+
+/**
+ * Per-channel agent-chat state: the registry driving this channel's agent
+ * sessions, their sink unsubscribes (for teardown), and the id `agent.prompt` /
+ * `agent.interrupt` apply to — those messages carry no id of their own, so we
+ * track the most recently `agent.start`ed one (mirrors the PTY's per-id
+ * tracking, but agent-chat is one-active-session-per-channel).
+ */
+interface AgentState {
+  registry: AgentRegistry;
+  attachments: Map<string, () => void>;
+  currentId: string | null;
 }
 
 const encoder = new TextEncoder();
@@ -198,6 +223,7 @@ async function applyMessage(
   attachments: Map<string, Attachment>,
   makeSubscriber: (id: string) => FocusSubscriber,
   sendSealed: (obj: unknown) => boolean,
+  agent: AgentState,
 ): Promise<void> {
   if (msg.t === 'start') {
     const cols = msg.cols ?? 80;
@@ -259,6 +285,22 @@ async function applyMessage(
     const mint = d.mintToken ?? defaultMintToken;
     const { token, expiresAt } = mint(d.identity.deviceId);
     sendSealed({ t: 'auth.token', token, expiresAt });
+  } else if (msg.t === 'agent.start') {
+    try {
+      createAgentSession(db, { id: msg.id, workspaceRoot: msg.cwd });
+      await agent.registry.start(msg.id, msg.cwd);
+    } catch (err) {
+      logError(`Noise session: agent.start('${msg.id}') failed:`, err);
+      return;
+    }
+    agent.attachments.get(msg.id)?.(); // replace any prior subscription (a re-start)
+    const unsub = agent.registry.attach(msg.id, (frame) => sendSealed(frame));
+    agent.attachments.set(msg.id, unsub);
+    agent.currentId = msg.id;
+  } else if (msg.t === 'agent.prompt') {
+    if (agent.currentId) void agent.registry.prompt(agent.currentId, msg.text);
+  } else if (msg.t === 'agent.interrupt') {
+    if (agent.currentId) agent.registry.interrupt(agent.currentId);
   }
 }
 
@@ -285,6 +327,12 @@ export async function runNoiseSession(
   const d: SessionDeps = { ...defaultDeps, ...deps };
   // One attachment per session id opened on this channel.
   const attachments = new Map<string, Attachment>();
+  // One AgentRegistry per channel, same lifetime as `attachments` above.
+  const agent: AgentState = {
+    registry: new AgentRegistry(d.agentDriverFactory ?? defaultAgentDriverFactory),
+    attachments: new Map<string, () => void>(),
+    currentId: null,
+  };
 
   // A seal advances the Noise nonce; if the seal or send then fails, the cipher
   // is desynced and NOTHING more may be sent on this channel. So a failure is
@@ -302,6 +350,12 @@ export async function runNoiseSession(
       } catch {}
     }
     attachments.clear();
+    for (const unsub of agent.attachments.values()) {
+      try {
+        unsub();
+      } catch {}
+    }
+    agent.attachments.clear();
   };
 
   // Returns false (and trips fatal) on any seal/send failure — callers must stop.
@@ -347,7 +401,7 @@ export async function runNoiseSession(
         logError('Noise session: decrypt/parse failed, ending session:', err);
         return;
       }
-      await applyMessage(msg, d, attachments, makeSubscriber, sendSealed);
+      await applyMessage(msg, d, attachments, makeSubscriber, sendSealed, agent);
     }
   } catch {
     // io.recv() rejected (socket closed) — fall through to cleanup.
