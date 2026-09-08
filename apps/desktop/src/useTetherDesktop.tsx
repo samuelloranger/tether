@@ -24,6 +24,7 @@ import {
   listenSessions,
 } from './coreApi';
 import type { FrameApplyResult } from './frameHandler';
+import { hostsBecomingReachable } from './hostRecovery';
 import type { PairScheme } from './hostScheme';
 import { markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
 import { sessionKey } from './sessionKey';
@@ -190,6 +191,26 @@ export function useTetherDesktop() {
       clearInterval(timer);
     };
   }, [ready]);
+
+  // Recover the drawer + last terminal when a host comes back. The startup
+  // effect hydrates and restores exactly once; if that first pull raced a host
+  // still coming up (VPN not yet connected, server mid-restart, keyring not
+  // ready) the drawer stayed blank and the last terminal never reopened, and
+  // only a manual action fixed it. On each edge into `reachable`, re-pull the
+  // list — and, for the active host with nothing open, reopen the last
+  // terminal. `restoreSession` checks the refs, so it never lands on a tab the
+  // user chose in the meantime.
+  const prevHealthRef = useRef<Record<string, HostHealthStatus>>({});
+  useEffect(() => {
+    if (!ready) return;
+    for (const hostId of hostsBecomingReachable(prevHealthRef.current, healthByHost)) {
+      void hydrateHost(hostId);
+      if (hostId === activeHostIdRef.current && activeSessionIdRef.current === '') {
+        void restoreSession(hostId);
+      }
+    }
+    prevHealthRef.current = healthByHost;
+  }, [ready, healthByHost, hydrateHost, restoreSession]);
 
   const activeHost = hosts.find((host) => host.id === activeHostId) ?? null;
 
