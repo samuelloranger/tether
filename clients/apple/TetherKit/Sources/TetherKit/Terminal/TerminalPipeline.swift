@@ -187,6 +187,11 @@ actor TerminalPipeline {
           // channel; they are driven over their own short-lived sessions
           // (`DevicesView`, `NoiseTokenCache`). Ignore.
           break
+        case .agentDelta, .agentTool, .agentToolResult, .agentPermissionReq, .agentDone,
+          .agentError:
+          // Agent-chat frames are consumed by AgentChatModel, not the terminal
+          // emulator pipeline. Ignore here.
+          break
         }
       } catch {
         // A deliberate teardown cancels this task; anything else is an

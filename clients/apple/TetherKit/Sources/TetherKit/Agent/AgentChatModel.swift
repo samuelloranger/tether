@@ -94,7 +94,7 @@ public final class AgentChatModel {
       inputJSON: inputJSON,
       diff: derivedDiff(name: name, inputJSON: inputJSON)
     )
-    ensureAssistant().tools.append(call)
+    messages[ensureAssistantIndex()].tools.append(call)
   }
 
   private func fillToolResult(text: String, isError: Bool) {
@@ -104,22 +104,10 @@ public final class AgentChatModel {
     messages[mi].tools[ti].isError = isError
   }
 
-  private func ensureAssistant() -> AssistantRef {
-    if let last = messages.indices.last, messages[last].role == .assistant {
-      return AssistantRef(model: self, index: last)
-    }
+  private func ensureAssistantIndex() -> Int {
+    if let last = messages.indices.last, messages[last].role == .assistant { return last }
     messages.append(AgentMessage(role: .assistant, isStreaming: true))
-    return AssistantRef(model: self, index: messages.count - 1)
-  }
-
-  // Cursor into the trailing assistant message so callers can `.tools.append`.
-  fileprivate struct AssistantRef {
-    let model: AgentChatModel
-    let index: Int
-    var tools: [AgentToolCall] {
-      get { model.messages[index].tools }
-      nonmutating set { model.messages[index].tools = newValue }
-    }
+    return messages.count - 1
   }
 
   private func summarize(name: String, inputJSON: String) -> String {

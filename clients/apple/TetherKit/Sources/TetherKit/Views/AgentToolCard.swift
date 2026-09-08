@@ -6,9 +6,12 @@ import SwiftUI
 /// arguments — or, for file edits, an inline diff — plus the result.
 public struct AgentToolCard: View {
   public let call: AgentToolCall
-  @State private var expanded = false
+  @State private var expanded: Bool
 
-  public init(call: AgentToolCall) { self.call = call }
+  public init(call: AgentToolCall, startExpanded: Bool = false) {
+    self.call = call
+    _expanded = State(initialValue: startExpanded)
+  }
 
   private var accent: Color { AgentToolStyle.accent(for: call.name) }
 

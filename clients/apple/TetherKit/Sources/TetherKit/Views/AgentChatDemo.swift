@@ -28,6 +28,9 @@
         AgentFolderPicker(folders: AgentChatSeed.folders) { _ in }
       case "empty":
         AgentChatView(model: AgentChatModel(sessionId: "s", cwd: "/home/sam/sites/tether"))
+      case "diff":
+        ScrollView { AgentToolCard(call: AgentChatSeed.editCall, startExpanded: true).padding(16) }
+          .background(TetherColors.background)
       default:
         AgentChatView(model: AgentChatSeed.conversation())
       }
@@ -73,7 +76,16 @@
       AgentFolder(name: "sites", path: "~/sites", isRepo: false),
     ]
 
-    static func conversation() -> AgentChatModel {
+    static let editCall = AgentToolCall(
+      name: "Edit",
+      summary: "src/routes/login.ts",
+      inputJSON: "{ \"file_path\": \"src/routes/login.ts\" }",
+      result: "Applied 1 edit.",
+      diff:
+        "@@ -1,4 +1,7 @@\n export function login(req, res) {\n+  if (!allow(req.ip)) {\n+    return res.status(429).json({ error: 'too many attempts' })\n+  }\n   const { email, password } = req.body\n   // ...verify\n }"
+    )
+
+    @MainActor static func conversation() -> AgentChatModel {
       let m = AgentChatModel(sessionId: "demo", cwd: "/home/sam/sites/tether")
       m.messages = [
         AgentMessage(role: .user, text: "Add a rate limiter to the login route — 5 tries per 15 min."),
@@ -115,7 +127,7 @@
       return m
     }
 
-    static func approving() -> AgentChatModel {
+    @MainActor static func approving() -> AgentChatModel {
       let m = conversation()
       m.messages[m.messages.count - 1].isStreaming = false
       m.turn = .idle

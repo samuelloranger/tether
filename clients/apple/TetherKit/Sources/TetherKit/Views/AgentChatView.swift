@@ -154,7 +154,7 @@ struct AgentMessageRow: View {
       ForEach(Array(splitMarkdownBlocks(message.text).enumerated()), id: \.offset) { _, block in
         switch block {
         case let .prose(text): ProseText(text)
-        case let .code(language, body): CodeBlock(language: language, body: body)
+        case let .code(language, body): CodeBlock(language: language, code: body)
         }
       }
       ForEach(message.tools) { call in AgentToolCard(call: call) }
@@ -209,7 +209,7 @@ struct ProseText: View {
 
 struct CodeBlock: View {
   let language: String?
-  let body: String
+  let code: String
 
   private var lang: CodeLanguage? { language.flatMap { CodeLanguage(rawValue: $0.lowercased()) } }
 
@@ -225,7 +225,7 @@ struct CodeBlock: View {
       }
       ScrollView(.horizontal, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 1) {
-          ForEach(Array(body.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+          ForEach(Array(code.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
             HighlightedCodeText(content: line.isEmpty ? " " : line, language: lang)
               .font(.system(.caption, design: .monospaced))
           }
