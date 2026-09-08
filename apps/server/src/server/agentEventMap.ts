@@ -20,6 +20,6 @@ export function toFrame(ev: AgentEvent, seq: FrameSeq): AgentFrame {
     case 'permission_req':
       return { t: 'agent.permission_req', reqId: ev.reqId, name: ev.name, input: ev.input };
     case 'error':
-      return { t: 'agent.error', message: ev.message };
+      return { t: 'agent.error', seq: seq.next(), message: ev.message };
   }
 }

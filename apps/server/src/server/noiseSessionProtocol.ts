@@ -1,5 +1,7 @@
+import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
-import { createAgentSession, db, getSession } from './db';
+import { applyAgentStart, defaultGetAgentMessages } from './agentReplay';
+import { getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
@@ -59,6 +61,8 @@ export interface SessionDeps {
    * (and a fake driver) without touching the real `sharedAgentRegistry`.
    */
   agentRegistry?: AgentRegistry;
+  /** Catch-up for an `agent.start` that carries `sinceSeq` — mirrors getReplayLogs. */
+  getAgentMessages: (sessionId: string, sinceSeq: number) => AgentMessageRow[];
 }
 
 function defaultGetReplayLogs(sessionId: string, sinceId: number) {
@@ -91,6 +95,7 @@ const defaultDeps: SessionDeps = {
   identity: { deviceId: '' },
   mintToken: defaultMintToken,
   agentRegistry: sharedAgentRegistry,
+  getAgentMessages: defaultGetAgentMessages,
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
@@ -102,7 +107,7 @@ type ClientMessage =
   | { t: 'devices.list' }
   | { t: 'devices.revoke'; target: string }
   | { t: 'auth.token' }
-  | { t: 'agent.start'; id: string; cwd: string }
+  | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number }
   | { t: 'agent.prompt'; text: string }
   | { t: 'agent.interrupt' };
 
@@ -141,7 +146,7 @@ interface Attachment {
  * track the most recently `agent.start`ed one (mirrors the PTY's per-id
  * tracking, but agent-chat is one-active-session-per-channel).
  */
-interface AgentState {
+export interface AgentState {
   registry: AgentRegistry;
   attachments: Map<string, () => void>;
   currentId: string | null;
@@ -285,23 +290,7 @@ async function applyMessage(
     const { token, expiresAt } = mint(d.identity.deviceId);
     sendSealed({ t: 'auth.token', token, expiresAt });
   } else if (msg.t === 'agent.start') {
-    try {
-      // If the agent is already running (server-owned, survives disconnects),
-      // this is a reconnect — re-attach to the live driver instead of starting
-      // a second one. Only a first open creates the DB row + spawns the driver.
-      if (!agent.registry.has(msg.id)) {
-        createAgentSession(db, { id: msg.id, workspaceRoot: msg.cwd });
-        await agent.registry.start(msg.id, msg.cwd);
-      }
-    } catch (err) {
-      logError(`Noise session: agent.start('${msg.id}') failed:`, err);
-      sendSealed({ t: 'agent.error', message: 'agent start failed' });
-      return;
-    }
-    agent.attachments.get(msg.id)?.(); // replace any prior subscription (a re-start)
-    const unsub = agent.registry.attach(msg.id, (frame) => sendSealed(frame));
-    agent.attachments.set(msg.id, unsub);
-    agent.currentId = msg.id;
+    await applyAgentStart(msg, d, sendSealed, agent);
   } else if (msg.t === 'agent.prompt') {
     // Un-awaited so `agent.interrupt` can still land while a prompt streams — but
     // a driver can reject mid-stream, and an unhandled rejection here would

@@ -129,6 +129,7 @@ function fakePty(): FakePty {
       client.focused = focused;
     }) as SessionDeps['setSessionFocus'],
     getReplayLogs: () => ({ reset: false, logs: [] }),
+    getAgentMessages: () => [],
     ...emptyRegistry(),
     identity: { deviceId: '' },
   };
@@ -725,5 +726,74 @@ describe('runNoiseSession — agent chat', () => {
 
     // Re-attach only — no second spawn.
     expect(driver.startCount).toBe(1);
+  });
+
+  test("'agent.start' with sinceSeq replays stored frames to this client before live frames resume", async () => {
+    const pty = fakePty();
+    const replayed: Array<{ sessionId: string; sinceSeq: number }> = [];
+    pty.deps.getAgentMessages = (sessionId, sinceSeq) => {
+      replayed.push({ sessionId, sinceSeq });
+      return [
+        {
+          session_id: sessionId,
+          seq: 3,
+          kind: 'delta',
+          text: 'earlier reply',
+          tool_json: null,
+          is_error: 0,
+          ts: 0,
+        },
+        {
+          session_id: sessionId,
+          seq: 4,
+          kind: 'done',
+          text: null,
+          tool_json: JSON.stringify({ cost: 0.01, usage: {} }),
+          is_error: 0,
+          ts: 0,
+        },
+      ];
+    };
+    const io = scriptedIo([
+      jsonFrame({ t: 'agent.start', id: 'a-replay', cwd: '/tmp', sinceSeq: 2 }),
+      jsonFrame({ t: 'agent.prompt', text: 'more' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentRegistry: new AgentRegistry(
+        () => new FakeAgentDriver([[{ t: 'delta', text: 'live chunk' }]]),
+        () => {}, // don't touch the real DB in this test
+      ),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(replayed).toEqual([{ sessionId: 'a-replay', sinceSeq: 2 }]);
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    // Replayed frames (reconstructed from the stored rows) precede the live one.
+    expect(msgs).toEqual([
+      { t: 'agent.delta', seq: 3, text: 'earlier reply' },
+      { t: 'agent.done', seq: 4, cost: 0.01, usage: {} },
+      { t: 'agent.delta', seq: 1, text: 'live chunk' },
+    ]);
+  });
+
+  test("'agent.start' without sinceSeq defaults to 0 (full-transcript replay for a cold client)", async () => {
+    const pty = fakePty();
+    const replayed: Array<{ sessionId: string; sinceSeq: number }> = [];
+    pty.deps.getAgentMessages = (sessionId, sinceSeq) => {
+      replayed.push({ sessionId, sinceSeq });
+      return [];
+    };
+    const io = scriptedIo([jsonFrame({ t: 'agent.start', id: 'a-cold', cwd: '/tmp' })]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentRegistry: new AgentRegistry(
+        () => new FakeAgentDriver([]),
+        () => {},
+      ),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(replayed).toEqual([{ sessionId: 'a-cold', sinceSeq: 0 }]);
   });
 });

@@ -32,7 +32,7 @@ enum OutboundFrame: Sendable {
   case paste(String, key: String?)
   case focus(Bool)
   case resize(cols: UInt16, rows: UInt16)
-  case agentStart(id: String, cwd: String)
+  case agentStart(id: String, cwd: String, sinceSeq: Int)
   case agentPrompt(String)
   case agentInterrupt
 }
@@ -304,9 +304,9 @@ actor TerminalPipeline {
       applyLocalResize(cols: newCols, rows: newRows)
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
-    case let .agentStart(id, cwd):
+    case let .agentStart(id, cwd, sinceSeq):
       guard let channel = noiseChannel else { return }
-      try? await channel.sendAgentStart(id: id, cwd: cwd)
+      try? await channel.sendAgentStart(id: id, cwd: cwd, sinceSeq: sinceSeq)
     case let .agentPrompt(text):
       guard let channel = noiseChannel else { return }
       try? await channel.sendAgentPrompt(text: text)

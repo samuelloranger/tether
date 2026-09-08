@@ -12,7 +12,11 @@ export type AgentFrame =
   | { t: 'agent.tool_result'; seq: number; text: string; isError: boolean }
   | { t: 'agent.permission_req'; reqId: string; name: string; input: unknown }
   | { t: 'agent.done'; seq: number; cost: number; usage: unknown }
-  | { t: 'agent.error'; message: string };
+  // seq is optional: toFrame assigns one so replay/persistence can order it
+  // alongside the rest of the run, but ad-hoc synthetic errors sent straight
+  // from noiseSessionProtocol.ts (start/prompt failures, not a driver event)
+  // have no run to order against and omit it.
+  | { t: 'agent.error'; seq?: number; message: string };
 
 export interface AgentDriver {
   start(cwd: string): Promise<void>;

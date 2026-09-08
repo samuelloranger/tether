@@ -45,6 +45,34 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(m.pendingApproval?.summary, "rm -rf x")
   }
 
+  func testLastSeqTracksTheHighestSeqSeenAcrossFrameKinds() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    XCTAssertEqual(m.lastSeq, 0)  // cold model — replay-from-scratch default
+    m.apply(.agentDelta(seq: 1, text: "Hel"))
+    m.apply(.agentDelta(seq: 2, text: "lo"))
+    m.apply(.agentTool(seq: 3, name: "Bash", input: "{}"))
+    m.apply(.agentToolResult(seq: 4, text: "ok", isError: false))
+    m.apply(.agentDone(seq: 5, cost: 0))
+    XCTAssertEqual(m.lastSeq, 5)
+  }
+
+  // Server-side coalescing (agentRegistry.ts) persists several streamed deltas
+  // as ONE replayed row — the reducer must render that identically to the
+  // many-small-chunks live path: one assistant bubble either way.
+  func testOneCoalescedReplayDeltaRendersSameAsManyLiveDeltas() {
+    let live = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    live.apply(.agentDelta(seq: 1, text: "Hel"))
+    live.apply(.agentDelta(seq: 2, text: "lo"))
+    live.apply(.agentDone(seq: 3, cost: 0))
+
+    let replayed = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    replayed.apply(.agentDelta(seq: 1, text: "Hello"))
+    replayed.apply(.agentDone(seq: 3, cost: 0))
+
+    XCTAssertEqual(live.messages.last?.text, replayed.messages.last?.text)
+    XCTAssertEqual(live.lastSeq, replayed.lastSeq)
+  }
+
   func testSendPromptAppendsUserAndFiresOutbound() {
     var sent: [AgentOutbound] = []
     let m = AgentChatModel(sessionId: "a1", cwd: "/tmp", send: { sent.append($0) })

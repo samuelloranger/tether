@@ -402,7 +402,8 @@ public final class SessionStore {
       send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
     )
     await connectAgent(sessionId: id)
-    pipeline.outbound.yield(.agentStart(id: id, cwd: cwd))
+    // Brand-new chat, empty model — sinceSeq 0 (nothing to replay).
+    pipeline.outbound.yield(.agentStart(id: id, cwd: cwd, sinceSeq: 0))
   }
 
   /// Routes an `AgentChatModel`'s outbound intent onto the pipeline's outbound
@@ -574,9 +575,12 @@ public final class SessionStore {
       (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
     if isAgent {
       await connectAgent(sessionId: sessionId)
-      // The server's AgentRegistry is per-connection — a reconnect gets a
-      // fresh one with no memory of this id, so `agent.start` has to be
+      // The server-owned AgentRegistry survives a disconnect, but this
+      // channel's per-connection attachment does not — `agent.start` has to be
       // re-sent every time a chat tab is reselected, not just on first open.
+      // sinceSeq replays whatever this local model hasn't seen yet: 0 for a
+      // freshly created model (cold app launch), or its tracked `lastSeq` for
+      // one that already streamed some of this transcript in this app session.
       let key = terminalKey(sessionId, hostId: hostId)
       let cwd = agentModels[key]?.cwd ?? ""
       if agentModels[key] == nil {
@@ -585,7 +589,8 @@ public final class SessionStore {
           send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
         )
       }
-      pipeline.outbound.yield(.agentStart(id: sessionId, cwd: cwd))
+      let sinceSeq = agentModels[key]?.lastSeq ?? 0
+      pipeline.outbound.yield(.agentStart(id: sessionId, cwd: cwd, sinceSeq: sinceSeq))
     } else {
       await connectTerminal(sessionId: sessionId)
     }

@@ -19,6 +19,12 @@ public final class AgentChatModel {
   public let sessionId: String
   public let cwd: String
 
+  /// Highest frame `seq` this model has applied. Sent back as `sinceSeq` on the
+  /// next `agent.start` (reconnect or app relaunch) so the host replays only
+  /// what was missed. A brand-new model starts at 0 — a cold client asking for
+  /// the full transcript.
+  public private(set) var lastSeq: Int = 0
+
   private let send: (AgentOutbound) -> Void
 
   public init(sessionId: String, cwd: String, send: @escaping (AgentOutbound) -> Void = { _ in }) {
@@ -54,9 +60,15 @@ public final class AgentChatModel {
 
   public func apply(_ msg: NoiseServerMessage) {
     switch msg {
-    case let .agentDelta(_, text): streamDelta(text)
-    case let .agentTool(_, name, input): addTool(name: name, inputJSON: input)
-    case let .agentToolResult(_, text, isError): fillToolResult(text: text, isError: isError)
+    case let .agentDelta(seq, text):
+      noteSeq(seq)
+      streamDelta(text)
+    case let .agentTool(seq, name, input):
+      noteSeq(seq)
+      addTool(name: name, inputJSON: input)
+    case let .agentToolResult(seq, text, isError):
+      noteSeq(seq)
+      fillToolResult(text: text, isError: isError)
     case let .agentPermissionReq(reqId, name, input):
       pendingApproval = AgentToolCall(
         id: UUID(uuidString: reqId) ?? UUID(),
@@ -64,7 +76,8 @@ public final class AgentChatModel {
         summary: summarize(name: name, inputJSON: input),
         inputJSON: input
       )
-    case .agentDone:
+    case let .agentDone(seq, _):
+      noteSeq(seq)
       if let last = messages.indices.last, messages[last].role == .assistant {
         messages[last].isStreaming = false
       }
@@ -75,6 +88,12 @@ public final class AgentChatModel {
     default:
       break
     }
+  }
+
+  /// Replayed frames arrive in ascending seq order, but this stays a max
+  /// (rather than an unconditional overwrite) as a defensive floor.
+  private func noteSeq(_ seq: Int) {
+    lastSeq = max(lastSeq, seq)
   }
 
   private func streamDelta(_ text: String) {

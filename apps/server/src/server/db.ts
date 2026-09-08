@@ -155,6 +155,26 @@ const migrations = [
     name: 'session_kind',
     up: `ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'pty';`,
   },
+  {
+    version: 12,
+    name: 'agent_messages',
+    // One row per persisted agent-chat frame, keyed by the same monotonic `seq`
+    // the live fan-out already assigns (agentEventMap.ts) — so replay (seq >
+    // sinceSeq) and live frames never collide. Deltas are coalesced by the
+    // registry before insert, so this stays low-volume unlike terminal_logs.
+    up: `
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        session_id TEXT NOT NULL,
+        seq        INTEGER NOT NULL,
+        kind       TEXT NOT NULL,
+        text       TEXT,
+        tool_json  TEXT,
+        is_error   INTEGER NOT NULL DEFAULT 0,
+        ts         INTEGER NOT NULL,
+        PRIMARY KEY (session_id, seq)
+      );
+    `,
+  },
 ];
 
 export function runMigrations() {
@@ -414,6 +434,8 @@ export function setSetting(key: string, value: string): void {
 }
 
 // Fully remove a session (row + its logs) so it disappears from the list.
+// Callers killing an agent session also purge agent_messages (agentMessages.ts,
+// not imported here to avoid another circular edge into an already-large file).
 export function deleteSession(id: string) {
   clearLogs(id);
   db.query('DELETE FROM sessions WHERE id = $id').run({ $id: id });

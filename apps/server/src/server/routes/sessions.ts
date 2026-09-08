@@ -1,5 +1,6 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
+import { deleteAgentMessages } from '../agentMessages';
 import { sharedAgentRegistry } from '../agentRegistry';
 import { deleteSession, getSession, listSessions, renameSession } from '../db';
 import { trackDeviceChannel } from '../deviceChannels';
@@ -256,6 +257,7 @@ sessionsRoutes.post('/api/sessions/kill', async (c) => {
   const session = getSession(sessionId);
   if (session?.kind === 'agent') {
     sharedAgentRegistry.kill(sessionId);
+    deleteAgentMessages(sessionId);
     deleteSession(sessionId);
     return c.json({ ok: true });
   }
