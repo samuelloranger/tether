@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
+import { SessionKindIcon } from './sessionIcons';
 import { parseSessionKey, sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
@@ -105,6 +106,7 @@ function SessionTab({
         onClick={onSelect}
       >
         <span className={`activity-dot dot-${dot}`} aria-hidden />
+        <SessionKindIcon kind={session.kind} />
         <span className="session-tab-title">{label}</span>
       </button>
       <button

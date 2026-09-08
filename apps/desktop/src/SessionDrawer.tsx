@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
+import { SessionKindIcon } from './sessionIcons';
 import { sessionLabel, sessionLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
@@ -167,6 +168,7 @@ function SessionRow({
         title={activityLabel(dot)}
       >
         <span className={`activity-dot dot-${dot}`} aria-hidden />
+        <SessionKindIcon kind={session.kind} />
         <span className="drawer-session-title">{shown}</span>
         {session.status === 'stopped' ? <span className="drawer-session-meta">stopped</span> : null}
       </button>

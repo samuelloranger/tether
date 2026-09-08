@@ -2705,6 +2705,17 @@ label > textarea {
   }
 }
 
+.session-kind-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+.drawer-session-row.active .session-kind-icon,
+.session-tab.active .session-kind-icon {
+  color: var(--text-muted);
+}
+
 /* ── Agent chat ─────────────────────────────────────────────── */
 .agent-pane {
   display: flex;
