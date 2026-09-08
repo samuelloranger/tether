@@ -201,11 +201,14 @@ actor TerminalPipeline {
           // (`DevicesView`, `NoiseTokenCache`). Ignore.
           break
         case .agentDelta, .agentTool, .agentToolResult, .agentPermissionReq, .agentDone,
-          .agentError:
+          .agentError, .agentUser, .agentStatus:
           // Agent-chat frames are consumed by AgentChatModel, not the terminal
           // emulator pipeline — forward to the event sink for SessionStore to
           // dispatch into the active AgentChatModel.
           eventSink.yield(.agent(message))
+        case .ignored:
+          // A frame this client does not understand — already dropped at decode.
+          break
         }
       } catch {
         // A deliberate teardown cancels this task; anything else is an
