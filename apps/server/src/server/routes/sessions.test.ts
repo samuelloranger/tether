@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
+import { sharedAgentRegistry } from '../agentRegistry';
 import { app } from '../app';
-import { createAgentSession, db, deleteSession } from '../db';
+import { createAgentSession, db, deleteSession, getSession } from '../db';
 import { testAuthHeaders } from '../testAuth';
 
 test('GET /api/sessions surfaces kind for agent sessions', async () => {
@@ -14,5 +15,23 @@ test('GET /api/sessions surfaces kind for agent sessions', async () => {
     expect(row?.kind).toBe('agent');
   } finally {
     deleteSession('kind-agent');
+  }
+});
+
+test('POST /api/sessions/kill on an agent session drops it from the shared registry + DB', async () => {
+  const AUTH = testAuthHeaders();
+  createAgentSession(db, { id: 'kind-agent-kill', workspaceRoot: '/tmp/kind-agent-kill' });
+  try {
+    const res = await app.request('/api/sessions/kill', {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'kind-agent-kill' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(sharedAgentRegistry.has('kind-agent-kill')).toBe(false);
+    expect(getSession('kind-agent-kill')).toBeNull();
+  } finally {
+    deleteSession('kind-agent-kill');
   }
 });

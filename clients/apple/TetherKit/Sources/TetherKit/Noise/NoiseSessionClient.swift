@@ -302,9 +302,11 @@ public final class NoiseChannel {
     try await sendSealed(Self.focusRequest(id: id, focused: focused))
   }
 
-  /// Starts an agent-chat session on the host (`{t:"agent.start",id,cwd}`).
-  public func sendAgentStart(id: String, cwd: String) async throws {
-    try await sendSealed(Self.agentStartRequest(id: id, cwd: cwd))
+  /// Starts an agent-chat session on the host (`{t:"agent.start",id,cwd,sinceSeq}`).
+  /// `sinceSeq` is the highest frame seq this client already applied — 0 for a
+  /// cold/empty model, which asks the host to replay the full transcript.
+  public func sendAgentStart(id: String, cwd: String, sinceSeq: Int = 0) async throws {
+    try await sendSealed(Self.agentStartRequest(id: id, cwd: cwd, sinceSeq: sinceSeq))
   }
 
   /// Sends a prompt to the last-started agent (`{t:"agent.prompt",text}`).
@@ -320,8 +322,8 @@ public final class NoiseChannel {
   }
 
   /// The `agent.start` request body. Pure + static, as above.
-  static func agentStartRequest(id: String, cwd: String) -> [String: Any] {
-    ["t": "agent.start", "id": id, "cwd": cwd]
+  static func agentStartRequest(id: String, cwd: String, sinceSeq: Int = 0) -> [String: Any] {
+    ["t": "agent.start", "id": id, "cwd": cwd, "sinceSeq": sinceSeq]
   }
 
   /// The `agent.prompt` request body. Pure + static, as above.

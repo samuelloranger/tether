@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mapClaudeLine } from './agentClaudeDriver';
+import { isMessageStartEvent, mapClaudeLine } from './agentClaudeDriver';
 
 test('init line yields no event', () => {
   const line = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc123' });
@@ -126,4 +126,22 @@ test('empty line yields null', () => {
 
 test('unknown top-level type yields null', () => {
   expect(mapClaudeLine(JSON.stringify({ type: 'something_else' }))).toBeNull();
+});
+
+test('isMessageStartEvent recognizes a stream_event message_start', () => {
+  const line = JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } });
+  expect(isMessageStartEvent(line)).toBe(true);
+});
+
+test('isMessageStartEvent is false for other stream_events', () => {
+  const line = JSON.stringify({
+    type: 'stream_event',
+    event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hi' } },
+  });
+  expect(isMessageStartEvent(line)).toBe(false);
+});
+
+test('isMessageStartEvent is false for non stream_event lines', () => {
+  expect(isMessageStartEvent(JSON.stringify({ type: 'assistant', message: {} }))).toBe(false);
+  expect(isMessageStartEvent('not json')).toBe(false);
 });

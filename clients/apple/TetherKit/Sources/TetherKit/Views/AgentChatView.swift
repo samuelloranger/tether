@@ -78,7 +78,7 @@ public struct AgentChatView: View {
         }
       }
       .onChange(of: model.messages.count) { _, _ in scrollToBottom(proxy) }
-      .onChange(of: model.messages.last?.text) { _, _ in scrollToBottom(proxy) }
+      .onChange(of: model.messages.last?.plainText) { _, _ in scrollToBottom(proxy) }
       .onChange(of: model.turn) { _, _ in scrollToBottom(proxy) }
     }
   }
@@ -169,7 +169,7 @@ struct AgentMessageRow: View {
   private var userBubble: some View {
     HStack {
       Spacer(minLength: 40)
-      Text(message.text)
+      Text(message.plainText)
         .font(.body)
         .foregroundStyle(TetherColors.textPrimary)
         .padding(.horizontal, 13)
@@ -185,13 +185,19 @@ struct AgentMessageRow: View {
 
   private var assistantTurn: some View {
     VStack(alignment: .leading, spacing: 10) {
-      ForEach(Array(splitMarkdownBlocks(message.text).enumerated()), id: \.offset) { _, block in
+      ForEach(message.blocks) { block in
         switch block {
-        case let .prose(text): ProseText(text)
-        case let .code(language, body): CodeBlock(language: language, code: body)
+        case let .text(_, text):
+          ForEach(Array(splitMarkdownBlocks(text).enumerated()), id: \.offset) { _, mdBlock in
+            switch mdBlock {
+            case let .prose(text): ProseText(text)
+            case let .code(language, body): CodeBlock(language: language, code: body)
+            }
+          }
+        case let .tool(call):
+          AgentToolCard(call: call)
         }
       }
-      ForEach(message.tools) { call in AgentToolCard(call: call) }
       if message.isStreaming {
         StreamingCaret()
       }
@@ -204,7 +210,7 @@ struct AgentMessageRow: View {
       Image(systemName: "exclamationmark.octagon.fill")
         .font(.caption)
         .foregroundStyle(TetherColors.danger)
-      Text(message.text)
+      Text(message.plainText)
         .font(.callout)
         .foregroundStyle(TetherColors.danger)
     }
