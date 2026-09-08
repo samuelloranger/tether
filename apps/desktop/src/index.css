@@ -3098,6 +3098,63 @@ label > textarea {
   font-family: var(--mono);
   font-size: 11px;
 }
+.agent-info-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.agent-info-model {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+.agent-info-gauges {
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+.agent-gauge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+}
+.agent-gauge-label {
+  color: var(--text-faint);
+}
+.agent-gauge-track {
+  width: 64px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--input);
+  overflow: hidden;
+}
+.agent-gauge-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.agent-gauge-fill.sev-ok {
+  background: var(--success);
+}
+.agent-gauge-fill.sev-warn {
+  background: var(--warning);
+}
+.agent-gauge-fill.sev-crit {
+  background: var(--danger);
+}
+.agent-gauge-pct {
+  min-width: 30px;
+  text-align: right;
+  color: var(--text-muted);
+}
 
 .agent-folder-picker {
   background: var(--surface);

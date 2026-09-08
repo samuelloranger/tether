@@ -1,6 +1,6 @@
 import { deriveDiff, summarize } from './agentDiff';
 import type { AgentFrame } from './agentFrames';
-import type { AgentMessage, AgentTurn, AgentUsage } from './agentTypes';
+import type { AgentMessage, AgentStatus, AgentTurn, AgentUsage } from './agentTypes';
 
 /** Map the server's `done` cost + usage blob into our AgentUsage. */
 function toUsage(cost: number | undefined, usage: unknown): AgentUsage | undefined {
@@ -51,6 +51,8 @@ export interface AgentSnapshot {
   canRetry: boolean;
   /** Running total across every turn in this chat; null until the first done. */
   sessionUsage: AgentUsage | null;
+  /** Model + account 5h/7day usage from the server; null until first status. */
+  status: AgentStatus | null;
 }
 
 /**
@@ -67,6 +69,7 @@ export class AgentChatModel {
   private approvalBacklog: PendingApproval[] = [];
   private queued: string[] = [];
   private draft = '';
+  private statusValue: AgentStatus | null = null;
   private lastUserPrompt: string | null = null;
   private listeners = new Set<() => void>();
   private cached: AgentSnapshot | null = null;
@@ -92,6 +95,7 @@ export class AgentChatModel {
         draft: this.draft,
         canRetry: this.turn === 'idle' && this.lastUserPrompt != null,
         sessionUsage: sumUsage(this.messages),
+        status: this.statusValue,
       };
     }
     return this.cached;
@@ -183,6 +187,17 @@ export class AgentChatModel {
       }
       case 'agent.tool_result': {
         this.fillLastToolResult(frame.text, frame.isError);
+        break;
+      }
+      case 'agent.status': {
+        // Merge: a later status with a known model but no fresh usage (or vice
+        // versa) must not wipe the field we already have.
+        const prev = this.statusValue;
+        this.statusValue = {
+          model: frame.model ?? prev?.model ?? null,
+          fiveHour: frame.fiveHour ?? prev?.fiveHour ?? null,
+          sevenDay: frame.sevenDay ?? prev?.sevenDay ?? null,
+        };
         break;
       }
       case 'agent.permission_req': {

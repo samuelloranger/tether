@@ -130,6 +130,7 @@ function fakePty(): FakePty {
     }) as SessionDeps['setSessionFocus'],
     getReplayLogs: () => ({ reset: false, logs: [] }),
     getAgentMessages: () => [],
+    fetchAgentUsage: async () => null,
     ...emptyRegistry(),
     identity: { deviceId: '' },
   };
@@ -626,7 +627,9 @@ describe('runNoiseSession — agent chat', () => {
     });
     await new Promise((r) => setTimeout(r, 5));
 
-    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    const msgs = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t !== 'agent.status');
     expect(msgs).toEqual([
       { t: 'agent.delta', seq: 1, text: 'Hi' },
       { t: 'agent.done', seq: 2, cost: 0, usage: {} },
@@ -684,7 +687,9 @@ describe('runNoiseSession — agent chat', () => {
     });
     await new Promise((r) => setTimeout(r, 5));
 
-    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    const msgs = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t !== 'agent.status');
     expect(msgs).toEqual([{ t: 'agent.error', message: 'agent prompt failed' }]);
   });
 
@@ -768,7 +773,9 @@ describe('runNoiseSession — agent chat', () => {
     await new Promise((r) => setTimeout(r, 5));
 
     expect(replayed).toEqual([{ sessionId: 'a-replay', sinceSeq: 2 }]);
-    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    const msgs = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t !== 'agent.status');
     // Replayed frames (reconstructed from the stored rows) precede the live one.
     expect(msgs).toEqual([
       { t: 'agent.delta', seq: 3, text: 'earlier reply' },

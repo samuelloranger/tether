@@ -23,6 +23,8 @@ export interface AgentDriver {
   prompt(text: string): AsyncIterable<AgentEvent>;
   interrupt(): void;
   close(): void;
+  /** The model the CLI reported on its init line, once a prompt has run. */
+  getModel?(): string | null;
 }
 
 export class FakeAgentDriver implements AgentDriver {

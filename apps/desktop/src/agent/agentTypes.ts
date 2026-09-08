@@ -1,6 +1,19 @@
 export type AgentRole = 'user' | 'assistant' | 'error';
 export type AgentTurn = 'idle' | 'thinking' | 'streaming';
 
+/** One rate-limit window from the account usage endpoint. */
+export interface UsageWindow {
+  utilization: number;
+  resetsAt: string | null;
+}
+
+/** Ephemeral account/session status shown in the chat's info strip. */
+export interface AgentStatus {
+  model: string | null;
+  fiveHour: UsageWindow | null;
+  sevenDay: UsageWindow | null;
+}
+
 export interface AgentUsage {
   inputTokens: number;
   outputTokens: number;

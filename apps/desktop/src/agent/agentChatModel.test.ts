@@ -53,6 +53,29 @@ describe('AgentChatModel core', () => {
     });
   });
 
+  test('agent.status merges, keeping the last-known field when one arrives null', () => {
+    const m = new AgentChatModel();
+    expect(m.snapshot().status).toBeNull();
+    m.apply({
+      t: 'agent.status',
+      model: null,
+      fiveHour: { utilization: 53, resetsAt: null },
+      sevenDay: { utilization: 35, resetsAt: null },
+    });
+    expect(m.snapshot().status).toEqual({
+      model: null,
+      fiveHour: { utilization: 53, resetsAt: null },
+      sevenDay: { utilization: 35, resetsAt: null },
+    });
+    // A later status learns the model but carries no fresh usage — usage sticks.
+    m.apply({ t: 'agent.status', model: 'claude-opus-4-8', fiveHour: null, sevenDay: null });
+    expect(m.snapshot().status).toEqual({
+      model: 'claude-opus-4-8',
+      fiveHour: { utilization: 53, resetsAt: null },
+      sevenDay: { utilization: 35, resetsAt: null },
+    });
+  });
+
   test('error appends an error message', () => {
     const m = new AgentChatModel();
     m.apply({ t: 'agent.error', seq: 1, message: 'boom' });

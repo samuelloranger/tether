@@ -1,6 +1,7 @@
 import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
 import { applyAgentStart, defaultGetAgentMessages } from './agentReplay';
+import { type AgentUsageLimits, fetchAgentUsage } from './agentUsage';
 import { getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
@@ -63,6 +64,8 @@ export interface SessionDeps {
   agentRegistry?: AgentRegistry;
   /** Catch-up for an `agent.start` that carries `sinceSeq` — mirrors getReplayLogs. */
   getAgentMessages: (sessionId: string, sinceSeq: number) => AgentMessageRow[];
+  /** Account 5h/7day usage for the `agent.status` frame; null = unavailable. */
+  fetchAgentUsage: () => Promise<AgentUsageLimits | null>;
 }
 
 function defaultGetReplayLogs(sessionId: string, sinceId: number) {
@@ -96,6 +99,7 @@ const defaultDeps: SessionDeps = {
   mintToken: defaultMintToken,
   agentRegistry: sharedAgentRegistry,
   getAgentMessages: defaultGetAgentMessages,
+  fetchAgentUsage: () => fetchAgentUsage(),
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */

@@ -1,10 +1,19 @@
+import type { UsageWindow } from './agentTypes';
+
 export type AgentFrame =
   | { t: 'agent.delta'; seq: number; text: string }
   | { t: 'agent.tool'; seq: number; name: string; input: unknown }
   | { t: 'agent.tool_result'; seq: number; text: string; isError: boolean }
   | { t: 'agent.permission_req'; reqId: string; name: string; input: unknown }
   | { t: 'agent.done'; seq: number; cost?: number; usage?: unknown }
-  | { t: 'agent.error'; seq?: number; message: string };
+  | { t: 'agent.error'; seq?: number; message: string }
+  // Ephemeral, no seq: account model + 5h/7day usage for the info strip.
+  | {
+      t: 'agent.status';
+      model: string | null;
+      fiveHour: UsageWindow | null;
+      sevenDay: UsageWindow | null;
+    };
 
 /** Decode one WS-JSON line into an AgentFrame, or null for non-agent frames. */
 export function decodeAgentFrame(json: string): AgentFrame | null {

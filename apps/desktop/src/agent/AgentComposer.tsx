@@ -1,4 +1,5 @@
 import type { KeyboardEvent } from 'react';
+import { AgentInfoStrip } from './AgentInfoStrip';
 import type { AgentChatModel, AgentSnapshot } from './agentChatModel';
 import { agentInterrupt, agentPermission, agentPrompt } from './agentFrames';
 import { type AgentUsage, formatCost, formatTokens } from './agentTypes';
@@ -24,7 +25,7 @@ export function AgentComposer({
   snapshot: AgentSnapshot;
   send: (payload: unknown) => void;
 }) {
-  const { draft, turn, queued, pendingApproval, sessionUsage } = snapshot;
+  const { draft, turn, queued, pendingApproval, sessionUsage, status } = snapshot;
   const streaming = turn !== 'idle';
 
   const submit = () => {
@@ -91,6 +92,8 @@ export function AgentComposer({
           ))}
         </div>
       ) : null}
+
+      <AgentInfoStrip status={status} />
 
       <div className="agent-composer-input">
         <textarea

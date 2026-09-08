@@ -119,6 +119,11 @@ export class AgentRegistry {
     return this.entries.has(id);
   }
 
+  /** The model the running driver reported, or null if not yet known. */
+  modelOf(id: string): string | null {
+    return this.entries.get(id)?.driver.getModel?.() ?? null;
+  }
+
   killAll(): void {
     for (const e of this.entries.values()) e.driver.close();
     this.entries.clear();
