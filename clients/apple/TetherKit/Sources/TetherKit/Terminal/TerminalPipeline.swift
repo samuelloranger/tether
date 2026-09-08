@@ -11,6 +11,8 @@ public enum TerminalPipelineEvent: Sendable {
   /// A `title`/`activity`/`exit` frame — the session list is out of date.
   case sessionsChanged
   case error(String)
+  /// An `agent.*` frame, forwarded as-is for `AgentChatModel.apply(_:)`.
+  case agent(NoiseServerMessage)
 }
 
 /// A frame the UI wants on the wire, in the order the UI produced it.
@@ -30,6 +32,9 @@ enum OutboundFrame: Sendable {
   case paste(String, key: String?)
   case focus(Bool)
   case resize(cols: UInt16, rows: UInt16)
+  case agentStart(id: String, cwd: String)
+  case agentPrompt(String)
+  case agentInterrupt
 }
 
 /// Owns the Noise session channel and the VT emulator, off the main actor.
@@ -190,8 +195,9 @@ actor TerminalPipeline {
         case .agentDelta, .agentTool, .agentToolResult, .agentPermissionReq, .agentDone,
           .agentError:
           // Agent-chat frames are consumed by AgentChatModel, not the terminal
-          // emulator pipeline. Ignore here.
-          break
+          // emulator pipeline — forward to the event sink for SessionStore to
+          // dispatch into the active AgentChatModel.
+          eventSink.yield(.agent(message))
         }
       } catch {
         // A deliberate teardown cancels this task; anything else is an
@@ -290,6 +296,15 @@ actor TerminalPipeline {
       applyLocalResize(cols: newCols, rows: newRows)
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
+    case let .agentStart(id, cwd):
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentStart(id: id, cwd: cwd)
+    case let .agentPrompt(text):
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentPrompt(text: text)
+    case .agentInterrupt:
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentInterrupt()
     }
   }
 

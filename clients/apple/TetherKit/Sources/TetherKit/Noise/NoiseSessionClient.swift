@@ -302,6 +302,38 @@ public final class NoiseChannel {
     try await sendSealed(Self.focusRequest(id: id, focused: focused))
   }
 
+  /// Starts an agent-chat session on the host (`{t:"agent.start",id,cwd}`).
+  public func sendAgentStart(id: String, cwd: String) async throws {
+    try await sendSealed(Self.agentStartRequest(id: id, cwd: cwd))
+  }
+
+  /// Sends a prompt to the last-started agent (`{t:"agent.prompt",text}`).
+  /// Carries no id — the server tracks the last-started agent id.
+  public func sendAgentPrompt(text: String) async throws {
+    try await sendSealed(Self.agentPromptRequest(text: text))
+  }
+
+  /// Interrupts the running agent (`{t:"agent.interrupt"}`). Carries no id —
+  /// see `sendAgentPrompt`.
+  public func sendAgentInterrupt() async throws {
+    try await sendSealed(Self.agentInterruptRequest())
+  }
+
+  /// The `agent.start` request body. Pure + static, as above.
+  static func agentStartRequest(id: String, cwd: String) -> [String: Any] {
+    ["t": "agent.start", "id": id, "cwd": cwd]
+  }
+
+  /// The `agent.prompt` request body. Pure + static, as above.
+  static func agentPromptRequest(text: String) -> [String: Any] {
+    ["t": "agent.prompt", "text": text]
+  }
+
+  /// The `agent.interrupt` request body. Pure + static, as above.
+  static func agentInterruptRequest() -> [String: Any] {
+    ["t": "agent.interrupt"]
+  }
+
   /// Ask the host for its full device roster (`{t:"devices.list"}`). The reply
   /// arrives through `receive()` as `.devices`.
   public func sendDevicesList() async throws {

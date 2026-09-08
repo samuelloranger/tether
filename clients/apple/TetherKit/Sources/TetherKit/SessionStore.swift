@@ -92,6 +92,17 @@ public final class SessionStore {
   /// stale `GET /api/sessions` (or a test double that still returns the row)
   /// must not put a just-killed tab back in the drawer.
   @ObservationIgnored private var locallyKilled: [String: Set<String>] = [:]
+  /// Live `AgentChatModel`s, keyed the same way scrollback grids are
+  /// (`terminalKey`) — a chat tab keeps its transcript across a drawer
+  /// round-trip the same way a terminal keeps its scrollback.
+  @ObservationIgnored private var agentModels: [String: AgentChatModel] = [:]
+
+  /// The chat model for the ACTIVE tab, when it is an agent tab. `RootView`
+  /// branches on this to decide between `AgentChatView` and `TerminalView`.
+  public var activeAgentModel: AgentChatModel? {
+    guard let activeSessionId else { return nil }
+    return agentModels[terminalKey(activeSessionId)]
+  }
 
   public init(
     hostStore: HostStoreAdapter = HostStoreAdapter(),
@@ -139,6 +150,8 @@ public final class SessionStore {
       Task { await refreshSessions() }
     case let .error(message):
       errorMessage = message
+    case let .agent(msg):
+      activeAgentModel?.apply(msg)
     }
   }
 
@@ -359,6 +372,65 @@ public final class SessionStore {
     activeSessionId = id
     sessions = next
     await connectTerminal(sessionId: id)
+  }
+
+  /// Opens an agent-chat tab on a NAMED host, rooted at `cwd`, and switches to
+  /// it. Mirrors `newNoiseTerminal`: no REST `startSession` for a Noise host —
+  /// the tab is synthesized locally, and `agent.start` (sent AFTER the
+  /// terminal-shaped Noise channel connects, same as a plain terminal's
+  /// `start` frame) both spawns and attaches the agent server-side.
+  public func newAgentChat(hostId: String, cwd: String) async {
+    let known = sessionsByHost[hostId] ?? []
+    let id = nextAgentSessionId(among: known)
+    let synthesized = RemoteSession(
+      id: id, status: "running", lastOutputAt: nil, name: nil, autoTitle: nil, activity: nil,
+      kind: "agent"
+    )
+    var next = known
+    next.append(synthesized)
+    sessionsByHost[hostId] = next
+    hasRestoredSession = true
+    if activeHostId != hostId || activeSessionId != id {
+      await pipeline.sendFocus(focused: false)
+    }
+    activeHostId = hostId
+    activeSessionId = id
+    sessions = next
+    let key = terminalKey(id, hostId: hostId)
+    agentModels[key] = AgentChatModel(
+      sessionId: id, cwd: cwd,
+      send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
+    )
+    await connectTerminal(sessionId: id)
+    pipeline.outbound.yield(.agentStart(id: id, cwd: cwd))
+  }
+
+  /// Routes an `AgentChatModel`'s outbound intent onto the pipeline's outbound
+  /// stream, the same FIFO path a keystroke takes — see `OutboundFrame`.
+  private func routeAgentOutbound(_ outbound: AgentOutbound) {
+    switch outbound {
+    case let .prompt(text):
+      pipeline.outbound.yield(.agentPrompt(text))
+    case .interrupt:
+      pipeline.outbound.yield(.agentInterrupt)
+    case .permission:
+      // Approval routing over Noise is a later pass (P3) — the model already
+      // clears `pendingApproval` locally on decision.
+      break
+    }
+  }
+
+  /// Picks a free `agent-N` against ONE host's session list, mirroring
+  /// `nextSessionId` — agent chats and terminals share the id namespace per
+  /// host but use a different prefix so the drawer's two affordances never
+  /// collide.
+  private func nextAgentSessionId(among known: [RemoteSession]) -> String {
+    let existing = Set(known.map(\.id))
+    var index = 1
+    while existing.contains("agent-\(index)") {
+      index += 1
+    }
+    return "agent-\(index)"
   }
 
   public var activeSession: RemoteSession? {
@@ -604,6 +676,14 @@ public final class SessionStore {
       profile: profile,
       bearerSource: NoiseTokenBearerSource(cache: noiseTokenCache, hostId: hostId)
     )
+  }
+
+  /// Backs the agent-chat folder picker — lists subdirectories of `path` (the
+  /// server's home dir when `nil`) on a named host over the ordinary
+  /// bearer-authed REST path (`GET /api/fs/dirs`), not Noise.
+  public func listDirs(hostId: String, path: String? = nil) async throws -> DirListing {
+    guard let client = client(for: hostId) else { throw HostClientError.invalidURL }
+    return try await client.listDirs(path: path)
   }
 
   /// Mint a REST device token for a Noise host over its Noise channel. Backs
