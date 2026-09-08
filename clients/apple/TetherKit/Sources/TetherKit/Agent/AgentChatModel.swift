@@ -25,6 +25,11 @@ public final class AgentChatModel {
   /// the full transcript.
   public private(set) var lastSeq: Int = 0
 
+  /// Fired once, with the trimmed text, the first time this chat sends a user
+  /// prompt — the hook `SessionStore.newAgentChat` uses to title the tab from
+  /// the prompt's gist instead of the cwd basename. Never fires again after.
+  public var onFirstPrompt: ((String) -> Void)?
+
   private let send: (AgentOutbound) -> Void
 
   public init(sessionId: String, cwd: String, send: @escaping (AgentOutbound) -> Void = { _ in }) {
@@ -38,9 +43,13 @@ public final class AgentChatModel {
   public func sendPrompt(_ raw: String) {
     let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty, turn == .idle else { return }
+    let isFirstUserPrompt = !messages.contains { $0.role == .user }
     appendUser(text)
     turn = .thinking
     send(.prompt(text))
+    if isFirstUserPrompt {
+      onFirstPrompt?(text)
+    }
   }
 
   public func interrupt() { send(.interrupt) }

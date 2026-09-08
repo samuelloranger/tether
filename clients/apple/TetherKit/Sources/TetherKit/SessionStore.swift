@@ -1,6 +1,25 @@
 import Foundation
 import Observation
 import TetherFFIBindings
+#if canImport(UIKit)
+  import UIKit
+#endif
+
+/// Force-resigns whatever UIKit responder currently holds the keyboard.
+///
+/// `TerminalInputTextView.dismantleUIView` resigns too — but only AFTER
+/// SwiftUI has already detached the view from the window, which is too late
+/// for UIKit to actually dismiss the accessory bar. Calling this first, while
+/// the terminal is still mounted, reaches the responder in time; the
+/// `dismantleUIView` resign stays as a backstop.
+@MainActor
+func dismissKeyboardGlobally() {
+  #if canImport(UIKit)
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+    )
+  #endif
+}
 
 @Observable
 @MainActor
@@ -391,19 +410,53 @@ public final class SessionStore {
     sessionsByHost[hostId] = next
     hasRestoredSession = true
     if activeHostId != hostId || activeSessionId != id {
+      // The old tab may be a terminal with a lingering inputAccessoryView
+      // responder — resign it now, while that terminal is still mounted, so
+      // the key bar doesn't ride along onto this agent chat.
+      dismissKeyboardGlobally()
       await pipeline.sendFocus(focused: false)
     }
     activeHostId = hostId
     activeSessionId = id
     sessions = next
     let key = terminalKey(id, hostId: hostId)
-    agentModels[key] = AgentChatModel(
+    let model = AgentChatModel(
       sessionId: id, cwd: cwd,
       send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
     )
+    // Like Claude Code: name the tab from the first prompt's gist instead of
+    // leaving it on the cwd basename. Server never sets `name`, so this local
+    // rename survives refresh — see `renameAgentSessionLocally`.
+    model.onFirstPrompt = { [weak self] text in
+      self?.renameAgentSessionLocally(id: id, hostId: hostId, name: Self.promptGist(text))
+    }
+    agentModels[key] = model
     await connectAgent(sessionId: id)
     // Brand-new chat, empty model — sinceSeq 0 (nothing to replay).
     pipeline.outbound.yield(.agentStart(id: id, cwd: cwd, sinceSeq: 0))
+  }
+
+  /// First line of the prompt, trimmed to ~40 chars with an ellipsis — the
+  /// tab-title gist, same idea as Claude Code's session titling.
+  private static func promptGist(_ text: String) -> String {
+    let firstLine = text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? text
+    let limit = 40
+    if firstLine.count <= limit { return firstLine }
+    return String(firstLine.prefix(limit)) + "…"
+  }
+
+  /// Renames an agent tab's `RemoteSession.name` locally only — there is no
+  /// server rename endpoint for agent sessions, and `displayTitle` prefers
+  /// `name` over `auto_title`, so this sticks across refresh without a
+  /// round-trip.
+  public func renameAgentSessionLocally(id: String, hostId: String, name: String) {
+    var list = sessionsByHost[hostId] ?? []
+    guard let index = list.firstIndex(where: { $0.id == id }) else { return }
+    list[index].name = name
+    sessionsByHost[hostId] = list
+    if activeHostId == hostId {
+      sessions = list
+    }
   }
 
   /// Routes an `AgentChatModel`'s outbound intent onto the pipeline's outbound
@@ -564,15 +617,21 @@ public final class SessionStore {
     // later would let the poll open another one, which is the "I closed that and
     // it came back" behaviour the latch exists to prevent.
     hasRestoredSession = true
+    let isAgent =
+      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
     if activeSessionId != sessionId || activeHostId != hostId {
+      if isAgent {
+        // Switching INTO an agent chat: resign the terminal's responder now,
+        // before the RootView branch swaps it out from under UIKit (see
+        // `dismissKeyboardGlobally`).
+        dismissKeyboardGlobally()
+      }
       // Awaited, not queued: this frame has to reach the OLD socket before
       // `connectTerminal` tears it down.
       await pipeline.sendFocus(focused: false)
     }
     activeHostId = hostId
     activeSessionId = sessionId
-    let isAgent =
-      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
     if isAgent {
       await connectAgent(sessionId: sessionId)
       // The server-owned AgentRegistry survives a disconnect, but this

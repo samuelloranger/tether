@@ -232,7 +232,9 @@ sessionsRoutes.get('/api/sessions', (c) => {
       activity: s.status === 'running' ? getActivity(s.id) : null,
       auto_title:
         s.status === 'running'
-          ? autoTitle(getOscTitle(s.id), getLiveCwd(s.id), s.command)
+          ? s.kind === 'agent'
+            ? autoTitle(null, s.workspace_root ?? null, s.command)
+            : autoTitle(getOscTitle(s.id), getLiveCwd(s.id), s.command)
           : s.command,
     })),
   );
