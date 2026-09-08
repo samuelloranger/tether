@@ -11,6 +11,8 @@ export function defaultGetAgentMessages(sessionId: string, sinceSeq: number): Ag
 /** Reconstruct the `agent.*` wire frame a stored row represents, for replay. */
 export function rowToAgentFrame(row: AgentMessageRow): AgentFrame | null {
   switch (row.kind) {
+    case 'user':
+      return { t: 'agent.user', seq: row.seq, text: row.text ?? '' };
     case 'delta':
       return { t: 'agent.delta', seq: row.seq, text: row.text ?? '' };
     case 'tool': {

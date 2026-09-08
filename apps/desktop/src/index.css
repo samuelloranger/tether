@@ -3155,6 +3155,12 @@ label > textarea {
   text-align: right;
   color: var(--text-muted);
 }
+.agent-info-total {
+  font-family: var(--mono);
+  color: var(--text-faint);
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+}
 
 .agent-folder-picker {
   background: var(--surface);

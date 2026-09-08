@@ -132,6 +132,20 @@ export class AgentChatModel {
       this.lastSeqValue = frame.seq;
     }
     switch (frame.t) {
+      case 'agent.user': {
+        this.messages = [
+          ...this.messages,
+          {
+            id: `u${frame.seq}`,
+            role: 'user',
+            blocks: [{ type: 'text', text: frame.text }],
+            isStreaming: false,
+          },
+        ];
+        this.lastUserPrompt = frame.text;
+        this.turn = 'thinking';
+        break;
+      }
       case 'agent.delta': {
         const msg = this.streamingAssistant();
         const blocks = [...msg.blocks];
@@ -230,19 +244,10 @@ export class AgentChatModel {
     return { id: current.id };
   }
 
-  /** Echo the user's own prompt into the transcript immediately (the server
-   * never sends it back as a frame). */
-  pushUserPrompt(text: string): void {
-    this.messages = [
-      ...this.messages,
-      {
-        id: `u${this.messages.length}-${Date.now()}`,
-        role: 'user',
-        blocks: [{ type: 'text', text }],
-        isStreaming: false,
-      },
-    ];
-    this.lastUserPrompt = text;
+  /** Optimistically flip to a busy turn the instant a prompt is sent. The user
+   * bubble itself arrives as an echoed `agent.user` frame — server-authoritative,
+   * so it persists across reconnect and reaches every attached device. */
+  notePromptSent(): void {
     this.turn = 'thinking';
     this.changed();
   }

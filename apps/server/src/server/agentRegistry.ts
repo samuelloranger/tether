@@ -97,6 +97,11 @@ export class AgentRegistry {
   async prompt(id: string, text: string): Promise<void> {
     const e = this.entries.get(id);
     if (!e) throw new Error(`no agent session ${id}`);
+    // Record + fan out the user's prompt first, seq-ordered ahead of the reply
+    // it triggers, so it persists for replay and reaches every attached device.
+    const userFrame: AgentFrame = { t: 'agent.user', seq: e.seq.next(), text };
+    this.persist({ sessionId: id, seq: userFrame.seq, kind: 'user', text });
+    for (const sink of e.sinks) sink(userFrame);
     for await (const ev of e.driver.prompt(text)) {
       const frame = toFrame(ev, e.seq);
       this.persistFrame(id, e, frame);

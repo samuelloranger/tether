@@ -631,8 +631,9 @@ describe('runNoiseSession — agent chat', () => {
       .map((f) => JSON.parse(dec.decode(f)))
       .filter((m) => m.t !== 'agent.status');
     expect(msgs).toEqual([
-      { t: 'agent.delta', seq: 1, text: 'Hi' },
-      { t: 'agent.done', seq: 2, cost: 0, usage: {} },
+      { t: 'agent.user', seq: 1, text: 'hello' },
+      { t: 'agent.delta', seq: 2, text: 'Hi' },
+      { t: 'agent.done', seq: 3, cost: 0, usage: {} },
     ]);
   });
 
@@ -690,7 +691,10 @@ describe('runNoiseSession — agent chat', () => {
     const msgs = io.sent
       .map((f) => JSON.parse(dec.decode(f)))
       .filter((m) => m.t !== 'agent.status');
-    expect(msgs).toEqual([{ t: 'agent.error', message: 'agent prompt failed' }]);
+    expect(msgs).toEqual([
+      { t: 'agent.user', seq: 1, text: 'hello' },
+      { t: 'agent.error', message: 'agent prompt failed' },
+    ]);
   });
 
   test('a disconnect detaches but does not kill the agent — a later reconnect re-attaches', async () => {
@@ -776,11 +780,13 @@ describe('runNoiseSession — agent chat', () => {
     const msgs = io.sent
       .map((f) => JSON.parse(dec.decode(f)))
       .filter((m) => m.t !== 'agent.status');
-    // Replayed frames (reconstructed from the stored rows) precede the live one.
+    // Replayed frames (reconstructed from the stored rows) precede the live turn,
+    // which now opens with the echoed user prompt before the assistant delta.
     expect(msgs).toEqual([
       { t: 'agent.delta', seq: 3, text: 'earlier reply' },
       { t: 'agent.done', seq: 4, cost: 0.01, usage: {} },
-      { t: 'agent.delta', seq: 1, text: 'live chunk' },
+      { t: 'agent.user', seq: 1, text: 'more' },
+      { t: 'agent.delta', seq: 2, text: 'live chunk' },
     ]);
   });
 

@@ -29,9 +29,11 @@ test('prompt fans mapped frames with monotonic seq to attached sink', async () =
   const got: AgentFrame[] = [];
   reg.attach('a1', (f) => got.push(f));
   await reg.prompt('a1', 'hello');
-  expect(got.map((f) => f.t)).toEqual(['agent.delta', 'agent.done']);
-  expect((got[0] as { seq: number }).seq).toBe(1);
+  // The echoed user prompt leads, seq 1, ahead of the reply it triggered.
+  expect(got.map((f) => f.t)).toEqual(['agent.user', 'agent.delta', 'agent.done']);
+  expect(got[0]).toEqual({ t: 'agent.user', seq: 1, text: 'hello' });
   expect((got[1] as { seq: number }).seq).toBe(2);
+  expect((got[2] as { seq: number }).seq).toBe(3);
 });
 
 test('delta,delta,tool,done persists one coalesced delta row, then tool, then done — seq stays consistent with what was fanned live', async () => {
@@ -53,23 +55,30 @@ test('delta,delta,tool,done persists one coalesced delta row, then tool, then do
   reg.attach('a1', (f) => got.push(f));
   await reg.prompt('a1', 'hi');
 
-  // Live fan-out still gets every individual delta, unbuffered.
-  expect(got.map((f) => f.t)).toEqual(['agent.delta', 'agent.delta', 'agent.tool', 'agent.done']);
+  // Live fan-out: the echoed user prompt, then every individual delta unbuffered.
+  expect(got.map((f) => f.t)).toEqual([
+    'agent.user',
+    'agent.delta',
+    'agent.delta',
+    'agent.tool',
+    'agent.done',
+  ]);
 
-  // Persistence coalesces the two deltas into one row keyed by the FIRST
-  // delta's seq (1) — the same seq the client already saw live, so replay
-  // and live never disagree on ordering.
+  // The user prompt persists first (seq 1). Persistence coalesces the two deltas
+  // into one row keyed by the FIRST delta's seq (2) — the same seq the client
+  // saw live, so replay and live never disagree on ordering.
   expect(persisted).toEqual([
-    { sessionId: 'a1', seq: 1, kind: 'delta', text: 'Hello' },
+    { sessionId: 'a1', seq: 1, kind: 'user', text: 'hi' },
+    { sessionId: 'a1', seq: 2, kind: 'delta', text: 'Hello' },
     {
       sessionId: 'a1',
-      seq: 3,
+      seq: 4,
       kind: 'tool',
       toolJson: JSON.stringify({ name: 'bash', input: { cmd: 'ls' } }),
     },
     {
       sessionId: 'a1',
-      seq: 4,
+      seq: 5,
       kind: 'done',
       toolJson: JSON.stringify({ cost: 0.02, usage: { in: 1, out: 2 } }),
     },
@@ -92,9 +101,10 @@ test('a tool_result frame persists text + isError alongside its own seq', async 
   await reg.start('a2', '/tmp');
   await reg.prompt('a2', 'hi');
 
-  expect(persisted[1]).toEqual({
+  // [0] user, [1] tool, [2] tool_result, [3] done.
+  expect(persisted[2]).toEqual({
     sessionId: 'a2',
-    seq: 2,
+    seq: 3,
     kind: 'tool_result',
     text: 'boom',
     isError: true,

@@ -1,6 +1,7 @@
 import type { UsageWindow } from './agentTypes';
 
 export type AgentFrame =
+  | { t: 'agent.user'; seq: number; text: string }
   | { t: 'agent.delta'; seq: number; text: string }
   | { t: 'agent.tool'; seq: number; name: string; input: unknown }
   | { t: 'agent.tool_result'; seq: number; text: string; isError: boolean }

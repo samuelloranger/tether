@@ -155,15 +155,25 @@ describe('AgentChatModel core', () => {
 
   test('retryLast drops trailing error and returns last prompt', () => {
     const m = new AgentChatModel();
-    m.pushUserPrompt('do it');
+    // The user bubble now arrives as a server-echoed agent.user frame.
+    m.apply({ t: 'agent.user', seq: 1, text: 'do it' });
     expect(m.snapshot().canRetry).toBe(false); // not idle
-    m.apply({ t: 'agent.error', seq: 1, message: 'boom' });
+    m.apply({ t: 'agent.error', seq: 2, message: 'boom' });
     expect(m.snapshot().canRetry).toBe(true);
     expect(m.snapshot().messages.at(-1)?.role).toBe('error');
     expect(m.retryLast()).toBe('do it');
     expect(m.snapshot().messages.at(-1)?.role).toBe('user');
     expect(m.snapshot().turn).toBe('thinking');
     expect(m.snapshot().canRetry).toBe(false);
+  });
+
+  test('agent.user appends a user bubble and echoes survive dedupe', () => {
+    const m = new AgentChatModel();
+    m.apply({ t: 'agent.user', seq: 1, text: 'hello' });
+    m.apply({ t: 'agent.user', seq: 1, text: 'DUP' }); // replay of same seq ignored
+    const users = m.snapshot().messages.filter((x) => x.role === 'user');
+    expect(users).toHaveLength(1);
+    expect(users[0].blocks).toEqual([{ type: 'text', text: 'hello' }]);
   });
 
   test('retryLast is null with no prior prompt', () => {

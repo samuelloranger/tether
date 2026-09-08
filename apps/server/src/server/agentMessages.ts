@@ -11,7 +11,7 @@ import { db } from './db';
 export interface AgentMessageRow {
   session_id: string;
   seq: number;
-  kind: 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
+  kind: 'user' | 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
   text: string | null;
   tool_json: string | null;
   is_error: number;
@@ -21,7 +21,7 @@ export interface AgentMessageRow {
 export interface AgentMessageInsert {
   sessionId: string;
   seq: number;
-  kind: 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
+  kind: 'user' | 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
   text?: string | null;
   toolJson?: string | null;
   isError?: boolean;

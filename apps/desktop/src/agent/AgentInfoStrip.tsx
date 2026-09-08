@@ -1,4 +1,10 @@
-import type { AgentStatus, UsageWindow } from './agentTypes';
+import {
+  type AgentStatus,
+  type AgentUsage,
+  formatCost,
+  formatTokens,
+  type UsageWindow,
+} from './agentTypes';
 
 function severity(pct: number): 'ok' | 'warn' | 'crit' {
   if (pct >= 90) return 'crit';
@@ -17,22 +23,38 @@ function resetHint(label: string, w: UsageWindow): string {
 function Gauge({ label, window }: { label: string; window: UsageWindow }) {
   const pct = Math.max(0, Math.min(100, window.utilization));
   return (
-    <div className="agent-gauge" title={resetHint(label, window)}>
+    <span className="agent-gauge" title={resetHint(label, window)}>
       <span className="agent-gauge-label">{label}</span>
       <span className="agent-gauge-track">
         <span className={`agent-gauge-fill sev-${severity(pct)}`} style={{ width: `${pct}%` }} />
       </span>
       <span className="agent-gauge-pct">{window.utilization}%</span>
-    </div>
+    </span>
   );
 }
 
-/** Compact strip atop the chat: model name + 5h/7day usage gauges. Renders
- * nothing until at least one field is known. */
-export function AgentInfoStrip({ status }: { status: AgentStatus | null }) {
-  if (!status) return null;
-  const { model, fiveHour, sevenDay } = status;
-  if (!model && !fiveHour && !sevenDay) return null;
+/** Single-line stats bar atop the composer: model name, 5h/7day usage gauges,
+ * and this chat's running token/cost total — all on one row. Renders nothing
+ * until at least one datum is known. */
+export function AgentInfoStrip({
+  status,
+  sessionUsage,
+}: {
+  status: AgentStatus | null;
+  sessionUsage: AgentUsage | null;
+}) {
+  const model = status?.model ?? null;
+  const fiveHour = status?.fiveHour ?? null;
+  const sevenDay = status?.sevenDay ?? null;
+  if (!model && !fiveHour && !sevenDay && !sessionUsage) return null;
+
+  const tokens =
+    sessionUsage && (sessionUsage.inputTokens || sessionUsage.outputTokens)
+      ? `${formatTokens(sessionUsage.inputTokens)}↑ ${formatTokens(sessionUsage.outputTokens)}↓`
+      : '';
+  const cost = sessionUsage?.costUsd ? formatCost(sessionUsage.costUsd) : '';
+  const total = [tokens, cost].filter(Boolean).join(' · ');
+
   return (
     <div className="agent-info-strip">
       {model ? (
@@ -43,6 +65,11 @@ export function AgentInfoStrip({ status }: { status: AgentStatus | null }) {
       <span className="agent-info-gauges">
         {fiveHour ? <Gauge label="5h" window={fiveHour} /> : null}
         {sevenDay ? <Gauge label="7d" window={sevenDay} /> : null}
+        {total ? (
+          <span className="agent-info-total" title="This chat's tokens and cost">
+            {total}
+          </span>
+        ) : null}
       </span>
     </div>
   );

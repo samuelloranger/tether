@@ -33,7 +33,7 @@ export function AgentChatPane({
     if (snapshot.turn === 'idle' && snapshot.queued.length > 0) {
       const next = model.dequeue();
       if (next) {
-        model.pushUserPrompt(next);
+        model.notePromptSent();
         send(agentPrompt(next));
       }
     }

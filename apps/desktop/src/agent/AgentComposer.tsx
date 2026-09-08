@@ -2,17 +2,6 @@ import type { KeyboardEvent } from 'react';
 import { AgentInfoStrip } from './AgentInfoStrip';
 import type { AgentChatModel, AgentSnapshot } from './agentChatModel';
 import { agentInterrupt, agentPermission, agentPrompt } from './agentFrames';
-import { type AgentUsage, formatCost, formatTokens } from './agentTypes';
-
-/** Running session token/cost total, shown at the composer foot. */
-function SessionMeter({ usage }: { usage: AgentUsage }) {
-  const cost = usage.costUsd ? ` · ${formatCost(usage.costUsd)}` : '';
-  return (
-    <div className="agent-session-meter" title="Session tokens and cost">
-      {formatTokens(usage.inputTokens)}↑ {formatTokens(usage.outputTokens)}↓{cost}
-    </div>
-  );
-}
 
 /** Input bar: prompt/queue, send/stop, and permission approve/deny. Port of
  * Swift AgentComposerView + QueuedRow + permission UI. */
@@ -34,7 +23,7 @@ export function AgentComposer({
     if (streaming) {
       model.enqueue(text);
     } else {
-      model.pushUserPrompt(text);
+      model.notePromptSent();
       send(agentPrompt(text));
     }
     model.setDraft('');
@@ -93,7 +82,7 @@ export function AgentComposer({
         </div>
       ) : null}
 
-      <AgentInfoStrip status={status} />
+      <AgentInfoStrip status={status} sessionUsage={sessionUsage} />
 
       <div className="agent-composer-input">
         <textarea
@@ -125,7 +114,6 @@ export function AgentComposer({
           </button>
         )}
       </div>
-      {sessionUsage ? <SessionMeter usage={sessionUsage} /> : null}
     </div>
   );
 }
