@@ -27,15 +27,15 @@ final class AgentQueueTests: XCTestCase {
     m.submit("third")
     XCTAssertEqual(m.queued, ["second", "third"])
 
-    m.apply(.agentDone(seq: 1, cost: 0))
+    m.apply(.agentDone(seq: 1, cost: 0, inputTokens: 0, outputTokens: 0))
     XCTAssertEqual(m.turn, .thinking)  // "second" now in flight
     XCTAssertEqual(m.queued, ["third"])
 
-    m.apply(.agentDone(seq: 2, cost: 0))
+    m.apply(.agentDone(seq: 2, cost: 0, inputTokens: 0, outputTokens: 0))
     XCTAssertEqual(m.turn, .thinking)  // "third" now in flight
     XCTAssertTrue(m.queued.isEmpty)
 
-    m.apply(.agentDone(seq: 3, cost: 0))
+    m.apply(.agentDone(seq: 3, cost: 0, inputTokens: 0, outputTokens: 0))
     XCTAssertEqual(m.turn, .idle)
     XCTAssertEqual(
       m.messages.filter { $0.role == .user }.map(\.plainText),

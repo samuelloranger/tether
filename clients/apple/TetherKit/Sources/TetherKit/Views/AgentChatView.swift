@@ -82,8 +82,12 @@ struct AgentTranscriptView: View {
         } else {
           LazyVStack(alignment: .leading, spacing: 16) {
             ForEach(model.messages) { message in
-              AgentMessageRow(message: message)
-                .id(message.id)
+              AgentMessageRow(
+                message: message,
+                onRetry: message.role == .error && model.canRetry
+                  ? { model.retryLast() } : nil
+              )
+              .id(message.id)
             }
             if model.turn == .thinking { ThinkingRow() }
             ForEach(Array(model.queued.enumerated()), id: \.offset) { index, text in
@@ -110,7 +114,34 @@ struct AgentTranscriptView: View {
       .onAppear {
         proxy.scrollTo(bottomID, anchor: .bottom)
       }
+      // Jump-to-latest: only while the user has scrolled up off the foot (and
+      // there is something to scroll to). Tapping re-arms follow so streamed
+      // output keeps up again.
+      .overlay(alignment: .bottomTrailing) {
+        if !following && !model.messages.isEmpty {
+          jumpToLatest {
+            following = true
+            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+          }
+        }
+      }
     }
+  }
+
+  private func jumpToLatest(_ action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Image(systemName: "arrow.down")
+        .font(.system(size: 15, weight: .bold))
+        .foregroundStyle(TetherColors.onAccent)
+        .frame(width: 36, height: 36)
+        .background(TetherColors.accent)
+        .clipShape(Circle())
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+    }
+    .padding(.trailing, 14)
+    .padding(.bottom, 14)
+    .transition(.scale.combined(with: .opacity))
+    .accessibilityLabel("Scroll to latest")
   }
 
   private var emptyState: some View {
@@ -224,6 +255,8 @@ struct AgentComposerView: View {
 
 struct AgentMessageRow: View {
   let message: AgentMessage
+  /// Present on an error row when a retry is possible — resends the last prompt.
+  var onRetry: (() -> Void)?
 
   var body: some View {
     switch message.role {
@@ -247,6 +280,7 @@ struct AgentMessageRow: View {
             .stroke(TetherColors.accent.opacity(0.35), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contextMenu { CopyButton(message.plainText) }
     }
   }
 
@@ -267,9 +301,36 @@ struct AgentMessageRow: View {
       }
       if message.isStreaming {
         StreamingCaret()
+      } else if let usage = message.usage, !usage.isEmpty {
+        usageFooter(usage)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    .contextMenu { CopyButton(message.plainText) }
+  }
+
+  /// Cost + tokens for a finished turn, muted and small under the reply.
+  private func usageFooter(_ usage: AgentUsage) -> some View {
+    HStack(spacing: 10) {
+      if usage.inputTokens > 0 || usage.outputTokens > 0 {
+        Label("\(Self.tokens(usage.inputTokens))↑ \(Self.tokens(usage.outputTokens))↓", systemImage: "number")
+          .labelStyle(.titleOnly)
+      }
+      if usage.cost > 0 {
+        Text(Self.money(usage.cost))
+      }
+    }
+    .font(.system(size: 11, design: .monospaced))
+    .foregroundStyle(TetherColors.textFaint)
+    .padding(.top, 2)
+  }
+
+  private static func tokens(_ n: Int) -> String {
+    n >= 1000 ? String(format: "%.1fk", Double(n) / 1000) : "\(n)"
+  }
+
+  private static func money(_ c: Double) -> String {
+    c < 0.01 ? String(format: "$%.4f", c) : String(format: "$%.2f", c)
   }
 
   private var errorBubble: some View {
@@ -280,12 +341,37 @@ struct AgentMessageRow: View {
       Text(message.plainText)
         .font(.callout)
         .foregroundStyle(TetherColors.danger)
+      Spacer(minLength: 0)
+      if let onRetry {
+        Button(action: onRetry) {
+          Label("Retry", systemImage: "arrow.clockwise")
+            .labelStyle(.titleAndIcon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(TetherColors.accent)
+        }
+      }
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 9)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(TetherColors.danger.opacity(0.1))
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+}
+
+/// Copies text to the clipboard from a context menu. iOS-only (UIPasteboard);
+/// compiles to nothing elsewhere.
+struct CopyButton: View {
+  let text: String
+  init(_ text: String) { self.text = text }
+  var body: some View {
+    Button {
+      #if canImport(UIKit)
+        UIPasteboard.general.string = text
+      #endif
+    } label: {
+      Label("Copy", systemImage: "doc.on.doc")
+    }
   }
 }
 
@@ -427,6 +513,25 @@ struct CodeBlock: View {
       RoundedRectangle(cornerRadius: 10, style: .continuous)
         .stroke(TetherColors.border, lineWidth: 1)
     )
+    .overlay(alignment: .topTrailing) { copyButton }
+    .contextMenu { CopyButton(code) }
+  }
+
+  private var copyButton: some View {
+    Button {
+      #if canImport(UIKit)
+        UIPasteboard.general.string = code
+      #endif
+    } label: {
+      Image(systemName: "doc.on.doc")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(TetherColors.textFaint)
+        .padding(6)
+        .background(TetherColors.surface.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+    .padding(6)
+    .accessibilityLabel("Copy code")
   }
 }
 

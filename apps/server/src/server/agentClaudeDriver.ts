@@ -77,10 +77,23 @@ export function mapClaudeLine(line: string): AgentEvent | AgentEvent[] | null {
 
     case 'result': {
       const cost = typeof obj.total_cost_usd === 'number' ? obj.total_cost_usd : 0;
+      const u = (obj.usage ?? {}) as Record<string, unknown>;
+      const n = (v: unknown): number => (typeof v === 'number' ? v : 0);
+      // Everything that counted toward the context window this turn, so the
+      // phone footer reflects real usage (cache reads/writes included), not just
+      // fresh input.
+      const inputTokens =
+        n(u.input_tokens) + n(u.cache_read_input_tokens) + n(u.cache_creation_input_tokens);
+      const outputTokens = n(u.output_tokens);
       return {
         t: 'done',
         cost,
-        usage: { duration_ms: obj.duration_ms, is_error: obj.is_error === true },
+        usage: {
+          duration_ms: obj.duration_ms,
+          is_error: obj.is_error === true,
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+        },
       };
     }
 

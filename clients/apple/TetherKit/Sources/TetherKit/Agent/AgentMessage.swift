@@ -47,24 +47,45 @@ public enum AgentBlock: Identifiable, Equatable, Sendable {
   }
 }
 
+/// Cost + token usage for one finished assistant turn, shown as a small footer.
+public struct AgentUsage: Equatable, Sendable {
+  public var cost: Double
+  public var inputTokens: Int
+  public var outputTokens: Int
+
+  public init(cost: Double, inputTokens: Int, outputTokens: Int) {
+    self.cost = cost
+    self.inputTokens = inputTokens
+    self.outputTokens = outputTokens
+  }
+
+  /// Nothing worth showing — a subscription turn that reported neither cost nor
+  /// tokens. The footer is hidden in that case.
+  public var isEmpty: Bool { cost == 0 && inputTokens == 0 && outputTokens == 0 }
+}
+
 public struct AgentMessage: Identifiable, Equatable, Sendable {
   public enum Role: Sendable { case user, assistant, error }
   public let id: UUID
   public var role: Role
   public var blocks: [AgentBlock]
   public var isStreaming: Bool
+  /// Set when the assistant turn finishes (`agent.done`); drives the cost/token footer.
+  public var usage: AgentUsage?
 
   public init(
     id: UUID = UUID(),
     role: Role,
     text: String = "",
     blocks: [AgentBlock]? = nil,
-    isStreaming: Bool = false
+    isStreaming: Bool = false,
+    usage: AgentUsage? = nil
   ) {
     self.id = id
     self.role = role
     self.blocks = blocks ?? (text.isEmpty ? [] : [.text(id: UUID(), text)])
     self.isStreaming = isStreaming
+    self.usage = usage
   }
 
   /// Concatenation of the `.text` blocks — the whole message for user/error

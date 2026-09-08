@@ -33,9 +33,17 @@ final class AgentFrameDecodeTests: XCTestCase {
     XCTAssertEqual(text, "ok")
     XCTAssertFalse(isError)
 
-    guard case let .agentDone(_, cost) = try decode(#"{"t":"agent.done","seq":6,"cost":0.02}"#)
+    guard case let .agentDone(_, cost, _, _) = try decode(#"{"t":"agent.done","seq":6,"cost":0.02}"#)
     else { return XCTFail("wrong case") }
     XCTAssertEqual(cost, 0.02, accuracy: 0.0001)
+
+    // Token usage rides in the `usage` sub-object; a frame without it is 0.
+    guard
+      case let .agentDone(_, _, inTok, outTok) = try decode(
+        #"{"t":"agent.done","seq":7,"cost":0.03,"usage":{"input_tokens":1234,"output_tokens":56}}"#)
+    else { return XCTFail("wrong case") }
+    XCTAssertEqual(inTok, 1234)
+    XCTAssertEqual(outTok, 56)
   }
 
   func testDecodesAgentError() throws {

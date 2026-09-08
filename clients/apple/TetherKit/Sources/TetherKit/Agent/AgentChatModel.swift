@@ -47,6 +47,10 @@ public final class AgentChatModel {
   /// edits, which must never move the scroll.
   public private(set) var revision: Int = 0
 
+  /// The most recent user prompt, kept so a failed turn can be retried without
+  /// the user retyping it — see `retryLast`.
+  private var lastUserPrompt: String?
+
   private let send: (AgentOutbound) -> Void
 
   public init(sessionId: String, cwd: String, send: @escaping (AgentOutbound) -> Void = { _ in }) {
@@ -62,10 +66,28 @@ public final class AgentChatModel {
     guard !text.isEmpty, turn == .idle else { return }
     let isFirstUserPrompt = !messages.contains { $0.role == .user }
     interrupting = false
+    lastUserPrompt = text
     appendUser(text)
     turn = .thinking
     send(.prompt(text))
     if isFirstUserPrompt { onFirstPrompt?(text) }
+  }
+
+  /// Whether a failed turn can be retried (there is a remembered prompt and the
+  /// agent is not mid-turn). Drives the error row's Retry button.
+  public var canRetry: Bool { turn == .idle && lastUserPrompt != nil }
+
+  /// Resends the last user prompt after an error, dropping the error row so the
+  /// transcript doesn't accumulate a dead end above the retried turn.
+  public func retryLast() {
+    guard turn == .idle, let text = lastUserPrompt else { return }
+    if let last = messages.indices.last, messages[last].role == .error {
+      messages.remove(at: last)
+    }
+    interrupting = false
+    turn = .thinking
+    send(.prompt(text))
+    revision += 1
   }
 
   /// Sends immediately when idle, otherwise queues to fire when the running
@@ -144,10 +166,12 @@ public final class AgentChatModel {
       } else {
         approvalBacklog.append(call)
       }
-    case let .agentDone(seq, _):
+    case let .agentDone(seq, cost, inputTokens, outputTokens):
       noteSeq(seq)
       if let last = messages.indices.last, messages[last].role == .assistant {
         messages[last].isStreaming = false
+        messages[last].usage = AgentUsage(
+          cost: cost, inputTokens: inputTokens, outputTokens: outputTokens)
       }
       turn = .idle
       interrupting = false

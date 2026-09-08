@@ -170,7 +170,11 @@
               .text(
                 id: UUID(),
                 "Done with turn \(i + 1). Everything is green — let me know what's next."),
-            ]
+            ],
+            usage: AgentUsage(
+              cost: 0.004 * Double(i + 1),
+              inputTokens: 12_000 + i * 2_400,
+              outputTokens: 480 + i * 90)
           ))
       }
       m.messages = msgs
