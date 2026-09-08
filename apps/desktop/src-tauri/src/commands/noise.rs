@@ -529,7 +529,9 @@ pub async fn core_noise_connect(
     session_id: String,
     cols: u16,
     rows: u16,
+    kind: Option<String>,
 ) -> Result<(), String> {
+    let is_agent = kind.as_deref() == Some("agent");
     let device_priv = load_device_keypair_in(&KeyringKeyStore, &host_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "missing device keypair for host".to_string())?;
@@ -575,11 +577,39 @@ pub async fn core_noise_connect(
         let mut opened_at = now_ms();
 
         'outer: loop {
-            match session.seal(&encode_start(&session_id, cols, rows, since_id)) {
-                Ok(wire) => {
-                    if tx.send(wire).await.is_err() {
-                        // The just-swapped socket already failed; fall through to
-                        // the reconnect path instead of ending outright.
+            // Agent sessions never send a terminal `start` — the frontend sends
+            // `agent.start{sinceSeq}` when it sees the `connected` status below.
+            if is_agent {
+                let _ = app.emit(&status_evt, "connected");
+            } else {
+                match session.seal(&encode_start(&session_id, cols, rows, since_id)) {
+                    Ok(wire) => {
+                        if tx.send(wire).await.is_err() {
+                            // The just-swapped socket already failed; fall through to
+                            // the reconnect path instead of ending outright.
+                            if reconnect(
+                                &app,
+                                &cancel,
+                                &status_evt,
+                                &address,
+                                &device_priv,
+                                &server_pub,
+                                &mut retry,
+                                &mut opened_at,
+                                &mut tx,
+                                &mut rx,
+                                &mut session,
+                            )
+                            .await
+                            {
+                                continue 'outer;
+                            }
+                            break 'outer;
+                        }
+                    }
+                    // A seal failure means the cipher is unusable — a reconnect
+                    // rebuilds the session, so try it rather than giving up blind.
+                    Err(_) => {
                         if reconnect(
                             &app,
                             &cancel,
@@ -599,28 +629,6 @@ pub async fn core_noise_connect(
                         }
                         break 'outer;
                     }
-                }
-                // A seal failure means the cipher is unusable — a reconnect
-                // rebuilds the session, so try it rather than giving up blind.
-                Err(_) => {
-                    if reconnect(
-                        &app,
-                        &cancel,
-                        &status_evt,
-                        &address,
-                        &device_priv,
-                        &server_pub,
-                        &mut retry,
-                        &mut opened_at,
-                        &mut tx,
-                        &mut rx,
-                        &mut session,
-                    )
-                    .await
-                    {
-                        continue 'outer;
-                    }
-                    break 'outer;
                 }
             }
 
