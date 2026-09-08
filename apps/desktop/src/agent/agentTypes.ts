@@ -7,6 +7,18 @@ export interface AgentUsage {
   costUsd?: number;
 }
 
+/** Compact token count: 1.2k past a thousand, else the raw integer. Matches
+ * iOS `usageFooter` (AgentChatView.swift:328). */
+export function formatTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/** Cost with cent-precision, or four decimals under a cent. Matches iOS
+ * `money` (AgentChatView.swift:332). */
+export function formatCost(usd: number): string {
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
 export interface DiffLine {
   kind: 'context' | 'add' | 'del';
   text: string;

@@ -194,6 +194,34 @@ function SessionRow({
   );
 }
 
+/** The per-host "New terminal" / "New agent chat" footer, mirroring iOS's
+ * NewTerminalRow + NewAgentChatRow. */
+function HostNewButtons({
+  hostId,
+  onNew,
+  onNewAgentChat,
+}: {
+  hostId: string;
+  onNew: (hostId: string) => void;
+  onNewAgentChat: (hostId: string) => void;
+}) {
+  return (
+    <>
+      <button type="button" className="secondary drawer-host-new" onClick={() => onNew(hostId)}>
+        New terminal
+      </button>
+      <button
+        type="button"
+        className="secondary drawer-host-new"
+        onClick={() => onNewAgentChat(hostId)}
+      >
+        <AgentIcon />
+        New agent chat
+      </button>
+    </>
+  );
+}
+
 export function SessionDrawer({
   hosts,
   healthByHost,
@@ -287,21 +315,7 @@ export function SessionDrawer({
                   />
                 ))
               )}
-              <button
-                type="button"
-                className="secondary drawer-host-new"
-                onClick={() => onNew(host.id)}
-              >
-                New terminal
-              </button>
-              <button
-                type="button"
-                className="secondary drawer-host-new"
-                onClick={() => onNewAgentChat(host.id)}
-              >
-                <AgentIcon />
-                New agent chat
-              </button>
+              <HostNewButtons hostId={host.id} onNew={onNew} onNewAgentChat={onNewAgentChat} />
             </section>
           );
         })}

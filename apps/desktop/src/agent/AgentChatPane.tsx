@@ -45,14 +45,40 @@ export function AgentChatPane({
     atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   };
 
+  const retryLast = () => {
+    const prompt = model.retryLast();
+    if (prompt) send(agentPrompt(prompt));
+  };
+
+  const basename = cwd?.replace(/\/+$/, '').split('/').at(-1);
+  const lastIndex = snapshot.messages.length - 1;
+
   return (
     <div className="agent-pane">
       <div className="agent-transcript" ref={scrollRef} onScroll={onScroll}>
         {snapshot.messages.length === 0 ? (
-          <div className="agent-empty">Ask Claude Code anything.</div>
+          <div className="agent-empty">
+            <div className="agent-empty-title">Ask Claude Code</div>
+            {basename ? <div className="agent-empty-cwd">{basename}</div> : null}
+          </div>
         ) : (
-          snapshot.messages.map((m) => <AgentMessageRow key={m.id} message={m} />)
+          snapshot.messages.map((m, i) => (
+            <AgentMessageRow
+              key={m.id}
+              message={m}
+              onRetry={
+                i === lastIndex && m.role === 'error' && snapshot.canRetry ? retryLast : undefined
+              }
+            />
+          ))
         )}
+        {snapshot.turn === 'thinking' ? (
+          <div className="agent-thinking" role="status" aria-label="Thinking">
+            <span className="agent-thinking-dot" />
+            <span className="agent-thinking-dot" />
+            <span className="agent-thinking-dot" />
+          </div>
+        ) : null}
       </div>
       <AgentComposer model={model} snapshot={snapshot} send={send} />
     </div>

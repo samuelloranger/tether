@@ -95,6 +95,35 @@ describe('AgentChatModel core', () => {
     expect(m.snapshot().queued).toEqual(['two']);
   });
 
+  test('removeQueued cancels one queued prompt', () => {
+    const m = new AgentChatModel();
+    m.enqueue('one');
+    m.enqueue('two');
+    m.enqueue('three');
+    m.removeQueued(1);
+    expect(m.snapshot().queued).toEqual(['one', 'three']);
+    m.removeQueued(9); // out of range is a no-op
+    expect(m.snapshot().queued).toEqual(['one', 'three']);
+  });
+
+  test('retryLast drops trailing error and returns last prompt', () => {
+    const m = new AgentChatModel();
+    m.pushUserPrompt('do it');
+    expect(m.snapshot().canRetry).toBe(false); // not idle
+    m.apply({ t: 'agent.error', seq: 1, message: 'boom' });
+    expect(m.snapshot().canRetry).toBe(true);
+    expect(m.snapshot().messages.at(-1)?.role).toBe('error');
+    expect(m.retryLast()).toBe('do it');
+    expect(m.snapshot().messages.at(-1)?.role).toBe('user');
+    expect(m.snapshot().turn).toBe('thinking');
+    expect(m.snapshot().canRetry).toBe(false);
+  });
+
+  test('retryLast is null with no prior prompt', () => {
+    const m = new AgentChatModel();
+    expect(m.retryLast()).toBeNull();
+  });
+
   test('subscribe fires on apply', () => {
     const m = new AgentChatModel();
     let hits = 0;

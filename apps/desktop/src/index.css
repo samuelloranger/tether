@@ -2743,6 +2743,18 @@ label > textarea {
 .agent-empty {
   margin: auto;
   color: var(--text-faint);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-empty-title {
+  color: var(--text-muted);
+  font-size: 15px;
+}
+.agent-empty-cwd {
+  font-family: var(--mono);
+  font-size: 12px;
 }
 .agent-row-user {
   align-self: flex-end;
@@ -2758,10 +2770,70 @@ label > textarea {
   align-self: stretch;
 }
 .agent-row-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   color: var(--danger);
   font-family: var(--mono);
   font-size: 13px;
+}
+.agent-error-text {
+  flex: 1;
   white-space: pre-wrap;
+}
+.agent-retry {
+  flex: none;
+  border-radius: var(--r-control);
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.agent-caret {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  background: var(--accent);
+  animation: agent-blink 1s steps(2, start) infinite;
+}
+.agent-thinking {
+  display: flex;
+  gap: 5px;
+  padding: 4px 2px;
+}
+.agent-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: agent-bounce 1.2s ease-in-out infinite;
+}
+.agent-thinking-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.agent-thinking-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes agent-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes agent-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 .agent-usage-footer {
   margin-top: 4px;
@@ -2884,10 +2956,23 @@ label > textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.agent-tool-result-label {
+  margin: 8px 0 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.agent-tool-result-label.error {
+  color: var(--danger);
+}
 .agent-tool-result {
-  margin: 6px 0 0;
+  margin: 2px 0 0;
   white-space: pre-wrap;
   color: var(--text-muted);
+  max-height: 320px;
+  overflow: auto;
 }
 .agent-tool-result.error {
   color: var(--danger);
@@ -2950,10 +3035,40 @@ label > textarea {
   color: var(--accent-text);
   border-color: var(--accent);
 }
+.agent-queued {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
 .agent-queued-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
   color: var(--text-faint);
   font-size: 12px;
-  padding: 2px 0;
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-control);
+  background: transparent;
+  cursor: pointer;
+}
+.agent-queued-row:hover {
+  border-color: var(--danger);
+}
+.agent-queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-queued-glyph,
+.agent-queued-x {
+  flex: none;
+  color: var(--text-faint);
 }
 .agent-composer-input {
   display: flex;

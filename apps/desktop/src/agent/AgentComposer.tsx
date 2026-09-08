@@ -61,10 +61,22 @@ export function AgentComposer({
       {queued.length > 0 ? (
         <div className="agent-queued">
           {queued.map((q, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: positional queue rows
-            <div key={i} className="agent-queued-row">
-              {q}
-            </div>
+            <button
+              type="button"
+              // biome-ignore lint/suspicious/noArrayIndexKey: positional queue rows
+              key={i}
+              className="agent-queued-row"
+              title="Cancel queued message"
+              onClick={() => model.removeQueued(i)}
+            >
+              <span className="agent-queued-glyph" aria-hidden>
+                ◷
+              </span>
+              <span className="agent-queued-text">{q}</span>
+              <span className="agent-queued-x" aria-hidden>
+                ×
+              </span>
+            </button>
           ))}
         </div>
       ) : null}

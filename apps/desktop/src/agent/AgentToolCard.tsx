@@ -52,7 +52,7 @@ export function AgentToolCard({ tool }: { tool: AgentToolCall }) {
         aria-expanded={expanded}
       >
         <span className="agent-tool-glyph">{style.glyph}</span>
-        <span className="agent-tool-name">{tool.name}</span>
+        <span className="agent-tool-name">{tool.name.toLowerCase()}</span>
         <span className="agent-tool-summary">{tool.summary}</span>
         {tool.isError ? <span className="agent-tool-err">⚠</span> : null}
         <span className="agent-tool-chevron">{expanded ? '▲' : '▼'}</span>
@@ -65,7 +65,14 @@ export function AgentToolCard({ tool }: { tool: AgentToolCall }) {
             <pre className="agent-tool-input">{formatInput(tool.inputJson)}</pre>
           )}
           {tool.result ? (
-            <pre className={`agent-tool-result${tool.isError ? ' error' : ''}`}>{tool.result}</pre>
+            <>
+              <div className={`agent-tool-result-label${tool.isError ? ' error' : ''}`}>
+                {tool.isError ? 'error' : 'output'}
+              </div>
+              <pre className={`agent-tool-result${tool.isError ? ' error' : ''}`}>
+                {tool.result}
+              </pre>
+            </>
           ) : null}
         </div>
       ) : null}

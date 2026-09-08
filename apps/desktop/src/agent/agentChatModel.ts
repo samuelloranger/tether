@@ -31,6 +31,8 @@ export interface AgentSnapshot {
   pendingApproval: PendingApproval | null;
   queued: string[];
   draft: string;
+  /** True when the last turn errored and there is a prompt to resend. */
+  canRetry: boolean;
 }
 
 /**
@@ -47,6 +49,7 @@ export class AgentChatModel {
   private approvalBacklog: PendingApproval[] = [];
   private queued: string[] = [];
   private draft = '';
+  private lastUserPrompt: string | null = null;
   private listeners = new Set<() => void>();
   private cached: AgentSnapshot | null = null;
 
@@ -69,6 +72,7 @@ export class AgentChatModel {
         pendingApproval: this.pendingApproval,
         queued: this.queued,
         draft: this.draft,
+        canRetry: this.turn === 'idle' && this.lastUserPrompt != null,
       };
     }
     return this.cached;
@@ -97,6 +101,7 @@ export class AgentChatModel {
     this.messages = [...this.messages.slice(0, -1), msg];
   }
 
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: one seq-ordered frame dispatch switch, clearest kept whole
   apply(frame: AgentFrame): void {
     // permission_req carries no seq; everything else is seq-ordered and deduped.
     if ('seq' in frame && typeof frame.seq === 'number') {
@@ -203,8 +208,21 @@ export class AgentChatModel {
         isStreaming: false,
       },
     ];
+    this.lastUserPrompt = text;
     this.turn = 'thinking';
     this.changed();
+  }
+
+  /** Drop a trailing error row and re-arm for the last prompt; the caller
+   * resends it. Returns the prompt, or null when there is nothing to retry. */
+  retryLast(): string | null {
+    if (this.turn !== 'idle' || this.lastUserPrompt == null) return null;
+    if (this.messages.at(-1)?.role === 'error') {
+      this.messages = this.messages.slice(0, -1);
+    }
+    this.turn = 'thinking';
+    this.changed();
+    return this.lastUserPrompt;
   }
 
   setDraft(text: string): void {
@@ -223,6 +241,13 @@ export class AgentChatModel {
     this.queued = rest;
     this.changed();
     return next;
+  }
+
+  /** Cancel one queued prompt before it is sent. */
+  removeQueued(index: number): void {
+    if (index < 0 || index >= this.queued.length) return;
+    this.queued = this.queued.filter((_, i) => i !== index);
+    this.changed();
   }
 
   /** Attach a result to the most recent tool block that has none — the server's
