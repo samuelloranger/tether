@@ -51,11 +51,48 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
     )
   }
 
+  /// Same generation but changed geometry (a font-size bump) must still repaint.
+  /// The generation shortcut is gated on `metrics == lastMetrics`; if that guard
+  /// regresses, a pinch-zoom with no new PTY output would freeze at the old size.
+  func testMetricsChangeAtSameGenerationStillRepaints() {
+    let worker = TerminalRenderWorker()
+    let first = worker.render(
+      bytes: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: metrics(cols: 4, rows: 2)
+    )
+    XCTAssertNotNil(first)
+    let second = worker.render(
+      bytes: grid("AAAA", cols: 4, rows: 2, generation: 1),
+      metrics: metrics(cols: 4, rows: 2, fontSize: 20)
+    )
+    XCTAssertNotNil(
+      second, "a metrics change must repaint even when the generation is unchanged"
+    )
+  }
+
+  /// `rerender` re-rasterizes the held frame for a font/bounds/scale change with
+  /// no new output behind it. With nothing rendered yet there is nothing to hold.
+  func testRerenderWithoutAPriorFrameReturnsNil() {
+    let worker = TerminalRenderWorker()
+    XCTAssertNil(worker.rerender(metrics: metrics(cols: 4, rows: 2)))
+  }
+
+  func testRerenderReusesLastGridAfterMetricsChange() {
+    let worker = TerminalRenderWorker()
+    _ = worker.render(
+      bytes: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: metrics(cols: 4, rows: 2)
+    )
+    let re = worker.rerender(metrics: metrics(cols: 4, rows: 2, fontSize: 20))
+    XCTAssertEqual(
+      re?.rowTexts.first, "AAAA",
+      "rerender must re-rasterize the held grid for a font/bounds change"
+    )
+  }
+
   // MARK: - Helpers
 
-  private func metrics(cols: Int, rows: Int) -> TerminalRenderMetrics {
-    let font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
-    let bold = UIFont.monospacedSystemFont(ofSize: 14, weight: .bold)
+  private func metrics(cols: Int, rows: Int, fontSize: CGFloat = 14) -> TerminalRenderMetrics {
+    let font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    let bold = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
     let cellWidth = ceil(("M" as NSString).size(withAttributes: [.font: font]).width)
     let cellHeight = ceil(font.lineHeight)
     return TerminalRenderMetrics(
