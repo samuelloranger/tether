@@ -48,6 +48,28 @@ final class TerminalGridLayoutTests: XCTestCase {
   }
 }
 
+final class TerminalGridInsetTests: XCTestCase {
+  func testColumnsReserveAnInsetOnEachSide() {
+    // 400pt wide, 10pt cells: flush-left would be 40 cols; with 8pt each side
+    // (384 available) it is 38.
+    XCTAssertEqual(TerminalGridInset.columns(viewWidth: 400, cellWidth: 10), 38)
+  }
+
+  func testMarginsAreEqualOnBothSides() {
+    // 384 available, 38 cols × 10 = 380, leftover 4 → 2 each side on top of the
+    // 8pt inset = 10pt origin, and the same 10pt on the right.
+    let originX = TerminalGridInset.originX(viewWidth: 400, cellWidth: 10, cols: 38)
+    XCTAssertEqual(originX, 10, accuracy: 0.001)
+    let rightMargin = 400 - (originX + CGFloat(38) * 10)
+    XCTAssertEqual(rightMargin, originX, accuracy: 0.001, "the grid is centred: both margins equal")
+  }
+
+  func testDegenerateWidthYieldsNoColumns() {
+    XCTAssertEqual(TerminalGridInset.columns(viewWidth: 10, cellWidth: 10), 0)
+    XCTAssertEqual(TerminalGridInset.columns(viewWidth: 400, cellWidth: 0), 0)
+  }
+}
+
 final class TerminalResizePublishTests: XCTestCase {
   func testARowGrowDoesNotPublishTheEmptyRows() {
     XCTAssertFalse(
