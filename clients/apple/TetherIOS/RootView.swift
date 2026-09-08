@@ -56,7 +56,11 @@ struct RootView: View {
 
         PresentationBannerSlot(store: store, workspace: workspace)
 
-        if store.activeSession?.kind == "agent", let agentModel = store.activeAgentModel {
+        // Branch on the model, not `activeSession?.kind`: a session-list refresh
+        // can momentarily drop the just-synthesized agent row before the server
+        // lists it, which would flip this to the terminal fallback mid-open. The
+        // model is keyed by the active session and is untouched by refresh.
+        if let agentModel = store.activeAgentModel {
           AgentChatView(model: agentModel)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

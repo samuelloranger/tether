@@ -134,6 +134,11 @@ export class AgentClaudeDriver implements AgentDriver {
       'stream-json',
       '--verbose',
       '--include-partial-messages',
+      // P1 scope: tools auto-approve. Headless `--print` otherwise auto-DENIES
+      // any tool that needs approval (Write/Edit/Bash), so nothing could mutate
+      // files. Real per-tool approval (a phone prompt via canUseTool) is P3 and
+      // will replace this flag.
+      '--dangerously-skip-permissions',
     ];
     if (this.sessionId) args.push('--resume', this.sessionId);
     // `--` terminates option parsing so a prompt starting with `-` (a pasted
