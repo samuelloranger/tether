@@ -8,7 +8,7 @@ import type { FrameApplyResult } from './frameHandler';
 import { setPasteListener } from './pasteBus';
 import { pastePayload } from './pastePayload';
 import type { UI_THEMES } from './preferences';
-import { resizeFrame } from './resizeFrame';
+import { resizeFrame, socketOpenFrames } from './resizeFrame';
 import { bindTerminalSession } from './terminalBind';
 import { TerminalFindBar } from './terminalSearch';
 
@@ -246,10 +246,22 @@ export function TerminalPane(props: TerminalPaneProps) {
 
   // Window / document blur while this pane is active — same push-suppression
   // contract as iOS scenePhase (server suppresses while focused:true).
+  // Focus-in always re-sends the grid: local size may already match, but the
+  // PTY can still be the old ioctl (the same hole as iOS gating sendResize on
+  // "local changed").
   useEffect(() => {
     if (!props.interactive) return undefined;
     const report = () => {
       const visible = document.visibilityState === 'visible' && document.hasFocus();
+      const socket = getSocketRef.current?.() ?? null;
+      const fit = fitRef.current;
+      if (visible && socket && fit) {
+        fit.fit();
+        const [resize, focus] = socketOpenFrames(fit.proposeDimensions(), true);
+        sendJson(socket, resize);
+        sendFocusRef.current?.(focus.focused);
+        return;
+      }
       sendFocusRef.current?.(visible);
     };
     window.addEventListener('blur', report);
@@ -260,7 +272,7 @@ export function TerminalPane(props: TerminalPaneProps) {
       window.removeEventListener('focus', report);
       document.removeEventListener('visibilitychange', report);
     };
-  }, [props.interactive, sendFocusRef]);
+  }, [props.interactive, fitRef, getSocketRef, sendFocusRef]);
 
   return (
     <div className={`resident-pane${props.interactive ? ' active' : ' inactive'}`}>
