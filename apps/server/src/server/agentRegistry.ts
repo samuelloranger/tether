@@ -1,3 +1,4 @@
+import { AgentClaudeDriver } from './agentClaudeDriver';
 import type { AgentDriver, AgentFrame } from './agentDriver';
 import { FrameSeq, toFrame } from './agentEventMap';
 
@@ -56,3 +57,11 @@ export class AgentRegistry {
     this.entries.clear();
   }
 }
+
+/**
+ * Server-owned, one per process — NOT per Noise connection. Agent sessions
+ * must outlive a client disconnect (app close, network drop), the same way
+ * PTY sessions outlive them via the module-level singletons in `pty.ts`.
+ * Killing an agent is explicit only (the drawer kill button / REST kill route).
+ */
+export const sharedAgentRegistry = new AgentRegistry(() => new AgentClaudeDriver());

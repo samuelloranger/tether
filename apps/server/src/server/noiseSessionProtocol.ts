@@ -1,6 +1,4 @@
-import { AgentClaudeDriver } from './agentClaudeDriver';
-import type { AgentDriver } from './agentDriver';
-import { AgentRegistry } from './agentRegistry';
+import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
 import { createAgentSession, db, getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
@@ -55,12 +53,12 @@ export interface SessionDeps {
   resolveTarget: typeof resolveTarget;
   identity: SessionIdentity;
   mintToken?: (deviceId: string) => { token: string; expiresAt: string };
-  /** Builds the driver behind a fresh `agent.start` — real driver lands in a later task. */
-  agentDriverFactory?: () => AgentDriver;
-}
-
-function defaultAgentDriverFactory(): AgentDriver {
-  return new AgentClaudeDriver();
+  /**
+   * Server-owned, shared across every Noise connection — agent sessions must
+   * outlive a client disconnect. Injectable so tests get an isolated registry
+   * (and a fake driver) without touching the real `sharedAgentRegistry`.
+   */
+  agentRegistry?: AgentRegistry;
 }
 
 function defaultGetReplayLogs(sessionId: string, sinceId: number) {
@@ -92,7 +90,7 @@ const defaultDeps: SessionDeps = {
   resolveTarget,
   identity: { deviceId: '' },
   mintToken: defaultMintToken,
-  agentDriverFactory: defaultAgentDriverFactory,
+  agentRegistry: sharedAgentRegistry,
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
@@ -288,8 +286,13 @@ async function applyMessage(
     sendSealed({ t: 'auth.token', token, expiresAt });
   } else if (msg.t === 'agent.start') {
     try {
-      createAgentSession(db, { id: msg.id, workspaceRoot: msg.cwd });
-      await agent.registry.start(msg.id, msg.cwd);
+      // If the agent is already running (server-owned, survives disconnects),
+      // this is a reconnect — re-attach to the live driver instead of starting
+      // a second one. Only a first open creates the DB row + spawns the driver.
+      if (!agent.registry.has(msg.id)) {
+        createAgentSession(db, { id: msg.id, workspaceRoot: msg.cwd });
+        await agent.registry.start(msg.id, msg.cwd);
+      }
     } catch (err) {
       logError(`Noise session: agent.start('${msg.id}') failed:`, err);
       sendSealed({ t: 'agent.error', message: 'agent start failed' });
@@ -338,9 +341,10 @@ export async function runNoiseSession(
   const d: SessionDeps = { ...defaultDeps, ...deps };
   // One attachment per session id opened on this channel.
   const attachments = new Map<string, Attachment>();
-  // One AgentRegistry per channel, same lifetime as `attachments` above.
+  // The registry is server-owned (shared across connections) — only this
+  // channel's attachments/currentId are per-connection state.
   const agent: AgentState = {
-    registry: new AgentRegistry(d.agentDriverFactory ?? defaultAgentDriverFactory),
+    registry: d.agentRegistry ?? sharedAgentRegistry,
     attachments: new Map<string, () => void>(),
     currentId: null,
   };
@@ -361,13 +365,15 @@ export async function runNoiseSession(
       } catch {}
     }
     attachments.clear();
+    // Detach only — never kill. The agent (and its underlying `claude`
+    // process) is server-owned and must survive this connection closing;
+    // another connection may still be attached, or this one may reconnect.
     for (const unsub of agent.attachments.values()) {
       try {
         unsub();
       } catch {}
     }
     agent.attachments.clear();
-    agent.registry.killAll();
   };
 
   // Returns false (and trips fatal) on any seal/send failure — callers must stop.

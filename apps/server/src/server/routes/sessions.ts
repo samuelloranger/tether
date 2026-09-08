@@ -1,6 +1,7 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
-import { getSession, listSessions, renameSession } from '../db';
+import { sharedAgentRegistry } from '../agentRegistry';
+import { deleteSession, getSession, listSessions, renameSession } from '../db';
 import { trackDeviceChannel } from '../deviceChannels';
 import { getLiveCwd } from '../liveCwd';
 import { logError, logInfo, logWarn } from '../log';
@@ -251,6 +252,13 @@ sessionsRoutes.post('/api/sessions/start', async (c) => {
 sessionsRoutes.post('/api/sessions/kill', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const sessionId = body.id || 'default';
+
+  const session = getSession(sessionId);
+  if (session?.kind === 'agent') {
+    sharedAgentRegistry.kill(sessionId);
+    deleteSession(sessionId);
+    return c.json({ ok: true });
+  }
 
   const killed = killSession(sessionId);
   return c.json({ ok: killed });

@@ -23,12 +23,19 @@ export interface AgentDriver {
 
 export class FakeAgentDriver implements AgentDriver {
   private call = 0;
+  /** Observable for tests asserting a driver was spawned/torn down at most once. */
+  startCount = 0;
+  closed = false;
   constructor(private readonly scripts: AgentEvent[][]) {}
-  async start(_cwd: string): Promise<void> {}
+  async start(_cwd: string): Promise<void> {
+    this.startCount += 1;
+  }
   async *prompt(_text: string): AsyncIterable<AgentEvent> {
     const script = this.scripts[this.call++] ?? [];
     for (const ev of script) yield ev;
   }
   interrupt(): void {}
-  close(): void {}
+  close(): void {
+    this.closed = true;
+  }
 }

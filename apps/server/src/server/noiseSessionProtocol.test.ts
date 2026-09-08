@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentDriver } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
+import { AgentRegistry } from './agentRegistry';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
@@ -612,13 +613,15 @@ describe('runNoiseSession — agent chat', () => {
     ]);
     void runNoiseSession(identityChannel(), io, {
       ...pty.deps,
-      agentDriverFactory: () =>
-        new FakeAgentDriver([
-          [
-            { t: 'delta', text: 'Hi' },
-            { t: 'done', cost: 0, usage: {} },
-          ],
-        ]),
+      agentRegistry: new AgentRegistry(
+        () =>
+          new FakeAgentDriver([
+            [
+              { t: 'delta', text: 'Hi' },
+              { t: 'done', cost: 0, usage: {} },
+            ],
+          ]),
+      ),
     });
     await new Promise((r) => setTimeout(r, 5));
 
@@ -646,7 +649,7 @@ describe('runNoiseSession — agent chat', () => {
     const io = scriptedIo([jsonFrame({ t: 'agent.start', id: 'a-broken-start', cwd: '/tmp' })]);
     void runNoiseSession(identityChannel(), io, {
       ...pty.deps,
-      agentDriverFactory: () => new BrokenStartDriver(),
+      agentRegistry: new AgentRegistry(() => new BrokenStartDriver()),
     }); // never throws out of the loop
     await new Promise((r) => setTimeout(r, 5));
 
@@ -676,11 +679,51 @@ describe('runNoiseSession — agent chat', () => {
     ]);
     void runNoiseSession(identityChannel(), io, {
       ...pty.deps,
-      agentDriverFactory: () => new ThrowingDriver(),
+      agentRegistry: new AgentRegistry(() => new ThrowingDriver()),
     });
     await new Promise((r) => setTimeout(r, 5));
 
     const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
     expect(msgs).toEqual([{ t: 'agent.error', message: 'agent prompt failed' }]);
+  });
+
+  test('a disconnect detaches but does not kill the agent — a later reconnect re-attaches', async () => {
+    const pty = fakePty();
+    const driver = new FakeAgentDriver([[{ t: 'delta', text: 'Hi' }]]);
+    const registry = new AgentRegistry(() => driver);
+
+    // Connection 1: agent.start, then the socket closes (io.recv rejects) —
+    // mirrors the app-close path that used to call registry.killAll().
+    const frames1 = [jsonFrame({ t: 'agent.start', id: 'a-survives', cwd: '/tmp' })];
+    const pendingRecv1: { reject: ((e: Error) => void) | null } = { reject: null };
+    const io1: FrameIO = {
+      send: () => {},
+      recv: () => {
+        const next = frames1.shift();
+        if (next) return Promise.resolve(next);
+        return new Promise<Uint8Array>((_res, rej) => {
+          pendingRecv1.reject = rej;
+        });
+      },
+    };
+    const done1 = runNoiseSession(identityChannel(), io1, { ...pty.deps, agentRegistry: registry });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(driver.startCount).toBe(1);
+    expect(registry.has('a-survives')).toBe(true);
+
+    pendingRecv1.reject?.(new Error('socket closed'));
+    await done1;
+
+    // The disconnect must NOT have killed the driver.
+    expect(driver.closed).toBe(false);
+    expect(registry.has('a-survives')).toBe(true);
+
+    // Connection 2: a fresh client reconnects and re-opens the same agent id.
+    const io2 = scriptedIo([jsonFrame({ t: 'agent.start', id: 'a-survives', cwd: '/tmp' })]);
+    void runNoiseSession(identityChannel(), io2, { ...pty.deps, agentRegistry: registry });
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Re-attach only — no second spawn.
+    expect(driver.startCount).toBe(1);
   });
 });
