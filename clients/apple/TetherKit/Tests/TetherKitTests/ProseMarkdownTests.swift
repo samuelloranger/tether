@@ -54,4 +54,58 @@ final class ProseMarkdownTests: XCTestCase {
       ]
     )
   }
+
+  func testPipeTableParsesHeaderAndRows() {
+    let md = "| Sev | Finding |\n|---|---|\n| Low | orphaned stack |\n| Info | flap |"
+    XCTAssertEqual(
+      parseProse(md),
+      [
+        .table(
+          header: ["Sev", "Finding"],
+          rows: [["Low", "orphaned stack"], ["Info", "flap"]]
+        )
+      ]
+    )
+  }
+
+  func testTableSeparatorAcceptsAlignmentColons() {
+    let md = "| A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |"
+    XCTAssertEqual(
+      parseProse(md),
+      [.table(header: ["A", "B", "C"], rows: [["1", "2", "3"]])]
+    )
+  }
+
+  func testTableWithoutOuterPipesStillParses() {
+    let md = "a | b\n--- | ---\n1 | 2"
+    XCTAssertEqual(
+      parseProse(md),
+      [.table(header: ["a", "b"], rows: [["1", "2"]])]
+    )
+  }
+
+  func testTableEndsAtBlankLineAndProseResumes() {
+    let md = "| H |\n|---|\n| r |\n\nafter"
+    XCTAssertEqual(
+      parseProse(md),
+      [.table(header: ["H"], rows: [["r"]]), .paragraph(text: "after")]
+    )
+  }
+
+  func testPipeLineWithoutSeparatorStaysParagraph() {
+    // A stray pipe in prose must not be mistaken for a table.
+    XCTAssertEqual(
+      parseProse("use a | b pipe here"),
+      [.paragraph(text: "use a | b pipe here")]
+    )
+  }
+
+  func testDataRowWithDashesIsNotMistakenForSeparator() {
+    // A row whose cells contain hyphens (rawkoon-db-dev) is data, not a rule.
+    let md = "| Sev | Name |\n|---|---|\n| Low | rawkoon-db-dev |"
+    XCTAssertEqual(
+      parseProse(md),
+      [.table(header: ["Sev", "Name"], rows: [["Low", "rawkoon-db-dev"]])]
+    )
+  }
 }

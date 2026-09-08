@@ -126,7 +126,7 @@
             ),
             .text(
               id: UUID(),
-              "Done. Login now allows **5 attempts per 15 minutes** per IP and returns `429` after that. Want me to add a test?"
+              "Done. Login now allows **5 attempts per 15 minutes** per IP and returns `429` after that.\n\n| Sev | Finding | Root cause | Fix |\n|---|---|---|---|\n| Low | no lockout on repeat fails | limiter keyed by IP only | add per-account counter |\n| Info | `429` has no `Retry-After` | header omitted | set `Retry-After: 900` |\n| Info | bucket grows unbounded | never pruned | sweep on write |\n\nWant me to add a test?"
             ),
           ],
           isStreaming: true

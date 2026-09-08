@@ -80,7 +80,7 @@ struct AgentTranscriptView: View {
         if model.messages.isEmpty {
           emptyState.padding(.top, 80)
         } else {
-          LazyVStack(alignment: .leading, spacing: 16) {
+          LazyVStack(alignment: .leading, spacing: 24) {
             ForEach(model.messages) { message in
               AgentMessageRow(
                 message: message,
@@ -441,6 +441,9 @@ struct ProseText: View {
         .font(.callout)
         .foregroundStyle(TetherColors.textPrimary)
         .frame(maxWidth: .infinity, alignment: .leading)
+    case let .table(header, rows):
+      MarkdownTable(header: header, rows: rows)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -532,6 +535,58 @@ struct CodeBlock: View {
     }
     .padding(6)
     .accessibilityLabel("Copy code")
+  }
+}
+
+/// A GFM pipe table. Columns size to their widest cell and the whole table
+/// scrolls horizontally (like `CodeBlock`) rather than squishing on a phone.
+/// The header is bold with a rule beneath; rows are separated by hairlines.
+struct MarkdownTable: View {
+  let header: [String]
+  let rows: [[String]]
+
+  private var columnCount: Int {
+    max(header.count, rows.map(\.count).max() ?? 0)
+  }
+
+  var body: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+        GridRow {
+          ForEach(0..<columnCount, id: \.self) { col in
+            cell(col < header.count ? header[col] : "", bold: true)
+          }
+        }
+        Divider().overlay(TetherColors.border).gridCellColumns(columnCount)
+        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+          GridRow {
+            ForEach(0..<columnCount, id: \.self) { col in
+              cell(col < row.count ? row[col] : "", bold: false)
+            }
+          }
+          if index < rows.count - 1 {
+            Divider().overlay(TetherColors.border.opacity(0.5)).gridCellColumns(columnCount)
+          }
+        }
+      }
+    }
+    .background(TetherColors.surface)
+    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .stroke(TetherColors.border, lineWidth: 1)
+    )
+  }
+
+  private func cell(_ text: String, bold: Bool) -> some View {
+    ProseText.inline(text)
+      .font(.callout.weight(bold ? .semibold : .regular))
+      .foregroundStyle(bold ? TetherColors.textPrimary : TetherColors.textSecondary)
+      .multilineTextAlignment(.leading)
+      .fixedSize(horizontal: false, vertical: true)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 7)
+      .frame(minWidth: 44, alignment: .leading)
   }
 }
 
