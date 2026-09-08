@@ -298,7 +298,16 @@ async function applyMessage(
     agent.attachments.set(msg.id, unsub);
     agent.currentId = msg.id;
   } else if (msg.t === 'agent.prompt') {
-    if (agent.currentId) void agent.registry.prompt(agent.currentId, msg.text);
+    // Un-awaited so `agent.interrupt` can still land while a prompt streams — but
+    // a driver can reject mid-stream, and an unhandled rejection here would
+    // escape this loop's try/catch and crash the whole process. Catch and
+    // report it to this client instead.
+    if (agent.currentId) {
+      agent.registry.prompt(agent.currentId, msg.text).catch((err) => {
+        logError(`Noise session: agent.prompt failed:`, err);
+        sendSealed({ t: 'agent.error', message: 'agent prompt failed' });
+      });
+    }
   } else if (msg.t === 'agent.interrupt') {
     if (agent.currentId) agent.registry.interrupt(agent.currentId);
   }

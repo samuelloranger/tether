@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentDriver } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
@@ -635,5 +636,35 @@ describe('runNoiseSession — agent chat', () => {
     await new Promise((r) => setTimeout(r, 5));
 
     expect(io.sent).toHaveLength(0);
+  });
+
+  test("'agent.prompt' rejecting mid-stream is caught, not an unhandled rejection", async () => {
+    const pty = fakePty();
+    // A driver whose prompt() throws before yielding anything — stands in for a
+    // driver crash mid-stream.
+    class ThrowingDriver implements AgentDriver {
+      async start(_cwd: string): Promise<void> {}
+      prompt(_text: string): AsyncIterable<never> {
+        return {
+          [Symbol.asyncIterator]: () => ({
+            next: () => Promise.reject(new Error('driver blew up')),
+          }),
+        };
+      }
+      interrupt(): void {}
+      close(): void {}
+    }
+    const io = scriptedIo([
+      jsonFrame({ t: 'agent.start', id: 'a-throw', cwd: '/tmp' }),
+      jsonFrame({ t: 'agent.prompt', text: 'hello' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentDriverFactory: () => new ThrowingDriver(),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    expect(msgs).toEqual([{ t: 'agent.error', message: 'agent prompt failed' }]);
   });
 });
