@@ -1,7 +1,10 @@
 import type { AgentEvent, AgentFrame } from './agentDriver';
 
 export class FrameSeq {
-  private n = 0;
+  // Seeded from the max persisted seq so numbering stays monotonic across server
+  // restarts — a reset to 0 would collide with stored rows (overwriting them) and
+  // make reconnecting clients drop the new frames as "already seen".
+  constructor(private n = 0) {}
   next(): number {
     return ++this.n;
   }

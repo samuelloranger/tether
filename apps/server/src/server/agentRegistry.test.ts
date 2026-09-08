@@ -111,6 +111,27 @@ test('a tool_result frame persists text + isError alongside its own seq', async 
   });
 });
 
+test('start seeds FrameSeq from the persisted max so seqs continue across a restart', async () => {
+  const got: AgentFrame[] = [];
+  const reg = new AgentRegistry(
+    () =>
+      new FakeAgentDriver([
+        [
+          { t: 'delta', text: 'hi' },
+          { t: 'done', cost: 0, usage: {} },
+        ],
+      ]),
+    () => {}, // don't touch the DB
+    () => 189, // pretend seq 1..189 are already persisted
+  );
+  await reg.start('a1', '/tmp');
+  reg.attach('a1', (f) => got.push(f));
+  await reg.prompt('a1', 'q');
+
+  // Numbering resumes at 190, never colliding with the stored 1..189.
+  expect(got.map((f) => (f as { seq: number }).seq)).toEqual([190, 191, 192]);
+});
+
 test('killAll closes every driver and clears the registry', async () => {
   const drivers: RecordingDriver[] = [];
   const reg = new AgentRegistry(() => {

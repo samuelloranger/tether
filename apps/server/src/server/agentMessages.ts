@@ -69,6 +69,15 @@ export function getAgentMessages(
     .all({ $sessionId: sessionId, $sinceSeq: sinceSeq }) as AgentMessageRow[];
 }
 
+/** Highest seq persisted for a session (0 if none) — seeds the live FrameSeq on
+ * (re)start so numbering continues monotonically instead of resetting. */
+export function maxAgentSeq(dbHandle: Database, sessionId: string): number {
+  const row = dbHandle
+    .query('SELECT COALESCE(MAX(seq), 0) AS m FROM agent_messages WHERE session_id = $sessionId')
+    .get({ $sessionId: sessionId }) as { m: number } | null;
+  return row?.m ?? 0;
+}
+
 /** Purge one session's transcript — called from the agent kill route alongside deleteSession. */
 export function deleteAgentMessages(sessionId: string): void {
   db.query('DELETE FROM agent_messages WHERE session_id = $sessionId').run({

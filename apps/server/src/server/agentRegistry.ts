@@ -1,15 +1,21 @@
 import { AgentClaudeDriver } from './agentClaudeDriver';
 import type { AgentDriver, AgentFrame } from './agentDriver';
 import { FrameSeq, toFrame } from './agentEventMap';
-import { type AgentMessageInsert, appendAgentMessage } from './agentMessages';
+import { type AgentMessageInsert, appendAgentMessage, maxAgentSeq } from './agentMessages';
 import { db } from './db';
 
 export type FrameSink = (f: AgentFrame) => void;
 /** Injectable so tests can spy on writes without touching the real DB. */
 export type PersistFn = (row: AgentMessageInsert) => void;
+/** The seq to resume numbering AFTER — the max already persisted for a session. */
+export type SeqSeedFn = (sessionId: string) => number;
 
 function defaultPersist(row: AgentMessageInsert): void {
   appendAgentMessage(db, row);
+}
+
+function defaultSeqSeed(sessionId: string): number {
+  return maxAgentSeq(db, sessionId);
 }
 
 /** Accumulates streamed delta text between two non-delta frames, so the DB
@@ -32,13 +38,18 @@ export class AgentRegistry {
   constructor(
     private readonly driverFactory: () => AgentDriver,
     private readonly persist: PersistFn = defaultPersist,
+    private readonly seqSeed: SeqSeedFn = defaultSeqSeed,
   ) {}
 
   async start(id: string, cwd: string): Promise<void> {
     if (this.entries.has(id)) return;
     const driver = this.driverFactory();
     await driver.start(cwd);
-    this.entries.set(id, { driver, seq: new FrameSeq(), sinks: new Set(), deltaBuf: null });
+    // Continue seq numbering from the persisted max so a server restart never
+    // reuses seqs (which would overwrite stored rows and make clients drop the
+    // new frames as replays).
+    const seq = new FrameSeq(this.seqSeed(id));
+    this.entries.set(id, { driver, seq, sinks: new Set(), deltaBuf: null });
   }
 
   attach(id: string, sink: FrameSink): () => void {
