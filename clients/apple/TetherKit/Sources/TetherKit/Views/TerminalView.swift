@@ -286,6 +286,16 @@ public struct TerminalInputBridge: UIViewRepresentable {
     }
   }
 
+  // SwiftUI does not resign a first responder whose host view it removes, and
+  // this view's inputAccessoryView (the key bar) lives in the keyboard window
+  // above the app. So when the terminal is swapped out — e.g. switching to an
+  // agent-chat tab — a lingering responder keeps the bar docked over whatever
+  // replaced it and routes keystrokes to both surfaces (doubled input). Resign
+  // on teardown so the bar and the responder go with the terminal.
+  public static func dismantleUIView(_ uiView: TerminalInputTextView, coordinator: Coordinator) {
+    uiView.resignFirstResponder()
+  }
+
   public final class Coordinator: NSObject, UITextViewDelegate {
     let onSubmitBytes: (String) -> Void
     let isFocused: Binding<Bool>
