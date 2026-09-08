@@ -113,7 +113,8 @@ actor TerminalPipeline {
     hostId: String,
     url: URL,
     sessionId: String,
-    key: String
+    key: String,
+    sendStart: Bool = true
   ) async {
     disconnect()
     startOutboundPumpIfNeeded()
@@ -139,20 +140,27 @@ actor TerminalPipeline {
     resetMouseModes()
     do {
       let channel = try await client.reconnect(hostId: hostId, url: url)
-      try await channel.sendStart(
-        id: sessionId,
-        cols: cols,
-        rows: rows,
-        sinceId: replayStore.sinceId(sessionId: key)
-      )
+      // Agent tabs (`sendStart: false`) share this channel/read-loop wiring
+      // but must never send the PTY `start` frame: the id is an `agent-N`,
+      // not a PTY session, and a `start` for it makes the server spawn a
+      // holder for it too (double-start, mixed session type). `agent.start`
+      // is the only start frame an agent tab sends — see `SessionStore`.
+      if sendStart {
+        try await channel.sendStart(
+          id: sessionId,
+          cols: cols,
+          rows: rows,
+          sinceId: replayStore.sinceId(sessionId: key)
+        )
+        // Layout often reports a size while the channel is still nil; start
+        // may have used 80×24. Send the current grid so a TUI gets SIGWINCH.
+        try? await channel.sendResize(id: sessionId, cols: cols, rows: rows)
+        if let focused = lastFocusSent {
+          try? await channel.sendFocus(id: sessionId, focused: focused)
+        }
+      }
       noiseChannel = channel
       noiseSessionId = sessionId
-      // Layout often reports a size while the channel is still nil; start may
-      // have used 80×24. Send the current grid so a TUI gets SIGWINCH.
-      try? await channel.sendResize(id: sessionId, cols: cols, rows: rows)
-      if let focused = lastFocusSent {
-        try? await channel.sendFocus(id: sessionId, focused: focused)
-      }
       noteTraffic()
       noiseReadTask = Task { [weak self] in
         await self?.readLoopNoise(key: key, channel: channel)
