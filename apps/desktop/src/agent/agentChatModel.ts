@@ -1,6 +1,21 @@
-import { deriveDiff } from './agentDiff';
+import { deriveDiff, summarize } from './agentDiff';
 import type { AgentFrame } from './agentFrames';
-import type { AgentBlock, AgentMessage, AgentTurn, AgentUsage } from './agentTypes';
+import type { AgentMessage, AgentTurn, AgentUsage } from './agentTypes';
+
+/** Map the server's `done` cost + usage blob into our AgentUsage. */
+function toUsage(cost: number | undefined, usage: unknown): AgentUsage | undefined {
+  const u = (usage ?? {}) as Record<string, unknown>;
+  const num = (...keys: string[]): number => {
+    for (const k of keys) {
+      if (typeof u[k] === 'number') return u[k] as number;
+    }
+    return 0;
+  };
+  const inputTokens = num('inputTokens', 'input_tokens');
+  const outputTokens = num('outputTokens', 'output_tokens');
+  if (!inputTokens && !outputTokens && cost == null) return undefined;
+  return { inputTokens, outputTokens, costUsd: cost };
+}
 
 export interface PendingApproval {
   id: string;
@@ -83,8 +98,11 @@ export class AgentChatModel {
   }
 
   apply(frame: AgentFrame): void {
-    if (frame.seq <= this.lastSeqValue) return;
-    this.lastSeqValue = frame.seq;
+    // permission_req carries no seq; everything else is seq-ordered and deduped.
+    if ('seq' in frame && typeof frame.seq === 'number') {
+      if (frame.seq <= this.lastSeqValue) return;
+      this.lastSeqValue = frame.seq;
+    }
     switch (frame.t) {
       case 'agent.delta': {
         const msg = this.streamingAssistant();
@@ -101,11 +119,11 @@ export class AgentChatModel {
       }
       case 'agent.done': {
         const last = this.messages.at(-1);
-        if (last && last.isStreaming) {
+        if (last?.isStreaming) {
           this.replaceLast({
             ...last,
             isStreaming: false,
-            usage: frame.usage as AgentUsage | undefined,
+            usage: toUsage(frame.cost, frame.usage),
           });
         }
         this.turn = 'idle';
@@ -125,24 +143,31 @@ export class AgentChatModel {
         break;
       }
       case 'agent.tool': {
+        const inputJson = JSON.stringify(frame.input ?? {});
         const msg = this.streamingAssistant();
         const tool = {
-          id: frame.id,
+          id: `t${this.lastSeqValue}-${msg.blocks.length}`,
           name: frame.name,
-          summary: frame.summary,
-          inputJson: frame.inputJson,
+          summary: summarize(frame.name, inputJson),
+          inputJson,
           isError: false,
+          diff: deriveDiff(frame.name, inputJson),
         };
         this.replaceLast({ ...msg, blocks: [...msg.blocks, { type: 'tool', tool }] });
         this.turn = 'thinking';
         break;
       }
       case 'agent.tool_result': {
-        this.attachToolResult(frame.id, frame.result, frame.isError);
+        this.fillLastToolResult(frame.text, frame.isError);
         break;
       }
       case 'agent.permission_req': {
-        const req = { id: frame.id, name: frame.name, summary: frame.summary };
+        const inputJson = JSON.stringify(frame.input ?? {});
+        const req = {
+          id: frame.reqId,
+          name: frame.name,
+          summary: summarize(frame.name, inputJson),
+        };
         if (this.pendingApproval) {
           this.approvalBacklog = [...this.approvalBacklog, req];
         } else {
@@ -200,15 +225,24 @@ export class AgentChatModel {
     return next;
   }
 
-  private attachToolResult(id: string, result: string, isError: boolean): void {
-    this.messages = this.messages.map((msg) => {
-      const idx = msg.blocks.findIndex((b) => b.type === 'tool' && b.tool.id === id);
-      if (idx < 0) return msg;
-      const block = msg.blocks[idx] as Extract<AgentBlock, { type: 'tool' }>;
-      const diff = deriveDiff(block.tool.name, block.tool.inputJson);
-      const blocks = [...msg.blocks];
-      blocks[idx] = { type: 'tool', tool: { ...block.tool, result, isError, diff } };
-      return { ...msg, blocks };
-    });
+  /** Attach a result to the most recent tool block that has none — the server's
+   * tool_result carries no id (results arrive in tool order). */
+  private fillLastToolResult(text: string, isError: boolean): void {
+    for (let mi = this.messages.length - 1; mi >= 0; mi--) {
+      const msg = this.messages[mi];
+      for (let bi = msg.blocks.length - 1; bi >= 0; bi--) {
+        const block = msg.blocks[bi];
+        if (block.type === 'tool' && block.tool.result === undefined) {
+          const blocks = [...msg.blocks];
+          blocks[bi] = { type: 'tool', tool: { ...block.tool, result: text, isError } };
+          this.messages = [
+            ...this.messages.slice(0, mi),
+            { ...msg, blocks },
+            ...this.messages.slice(mi + 1),
+          ];
+          return;
+        }
+      }
+    }
   }
 }

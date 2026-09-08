@@ -20,7 +20,8 @@ describe('AgentChatModel core', () => {
     m.apply({
       t: 'agent.done',
       seq: 2,
-      usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
+      cost: 0.001,
+      usage: { input_tokens: 10, output_tokens: 5 },
     });
     const s = m.snapshot();
     expect(s.messages[0].isStreaming).toBe(false);
@@ -48,17 +49,16 @@ describe('AgentChatModel core', () => {
     m.apply({
       t: 'agent.tool',
       seq: 1,
-      id: 't1',
       name: 'Edit',
-      summary: 'edit foo',
-      inputJson: JSON.stringify({ file_path: '/foo', old_string: 'a', new_string: 'b' }),
+      input: { file_path: '/foo', old_string: 'a', new_string: 'b' },
     });
-    m.apply({ t: 'agent.tool_result', seq: 2, id: 't1', result: 'ok', isError: false });
+    m.apply({ t: 'agent.tool_result', seq: 2, text: 'ok', isError: false });
     const msg = m.snapshot().messages.at(-1)!;
     const block = msg.blocks.find((b) => b.type === 'tool');
     expect(block).toBeTruthy();
     if (block?.type === 'tool') {
       expect(block.tool.result).toBe('ok');
+      expect(block.tool.summary).toBe('/foo');
       expect(block.tool.diff?.path).toBe('/foo');
     }
   });
@@ -67,19 +67,15 @@ describe('AgentChatModel core', () => {
     const m = new AgentChatModel();
     m.apply({
       t: 'agent.permission_req',
-      seq: 1,
-      id: 'p1',
+      reqId: 'p1',
       name: 'Bash',
-      summary: 'rm -rf',
-      inputJson: '{}',
+      input: { command: 'rm -rf' },
     });
     m.apply({
       t: 'agent.permission_req',
-      seq: 2,
-      id: 'p2',
+      reqId: 'p2',
       name: 'Write',
-      summary: 'x',
-      inputJson: '{}',
+      input: { file_path: 'x' },
     });
     expect(m.snapshot().pendingApproval?.id).toBe('p1');
     expect(m.resolvePermission(true)).toEqual({ id: 'p1' });

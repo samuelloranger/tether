@@ -2825,10 +2825,49 @@ label > textarea {
 .agent-tool-muted {
   border-left-color: var(--text-faint);
 }
+.agent-tool-card {
+  padding: 0;
+  overflow: hidden;
+}
 .agent-tool-head {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
+  width: 100%;
+  /* reset global button chrome */
+  height: auto;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-tool-head:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-color: transparent;
+  color: var(--text);
+}
+.agent-tool-err {
+  color: var(--danger);
+}
+.agent-tool-chevron {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+.agent-tool-body {
+  padding: 0 10px 8px;
+  border-top: 1px solid var(--border);
+}
+.agent-tool-input {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  overflow-x: auto;
 }
 .agent-tool-glyph {
   color: var(--text-muted);
@@ -2837,6 +2876,8 @@ label > textarea {
   font-weight: 600;
 }
 .agent-tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;

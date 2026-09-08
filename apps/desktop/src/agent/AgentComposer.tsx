@@ -37,7 +37,7 @@ export function AgentComposer({
 
   const resolve = (allow: boolean) => {
     const r = model.resolvePermission(allow);
-    if (r) send(agentPermission({ id: r.id, allow }));
+    if (r) send(agentPermission({ reqId: r.id, allow }));
   };
 
   return (

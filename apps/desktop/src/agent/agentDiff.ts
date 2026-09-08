@@ -54,6 +54,34 @@ function lcsDiffOps(a: string[], b: string[]): DiffLine[] {
   return ops;
 }
 
+/** One-line summary of a tool call from its input. Port of Swift summarize
+ * (AgentChatModel.swift:251). */
+export function summarize(name: string, inputJson: string): string {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(inputJson);
+  } catch {
+    return name;
+  }
+  const str = (k: string): string | undefined =>
+    typeof obj[k] === 'string' ? (obj[k] as string) : undefined;
+  switch (name.toLowerCase()) {
+    case 'bash':
+    case 'shell':
+      return str('command') ?? name;
+    case 'read':
+    case 'edit':
+    case 'write':
+    case 'multiedit':
+      return str('file_path') ?? name;
+    case 'grep':
+    case 'glob':
+      return str('pattern') ?? name;
+    default:
+      return name;
+  }
+}
+
 /**
  * Synthesize a diff from an Edit/Write/MultiEdit tool's inputJson.
  * Port of Swift derivedDiff (AgentChatModel.swift:265).

@@ -1,28 +1,10 @@
 export type AgentFrame =
   | { t: 'agent.delta'; seq: number; text: string }
-  | {
-      t: 'agent.tool';
-      seq: number;
-      id: string;
-      name: string;
-      summary: string;
-      inputJson: string;
-    }
-  | { t: 'agent.tool_result'; seq: number; id: string; result: string; isError: boolean }
-  | {
-      t: 'agent.permission_req';
-      seq: number;
-      id: string;
-      name: string;
-      summary: string;
-      inputJson: string;
-    }
-  | {
-      t: 'agent.done';
-      seq: number;
-      usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
-    }
-  | { t: 'agent.error'; seq: number; message: string };
+  | { t: 'agent.tool'; seq: number; name: string; input: unknown }
+  | { t: 'agent.tool_result'; seq: number; text: string; isError: boolean }
+  | { t: 'agent.permission_req'; reqId: string; name: string; input: unknown }
+  | { t: 'agent.done'; seq: number; cost?: number; usage?: unknown }
+  | { t: 'agent.error'; seq?: number; message: string };
 
 /** Decode one WS-JSON line into an AgentFrame, or null for non-agent frames. */
 export function decodeAgentFrame(json: string): AgentFrame | null {
@@ -49,6 +31,6 @@ export function agentInterrupt() {
   return { t: 'agent.interrupt' as const };
 }
 
-export function agentPermission(input: { id: string; allow: boolean }) {
-  return { t: 'agent.permission' as const, id: input.id, allow: input.allow };
+export function agentPermission(input: { reqId: string; allow: boolean }) {
+  return { t: 'agent.permission' as const, reqId: input.reqId, allow: input.allow };
 }
