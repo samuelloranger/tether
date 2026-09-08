@@ -47,6 +47,27 @@ public final class AgentChatModel {
   /// edits, which must never move the scroll.
   public private(set) var revision: Int = 0
 
+  /// Model + account 5h/7d usage for the composer's info strip. nil until an
+  /// `agent.status` frame arrives (server support pending); the strip shows only
+  /// the fields it has and hides the rest. Merge via `applyStatus`.
+  public private(set) var status: AgentStatus?
+
+  /// This chat's running token/cost total — the sum of every finished turn's
+  /// usage. nil while nothing has reported, so the strip omits it.
+  public var sessionUsage: AgentUsage? {
+    var input = 0
+    var output = 0
+    var cost = 0.0
+    for message in messages {
+      guard let usage = message.usage else { continue }
+      input += usage.inputTokens
+      output += usage.outputTokens
+      cost += usage.cost
+    }
+    let total = AgentUsage(cost: cost, inputTokens: input, outputTokens: output)
+    return total.isEmpty ? nil : total
+  }
+
   /// The most recent user prompt, kept so a failed turn can be retried without
   /// the user retyping it — see `retryLast`.
   private var lastUserPrompt: String?
@@ -139,6 +160,20 @@ public final class AgentChatModel {
   public func appendUser(_ text: String) {
     messages.append(AgentMessage(role: .user, blocks: [.text(id: UUID(), text)]))
     revision += 1
+  }
+
+  /// Merge a status update from the host. A later frame that carries only some
+  /// fields (a fresh model but no new usage, or vice versa) keeps the rest —
+  /// so the strip never blanks a value it already showed. This is the entry the
+  /// `agent.status` frame handler will call once that frame is wired.
+  public func applyStatus(
+    model: String? = nil, fiveHour: UsageWindow? = nil, sevenDay: UsageWindow? = nil
+  ) {
+    let prev = status
+    status = AgentStatus(
+      model: model ?? prev?.model,
+      fiveHour: fiveHour ?? prev?.fiveHour,
+      sevenDay: sevenDay ?? prev?.sevenDay)
   }
 
   // MARK: reducer
