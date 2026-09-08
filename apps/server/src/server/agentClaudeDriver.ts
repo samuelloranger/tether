@@ -141,8 +141,13 @@ export class AgentClaudeDriver implements AgentDriver {
     // an option by the claude CLI.
     args.push('--', text);
 
+    // Force the CLI's own subscription login (claude login), never API billing.
+    // Both credential envs are stripped so a stray key/token in the daemon's
+    // environment can't silently route agent turns to paid API usage — the CLI
+    // then falls through to its stored OAuth login (apiKeySource: "none").
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;
+    delete env.ANTHROPIC_AUTH_TOKEN;
 
     const child = Bun.spawn(args, {
       cwd: this.cwd,
