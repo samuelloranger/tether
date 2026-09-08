@@ -141,16 +141,42 @@ function extractSessionId(line: string): string | null {
   return null;
 }
 
+/** The `model` the init line reports (e.g. "claude-opus-4-8"), or null. */
+export function extractModel(line: string): string | null {
+  try {
+    const obj = JSON.parse(line) as Record<string, unknown>;
+    if (obj.type === 'system' && obj.subtype === 'init' && typeof obj.model === 'string') {
+      return obj.model;
+    }
+  } catch {
+    // not JSON / not init — ignore
+  }
+  return null;
+}
+
 type ClaudeProc = ReturnType<typeof Bun.spawn>;
 
 /** Wraps the `claude` CLI in headless streaming mode as the production AgentDriver. */
 export class AgentClaudeDriver implements AgentDriver {
   private cwd = '';
   private sessionId: string | null = null;
+  private currentModel: string | null = null;
   private child: ClaudeProc | null = null;
 
   async start(cwd: string): Promise<void> {
     this.cwd = cwd;
+  }
+
+  getModel(): string | null {
+    return this.currentModel;
+  }
+
+  /** Capture session id + model from a `system`/init line (both no-ops otherwise). */
+  private captureInit(line: string): void {
+    const sid = extractSessionId(line);
+    if (sid) this.sessionId = sid;
+    const model = extractModel(line);
+    if (model) this.currentModel = model;
   }
 
   async *prompt(text: string): AsyncIterable<AgentEvent> {
@@ -201,8 +227,7 @@ export class AgentClaudeDriver implements AgentDriver {
     let sawMessageStart = false;
 
     const handleLine = (line: string): AgentEvent[] => {
-      const sid = extractSessionId(line);
-      if (sid) this.sessionId = sid;
+      this.captureInit(line);
       if (isMessageStartEvent(line)) {
         const events: AgentEvent[] = [];
         if (sawMessageStart && hasEmittedText) events.push({ t: 'delta', text: '\n\n' });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AgentChatPane } from './agent/AgentChatPane';
 import { coreCacheDelete, coreCacheIds, coreCacheTouch } from './coreApi';
 import { EmptyPanePicker } from './EmptyPanePicker';
 import type { FrameApplyResult } from './frameHandler';
@@ -113,6 +114,12 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         const session = leaf.session;
         const host = props.hosts.find((row) => row.id === session.hostId);
         if (!host) return null;
+        const drawer = props.sessions.find(
+          (row) => row.hostId === session.hostId && row.id === session.sessionId,
+        );
+        // Leaf kind is durable; DrawerSession.kind is poll-transient. Either
+        // marking the session agent is authoritative.
+        const isAgent = session.kind === 'agent' || drawer?.kind === 'agent';
         return (
           <div
             key={leaf.paneId}
@@ -128,17 +135,26 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
                 onClose={props.onClosePane}
               />
             )}
-            <TerminalPane
-              hostId={session.hostId}
-              sessionId={session.sessionId}
-              interactive={leaf.paneId === props.focusedPaneId}
-              noiseAddress={noiseSessionAddress(host)}
-              terminalTheme={props.terminalTheme}
-              fontFamily={props.fontFamily}
-              fontSize={props.fontSize}
-              onFrame={props.onFrame}
-              onDisconnected={() => props.onDisconnected(session.hostId)}
-            />
+            {isAgent ? (
+              <AgentChatPane
+                hostId={session.hostId}
+                sessionId={session.sessionId}
+                noiseAddress={noiseSessionAddress(host)}
+                cwd={session.cwd ?? drawer?.cwd ?? undefined}
+              />
+            ) : (
+              <TerminalPane
+                hostId={session.hostId}
+                sessionId={session.sessionId}
+                interactive={leaf.paneId === props.focusedPaneId}
+                noiseAddress={noiseSessionAddress(host)}
+                terminalTheme={props.terminalTheme}
+                fontFamily={props.fontFamily}
+                fontSize={props.fontSize}
+                onFrame={props.onFrame}
+                onDisconnected={() => props.onDisconnected(session.hostId)}
+              />
+            )}
           </div>
         );
       })}

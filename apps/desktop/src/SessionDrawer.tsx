@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
+import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { sessionLabel, sessionLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
@@ -20,6 +21,7 @@ interface SessionDrawerProps {
   onSelect: (hostId: string, sessionId: string) => void;
   /** Per host: a single global button can only mean "the active host". */
   onNew: (hostId: string) => void;
+  onNewAgentChat: (hostId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
   onRetryHost: (hostId: string) => void;
@@ -166,6 +168,7 @@ function SessionRow({
         title={activityLabel(dot)}
       >
         <span className={`activity-dot dot-${dot}`} aria-hidden />
+        <SessionKindIcon kind={session.kind} />
         <span className="drawer-session-title">{shown}</span>
         {session.status === 'stopped' ? <span className="drawer-session-meta">stopped</span> : null}
       </button>
@@ -191,6 +194,34 @@ function SessionRow({
   );
 }
 
+/** The per-host "New terminal" / "New agent chat" footer, mirroring iOS's
+ * NewTerminalRow + NewAgentChatRow. */
+function HostNewButtons({
+  hostId,
+  onNew,
+  onNewAgentChat,
+}: {
+  hostId: string;
+  onNew: (hostId: string) => void;
+  onNewAgentChat: (hostId: string) => void;
+}) {
+  return (
+    <>
+      <button type="button" className="secondary drawer-host-new" onClick={() => onNew(hostId)}>
+        New terminal
+      </button>
+      <button
+        type="button"
+        className="secondary drawer-host-new"
+        onClick={() => onNewAgentChat(hostId)}
+      >
+        <AgentIcon />
+        New agent chat
+      </button>
+    </>
+  );
+}
+
 export function SessionDrawer({
   hosts,
   healthByHost,
@@ -203,6 +234,7 @@ export function SessionDrawer({
   onTogglePin,
   onSelect,
   onNew,
+  onNewAgentChat,
   onRequestKill,
   onRequestRename,
   onRetryHost,
@@ -283,13 +315,7 @@ export function SessionDrawer({
                   />
                 ))
               )}
-              <button
-                type="button"
-                className="secondary drawer-host-new"
-                onClick={() => onNew(host.id)}
-              >
-                New terminal
-              </button>
+              <HostNewButtons hostId={host.id} onNew={onNew} onNewAgentChat={onNewAgentChat} />
             </section>
           );
         })}

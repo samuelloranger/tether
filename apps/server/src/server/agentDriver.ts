@@ -7,6 +7,9 @@ export type AgentEvent =
   | { t: 'error'; message: string };
 
 export type AgentFrame =
+  // The user's own prompt, persisted + fanned out so it survives reconnect and
+  // reaches every attached device (the sender included), not just the local echo.
+  | { t: 'agent.user'; seq: number; text: string }
   | { t: 'agent.delta'; seq: number; text: string }
   | { t: 'agent.tool'; seq: number; name: string; input: unknown }
   | { t: 'agent.tool_result'; seq: number; text: string; isError: boolean }
@@ -23,6 +26,8 @@ export interface AgentDriver {
   prompt(text: string): AsyncIterable<AgentEvent>;
   interrupt(): void;
   close(): void;
+  /** The model the CLI reported on its init line, once a prompt has run. */
+  getModel?(): string | null;
 }
 
 export class FakeAgentDriver implements AgentDriver {

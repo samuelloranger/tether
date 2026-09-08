@@ -54,6 +54,9 @@ pub enum ServerMsg {
     },
     /// A minted per-device REST bearer, in reply to `auth.token`.
     AuthToken { token: String, expires_at: String },
+    /// Any `agent.*` frame, carried as its raw JSON line. The Tauri layer is a
+    /// pipe here — agent semantics live in the TS reducer, not in Rust.
+    Agent(String),
     /// Any other sealed frame — the terminal pump ignores it.
     Other,
 }
@@ -174,6 +177,13 @@ pub fn encode_focus(session_id: &str, focused: bool) -> Vec<u8> {
 /// - `{"type":"focus","focused":…}` → `{"t":"focus","id":session,"focused":…}`
 pub fn translate_frontend(session_id: &str, ws_json: &str) -> Option<Vec<u8>> {
     let value: Value = serde_json::from_str(ws_json).ok()?;
+    // Agent frames use the server session-protocol shape (`t:"agent.*"`) and
+    // pass through 1:1 — forward the bytes unchanged rather than remapping.
+    if let Some(t) = value.get("t").and_then(Value::as_str) {
+        if t.starts_with("agent.") {
+            return serde_json::to_vec(&value).ok();
+        }
+    }
     match value.get("type").and_then(Value::as_str)? {
         "input" => {
             let text = value.get("text").and_then(Value::as_str).unwrap_or("");
@@ -244,6 +254,9 @@ pub fn decode_server(plaintext: &[u8]) -> Result<ServerMsg, serde_json::Error> {
                 .unwrap_or("")
                 .to_string(),
         },
+        Some(t) if t.starts_with("agent.") => {
+            ServerMsg::Agent(String::from_utf8_lossy(plaintext).into_owned())
+        }
         _ => ServerMsg::Other,
     })
 }
@@ -371,6 +384,27 @@ mod tests {
     fn decode_server_reset() {
         let msg = decode_server(br#"{"t":"reset","id":"sess-1"}"#).unwrap();
         assert_eq!(msg, ServerMsg::Reset);
+    }
+
+    #[test]
+    fn decode_server_agent_frame_is_passthrough() {
+        let line = br#"{"t":"agent.delta","seq":3,"text":"hi"}"#;
+        match decode_server(line).unwrap() {
+            ServerMsg::Agent(raw) => {
+                assert!(raw.contains("\"agent.delta\""));
+                assert!(raw.contains("\"seq\":3"));
+            }
+            other => panic!("expected Agent passthrough, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn translate_frontend_passes_agent_prompt_through() {
+        let line = r#"{"t":"agent.prompt","text":"build it"}"#;
+        let out = translate_frontend("s1", line).expect("agent.prompt should translate");
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["t"], "agent.prompt");
+        assert_eq!(v["text"], "build it");
     }
 
     #[test]

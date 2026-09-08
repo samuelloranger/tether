@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
+import { AgentFolderPicker } from './agent/AgentFolderPicker';
 import { DevicesScreen } from './DevicesScreen';
 import { ensureNotificationPermission } from './desktopNotifications';
 import type { DropIntent } from './dropZone';
@@ -165,6 +166,7 @@ export function App() {
   const [views, setViews] = useState<View[]>(initialViews.views);
   const [activeViewId, setActiveViewId] = useState(initialViews.activeViewId);
   const [panePickerFor, setPanePickerFor] = useState<string | null>(null);
+  const [agentChatFor, setAgentChatFor] = useState<string | null>(null);
   const viewStateRef = useRef<ViewState>({ views, activeViewId });
   viewStateRef.current = { views, activeViewId };
   const applyViews = (next: ViewState) => {
@@ -177,7 +179,10 @@ export function App() {
   const tree: PaneNode = activeView?.tree ?? { kind: 'leaf', id: 'empty', session: null };
   const focusedPaneId = activeView?.focusedPaneId ?? firstLeafId(tree);
   const liveKeys = () =>
-    liveSessionKeys(app.sessions, viewStateRef.current.views, app.healthByHost);
+    new Set([
+      ...liveSessionKeys(app.sessions, viewStateRef.current.views, app.healthByHost),
+      ...app.pendingAgentKeys(),
+    ]);
 
   const openSessionKeys = useMemo(
     () => new Set(views.flatMap((view) => viewMemberKeys(view))),
@@ -336,6 +341,23 @@ export function App() {
         return;
       }
       const solo = newSoloView({ hostId, sessionId });
+      applyViews({ views: [...current.views, solo], activeViewId: solo.id });
+    });
+    if (!layout.docked) setDrawerOpen(false);
+  };
+
+  const newAgentChatOn = (hostId: string | null) => {
+    if (hostId) setAgentChatFor(hostId);
+  };
+
+  const startAgentChat = (cwd: string) => {
+    const hostId = agentChatFor;
+    setAgentChatFor(null);
+    if (!hostId) return;
+    void app.newAgentChat(hostId).then((sessionId) => {
+      if (!sessionId) return;
+      const current = viewStateRef.current;
+      const solo = newSoloView({ hostId, sessionId, kind: 'agent', cwd });
       applyViews({ views: [...current.views, solo], activeViewId: solo.id });
     });
     if (!layout.docked) setDrawerOpen(false);
@@ -520,6 +542,7 @@ export function App() {
               if (!layout.docked) setDrawerOpen(false);
             }}
             onNew={newTerminalOn}
+            onNewAgentChat={newAgentChatOn}
             onRequestKill={modals.openKill}
             onRequestRename={modals.openRename}
             onRetryHost={app.retryHost}
@@ -546,6 +569,7 @@ export function App() {
               dot={activeDot}
               hasSession={hasSession}
               onNew={newTerminalOn}
+              onNewAgentChat={newAgentChatOn}
               onKill={modals.openKill}
               onKillMembers={modals.openKillMembers}
               onWorkspace={() => workspace.setWorkspaceOpen(true)}
@@ -692,6 +716,13 @@ export function App() {
           }}
           onClose={() => setPanePickerFor(null)}
         />
+      )}
+      {agentChatFor && (
+        <div className="agent-folder-backdrop" onPointerDown={() => setAgentChatFor(null)}>
+          <div onPointerDown={(e) => e.stopPropagation()}>
+            <AgentFolderPicker onPick={startAgentChat} onCancel={() => setAgentChatFor(null)} />
+          </div>
+        </div>
       )}
       <AppOverflowMenu
         visible={overflowOpen}

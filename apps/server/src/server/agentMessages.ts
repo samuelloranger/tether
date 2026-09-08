@@ -11,7 +11,7 @@ import { db } from './db';
 export interface AgentMessageRow {
   session_id: string;
   seq: number;
-  kind: 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
+  kind: 'user' | 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
   text: string | null;
   tool_json: string | null;
   is_error: number;
@@ -21,7 +21,7 @@ export interface AgentMessageRow {
 export interface AgentMessageInsert {
   sessionId: string;
   seq: number;
-  kind: 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
+  kind: 'user' | 'delta' | 'tool' | 'tool_result' | 'done' | 'error';
   text?: string | null;
   toolJson?: string | null;
   isError?: boolean;
@@ -67,6 +67,15 @@ export function getAgentMessages(
       ORDER BY seq ASC
     `)
     .all({ $sessionId: sessionId, $sinceSeq: sinceSeq }) as AgentMessageRow[];
+}
+
+/** Highest seq persisted for a session (0 if none) — seeds the live FrameSeq on
+ * (re)start so numbering continues monotonically instead of resetting. */
+export function maxAgentSeq(dbHandle: Database, sessionId: string): number {
+  const row = dbHandle
+    .query('SELECT COALESCE(MAX(seq), 0) AS m FROM agent_messages WHERE session_id = $sessionId')
+    .get({ $sessionId: sessionId }) as { m: number } | null;
+  return row?.m ?? 0;
 }
 
 /** Purge one session's transcript — called from the agent kill route alongside deleteSession. */

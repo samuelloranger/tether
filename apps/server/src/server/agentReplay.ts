@@ -11,6 +11,8 @@ export function defaultGetAgentMessages(sessionId: string, sinceSeq: number): Ag
 /** Reconstruct the `agent.*` wire frame a stored row represents, for replay. */
 export function rowToAgentFrame(row: AgentMessageRow): AgentFrame | null {
   switch (row.kind) {
+    case 'user':
+      return { t: 'agent.user', seq: row.seq, text: row.text ?? '' };
     case 'delta':
       return { t: 'agent.delta', seq: row.seq, text: row.text ?? '' };
     case 'tool': {
@@ -80,7 +82,36 @@ export async function applyAgentStart(
     if (frame && !sendSealed(frame)) return;
   }
 
-  const unsub = agent.registry.attach(msg.id, (frame) => sendSealed(frame));
+  const unsub = agent.registry.attach(msg.id, (frame) => {
+    sendSealed(frame);
+    // Usage moves after a turn spends tokens — refresh the strip when one ends.
+    if (frame.t === 'agent.done') void sendAgentStatus(msg.id, d, sendSealed, agent);
+  });
   agent.attachments.set(msg.id, unsub);
   agent.currentId = msg.id;
+
+  // Push model + 5h/7day usage now, so the strip is populated the moment the
+  // chat attaches (before the first prompt of a resumed session).
+  void sendAgentStatus(msg.id, d, sendSealed, agent);
+}
+
+/**
+ * Send an `agent.status` frame: the running model plus the account's 5h/7day
+ * usage. Not part of the seq-ordered transcript (never persisted or replayed) —
+ * it is ephemeral account state, refreshed on attach and after each turn. Usage
+ * is advisory: a null fetch just omits the windows.
+ */
+async function sendAgentStatus(
+  id: string,
+  d: SessionDeps,
+  sendSealed: (obj: unknown) => boolean,
+  agent: AgentState,
+): Promise<void> {
+  const limits = await d.fetchAgentUsage().catch(() => null);
+  sendSealed({
+    t: 'agent.status',
+    model: agent.registry.modelOf(id),
+    fiveHour: limits?.fiveHour ?? null,
+    sevenDay: limits?.sevenDay ?? null,
+  });
 }

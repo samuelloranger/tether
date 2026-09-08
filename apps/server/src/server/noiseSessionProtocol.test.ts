@@ -1,7 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AgentDriver } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
 import { AgentRegistry } from './agentRegistry';
+import { db } from './db';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
@@ -9,6 +10,13 @@ import type { FocusSubscriber } from './pty';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+// The agent tests persist prompts to the shared per-process DB and seed the seq
+// from its MAX; clear it before each so a sibling test's rows can't shift seqs
+// (fails only in the full parallel suite, where files share one DB).
+beforeEach(() => {
+  db.query('DELETE FROM agent_messages').run();
+});
 
 /**
  * A fake ServerChannel whose seal/open are identity — the JSON bytes pass
@@ -130,6 +138,7 @@ function fakePty(): FakePty {
     }) as SessionDeps['setSessionFocus'],
     getReplayLogs: () => ({ reset: false, logs: [] }),
     getAgentMessages: () => [],
+    fetchAgentUsage: async () => null,
     ...emptyRegistry(),
     identity: { deviceId: '' },
   };
@@ -626,10 +635,13 @@ describe('runNoiseSession — agent chat', () => {
     });
     await new Promise((r) => setTimeout(r, 5));
 
-    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    const msgs = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t !== 'agent.status');
     expect(msgs).toEqual([
-      { t: 'agent.delta', seq: 1, text: 'Hi' },
-      { t: 'agent.done', seq: 2, cost: 0, usage: {} },
+      { t: 'agent.user', seq: 1, text: 'hello' },
+      { t: 'agent.delta', seq: 2, text: 'Hi' },
+      { t: 'agent.done', seq: 3, cost: 0, usage: {} },
     ]);
   });
 
@@ -684,8 +696,13 @@ describe('runNoiseSession — agent chat', () => {
     });
     await new Promise((r) => setTimeout(r, 5));
 
-    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
-    expect(msgs).toEqual([{ t: 'agent.error', message: 'agent prompt failed' }]);
+    const msgs = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t !== 'agent.status');
+    expect(msgs).toEqual([
+      { t: 'agent.user', seq: 1, text: 'hello' },
+      { t: 'agent.error', message: 'agent prompt failed' },
+    ]);
   });
 
   test('a disconnect detaches but does not kill the agent — a later reconnect re-attaches', async () => {
@@ -768,12 +785,16 @@ describe('runNoiseSession — agent chat', () => {
     await new Promise((r) => setTimeout(r, 5));
 
     expect(replayed).toEqual([{ sessionId: 'a-replay', sinceSeq: 2 }]);
-    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
-    // Replayed frames (reconstructed from the stored rows) precede the live one.
+    const msgs = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t !== 'agent.status');
+    // Replayed frames (reconstructed from the stored rows) precede the live turn,
+    // which now opens with the echoed user prompt before the assistant delta.
     expect(msgs).toEqual([
       { t: 'agent.delta', seq: 3, text: 'earlier reply' },
       { t: 'agent.done', seq: 4, cost: 0.01, usage: {} },
-      { t: 'agent.delta', seq: 1, text: 'live chunk' },
+      { t: 'agent.user', seq: 1, text: 'more' },
+      { t: 'agent.delta', seq: 2, text: 'live chunk' },
     ]);
   });
 

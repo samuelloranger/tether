@@ -36,6 +36,7 @@ pub fn drawer_session(row: &SessionRow) -> Value {
         "name": row.name,
         "auto_title": row.auto_title,
         "activity": row.activity,
+        "kind": row.kind,
     })
 }
 

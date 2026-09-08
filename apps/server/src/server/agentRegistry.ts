@@ -1,15 +1,21 @@
 import { AgentClaudeDriver } from './agentClaudeDriver';
 import type { AgentDriver, AgentFrame } from './agentDriver';
 import { FrameSeq, toFrame } from './agentEventMap';
-import { type AgentMessageInsert, appendAgentMessage } from './agentMessages';
+import { type AgentMessageInsert, appendAgentMessage, maxAgentSeq } from './agentMessages';
 import { db } from './db';
 
 export type FrameSink = (f: AgentFrame) => void;
 /** Injectable so tests can spy on writes without touching the real DB. */
 export type PersistFn = (row: AgentMessageInsert) => void;
+/** The seq to resume numbering AFTER — the max already persisted for a session. */
+export type SeqSeedFn = (sessionId: string) => number;
 
 function defaultPersist(row: AgentMessageInsert): void {
   appendAgentMessage(db, row);
+}
+
+function defaultSeqSeed(sessionId: string): number {
+  return maxAgentSeq(db, sessionId);
 }
 
 /** Accumulates streamed delta text between two non-delta frames, so the DB
@@ -29,16 +35,30 @@ interface Entry {
 
 export class AgentRegistry {
   private readonly entries = new Map<string, Entry>();
+  /** Ids whose `driver.start` is in flight — closes the await-window where two
+   * concurrent `start(id)` calls could both pass the `entries` guard and spawn
+   * two drivers (the second orphaning the first). */
+  private readonly starting = new Set<string>();
   constructor(
     private readonly driverFactory: () => AgentDriver,
     private readonly persist: PersistFn = defaultPersist,
+    private readonly seqSeed: SeqSeedFn = defaultSeqSeed,
   ) {}
 
   async start(id: string, cwd: string): Promise<void> {
-    if (this.entries.has(id)) return;
-    const driver = this.driverFactory();
-    await driver.start(cwd);
-    this.entries.set(id, { driver, seq: new FrameSeq(), sinks: new Set(), deltaBuf: null });
+    if (this.entries.has(id) || this.starting.has(id)) return;
+    this.starting.add(id);
+    try {
+      const driver = this.driverFactory();
+      await driver.start(cwd);
+      // Continue seq numbering from the persisted max so a server restart never
+      // reuses seqs (which would overwrite stored rows and make clients drop the
+      // new frames as replays).
+      const seq = new FrameSeq(this.seqSeed(id));
+      this.entries.set(id, { driver, seq, sinks: new Set(), deltaBuf: null });
+    } finally {
+      this.starting.delete(id);
+    }
   }
 
   attach(id: string, sink: FrameSink): () => void {
@@ -97,6 +117,11 @@ export class AgentRegistry {
   async prompt(id: string, text: string): Promise<void> {
     const e = this.entries.get(id);
     if (!e) throw new Error(`no agent session ${id}`);
+    // Record + fan out the user's prompt first, seq-ordered ahead of the reply
+    // it triggers, so it persists for replay and reaches every attached device.
+    const userFrame: AgentFrame = { t: 'agent.user', seq: e.seq.next(), text };
+    this.persist({ sessionId: id, seq: userFrame.seq, kind: 'user', text });
+    for (const sink of e.sinks) sink(userFrame);
     for await (const ev of e.driver.prompt(text)) {
       const frame = toFrame(ev, e.seq);
       this.persistFrame(id, e, frame);
@@ -117,6 +142,11 @@ export class AgentRegistry {
 
   has(id: string): boolean {
     return this.entries.has(id);
+  }
+
+  /** The model the running driver reported, or null if not yet known. */
+  modelOf(id: string): string | null {
+    return this.entries.get(id)?.driver.getModel?.() ?? null;
   }
 
   killAll(): void {
