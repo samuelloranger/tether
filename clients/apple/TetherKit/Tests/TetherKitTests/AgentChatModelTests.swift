@@ -85,6 +85,21 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(sent, [.prompt("do a thing")])
   }
 
+  // Tab-titling hook (SessionStore.newAgentChat): fires once, with the gist
+  // text, on the very first user prompt — never again after.
+  func testOnFirstPromptFiresOnceOnFirstUserMessageOnly() {
+    var fired: [String] = []
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    m.onFirstPrompt = { fired.append($0) }
+
+    m.sendPrompt("first prompt")
+    XCTAssertEqual(fired, ["first prompt"])
+
+    m.turn = .idle  // let a second prompt actually send
+    m.sendPrompt("second prompt")
+    XCTAssertEqual(fired, ["first prompt"])  // unchanged — did not fire again
+  }
+
   // The bug this fix addresses: text/tool/text must stay three ordered blocks
   // — NOT one coalesced text block followed by a trailing tool.
   func testTextToolTextInterleaveInArrivalOrder() {
