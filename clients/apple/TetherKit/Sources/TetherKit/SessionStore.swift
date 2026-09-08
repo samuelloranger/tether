@@ -1,25 +1,6 @@
 import Foundation
 import Observation
 import TetherFFIBindings
-#if canImport(UIKit)
-  import UIKit
-#endif
-
-/// Force-resigns whatever UIKit responder currently holds the keyboard.
-///
-/// `TerminalInputTextView.dismantleUIView` resigns too — but only AFTER
-/// SwiftUI has already detached the view from the window, which is too late
-/// for UIKit to actually dismiss the accessory bar. Calling this first, while
-/// the terminal is still mounted, reaches the responder in time; the
-/// `dismantleUIView` resign stays as a backstop.
-@MainActor
-func dismissKeyboardGlobally() {
-  #if canImport(UIKit)
-    UIApplication.shared.sendAction(
-      #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
-    )
-  #endif
-}
 
 @Observable
 @MainActor
@@ -398,9 +379,14 @@ public final class SessionStore {
   /// the tab is synthesized locally, and `agent.start` (sent AFTER the
   /// terminal-shaped Noise channel connects, same as a plain terminal's
   /// `start` frame) both spawns and attaches the agent server-side.
-  public func newAgentChat(hostId: String, cwd: String) async {
+  /// Synchronous on purpose: the tab flip (session + model) must land in the same
+  /// transaction that closes the drawer, or the terminal reclaims the keyboard in
+  /// the gap and strands its key bar over the new chat — see `activateSession`.
+  /// The network connect trails in a detached task.
+  public func newAgentChat(hostId: String, cwd: String) {
     let known = sessionsByHost[hostId] ?? []
     let id = nextAgentSessionId(among: known)
+    let changed = activeHostId != hostId || activeSessionId != id
     let synthesized = RemoteSession(
       id: id, status: "running", lastOutputAt: nil, name: nil, autoTitle: nil, activity: nil,
       kind: "agent"
@@ -409,13 +395,6 @@ public final class SessionStore {
     next.append(synthesized)
     sessionsByHost[hostId] = next
     hasRestoredSession = true
-    if activeHostId != hostId || activeSessionId != id {
-      // The old tab may be a terminal with a lingering inputAccessoryView
-      // responder — resign it now, while that terminal is still mounted, so
-      // the key bar doesn't ride along onto this agent chat.
-      dismissKeyboardGlobally()
-      await pipeline.sendFocus(focused: false)
-    }
     activeHostId = hostId
     activeSessionId = id
     sessions = next
@@ -424,38 +403,17 @@ public final class SessionStore {
       sessionId: id, cwd: cwd,
       send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
     )
-    // Like Claude Code: name the tab from the first prompt's gist instead of
-    // leaving it on the cwd basename. Server never sets `name`, so this local
-    // rename survives refresh — see `renameAgentSessionLocally`.
     model.onFirstPrompt = { [weak self] text in
       self?.renameAgentSessionLocally(id: id, hostId: hostId, name: Self.promptGist(text))
     }
     agentModels[key] = model
-    await connectAgent(sessionId: id)
-    // Brand-new chat, empty model — sinceSeq 0 (nothing to replay).
-    pipeline.outbound.yield(.agentStart(id: id, cwd: cwd, sinceSeq: 0))
-  }
-
-  /// First line of the prompt, trimmed to ~40 chars with an ellipsis — the
-  /// tab-title gist, same idea as Claude Code's session titling.
-  private static func promptGist(_ text: String) -> String {
-    let firstLine = text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? text
-    let limit = 40
-    if firstLine.count <= limit { return firstLine }
-    return String(firstLine.prefix(limit)) + "…"
-  }
-
-  /// Renames an agent tab's `RemoteSession.name` locally only — there is no
-  /// server rename endpoint for agent sessions, and `displayTitle` prefers
-  /// `name` over `auto_title`, so this sticks across refresh without a
-  /// round-trip.
-  public func renameAgentSessionLocally(id: String, hostId: String, name: String) {
-    var list = sessionsByHost[hostId] ?? []
-    guard let index = list.firstIndex(where: { $0.id == id }) else { return }
-    list[index].name = name
-    sessionsByHost[hostId] = list
-    if activeHostId == hostId {
-      sessions = list
+    Task {
+      if changed {
+        await pipeline.sendFocus(focused: false)
+      }
+      await connectAgent(sessionId: id)
+      // Brand-new chat, empty model — sinceSeq 0 (nothing to replay).
+      pipeline.outbound.yield(.agentStart(id: id, cwd: cwd, sinceSeq: 0))
     }
   }
 
@@ -609,29 +567,71 @@ public final class SessionStore {
     }
   }
 
-  /// Switches the active terminal tab and opens its live stream.
-  public func selectSession(hostId: String, sessionId: String) async {
-    // The user has chosen a terminal, so the cold-launch restore has no more
+  /// First line of a prompt, clipped to a drawer-friendly length — used to title
+  /// an agent tab from its first user message instead of leaving it "agent-N".
+  private static func promptGist(_ text: String) -> String {
+    let firstLine = text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? text
+    let limit = 40
+    if firstLine.count <= limit { return firstLine }
+    return String(firstLine.prefix(limit)) + "…"
+  }
+
+  /// Renames an agent tab in local state only — no REST call, since agent
+  /// sessions are synthesized client-side (see `newAgentChat`) and have no
+  /// server-side session row to rename.
+  public func renameAgentSessionLocally(id: String, hostId: String, name: String) {
+    var list = sessionsByHost[hostId] ?? []
+    guard let index = list.firstIndex(where: { $0.id == id }) else { return }
+    list[index].name = name
+    sessionsByHost[hostId] = list
+    if activeHostId == hostId { sessions = list }
+  }
+
+  /// Flips the active tab SYNCHRONOUSLY, ahead of any network work. `RootView`
+  /// branches Terminal vs AgentChat on `activeAgentModel`, so the branch has to
+  /// settle in the same transaction that closes the drawer. When this trailed the
+  /// `sendFocus` await, the terminal stayed mounted for a frame after the drawer
+  /// closed, reclaimed the keyboard, and re-docked its input-accessory key bar
+  /// over the agent composer. Returns whether focus actually changed, which the
+  /// caller hands to `connectActiveSession` to gate the unfocus-previous frame.
+  @discardableResult
+  public func activateSession(hostId: String, sessionId: String) -> Bool {
+    // The user has chosen a session, so the cold-launch restore has no more
     // work to do. Without this the latch could still be unspent — a launch whose
     // first fetch returned nothing never spends it — and killing this session
     // later would let the poll open another one, which is the "I closed that and
     // it came back" behaviour the latch exists to prevent.
     hasRestoredSession = true
-    let isAgent =
-      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
-    if activeSessionId != sessionId || activeHostId != hostId {
-      if isAgent {
-        // Switching INTO an agent chat: resign the terminal's responder now,
-        // before the RootView branch swaps it out from under UIKit (see
-        // `dismissKeyboardGlobally`).
-        dismissKeyboardGlobally()
-      }
-      // Awaited, not queued: this frame has to reach the OLD socket before
-      // `connectTerminal` tears it down.
-      await pipeline.sendFocus(focused: false)
-    }
+    let changed = activeSessionId != sessionId || activeHostId != hostId
     activeHostId = hostId
     activeSessionId = sessionId
+    let isAgent =
+      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
+    // Build the model NOW so `activeAgentModel` is non-nil this frame — that is
+    // what lets RootView show the agent surface instead of the terminal.
+    if isAgent {
+      let key = terminalKey(sessionId, hostId: hostId)
+      if agentModels[key] == nil {
+        agentModels[key] = AgentChatModel(
+          sessionId: sessionId, cwd: "",
+          send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
+        )
+      }
+    }
+    return changed
+  }
+
+  /// Opens the live stream for whatever tab `activateSession` last selected.
+  /// `changed` comes from that call: the focus flip is UI state and the socket
+  /// is untouched until `connect*` below, so the unfocus frame still reaches the
+  /// OLD socket even though `activeSessionId` already points at the new tab.
+  public func connectActiveSession(changed: Bool) async {
+    guard let sessionId = activeSessionId, let hostId = activeHostId else { return }
+    if changed {
+      await pipeline.sendFocus(focused: false)
+    }
+    let isAgent =
+      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
     if isAgent {
       await connectAgent(sessionId: sessionId)
       // The server-owned AgentRegistry survives a disconnect, but this
@@ -642,17 +642,19 @@ public final class SessionStore {
       // one that already streamed some of this transcript in this app session.
       let key = terminalKey(sessionId, hostId: hostId)
       let cwd = agentModels[key]?.cwd ?? ""
-      if agentModels[key] == nil {
-        agentModels[key] = AgentChatModel(
-          sessionId: sessionId, cwd: cwd,
-          send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
-        )
-      }
       let sinceSeq = agentModels[key]?.lastSeq ?? 0
       pipeline.outbound.yield(.agentStart(id: sessionId, cwd: cwd, sinceSeq: sinceSeq))
     } else {
       await connectTerminal(sessionId: sessionId)
     }
+  }
+
+  /// Switches the active tab and opens its live stream. Convenience for callers
+  /// with no keyboard to strand (deep links); the drawer flips + connects in two
+  /// steps so the flip lands synchronously with the drawer dismissal.
+  public func selectSession(hostId: String, sessionId: String) async {
+    let changed = activateSession(hostId: hostId, sessionId: sessionId)
+    await connectActiveSession(changed: changed)
   }
 
   /// Adopts the grid the surface can actually display.

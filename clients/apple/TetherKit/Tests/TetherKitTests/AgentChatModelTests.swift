@@ -85,8 +85,6 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(sent, [.prompt("do a thing")])
   }
 
-  // Tab-titling hook (SessionStore.newAgentChat): fires once, with the gist
-  // text, on the very first user prompt — never again after.
   func testOnFirstPromptFiresOnceOnFirstUserMessageOnly() {
     var fired: [String] = []
     let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
@@ -118,5 +116,16 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(call.name, "Bash")
     guard case let .text(_, third) = blocks[2] else { return XCTFail("expected text block third") }
     XCTAssertEqual(third, "B")
+  }
+
+  func testErrorClearsAHalfStreamedTurn() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    m.apply(.agentDelta(seq: 1, text: "partial"))
+    XCTAssertEqual(m.messages.last?.isStreaming, true)
+    m.apply(.agentError(message: "boom"))
+    let assistant = m.messages.first { $0.role == .assistant }
+    XCTAssertEqual(assistant?.isStreaming, false)
+    XCTAssertEqual(m.messages.last?.role, .error)
+    XCTAssertEqual(m.turn, .idle)
   }
 }

@@ -16,19 +16,30 @@ public final class AgentChatModel {
   public var messages: [AgentMessage] = []
   public var turn: AgentTurnState = .idle
   public var pendingApproval: AgentToolCall?
+  /// Approvals that arrived while one was already on screen — shown one at a time
+  /// so a second tool's request can't clobber the first (which would then never
+  /// be answered and hang the agent).
+  private var approvalBacklog: [AgentToolCall] = []
+  /// True between tapping stop and the server confirming the turn ended, so the
+  /// composer can show the interrupt is in flight instead of looking inert.
+  public private(set) var interrupting = false
+  /// Composer text, held on the per-session model (not the view's `@State`) so an
+  /// unsent draft survives switching to another tab and back.
+  public var draft: String = ""
+  /// Prompts typed while a turn was running, fired one per turn as the agent
+  /// goes idle. The composer can always send; a busy agent just defers it.
+  public private(set) var queued: [String] = []
   public let sessionId: String
   public let cwd: String
+  /// Fired once, on the first user prompt this model ever sends (immediate or
+  /// queued) — lets `SessionStore` rename the drawer tab from a gist of it.
+  public var onFirstPrompt: ((String) -> Void)?
 
   /// Highest frame `seq` this model has applied. Sent back as `sinceSeq` on the
   /// next `agent.start` (reconnect or app relaunch) so the host replays only
   /// what was missed. A brand-new model starts at 0 — a cold client asking for
   /// the full transcript.
   public private(set) var lastSeq: Int = 0
-
-  /// Fired once, with the trimmed text, the first time this chat sends a user
-  /// prompt — the hook `SessionStore.newAgentChat` uses to title the tab from
-  /// the prompt's gist instead of the cwd basename. Never fires again after.
-  public var onFirstPrompt: ((String) -> Void)?
 
   private let send: (AgentOutbound) -> Void
 
@@ -44,21 +55,56 @@ public final class AgentChatModel {
     let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty, turn == .idle else { return }
     let isFirstUserPrompt = !messages.contains { $0.role == .user }
+    interrupting = false
     appendUser(text)
     turn = .thinking
     send(.prompt(text))
-    if isFirstUserPrompt {
-      onFirstPrompt?(text)
+    if isFirstUserPrompt { onFirstPrompt?(text) }
+  }
+
+  /// Sends immediately when idle, otherwise queues to fire when the running
+  /// turn ends — see `flushQueue`.
+  public func submit(_ raw: String) {
+    let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return }
+    if turn == .idle {
+      sendPrompt(text)
+    } else {
+      queued.append(text)
     }
   }
 
-  public func interrupt() { send(.interrupt) }
+  public func cancelQueued(at index: Int) {
+    guard queued.indices.contains(index) else { return }
+    queued.remove(at: index)
+  }
+
+  /// Fires the oldest queued prompt once the agent is idle. One per turn: the
+  /// next flushes when this turn's `agentDone` lands.
+  private func flushQueue() {
+    guard turn == .idle, !queued.isEmpty else { return }
+    sendPrompt(queued.removeFirst())
+  }
+
+  public func interrupt() {
+    guard turn != .idle else { return }
+    interrupting = true
+    send(.interrupt)
+  }
 
   public func resolveApproval(_ decision: String) {
     guard let pending = pendingApproval else { return }
     send(.permission(reqId: pending.id.uuidString, decision: decision))
-    pendingApproval = nil
-    if decision == "deny" { turn = .idle }
+    if approvalBacklog.isEmpty {
+      pendingApproval = nil
+      if decision == "deny" {
+        turn = .idle
+        flushQueue()
+      }
+    } else {
+      // Another tool is still waiting — show it rather than idling the turn.
+      pendingApproval = approvalBacklog.removeFirst()
+    }
   }
 
   public func appendUser(_ text: String) {
@@ -79,21 +125,35 @@ public final class AgentChatModel {
       noteSeq(seq)
       fillToolResult(text: text, isError: isError)
     case let .agentPermissionReq(reqId, name, input):
-      pendingApproval = AgentToolCall(
+      let call = AgentToolCall(
         id: UUID(uuidString: reqId) ?? UUID(),
         name: name,
         summary: summarize(name: name, inputJSON: input),
         inputJSON: input
       )
+      if pendingApproval == nil {
+        pendingApproval = call
+      } else {
+        approvalBacklog.append(call)
+      }
     case let .agentDone(seq, _):
       noteSeq(seq)
       if let last = messages.indices.last, messages[last].role == .assistant {
         messages[last].isStreaming = false
       }
       turn = .idle
+      interrupting = false
+      flushQueue()
     case let .agentError(message):
+      // Close out a half-streamed turn too, or its caret blinks forever behind
+      // the error.
+      if let last = messages.indices.last, messages[last].role == .assistant {
+        messages[last].isStreaming = false
+      }
       messages.append(AgentMessage(role: .error, blocks: [.text(id: UUID(), message)]))
       turn = .idle
+      interrupting = false
+      flushQueue()
     default:
       break
     }
@@ -163,9 +223,32 @@ public final class AgentChatModel {
     }
   }
 
-  // Edit/Write with a ready-made patch render as a diff card; otherwise nil.
+  // A ready-made patch wins; otherwise synthesize one from an Edit/Write's
+  // before/after strings so the card shows a diff instead of raw JSON.
   private func derivedDiff(name: String, inputJSON: String) -> String? {
     let obj = (try? JSONSerialization.jsonObject(with: Data(inputJSON.utf8))) as? [String: Any]
-    return obj?["_diff"] as? String
+    if let pre = obj?["_diff"] as? String, !pre.isEmpty { return pre }
+    switch name.lowercased() {
+    case "edit":
+      guard let old = obj?["old_string"] as? String, let new = obj?["new_string"] as? String
+      else { return nil }
+      let diff = unifiedLineDiff(old: old, new: new)
+      return diff.isEmpty ? nil : diff
+    case "write":
+      guard let content = obj?["content"] as? String else { return nil }
+      let diff = unifiedLineDiff(old: "", new: content)
+      return diff.isEmpty ? nil : diff
+    case "multiedit":
+      guard let edits = obj?["edits"] as? [[String: Any]] else { return nil }
+      let parts = edits.compactMap { edit -> String? in
+        guard let old = edit["old_string"] as? String, let new = edit["new_string"] as? String
+        else { return nil }
+        let diff = unifiedLineDiff(old: old, new: new)
+        return diff.isEmpty ? nil : diff
+      }
+      return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    default:
+      return nil
+    }
   }
 }
