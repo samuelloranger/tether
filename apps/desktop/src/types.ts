@@ -27,6 +27,9 @@ export interface DrawerSession {
   activity?: SessionActivity | null;
   /** 'pty' (default) or 'agent' — agent sessions render as chat panes. */
   kind?: string | null;
+  /** Client-only: chosen cwd for a freshly-created agent chat, used for its
+   * first `agent.start`. Never sent by the server; undefined for foreign rows. */
+  cwd?: string | null;
 }
 
 export function activeSessionStorageKey(hostId: string): string {

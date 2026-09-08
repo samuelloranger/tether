@@ -1,5 +1,6 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: desktop app state hook — owns hosts, sessions, pairing, and the screen state machine in one place
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { nextAgentSessionId } from './agent/newChat';
 import {
   coreCacheDelete,
   coreHostRetry,
@@ -259,6 +260,28 @@ export function useTetherDesktop() {
     [hydrateHost, selectSession],
   );
 
+  const newAgentChat = useCallback(
+    async (hostId: string, cwd: string): Promise<string | null> => {
+      const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
+      const ids = (await hydrateHost(hostId)).map((row) => row.id);
+      const nextId = nextAgentSessionId(ids);
+      if (activeHostIdRef.current !== from.host || activeSessionIdRef.current !== from.session) {
+        return null;
+      }
+      setSessions((previous) =>
+        previous.some((row) => row.hostId === hostId && row.id === nextId)
+          ? previous
+          : [
+              ...previous,
+              { hostId, id: nextId, status: 'running', last_output_at: null, kind: 'agent', cwd },
+            ],
+      );
+      selectSession(hostId, nextId);
+      return nextId;
+    },
+    [hydrateHost, selectSession],
+  );
+
   const killSessionById = useCallback(
     async (hostId: string, sessionId: string) => {
       try {
@@ -456,6 +479,7 @@ export function useTetherDesktop() {
     selectHost,
     selectSession,
     newSession,
+    newAgentChat,
     killSessionById,
     renameSessionById,
     retryHost,
