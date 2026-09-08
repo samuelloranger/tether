@@ -53,7 +53,7 @@ public final class AgentChatModel {
   }
 
   public func appendUser(_ text: String) {
-    messages.append(AgentMessage(role: .user, text: text))
+    messages.append(AgentMessage(role: .user, blocks: [.text(id: UUID(), text)]))
   }
 
   // MARK: reducer
@@ -83,7 +83,7 @@ public final class AgentChatModel {
       }
       turn = .idle
     case let .agentError(message):
-      messages.append(AgentMessage(role: .error, text: message))
+      messages.append(AgentMessage(role: .error, blocks: [.text(id: UUID(), message)]))
       turn = .idle
     default:
       break
@@ -100,9 +100,15 @@ public final class AgentChatModel {
     turn = .streaming
     if let last = messages.indices.last, messages[last].role == .assistant,
       messages[last].isStreaming {
-      messages[last].text += text
+      // A tool just ran (last block is `.tool`) → the delta starts a fresh
+      // paragraph rather than gluing onto whatever text preceded the tool.
+      if case let .text(id, existing)? = messages[last].blocks.last {
+        messages[last].blocks[messages[last].blocks.count - 1] = .text(id: id, existing + text)
+      } else {
+        messages[last].blocks.append(.text(id: UUID(), text))
+      }
     } else {
-      messages.append(AgentMessage(role: .assistant, text: text, isStreaming: true))
+      messages.append(AgentMessage(role: .assistant, blocks: [.text(id: UUID(), text)], isStreaming: true))
     }
   }
 
@@ -113,14 +119,21 @@ public final class AgentChatModel {
       inputJSON: inputJSON,
       diff: derivedDiff(name: name, inputJSON: inputJSON)
     )
-    messages[ensureAssistantIndex()].tools.append(call)
+    messages[ensureAssistantIndex()].blocks.append(.tool(call))
   }
 
   private func fillToolResult(text: String, isError: Bool) {
     guard let mi = messages.indices.last, messages[mi].role == .assistant else { return }
-    guard let ti = messages[mi].tools.lastIndex(where: { $0.result == nil }) else { return }
-    messages[mi].tools[ti].result = text
-    messages[mi].tools[ti].isError = isError
+    guard
+      let bi = messages[mi].blocks.lastIndex(where: {
+        if case let .tool(call) = $0 { return call.result == nil }
+        return false
+      })
+    else { return }
+    guard case var .tool(call) = messages[mi].blocks[bi] else { return }
+    call.result = text
+    call.isError = isError
+    messages[mi].blocks[bi] = .tool(call)
   }
 
   private func ensureAssistantIndex() -> Int {

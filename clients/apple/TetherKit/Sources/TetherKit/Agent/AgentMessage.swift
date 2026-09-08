@@ -32,26 +32,48 @@ public struct AgentToolCall: Identifiable, Equatable, Sendable {
   }
 }
 
+/// One ordered piece of an assistant turn — text and tool calls interleaved in
+/// the order the server emitted them, so the transcript reads paragraph, its
+/// tool, next paragraph, its tool… rather than all text then all tools.
+public enum AgentBlock: Identifiable, Equatable, Sendable {
+  case text(id: UUID, String)
+  case tool(AgentToolCall)
+
+  public var id: UUID {
+    switch self {
+    case let .text(id, _): id
+    case let .tool(call): call.id
+    }
+  }
+}
+
 public struct AgentMessage: Identifiable, Equatable, Sendable {
   public enum Role: Sendable { case user, assistant, error }
   public let id: UUID
   public var role: Role
-  public var text: String
-  public var tools: [AgentToolCall]
+  public var blocks: [AgentBlock]
   public var isStreaming: Bool
 
   public init(
     id: UUID = UUID(),
     role: Role,
     text: String = "",
-    tools: [AgentToolCall] = [],
+    blocks: [AgentBlock]? = nil,
     isStreaming: Bool = false
   ) {
     self.id = id
     self.role = role
-    self.text = text
-    self.tools = tools
+    self.blocks = blocks ?? (text.isEmpty ? [] : [.text(id: UUID(), text)])
     self.isStreaming = isStreaming
+  }
+
+  /// Concatenation of the `.text` blocks — the whole message for user/error
+  /// rows (which are always a single text block) and a plain-text fallback
+  /// for anything that just wants the words.
+  public var plainText: String {
+    blocks.reduce(into: "") { acc, block in
+      if case let .text(_, s) = block { acc += s }
+    }
   }
 }
 

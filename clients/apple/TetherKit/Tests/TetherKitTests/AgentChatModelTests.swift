@@ -11,7 +11,7 @@ final class AgentChatModelTests: XCTestCase {
     m.apply(.agentDelta(seq: 2, text: "lo"))
     m.apply(.agentDone(seq: 3, cost: 0))
     XCTAssertEqual(m.messages.count, 2)  // user + one assistant
-    XCTAssertEqual(m.messages.last?.text, "Hello")
+    XCTAssertEqual(m.messages.last?.plainText, "Hello")
     XCTAssertEqual(m.messages.last?.isStreaming, false)
     XCTAssertEqual(m.turn, .idle)
   }
@@ -21,11 +21,14 @@ final class AgentChatModelTests: XCTestCase {
     m.apply(.agentDelta(seq: 1, text: "running"))
     m.apply(.agentTool(seq: 2, name: "Bash", input: #"{"command":"ls"}"#))
     m.apply(.agentToolResult(seq: 3, text: "file.txt", isError: false))
-    let tools = m.messages.last?.tools ?? []
-    XCTAssertEqual(tools.count, 1)
-    XCTAssertEqual(tools.first?.name, "Bash")
-    XCTAssertEqual(tools.first?.summary, "ls")
-    XCTAssertEqual(tools.first?.result, "file.txt")
+    let toolCalls: [AgentToolCall] = m.messages.last?.blocks.compactMap {
+      if case let .tool(call) = $0 { return call }
+      return nil
+    } ?? []
+    XCTAssertEqual(toolCalls.count, 1)
+    XCTAssertEqual(toolCalls.first?.name, "Bash")
+    XCTAssertEqual(toolCalls.first?.summary, "ls")
+    XCTAssertEqual(toolCalls.first?.result, "file.txt")
   }
 
   func testErrorAppendsErrorRowAndIdles() {
@@ -33,7 +36,7 @@ final class AgentChatModelTests: XCTestCase {
     m.turn = .thinking
     m.apply(.agentError(message: "boom"))
     XCTAssertEqual(m.messages.last?.role, .error)
-    XCTAssertEqual(m.messages.last?.text, "boom")
+    XCTAssertEqual(m.messages.last?.plainText, "boom")
     XCTAssertEqual(m.turn, .idle)
   }
 
@@ -69,7 +72,7 @@ final class AgentChatModelTests: XCTestCase {
     replayed.apply(.agentDelta(seq: 1, text: "Hello"))
     replayed.apply(.agentDone(seq: 3, cost: 0))
 
-    XCTAssertEqual(live.messages.last?.text, replayed.messages.last?.text)
+    XCTAssertEqual(live.messages.last?.plainText, replayed.messages.last?.plainText)
     XCTAssertEqual(live.lastSeq, replayed.lastSeq)
   }
 
@@ -80,5 +83,25 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(m.messages.first?.role, .user)
     XCTAssertEqual(m.turn, .thinking)
     XCTAssertEqual(sent, [.prompt("do a thing")])
+  }
+
+  // The bug this fix addresses: text/tool/text must stay three ordered blocks
+  // — NOT one coalesced text block followed by a trailing tool.
+  func testTextToolTextInterleaveInArrivalOrder() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    m.apply(.agentDelta(seq: 1, text: "A"))
+    m.apply(.agentTool(seq: 2, name: "Bash", input: #"{"command":"ls"}"#))
+    m.apply(.agentDelta(seq: 3, text: "B"))
+    m.apply(.agentDone(seq: 4, cost: 0))
+
+    let blocks = m.messages.last?.blocks ?? []
+    XCTAssertEqual(blocks.count, 3)
+    guard blocks.count == 3 else { return }
+    guard case let .text(_, first) = blocks[0] else { return XCTFail("expected text block first") }
+    XCTAssertEqual(first, "A")
+    guard case let .tool(call) = blocks[1] else { return XCTFail("expected tool block second") }
+    XCTAssertEqual(call.name, "Bash")
+    guard case let .text(_, third) = blocks[2] else { return XCTFail("expected text block third") }
+    XCTAssertEqual(third, "B")
   }
 }

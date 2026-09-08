@@ -102,6 +102,20 @@ function toolResultText(
   return '';
 }
 
+/** True for the `stream_event` that opens a NEW assistant message (a reasoning
+ * step boundary) — used by the driver loop to insert a paragraph break
+ * between consecutive steps that emit no tool call in between. */
+export function isMessageStartEvent(line: string): boolean {
+  try {
+    const obj = JSON.parse(line) as Record<string, unknown>;
+    if (obj.type !== 'stream_event') return false;
+    const event = obj.event as Record<string, unknown> | undefined;
+    return event?.type === 'message_start';
+  } catch {
+    return false;
+  }
+}
+
 function extractSessionId(line: string): string | null {
   try {
     const obj = JSON.parse(line) as Record<string, unknown>;
@@ -166,6 +180,31 @@ export class AgentClaudeDriver implements AgentDriver {
     const stderrText = new Response(child.stderr).text();
     stderrText.catch(() => {});
 
+    // Claude emits several assistant messages per turn (reasoning steps). With
+    // no tool call between two of them the text otherwise glues together with
+    // no separator — insert a synthetic blank-line delta at each new message
+    // that follows text we've already emitted.
+    let hasEmittedText = false;
+    let sawMessageStart = false;
+
+    const handleLine = (line: string): AgentEvent[] => {
+      const sid = extractSessionId(line);
+      if (sid) this.sessionId = sid;
+      if (isMessageStartEvent(line)) {
+        const events: AgentEvent[] = [];
+        if (sawMessageStart && hasEmittedText) events.push({ t: 'delta', text: '\n\n' });
+        sawMessageStart = true;
+        return events;
+      }
+      const mapped = mapClaudeLine(line);
+      if (mapped === null) return [];
+      const events = Array.isArray(mapped) ? mapped : [mapped];
+      for (const ev of events) {
+        if (ev.t === 'delta') hasEmittedText = true;
+      }
+      return events;
+    };
+
     try {
       let buf = '';
       const reader = child.stdout.getReader();
@@ -179,20 +218,11 @@ export class AgentClaudeDriver implements AgentDriver {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
           idx = buf.indexOf('\n');
-          const sid = extractSessionId(line);
-          if (sid) this.sessionId = sid;
-          const mapped = mapClaudeLine(line);
-          if (mapped === null) continue;
-          for (const ev of Array.isArray(mapped) ? mapped : [mapped]) yield ev;
+          for (const ev of handleLine(line)) yield ev;
         }
       }
       if (buf.trim()) {
-        const sid = extractSessionId(buf);
-        if (sid) this.sessionId = sid;
-        const mapped = mapClaudeLine(buf);
-        if (mapped !== null) {
-          for (const ev of Array.isArray(mapped) ? mapped : [mapped]) yield ev;
-        }
+        for (const ev of handleLine(buf)) yield ev;
       }
 
       const exitCode = await child.exited;

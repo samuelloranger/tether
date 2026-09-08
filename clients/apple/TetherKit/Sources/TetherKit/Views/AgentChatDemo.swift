@@ -91,35 +91,36 @@
         AgentMessage(role: .user, text: "Add a rate limiter to the login route — 5 tries per 15 min."),
         AgentMessage(
           role: .assistant,
-          text: "I'll add a token-bucket limiter keyed by IP. First, let me read the route.",
-          tools: [
-            AgentToolCall(
-              name: "Read",
-              summary: "src/routes/login.ts",
-              inputJSON: "{\n  \"file_path\" : \"src/routes/login.ts\"\n}",
-              result: "export function login(req, res) {\n  const { email, password } = req.body\n  // ...verify\n}"
-            )
-          ]
-        ),
-        AgentMessage(
-          role: .assistant,
-          text:
-            "Here's the limiter, then I'll wire it into the route:\n```ts\nconst bucket = new Map<string, number[]>()\nfunction allow(ip: string) {\n  const now = Date.now()\n  const hits = (bucket.get(ip) ?? []).filter(t => now - t < 900_000)\n  hits.push(now)\n  bucket.set(ip, hits)\n  return hits.length <= 5\n}\n```",
-          tools: [
-            AgentToolCall(
-              name: "Edit",
-              summary: "src/routes/login.ts",
-              inputJSON: "{ \"file_path\": \"src/routes/login.ts\" }",
-              result: "Applied 1 edit.",
-              diff:
-                "@@ -1,4 +1,7 @@\n export function login(req, res) {\n+  if (!allow(req.ip)) {\n+    return res.status(429).json({ error: 'too many attempts' })\n+  }\n   const { email, password } = req.body\n   // ...verify\n }"
-            )
-          ]
-        ),
-        AgentMessage(
-          role: .assistant,
-          text:
-            "Done. Login now allows **5 attempts per 15 minutes** per IP and returns `429` after that. Want me to add a test?",
+          blocks: [
+            .text(id: UUID(), "I'll add a token-bucket limiter keyed by IP. First, let me read the route."),
+            .tool(
+              AgentToolCall(
+                name: "Read",
+                summary: "src/routes/login.ts",
+                inputJSON: "{\n  \"file_path\" : \"src/routes/login.ts\"\n}",
+                result:
+                  "export function login(req, res) {\n  const { email, password } = req.body\n  // ...verify\n}"
+              )
+            ),
+            .text(
+              id: UUID(),
+              "Here's the limiter, then I'll wire it into the route:\n```ts\nconst bucket = new Map<string, number[]>()\nfunction allow(ip: string) {\n  const now = Date.now()\n  const hits = (bucket.get(ip) ?? []).filter(t => now - t < 900_000)\n  hits.push(now)\n  bucket.set(ip, hits)\n  return hits.length <= 5\n}\n```"
+            ),
+            .tool(
+              AgentToolCall(
+                name: "Edit",
+                summary: "src/routes/login.ts",
+                inputJSON: "{ \"file_path\": \"src/routes/login.ts\" }",
+                result: "Applied 1 edit.",
+                diff:
+                  "@@ -1,4 +1,7 @@\n export function login(req, res) {\n+  if (!allow(req.ip)) {\n+    return res.status(429).json({ error: 'too many attempts' })\n+  }\n   const { email, password } = req.body\n   // ...verify\n }"
+              )
+            ),
+            .text(
+              id: UUID(),
+              "Done. Login now allows **5 attempts per 15 minutes** per IP and returns `429` after that. Want me to add a test?"
+            ),
+          ],
           isStreaming: true
         ),
       ]
