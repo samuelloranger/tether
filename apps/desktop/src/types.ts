@@ -25,6 +25,8 @@ export interface DrawerSession {
   name?: string | null;
   auto_title?: string | null;
   activity?: SessionActivity | null;
+  /** 'pty' (default) or 'agent' — agent sessions render as chat panes. */
+  kind?: string | null;
 }
 
 export function activeSessionStorageKey(hostId: string): string {
