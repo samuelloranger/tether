@@ -102,7 +102,11 @@ function liveSessionKeys(
   for (const view of views) {
     for (const leaf of leaves(view.tree)) {
       if (!leaf.session) continue;
-      if (!known.has(leaf.session.hostId)) {
+      // Keep a leaf live when its host health is still unknown, or when it is an
+      // agent chat: a freshly-created agent session isn't in the server's list
+      // until its first agent.start lands, so the poll must not prune the pane
+      // that sends it.
+      if (!known.has(leaf.session.hostId) || leaf.session.kind === 'agent') {
         live.add(sessionKey(leaf.session.hostId, leaf.session.sessionId));
       }
     }
@@ -354,7 +358,7 @@ export function App() {
     void app.newAgentChat(hostId, cwd).then((sessionId) => {
       if (!sessionId) return;
       const current = viewStateRef.current;
-      const solo = newSoloView({ hostId, sessionId });
+      const solo = newSoloView({ hostId, sessionId, kind: 'agent', cwd });
       applyViews({ views: [...current.views, solo], activeViewId: solo.id });
     });
     if (!layout.docked) setDrawerOpen(false);
@@ -539,6 +543,7 @@ export function App() {
               if (!layout.docked) setDrawerOpen(false);
             }}
             onNew={newTerminalOn}
+            onNewAgentChat={newAgentChatOn}
             onRequestKill={modals.openKill}
             onRequestRename={modals.openRename}
             onRetryHost={app.retryHost}

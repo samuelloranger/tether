@@ -117,7 +117,9 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         const drawer = props.sessions.find(
           (row) => row.hostId === session.hostId && row.id === session.sessionId,
         );
-        const isAgent = drawer?.kind === 'agent';
+        // Leaf kind is durable; DrawerSession.kind is poll-transient. Either
+        // marking the session agent is authoritative.
+        const isAgent = session.kind === 'agent' || drawer?.kind === 'agent';
         return (
           <div
             key={leaf.paneId}
@@ -138,7 +140,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
                 hostId={session.hostId}
                 sessionId={session.sessionId}
                 noiseAddress={noiseSessionAddress(host)}
-                cwd={drawer?.cwd ?? undefined}
+                cwd={session.cwd ?? drawer?.cwd ?? undefined}
               />
             ) : (
               <TerminalPane

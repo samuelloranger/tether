@@ -20,6 +20,7 @@ interface SessionDrawerProps {
   onSelect: (hostId: string, sessionId: string) => void;
   /** Per host: a single global button can only mean "the active host". */
   onNew: (hostId: string) => void;
+  onNewAgentChat: (hostId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestRename: (hostId: string, sessionId: string, text: string, placeholder: string) => void;
   onRetryHost: (hostId: string) => void;
@@ -203,6 +204,7 @@ export function SessionDrawer({
   onTogglePin,
   onSelect,
   onNew,
+  onNewAgentChat,
   onRequestKill,
   onRequestRename,
   onRetryHost,
@@ -289,6 +291,13 @@ export function SessionDrawer({
                 onClick={() => onNew(host.id)}
               >
                 New terminal
+              </button>
+              <button
+                type="button"
+                className="secondary drawer-host-new"
+                onClick={() => onNewAgentChat(host.id)}
+              >
+                ✳ New agent chat
               </button>
             </section>
           );
