@@ -33,7 +33,8 @@ export function bindAgentSession(input: {
   open?: AgentOpener;
 }): AgentBinding {
   const open = input.open ?? openNoiseSocket;
-  const connId = `agent-${(bindSeq += 1)}`;
+  bindSeq += 1;
+  const connId = `agent-${bindSeq}`;
   let socket: TerminalSocket | null = null;
   let closed = false;
 
