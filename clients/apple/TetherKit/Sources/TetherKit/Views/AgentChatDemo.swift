@@ -68,6 +68,10 @@
       }
       .background(TetherColors.background)
       .preferredColorScheme(.dark)
+      // Mirror RootView: the chat lifts its own composer over the keyboard, so
+      // the harness must also opt out of SwiftUI's automatic avoidance — else
+      // both fire and the composer floats a keyboard-height above the keyboard.
+      .ignoresSafeArea(.keyboard, edges: .bottom)
     }
   }
 
