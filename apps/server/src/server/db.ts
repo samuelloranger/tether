@@ -150,6 +150,11 @@ const migrations = [
     name: 'push_devices_auth_device_id',
     up: `ALTER TABLE push_devices ADD COLUMN auth_device_id TEXT;`,
   },
+  {
+    version: 11,
+    name: 'session_kind',
+    up: `ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'pty';`,
+  },
 ];
 
 export function runMigrations() {
@@ -293,6 +298,7 @@ export interface Session {
   name: string | null;
   pruned_before: number;
   workspace_root: string | null;
+  kind: 'pty' | 'agent';
 }
 
 export interface TerminalLog {
@@ -317,6 +323,22 @@ export function upsertSession(
     VALUES ($id, $command, $status, $workspaceRoot)
     ON CONFLICT(id) DO UPDATE SET command = excluded.command, status = excluded.status
   `).run({ $id: id, $command: command, $status: status, $workspaceRoot: workspaceRoot ?? null });
+}
+
+export function createAgentSession(
+  db: Database,
+  args: { id: string; workspaceRoot: string },
+): void {
+  db.query(`
+    INSERT INTO sessions (id, command, status, workspace_root, kind)
+    VALUES ($id, $command, $status, $workspaceRoot, $kind)
+  `).run({
+    $id: args.id,
+    $command: '<agent>',
+    $status: 'running',
+    $workspaceRoot: args.workspaceRoot,
+    $kind: 'agent',
+  });
 }
 
 export function addTerminalLog(sessionId: string, chunk: string): number {

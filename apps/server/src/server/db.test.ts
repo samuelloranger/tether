@@ -1,6 +1,7 @@
 // Run: TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/server/db.test.ts
 import {
   addTerminalLog,
+  createAgentSession,
   db,
   getLogs,
   getSession,
@@ -198,6 +199,13 @@ function ok(cond: boolean, msg: string) {
     session.command === 'zsh' && session.status === 'stopped',
     'other session fields still update',
   );
+}
+
+{
+  createAgentSession(db, { id: 'a1', workspaceRoot: '/home/u/sites/tether' });
+  const row = getSession('a1');
+  ok(row?.kind === 'agent', 'agent session has kind=agent');
+  ok(row?.workspace_root === '/home/u/sites/tether', 'agent session stores workspace_root');
 }
 
 console.log(`\n  ${pass} assertions passed\n`);
