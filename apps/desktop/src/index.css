@@ -2224,6 +2224,10 @@ label > textarea {
   width: 100%;
   height: auto;
   display: grid;
+  /* Pin the single column to the full row. Without this the implicit track is
+     content-sized, so short-subject rows ("release: v4.2.4") sized to their
+     text and sat narrow while long ones filled the row. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   justify-items: start;
   text-align: left;
@@ -2237,6 +2241,12 @@ label > textarea {
 .git-history-row:hover:not(:disabled) {
   background: var(--surface-raised);
   color: var(--text);
+}
+
+/* Fill the row: short subjects ("release: v4.2.4") otherwise sat narrow,
+   the span sized to its content inside the start-aligned grid cell. */
+.git-history-row > span {
+  width: 100%;
 }
 
 .git-history-sha {
