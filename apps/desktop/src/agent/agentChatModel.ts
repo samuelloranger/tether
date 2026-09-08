@@ -17,14 +17,20 @@ function toUsage(cost: number | undefined, usage: unknown): AgentUsage | undefin
   return { inputTokens, outputTokens, costUsd: cost };
 }
 
-/** Fold one turn's usage into the running session total. */
-function addUsage(total: AgentUsage | null, next: AgentUsage): AgentUsage {
-  const cost = (total?.costUsd ?? 0) + (next.costUsd ?? 0);
-  return {
-    inputTokens: (total?.inputTokens ?? 0) + next.inputTokens,
-    outputTokens: (total?.outputTokens ?? 0) + next.outputTokens,
-    costUsd: cost || undefined,
-  };
+/** Sum every message's usage into one session total, or null if none. */
+function sumUsage(messages: AgentMessage[]): AgentUsage | null {
+  let seen = false;
+  const total: AgentUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  for (const m of messages) {
+    if (!m.usage) continue;
+    seen = true;
+    total.inputTokens += m.usage.inputTokens;
+    total.outputTokens += m.usage.outputTokens;
+    total.costUsd = (total.costUsd ?? 0) + (m.usage.costUsd ?? 0);
+  }
+  if (!seen) return null;
+  if (!total.costUsd) total.costUsd = undefined;
+  return total;
 }
 
 export interface PendingApproval {
@@ -61,7 +67,6 @@ export class AgentChatModel {
   private approvalBacklog: PendingApproval[] = [];
   private queued: string[] = [];
   private draft = '';
-  private sessionUsage: AgentUsage | null = null;
   private lastUserPrompt: string | null = null;
   private listeners = new Set<() => void>();
   private cached: AgentSnapshot | null = null;
@@ -86,7 +91,7 @@ export class AgentChatModel {
         queued: this.queued,
         draft: this.draft,
         canRetry: this.turn === 'idle' && this.lastUserPrompt != null,
-        sessionUsage: this.sessionUsage,
+        sessionUsage: sumUsage(this.messages),
       };
     }
     return this.cached;
@@ -137,12 +142,14 @@ export class AgentChatModel {
         break;
       }
       case 'agent.done': {
-        const usage = toUsage(frame.cost, frame.usage);
         const last = this.messages.at(-1);
         if (last?.isStreaming) {
-          this.replaceLast({ ...last, isStreaming: false, usage });
+          this.replaceLast({
+            ...last,
+            isStreaming: false,
+            usage: toUsage(frame.cost, frame.usage),
+          });
         }
-        if (usage) this.sessionUsage = addUsage(this.sessionUsage, usage);
         this.turn = 'idle';
         break;
       }
