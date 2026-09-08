@@ -1,3 +1,4 @@
+import { AgentClaudeDriver } from './agentClaudeDriver';
 import type { AgentDriver } from './agentDriver';
 import { AgentRegistry } from './agentRegistry';
 import { createAgentSession, db, getSession } from './db';
@@ -59,7 +60,7 @@ export interface SessionDeps {
 }
 
 function defaultAgentDriverFactory(): AgentDriver {
-  throw new Error('agent driver not configured');
+  return new AgentClaudeDriver();
 }
 
 function defaultGetReplayLogs(sessionId: string, sinceId: number) {
