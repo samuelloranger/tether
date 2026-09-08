@@ -102,7 +102,27 @@ test('result line yields done with cost and usage', () => {
   expect(mapClaudeLine(line)).toEqual({
     t: 'done',
     cost: 0.0123,
-    usage: { duration_ms: 4567, is_error: false },
+    usage: { duration_ms: 4567, is_error: false, input_tokens: 0, output_tokens: 0 },
+  });
+});
+
+test('result line sums input token buckets (fresh + cache read + cache write)', () => {
+  const line = JSON.stringify({
+    type: 'result',
+    total_cost_usd: 0.5,
+    duration_ms: 100,
+    is_error: false,
+    usage: {
+      input_tokens: 100,
+      cache_read_input_tokens: 4000,
+      cache_creation_input_tokens: 900,
+      output_tokens: 250,
+    },
+  });
+  expect(mapClaudeLine(line)).toEqual({
+    t: 'done',
+    cost: 0.5,
+    usage: { duration_ms: 100, is_error: false, input_tokens: 5000, output_tokens: 250 },
   });
 });
 
@@ -111,7 +131,7 @@ test('result line without total_cost_usd defaults cost to 0', () => {
   expect(mapClaudeLine(line)).toEqual({
     t: 'done',
     cost: 0,
-    usage: { duration_ms: 100, is_error: true },
+    usage: { duration_ms: 100, is_error: true, input_tokens: 0, output_tokens: 0 },
   });
 });
 

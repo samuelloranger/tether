@@ -25,7 +25,7 @@ final class AgentControlTests: XCTestCase {
     let m = AgentChatModel(sessionId: "a", cwd: "/tmp")
     m.sendPrompt("go")
     m.interrupt()
-    m.apply(.agentDone(seq: 1, cost: 0))
+    m.apply(.agentDone(seq: 1, cost: 0, inputTokens: 0, outputTokens: 0))
     XCTAssertFalse(m.interrupting)
   }
 

@@ -9,7 +9,7 @@ final class AgentChatModelTests: XCTestCase {
     m.appendUser("hello")
     m.apply(.agentDelta(seq: 1, text: "Hel"))
     m.apply(.agentDelta(seq: 2, text: "lo"))
-    m.apply(.agentDone(seq: 3, cost: 0))
+    m.apply(.agentDone(seq: 3, cost: 0, inputTokens: 0, outputTokens: 0))
     XCTAssertEqual(m.messages.count, 2)  // user + one assistant
     XCTAssertEqual(m.messages.last?.plainText, "Hello")
     XCTAssertEqual(m.messages.last?.isStreaming, false)
@@ -41,6 +41,28 @@ final class AgentChatModelTests: XCTestCase {
     m.draft = "user is typing a long message"
     m.draft = "user is typing a long message that keeps growing"
     XCTAssertEqual(m.revision, afterTool, "draft edits must not bump revision")
+  }
+
+  func testDoneStoresUsageOnAssistantTurn() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    m.appendUser("hi")
+    m.apply(.agentDelta(seq: 1, text: "done"))
+    m.apply(.agentDone(seq: 2, cost: 0.03, inputTokens: 1200, outputTokens: 340))
+    XCTAssertEqual(m.messages.last?.usage, AgentUsage(cost: 0.03, inputTokens: 1200, outputTokens: 340))
+  }
+
+  func testRetryResendsLastPromptAndDropsErrorRow() {
+    var sent: [AgentOutbound] = []
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp", send: { sent.append($0) })
+    m.submit("do the thing")
+    m.apply(.agentError(message: "boom"))
+    XCTAssertEqual(m.messages.last?.role, .error)
+    XCTAssertTrue(m.canRetry)
+
+    m.retryLast()
+    XCTAssertFalse(m.messages.contains { $0.role == .error }, "error row dropped on retry")
+    XCTAssertEqual(m.turn, .thinking)
+    XCTAssertEqual(sent, [.prompt("do the thing"), .prompt("do the thing")])
   }
 
   func testToolThenResultAttachesToAssistant() {
@@ -82,7 +104,7 @@ final class AgentChatModelTests: XCTestCase {
     m.apply(.agentDelta(seq: 2, text: "lo"))
     m.apply(.agentTool(seq: 3, name: "Bash", input: "{}"))
     m.apply(.agentToolResult(seq: 4, text: "ok", isError: false))
-    m.apply(.agentDone(seq: 5, cost: 0))
+    m.apply(.agentDone(seq: 5, cost: 0, inputTokens: 0, outputTokens: 0))
     XCTAssertEqual(m.lastSeq, 5)
   }
 
@@ -93,11 +115,11 @@ final class AgentChatModelTests: XCTestCase {
     let live = AgentChatModel(sessionId: "a1", cwd: "/tmp")
     live.apply(.agentDelta(seq: 1, text: "Hel"))
     live.apply(.agentDelta(seq: 2, text: "lo"))
-    live.apply(.agentDone(seq: 3, cost: 0))
+    live.apply(.agentDone(seq: 3, cost: 0, inputTokens: 0, outputTokens: 0))
 
     let replayed = AgentChatModel(sessionId: "a1", cwd: "/tmp")
     replayed.apply(.agentDelta(seq: 1, text: "Hello"))
-    replayed.apply(.agentDone(seq: 3, cost: 0))
+    replayed.apply(.agentDone(seq: 3, cost: 0, inputTokens: 0, outputTokens: 0))
 
     XCTAssertEqual(live.messages.last?.plainText, replayed.messages.last?.plainText)
     XCTAssertEqual(live.lastSeq, replayed.lastSeq)
@@ -132,7 +154,7 @@ final class AgentChatModelTests: XCTestCase {
     m.apply(.agentDelta(seq: 1, text: "A"))
     m.apply(.agentTool(seq: 2, name: "Bash", input: #"{"command":"ls"}"#))
     m.apply(.agentDelta(seq: 3, text: "B"))
-    m.apply(.agentDone(seq: 4, cost: 0))
+    m.apply(.agentDone(seq: 4, cost: 0, inputTokens: 0, outputTokens: 0))
 
     let blocks = m.messages.last?.blocks ?? []
     XCTAssertEqual(blocks.count, 3)

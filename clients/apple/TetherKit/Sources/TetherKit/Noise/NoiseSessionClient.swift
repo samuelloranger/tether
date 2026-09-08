@@ -48,8 +48,9 @@ public enum NoiseServerMessage: Sendable, Equatable {
   case agentToolResult(seq: Int, text: String, isError: Bool)
   /// Agent chat: a tool wants approval before it runs (P3).
   case agentPermissionReq(reqId: String, name: String, input: String)
-  /// Agent chat: the turn finished; `cost` is the turn's USD cost.
-  case agentDone(seq: Int, cost: Double)
+  /// Agent chat: the turn finished. `cost` is the turn's USD cost; `inputTokens`
+  /// / `outputTokens` are the turn's token usage (0 when the host didn't report).
+  case agentDone(seq: Int, cost: Double, inputTokens: Int, outputTokens: Int)
   /// Agent chat: the turn failed.
   case agentError(message: String)
 }
@@ -414,7 +415,14 @@ public final class NoiseChannel {
 extension NoiseServerMessage: Decodable {
   private enum CodingKeys: String, CodingKey {
     case t, id, chunk, exitCode, items, target, ok, error, token, expiresAt
-    case seq, text, name, input, isError, reqId, cost, message
+    case seq, text, name, input, isError, reqId, cost, message, usage
+  }
+
+  /// The `usage` sub-object on an `agent.done` frame. Tokens are optional so an
+  /// older host that omits them decodes as 0 rather than failing the frame.
+  private struct AgentUsageWire: Decodable {
+    let input_tokens: Int?
+    let output_tokens: Int?
   }
 
   public init(from decoder: Decoder) throws {
@@ -467,9 +475,12 @@ extension NoiseServerMessage: Decodable {
         input: input.prettyString
       )
     case "agent.done":
+      let usage = try container.decodeIfPresent(AgentUsageWire.self, forKey: .usage)
       self = .agentDone(
         seq: try container.decode(Int.self, forKey: .seq),
-        cost: try container.decodeIfPresent(Double.self, forKey: .cost) ?? 0
+        cost: try container.decodeIfPresent(Double.self, forKey: .cost) ?? 0,
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0
       )
     case "agent.error":
       self = .agentError(message: try container.decode(String.self, forKey: .message))
