@@ -10,14 +10,18 @@ import SwiftUI
 public struct AgentChatView: View {
   @Bindable public var model: AgentChatModel
   @State private var keyboardInset: CGFloat = 0
-  @FocusState private var composerFocused: Bool
 
   public init(model: AgentChatModel) { self.model = model }
 
   public var body: some View {
     VStack(spacing: 0) {
-      transcript
-      composer
+      // Transcript and composer are separate views on purpose: the composer owns
+      // `model.draft`, so a keystroke re-evaluates only the composer. If the
+      // transcript read `draft` (directly or by sharing a body), every keystroke
+      // would re-parse the whole transcript's markdown and re-measure it — which,
+      // with a bottom scroll anchor, yanked the view around while typing.
+      AgentTranscriptView(model: model)
+      AgentComposerView(model: model)
     }
     // RootView ignores the keyboard safe area at the root (the terminal measures
     // the keyboard itself), so this surface must lift its own composer above the
@@ -55,38 +59,58 @@ public struct AgentChatView: View {
       return max(0, window.bounds.maxY - end.minY - window.safeAreaInsets.bottom)
     }
   #endif
+}
 
-  private var transcript: some View {
-    // `.defaultScrollAnchor(.bottom)` owns BOTH jobs: it opens an existing chat
-    // at its foot AND keeps the foot pinned as content grows (new turns, streamed
-    // deltas). An earlier version drove that by hand with `withAnimation
-    // scrollTo` on four onChange handlers; on send they raced each other and the
-    // anchor and overshot past the content into the window backdrop before an
-    // update pulled it back. One anchor, no manual scrolling, no fight.
-    ScrollView(.vertical) {
-      if model.messages.isEmpty {
-        emptyState.padding(.top, 80)
-      } else {
-        LazyVStack(alignment: .leading, spacing: 16) {
-          ForEach(model.messages) { message in
-            AgentMessageRow(message: message)
-              .id(message.id)
+// MARK: - Transcript
+
+/// The scrolling record of the conversation. Reads `messages` / `turn` /
+/// `queued` / `revision` but NEVER `draft`, so typing does not re-render it.
+struct AgentTranscriptView: View {
+  let model: AgentChatModel
+  /// The scroll follows the foot only while the user is already near it. It
+  /// starts true (a fresh chat opens pinned) and flips off the moment the user
+  /// scrolls up to read history, so streamed deltas stop yanking them back.
+  @State private var following = true
+
+  private let bottomID = "agent.transcript.bottom"
+
+  var body: some View {
+    ScrollViewReader { proxy in
+      ScrollView(.vertical) {
+        if model.messages.isEmpty {
+          emptyState.padding(.top, 80)
+        } else {
+          LazyVStack(alignment: .leading, spacing: 16) {
+            ForEach(model.messages) { message in
+              AgentMessageRow(message: message)
+                .id(message.id)
+            }
+            if model.turn == .thinking { ThinkingRow() }
+            ForEach(Array(model.queued.enumerated()), id: \.offset) { index, text in
+              QueuedRow(text: text) { model.cancelQueued(at: index) }
+            }
+            // Zero-height sentinel the reader scrolls to. Anchoring on a fixed
+            // trailing element (not `.defaultScrollAnchor`) means only an
+            // explicit `scrollTo` moves the view — never a keyboard resize.
+            Color.clear.frame(height: 1).id(bottomID)
           }
-          if model.turn == .thinking { ThinkingRow() }
-          ForEach(Array(model.queued.enumerated()), id: \.offset) { index, text in
-            QueuedRow(text: text) { model.cancelQueued(at: index) }
-          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 18)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 18)
+      }
+      // A drag through the transcript pulls the keyboard down with the finger.
+      // (Dropped the blanket tap-to-dismiss gesture: it also swallowed taps
+      // meant for tool cards and text selection.)
+      .scrollDismissesKeyboard(.interactively)
+      .modifier(NearBottomTracker { following = $0 })
+      .onChange(of: model.revision) {
+        guard following else { return }
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+      }
+      .onAppear {
+        proxy.scrollTo(bottomID, anchor: .bottom)
       }
     }
-    .defaultScrollAnchor(.bottom)
-    // A drag through the transcript pulls the keyboard down with the finger; a
-    // plain tap dismisses it outright. Without either, the composer keyboard
-    // stayed up over the transcript with no way down but the send button.
-    .scrollDismissesKeyboard(.interactively)
-    .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
   }
 
   private var emptyState: some View {
@@ -97,24 +121,50 @@ public struct AgentChatView: View {
       Text("Ask Claude Code")
         .font(.headline)
         .foregroundStyle(TetherColors.textPrimary)
-      Text(shortCwd)
+      Text(URL(fileURLWithPath: model.cwd).lastPathComponent)
         .font(.system(.caption, design: .monospaced))
         .foregroundStyle(TetherColors.textFaint)
     }
     .frame(maxWidth: .infinity)
   }
+}
 
-  private var shortCwd: String {
-    URL(fileURLWithPath: model.cwd).lastPathComponent
+/// Reports whether the scroll is parked within a hair of the foot, so the
+/// transcript knows when to keep following streamed output. Uses the iOS 18
+/// scroll-geometry hook where present; older systems just keep following (only
+/// real content changes trigger a scroll there, so nothing runs away).
+private struct NearBottomTracker: ViewModifier {
+  let onChange: (Bool) -> Void
+
+  func body(content: Content) -> some View {
+    if #available(iOS 18.0, *) {
+      content.onScrollGeometryChange(for: Bool.self) { geo in
+        geo.contentOffset.y >= geo.contentSize.height - geo.containerSize.height
+          - geo.contentInsets.bottom - 48
+      } action: { _, nearBottom in
+        onChange(nearBottom)
+      }
+    } else {
+      content
+    }
   }
+}
 
-  private var composer: some View {
+// MARK: - Composer
+
+/// The input row. Owns `model.draft`; isolating it here keeps typing from
+/// re-rendering the transcript.
+struct AgentComposerView: View {
+  @Bindable var model: AgentChatModel
+  @FocusState private var focused: Bool
+
+  var body: some View {
     HStack(alignment: .bottom, spacing: 10) {
       TextField("Message Claude Code…", text: $model.draft, axis: .vertical)
         .lineLimit(1...5)
         .font(.body)
         .foregroundStyle(TetherColors.textPrimary)
-        .focused($composerFocused)
+        .focused($focused)
         .padding(.horizontal, 13)
         .padding(.vertical, 9)
         .background(TetherColors.input)

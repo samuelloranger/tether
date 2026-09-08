@@ -31,6 +31,10 @@
       case "diff":
         ScrollView { AgentToolCard(call: AgentChatSeed.editCall, startExpanded: true).padding(16) }
           .background(TetherColors.background)
+      case "scroll":
+        // Long, idle transcript for the scroll-stability check: it must NOT move
+        // when the keyboard appears or while the composer is being typed into.
+        AgentChatView(model: AgentChatSeed.longConversation())
       default:
         AgentChatView(model: AgentChatSeed.conversation())
       }
@@ -64,6 +68,10 @@
       }
       .background(TetherColors.background)
       .preferredColorScheme(.dark)
+      // Mirror RootView: the chat lifts its own composer over the keyboard, so
+      // the harness must also opt out of SwiftUI's automatic avoidance — else
+      // both fire and the composer floats a keyboard-height above the keyboard.
+      .ignoresSafeArea(.keyboard, edges: .bottom)
     }
   }
 
@@ -125,6 +133,48 @@
         ),
       ]
       m.turn = .streaming
+      return m
+    }
+
+    /// An idle multi-turn transcript tall enough to overflow the screen, so a
+    /// scroll away from the foot is visible and can be checked to hold steady.
+    @MainActor static func longConversation() -> AgentChatModel {
+      let m = AgentChatModel(sessionId: "scroll", cwd: "/home/sam/sites/tether")
+      var msgs: [AgentMessage] = []
+      let asks = [
+        "Add a rate limiter to the login route — 5 tries per 15 min.",
+        "Now cover it with a test.",
+        "The test is flaky on CI. Look into it.",
+        "Good. Wire the limiter into the signup route too.",
+        "Add a metrics counter for rejected requests.",
+      ]
+      for (i, ask) in asks.enumerated() {
+        msgs.append(AgentMessage(role: .user, text: ask))
+        msgs.append(
+          AgentMessage(
+            role: .assistant,
+            blocks: [
+              .text(
+                id: UUID(),
+                "On it. Here's turn \(i + 1): I read the route, made the change, and verified it. "
+                  + "The limiter is a token bucket keyed by IP with a 15-minute window."),
+              .tool(
+                AgentToolCall(
+                  name: i % 2 == 0 ? "Read" : "Edit",
+                  summary: "src/routes/login.ts",
+                  inputJSON: "{ \"file_path\": \"src/routes/login.ts\" }",
+                  result: "Applied \(i + 1) edit(s).",
+                  diff:
+                    "@@ -1,4 +1,7 @@\n export function login(req, res) {\n+  if (!allow(req.ip)) {\n+    return res.status(429).json({ error: 'too many attempts' })\n+  }\n   const { email, password } = req.body\n }"
+                )),
+              .text(
+                id: UUID(),
+                "Done with turn \(i + 1). Everything is green — let me know what's next."),
+            ]
+          ))
+      }
+      m.messages = msgs
+      m.turn = .idle
       return m
     }
 

@@ -41,6 +41,12 @@ public final class AgentChatModel {
   /// the full transcript.
   public private(set) var lastSeq: Int = 0
 
+  /// Bumped on every change to transcript *content* (a new message, a streamed
+  /// delta, a tool card, a result). The view watches this to follow the foot as
+  /// the agent talks — and, critically, NOT on keyboard frame changes or draft
+  /// edits, which must never move the scroll.
+  public private(set) var revision: Int = 0
+
   private let send: (AgentOutbound) -> Void
 
   public init(sessionId: String, cwd: String, send: @escaping (AgentOutbound) -> Void = { _ in }) {
@@ -71,6 +77,7 @@ public final class AgentChatModel {
       sendPrompt(text)
     } else {
       queued.append(text)
+      revision += 1
     }
   }
 
@@ -109,6 +116,7 @@ public final class AgentChatModel {
 
   public func appendUser(_ text: String) {
     messages.append(AgentMessage(role: .user, blocks: [.text(id: UUID(), text)]))
+    revision += 1
   }
 
   // MARK: reducer
@@ -143,6 +151,7 @@ public final class AgentChatModel {
       }
       turn = .idle
       interrupting = false
+      revision += 1
       flushQueue()
     case let .agentError(message):
       // Close out a half-streamed turn too, or its caret blinks forever behind
@@ -153,6 +162,7 @@ public final class AgentChatModel {
       messages.append(AgentMessage(role: .error, blocks: [.text(id: UUID(), message)]))
       turn = .idle
       interrupting = false
+      revision += 1
       flushQueue()
     default:
       break
@@ -179,6 +189,7 @@ public final class AgentChatModel {
     } else {
       messages.append(AgentMessage(role: .assistant, blocks: [.text(id: UUID(), text)], isStreaming: true))
     }
+    revision += 1
   }
 
   private func addTool(name: String, inputJSON: String) {
@@ -189,6 +200,7 @@ public final class AgentChatModel {
       diff: derivedDiff(name: name, inputJSON: inputJSON)
     )
     messages[ensureAssistantIndex()].blocks.append(.tool(call))
+    revision += 1
   }
 
   private func fillToolResult(text: String, isError: Bool) {
@@ -203,6 +215,7 @@ public final class AgentChatModel {
     call.result = text
     call.isError = isError
     messages[mi].blocks[bi] = .tool(call)
+    revision += 1
   }
 
   private func ensureAssistantIndex() -> Int {

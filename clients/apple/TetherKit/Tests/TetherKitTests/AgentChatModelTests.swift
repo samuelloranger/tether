@@ -16,6 +16,33 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(m.turn, .idle)
   }
 
+  /// The transcript view follows the foot by watching `revision`. It MUST tick
+  /// on real content (so streamed output stays pinned) and MUST NOT tick on a
+  /// draft edit (or typing would yank the scroll — the device bug this fixes).
+  func testRevisionTracksContentNotDraft() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    XCTAssertEqual(m.revision, 0)
+
+    m.appendUser("hi")
+    let afterUser = m.revision
+    XCTAssertGreaterThan(afterUser, 0)
+
+    m.apply(.agentDelta(seq: 1, text: "one"))
+    m.apply(.agentDelta(seq: 2, text: "two"))
+    let afterDeltas = m.revision
+    XCTAssertGreaterThan(afterDeltas, afterUser)
+
+    m.apply(.agentTool(seq: 3, name: "Bash", input: #"{"command":"ls"}"#))
+    m.apply(.agentToolResult(seq: 4, text: "ok", isError: false))
+    let afterTool = m.revision
+    XCTAssertGreaterThan(afterTool, afterDeltas)
+
+    // Typing into the composer changes only the draft — no content, no tick.
+    m.draft = "user is typing a long message"
+    m.draft = "user is typing a long message that keeps growing"
+    XCTAssertEqual(m.revision, afterTool, "draft edits must not bump revision")
+  }
+
   func testToolThenResultAttachesToAssistant() {
     let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
     m.apply(.agentDelta(seq: 1, text: "running"))
