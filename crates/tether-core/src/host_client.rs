@@ -49,7 +49,12 @@ impl HostClient {
     }
 
     pub fn base_url(&self) -> String {
-        format!("http://{}:{}", self.profile.host, self.profile.port)
+        let scheme = if self.profile.scheme_or_guess() == "https" {
+            "https"
+        } else {
+            "http"
+        };
+        format!("{scheme}://{}:{}", self.profile.host, self.profile.port)
     }
 
     pub fn auth_header(&self) -> BTreeMap<String, String> {
@@ -110,8 +115,13 @@ impl HostClient {
         } else {
             format!("?{query}")
         };
+        let scheme = if self.profile.scheme_or_guess() == "https" {
+            "wss"
+        } else {
+            "ws"
+        };
         format!(
-            "ws://{}:{}{path}{suffix}",
+            "{scheme}://{}:{}{path}{suffix}",
             self.profile.host, self.profile.port
         )
     }
@@ -207,6 +217,40 @@ mod tests {
             "ws://studio.local:8085/api/ws?sessionId=term-1&sinceId=2"
         );
         assert!(!client.url("/api/sessions").contains("not-in-a-url"));
+    }
+
+    #[test]
+    fn tls_host_uses_https_and_wss() {
+        // A Cloudflare/TLS-fronted host on :443 must get https REST + wss sockets;
+        // http:// to the TLS port is answered with 400 and broke Git/Review/Workspace
+        // on remote desktops while the (wss) terminal kept working.
+        let tls = HostProfile {
+            host: "tether.example".to_string(),
+            port: "443".to_string(),
+            scheme: Some("https".to_string()),
+            ..profile()
+        };
+        let client = HostClient::new(tls, "secret");
+        assert_eq!(
+            client.url("/api/sessions/term-1/git/status"),
+            "https://tether.example:443/api/sessions/term-1/git/status"
+        );
+        assert_eq!(
+            client.socket_url("/api/noise/session", []),
+            "wss://tether.example:443/api/noise/session"
+        );
+    }
+
+    #[test]
+    fn tls_port_guess_applies_without_a_recorded_scheme() {
+        // Pre-scheme profiles fall back to the port guess (8443 -> https).
+        let tls = HostProfile {
+            port: "8443".to_string(),
+            scheme: None,
+            ..profile()
+        };
+        let client = HostClient::new(tls, "secret");
+        assert!(client.url("/api/sessions").starts_with("https://"));
     }
 
     #[test]
