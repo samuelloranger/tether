@@ -1581,13 +1581,19 @@ label > textarea {
   justify-content: center;
   width: 22px;
   height: 22px;
+  /* Reset the global button padding/border — 14px padding in a 22px button
+     squeezes the icon out entirely. */
+  padding: 0;
+  border: 1px solid var(--border);
   border-radius: var(--r-control);
   background: color-mix(in srgb, var(--input) 80%, transparent);
-  color: var(--text);
+  color: var(--text-muted);
 }
 
 .pane-controls button:hover {
   background: color-mix(in srgb, var(--lit) 30%, transparent);
+  border-color: color-mix(in srgb, var(--lit) 50%, transparent);
+  color: var(--text);
 }
 
 .pane-controls button svg {
