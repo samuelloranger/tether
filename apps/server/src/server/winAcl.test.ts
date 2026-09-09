@@ -71,6 +71,60 @@ test('secureWindowsPath is inert off Windows', () => {
   }
 });
 
+// SDDL parsing + canonicalisation. Pure, so it runs on every platform — which
+// is the point: the failure it guards against showed up only on the GitHub
+// runner (which logs in AS the built-in Administrator, RID 500, so `icacls
+// /save` writes our own grant as the `LA` alias) and a Windows-only test could
+// not have caught it before a red CI run.
+
+test('machineSidPrefix strips the RID off an account SID', () => {
+  expect(machineSidPrefix('S-1-5-21-1-2-3-500')).toBe('S-1-5-21-1-2-3');
+  expect(machineSidPrefix('S-1-5-18')).toBeNull(); // not an S-1-5-21 account SID
+  expect(machineSidPrefix(null)).toBeNull();
+});
+
+test('canonicalizeSddlPrincipal maps aliases to SIDs and leaves raw SIDs alone', () => {
+  const prefix = 'S-1-5-21-1-2-3';
+  expect(canonicalizeSddlPrincipal('SY', prefix)).toBe('S-1-5-18');
+  expect(canonicalizeSddlPrincipal('BA', prefix)).toBe('S-1-5-32-544');
+  expect(canonicalizeSddlPrincipal('LA', prefix)).toBe('S-1-5-21-1-2-3-500');
+  expect(canonicalizeSddlPrincipal('S-1-5-21-1-2-3-1000', prefix)).toBe('S-1-5-21-1-2-3-1000');
+  expect(canonicalizeSddlPrincipal('WD', prefix)).toBe('WD'); // unknown alias kept, reads as a stranger
+});
+
+test('the owner-only check tolerates the GitHub-runner ACL where we ARE the built-in Administrator', () => {
+  // Exact shape from the runner: SYSTEM + Administrators as raw SIDs, and our
+  // own grant — the built-in Administrator — as the LA alias.
+  const mine = 'S-1-5-21-1456194669-2875347699-3862154473-500';
+  const prefix = machineSidPrefix(mine);
+  const sddl = 'D:PAI(A;OICIID;FA;;;S-1-5-18)(A;OICIID;FA;;;S-1-5-32-544)(A;OICI;FA;;;LA)';
+  const sids = sidsFromSddl(sddl, prefix);
+  const privileged = new Set([
+    ...FIXED_PRIVILEGED_SIDS,
+    `${prefix}-500`,
+    `${prefix}-512`,
+    `${prefix}-519`,
+  ]);
+  const strangers = sids.filter((sid) => sid !== mine && !privileged.has(sid));
+  expect(strangers).toEqual([]);
+  expect(sids).toContain(mine); // LA canonicalised to our SID
+});
+
+test('the owner-only check still flags an ordinary second user', () => {
+  const mine = 'S-1-5-21-1-2-3-1000';
+  const prefix = machineSidPrefix(mine);
+  const sddl = `D:(A;;FA;;;${mine})(A;;FA;;;S-1-5-21-1-2-3-1001)`;
+  const sids = sidsFromSddl(sddl, prefix);
+  const privileged = new Set([
+    ...FIXED_PRIVILEGED_SIDS,
+    `${prefix}-500`,
+    `${prefix}-512`,
+    `${prefix}-519`,
+  ]);
+  const strangers = sids.filter((sid) => sid !== mine && !privileged.has(sid));
+  expect(strangers).toEqual(['S-1-5-21-1-2-3-1001']);
+});
+
 // ---------------------------------------------------------------------------
 // End-to-end, Windows only.
 //
@@ -116,7 +170,7 @@ function secureInChild(target: string, isDir: boolean): string {
  * writes the raw SDDL (works for a file or a directory), whose ACEs already
  * carry SIDs; no PowerShell, no cold start.
  */
-function grantedSids(target: string): string[] {
+function grantedSids(target: string, machinePrefix: string | null): string[] {
   const out = path.join(tmpdir(), `tether-acl-sddl-${process.pid}-${aclNonce()}.txt`);
   try {
     const saved = spawnSync('icacls.exe', [target, '/save', out], {
@@ -130,7 +184,7 @@ function grantedSids(target: string): string[] {
     } catch {
       return [];
     }
-    return sidsFromSddl(sddl);
+    return sidsFromSddl(sddl, machinePrefix);
   } finally {
     rmSync(out, { force: true });
   }
@@ -140,37 +194,56 @@ let aclNonceCounter = 0;
 const aclNonce = () => `${Date.now()}-${aclNonceCounter++}`;
 
 /**
- * The principal SID of every ACE in an SDDL string. An ACE is
+ * Every ACE's principal as a SID, from an SDDL string. An ACE is
  * `(type;flags;rights;object;inherit;principal)`; the principal is the 6th
- * field, and `icacls /save` writes it as a raw `S-1-...` SID for ordinary
- * accounts (ours, or any stray second user) and as a two-letter alias for the
- * well-known ones, which `sddlPrincipalToSid` maps back. An unknown alias is
- * kept verbatim so it still reads as a stranger rather than vanishing.
+ * field. `icacls /save` writes it inconsistently — an ordinary account as a raw
+ * `S-1-...` SID, a well-known one as a two-letter alias, and even the same
+ * well-known principal one way here and the other on another host (the GitHub
+ * runner prints SYSTEM/Administrators as raw SIDs but the built-in
+ * Administrator as `LA`). `canonicalizeSddlPrincipal` maps every alias back to
+ * a SID so a caller compares like with like.
  */
-function sidsFromSddl(sddl: string): string[] {
+function sidsFromSddl(sddl: string, machinePrefix: string | null): string[] {
   const sids: string[] = [];
   for (const ace of sddl.matchAll(/\(([^)]*)\)/g)) {
     const principal = ace[1].split(';')[5]?.trim();
-    if (principal) sids.push(sddlPrincipalToSid(principal));
+    if (principal) sids.push(canonicalizeSddlPrincipal(principal, machinePrefix));
   }
   return sids;
 }
 
 /**
- * The well-known SDDL aliases `icacls /save` can emit for the privileged
- * principals, mapped to their SIDs. Only these need mapping: everyone else,
- * including our own account, is written as a raw SID and passes straight
- * through.
+ * An SDDL principal to a SID. A raw SID passes through. Fixed aliases map to
+ * their constant SIDs; the machine/domain-relative ones (LA = the built-in
+ * Administrator, RID 500 — which is the account the GitHub runner itself logs
+ * in as, so our OWN grant comes back as `LA`) only become a SID once combined
+ * with a machine SID, which we take from our own SID's prefix. An unknown alias
+ * is kept verbatim so it still reads as a stranger rather than silently
+ * vanishing.
  */
-const SDDL_ALIAS_TO_SID: Record<string, string> = {
-  SY: 'S-1-5-18', // NT AUTHORITY\SYSTEM
-  BA: 'S-1-5-32-544', // BUILTIN\Administrators
-  CO: 'S-1-3-0', // CREATOR OWNER
-  OW: 'S-1-3-4', // OWNER RIGHTS
-};
+function canonicalizeSddlPrincipal(principal: string, machinePrefix: string | null): string {
+  const fixed: Record<string, string> = {
+    SY: 'S-1-5-18', // NT AUTHORITY\SYSTEM
+    BA: 'S-1-5-32-544', // BUILTIN\Administrators
+    CO: 'S-1-3-0', // CREATOR OWNER
+    OW: 'S-1-3-4', // OWNER RIGHTS
+  };
+  if (fixed[principal]) return fixed[principal];
+  if (machinePrefix) {
+    const relative: Record<string, string> = {
+      LA: `${machinePrefix}-500`, // built-in Administrator account
+      DA: `${machinePrefix}-512`, // Domain Admins
+      EA: `${machinePrefix}-519`, // Enterprise Admins
+    };
+    if (relative[principal]) return relative[principal];
+  }
+  return principal;
+}
 
-function sddlPrincipalToSid(principal: string): string {
-  return SDDL_ALIAS_TO_SID[principal] ?? principal;
+/** The machine/domain SID that an `S-1-5-21-…-<RID>` account SID hangs off. */
+function machineSidPrefix(sid: string | null): string | null {
+  const m = sid?.match(/^(S-1-5-21-\d+-\d+-\d+)-\d+$/);
+  return m ? m[1] : null;
 }
 
 /**
@@ -182,13 +255,17 @@ function sddlPrincipalToSid(principal: string): string {
  * be, and they are the Windows equivalent of root — POSIX makes exactly the
  * same concession, since root reads a 0700 file regardless. What must never
  * appear is an ordinary second user.
+ *
+ * The machine-relative admins (the built-in Administrator, Domain/Enterprise
+ * Admins) are added per-check in `expectOwnerOnly`, since their SIDs depend on
+ * the machine prefix.
  */
-const PRIVILEGED_SIDS = new Set([
+const FIXED_PRIVILEGED_SIDS = [
   'S-1-5-18', // NT AUTHORITY\SYSTEM
   'S-1-5-32-544', // BUILTIN\Administrators
   'S-1-3-0', // CREATOR OWNER
   'S-1-3-4', // OWNER RIGHTS
-]);
+];
 
 /**
  * Our own SID, the one identity that must be granted.
@@ -234,8 +311,17 @@ function readUserSid(): string | null {
 function expectOwnerOnly(target: string, label: string): void {
   const mine = currentUserSid();
   expect(mine).not.toBeNull();
-  const sids = grantedSids(target);
-  const strangers = sids.filter((sid) => sid !== mine && !PRIVILEGED_SIDS.has(sid));
+  const prefix = machineSidPrefix(mine);
+  // The privileged set includes the machine-relative admins, whose SIDs only
+  // exist once combined with this machine's prefix. On the GitHub runner our
+  // OWN account IS the built-in Administrator (RID 500), so `mine` is one of
+  // these too — harmless, the `sid !== mine` guard below covers it.
+  const privileged = new Set([
+    ...FIXED_PRIVILEGED_SIDS,
+    ...(prefix ? [`${prefix}-500`, `${prefix}-512`, `${prefix}-519`] : []),
+  ]);
+  const sids = grantedSids(target, prefix);
+  const strangers = sids.filter((sid) => sid !== mine && !privileged.has(sid));
   if (strangers.length > 0) {
     throw new Error(
       `${label}: unprivileged principals still have access: ${strangers.join(', ')}\n` +
