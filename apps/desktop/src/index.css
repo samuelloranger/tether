@@ -2868,9 +2868,13 @@ label > textarea {
 }
 .agent-code-inline {
   font-family: var(--mono);
-  background: var(--input);
-  padding: 1px 4px;
-  border-radius: var(--r-control);
+  font-size: 0.95em;
+  padding: 0.05em 0.25em;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: color-mix(in srgb, var(--text) 92%, var(--text-muted));
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 .agent-code-block {
   font-family: var(--mono);
