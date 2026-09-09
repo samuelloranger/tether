@@ -25,12 +25,14 @@ function CodeBlock({ language, code }: { language: string | null; code: string }
   );
 }
 
-type CodeProps = ComponentPropsWithoutRef<'code'> & { inline?: boolean };
+type CodeProps = ComponentPropsWithoutRef<'code'>;
 
-function renderCode({ inline, className, children }: CodeProps) {
+// react-markdown v10 dropped the `inline` prop: fenced blocks carry a
+// `language-*` class or span multiple lines, everything else is an inline span.
+function renderCode({ className, children }: CodeProps) {
   const text = String(children ?? '');
-  if (inline) return <code className="agent-code-inline">{text}</code>;
   const match = /language-(\w+)/.exec(className ?? '');
+  if (!match && !text.includes('\n')) return <code className="agent-code-inline">{text}</code>;
   return <CodeBlock language={match ? match[1] : null} code={text} />;
 }
 
