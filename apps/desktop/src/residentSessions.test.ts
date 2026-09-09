@@ -42,6 +42,34 @@ describe('residentSessions', () => {
     expect(out).toEqual(['h:a', 'h:b', 'h:c']);
   });
 
+  // The zero-replay oracle in pure form: across A(visible)→B(visible)→A(visible),
+  // session A must stay in the resident set the whole time. Its TerminalPane is
+  // keyed by session, so staying resident == the mount (and its socket) is never
+  // torn down == nothing to replay on switch-back.
+  test('A stays resident across A→B→A (socket never drops)', () => {
+    const drawerKeys = ['h:a', 'h:b'];
+    const cap = 8;
+    // A visible, B in background.
+    const step1 = residentSessions({ drawerKeys, visibleKeys: ['h:a'], lruOrder: ['h:a'], cap });
+    // Switch to B: A is now background but recently active.
+    const step2 = residentSessions({
+      drawerKeys,
+      visibleKeys: ['h:b'],
+      lruOrder: ['h:b', 'h:a'],
+      cap,
+    });
+    // Switch back to A.
+    const step3 = residentSessions({
+      drawerKeys,
+      visibleKeys: ['h:a'],
+      lruOrder: ['h:a', 'h:b'],
+      cap,
+    });
+    expect(step1).toContain('h:a');
+    expect(step2).toContain('h:a');
+    expect(step3).toContain('h:a');
+  });
+
   test('a key absent from the drawer is never resident', () => {
     const out = residentSessions({
       drawerKeys: ['h:a'],
