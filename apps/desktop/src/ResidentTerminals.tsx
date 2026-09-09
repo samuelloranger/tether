@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AgentChatPane } from './agent/AgentChatPane';
 import { coreCacheDelete, coreCacheIds, coreCacheTouch } from './coreApi';
+import { forgetCoreSession } from './coreTransport';
 import { EmptyPanePicker } from './EmptyPanePicker';
 import type { FrameApplyResult } from './frameHandler';
 import { layoutTree } from './layoutRects';
@@ -9,6 +10,7 @@ import { PaneControls } from './PaneControls';
 import { PaneDivider } from './PaneDivider';
 import type { PaneDir, PaneNode, PaneSide } from './paneTree';
 import type { UI_THEMES } from './preferences';
+import { reconcileResidency } from './residencyReconcile';
 import { residentKeys } from './residentKeys';
 import { SplitPreviewOverlay } from './SplitPreviewOverlay';
 import { sessionKey } from './sessionKey';
@@ -65,13 +67,18 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      for (const key of residentKeys(props.tree)) await coreCacheTouch(key);
-      const valid = new Set(props.sessions.map((row) => sessionKey(row.hostId, row.id)));
-      const wanted = new Set(residentKeys(props.tree));
-      const ids = await coreCacheIds();
-      for (const id of ids) {
-        if (!valid.has(id) && !wanted.has(id)) await coreCacheDelete(id);
-      }
+      const wantedKeys = residentKeys(props.tree);
+      for (const key of wantedKeys) await coreCacheTouch(key);
+      const plan = reconcileResidency({
+        drawerKeys: props.sessions.map((row) => sessionKey(row.hostId, row.id)),
+        wantedKeys,
+        cachedIds: await coreCacheIds(),
+      });
+      // A tab merely switched away stays a drawer key, so its cursor is kept —
+      // switch-back replays only the `sinceId` delta. Only sessions gone from
+      // the drawer entirely lose their snapshot and replay cursor here.
+      for (const id of plan.deleteCache) await coreCacheDelete(id);
+      for (const id of plan.forgetCursor) await forgetCoreSession(id);
       if (cancelled) return;
     })();
     return () => {
