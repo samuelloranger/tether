@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import * as readline from 'node:readline/promises';
 import { pairQrPayload, renderPairQr } from './pairQr';
 
@@ -7,11 +6,8 @@ export function groupPairCode(code: string): string {
 }
 
 export interface PairDeps {
-  port: string;
-  // Loopback origin of the running daemon's control listener. Defaults to plain
-  // http on `port`; main.ts overrides it when the daemon is https-only.
-  baseUrl?: string;
-  tokenFile: string;
+  // The daemon's loopback control socket (~/.tether/control.sock).
+  sock: string;
   advertiseUrl?: string | null;
   qr?: (payload: string) => Promise<string>;
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -35,23 +31,14 @@ function isApproved(answer: string): boolean {
   return trimmed === 'y' || trimmed === 'yes';
 }
 
-async function controlRequest(
-  deps: PairDeps,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  const token = readFileSync(deps.tokenFile, 'utf8').trim();
-  const base = deps.baseUrl ?? `http://127.0.0.1:${deps.port}`;
-  return (deps.fetch ?? fetch)(`${base}${path}`, {
+function controlRequest(deps: PairDeps, path: string, init: RequestInit = {}): Promise<Response> {
+  return (deps.fetch ?? fetch)(`http://localhost${path}`, {
     ...init,
+    unix: deps.sock,
     headers: {
       'Content-Type': 'application/json',
-      'X-Tether-Present-Control': token,
       ...(init.headers ?? {}),
     },
-    // Loopback to our own self-signed certificate. The control token, not the
-    // certificate chain, is what authorises this call.
-    tls: { rejectUnauthorized: false },
   } as RequestInit);
 }
 

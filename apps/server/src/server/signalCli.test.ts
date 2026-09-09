@@ -1,14 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { claudeHookSnippet, parseSignalArgs, runSignal } from './signalCli';
 
-function tokenFile(token = 'tok'): string {
-  const file = path.join(mkdtempSync(path.join(tmpdir(), 'tether-signal-')), 'token');
-  writeFileSync(file, `${token}\n`);
-  return file;
-}
+const SOCK = '/tmp/tether-control.sock';
 
 describe('parseSignalArgs', () => {
   test('reads a bare state', () => {
@@ -38,13 +31,12 @@ describe('parseSignalArgs', () => {
 });
 
 describe('runSignal', () => {
-  test('posts the session id from the environment with the control token', async () => {
+  test('posts the session id over the control socket without a token header', async () => {
     let seen: { url: string; init?: RequestInit } | null = null;
     await runSignal(
       { kind: 'send', state: 'done', body: 'Tests pass' },
       {
-        baseUrl: 'http://127.0.0.1:8085',
-        tokenFile: tokenFile('secret'),
+        sock: SOCK,
         sessionId: 'term-7',
         fetch: async (url, init) => {
           seen = { url: String(url), init };
@@ -52,10 +44,11 @@ describe('runSignal', () => {
         },
       },
     );
-    expect(seen!.url).toBe('http://127.0.0.1:8085/control/signal');
-    expect((seen!.init!.headers as Record<string, string>)['X-Tether-Present-Control']).toBe(
-      'secret',
-    );
+    expect(seen!.url).toBe('http://localhost/control/signal');
+    expect((seen!.init as { unix?: string }).unix).toBe(SOCK);
+    expect(
+      (seen!.init!.headers as Record<string, string>)['X-Tether-Present-Control'],
+    ).toBeUndefined();
     expect(JSON.parse(String(seen!.init!.body))).toEqual({
       sessionId: 'term-7',
       state: 'done',
@@ -67,11 +60,7 @@ describe('runSignal', () => {
     await expect(
       runSignal(
         { kind: 'send', state: 'done' },
-        {
-          baseUrl: 'http://127.0.0.1:8085',
-          tokenFile: tokenFile(),
-          fetch: async () => new Response('{}'),
-        },
+        { sock: SOCK, fetch: async () => new Response('{}') },
       ),
     ).rejects.toThrow(/TETHER_SESSION_ID/);
   });
@@ -81,13 +70,12 @@ describe('runSignal', () => {
       runSignal(
         { kind: 'send', state: 'done' },
         {
-          baseUrl: 'http://127.0.0.1:8085',
-          tokenFile: tokenFile(),
+          sock: SOCK,
           sessionId: 'term-7',
-          fetch: async () => new Response('nope', { status: 401 }),
+          fetch: async () => new Response('nope', { status: 500 }),
         },
       ),
-    ).rejects.toThrow(/401/);
+    ).rejects.toThrow(/500/);
   });
 });
 

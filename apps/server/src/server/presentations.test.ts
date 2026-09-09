@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { CAN_SYMLINK, HAS_POSIX_MODES } from '../../test-paths';
-import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
+import { CAN_SYMLINK } from '../../test-paths';
+import { PresentationRegistry, resolvePresentationFile } from './presentations';
 
 function tempDir(prefix: string) {
   return mkdtempSync(path.join(tmpdir(), prefix));
@@ -104,17 +104,42 @@ test('debounces changes and resets all previews for a project', async () => {
   }
 });
 
-test('creates and reuses an owner-only local control token', () => {
-  const root = tempDir('tether-control-');
+test('a preview token expires after its TTL and is then unresolvable', () => {
+  const root = tempDir('tether-ttl-');
   try {
-    const file = path.join(root, 'present-control-token');
-    const first = createControlToken(file);
-    const second = createControlToken(file);
+    const entry = path.join(root, 'index.html');
+    writeFileSync(entry, 'ok');
+    let clock = 1_000;
+    const registry = new PresentationRegistry(150, 60_000, () => clock);
+    const { url } = registry.create({ entry });
+    const token = url.split('/')[2];
 
-    expect(first).toMatch(/^[a-f0-9]{48}$/);
-    expect(second).toBe(first);
-    // Unassertable on Windows (no mode bits) — see HAS_POSIX_MODES.
-    if (HAS_POSIX_MODES) expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(registry.findByToken(token)).not.toBeNull();
+    clock += 60_001; // just past the TTL
+    expect(registry.findByToken(token)).toBeNull();
+    registry.dispose();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('listing (the authed poll) renews a preview and keeps its token stable', () => {
+  const root = tempDir('tether-renew-');
+  try {
+    const entry = path.join(root, 'index.html');
+    writeFileSync(entry, 'ok');
+    let clock = 1_000;
+    const registry = new PresentationRegistry(150, 60_000, () => clock);
+    const { url } = registry.create({ entry });
+    const token = url.split('/')[2];
+
+    clock += 40_000;
+    const listed = registry.list(); // renews expiry
+    expect(listed[0]?.url).toBe(url); // same token string → no iframe reload churn
+
+    clock += 40_000; // 80s since create, but only 40s since the renewing list
+    expect(registry.findByToken(token)).not.toBeNull();
+    registry.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

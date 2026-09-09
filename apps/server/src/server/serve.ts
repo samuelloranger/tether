@@ -1,5 +1,6 @@
 import { websocket } from 'hono/bun';
 import { app } from './app';
+import { serveControl } from './controlServe';
 import { resetRunningSessions, setSessionStatus } from './db';
 import { logError, logInfo, logWarn } from './log';
 import { reattachHolders } from './pty';
@@ -115,6 +116,10 @@ export async function serve(): Promise<void> {
     logInfo(`Tether server listening on :${httpsPort} (https)`);
     logInfo(`TLS certificate fingerprint: sha256:${tls.fingerprintSha256}`);
   }
+
+  // The control plane (present/signal/pair CLIs) rides a loopback unix socket,
+  // never the network listeners — its filesystem perms are the auth.
+  serveControl();
 
   logInfo('Auth: /api routes require a per-device bearer token.');
 
