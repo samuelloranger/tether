@@ -380,6 +380,10 @@ actor TerminalPipeline {
     if on { publishSnapshot() }
   }
 
+  /// True while a live Noise channel is attached — used to reuse a background
+  /// pipeline on switch-back instead of reconnecting (and replaying).
+  var isConnected: Bool { noiseChannel != nil }
+
   #if DEBUG
   /// Test seam: stand up a live emulator without a Noise connection.
   func attachForTest(cols: UInt16, rows: UInt16) {
