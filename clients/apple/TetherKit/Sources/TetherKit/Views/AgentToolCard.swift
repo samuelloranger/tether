@@ -14,6 +14,19 @@ public struct AgentToolCard: View {
   }
 
   private var accent: Color { AgentToolStyle.accent(for: call.name) }
+  private var isShellTool: Bool {
+    let n = call.name.lowercased()
+    return n == "bash" || n == "shell"
+  }
+
+  private var shellCommand: String? {
+    guard
+      let obj = try? JSONSerialization.jsonObject(with: Data(call.inputJSON.utf8)) as? [String: Any],
+      let command = obj["command"] as? String
+    else { return nil }
+    let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
 
   public var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -45,7 +58,7 @@ public struct AgentToolCard: View {
           .foregroundStyle(accent)
         Text(call.summary)
           .font(.system(.caption, design: .monospaced))
-          .foregroundStyle(TetherColors.textSecondary)
+          .foregroundStyle(isShellTool ? TetherColors.textPrimary : TetherColors.textSecondary)
           .lineLimit(1)
           .truncationMode(.middle)
         Spacer(minLength: 4)
@@ -72,6 +85,8 @@ public struct AgentToolCard: View {
       if let diff = call.diff, !diff.isEmpty {
         SideBySideDiffView(lines: parseDiffLines(diff), path: call.summary)
           .padding(.horizontal, 4)
+      } else if isShellTool {
+        shellInput(shellCommand ?? call.summary)
       } else {
         Text(call.inputJSON)
           .font(.system(.caption2, design: .monospaced))
@@ -85,6 +100,23 @@ public struct AgentToolCard: View {
       }
     }
     .padding(.bottom, 10)
+  }
+
+  private func shellInput(_ command: String) -> some View {
+    Text("$ \(command)")
+      .font(.system(.caption2, design: .monospaced))
+      .foregroundStyle(TetherColors.textPrimary)
+      .textSelection(.enabled)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .background(TetherColors.input)
+      .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .overlay(
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .stroke(TetherColors.border, lineWidth: 1)
+      )
+      .padding(.horizontal, 12)
   }
 
   private func resultView(_ result: String) -> some View {

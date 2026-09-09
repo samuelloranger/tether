@@ -244,6 +244,46 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(m.lastSeq, 5)  // cursor advanced so reconnect won't replay it
   }
 
+  func testAgentUserFrameAppendsBubbleWhenMissing() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    XCTAssertTrue(m.messages.isEmpty)
+    XCTAssertEqual(m.turn, .idle)
+
+    m.apply(.agentUser(seq: 1, text: "from desktop"))
+    XCTAssertEqual(m.messages.count, 1)
+    XCTAssertEqual(m.messages.first?.role, .user)
+    XCTAssertEqual(m.messages.first?.plainText, "from desktop")
+    XCTAssertEqual(m.turn, .thinking)
+    XCTAssertEqual(m.lastSeq, 1)
+  }
+
+  func testAgentUserFrameAcksLocalEchoWithoutDuping() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp", send: { _ in })
+    m.sendPrompt("hi")
+    XCTAssertEqual(m.messages.count, 1)
+    XCTAssertEqual(m.messages.first?.role, .user)
+
+    m.apply(.agentUser(seq: 1, text: "hi"))
+    XCTAssertEqual(m.messages.count, 1)
+    XCTAssertEqual(m.lastSeq, 1)
+    XCTAssertEqual(m.turn, .thinking)
+  }
+
+  func testSeqOrderedFramesAreDeduped() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    XCTAssertEqual(m.lastSeq, 0)
+    XCTAssertEqual(m.revision, 0)
+
+    m.apply(.agentDelta(seq: 1, text: "A"))
+    let afterFirst = (m.messages.last?.plainText, m.lastSeq, m.revision)
+
+    // Duplicate seq must be ignored (no double-append, no revision tick).
+    m.apply(.agentDelta(seq: 1, text: "B"))
+    XCTAssertEqual(m.messages.last?.plainText, afterFirst.0)
+    XCTAssertEqual(m.lastSeq, afterFirst.1)
+    XCTAssertEqual(m.revision, afterFirst.2)
+  }
+
   func testInfoStripTotalLabelFormatsTokensAndCost() {
     XCTAssertNil(AgentInfoStrip.totalLabel(nil))
     XCTAssertNil(

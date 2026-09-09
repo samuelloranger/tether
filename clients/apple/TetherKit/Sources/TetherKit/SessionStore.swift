@@ -332,8 +332,8 @@ public final class SessionStore {
         available: SessionResume.restorable(sessions.map { ($0.id, $0.status) })
       )
     else { return }
-    activeSessionId = id
-    await connectTerminal(sessionId: id)
+    let changed = activateSession(hostId: hostId, sessionId: id)
+    await connectActiveSession(changed: changed)
   }
 
   public func newTerminal() async {

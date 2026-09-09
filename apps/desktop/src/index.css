@@ -2881,6 +2881,9 @@ label > textarea {
   padding: 8px 10px;
   overflow-x: auto;
   margin: 8px 0;
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
 }
 .agent-code-line {
   white-space: pre;
@@ -2952,6 +2955,13 @@ label > textarea {
   color: var(--text-muted);
   overflow-x: auto;
 }
+.agent-tool-input.bash {
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 8px 10px;
+  color: var(--text);
+}
 .agent-tool-glyph {
   color: var(--text-muted);
 }
@@ -2965,6 +2975,9 @@ label > textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.agent-tool-bash .agent-tool-summary {
+  color: var(--text);
 }
 .agent-tool-result-label {
   margin: 8px 0 2px;

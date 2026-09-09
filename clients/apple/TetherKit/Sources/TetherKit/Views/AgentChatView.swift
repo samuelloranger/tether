@@ -71,8 +71,11 @@ struct AgentTranscriptView: View {
   /// starts true (a fresh chat opens pinned) and flips off the moment the user
   /// scrolls up to read history, so streamed deltas stop yanking them back.
   @State private var following = true
+  @State private var viewportHeight: CGFloat = 0
+  @State private var bottomY: CGFloat = 0
 
   private let bottomID = "agent.transcript.bottom"
+  private static let scrollSpace = "agent.transcript.scroll"
 
   var body: some View {
     ScrollViewReader { proxy in
@@ -97,10 +100,32 @@ struct AgentTranscriptView: View {
             // trailing element (not `.defaultScrollAnchor`) means only an
             // explicit `scrollTo` moves the view — never a keyboard resize.
             Color.clear.frame(height: 1).id(bottomID)
+              .background(
+                GeometryReader { geo in
+                  Color.clear.preference(
+                    key: BottomYKey.self,
+                    value: geo.frame(in: .named(Self.scrollSpace)).maxY
+                  )
+                }
+              )
           }
           .padding(.horizontal, 16)
           .padding(.vertical, 18)
         }
+      }
+      .coordinateSpace(name: Self.scrollSpace)
+      .background(
+        GeometryReader { geo in
+          Color.clear.preference(key: ViewportHeightKey.self, value: geo.size.height)
+        }
+      )
+      .onPreferenceChange(ViewportHeightKey.self) { h in
+        viewportHeight = h
+        updateFollowingForLegacyScroll()
+      }
+      .onPreferenceChange(BottomYKey.self) { y in
+        bottomY = y
+        updateFollowingForLegacyScroll()
       }
       // A drag through the transcript pulls the keyboard down with the finger;
       // a tap anywhere in it lowers the keyboard too. `simultaneousGesture` (not
@@ -117,13 +142,18 @@ struct AgentTranscriptView: View {
           #endif
         }
       )
-      .modifier(NearBottomTracker { following = $0 })
+      .agentNearBottomTracker { following = $0 }
       .onChange(of: model.revision) {
         guard following else { return }
-        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+        scrollToBottom(proxy)
       }
       .onAppear {
-        proxy.scrollTo(bottomID, anchor: .bottom)
+        // Explicitly disable animation so a tab switch (or any outer animated
+        // transaction) can't turn this into a long "scroll down" from the top.
+        Task { @MainActor in
+          await Task.yield()
+          scrollToBottom(proxy)
+        }
       }
       // Jump-to-latest: only while the user has scrolled up off the foot (and
       // there is something to scroll to). Tapping re-arms follow so streamed
@@ -136,6 +166,23 @@ struct AgentTranscriptView: View {
           }
         }
       }
+    }
+  }
+
+  private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    var t = Transaction()
+    t.disablesAnimations = true
+    withTransaction(t) {
+      proxy.scrollTo(bottomID, anchor: .bottom)
+    }
+  }
+
+  private func updateFollowingForLegacyScroll() {
+    if #available(iOS 18.0, *) { return }
+    guard viewportHeight > 0 else { return }
+    let nearBottom = bottomY <= viewportHeight + 48
+    if nearBottom != following {
+      following = nearBottom
     }
   }
 
@@ -171,23 +218,32 @@ struct AgentTranscriptView: View {
   }
 }
 
-/// Reports whether the scroll is parked within a hair of the foot, so the
-/// transcript knows when to keep following streamed output. Uses the iOS 18
-/// scroll-geometry hook where present; older systems just keep following (only
-/// real content changes trigger a scroll there, so nothing runs away).
-private struct NearBottomTracker: ViewModifier {
-  let onChange: (Bool) -> Void
+private struct ViewportHeightKey: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = nextValue()
+  }
+}
 
-  func body(content: Content) -> some View {
+private struct BottomYKey: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = nextValue()
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func agentNearBottomTracker(_ onChange: @escaping (Bool) -> Void) -> some View {
     if #available(iOS 18.0, *) {
-      content.onScrollGeometryChange(for: Bool.self) { geo in
+      self.onScrollGeometryChange(for: Bool.self) { geo in
         geo.contentOffset.y >= geo.contentSize.height - geo.containerSize.height
           - geo.contentInsets.bottom - 48
       } action: { _, nearBottom in
         onChange(nearBottom)
       }
     } else {
-      content
+      self
     }
   }
 }

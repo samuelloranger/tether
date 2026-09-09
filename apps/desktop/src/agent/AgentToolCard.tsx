@@ -28,12 +28,30 @@ function ToolDiff({ diff }: { diff: DerivedDiff }) {
   );
 }
 
-/** Pretty-print the tool input JSON, falling back to the raw string. */
-function formatInput(inputJson: string): string {
+function isShellTool(name: string): boolean {
+  const n = name.toLowerCase();
+  return n === 'bash' || n === 'shell';
+}
+
+function shellCommand(inputJson: string): string | null {
   try {
-    return JSON.stringify(JSON.parse(inputJson), null, 2);
+    const obj = JSON.parse(inputJson) as Record<string, unknown>;
+    return typeof obj.command === 'string' ? obj.command : null;
   } catch {
-    return inputJson;
+    return null;
+  }
+}
+
+/** Pretty-print the tool input JSON, falling back to the raw string. */
+function formatInput(tool: AgentToolCall): string {
+  if (isShellTool(tool.name)) {
+    const cmd = shellCommand(tool.inputJson) ?? tool.summary;
+    return `$ ${String(cmd ?? '').trim()}`.trim();
+  }
+  try {
+    return JSON.stringify(JSON.parse(tool.inputJson), null, 2);
+  } catch {
+    return tool.inputJson;
   }
 }
 
@@ -43,8 +61,9 @@ function formatInput(inputJson: string): string {
 export function AgentToolCard({ tool }: { tool: AgentToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const style = toolStyle(tool.name);
+  const shell = isShellTool(tool.name);
   return (
-    <div className={`agent-tool-card agent-tool-${style.accent}`}>
+    <div className={`agent-tool-card agent-tool-${style.accent}${shell ? ' agent-tool-bash' : ''}`}>
       <button
         type="button"
         className="agent-tool-head"
@@ -62,7 +81,7 @@ export function AgentToolCard({ tool }: { tool: AgentToolCall }) {
           {tool.diff ? (
             <ToolDiff diff={tool.diff} />
           ) : (
-            <pre className="agent-tool-input">{formatInput(tool.inputJson)}</pre>
+            <pre className={`agent-tool-input${shell ? ' bash' : ''}`}>{formatInput(tool)}</pre>
           )}
           {tool.result ? (
             <>

@@ -179,15 +179,27 @@ public final class AgentChatModel {
   // MARK: reducer
 
   public func apply(_ msg: NoiseServerMessage) {
+    // permission_req + status carry no seq; every other agent frame is seq-ordered
+    // and must be deduped (replay, reconnect, or double-send must not double-apply).
+    var seq: Int?
     switch msg {
-    case let .agentDelta(seq, text):
+    case let .agentDelta(s, _): seq = s
+    case let .agentTool(s, _, _): seq = s
+    case let .agentToolResult(s, _, _): seq = s
+    case let .agentDone(s, _, _, _): seq = s
+    case let .agentUser(s, _): seq = s
+    default: break
+    }
+    if let seq {
+      guard seq > lastSeq else { return }
       noteSeq(seq)
+    }
+    switch msg {
+    case let .agentDelta(_, text):
       streamDelta(text)
-    case let .agentTool(seq, name, input):
-      noteSeq(seq)
+    case let .agentTool(_, name, input):
       addTool(name: name, inputJSON: input)
-    case let .agentToolResult(seq, text, isError):
-      noteSeq(seq)
+    case let .agentToolResult(_, text, isError):
       fillToolResult(text: text, isError: isError)
     case let .agentPermissionReq(reqId, name, input):
       let call = AgentToolCall(
@@ -201,8 +213,7 @@ public final class AgentChatModel {
       } else {
         approvalBacklog.append(call)
       }
-    case let .agentDone(seq, cost, inputTokens, outputTokens):
-      noteSeq(seq)
+    case let .agentDone(_, cost, inputTokens, outputTokens):
       if let last = messages.indices.last, messages[last].role == .assistant {
         messages[last].isStreaming = false
         messages[last].usage = AgentUsage(
@@ -223,12 +234,17 @@ public final class AgentChatModel {
       interrupting = false
       revision += 1
       flushQueue()
-    case let .agentUser(seq, _):
-      // The user's bubble is already shown locally on send (see sendPrompt);
-      // just advance the seq cursor so a reconnect doesn't replay it. (Rendering
-      // it from the frame instead — for cross-device prompt sync — is a later
-      // step; ignoring it here is safe and never double-renders.)
-      noteSeq(seq)
+    case let .agentUser(_, text):
+      // Render server-authoritative prompts so a conversation started on another
+      // device appears here. When the prompt originated locally we already
+      // showed it immediately (sendPrompt), so treat this as an ack and avoid a
+      // duplicate bubble.
+      lastUserPrompt = text
+      if messages.last?.role != .user || messages.last?.plainText != text {
+        appendUser(text)
+      }
+      turn = .thinking
+      interrupting = false
     case let .agentStatus(model, fiveHour, sevenDay):
       applyStatus(model: model, fiveHour: fiveHour, sevenDay: sevenDay)
     default:
