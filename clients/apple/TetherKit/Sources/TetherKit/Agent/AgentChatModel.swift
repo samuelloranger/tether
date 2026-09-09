@@ -223,6 +223,14 @@ public final class AgentChatModel {
       interrupting = false
       revision += 1
       flushQueue()
+    case let .agentUser(seq, _):
+      // The user's bubble is already shown locally on send (see sendPrompt);
+      // just advance the seq cursor so a reconnect doesn't replay it. (Rendering
+      // it from the frame instead — for cross-device prompt sync — is a later
+      // step; ignoring it here is safe and never double-renders.)
+      noteSeq(seq)
+    case let .agentStatus(model, fiveHour, sevenDay):
+      applyStatus(model: model, fiveHour: fiveHour, sevenDay: sevenDay)
     default:
       break
     }

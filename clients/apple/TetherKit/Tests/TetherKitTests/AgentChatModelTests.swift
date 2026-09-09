@@ -222,6 +222,28 @@ final class AgentChatModelTests: XCTestCase {
     XCTAssertEqual(m.status?.fiveHour?.utilization, 42)
   }
 
+  func testAgentStatusFrameLightsUpTheStrip() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    XCTAssertNil(m.status)
+    m.apply(
+      .agentStatus(
+        model: "claude-opus-4-8",
+        fiveHour: UsageWindow(utilization: 42),
+        sevenDay: UsageWindow(utilization: 78)))
+    XCTAssertEqual(m.status?.model, "claude-opus-4-8")
+    XCTAssertEqual(m.status?.fiveHour?.utilization, 42)
+    XCTAssertEqual(m.status?.sevenDay?.utilization, 78)
+  }
+
+  func testAgentUserFrameAdvancesSeqWithoutDoubleBubble() {
+    let m = AgentChatModel(sessionId: "a1", cwd: "/tmp")
+    m.appendUser("hi")  // local echo, as sendPrompt does
+    let before = m.messages.count
+    m.apply(.agentUser(seq: 5, text: "hi"))
+    XCTAssertEqual(m.messages.count, before)  // no second user bubble
+    XCTAssertEqual(m.lastSeq, 5)  // cursor advanced so reconnect won't replay it
+  }
+
   func testInfoStripTotalLabelFormatsTokensAndCost() {
     XCTAssertNil(AgentInfoStrip.totalLabel(nil))
     XCTAssertNil(
