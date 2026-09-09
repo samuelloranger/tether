@@ -58,7 +58,7 @@ actor TerminalPipeline {
   private let eventSink: AsyncStream<TerminalPipelineEvent>.Continuation
   private let outboundFrames: AsyncStream<OutboundFrame>
 
-  private let replayStore = FfiReplayStore()
+  private let replayStore = TerminalPipeline.makeReplayStore()
   private let snapshotCache = TerminalSnapshotCache()
   private let sessionGrids = TerminalSessionGrids()
   private var currentGrid: TerminalSessionGrid?
@@ -92,6 +92,23 @@ actor TerminalPipeline {
     )
     (events, eventSink) = AsyncStream.makeStream(of: TerminalPipelineEvent.self)
     (outboundFrames, outbound) = AsyncStream.makeStream(of: OutboundFrame.self)
+  }
+
+  /// Persist replay cursors to Application Support so a relaunch / tab eviction
+  /// replays only the `sinceId` delta instead of the whole retained tail.
+  /// Fail-open: if the directory can't be prepared, fall back to the in-memory
+  /// store — a lost cursor costs one slower reconnect, never a crash.
+  private static func makeReplayStore() -> FfiReplayStore {
+    let fm = FileManager.default
+    guard
+      let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    else { return FfiReplayStore() }
+    do {
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+      return FfiReplayStore.withPath(path: dir.appendingPathComponent("replay_cursors.json").path)
+    } catch {
+      return FfiReplayStore()
+    }
   }
 
   // MARK: - Connection
