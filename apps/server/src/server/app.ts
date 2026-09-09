@@ -4,7 +4,6 @@ import { allowAdminRequest, scheduleAdminCommand, updateTargetVersion } from './
 import { authMiddleware } from './auth';
 import { getConfig } from './config';
 import { logError, logInfo } from './log';
-import { pairControlRoutes } from './pairControl';
 import { sendTestPush } from './push';
 import { isValidSecretKey } from './pushCrypto';
 import { registerPushDevice, removePushDevice } from './pushDevices';
@@ -13,17 +12,10 @@ import { filesRoutes } from './routes/files';
 import { fsRoutes } from './routes/fs';
 import { gitRoutes } from './routes/git';
 import { noiseRoutes } from './routes/noise';
-import {
-  hasControlToken,
-  presentationControlToken,
-  presentationsRoutes,
-} from './routes/presentations';
+import { presentationsRoutes } from './routes/presentations';
 import { sessionsRoutes } from './routes/sessions';
-import { signalRoutes } from './routes/signal';
 import { VERSION } from './runtime';
 import { getTlsReport, isSecureRequest } from './tlsRuntime';
-
-export { hasControlToken, presentationControlToken };
 
 /** Bindings come from Bun.serve's fetch wrapper in serve.ts (peer + server). */
 export type AppEnv = {
@@ -161,13 +153,11 @@ app.post('/api/push/unregister', async (c) => {
 });
 
 app.route('/', presentationsRoutes);
-app.route('/', pairControlRoutes);
 app.route('/', noiseRoutes);
 app.route('/', configRoutes);
 app.route('/', filesRoutes);
 app.route('/', fsRoutes);
 app.route('/', gitRoutes);
 app.route('/', sessionsRoutes);
-app.route('/', signalRoutes);
 
 export { app };

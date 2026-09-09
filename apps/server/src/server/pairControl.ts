@@ -3,7 +3,6 @@ import { upsertDevice as registryAddDevice } from './deviceRegistry';
 import { EnrollmentWindow, type PairingDeps, runPairing } from './enrollment';
 import type { FrameIO } from './noiseChannel';
 import { loadOrCreateServerKeypair, serverFingerprint } from './noiseIdentity';
-import { hasControlToken } from './routes/presentations';
 
 export interface PendingProposal {
   label: string;
@@ -98,10 +97,11 @@ function createPendingGate() {
   };
 }
 
-function gated(c: Context, then: () => Response | Promise<Response>): Response | Promise<Response> {
-  if (!hasControlToken(c.req.header('X-Tether-Present-Control'))) {
-    return c.json({ error: 'unauthorized' }, 401);
-  }
+// The unix control socket's filesystem perms are the auth now; no header token.
+function gated(
+  _c: Context,
+  then: () => Response | Promise<Response>,
+): Response | Promise<Response> {
   return then();
 }
 
