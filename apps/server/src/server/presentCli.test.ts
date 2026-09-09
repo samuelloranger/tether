@@ -51,12 +51,13 @@ test('posts over the control socket without any token header', async () => {
         },
       },
     );
-    expect(call?.url).toBe('http://localhost/control/presentations');
-    expect((call?.init as { unix?: string }).unix).toBe('/tmp/tether-control.sock');
+    if (!call) throw new Error('fetch was not called');
+    expect(call.url).toBe('http://localhost/control/presentations');
+    expect((call.init as { unix?: string }).unix).toBe('/tmp/tether-control.sock');
     expect(
-      (call?.init.headers as Record<string, string>)['X-Tether-Present-Control'],
+      (call.init.headers as Record<string, string>)['X-Tether-Present-Control'],
     ).toBeUndefined();
-    expect(JSON.parse(String(call?.init.body))).toEqual({
+    expect(JSON.parse(String(call.init.body))).toEqual({
       entry: path.resolve('index.html'),
       project: 'creneau',
       title: 'UI',

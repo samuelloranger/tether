@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { CAN_SYMLINK, HAS_POSIX_MODES } from '../../test-paths';
-import { createControlToken, PresentationRegistry, resolvePresentationFile } from './presentations';
+import { CAN_SYMLINK } from '../../test-paths';
+import { PresentationRegistry, resolvePresentationFile } from './presentations';
 
 function tempDir(prefix: string) {
   return mkdtempSync(path.join(tmpdir(), prefix));
@@ -99,22 +99,6 @@ test('debounces changes and resets all previews for a project', async () => {
     expect(registry.list().find((preview) => preview.id === first.id)?.revision).toBe(1);
     expect(registry.reset('creneau')).toBe(2);
     expect(registry.list()).toEqual([]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('creates and reuses an owner-only local control token', () => {
-  const root = tempDir('tether-control-');
-  try {
-    const file = path.join(root, 'present-control-token');
-    const first = createControlToken(file);
-    const second = createControlToken(file);
-
-    expect(first).toMatch(/^[a-f0-9]{48}$/);
-    expect(second).toBe(first);
-    // Unassertable on Windows (no mode bits) — see HAS_POSIX_MODES.
-    if (HAS_POSIX_MODES) expect(statSync(file).mode & 0o777).toBe(0o600);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

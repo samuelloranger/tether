@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { followFile } from './logTail';
-import { LOG_FILE, PID_FILE, PRESENT_CONTROL_TOKEN_FILE, STATE_DIR } from './paths';
+import { CONTROL_SOCK, LOG_FILE, PID_FILE, STATE_DIR } from './paths';
 import { processStartTime } from './procIdentity';
 import { COMPILED, selfArgv, VERSION } from './runtime';
 import { resolveListenerPlan } from './tlsConfig';
@@ -257,15 +257,7 @@ switch (cmd) {
   case 'present': {
     const { parsePresentArgs, runPresent } = await import('./presentCli');
     try {
-      const plan = resolveListenerPlan();
-      await runPresent(parsePresentArgs(process.argv.slice(3)), {
-        port: PORT,
-        baseUrl:
-          plan.httpPort === null
-            ? `https://127.0.0.1:${plan.httpsPort}`
-            : `http://127.0.0.1:${plan.httpPort}`,
-        tokenFile: PRESENT_CONTROL_TOKEN_FILE,
-      });
+      await runPresent(parsePresentArgs(process.argv.slice(3)), { sock: CONTROL_SOCK });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
@@ -278,12 +270,7 @@ switch (cmd) {
     try {
       const plan = resolveListenerPlan();
       await runPair({
-        port: PORT,
-        baseUrl:
-          plan.httpPort === null
-            ? `https://127.0.0.1:${plan.httpsPort}`
-            : `http://127.0.0.1:${plan.httpPort}`,
-        tokenFile: PRESENT_CONTROL_TOKEN_FILE,
+        sock: CONTROL_SOCK,
         advertiseUrl: advertisePairUrl({ ...plan, hosts: firstNonLoopbackIPv4() }),
       });
     } catch (error) {
@@ -295,13 +282,8 @@ switch (cmd) {
   case 'signal': {
     const { parseSignalArgs, runSignal } = await import('./signalCli');
     try {
-      const plan = resolveListenerPlan();
       await runSignal(parseSignalArgs(process.argv.slice(3)), {
-        baseUrl:
-          plan.httpPort === null
-            ? `https://127.0.0.1:${plan.httpsPort}`
-            : `http://127.0.0.1:${plan.httpPort}`,
-        tokenFile: PRESENT_CONTROL_TOKEN_FILE,
+        sock: CONTROL_SOCK,
         sessionId: process.env.TETHER_SESSION_ID,
       });
     } catch (error) {

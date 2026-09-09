@@ -1,16 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  type FSWatcher,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  statSync,
-  watch,
-  writeSync,
-} from 'node:fs';
+import { type FSWatcher, statSync, watch } from 'node:fs';
 import path from 'node:path';
-import { secureWindowsPath } from './winAcl';
 import { canonicalPath, inside } from './workspaceFile';
 
 export interface Presentation {
@@ -20,34 +10,6 @@ export interface Presentation {
   revision: number;
   url: string;
   sessionId?: string;
-}
-
-export function createControlToken(file: string): string {
-  mkdirSync(path.dirname(file), { recursive: true });
-  try {
-    // 'wx' plus 0o600: create-or-fail, owner-only. The mode is the whole point —
-    // this token authorises /control/signal and /control/presentations, so any
-    // account that can read the file can drive every session's activity state
-    // and register previews.
-    const fd = openSync(file, 'wx', 0o600);
-    const token = randomBytes(24).toString('hex');
-    writeSync(fd, token);
-    closeSync(fd);
-    // The 0o600 above is a no-op on Windows, and this file's parent is ~/.tether
-    // — created without a mode and shared with the pid file and the log, so
-    // there is no owner-only directory grant here for the token to inherit.
-    // Unlike the holder sockets it has to be secured in its own right.
-    //
-    // After closeSync, not before: icacls opens the target itself, and rewriting
-    // the DACL of a file we still hold a write handle to is needless contention.
-    // Only in the create branch — on every later boot the open throws EEXIST and
-    // the ACL set on first boot is still in force, so there is nothing to redo.
-    secureWindowsPath(file, false);
-    return token;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    return readFileSync(file, 'utf8').trim();
-  }
 }
 
 interface InternalPresentation extends Presentation {
