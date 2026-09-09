@@ -3,9 +3,18 @@
 // isolated temp paths so tests never touch the developer's live config DB or
 // present-control-token file, regardless of which test file imports first.
 // Honors explicit TETHER_DB_PATH / TETHER_PRESENT_CONTROL_TOKEN_FILE overrides.
+import { setDefaultTimeout } from 'bun:test';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+
+// Windows CI runners spawn subprocesses (git, the PTY holder, powershell.exe)
+// glacially under load — a cold git/holder start alone can eat several seconds,
+// so tests that shell out routinely blew bun's 5000ms default and failed the
+// server-windows gate for reasons unrelated to the code. Raise the ceiling
+// there; it only lets a slow-but-correct test finish, and fast tests are
+// unaffected. POSIX keeps the tight default so a genuine hang still surfaces.
+if (process.platform === 'win32') setDefaultTimeout(20_000);
 
 // A per-run DIRECTORY, not just a per-run filename.
 //

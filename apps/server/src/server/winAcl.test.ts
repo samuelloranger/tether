@@ -1,20 +1,14 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { currentUserPrincipal, icaclsArgs, secureCreatedDir, secureWindowsPath } from './winAcl';
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/**
- * How long a PowerShell probe may take before it counts as a failure.
- *
- * Only ever hit on a runner that is thrashing; a warm powershell.exe answers in
- * well under a second. Large rather than tight because the cost of overshooting
- * is a slow test and the cost of undershooting is a red release gate.
- */
-const PS_TIMEOUT_MS = 30_000;
+// System32, for calling whoami by absolute path — see readUserSid.
+const SYSTEM32 = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
 
 // ---------------------------------------------------------------------------
 // Pure argument shaping. Runs on every platform, which is the whole reason
@@ -110,60 +104,73 @@ function secureInChild(target: string, isDir: boolean): string {
 }
 
 /**
- * The SID of every principal granted access to `target`.
+ * The SID of every principal granted access to `target`, read from the object's
+ * own SDDL via `icacls <target> /save`.
  *
- * Read through Get-Acl and translated to SIDs rather than scraped out of
- * `icacls` text. Account *names* are neither stable nor parseable: icacls
- * prints a bare SID when a name does not resolve, localises the well-known
- * ones ("AUTORITE NT\Système" here, "NT AUTHORITY\SYSTEM" on an English
- * install), and lays them out positionally. A SID is the identity itself.
+ * This deliberately replaces an older `icacls`-text-plus-`NTAccount.Translate`
+ * path. Parsing icacls' human output means dealing with account *names*, which
+ * are localised ("AUTORITE NT\Système" vs "NT AUTHORITY\SYSTEM") and positional,
+ * so the old code shelled out to powershell.exe to translate them back to SIDs —
+ * and a cold powershell.exe under CI load was THE server-windows flake: it
+ * returned empty and a perfectly correct ACL read as an empty one. `/save`
+ * writes the raw SDDL (works for a file or a directory), whose ACEs already
+ * carry SIDs; no PowerShell, no cold start.
  */
 function grantedSids(target: string): string[] {
-  const shown = spawnSync('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
-  // `<path> ACCOUNT:(FLAGS)` on the first line, then `ACCOUNT:(FLAGS)` indented.
-  // The trailing summary line is localised ("1 fichiers correctement traités")
-  // and carries no ':(', so it drops out here rather than needing a match.
-  const names = (shown.stdout ?? '')
-    .split('\n')
-    .map((line) => line.replace(target, '').trim())
-    .filter((line) => line.includes(':('))
-    .map((line) => line.slice(0, line.indexOf(':(')).trim())
-    .filter(Boolean);
-  return names.length === 0 ? [] : translateToSids(names);
+  const out = path.join(tmpdir(), `tether-acl-sddl-${process.pid}-${aclNonce()}.txt`);
+  try {
+    const saved = spawnSync('icacls.exe', [target, '/save', out], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (saved.status !== 0) return [];
+    let sddl: string;
+    try {
+      sddl = readFileSync(out, 'utf16le');
+    } catch {
+      return [];
+    }
+    return sidsFromSddl(sddl);
+  } finally {
+    rmSync(out, { force: true });
+  }
+}
+
+let aclNonceCounter = 0;
+const aclNonce = () => `${Date.now()}-${aclNonceCounter++}`;
+
+/**
+ * The principal SID of every ACE in an SDDL string. An ACE is
+ * `(type;flags;rights;object;inherit;principal)`; the principal is the 6th
+ * field, and `icacls /save` writes it as a raw `S-1-...` SID for ordinary
+ * accounts (ours, or any stray second user) and as a two-letter alias for the
+ * well-known ones, which `sddlPrincipalToSid` maps back. An unknown alias is
+ * kept verbatim so it still reads as a stranger rather than vanishing.
+ */
+function sidsFromSddl(sddl: string): string[] {
+  const sids: string[] = [];
+  for (const ace of sddl.matchAll(/\(([^)]*)\)/g)) {
+    const principal = ace[1].split(';')[5]?.trim();
+    if (principal) sids.push(sddlPrincipalToSid(principal));
+  }
+  return sids;
 }
 
 /**
- * Account names to SIDs.
- *
- * Deliberately NOT `Get-Acl`: that cmdlet lives in Microsoft.PowerShell.Security,
- * which fails to load on this development machine ("le module n'a pas pu être
- * chargé"), so it returned an empty access list and made a perfectly correct ACL
- * look like an empty one. `icacls` is the tool the implementation itself uses and
- * is always present; `NTAccount.Translate` is a plain .NET type and needs no
- * module.
- *
- * A name that will not translate is passed through unchanged, which is right in
- * the one case it happens: icacls prints a bare SID when it cannot resolve the
- * account, and that string is already the answer.
+ * The well-known SDDL aliases `icacls /save` can emit for the privileged
+ * principals, mapped to their SIDs. Only these need mapping: everyone else,
+ * including our own account, is written as a raw SID and passes straight
+ * through.
  */
-function translateToSids(names: string[]): string[] {
-  const list = names.map((n) => `'${n.replace(/'/g, "''")}'`).join(',');
-  const ps = spawnSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `foreach ($n in @(${list})) { try { ` +
-        '[System.Security.Principal.NTAccount]::new($n).Translate(' +
-        '[System.Security.Principal.SecurityIdentifier]).Value } catch { $n } }',
-    ],
-    { encoding: 'utf8', windowsHide: true, timeout: PS_TIMEOUT_MS },
-  );
-  return (ps.stdout ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+const SDDL_ALIAS_TO_SID: Record<string, string> = {
+  SY: 'S-1-5-18', // NT AUTHORITY\SYSTEM
+  BA: 'S-1-5-32-544', // BUILTIN\Administrators
+  CO: 'S-1-3-0', // CREATOR OWNER
+  OW: 'S-1-3-4', // OWNER RIGHTS
+};
+
+function sddlPrincipalToSid(principal: string): string {
+  return SDDL_ALIAS_TO_SID[principal] ?? principal;
 }
 
 /**
@@ -185,47 +192,36 @@ const PRIVILEGED_SIDS = new Set([
 
 /**
  * Our own SID, the one identity that must be granted.
- *
- * Asked of .NET rather than of `whoami /user`, which looks like the obvious
- * tool and is a trap: Git for Windows ships a POSIX `whoami` that wins on PATH
- * inside a Git Bash environment, rejects `/user`, and exits 1 with empty
- * stdout — so the SID silently came back null and every assertion below
- * collapsed into "expected not null".
  */
 let cachedUserSid: string | null | undefined;
 
 function currentUserSid(): string | null {
   // The SID cannot change inside one test process, and every assertion asks for
-  // it — so pay for PowerShell once rather than per check.
+  // it — so read it once and cache.
   if (cachedUserSid !== undefined) return cachedUserSid;
-  cachedUserSid = readUserSid() ?? readUserSid();
+  cachedUserSid = readUserSid();
   return cachedUserSid;
 }
 
 /**
- * One attempt at the SID.
+ * Our own SID, from the header-less `NAME SID` line of `whoami /user /nh`.
  *
- * The timeout is explicit and generous on purpose. A cold `powershell.exe` on a
- * loaded CI runner takes seconds to start, and when the budget ran out
- * spawnSync returned empty stdout — indistinguishable from "no SID" — so the
- * assertion failed as a bare `Received: null` and this suite flaked on Windows
- * about half the time, blocking the release gate for reasons that had nothing
- * to do with the release. `currentUserSid` retries once on top of this: a
- * runner slow enough to miss the budget once is not necessarily slow twice.
+ * Called by absolute path out of System32, never bare `whoami`: Git for Windows
+ * ships a POSIX `whoami.exe` that wins on PATH inside a Git Bash environment,
+ * rejects `/user`, and exits 1 empty — which silently returned null and
+ * collapsed every assertion into "expected not null". The System32 tool answers
+ * in milliseconds with no cold start, which is the point of not asking
+ * powershell.exe: on a loaded CI runner its cold start was the flake this whole
+ * change removes. (`/user /fmt:list` is NOT valid — whoami rejects it; `/nh`
+ * drops the table header instead.)
  */
 function readUserSid(): string | null {
-  const ps = spawnSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
-    ],
-    { encoding: 'utf8', windowsHide: true, timeout: PS_TIMEOUT_MS },
-  );
-  const sid = (ps.stdout ?? '').trim();
-  return /^S-1-[\d-]+$/.test(sid) ? sid : null;
+  const r = spawnSync(path.join(SYSTEM32, 'whoami.exe'), ['/user', '/nh'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const sid = (r.stdout ?? '').match(/S-1-[\d-]+/);
+  return sid ? sid[0] : null;
 }
 
 /**
