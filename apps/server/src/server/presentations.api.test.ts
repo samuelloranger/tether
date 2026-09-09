@@ -37,6 +37,10 @@ test('opens a scoped preview through control and serves its assets by capability
     const css = await app.request(preview.url.replace('index.html', 'style.css'));
     expect(css.status).toBe(200);
     expect(css.headers.get('Content-Type')).toContain('text/css');
+    // The capability token is in the URL; no-referrer stops it leaking to any
+    // external resource the presented HTML loads.
+    expect(css.headers.get('Referrer-Policy')).toBe('no-referrer');
+    expect(css.headers.get('Cache-Control')).toBe('no-store');
     expect(await css.text()).toBe('body { color: papayawhip; }');
 
     expect(await (await reset('creneau')).json()).toEqual({ cleared: 1 });

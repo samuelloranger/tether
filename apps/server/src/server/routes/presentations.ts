@@ -15,7 +15,13 @@ presentationsRoutes.get('/preview/:token/*', (c) => {
       decodeURIComponent(new URL(c.req.url).pathname.slice(prefix.length)),
     );
     return new Response(Bun.file(file), {
-      headers: { 'Content-Type': previewMime(file), 'Cache-Control': 'no-store' },
+      headers: {
+        'Content-Type': previewMime(file),
+        'Cache-Control': 'no-store',
+        // The capability token rides the URL; keep it out of any Referer the
+        // presented page's external requests would otherwise carry.
+        'Referrer-Policy': 'no-referrer',
+      },
     });
   } catch {
     return c.notFound();

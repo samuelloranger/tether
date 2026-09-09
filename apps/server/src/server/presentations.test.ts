@@ -103,3 +103,44 @@ test('debounces changes and resets all previews for a project', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a preview token expires after its TTL and is then unresolvable', () => {
+  const root = tempDir('tether-ttl-');
+  try {
+    const entry = path.join(root, 'index.html');
+    writeFileSync(entry, 'ok');
+    let clock = 1_000;
+    const registry = new PresentationRegistry(150, 60_000, () => clock);
+    const { url } = registry.create({ entry });
+    const token = url.split('/')[2];
+
+    expect(registry.findByToken(token)).not.toBeNull();
+    clock += 60_001; // just past the TTL
+    expect(registry.findByToken(token)).toBeNull();
+    registry.dispose();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('listing (the authed poll) renews a preview and keeps its token stable', () => {
+  const root = tempDir('tether-renew-');
+  try {
+    const entry = path.join(root, 'index.html');
+    writeFileSync(entry, 'ok');
+    let clock = 1_000;
+    const registry = new PresentationRegistry(150, 60_000, () => clock);
+    const { url } = registry.create({ entry });
+    const token = url.split('/')[2];
+
+    clock += 40_000;
+    const listed = registry.list(); // renews expiry
+    expect(listed[0]?.url).toBe(url); // same token string → no iframe reload churn
+
+    clock += 40_000; // 80s since create, but only 40s since the renewing list
+    expect(registry.findByToken(token)).not.toBeNull();
+    registry.dispose();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
