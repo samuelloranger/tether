@@ -46,6 +46,7 @@ import { SessionModalHost, useSessionModals } from './SessionModals';
 import { SessionChrome } from './SessionTabBar';
 import { LocalSettingsScreen } from './SettingsScreen';
 import { sessionKey } from './sessionKey';
+import { touchLru } from './sessionLru';
 import { TerminalEmpty } from './TerminalEmpty';
 import { type DrawerSession, type HostHealthStatus, httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
@@ -178,6 +179,9 @@ export function App() {
   const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
   const tree: PaneNode = activeView?.tree ?? { kind: 'leaf', id: 'empty', session: null };
   const focusedPaneId = activeView?.focusedPaneId ?? firstLeafId(tree);
+  // Recency order of active sessions — feeds residentSessions so recently-used
+  // background tabs keep a live socket (zero replay on switch-back).
+  const [lruOrder, setLruOrder] = useState<string[]>([]);
   const liveKeys = () =>
     new Set([
       ...liveSessionKeys(app.sessions, viewStateRef.current.views, app.healthByHost),
@@ -201,7 +205,11 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: app.selectSession is stable; this mirrors focus into the active session
   useEffect(() => {
     const leaf = findLeaf(tree, focusedPaneId);
-    if (leaf?.session) app.selectSession(leaf.session.hostId, leaf.session.sessionId);
+    if (leaf?.session) {
+      app.selectSession(leaf.session.hostId, leaf.session.sessionId);
+      const key = sessionKey(leaf.session.hostId, leaf.session.sessionId);
+      setLruOrder((order) => touchLru(order, key));
+    }
   }, [focusedPaneId, tree]);
 
   const splitPane = (paneId: string, dir: PaneDir, side: PaneSide) => {
@@ -602,6 +610,7 @@ export function App() {
                     sessions={app.sessions}
                     tree={tree}
                     focusedPaneId={focusedPaneId}
+                    lruOrder={lruOrder}
                     terminalTheme={theme.terminal}
                     fontFamily={prefs.terminalFont}
                     onFrame={app.handleWsFrame}
