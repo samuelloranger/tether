@@ -58,7 +58,7 @@ actor TerminalPipeline {
   private let eventSink: AsyncStream<TerminalPipelineEvent>.Continuation
   private let outboundFrames: AsyncStream<OutboundFrame>
 
-  private let replayStore = TerminalPipeline.makeReplayStore()
+  private let replayStore: FfiReplayStore
   private let snapshotCache = TerminalSnapshotCache()
   private let sessionGrids = TerminalSessionGrids()
   private var currentGrid: TerminalSessionGrid?
@@ -80,35 +80,25 @@ actor TerminalPipeline {
   private var lastMouseMode: MouseMode = .off
   private var lastMouseSgr = true
   private var lastAltScreen = false
+  /// When false, output is still fed to the emulator and the replay cursor still
+  /// advances, but grid snapshots are not produced — a background (non-visible)
+  /// session stays current without paying to rasterize.
+  private var rendering = true
   /// One source of truth for the grid size: the channel, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
   private var cols: UInt16 = 80
   private var rows: UInt16 = 24
 
-  init() {
+  /// The replay cursor store is injected (and shared across every pipeline) so
+  /// N concurrent sessions never write the persisted cursor file at once.
+  init(replayStore: FfiReplayStore) {
+    self.replayStore = replayStore
     (snapshots, snapshotSink) = AsyncStream.makeStream(
       of: Optional<Data>.self,
       bufferingPolicy: .bufferingNewest(1)
     )
     (events, eventSink) = AsyncStream.makeStream(of: TerminalPipelineEvent.self)
     (outboundFrames, outbound) = AsyncStream.makeStream(of: OutboundFrame.self)
-  }
-
-  /// Persist replay cursors to Application Support so a relaunch / tab eviction
-  /// replays only the `sinceId` delta instead of the whole retained tail.
-  /// Fail-open: if the directory can't be prepared, fall back to the in-memory
-  /// store — a lost cursor costs one slower reconnect, never a crash.
-  private static func makeReplayStore() -> FfiReplayStore {
-    let fm = FileManager.default
-    guard
-      let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-    else { return FfiReplayStore() }
-    do {
-      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-      return FfiReplayStore.withPath(path: dir.appendingPathComponent("replay_cursors.json").path)
-    } catch {
-      return FfiReplayStore()
-    }
   }
 
   // MARK: - Connection
@@ -382,6 +372,28 @@ actor TerminalPipeline {
     publishSnapshot()
   }
 
+  /// Toggle grid rasterization. A background (non-visible) session sets this
+  /// false: output keeps feeding the emulator and advancing the replay cursor,
+  /// but no snapshot is produced until it becomes visible again.
+  func setRendering(_ on: Bool) {
+    rendering = on
+    if on { publishSnapshot() }
+  }
+
+  #if DEBUG
+  /// Test seam: stand up a live emulator without a Noise connection.
+  func attachForTest(cols: UInt16, rows: UInt16) {
+    let attached = sessionGrids.attach(key: "test", cols: cols, rows: rows)
+    currentGrid = attached.grid
+    emulatorKey = "test"
+    self.cols = cols
+    self.rows = rows
+  }
+
+  /// Test seam: feed bytes through the normal output path.
+  func feedForTest(_ bytes: Data) { applyOutput(bytes) }
+  #endif
+
   /// Tracks the last focus value so `.inactive` then `.background` for one
   /// scenePhase transition is not treated as two events.
   func sendFocus(focused: Bool) {
@@ -398,6 +410,7 @@ actor TerminalPipeline {
   /// packed bytes, so a burst of output that does not alter the viewport costs
   /// nothing beyond the counter read.
   private func publishSnapshot() {
+    guard rendering else { return }
     guard let emulator else { return }
     let generation = emulator.generation()
     // Mouse mode can flip without a viewport change (e.g. vim entering or

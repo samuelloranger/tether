@@ -59,7 +59,26 @@ public final class SessionStore {
   )
   /// Owns the socket and the VT emulator on its OWN executor. See
   /// `TerminalPipeline` for why none of that may run on the main actor.
-  @ObservationIgnored private let pipeline = TerminalPipeline()
+  /// One shared cursor store for every pipeline — a per-pipeline path-backed
+  /// store would put N writers on the same file. Built once here.
+  @ObservationIgnored private let replayStore = SessionStore.makeReplayStore()
+  @ObservationIgnored private lazy var pipeline = TerminalPipeline(replayStore: replayStore)
+
+  /// Persist replay cursors to Application Support so a relaunch / tab eviction
+  /// replays only the `sinceId` delta instead of the whole retained tail.
+  /// Fail-open: if the directory can't be prepared, fall back to the in-memory
+  /// store — a lost cursor costs one slower reconnect, never a crash.
+  private static func makeReplayStore() -> FfiReplayStore {
+    let fm = FileManager.default
+    guard let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    else { return FfiReplayStore() }
+    do {
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+      return FfiReplayStore.withPath(path: dir.appendingPathComponent("replay_cursors.json").path)
+    } catch {
+      return FfiReplayStore()
+    }
+  }
   /// `lazy` + `@ObservationIgnored`: the coordinator's closures capture `self`,
   /// which cannot happen inside `init` before every stored property is
   /// initialized. Building it on first use sidesteps that. It is internal
