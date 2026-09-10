@@ -215,7 +215,12 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
             }
           : OFFSCREEN_STYLE;
         return (
-          <div key={key} className="resident-terminal-holder" style={style}>
+          <div
+            key={key}
+            className="resident-terminal-holder"
+            style={style}
+            onPointerDownCapture={shown ? () => props.onFocusPane(shown.paneId) : undefined}
+          >
             <TerminalPane
               hostId={hostId}
               sessionId={sessionId}

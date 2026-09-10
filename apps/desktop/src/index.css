@@ -1511,12 +1511,23 @@ label > textarea {
 
 /* Panes are positioned by their slot now, not stacked — every resident pane is
    visible. Focus only governs input gating (handled in JS) and focus styling. */
+/* Chrome layer sits above the focused terminal (z-index below), so it must be
+   pointer-transparent — else a click on the terminal body lands on this empty
+   div, pulls DOM focus off the xterm textarea, and typing dies. Interactive
+   children re-enable pointer events. */
 .pane-slot {
   overflow: hidden;
+  pointer-events: none;
 }
 
 .pane-slot.focused {
   z-index: 1;
+}
+
+.pane-controls,
+.empty-pane,
+.agent-pane {
+  pointer-events: auto;
 }
 
 .pane-divider {
