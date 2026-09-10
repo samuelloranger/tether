@@ -37,9 +37,8 @@ export interface DiffFileStat {
   // Index (staged) vs working-tree (unstaged) side. A partially staged file
   // appears twice, once per side. Absent on older payloads.
   staged?: boolean;
-  // Whether the file is untracked. A client cannot infer this from the counts
-  // — an ordinary edit that only appends lines looks exactly like a new file —
-  // so the status letter needs it stated. Absent on older payloads.
+  // Whether the file is untracked — a client can't infer this from the counts
+  // alone (an appended-only edit looks like a new file). Absent on older payloads.
   untracked?: boolean;
 }
 
@@ -91,15 +90,12 @@ function runGitDiff(root: string, args: string[], okStatuses: number[] = [0]): P
   });
 }
 
-// `git diff --no-index` exits 1 (not 0) when the two sides differ — that's
-// the expected case every time we use it (comparing /dev/null against a real
-// untracked file), so 1 is accepted alongside 0 wherever it's invoked.
+// `git diff --no-index` exits 1 (not 0) when the two sides differ — expected
+// every time we use it (/dev/null vs a real untracked file), so 1 is accepted.
 const NO_INDEX_OK_STATUSES = [0, 1];
 
-// Parses `--numstat -z` output (tracked-diff or --no-index). NUL-delimited so
-// renames are unambiguous: a rename record is an empty inline path followed by
-// two more NUL-terminated fields (old path, new path) instead of `old => new`
-// baked into one string — see git-diff-tree(1) `-z` docs.
+// Parses `--numstat -z` output. NUL-delimited so renames are unambiguous: a
+// rename record is an empty inline path + two more fields (old, new path).
 function parseNumstatZ(out: string): Array<{
   insertions: number;
   deletions: number;
@@ -169,8 +165,7 @@ function untrackedNumstat(root: string, requestedPath: string): DiffFileStat {
 
 export function readDiffSummary(root: string): DiffSummary {
   // Index vs HEAD (staged) and working tree vs index (unstaged), so the client
-  // can group files the way `git status` does. A path with both staged and
-  // unstaged edits yields one entry per side.
+  // can group files like `git status`. A path with both yields one entry per side.
   const pick = ({
     insertions,
     deletions,
@@ -195,10 +190,8 @@ export function readDiffSummary(root: string): DiffSummary {
   return { files: [...staged, ...unstaged, ...untracked] };
 }
 
-// mode selects the comparison for per-file diffs: 'head' (HEAD vs working
-// tree — the pre-v2 behavior), 'staged' (HEAD vs index), or 'unstaged'
-// (index vs working tree). The staged/unstaged views line up hunk-for-hunk
-// with what gitOps' stage-hunk/unstage-hunk operate on.
+// 'head' = HEAD vs working tree (pre-v2 behavior); 'staged'/'unstaged' line up
+// hunk-for-hunk with what gitOps' stage-hunk/unstage-hunk operate on.
 export type DiffMode = 'head' | 'staged' | 'unstaged';
 
 export async function readDiff(
@@ -249,9 +242,7 @@ export async function readDiff(
 }
 
 // Raw bytes for one side of a (possibly binary) file, for image-diff previews.
-// 'old' reads the committed blob via `git show`; 'new' reads the working tree
-// directly. Either side legitimately doesn't exist (added or deleted file) —
-// that's not an error, just null, so the caller can render a one-sided view.
+// Either side may legitimately not exist (added/deleted file) — that's null, not an error.
 export function readDiffBlob(
   root: string,
   side: 'old' | 'new',
@@ -281,7 +272,6 @@ export function readDiffBlob(
   return result.stdout;
 }
 
-/** Bounded concurrency for the per-untracked-file numstat reads. */
 const UNTRACKED_NUMSTAT_CONCURRENCY = 8;
 
 function runGitTextAsync(
@@ -310,15 +300,8 @@ async function mapBounded<T, R>(
   return results;
 }
 
-/**
- * Same summary as readDiffSummary, off the event loop.
- *
- * The git watcher calls this on every worktree change, and a repository where
- * git is slow (a working tree holding directories git cannot read, say) took
- * ~1s per read through spawnSync — held on the one event loop, so every
- * session's keystrokes waited behind it. Untracked numstats are bounded rather
- * than fired all at once: a fresh checkout can have thousands of them.
- */
+// Same as readDiffSummary, off the event loop: the git watcher calls this on
+// every worktree change, and spawnSync-based git can block ~1s per read.
 export async function readDiffSummaryAsync(root: string): Promise<DiffSummary> {
   const pick = ({
     insertions,

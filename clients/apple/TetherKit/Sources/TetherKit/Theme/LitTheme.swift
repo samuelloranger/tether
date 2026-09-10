@@ -1,10 +1,8 @@
 import Foundation
 import SwiftUI
 
-/// What the chrome is currently wearing.
-///
-/// `none` is not "idle": a stopped session, or no session at all, must not tint
-/// the app warm or cool — a dead shell that keeps glowing reads as a live one.
+/// What the chrome is wearing. `none` is not "idle": a stopped or absent session
+/// must not tint the app, or a dead shell reads as a live one.
 public enum LitState: String, Equatable, Sendable {
   case working
   case waiting
@@ -13,9 +11,8 @@ public enum LitState: String, Equatable, Sendable {
   case none
 }
 
-/// Bloom alphas for the atmospheric glow. Per-state on purpose: ember reads
-/// hotter than amber at equal alpha, so waiting is scaled quieter; idle is
-/// quieter still; none is fully zeroed.
+/// Bloom alphas for the glow, per-state: ember reads hotter than amber at equal
+/// alpha, so waiting is scaled quieter; idle quieter still; none zeroed.
 public struct LitBloom: Equatable, Sendable {
   public var b1: Double
   public var b2: Double
@@ -42,7 +39,6 @@ public struct LitBloom: Equatable, Sendable {
 }
 
 /// Pure classification + colour resolution for Aurora's lit chrome.
-/// Port of `apps/desktop/src/litTheme.ts`.
 public enum LitTheme {
   /// Reuses the drawer's own classification so the row and the chrome can never disagree.
   public static func state(for dot: SessionActivityDot?) -> LitState {

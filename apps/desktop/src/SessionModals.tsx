@@ -125,10 +125,8 @@ export function useSessionModals() {
 
 export type SessionModals = ReturnType<typeof useSessionModals>;
 
-/**
- * The rename and kill dialogs with their state already wired, so the app shell
- * carries one element instead of two blocks of plumbing.
- */
+/** Rename and kill dialogs with their state wired, so the app shell carries one
+ *  element instead of two blocks of plumbing. */
 export function SessionModalHost({
   modals,
   onRename,

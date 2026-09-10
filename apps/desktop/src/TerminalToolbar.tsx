@@ -19,11 +19,8 @@ interface TerminalToolbarProps {
 }
 
 /**
- * Session identity on the left, one segmented control on the right.
- *
- * The four actions used to be four separate outlined buttons floating in the
- * row, which read as four unrelated decisions. Grouping them says what is true:
- * they are one set of things you can do to the session named beside them.
+ * Session identity on the left, one segmented control on the right — the actions
+ * grouped so they read as one set of things you can do to the named session.
  */
 export function TerminalToolbar({
   sessionLabel,

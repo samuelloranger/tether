@@ -20,37 +20,17 @@ import { shouldSkipWatchDirName } from './gitWatchIgnore';
 import { isEacces, listIgnoredDirs } from './gitWatchIgnoredDirs';
 import { logWarn } from './log';
 
-// Hard ceiling on watched directories. Ignore-pruning plus the nested-repo
-// boundary keeps a normal project far below this; the cap only exists so a tree
-// nobody anticipated degrades into "watch less" instead of freezing the server
-// and exhausting the kernel's inotify allowance (one watch per directory,
-// default limit 8192 on many systems).
+// Hard ceiling on watched directories, so an unanticipated tree degrades into
+// "watch less" instead of freezing the server and exhausting inotify's allowance.
 const MAX_WATCHED_DIRS = 4096;
 
 // How long one scan slice may hold the event loop. The scan runs in slices
 // because setRoot is called from the PTY output path: `cd` must not wait on it.
 const SCAN_SLICE_MS = 8;
 
-/**
- * Whether to install filesystem watchers at all. Off on Windows.
- *
- * Watching is not just more expensive there, it is expensive visibly: a git
- * spawn costs 200-380ms against ~5ms on Linux, readRepoStatus alone runs four,
- * and the daemon runs console-less — so each one opens and closes a console
- * window on the user's desktop (spawnWindow.ts). An actively edited repository
- * made that a continuous stream.
- *
- * Only the *live* part is given up: the diff panel still fills on `cd` and on
- * an explicit kick, and /api/sessions/:id/diff is untouched, so a client that
- * asks still gets a current answer. It just no longer updates by itself.
- *
- * TETHER_GIT_WATCH=1 opts back in (=0 opts out anywhere). The watcher works
- * correctly here — its tests pass on Windows — so this is a cost decision, not
- * a bug fix, and it should be reversible by whoever disagrees with the trade.
- *
- * Read once at module load rather than per call: it gates a hot path, and a
- * value that could change between two `cd`s would leave a session half-watched.
- */
+// Off on Windows by default: each git spawn there flashes a console window
+// (spawnWindow.ts) and an active repo turns that into a continuous stream.
+// TETHER_GIT_WATCH=1/0 overrides; read once at load so a session is never half-watched.
 const GIT_WATCH_ENABLED =
   process.env.TETHER_GIT_WATCH === '1' ||
   (process.platform !== 'win32' && process.env.TETHER_GIT_WATCH !== '0');
@@ -89,9 +69,8 @@ export class GitWatch {
   private queue: string[] = [];
   private scanGen = 0;
   private scanTimer?: ReturnType<typeof setTimeout>;
-  // Resolves when the deferred scan for the current root has finished placing
-  // its watches. Nothing in the server waits on it — it exists so tests can
-  // assert on the finished state instead of racing the slices.
+  // Resolves when the deferred scan finishes placing its watches — nothing in
+  // the server waits on it, it exists so tests can assert finished state instead of racing slices.
   private settled: Promise<void> = Promise.resolve();
   private settle: () => void = () => {};
 
@@ -108,12 +87,8 @@ export class GitWatch {
     private readonly readIgnoredDirs: (root: string) => Promise<Set<string>> = listIgnoredDirs,
   ) {}
 
-  // Returns immediately. This is called from the PTY output path in pty.ts, so
-  // anything expensive here stalls the terminal the user just typed `cd` into —
-  // and every other session with it, since it is one event loop. Setting up the
-  // watch is therefore deferred and time-sliced: the user lands in the new
-  // directory first, the diff summary arrives a tick later, and the working-tree
-  // watches fill in behind it.
+  // Returns immediately: called from the PTY output path in pty.ts, so anything
+  // expensive here stalls the terminal (and every other session, one event loop).
   setRoot(root: string | null) {
     if (this.disposed || root === this.root) return;
     this.cancelScan();
@@ -134,8 +109,6 @@ export class GitWatch {
     this.scanTimer = setTimeout(() => void this.beginScan(root, gen), 0);
   }
 
-  // First slice: the cheap-but-blocking setup, then publish the diff summary
-  // before walking, because the summary is the part the user actually sees.
   /** Awaits the deferred scan and any git read still in flight (tests). */
   async whenScanned(): Promise<void> {
     await this.settled;
@@ -148,9 +121,7 @@ export class GitWatch {
     this.scanTimer = undefined;
     if (this.disposed || gen !== this.scanGen) return;
 
-    // Watching disabled (Windows): publish one summary for this root and stop,
-    // installing no watchers. See GIT_WATCH_ENABLED above for why, and what the
-    // diff panel still does and no longer does.
+    // Watching disabled (Windows): publish one summary and stop, no watchers installed.
     if (!GIT_WATCH_ENABLED) {
       this.refresh();
       this.settle();
@@ -204,10 +175,8 @@ export class GitWatch {
     this.settle(); // never leave an awaited scan hanging
   }
 
-  // One directory per call, queueing its children (instead of node:fs's
-  // {recursive:true}) so ignored directories can be pruned from the traversal
-  // entirely — see listIgnoredDirs above for why that matters — and so the scan
-  // can be interrupted between directories.
+  // One directory per call, queueing children instead of node:fs {recursive:true},
+  // so ignored dirs are pruned entirely and the scan can be interrupted between directories.
   private visit(root: string, dir: string) {
     if (this.watchedDirs.size >= this.maxWatchedDirs) {
       this.truncated = true;
@@ -235,13 +204,8 @@ export class GitWatch {
         continue;
       }
       if (!isDir) continue;
-      // A nested repository is a boundary. `git status` in the parent reports
-      // the whole directory as one entry and never looks inside, so watching
-      // its contents cannot change this repo's diff — it only costs watches.
-      // Skipping it matters: a directory that merely *contains* checkouts (no
-      // commits of its own, so nothing is ignored) otherwise drags every
-      // project's node_modules into the walk. Measured at 508k directories and
-      // ~14s of blocking on one such tree, which is what made `cd` hang.
+      // A nested repo is a boundary: `git status` never looks inside it, so
+      // watching its contents only costs watches (measured 508k dirs / ~14s hang without this).
       if (isNestedRepo(child)) continue;
       this.queue.push(child);
     }
@@ -310,8 +274,7 @@ export class GitWatch {
     this.schedule();
   }
 
-  // Single-flight: a busy tree fires events far faster than git can answer, and
-  // piling reads on top of each other only starves the loop further. Anything
+  // Single-flight: a busy tree fires events faster than git can answer; anything
   // that lands mid-read collapses into exactly one follow-up.
   private refresh = () => {
     this.timer = undefined;

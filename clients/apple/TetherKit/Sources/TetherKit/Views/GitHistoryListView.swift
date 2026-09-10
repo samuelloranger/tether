@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Port of `apps/mobile/src/GitTabBar.tsx`.
 public struct GitTabBar: View {
   public enum Tab: String, CaseIterable, Hashable {
     case changes
@@ -49,7 +48,6 @@ public struct GitTabBar: View {
   }
 }
 
-/// Port of `apps/mobile/src/HistoryList.tsx`.
 public struct GitHistoryListView: View {
   public var entries: [GitLogEntry]?
   public var onSelect: (GitLogEntry) -> Void

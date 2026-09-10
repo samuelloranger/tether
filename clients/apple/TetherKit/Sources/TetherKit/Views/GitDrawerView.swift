@@ -274,9 +274,8 @@ public struct GitDrawerView: View {
           .font(.subheadline.monospaced())
           .foregroundStyle(TetherColors.textPrimary)
           .lineLimit(1)
-          // Truncate the MIDDLE. Tail truncation ate the filename — the one part
-          // that tells you which file this row is — and left a run of directories
-          // that several rows share.
+          // Truncate the MIDDLE: tail truncation ate the filename and left a run
+          // of directories several rows share.
           .truncationMode(.middle)
 
         Spacer(minLength: 8)
@@ -325,10 +324,8 @@ public struct GitDrawerView: View {
 
   private var commitBar: some View {
     VStack(alignment: .leading, spacing: 8) {
-      // Say WHY the button is inert. A disabled prominent button on a dark
-      // theme is a dark pill with a grey label — indistinguishable from an
-      // enabled one, and silent about what is missing. Naming the next action
-      // turns a dead end into an instruction.
+      // Name why the button is inert: a disabled prominent button on a dark theme
+      // is indistinguishable from an enabled one, so name the next action instead.
       if let blocker = commitBlocker {
         Text(blocker)
           .font(.caption)
@@ -379,9 +376,8 @@ public struct GitDrawerView: View {
             .fontWeight(.semibold)
         }
       }
-      // Painted rather than `.borderedProminent`, so the disabled state is a
-      // deliberate colour instead of the system's dimmed tint — which on this
-      // palette landed on almost exactly the enabled fill.
+      // Painted, not `.borderedProminent`: the system's dimmed disabled tint
+      // landed on almost exactly the enabled fill on this palette.
       .buttonStyle(.plain)
       .padding(.horizontal, 18)
       .frame(minHeight: 44)
@@ -398,9 +394,8 @@ public struct GitDrawerView: View {
     }
   }
 
-  // `commitBlocker` reports nothing while a commit is in flight — there is a
-  // spinner in the button saying so, and a caption repeating it would be noise —
-  // so the in-flight guard has to live here, not there.
+  // `commitBlocker` stays silent while a commit is in flight (the button spinner
+  // says so), so the in-flight guard lives here instead.
   private var canCommit: Bool { !committing && commitBlocker == nil }
 
   /// What is stopping a commit, in the order the user has to fix it.

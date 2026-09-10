@@ -116,7 +116,6 @@ public struct PairPayload: Equatable {
       return PairPayload(code: code, host: (cleanedHost?.isEmpty ?? true) ? nil : cleanedHost)
     }
 
-    // Bare code form.
     guard let code = PairingCode.normalize(trimmed) else { return nil }
     return PairPayload(code: code, host: nil)
   }

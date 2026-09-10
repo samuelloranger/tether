@@ -59,9 +59,8 @@ gitRoutes.get('/api/sessions/:id/diff', async (c) => {
   }
 });
 
-// Raw bytes for one side of a binary (typically image) file diff — 'old' is
-// the committed blob, 'new' is the working tree copy. Either side can be
-// legitimately absent (added/deleted file), reported as 404.
+// Raw bytes for one side of a binary file diff ('old' = committed, 'new' =
+// working tree). Either side can be legitimately absent (add/delete), 404.
 gitRoutes.get('/api/sessions/:id/diff/file', async (c) => {
   const requestedPath = c.req.query('path');
   const side = c.req.query('side');
@@ -81,9 +80,8 @@ gitRoutes.get('/api/sessions/:id/diff/file', async (c) => {
   }
 });
 
-// Git write ops (stage/unstage/discard/commit) and history. Same trust anchor
-// as the diff read routes: the session's live cwd resolved to its git root —
-// a tree the authenticated shell user already controls.
+// Git write ops (stage/unstage/discard/commit) and history. Same trust anchor as
+// the diff reads: the session's git root, a tree the shell user already controls.
 
 gitRoutes.post('/api/sessions/:id/git/push', async (c) => {
   try {

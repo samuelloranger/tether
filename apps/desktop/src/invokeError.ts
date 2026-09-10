@@ -1,13 +1,9 @@
-/// Tauri rejects a failed command with the command's error payload — for our
-/// `Result<_, String>` commands that is a plain STRING, not an Error. Every
-/// `err instanceof Error` check downstream therefore missed, and the real
-/// reason ("Unreachable — check the host and port.", "Wrong password.", …) was
-/// replaced by a generic fallback. Normalise once, at the boundary.
+/// Tauri rejects `Result<_, String>` commands with a plain STRING, not an
+/// Error, so `err instanceof Error` checks downstream missed it. Normalise once, at the boundary.
 export function normalizeInvokeError(raw: unknown): Error {
   if (raw instanceof Error) return raw;
   if (typeof raw === 'string') return new Error(raw);
-  // Some Tauri failures arrive as `{ message }` or a serialised struct; prefer a
-  // readable field over `String(object)`, which would yield "[object Object]".
+  // Prefer a readable field over String(object), which yields "[object Object]".
   if (raw && typeof raw === 'object') {
     const record = raw as Record<string, unknown>;
     for (const key of ['message', 'msg', 'error']) {

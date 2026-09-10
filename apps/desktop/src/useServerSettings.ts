@@ -74,12 +74,8 @@ function useSettingsLoad(host: HostProfile, health: HostHealthStatus) {
     void Promise.all([loadServerConfig(host.id), loadServerVersion(host.id)])
       .then(([nextConfig, nextVersion]) => {
         setConfig(nextConfig);
-        // Seed the draft from the SERVER's identity, not the local profile name.
-        // Overriding it with host.name made patchForDraft see identity as changed
-        // on every load whenever the two differed, so saving any unrelated field
-        // — a notification trigger, a shell — silently renamed the server to
-        // whatever the local profile happened to be called. The mirror image of
-        // the iOS trap fixed in 46c1c78.
+        // Seed from the SERVER's identity, not host.name: else patchForDraft sees identity
+        // changed and saving any field renames the server. Mirror of the iOS trap (46c1c78).
         setDraft(createServerSettingsDraft(nextConfig));
         setVersion(nextVersion);
       })

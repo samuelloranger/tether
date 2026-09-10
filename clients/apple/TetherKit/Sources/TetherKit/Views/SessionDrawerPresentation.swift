@@ -47,10 +47,8 @@ public struct SessionDrawerOverlay: View {
         )
         .frame(width: drawerWidth)
         .frame(maxHeight: .infinity)
-        // The drawer comes from the edge it lives on, so the gesture that opens
-        // it and the animation that answers are the same movement. Reduce
-        // Motion gets the crossfade instead — the panel is 264pt of travel,
-        // which is exactly the kind of slide that setting is asking about.
+        // Comes from the edge it lives on, so the open gesture and the animation
+        // are one movement. Reduce Motion crossfades instead — 264pt is real travel.
         .transition(reduceMotion ? .opacity : .move(edge: .leading))
       }
 
@@ -58,10 +56,8 @@ public struct SessionDrawerOverlay: View {
         .frame(width: 20)
         .frame(maxHeight: .infinity, alignment: .leading)
     }
-    // Without this the ZStack shrinks to its only child when the drawer is
-    // closed — a 20pt column — and the parent ZStack centres it, putting an
-    // invisible touch-swallowing strip down the middle of the terminal and
-    // leaving the edge recogniser nowhere near the edge.
+    // Without this the closed ZStack shrinks to its 20pt handle and the parent
+    // centres it — a dead strip mid-terminal, and the edge recogniser off the edge.
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     // Exits faster than it enters: dismissing is a decision already made, and
     // waiting for the panel to leave is waiting for the terminal to come back.
@@ -105,9 +101,8 @@ private struct LeadingEdgeSwipeHandle: UIViewRepresentable {
     Coordinator(onSwipe: onSwipe)
   }
 
-  /// Claims a touch only when it starts within the screen-edge band the
-  /// recogniser can actually act on. A plain UIView would swallow every touch
-  /// inside its bounds and never hand it back to the terminal underneath.
+  /// Claims a touch only within the screen-edge band the recogniser can act on;
+  /// a plain UIView would swallow every touch and never hand it to the terminal.
   final class EdgeHandleView: UIView {
     static let edgeBand: CGFloat = 20
 

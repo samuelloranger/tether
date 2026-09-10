@@ -338,7 +338,6 @@ public func validateServerSettingsDraft(
     errors[.identityColor] = "Color must be at most 32 characters."
   }
   if let longJob = Int(draft.longJobSeconds), longJob > 0 {
-    // ok
   } else {
     errors[.longJobSeconds] = "Long-job threshold must be a positive whole number."
   }
@@ -349,7 +348,6 @@ public func validateServerSettingsDraft(
     errors[.defaultCwd] = "Default directory must be between 1 and 4096 characters."
   }
   if let rows = Int(draft.scrollbackRows), rows >= 100, rows <= 100_000 {
-    // ok
   } else {
     errors[.scrollbackRows] = "Scrollback must be between 100 and 100000 rows."
   }

@@ -1,7 +1,6 @@
 import Foundation
 
 /// Compact age of a timestamp, e.g. `4s`, `12m`, `3h`, `2d`.
-/// Port of `apps/desktop/src/sessionStrip.ts` `relativeSince`.
 public enum SessionStrip {
   public static func relativeSince(
     _ raw: String?,

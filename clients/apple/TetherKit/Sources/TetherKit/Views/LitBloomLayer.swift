@@ -1,18 +1,7 @@
 import SwiftUI
 
-/// The app's atmospheric bloom: the active session's heat colour, soft and
-/// off-centre, sitting behind everything.
-///
-/// This was an `if` around a `RadialGradient` in `RootView`, which meant the
-/// glow appeared and vanished on a frame boundary — the app's one continuous
-/// signal that a shell is alive changed by hard cut. Here the two states
-/// crossfade (`.id` + `.transition`, since gradient colours themselves do not
-/// interpolate), on the asymmetric curve from `TetherMotion`: heat arrives in
-/// a quarter second, and takes most of a second to leave.
-///
-/// Entering `waiting` also gets the surface's one authored moment — a single
-/// swell of the same glow, no repeat, no loop. It is the moment the product is
-/// for: the shell has stopped and is asking you something.
+/// The app's atmospheric bloom: the active session's heat colour behind everything.
+/// States crossfade via `.id`+`.transition` (gradient colours don't interpolate); waiting swells once.
 public struct LitBloomLayer: View {
   public var chrome: LitChrome
 
@@ -59,10 +48,8 @@ public struct LitBloomLayer: View {
         settled: wasSettled,
         reduceMotion: reduceMotion
       ) else {
-        // Answer a prompt quickly and the session leaves `waiting` while the
-        // swell is still on screen. The bloom has already crossfaded to the new
-        // state's colour by then, so the leftover brightness is a state that is
-        // over — take it back rather than letting it finish its own fall.
+        // Leaving `waiting` mid-swell, the bloom has already crossfaded colour, so
+        // the leftover brightness is a dead state — take it back, don't let it fall.
         if pulse != 0 {
           withAnimation(.easeOut(duration: TetherMotion.pulseCancel)) { pulse = 0 }
         }

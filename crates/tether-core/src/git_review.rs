@@ -113,8 +113,6 @@ where
         .collect()
 }
 
-// --- gitDrawerLayout.ts ---
-
 pub const GIT_DRAWER_MIN_LEFT: i32 = 220;
 pub const GIT_DRAWER_MIN_RIGHT: i32 = 320;
 pub const GIT_DRAWER_DEFAULT_LEFT_RATIO: f64 = 1.0 / 3.0;
