@@ -69,6 +69,17 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   },
 ];
 
+/** The `/model` aliases. Static on purpose — the CLI exposes no model list, and
+ * an alias always resolves to the latest model of its tier, so a new release
+ * needs no update here. A full model ID can still be typed as passthrough. */
+export const MODEL_ALIASES: { name: string; desc: string }[] = [
+  { name: 'sonnet', desc: 'Balanced — the default for coding turns' },
+  { name: 'opus', desc: 'Deepest reasoning, slower' },
+  { name: 'haiku', desc: 'Fast and cheap for light edits' },
+  { name: 'opusplan', desc: 'Opus to plan, Sonnet to execute' },
+  { name: 'default', desc: 'Whatever your subscription picks' },
+];
+
 const byId = new Map(AGENT_COMMANDS.map((c) => [c.id, c]));
 
 /** Palette is active only while the draft is a single `/word` with no space. */

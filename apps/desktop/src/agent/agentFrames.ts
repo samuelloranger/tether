@@ -41,6 +41,10 @@ export function agentInterrupt() {
   return { t: 'agent.interrupt' as const };
 }
 
+export function agentModel(name: string) {
+  return { t: 'agent.model' as const, name };
+}
+
 export function agentPermission(input: { reqId: string; allow: boolean }) {
   return { t: 'agent.permission' as const, reqId: input.reqId, allow: input.allow };
 }

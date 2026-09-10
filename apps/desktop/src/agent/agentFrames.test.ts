@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { agentPrompt, agentStart, decodeAgentFrame } from './agentFrames';
+import { agentModel, agentPrompt, agentStart, decodeAgentFrame } from './agentFrames';
 
 describe('decodeAgentFrame', () => {
   test('decodes a delta', () => {
@@ -29,4 +29,8 @@ describe('outbound builders', () => {
   test('prompt carries text', () => {
     expect(agentPrompt('go')).toEqual({ t: 'agent.prompt', text: 'go' });
   });
+});
+
+test('agentModel builds the model frame', () => {
+  expect(agentModel('opus')).toEqual({ t: 'agent.model', name: 'opus' });
 });

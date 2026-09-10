@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { AgentComposer } from './AgentComposer';
 import { AgentMessageRow } from './AgentMessageRow';
-import { agentPrompt } from './agentFrames';
+import { AgentModelPicker } from './AgentModelPicker';
+import { agentModel, agentPrompt } from './agentFrames';
 import { useAgentChat } from './useAgentChat';
 
 /** Full agent chat surface: transcript (auto-following) + composer. Port of
@@ -81,6 +82,16 @@ export function AgentChatPane({
         ) : null}
       </div>
       <AgentComposer model={model} snapshot={snapshot} send={send} />
+      {snapshot.pendingPicker === 'model' ? (
+        <AgentModelPicker
+          current={snapshot.status?.model}
+          onPick={(name) => {
+            send(agentModel(name));
+            model.closePicker();
+          }}
+          onClose={() => model.closePicker()}
+        />
+      ) : null}
     </div>
   );
 }

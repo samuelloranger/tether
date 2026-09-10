@@ -3295,3 +3295,60 @@ label > textarea {
   border-radius: 999px;
   padding: 1px 6px;
 }
+
+/* /model picker */
+.agent-model-picker {
+  width: min(440px, 92vw);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-model-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.agent-model-row {
+  display: grid;
+  grid-template-columns: 18px auto 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 8px;
+  background: none;
+  border: none;
+  border-radius: var(--r-control);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.agent-model-row.sel,
+.agent-model-row:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+}
+.agent-model-check {
+  color: var(--accent);
+  text-align: center;
+}
+.agent-model-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.agent-model-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-model-custom {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
