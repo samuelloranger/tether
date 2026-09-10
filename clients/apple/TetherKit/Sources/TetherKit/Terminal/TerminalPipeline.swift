@@ -219,9 +219,15 @@ actor TerminalPipeline {
         }
       } catch {
         // A deliberate teardown cancels this task; anything else is an
-        // unexpected drop. No backoff here (see `connectNoise` TODOs) — just
-        // report it so the UI can reflect a closed connection.
+        // unexpected drop. No backoff here (see `connectNoise` TODOs).
         if !Task.isCancelled {
+          // Clear the dead channel so `isConnected` stops lying — otherwise the
+          // switch-back reuse path writes into it and `try?` swallows the loss.
+          // A real reconnect cancels this task first, so this is an unsolicited
+          // drop and `noiseChannel` is still this one.
+          noiseChannel = nil
+          noiseSessionId = nil
+          Task { await channel.close() }
           eventSink.yield(.error("Connection closed"))
         }
         break
@@ -377,7 +383,15 @@ actor TerminalPipeline {
   /// but no snapshot is produced until it becomes visible again.
   func setRendering(_ on: Bool) {
     rendering = on
-    if on { publishSnapshot() }
+    if on {
+      // Force a fresh frame even when the grid is unchanged since it last
+      // rendered. A resident session switched back into view was quiescent while
+      // backgrounded, so its generation still equals `lastRenderedGeneration` and
+      // `publishSnapshot`'s guard would skip it — leaving the surface stuck on the
+      // previous tab's frame until the next byte of output arrives.
+      lastRenderedGeneration = nil
+      publishSnapshot()
+    }
   }
 
   /// True while a live Noise channel is attached — used to reuse a background
