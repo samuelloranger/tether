@@ -168,6 +168,12 @@ const migrations = [
       );
     `,
   },
+  {
+    version: 13,
+    name: 'session_model',
+    // Per-chat `/model` override for agent sessions; null = use the default.
+    up: `ALTER TABLE sessions ADD COLUMN model TEXT;`,
+  },
 ];
 
 export function runMigrations() {
@@ -309,6 +315,7 @@ export interface Session {
   pruned_before: number;
   workspace_root: string | null;
   kind: 'pty' | 'agent';
+  model: string | null;
 }
 
 export interface TerminalLog {
@@ -406,6 +413,10 @@ export function resetRunningSessions() {
 
 export function renameSession(id: string, name: string | null) {
   db.query('UPDATE sessions SET name = $name WHERE id = $id').run({ $id: id, $name: name });
+}
+
+export function setSessionModel(db: Database, id: string, model: string | null): void {
+  db.query('UPDATE sessions SET model = $model WHERE id = $id').run({ $id: id, $model: model });
 }
 
 export function getSetting(key: string): string | null {

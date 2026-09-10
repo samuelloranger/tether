@@ -45,12 +45,20 @@ export class AgentRegistry {
     private readonly seqSeed: SeqSeedFn = defaultSeqSeed,
   ) {}
 
-  async start(id: string, cwd: string): Promise<void> {
+  async start(
+    id: string,
+    cwd: string,
+    opts?: { model?: string | null; resumeSessionId?: string },
+  ): Promise<void> {
     if (this.entries.has(id) || this.starting.has(id)) return;
     this.starting.add(id);
     try {
       const driver = this.driverFactory();
       await driver.start(cwd);
+      // Seed before the first prompt: model wins over the CLI's init-line report,
+      // and a resume id makes the first spawn continue that Claude session.
+      if (opts?.model != null) driver.setModel?.(opts.model);
+      if (opts?.resumeSessionId) driver.seedResume?.(opts.resumeSessionId);
       // Continue seq numbering from the persisted max so a server restart never
       // reuses seqs (which would overwrite stored rows and make clients drop the
       // new frames as replays).
@@ -59,6 +67,10 @@ export class AgentRegistry {
     } finally {
       this.starting.delete(id);
     }
+  }
+
+  setModel(id: string, name: string | null): void {
+    this.entries.get(id)?.driver.setModel?.(name);
   }
 
   attach(id: string, sink: FrameSink): () => void {

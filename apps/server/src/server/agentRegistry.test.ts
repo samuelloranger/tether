@@ -157,3 +157,19 @@ test('killAll closes every driver and clears the registry', async () => {
   expect(reg.has('a1')).toBe(false);
   expect(reg.has('a2')).toBe(false);
 });
+
+test('registry.setModel routes to the driver; start passes model + resume', async () => {
+  const calls: string[] = [];
+  class Spy extends FakeAgentDriver {
+    setModel(n: string | null) {
+      calls.push(`model:${n}`);
+    }
+    seedResume(s: string) {
+      calls.push(`resume:${s}`);
+    }
+  }
+  const reg = new AgentRegistry(() => new Spy([]));
+  await reg.start('a', '/tmp', { model: 'opus', resumeSessionId: 'sid' });
+  reg.setModel('a', 'haiku');
+  expect(calls).toEqual(['model:opus', 'resume:sid', 'model:haiku']);
+});

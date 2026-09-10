@@ -95,3 +95,9 @@ test('a shell with no cwd hook is accepted, and reported as unintegrated', async
 test('the shell report is not a config key and cannot be patched', async () => {
   await expect(patchConfig({ session: { shellSupport: 'full' } })).rejects.toThrow();
 });
+
+test('agent.defaultModel defaults to empty and round-trips through patch', async () => {
+  expect(getConfig().agent.defaultModel).toBe('');
+  await patchConfig({ agent: { defaultModel: 'sonnet' } });
+  expect(getConfig().agent.defaultModel).toBe('sonnet');
+});
