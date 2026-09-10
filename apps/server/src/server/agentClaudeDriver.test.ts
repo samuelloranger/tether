@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { isMessageStartEvent, mapClaudeLine } from './agentClaudeDriver';
+import { buildClaudeArgs, isMessageStartEvent, mapClaudeLine } from './agentClaudeDriver';
 
 test('init line yields no event', () => {
   const line = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc123' });
@@ -164,4 +164,22 @@ test('isMessageStartEvent is false for other stream_events', () => {
 test('isMessageStartEvent is false for non stream_event lines', () => {
   expect(isMessageStartEvent(JSON.stringify({ type: 'assistant', message: {} }))).toBe(false);
   expect(isMessageStartEvent('not json')).toBe(false);
+});
+
+test('buildClaudeArgs: base flags, no model, no resume', () => {
+  const a = buildClaudeArgs({ text: 'hi', sessionId: null, model: null });
+  expect(a[0]).toBe('claude');
+  expect(a).toContain('--print');
+  expect(a).not.toContain('--model');
+  expect(a).not.toContain('--resume');
+  expect(a.slice(-2)).toEqual(['--', 'hi']);
+});
+
+test('buildClaudeArgs: includes --model and --resume when set', () => {
+  const a = buildClaudeArgs({ text: 'go', sessionId: 'sid-1', model: 'sonnet' });
+  expect(a).toContain('--model');
+  expect(a[a.indexOf('--model') + 1]).toBe('sonnet');
+  expect(a).toContain('--resume');
+  expect(a[a.indexOf('--resume') + 1]).toBe('sid-1');
+  expect(a.slice(-2)).toEqual(['--', 'go']);
 });
