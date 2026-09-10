@@ -1,6 +1,6 @@
 # Desktop app
 
-Tether ships a native desktop client for **Linux, Windows, and macOS** alongside the iOS app. It's a [Tauri](https://tauri.app) application: a native window over [xterm.js](https://xtermjs.org), with the connection, replay, git and workspace logic in a Rust core it shares with the iOS client. The core opens the WebSocket itself and carries the shared secret in the `Authorization` header — a plain browser can't, which is why there's no in-browser client. It connects to your server exactly like the iOS app.
+Tether ships a native desktop client for **Linux, Windows, and macOS** alongside the iOS app. It's a [Tauri](https://tauri.app) application: a native window over [xterm.js](https://xtermjs.org), with the connection, replay, git and workspace logic in a Rust core it shares with the iOS client. The core opens the Noise session itself and mints a short-lived bearer for REST — a plain browser can't, which is why there's no in-browser client. It connects to your server exactly like the iOS app.
 
 ## Download & install
 
@@ -23,6 +23,8 @@ The macOS and Windows builds aren't code-signed yet, so the OS may warn on first
 
 Same as iOS: on the setup screen enter your server's **host/IP** and **port** (default `8085`), then the **12-char code** from `tether pair` (or scan the QR). The device enrolls over Noise — there is no password. Repeat `tether pair` once per device. See [Getting started](/getting-started#_4-pair-the-device). The cert is self-signed, so still run Tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only — see [Security & networking](/security).
 
+You can pair more than one host. The sidebar groups sessions by host; each host fails independently.
+
 ## Updating
 
 The app checks for a newer release on launch (and on demand via the **⋯** menu → **Check for updates**). It tells you the new version and what you're on, and installs it when you accept.
@@ -42,8 +44,11 @@ The desktop app is the same terminal — same server, same Rust core — retuned
 
 - **Docked session sidebar** — your terminals live in a permanent left sidebar instead of the slide-in drawer. Switch, create, rename, and kill from there; the active shell fills the rest of the window.
 - **Physical keyboard** — there's no on-screen key bar. Type straight into the terminal; arrows, `Tab`/`Shift+Tab`, `Esc`, `Home`/`End`, `Page Up`/`Down`, `Delete`, the function keys, and `Ctrl`/`Alt` combos are all sent to the shell as you'd expect.
-- **Mouse selection & clipboard** — drag to select terminal text natively.
+- **Mouse selection & clipboard** — drag to select terminal text natively. Hold **Shift** to bypass mouse reporting (vim/tmux) and select in the app instead.
   - `Ctrl` / `Cmd` + `C` — copies the selection when there is one, otherwise sends `Ctrl-C` (SIGINT) to the shell.
   - `Ctrl` / `Cmd` + `V` — pastes the clipboard into the shell (bracketed paste when the program supports it).
+- **Right-click** — Copy / Paste / Select all in the terminal.
+- **Split view** — hover the focused pane for split-right / split-down / close, or drag a tab onto a pane edge, or right-click a tab. Shortcuts: `Cmd+D` / `Ctrl+Shift+D` (split right), `Cmd+E` / `Ctrl+Shift+E` (split down), `Cmd+W` / `Ctrl+Shift+W` (close pane). A split becomes a **group tab**; an ungrouped terminal still runs full-space. Closing a pane does not kill the shell.
+- **Git, files, previews** — the same panels as iOS; see [Git, files & previews](/workspace).
 
-Everything else — persistent sessions, reconnect-and-replay, saved commands, transcript search — works identically across both apps, because it's the same server and the same core underneath.
+Everything else — persistent sessions, reconnect-and-replay, saved commands, transcript search, activity tint — works identically across both apps, because it's the same server and the same core underneath.

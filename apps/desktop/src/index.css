@@ -25,7 +25,7 @@
 @property --lit {
   syntax: '<color>';
   inherits: true;
-  initial-value: #7c8cf8;
+  initial-value: #4d8dff;
 }
 @property --b1 {
   syntax: '<percentage>';
@@ -60,22 +60,22 @@
   --border: #232333;
   --overlay: #08080ecc;
   --selected: #191926;
-  --accent: #7c8cf8;
+  --accent: #3ddc97;
   --accent-text: #08080e;
   --success: #6ee7a8;
   --warning: #f2b34c;
   --danger: #ff7050;
-  --info: #7c8cf8;
-  --lit: #7c8cf8;
+  --info: #4d8dff;
+  --lit: #4d8dff;
   --b1: 0%;
   --b2: 0%;
   --b3: 0%;
   --rim: 0%;
 
-  /* geometry */
-  --r-control: 8px;
-  --r-panel: 12px;
-  --r-screen: 12px;
+  /* geometry — instrument bezel: tight controls, hard-edged screen */
+  --r-control: 2px;
+  --r-panel: 4px;
+  --r-screen: 0;
 
   /* motion — see the block at the foot of this file.
      Heat rises fast and cools slow; everything else is short enough to land
@@ -84,7 +84,7 @@
   --t-press: 90ms;
   --t-fast: 140ms;
   --t-state: 200ms;
-  --t-overlay: 260ms;
+  --t-overlay: 280ms;
   --heat-in: 260ms;
   --heat-wait: 340ms;
   --heat-done: 300ms;
@@ -244,6 +244,26 @@ body {
 
 .boot-message {
   margin: auto;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+
+.boot-mark {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.boot-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 /* ── controls ──────────────────────────────────────────────────────────── */
@@ -669,16 +689,13 @@ label > textarea {
   color: var(--text);
 }
 
-/* Accent-tinted chip — same grammar as the primary button's tint, not a slab. */
+/* An uppercase eyebrow word, not a pill — same status grammar as .git-review-mode. */
 .devices-self-badge {
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.11em;
   text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 999px;
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .devices-row-fp {
@@ -899,7 +916,7 @@ label > textarea {
   align-items: center;
   gap: 2px;
   height: 40px;
-  border-radius: 9px;
+  border-radius: var(--r-control);
   color: var(--text-muted);
   /* Selection used to swap four things at once — fill, edge light, shadow and
      text — on the frame the click landed. Moving them together over one beat
@@ -973,7 +990,7 @@ label > textarea {
   padding: 0 4px 0 12px;
   background: none;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-control);
   color: inherit;
   font-weight: inherit;
   text-align: left;
@@ -1139,8 +1156,25 @@ label > textarea {
   margin: auto;
   text-align: center;
   display: grid;
-  gap: 14px;
+  gap: 6px;
   justify-items: center;
+}
+
+.empty-main-host {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.empty-main-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.empty-main > button {
+  margin-top: 10px;
 }
 
 /* ── toolbar ───────────────────────────────────────────────────────────── */
@@ -1204,7 +1238,7 @@ label > textarea {
   min-width: 120px;
   max-width: 200px;
   flex: 1 1 140px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   color: var(--text-muted);
   overflow: hidden;
   transition:
@@ -1249,7 +1283,7 @@ label > textarea {
   padding: 0 4px 0 12px;
   background: none;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   color: inherit;
   font-weight: inherit;
   text-align: left;
@@ -1332,8 +1366,8 @@ label > textarea {
   margin: 4px 4px 0;
   padding: 0;
   flex-shrink: 0;
-  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: var(--r-control);
   background: transparent;
   color: var(--text-faint);
   font-size: 16px;
@@ -1357,16 +1391,18 @@ label > textarea {
   white-space: nowrap;
 }
 
-/* the state word travels with the session name */
+/* A tabular status word with a left rule, not a pill — the state reads as a
+   label on the instrument, and the rule carries the heat colour. */
 .session-state {
   flex-shrink: 0;
-  padding: 3px 8px;
-  border-radius: 6px;
+  padding: 2px 0 2px 8px;
+  border-left: 2px solid var(--lit);
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--lit);
-  background: color-mix(in srgb, var(--lit) 12%, transparent);
 }
 
 /* one segmented control, not four floating pills */
@@ -1375,7 +1411,7 @@ label > textarea {
   margin-left: auto;
   flex-shrink: 0;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-control);
   overflow: hidden;
   background: color-mix(in srgb, var(--surface-raised) 55%, transparent);
 }
@@ -1475,12 +1511,23 @@ label > textarea {
 
 /* Panes are positioned by their slot now, not stacked — every resident pane is
    visible. Focus only governs input gating (handled in JS) and focus styling. */
+/* Chrome layer sits above the focused terminal (z-index below), so it must be
+   pointer-transparent — else a click on the terminal body lands on this empty
+   div, pulls DOM focus off the xterm textarea, and typing dies. Interactive
+   children re-enable pointer events. */
 .pane-slot {
   overflow: hidden;
+  pointer-events: none;
 }
 
 .pane-slot.focused {
   z-index: 1;
+}
+
+.pane-controls,
+.empty-pane,
+.agent-pane {
+  pointer-events: auto;
 }
 
 .pane-divider {
@@ -1503,15 +1550,23 @@ label > textarea {
 
 .empty-pane {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
   align-items: center;
   justify-content: center;
   height: 100%;
   background: var(--term-bg);
 }
 
+.empty-pane-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
 .empty-pane-button {
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--input) 80%, transparent);
   color: var(--text);
 }
@@ -1537,13 +1592,26 @@ label > textarea {
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  /* Reset the global button padding/border — 14px padding in a 22px button
+     squeezes the icon out entirely. */
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--input) 80%, transparent);
-  color: var(--text);
+  color: var(--text-muted);
 }
 
 .pane-controls button:hover {
   background: color-mix(in srgb, var(--lit) 30%, transparent);
+  border-color: color-mix(in srgb, var(--lit) 50%, transparent);
+  color: var(--text);
+}
+
+.pane-controls button svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  stroke-linecap: round;
 }
 
 .pane-picker-scrim {
@@ -1566,7 +1634,7 @@ label > textarea {
   max-width: 420px;
   max-height: 70vh;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: var(--r-panel);
   background: var(--input);
   box-shadow: 0 18px 48px rgb(0 0 0 / 50%);
 }
@@ -1586,7 +1654,7 @@ label > textarea {
 .pane-picker-new {
   text-align: left;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--input) 60%, transparent);
   color: var(--text);
 }
@@ -1611,18 +1679,30 @@ label > textarea {
   z-index: 51;
   display: flex;
   flex-direction: column;
-  min-width: 150px;
+  min-width: 210px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: var(--r-panel);
   background: var(--input);
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
 }
 
 .tab-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  white-space: nowrap;
   text-align: left;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   color: var(--text);
+}
+
+/* The accelerator, right-aligned like a native menu — mono so it reads as keys. */
+.tab-menu-key {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .tab-menu-item:hover {
@@ -1634,7 +1714,7 @@ label > textarea {
   pointer-events: none;
   background: color-mix(in srgb, var(--lit) 30%, transparent);
   outline: 2px solid color-mix(in srgb, var(--lit) 70%, transparent);
-  border-radius: 8px;
+  border-radius: var(--r-control);
 }
 
 /* Floating label that follows the cursor while dragging a session tab into a
@@ -1648,7 +1728,7 @@ label > textarea {
   overflow: hidden;
   padding: 4px 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: color-mix(in srgb, var(--accent) 22%, var(--surface-raised));
   color: var(--text);
   font-size: 12px;
@@ -1822,7 +1902,9 @@ label > textarea {
   flex: 1;
   width: 100%;
   border: 0;
-  background: #fff;
+  /* Match the chrome while the framed HTML loads so there is no white flash
+     inside the dark bezel; the presentation paints its own background over this. */
+  background: var(--surface);
 }
 
 /* ══ WORKSPACE PANEL ══════════════════════════════════════════════════════ */
@@ -1887,7 +1969,7 @@ label > textarea {
   gap: 7px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
   text-align: left;
@@ -1983,7 +2065,7 @@ label > textarea {
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
   font-size: 12px;
@@ -2066,7 +2148,7 @@ label > textarea {
   display: flex;
   align-items: center;
   gap: 4px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
 }
 
 .git-file-row:hover {
@@ -2159,12 +2241,16 @@ label > textarea {
   width: 100%;
   height: auto;
   display: grid;
+  /* Pin the single column to the full row. Without this the implicit track is
+     content-sized, so short-subject rows ("release: v4.2.4") sized to their
+     text and sat narrow while long ones filled the row. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   justify-items: start;
   text-align: left;
   padding: 8px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
 }
@@ -2172,6 +2258,12 @@ label > textarea {
 .git-history-row:hover:not(:disabled) {
   background: var(--surface-raised);
   color: var(--text);
+}
+
+/* Fill the row: short subjects ("release: v4.2.4") otherwise sat narrow,
+   the span sized to its content inside the start-aligned grid cell. */
+.git-history-row > span {
+  width: 100%;
 }
 
 .git-history-sha {
@@ -2429,7 +2521,7 @@ label > textarea {
   min-width: 232px;
   padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--surface);
   box-shadow: 0 24px 60px -24px rgb(0 0 0 / 70%);
   display: grid;
@@ -2441,7 +2533,7 @@ label > textarea {
   justify-content: flex-start;
   padding: 0 11px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   background: none;
   color: var(--text-muted);
   text-align: left;
@@ -2638,4 +2730,512 @@ label > textarea {
   button:active:not(:disabled) {
     transform: none;
   }
+}
+
+.session-kind-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+.drawer-session-row.active .session-kind-icon,
+.session-tab.active .session-kind-icon {
+  color: var(--text-muted);
+}
+
+/* ── Agent chat ─────────────────────────────────────────────── */
+.agent-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--sans);
+}
+.agent-transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.agent-empty {
+  margin: auto;
+  color: var(--text-faint);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-empty-title {
+  color: var(--text-muted);
+  font-size: 15px;
+}
+.agent-empty-cwd {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.agent-row-user {
+  align-self: flex-end;
+  max-width: 80%;
+}
+.agent-bubble-user {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 4px 12px;
+}
+.agent-row-assistant {
+  align-self: stretch;
+}
+.agent-row-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.agent-error-text {
+  flex: 1;
+  white-space: pre-wrap;
+}
+.agent-retry {
+  flex: none;
+  border-radius: var(--r-control);
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.agent-caret {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  background: var(--accent);
+  animation: agent-blink 1s steps(2, start) infinite;
+}
+.agent-thinking {
+  display: flex;
+  gap: 5px;
+  padding: 4px 2px;
+}
+.agent-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: agent-bounce 1.2s ease-in-out infinite;
+}
+.agent-thinking-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.agent-thinking-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes agent-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes agent-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.agent-usage-footer {
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.agent-prose {
+  line-height: 1.55;
+}
+.agent-prose table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.agent-prose th,
+.agent-prose td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.agent-code-inline {
+  font-family: var(--mono);
+  font-size: 0.95em;
+  padding: 0.05em 0.25em;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: color-mix(in srgb, var(--text) 92%, var(--text-muted));
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.agent-code-block {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 8px 0;
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+}
+.agent-code-line {
+  white-space: pre;
+}
+
+.agent-tool-card {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--text-faint);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  padding: 8px 10px;
+  margin: 8px 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.agent-tool-success {
+  border-left-color: var(--success);
+}
+.agent-tool-accent {
+  border-left-color: var(--accent);
+}
+.agent-tool-info {
+  border-left-color: var(--info);
+}
+.agent-tool-muted {
+  border-left-color: var(--text-faint);
+}
+.agent-tool-card {
+  padding: 0;
+  overflow: hidden;
+}
+.agent-tool-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  /* reset global button chrome */
+  height: auto;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-tool-head:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-color: transparent;
+  color: var(--text);
+}
+.agent-tool-err {
+  color: var(--danger);
+}
+.agent-tool-chevron {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+.agent-tool-body {
+  padding: 0 10px 8px;
+  border-top: 1px solid var(--border);
+}
+.agent-tool-input {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  overflow-x: auto;
+}
+.agent-tool-input.bash {
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 8px 10px;
+  color: var(--text);
+}
+.agent-tool-glyph {
+  color: var(--text-muted);
+}
+.agent-tool-name {
+  font-weight: 600;
+}
+.agent-tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool-bash .agent-tool-summary {
+  color: var(--text);
+}
+.agent-tool-result-label {
+  margin: 8px 0 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.agent-tool-result-label.error {
+  color: var(--danger);
+}
+.agent-tool-result {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  max-height: 320px;
+  overflow: auto;
+}
+.agent-tool-result.error {
+  color: var(--danger);
+}
+.agent-tool-diff {
+  margin-top: 6px;
+  overflow-x: auto;
+}
+.agent-diff-row {
+  display: flex;
+  gap: 6px;
+  white-space: pre;
+}
+.agent-diff-add {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+.agent-diff-del {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.agent-diff-marker {
+  width: 1ch;
+  color: var(--text-faint);
+}
+
+.agent-composer {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.agent-permission {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid var(--warning);
+  border-radius: var(--r-panel);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.agent-permission-actions {
+  display: flex;
+  gap: 8px;
+}
+.agent-approve,
+.agent-deny,
+.agent-send,
+.agent-stop,
+.agent-folder-confirm,
+.agent-folder-cancel {
+  border-radius: var(--r-control);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  cursor: pointer;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.agent-approve {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.agent-queued {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.agent-queued-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-control);
+  background: transparent;
+  cursor: pointer;
+}
+.agent-queued-row:hover {
+  border-color: var(--danger);
+}
+.agent-queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-queued-glyph,
+.agent-queued-x {
+  flex: none;
+  color: var(--text-faint);
+}
+.agent-composer-input {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.agent-textarea {
+  flex: 1;
+  resize: none;
+  min-height: 36px;
+  max-height: 160px;
+  background: var(--input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 8px 10px;
+  font-family: var(--sans);
+}
+.agent-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.agent-session-meter {
+  margin-top: 6px;
+  text-align: right;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.agent-info-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.agent-info-model {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+.agent-info-gauges {
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+.agent-gauge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+}
+.agent-gauge-label {
+  color: var(--text-faint);
+}
+.agent-gauge-track {
+  width: 64px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--input);
+  overflow: hidden;
+}
+.agent-gauge-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.agent-gauge-fill.sev-ok {
+  background: var(--success);
+}
+.agent-gauge-fill.sev-warn {
+  background: var(--warning);
+}
+.agent-gauge-fill.sev-crit {
+  background: var(--danger);
+}
+.agent-gauge-pct {
+  min-width: 30px;
+  text-align: right;
+  color: var(--text-muted);
+}
+.agent-info-total {
+  font-family: var(--mono);
+  color: var(--text-faint);
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+}
+
+.agent-folder-picker {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 360px;
+}
+.agent-folder-title {
+  font-weight: 600;
+}
+.agent-folder-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.agent-folder-input {
+  background: var(--input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 8px 10px;
+  font-family: var(--mono);
+}
+.agent-folder-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.agent-folder-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
 }

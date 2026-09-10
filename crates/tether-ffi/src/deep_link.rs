@@ -56,6 +56,7 @@ fn to_core_profiles(profiles: Vec<FfiHostProfile>) -> Vec<HostProfile> {
             port: profile.port,
             identity_name: profile.identity_name,
             order: profile.order as usize,
+            scheme: profile.scheme,
         })
         .collect()
 }

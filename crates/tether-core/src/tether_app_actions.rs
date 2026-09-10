@@ -278,6 +278,7 @@ mod tests {
             port: "8085".to_string(),
             identity_name: "studio".to_string(),
             order: 0,
+            scheme: None,
         }
     }
 
@@ -294,6 +295,7 @@ mod tests {
             name: name.map(str::to_string),
             auto_title: None,
             activity: None,
+            kind: None,
         }
     }
 

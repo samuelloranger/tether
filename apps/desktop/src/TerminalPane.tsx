@@ -4,11 +4,12 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import { sendJson, type TerminalSocket } from './coreTransport';
+import { fitTerminal } from './fitTerminal';
 import type { FrameApplyResult } from './frameHandler';
 import { setPasteListener } from './pasteBus';
 import { pastePayload } from './pastePayload';
 import type { UI_THEMES } from './preferences';
-import { resizeFrame } from './resizeFrame';
+import { resizeFrame, socketOpenFrames } from './resizeFrame';
 import { bindTerminalSession } from './terminalBind';
 import { TerminalFindBar } from './terminalSearch';
 
@@ -187,10 +188,22 @@ export function TerminalPane(props: TerminalPaneProps) {
     term.options.theme = props.terminalTheme;
     term.options.fontFamily = `${props.fontFamily}, ui-monospace, monospace`;
     term.options.fontSize = props.fontSize ?? 14;
-    fitRef.current?.fit();
+    const fit = fitRef.current;
+    const host = hostRef.current;
     const socket = getSocketRef.current?.() ?? null;
-    if (socket) sendJson(socket, resizeFrame(fitRef.current?.proposeDimensions()));
-  }, [props.terminalTheme, props.fontFamily, props.fontSize, termRef, fitRef, getSocketRef]);
+    if (fit && host) {
+      const dims = fitTerminal(term, fit, host);
+      if (socket) sendJson(socket, resizeFrame(dims));
+    }
+  }, [
+    props.terminalTheme,
+    props.fontFamily,
+    props.fontSize,
+    termRef,
+    fitRef,
+    hostRef,
+    getSocketRef,
+  ]);
 
   // Sprint D's paste bridge, gated to the active tab: every resident session
   // keeps a live socket, but only the focused one may receive a paste.
@@ -209,20 +222,22 @@ export function TerminalPane(props: TerminalPaneProps) {
   useEffect(() => {
     const term = termRef.current;
     const fit = fitRef.current;
+    const host = hostRef.current;
     const socket = getSocketRef.current?.() ?? null;
     if (!term || !fit) return;
     if (props.interactive) {
       term.focus();
-      fit.fit();
-      const next = fit.proposeDimensions();
-      if (socket) sendJson(socket, resizeFrame(next));
+      if (host) {
+        const next = fitTerminal(term, fit, host);
+        if (socket) sendJson(socket, resizeFrame(next));
+      }
       sendFocusRef.current?.(true);
     } else {
       term.blur();
       setFindOpen(false);
       sendFocusRef.current?.(false);
     }
-  }, [props.interactive, termRef, fitRef, getSocketRef, sendFocusRef, setFindOpen]);
+  }, [props.interactive, termRef, fitRef, hostRef, getSocketRef, sendFocusRef, setFindOpen]);
 
   // A split pane's box changes on divider drag, split, close, and window resize;
   // refit and tell the server the new grid whenever the host element resizes.
@@ -230,22 +245,36 @@ export function TerminalPane(props: TerminalPaneProps) {
     const host = hostRef.current;
     if (!host) return undefined;
     const observer = new ResizeObserver(() => {
+      const term = termRef.current;
       const fit = fitRef.current;
       const socket = getSocketRef.current?.() ?? null;
-      if (!fit) return;
-      fit.fit();
-      if (socket) sendJson(socket, resizeFrame(fit.proposeDimensions()));
+      if (!term || !fit) return;
+      const dims = fitTerminal(term, fit, host);
+      if (socket) sendJson(socket, resizeFrame(dims));
     });
     observer.observe(host);
     return () => observer.disconnect();
-  }, [hostRef, fitRef, getSocketRef]);
+  }, [hostRef, termRef, fitRef, getSocketRef]);
 
   // Window / document blur while this pane is active — same push-suppression
   // contract as iOS scenePhase (server suppresses while focused:true).
+  // Focus-in always re-sends the grid: local size may already match, but the
+  // PTY can still be the old ioctl (the same hole as iOS gating sendResize on
+  // "local changed").
   useEffect(() => {
     if (!props.interactive) return undefined;
     const report = () => {
       const visible = document.visibilityState === 'visible' && document.hasFocus();
+      const socket = getSocketRef.current?.() ?? null;
+      const term = termRef.current;
+      const fit = fitRef.current;
+      const host = hostRef.current;
+      if (visible && socket && term && fit && host) {
+        const [resize, focus] = socketOpenFrames(fitTerminal(term, fit, host), true);
+        sendJson(socket, resize);
+        sendFocusRef.current?.(focus.focused);
+        return;
+      }
       sendFocusRef.current?.(visible);
     };
     window.addEventListener('blur', report);
@@ -256,7 +285,7 @@ export function TerminalPane(props: TerminalPaneProps) {
       window.removeEventListener('focus', report);
       document.removeEventListener('visibilitychange', report);
     };
-  }, [props.interactive, sendFocusRef]);
+  }, [props.interactive, termRef, fitRef, hostRef, getSocketRef, sendFocusRef]);
 
   return (
     <div className={`resident-pane${props.interactive ? ' active' : ' inactive'}`}>

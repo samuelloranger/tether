@@ -4,7 +4,6 @@ import type { FrameIO } from './noiseChannel';
 import { derivePsk, genKeypair, pairInitiator } from './noiseFfi';
 import { serverFingerprint } from './noiseIdentity';
 import { createPairControl, pairControlRoutes } from './pairControl';
-import { presentationControlToken } from './routes/presentations';
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -54,14 +53,8 @@ describe('pairControl open', () => {
     expect(opened.fingerprint).toBe(serverFingerprint(server.pub));
   });
 
-  test('POST /control/pair/open is gated by the present control token', async () => {
-    const rejected = await pairControlRoutes.request('/control/pair/open', { method: 'POST' });
-    expect(rejected.status).toBe(401);
-
-    const opened = await pairControlRoutes.request('/control/pair/open', {
-      method: 'POST',
-      headers: { 'X-Tether-Present-Control': presentationControlToken },
-    });
+  test('POST /control/pair/open needs no token (the socket is the auth)', async () => {
+    const opened = await pairControlRoutes.request('/control/pair/open', { method: 'POST' });
     expect(opened.status).toBe(200);
     const body = (await opened.json()) as { code: string; expiresAt: number; fingerprint: string };
     expect(body.code).toHaveLength(12);

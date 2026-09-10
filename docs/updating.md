@@ -23,16 +23,18 @@ Pair each device once (`tether pair` → enter or scan the code in the app → c
 One binary is the whole CLI:
 
 ```
-tether serve | start | stop | restart | status | logs | present | pair | devices | update | version
+tether serve | start | stop | restart | status | logs | present | pair | signal | devices | device | update | version
 ```
 
 - `serve` (or no argument) runs the daemon in the foreground; `start` runs it detached.
 - `present` opens or clears display-only HTML previews for coding agents. Run `tether present agent-install [codex|claude]` to install the optional global agent skills.
+- `signal` declares a session `working` / `waiting` / `done` from inside that session (`tether signal hooks` prints the Claude Code snippet). See [Sessions](/terminal/sessions#activity).
+- `devices` lists authorized devices; `device revoke|rename|token` manages one.
 - pid + log live in `~/.tether/`.
 
 ## Data & environment
 
-- Database (sessions) lives in `~/.tether/config/tether.db`.
+- Database (sessions + device registry) lives in `~/.tether/config/tether.db`. Noise identity is `~/.tether/config/noise/`; the TLS key is `~/.tether/config/tls/`.
 - Environment: `TETHER_PORT` (default `8085`), `TETHER_TLS` (`both` | `only` | `off`) and `TETHER_TLS_PORT` (default `8443`) — see [Security & networking](/security#transport-encryption), `TETHER_DB_PATH` (override the DB path), `TETHER_REPO_SLUG` (update source, default `samuelloranger/tether`).
 
 The desktop and iOS clients update through their own channels, not this command — see [Desktop app](/desktop#updating) for the desktop updater.

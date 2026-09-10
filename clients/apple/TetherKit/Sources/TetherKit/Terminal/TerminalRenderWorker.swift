@@ -37,6 +37,13 @@ final class TerminalRenderWorker {
     lastLinkSpans = []
   }
 
+  /// Drop the generation gate without clearing the last image. A session switch
+  /// that shows a cached grid must not `clearSnapshot` (that is the blank flash)
+  /// but two sessions both starting at generation 1 would otherwise collide.
+  func forgetGeneration() {
+    lastGeneration = nil
+  }
+
   /// `nil` when the frame carries nothing new to show.
   func render(bytes: Data, metrics: TerminalRenderMetrics) -> TerminalRenderOutput? {
     guard let decoded = try? GridSnapshotDecoder.decode(bytes) else { return nil }

@@ -109,7 +109,7 @@ public struct ConfigSettingsView: View {
       }
       .sheet(isPresented: $pairDevice) {
         NavigationStack {
-          PairDeviceView(hostId: pairHostId) { pairId, host, port, _ in
+          PairDeviceView(hostId: pairHostId) { pairId, host, port, scheme, _ in
             // Keys are pinned in the Keychain under `pairId`; `createNoiseHost`
             // migrates them onto the profile's real id and selects it.
             do {
@@ -117,7 +117,8 @@ public struct ConfigSettingsView: View {
                 name: "",
                 host: host,
                 port: port,
-                pairHostId: pairId
+                pairHostId: pairId,
+                scheme: scheme
               )
             } catch {
               store.errorMessage = error.localizedDescription

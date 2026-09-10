@@ -17,43 +17,8 @@ import {
 import { resolveGitDir } from './gitRoot';
 import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './gitStatus';
 import { shouldSkipWatchDirName } from './gitWatchIgnore';
+import { isEacces, listIgnoredDirs } from './gitWatchIgnoredDirs';
 import { logWarn } from './log';
-import { HIDE_CONSOLE } from './spawnWindow';
-
-// Skips dirs git never looks inside when diffing/statusing, instead of handing
-// the bare root to node:fs {recursive:true} (no .gitignore awareness, blows past inotify's 8192-watch default).
-async function listIgnoredDirs(root: string): Promise<Set<string>> {
-  const process = Bun.spawn(
-    [
-      'git',
-      '-C',
-      root,
-      'ls-files',
-      '-z',
-      '--others',
-      '--ignored',
-      '--exclude-standard',
-      '--directory',
-      '--no-empty-directory',
-    ],
-    { stdout: 'pipe', stderr: 'ignore', ...HIDE_CONSOLE },
-  );
-  const [stdout, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    process.exited,
-  ]);
-  if (exitCode !== 0) return new Set();
-  return new Set(
-    stdout
-      .split('\0')
-      .filter(Boolean)
-      .map((rel) => path.join(root, rel.replace(/\/$/, ''))),
-  );
-}
-
-function isEacces(err: unknown): boolean {
-  return (err as NodeJS.ErrnoException).code === 'EACCES';
-}
 
 // Hard ceiling on watched directories, so an unanticipated tree degrades into
 // "watch less" instead of freezing the server and exhausting inotify's allowance.
@@ -364,14 +329,30 @@ export class GitWatch {
 
   private addHandle(handle: FSWatcher) {
     this.handles.push(handle);
-    handle.on('error', (err) => {
-      if (this.disposed) return;
-      logWarn(`tether: git watch for "${this.root}" died:`, err);
-      this.closeHandles();
-      this.root = null;
-      this.lastSummary = null;
-      this.lastStatus = null;
-      this.refresh();
-    });
+    const h = handle as unknown as {
+      on?: (event: string, cb: (err: unknown) => void) => void;
+      addListener?: (event: string, cb: (err: unknown) => void) => void;
+      unref?: () => void;
+    };
+    try {
+      const listen =
+        typeof h.on === 'function'
+          ? h.on
+          : typeof h.addListener === 'function'
+            ? h.addListener
+            : null;
+      listen?.call(handle, 'error', (err: unknown) => {
+        if (this.disposed) return;
+        logWarn(`tether: git watch for "${this.root}" died:`, err);
+        this.closeHandles();
+        this.root = null;
+        this.lastSummary = null;
+        this.lastStatus = null;
+        this.refresh();
+      });
+    } catch {}
+    try {
+      h.unref?.();
+    } catch {}
   }
 }

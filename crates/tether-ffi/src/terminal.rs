@@ -82,6 +82,7 @@ fn encode_snapshot(snapshot: &TerminalSnapshot) -> Vec<u8> {
         cursor_row: snapshot.cursor_row,
         generation: snapshot.generation,
         cursor_visible: snapshot.cursor_visible,
+        alt_screen: snapshot.alt_screen,
     };
     let cells = snapshot
         .cells
@@ -111,6 +112,16 @@ mod tests {
         assert_eq!(cells[0].codepoint, b'H' as u32);
         assert_eq!(cells[0].attrs & GRID_ATTR_BOLD, GRID_ATTR_BOLD);
         assert_eq!(cells[1].codepoint, b'i' as u32);
+        assert!(!header.alt_screen);
+    }
+
+    #[test]
+    fn alt_screen_sets_the_tgrd_flag() {
+        let emulator = FfiTerminalEmulator::new(20, 5);
+        emulator.feed(b"\x1b[?1049h".to_vec());
+        let packed = emulator.snapshot();
+        let (header, _) = decode_grid_snapshot(&packed).expect("decode TGRD");
+        assert!(header.alt_screen);
     }
 
     #[test]

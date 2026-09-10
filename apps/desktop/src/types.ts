@@ -1,5 +1,5 @@
 import type { SessionActivity } from './activity';
-import { hostScheme } from './hostScheme';
+import { type PairScheme, resolveScheme } from './hostScheme';
 
 export const KEY_ACTIVE_HOST = 'tether_active_host';
 export const HOST_PROFILES_KEY = 'tether_host_profiles';
@@ -12,6 +12,7 @@ export interface HostProfile {
   port: string;
   identityName: string;
   order: number;
+  scheme?: PairScheme;
 }
 
 export type HostHealthStatus = 'unknown' | 'reachable' | 'unreachable' | 'unauthorized';
@@ -24,6 +25,11 @@ export interface DrawerSession {
   name?: string | null;
   auto_title?: string | null;
   activity?: SessionActivity | null;
+  /** 'pty' (default) or 'agent' — agent sessions render as chat panes. */
+  kind?: string | null;
+  /** Client-only: chosen cwd for a freshly-created agent chat, used for its
+   * first `agent.start`. Never sent by the server; undefined for foreign rows. */
+  cwd?: string | null;
 }
 
 export function activeSessionStorageKey(hostId: string): string {
@@ -31,5 +37,5 @@ export function activeSessionStorageKey(hostId: string): string {
 }
 
 export function httpOriginFor(profile: HostProfile): string {
-  return `${hostScheme(profile.id, profile.port)}://${profile.host}:${profile.port}`;
+  return `${resolveScheme(profile.scheme, profile.port)}://${profile.host}:${profile.port}`;
 }

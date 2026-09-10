@@ -6,6 +6,12 @@ public struct SessionDrawerView: View {
   public var onHostSettings: (String) -> Void
   public var onClose: () -> Void
 
+  /// Host id a "New agent chat" tap opened the folder picker for. `String`
+  /// isn't `Identifiable` in this module (only `TetherIOS` adds that
+  /// conformance), so the sheet is gated on `agentChatHostId != nil` rather
+  /// than `sheet(item:)`.
+  @State private var agentChatHostId: String?
+
   public init(
     store: SessionStore,
     onSelectSession: @escaping (String, String) -> Void,
@@ -57,6 +63,12 @@ public struct SessionDrawerView: View {
                 onClose()
                 Task { await store.newTerminal(hostId: host.id) }
               },
+              onNewAgentChat: {
+                // Unlike "New terminal", this needs a cwd before the chat can
+                // start, so it opens the folder-picker sheet instead of
+                // closing the drawer immediately.
+                agentChatHostId = host.id
+              },
               onHostSettings: onHostSettings
             )
           }
@@ -82,6 +94,22 @@ public struct SessionDrawerView: View {
     // The drawer is a fixed 264pt wide, so an accessibility text size does not
     // just enlarge it — it truncates every session name. Cap it here.
     .dynamicTypeSize(...DynamicTypeSize.large)
+    .sheet(
+      isPresented: Binding(
+        get: { agentChatHostId != nil },
+        set: { if !$0 { agentChatHostId = nil } }
+      )
+    ) {
+      if let hostId = agentChatHostId {
+        AgentDirBrowserView(store: store, hostId: hostId) { path in
+          agentChatHostId = nil
+          // Flip the tab BEFORE closing the drawer, in one transaction, so the
+          // terminal is already gone and never reclaims the keyboard mid-switch.
+          store.newAgentChat(hostId: hostId, cwd: path)
+          onClose()
+        }
+      }
+    }
   }
 
   private func sessions(for hostId: String) -> [RemoteSession] {
@@ -101,6 +129,7 @@ private struct HostDrawerSection: View {
   let onKillSession: (String) -> Void
   let onRetryHost: () -> Void
   let onNewTerminal: () -> Void
+  let onNewAgentChat: () -> Void
   let onHostSettings: (String) -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -147,6 +176,7 @@ private struct HostDrawerSection: View {
             status: session.status,
             activity: session.activity,
             lastOutputAt: session.lastOutputAt,
+            isAgent: session.kind == "agent",
             onSelect: { onSelectSession(host.id, session.id) },
             onKill: { onKillSession(session.id) }
           )
@@ -158,6 +188,8 @@ private struct HostDrawerSection: View {
         // One per host: a single global button only means "active host", so a
         // second server with no sessions could never get its first terminal.
         NewTerminalRow(hostName: host.name, action: onNewTerminal)
+          .disabled(isUnavailable)
+        NewAgentChatRow(hostName: host.name, action: onNewAgentChat)
           .disabled(isUnavailable)
       }
       .animation(
@@ -252,6 +284,39 @@ private struct NewTerminalRow: View {
   }
 }
 
+/// "New agent chat" — same dashed-pill treatment as `NewTerminalRow`, one row
+/// below it, so the two "start something new" affordances read as a pair.
+private struct NewAgentChatRow: View {
+  let hostName: String
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        Image(systemName: "bubble.left.and.text.bubble.right")
+          .font(.caption2.weight(.semibold))
+        Text("New agent chat")
+          .font(.footnote)
+        Spacer()
+      }
+      .foregroundStyle(TetherColors.accent)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .overlay(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .strokeBorder(
+            TetherColors.accent.opacity(0.35),
+            style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+          )
+      )
+    }
+    .buttonStyle(.plain)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    .accessibilityLabel("New agent chat on \(hostName)")
+  }
+}
+
 private struct SessionDrawerRow: View {
   let title: String
   let stopped: Bool
@@ -259,6 +324,7 @@ private struct SessionDrawerRow: View {
   let status: String
   let activity: String?
   let lastOutputAt: String?
+  let isAgent: Bool
   let onSelect: () -> Void
   let onKill: () -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -279,6 +345,9 @@ private struct SessionDrawerRow: View {
     HStack(spacing: 0) {
       Button(action: onSelect) {
         HStack {
+          Image(systemName: isAgent ? "bubble.left.and.text.bubble.right" : "terminal")
+            .font(.caption2)
+            .foregroundStyle(TetherColors.textSecondary)
           Text(title)
             .font(.footnote)
             .foregroundStyle(active ? rowLit.color : TetherColors.textPrimary)

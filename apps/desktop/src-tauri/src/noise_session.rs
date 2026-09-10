@@ -37,10 +37,13 @@ pub struct DeviceInfo {
 /// A server → client application message, after Noise `open` + JSON parse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerMsg {
-    /// Terminal output to render. `chunk` is the raw PTY text.
-    Output { chunk: String },
+    /// Terminal output to render. `chunk` is the raw PTY text. `id` is the
+    /// `terminal_logs` row when the server sent one (Noise live/replay frames).
+    Output { id: Option<u64>, chunk: String },
     /// The session ended. `exit_code` mirrors the server's `exitCode`.
     Exit { exit_code: i64 },
+    /// Catch-up window was trimmed; wipe xterm before the replay that follows.
+    Reset,
     /// The device roster, in reply to `devices.list`.
     Devices(Vec<DeviceInfo>),
     /// The verdict of a `devices.revoke`, matched to its `target`.
@@ -51,6 +54,9 @@ pub enum ServerMsg {
     },
     /// A minted per-device REST bearer, in reply to `auth.token`.
     AuthToken { token: String, expires_at: String },
+    /// Any `agent.*` frame, carried as its raw JSON line. The Tauri layer is a
+    /// pipe here — agent semantics live in the TS reducer, not in Rust.
+    Agent(String),
     /// Any other sealed frame — the terminal pump ignores it.
     Other,
 }
@@ -62,6 +68,8 @@ struct StartMsg<'a> {
     id: &'a str,
     cols: u16,
     rows: u16,
+    #[serde(rename = "sinceId")]
+    since_id: u64,
 }
 
 /// Serialized shape of a client → server `input`.
@@ -99,12 +107,14 @@ struct FrontendOutput<'a> {
 }
 
 /// Encode the session-opening `{"t":"start",…}` plaintext to seal on connect.
-pub fn encode_start(session_id: &str, cols: u16, rows: u16) -> Vec<u8> {
+/// `since_id` is the last applied log row (0 = full retained tail).
+pub fn encode_start(session_id: &str, cols: u16, rows: u16, since_id: u64) -> Vec<u8> {
     serde_json::to_vec(&StartMsg {
         t: "start",
         id: session_id,
         cols,
         rows,
+        since_id,
     })
     .expect("start serializes")
 }
@@ -167,6 +177,13 @@ pub fn encode_focus(session_id: &str, focused: bool) -> Vec<u8> {
 /// - `{"type":"focus","focused":…}` → `{"t":"focus","id":session,"focused":…}`
 pub fn translate_frontend(session_id: &str, ws_json: &str) -> Option<Vec<u8>> {
     let value: Value = serde_json::from_str(ws_json).ok()?;
+    // Agent frames use the server session-protocol shape (`t:"agent.*"`) and
+    // pass through 1:1 — forward the bytes unchanged rather than remapping.
+    if let Some(t) = value.get("t").and_then(Value::as_str) {
+        if t.starts_with("agent.") {
+            return serde_json::to_vec(&value).ok();
+        }
+    }
     match value.get("type").and_then(Value::as_str)? {
         "input" => {
             let text = value.get("text").and_then(Value::as_str).unwrap_or("");
@@ -195,6 +212,7 @@ pub fn decode_server(plaintext: &[u8]) -> Result<ServerMsg, serde_json::Error> {
     let value: Value = serde_json::from_slice(plaintext)?;
     Ok(match value.get("t").and_then(Value::as_str) {
         Some("output") => ServerMsg::Output {
+            id: value.get("id").and_then(json_u64),
             chunk: value
                 .get("chunk")
                 .and_then(Value::as_str)
@@ -204,6 +222,7 @@ pub fn decode_server(plaintext: &[u8]) -> Result<ServerMsg, serde_json::Error> {
         Some("exit") => ServerMsg::Exit {
             exit_code: value.get("exitCode").and_then(Value::as_i64).unwrap_or(0),
         },
+        Some("reset") => ServerMsg::Reset,
         Some("devices") => {
             let items = value
                 .get("items")
@@ -235,6 +254,9 @@ pub fn decode_server(plaintext: &[u8]) -> Result<ServerMsg, serde_json::Error> {
                 .unwrap_or("")
                 .to_string(),
         },
+        Some(t) if t.starts_with("agent.") => {
+            ServerMsg::Agent(String::from_utf8_lossy(plaintext).into_owned())
+        }
         _ => ServerMsg::Other,
     })
 }
@@ -251,6 +273,32 @@ pub fn encode_frontend_output(id: u64, chunk: &str) -> String {
     .expect("frontend output serializes")
 }
 
+/// WS-JSON `reset` the frontend already handles on the plaintext path.
+pub fn encode_frontend_reset() -> String {
+    r#"{"type":"reset"}"#.to_string()
+}
+
+/// Whether this server log id should be written to xterm.
+///
+/// Same-id frames are 16KiB splits of one log row, not replay overlap. Skip
+/// only strictly older ids. Advances `cursor` when `id` is newer.
+pub fn apply_log_id(id: u64, cursor: &mut u64) -> bool {
+    if id < *cursor {
+        return false;
+    }
+    if id > *cursor {
+        *cursor = id;
+    }
+    true
+}
+
+fn json_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_i64().and_then(|n| u64::try_from(n).ok()))
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,11 +306,11 @@ mod tests {
 
     #[test]
     fn start_round_trips_to_the_noise_shape() {
-        let bytes = encode_start("sess-1", 120, 40);
+        let bytes = encode_start("sess-1", 120, 40, 42);
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
             value,
-            json!({"t":"start","id":"sess-1","cols":120,"rows":40})
+            json!({"t":"start","id":"sess-1","cols":120,"rows":40,"sinceId":42})
         );
     }
 
@@ -322,13 +370,54 @@ mod tests {
 
     #[test]
     fn decode_server_output() {
-        let msg = decode_server(br#"{"t":"output","chunk":"hello","id":"sess-1"}"#).unwrap();
+        let msg = decode_server(br#"{"t":"output","chunk":"hello","id":12}"#).unwrap();
         assert_eq!(
             msg,
             ServerMsg::Output {
+                id: Some(12),
                 chunk: "hello".to_string()
             }
         );
+    }
+
+    #[test]
+    fn decode_server_reset() {
+        let msg = decode_server(br#"{"t":"reset","id":"sess-1"}"#).unwrap();
+        assert_eq!(msg, ServerMsg::Reset);
+    }
+
+    #[test]
+    fn decode_server_agent_frame_is_passthrough() {
+        let line = br#"{"t":"agent.delta","seq":3,"text":"hi"}"#;
+        match decode_server(line).unwrap() {
+            ServerMsg::Agent(raw) => {
+                assert!(raw.contains("\"agent.delta\""));
+                assert!(raw.contains("\"seq\":3"));
+            }
+            other => panic!("expected Agent passthrough, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn translate_frontend_passes_agent_prompt_through() {
+        let line = r#"{"t":"agent.prompt","text":"build it"}"#;
+        let out = translate_frontend("s1", line).expect("agent.prompt should translate");
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["t"], "agent.prompt");
+        assert_eq!(v["text"], "build it");
+    }
+
+    #[test]
+    fn apply_log_id_skips_older_keeps_same_id_splits() {
+        let mut cursor = 0;
+        assert!(apply_log_id(10, &mut cursor));
+        assert_eq!(cursor, 10);
+        assert!(apply_log_id(10, &mut cursor));
+        assert_eq!(cursor, 10);
+        assert!(!apply_log_id(9, &mut cursor));
+        assert_eq!(cursor, 10);
+        assert!(apply_log_id(120, &mut cursor));
+        assert_eq!(cursor, 120);
     }
 
     #[test]
@@ -345,7 +434,7 @@ mod tests {
 
     #[test]
     fn decode_server_unknown_type_is_other() {
-        let msg = decode_server(br#"{"t":"reset","id":"sess-1"}"#).unwrap();
+        let msg = decode_server(br#"{"t":"title","title":"x"}"#).unwrap();
         assert_eq!(msg, ServerMsg::Other);
     }
 
@@ -477,6 +566,12 @@ mod tests {
     }
 
     #[test]
+    fn frontend_reset_is_the_ws_json_shape() {
+        let value: Value = serde_json::from_str(&encode_frontend_reset()).unwrap();
+        assert_eq!(value, json!({"type":"reset"}));
+    }
+
+    #[test]
     fn frontend_output_stamps_the_synthetic_id() {
         let line = encode_frontend_output(7, "abc");
         let value: Value = serde_json::from_str(&line).unwrap();
@@ -486,8 +581,8 @@ mod tests {
     #[test]
     fn output_decode_then_reencode_preserves_chunk() {
         // The exact inbound→outbound path the pump runs.
-        let ServerMsg::Output { chunk } =
-            decode_server(br#"{"t":"output","chunk":"drwxr-xr-x\r\n","id":"s"}"#).unwrap()
+        let ServerMsg::Output { chunk, .. } =
+            decode_server(br#"{"t":"output","chunk":"drwxr-xr-x\r\n","id":7}"#).unwrap()
         else {
             panic!("expected output");
         };

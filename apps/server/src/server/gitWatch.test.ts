@@ -10,6 +10,13 @@ import { GitWatch } from './gitWatch';
 
 const IS_WINDOWS = process.platform === 'win32';
 
+// The live watcher is OFF on Windows in production (GIT_WATCH_ENABLED, gitWatch.ts),
+// and bun's Windows fs.watch is unreliable (`handle.on is not a function`), which
+// intermittently hung this job to the 15-min cap. Exercise the fs.watch-driven
+// tests only where the watcher actually ships; the pure logic stays covered on
+// Linux/macOS.
+const watchTest = test.skipIf(IS_WINDOWS);
+
 // On Windows, closing a ReadDirectoryChangesW handle only queues the
 // cancellation — the directory stays EBUSY briefly after dispose(). Retry.
 async function removeFixture(root: string): Promise<void> {
@@ -62,7 +69,7 @@ async function waitFor(condition: () => boolean, timeout = IS_WINDOWS ? 8_000 : 
   expect(condition()).toBe(true);
 }
 
-test(
+watchTest(
   'debounces native worktree events and suppresses an identical summary',
   async () => {
     await withRepo(async (root) => {
@@ -114,7 +121,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'kick schedules a refresh after an out-of-band index change',
   async () => {
     await withRepo(async (root) => {
@@ -153,7 +160,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'retargets to a new repository and stops publishing the old root',
   async () => {
     await withRepo(async (first) => {
@@ -197,7 +204,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'dispose prevents later watcher callbacks',
   async () => {
     await withRepo(async (root) => {
@@ -221,7 +228,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'captures changes that already existed before setRoot was first called',
   async () => {
     await withRepo(async (root) => {
@@ -268,7 +275,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'does not open a watch inside a gitignored directory (e.g. node_modules)',
   async () => {
     await withRepo(async (root) => {
@@ -295,7 +302,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'logs instead of throwing when a watch cannot be created',
   async () => {
     await withRepo(async (root) => {
@@ -318,7 +325,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'degrades to empty and closes a partial watcher for a non-repository root',
   async () => {
     const root = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-gitwatch-notgit-')));
@@ -354,7 +361,7 @@ test(
 // ~14s of synchronous blocking on the PTY output path, plus one inotify watch
 // per directory. Nested repositories are boundaries for the parent's diff, so
 // there was never a reason to look inside them.
-test(
+watchTest(
   'does not walk into nested repositories',
   async () => {
     await withRepo(async (parent) => {
@@ -388,7 +395,7 @@ test(
 // Belt and braces for a tree nobody anticipated: watch less rather than freeze
 // the server and exhaust the kernel's inotify allowance. The cap is injectable
 // so this exercises the real branch without creating thousands of inodes.
-test(
+watchTest(
   'stops watching past the directory cap instead of blocking',
   async () => {
     await withRepo(async (root) => {
@@ -422,7 +429,7 @@ test(
 // does. It must hand back control immediately and set the watch up afterwards:
 // the user lands in the new directory first, the diff summary arrives a tick
 // later, the working-tree watches fill in behind it.
-test(
+watchTest(
   'setRoot returns before doing any of the work',
   async () => {
     await withRepo(async (root) => {
@@ -457,7 +464,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'ignored-directory discovery yields the event loop before scanning',
   async () => {
     await withRepo(async (root) => {
@@ -502,7 +509,7 @@ test(
   REPO_TEST_TIMEOUT_MS,
 );
 
-test(
+watchTest(
   'a stale ignored-directory result cannot overwrite the active root',
   async () => {
     await withRepo(async (first) => {
@@ -604,7 +611,7 @@ const EVENT_BUDGET_MS = IS_WINDOWS ? 400 : 100;
 // loop, so a repo where git needs ~1s (e.g. one whose working tree contains
 // directories git cannot read) froze every session on the server for that long,
 // every debounce, for as long as anything kept writing to it.
-test(
+watchTest(
   'a slow git read never blocks the event loop',
   async () => {
     await withRepo(async (root) => {
@@ -649,7 +656,7 @@ test(
 
 // Reads are single-flight: writes that land while one is in flight collapse into
 // exactly one follow-up read, so a busy tree cannot queue up a pile of gits.
-test(
+watchTest(
   'coalesces changes that arrive while a read is in flight',
   async () => {
     await withRepo(async (root) => {

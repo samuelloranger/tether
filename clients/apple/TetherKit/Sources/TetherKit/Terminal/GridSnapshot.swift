@@ -8,6 +8,8 @@ public enum GridSnapshot {
   public static let cellStride = 16
 
   public static let flagCursorVisible: UInt16 = 1 << 0
+  /// Bit 1 of the TGRD flags word. Trailing empty rows are slack, not content.
+  public static let flagAltScreen: UInt16 = 1 << 1
 
   public static let attrBold: UInt32 = 1 << 0
   public static let attrItalic: UInt32 = 1 << 1
@@ -23,6 +25,7 @@ public enum GridSnapshot {
     public var cursorRow: UInt16
     public var generation: UInt64
     public var cursorVisible: Bool
+    public var altScreen: Bool = false
   }
 
   public struct Cell: Equatable, Sendable {

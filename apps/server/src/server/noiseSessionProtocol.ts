@@ -1,3 +1,8 @@
+import type { AgentMessageRow } from './agentMessages';
+import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
+import { applyAgentStart, defaultGetAgentMessages } from './agentReplay';
+import { type AgentUsageLimits, fetchAgentUsage } from './agentUsage';
+import { getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
@@ -5,12 +10,17 @@ import { logError } from './log';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import {
   type FocusSubscriber,
+  getActiveSession,
+  kickPtySize,
   resizeSession,
   setSessionFocus,
   startSession,
   subscribeToSession,
   writeToSession,
 } from './pty';
+import { REPLAY_BYTE_BUDGET, replayOutputFrames } from './replayPlan';
+import { getReplayLogs as readReplayLogs } from './replayRead';
+import { testEvent } from './testEvents';
 
 /**
  * The identity of the device on the far end of this Noise session — already
@@ -34,11 +44,35 @@ export interface SessionDeps {
   writeToSession: typeof writeToSession;
   resizeSession: typeof resizeSession;
   setSessionFocus: typeof setSessionFocus;
+  kickPtySize: typeof kickPtySize;
+  isSessionLive: (id: string) => boolean;
+  /** Byte-bounded catch-up for a Noise `start` that carries `sinceId`. */
+  getReplayLogs: (
+    sessionId: string,
+    sinceId: number,
+  ) => { reset: boolean; logs: Array<{ id: number; chunk: string }> };
   listDevices: typeof listDevices;
   revokeDevice: typeof revokeDevice;
   resolveTarget: typeof resolveTarget;
   identity: SessionIdentity;
   mintToken?: (deviceId: string) => { token: string; expiresAt: string };
+  /**
+   * Server-owned, shared across every Noise connection — agent sessions must
+   * outlive a client disconnect. Injectable so tests get an isolated registry
+   * (and a fake driver) without touching the real `sharedAgentRegistry`.
+   */
+  agentRegistry?: AgentRegistry;
+  /** Catch-up for an `agent.start` that carries `sinceSeq` — mirrors getReplayLogs. */
+  getAgentMessages: (sessionId: string, sinceSeq: number) => AgentMessageRow[];
+  /** Account 5h/7day usage for the `agent.status` frame; null = unavailable. */
+  fetchAgentUsage: () => Promise<AgentUsageLimits | null>;
+}
+
+function defaultGetReplayLogs(sessionId: string, sinceId: number) {
+  const plan = readReplayLogs(sessionId, sinceId, REPLAY_BYTE_BUDGET);
+  const sess = getSession(sessionId);
+  const pruned = sinceId > 0 && sess !== null && sinceId < sess.pruned_before;
+  return { reset: plan.reset || pruned, logs: plan.logs };
 }
 
 function defaultMintToken(deviceId: string): { token: string; expiresAt: string } {
@@ -55,22 +89,31 @@ const defaultDeps: SessionDeps = {
   writeToSession,
   resizeSession,
   setSessionFocus,
+  kickPtySize,
+  isSessionLive: (id) => getActiveSession(id) !== undefined,
+  getReplayLogs: defaultGetReplayLogs,
   listDevices,
   revokeDevice,
   resolveTarget,
   identity: { deviceId: '' },
   mintToken: defaultMintToken,
+  agentRegistry: sharedAgentRegistry,
+  getAgentMessages: defaultGetAgentMessages,
+  fetchAgentUsage: () => fetchAgentUsage(),
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
 type ClientMessage =
-  | { t: 'start'; id: string; command?: string; cols?: number; rows?: number }
+  | { t: 'start'; id: string; command?: string; cols?: number; rows?: number; sinceId?: number }
   | { t: 'input'; id: string; text: string }
   | { t: 'resize'; id: string; cols: number; rows: number }
   | { t: 'focus'; id: string; focused: boolean }
   | { t: 'devices.list' }
   | { t: 'devices.revoke'; target: string }
-  | { t: 'auth.token' };
+  | { t: 'auth.token' }
+  | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number }
+  | { t: 'agent.prompt'; text: string }
+  | { t: 'agent.interrupt' };
 
 /** One row of the `devices` reply — the wire shape an iOS client mirrors. */
 interface DeviceListItem {
@@ -100,6 +143,19 @@ interface Attachment {
   sub: FocusSubscriber;
 }
 
+/**
+ * Per-channel agent-chat state: the registry driving this channel's agent
+ * sessions, their sink unsubscribes (for teardown), and the id `agent.prompt` /
+ * `agent.interrupt` apply to — those messages carry no id of their own, so we
+ * track the most recently `agent.start`ed one (mirrors the PTY's per-id
+ * tracking, but agent-chat is one-active-session-per-channel).
+ */
+export interface AgentState {
+  registry: AgentRegistry;
+  attachments: Map<string, () => void>;
+  currentId: string | null;
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -108,6 +164,25 @@ const decoder = new TextDecoder();
 // AFTER the nonce advanced, desyncing the cipher — so we chunk, and also treat
 // any seal/send failure as fatal (below).
 const MAX_OUTPUT_CHARS = 16 * 1024;
+
+function sendOutputChunks(
+  sendSealed: (obj: unknown) => boolean,
+  id: number,
+  chunk: string,
+): boolean {
+  for (let i = 0; i < chunk.length; i += MAX_OUTPUT_CHARS) {
+    if (
+      !sendSealed({
+        t: 'output',
+        chunk: chunk.slice(i, i + MAX_OUTPUT_CHARS),
+        id,
+      })
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 /**
  * Handle the device-management control messages (`devices.list` /
@@ -156,10 +231,16 @@ async function applyMessage(
   attachments: Map<string, Attachment>,
   makeSubscriber: (id: string) => FocusSubscriber,
   sendSealed: (obj: unknown) => boolean,
+  agent: AgentState,
 ): Promise<void> {
   if (msg.t === 'start') {
     const cols = msg.cols ?? 80;
     const rows = msg.rows ?? 24;
+    // A switch-back reattaches to a PTY that is already running. The fit does
+    // not move (so recomputeSize stays silent). SIGWINCH is a no-op when the
+    // TUI is idle, so a client that sends sinceId also gets a log replay.
+    // Old clients omit sinceId and keep the SIGWINCH-only path.
+    const wasLive = d.isSessionLive(msg.id);
     try {
       await d.startSession(msg.id, msg.command, cols, rows);
     } catch (err) {
@@ -167,19 +248,43 @@ async function applyMessage(
       return;
     }
     attachments.get(msg.id)?.unsub(); // replace any prior subscription (a re-start)
+
+    const sinceId =
+      typeof msg.sinceId === 'number' && Number.isFinite(msg.sinceId) ? msg.sinceId : undefined;
+    if (sinceId !== undefined) {
+      const plan = d.getReplayLogs(msg.id, sinceId);
+      if (plan.reset && !sendSealed({ t: 'reset', id: msg.id })) return;
+      for (const frame of replayOutputFrames(plan.logs)) {
+        if (!sendOutputChunks(sendSealed, frame.id, frame.chunk)) return;
+      }
+      testEvent('replay', {
+        session: msg.id,
+        count: plan.logs.length,
+        bytes: plan.logs.reduce((n, log) => n + Buffer.byteLength(log.chunk), 0),
+        reset: plan.reset,
+      });
+    }
+
     const sub = makeSubscriber(msg.id);
     const unsub = d.subscribeToSession(msg.id, sub, cols, rows);
     attachments.set(msg.id, { unsub, sub });
+    if (wasLive) d.kickPtySize(msg.id);
+    testEvent('noise_start', { session: msg.id, wasLive, cols, rows, sinceId: sinceId ?? null });
   } else if (msg.t === 'input') {
+    testEvent('noise_input', { session: msg.id, bytes: msg.text.length });
     d.writeToSession(msg.id, msg.text);
   } else if (msg.t === 'resize') {
     // resizeSession keys the PTY-fit off the exact subscriber object, so only
     // resize a session this channel actually subscribed to.
     const attachment = attachments.get(msg.id);
-    if (attachment) d.resizeSession(msg.id, attachment.sub, msg.cols, msg.rows);
+    if (attachment) {
+      testEvent('noise_resize', { session: msg.id, cols: msg.cols, rows: msg.rows });
+      d.resizeSession(msg.id, attachment.sub, msg.cols, msg.rows);
+    }
   } else if (msg.t === 'focus') {
     const attachment = attachments.get(msg.id);
     if (attachment && typeof msg.focused === 'boolean') {
+      testEvent('noise_focus', { session: msg.id, focused: msg.focused });
       d.setSessionFocus(msg.id, attachment.sub, msg.focused);
     }
   } else if (msg.t === 'devices.list' || msg.t === 'devices.revoke') {
@@ -188,6 +293,21 @@ async function applyMessage(
     const mint = d.mintToken ?? defaultMintToken;
     const { token, expiresAt } = mint(d.identity.deviceId);
     sendSealed({ t: 'auth.token', token, expiresAt });
+  } else if (msg.t === 'agent.start') {
+    await applyAgentStart(msg, d, sendSealed, agent);
+  } else if (msg.t === 'agent.prompt') {
+    // Un-awaited so `agent.interrupt` can still land while a prompt streams — but
+    // a driver can reject mid-stream, and an unhandled rejection here would
+    // escape this loop's try/catch and crash the whole process. Catch and
+    // report it to this client instead.
+    if (agent.currentId) {
+      agent.registry.prompt(agent.currentId, msg.text).catch((err) => {
+        logError(`Noise session: agent.prompt failed:`, err);
+        sendSealed({ t: 'agent.error', message: 'agent prompt failed' });
+      });
+    }
+  } else if (msg.t === 'agent.interrupt') {
+    if (agent.currentId) agent.registry.interrupt(agent.currentId);
   }
 }
 
@@ -214,6 +334,13 @@ export async function runNoiseSession(
   const d: SessionDeps = { ...defaultDeps, ...deps };
   // One attachment per session id opened on this channel.
   const attachments = new Map<string, Attachment>();
+  // The registry is server-owned (shared across connections) — only this
+  // channel's attachments/currentId are per-connection state.
+  const agent: AgentState = {
+    registry: d.agentRegistry ?? sharedAgentRegistry,
+    attachments: new Map<string, () => void>(),
+    currentId: null,
+  };
 
   // A seal advances the Noise nonce; if the seal or send then fails, the cipher
   // is desynced and NOTHING more may be sent on this channel. So a failure is
@@ -231,6 +358,15 @@ export async function runNoiseSession(
       } catch {}
     }
     attachments.clear();
+    // Detach only — never kill. The agent (and its underlying `claude`
+    // process) is server-owned and must survive this connection closing;
+    // another connection may still be attached, or this one may reconnect.
+    for (const unsub of agent.attachments.values()) {
+      try {
+        unsub();
+      } catch {}
+    }
+    agent.attachments.clear();
   };
 
   // Returns false (and trips fatal) on any seal/send failure — callers must stop.
@@ -250,17 +386,7 @@ export async function runNoiseSession(
   const makeSubscriber = (id: string): FocusSubscriber => {
     const onData: FocusSubscriber = (data) => {
       if (data.type === 'output') {
-        // Chunk so each sealed frame's plaintext stays under the FFI buffer.
-        for (let i = 0; i < data.chunk.length; i += MAX_OUTPUT_CHARS) {
-          if (
-            !sendSealed({
-              t: 'output',
-              chunk: data.chunk.slice(i, i + MAX_OUTPUT_CHARS),
-              id: data.id,
-            })
-          )
-            break;
-        }
+        sendOutputChunks(sendSealed, data.id, data.chunk);
       } else if (data.type === 'exit') {
         sendSealed({ t: 'exit', id, exitCode: data.exitCode });
       }
@@ -286,7 +412,7 @@ export async function runNoiseSession(
         logError('Noise session: decrypt/parse failed, ending session:', err);
         return;
       }
-      await applyMessage(msg, d, attachments, makeSubscriber, sendSealed);
+      await applyMessage(msg, d, attachments, makeSubscriber, sendSealed, agent);
     }
   } catch {
     // io.recv() rejected (socket closed) — fall through to cleanup.

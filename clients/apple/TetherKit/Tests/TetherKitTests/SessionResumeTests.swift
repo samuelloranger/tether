@@ -47,4 +47,9 @@ extension SessionResumeTests {
       SessionResume.pick(remembered: "main", available: SessionResume.restorable(listed))
     )
   }
+
+  func test_restorable_includes_running_agent_sessions() {
+    let listed = [("agent-1", "running"), ("term-2", "running")]
+    XCTAssertEqual(SessionResume.restorable(listed), ["agent-1", "term-2"])
+  }
 }

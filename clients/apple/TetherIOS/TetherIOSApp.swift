@@ -17,7 +17,21 @@ struct TetherIOSApp: App {
 
   var body: some Scene {
     WindowGroup {
-      RootView(store: store, preferences: preferences)
+      #if DEBUG
+      if AgentChatDemoRoot.launchState != nil {
+        AgentChatDemoRoot()
+          .tint(TetherColors.accent)
+      } else {
+        appRoot
+      }
+      #else
+      appRoot
+      #endif
+    }
+  }
+
+  @ViewBuilder private var appRoot: some View {
+    RootView(store: store, preferences: preferences)
         // Without this, the SwiftUI Forms (settings, pairing) render system blue
         // while terminal surfaces use TetherColors.accent — two identities.
         .tint(TetherColors.accent)
@@ -45,7 +59,6 @@ struct TetherIOSApp: App {
             break
           }
         }
-    }
   }
 }
 

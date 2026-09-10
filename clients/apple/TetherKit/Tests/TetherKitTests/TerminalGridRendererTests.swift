@@ -19,7 +19,7 @@ final class TerminalGridRendererTests: XCTestCase {
   private let backgroundARGB: UInt32 = 0xFF00_0000
   private let foregroundARGB: UInt32 = 0xFFFF_FFFF
 
-  private func metrics(cols: Int, rows: Int) -> TerminalRenderMetrics {
+  private func metrics(cols: Int, rows: Int, viewRows: Int? = nil) -> TerminalRenderMetrics {
     let font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     let bold = UIFont.monospacedSystemFont(ofSize: 14, weight: .bold)
     let cellWidth = ceil(("M" as NSString).size(withAttributes: [.font: font]).width)
@@ -27,7 +27,10 @@ final class TerminalGridRendererTests: XCTestCase {
     return TerminalRenderMetrics(
       cellWidth: cellWidth,
       cellHeight: cellHeight,
-      size: CGSize(width: cellWidth * CGFloat(cols), height: cellHeight * CGFloat(rows)),
+      size: CGSize(
+        width: cellWidth * CGFloat(cols),
+        height: cellHeight * CGFloat(viewRows ?? rows)
+      ),
       scale: 2,
       font: font,
       boldFont: bold,
@@ -51,14 +54,17 @@ final class TerminalGridRendererTests: XCTestCase {
     return cells
   }
 
-  private func header(cols: Int, rows: Int, generation: UInt64) -> GridSnapshot.Header {
+  private func header(cols: Int, rows: Int, generation: UInt64, altScreen: Bool = false)
+    -> GridSnapshot.Header
+  {
     GridSnapshot.Header(
       cols: UInt16(cols),
       rows: UInt16(rows),
       cursorCol: 0,
       cursorRow: 0,
       generation: generation,
-      cursorVisible: false
+      cursorVisible: false,
+      altScreen: altScreen
     )
   }
 
@@ -147,6 +153,253 @@ final class TerminalGridRendererTests: XCTestCase {
 
     XCTAssertEqual(inkedPixels(top), 0, "ink bled into the empty first row")
     XCTAssertGreaterThan(inkedPixels(bottom), 0, "the second row's glyph never landed")
+  }
+
+  /// On the primary screen, empty rows under a prompt are the grid. They must
+  /// stay at the bottom — pulling them up would move a new shell's prompt.
+  func testEmptyTrailingRowsOnThePrimaryScreenStayAtTheBottom() {
+    let renderer = TerminalGridRenderer()
+    let cols = 8
+    let rows = 8
+    let filled = 5
+    let m = metrics(cols: cols, rows: rows)
+    var cells = grid("", cols: cols, rows: rows)
+    for row in 0..<filled {
+      cells[row * cols].codepoint = 0x48  // 'H'
+    }
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: rows, generation: 1), cells: cells, metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let rowHeightPx = Int((m.cellHeight * m.scale).rounded())
+    let gapTop = rowHeightPx * filled
+    guard
+      let gap = image.cropping(
+        to: CGRect(x: 0, y: gapTop, width: image.width, height: image.height - gapTop)
+      )
+    else { return XCTFail("crop failed") }
+    XCTAssertEqual(inkedPixels(gap), 0)
+  }
+
+  /// Alt-screen TUI after a grow: trailing empty rows are unpainted, not
+  /// content. They must sit as slack against the title bar so the painted TUI
+  /// stays on the key bar — otherwise the whole screen looks pushed up.
+  func testAltScreenTrailingEmptyRowsSitAsSlackAtTheTop() {
+    let renderer = TerminalGridRenderer()
+    let cols = 8
+    let rows = 8
+    let filled = 5
+    let m = metrics(cols: cols, rows: rows)
+    var cells = grid("", cols: cols, rows: rows)
+    for row in 0..<filled {
+      cells[row * cols].codepoint = 0x48  // 'H'
+    }
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: rows, generation: 1, altScreen: true),
+        cells: cells,
+        metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let rowHeightPx = Int((m.cellHeight * m.scale).rounded())
+    let slack = rowHeightPx * (rows - filled)
+    guard
+      let top = image.cropping(to: CGRect(x: 0, y: 0, width: image.width, height: slack)),
+      let content = image.cropping(
+        to: CGRect(x: 0, y: slack, width: image.width, height: image.height - slack)
+      )
+    else { return XCTFail("crop failed") }
+    XCTAssertEqual(inkedPixels(top), 0, "unpainted alt-screen rows must not occupy the bottom")
+    XCTAssertGreaterThan(inkedPixels(content), 0, "the painted TUI never landed")
+  }
+
+  /// When the snapshot has fewer rows than the view, slack belongs at the TOP
+  /// (against the title bar), not under the last line. A regression here is
+  /// the other way to get a gap at the bottom: content top-aligned in a tall view.
+  func testAShortGridInATallViewPutsSlackAtTheTop() {
+    let renderer = TerminalGridRenderer()
+    let cols = 8
+    let gridRows = 5
+    let viewRows = 8
+    let m = metrics(cols: cols, rows: gridRows, viewRows: viewRows)
+    var cells = grid("", cols: cols, rows: gridRows)
+    cells[0].codepoint = 0x48  // 'H' on the first grid row
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: gridRows, generation: 1), cells: cells, metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let rowHeightPx = Int((m.cellHeight * m.scale).rounded())
+    let slack = rowHeightPx * (viewRows - gridRows)
+    guard
+      let top = image.cropping(to: CGRect(x: 0, y: 0, width: image.width, height: slack)),
+      let content = image.cropping(
+        to: CGRect(x: 0, y: slack, width: image.width, height: image.height - slack)
+      )
+    else { return XCTFail("crop failed") }
+    XCTAssertEqual(inkedPixels(top), 0, "slack must sit above the grid, not below it")
+    XCTAssertGreaterThan(inkedPixels(content), 0, "the short grid's glyph never landed")
+  }
+
+  // MARK: - Attribute / colour edge cases
+
+  /// The bitmap is retained across frames, so a changed row that never makes it
+  /// into the repaint keeps the previous frame's glyphs on screen. A dense row
+  /// replaced by blanks on the SAME renderer (the incremental dirty-row path,
+  /// not a full repaint) must come back to pure background. A dirty-detection or
+  /// return-early regression that left the old image standing shows here — and
+  /// nothing but the pixels catches it. (Verified by mutation: forcing the
+  /// stale image to be returned turns this red.)
+  func testIncrementalRepaintClearsStaleGlyphs() {
+    let renderer = TerminalGridRenderer()
+    let cols = 4
+    let rows = 1
+    let m = metrics(cols: cols, rows: rows)
+    _ = renderer.render(
+      header: header(cols: cols, rows: rows, generation: 1),
+      cells: grid("MMMM", cols: cols, rows: rows), metrics: m
+    )
+    // Same renderer, same geometry: the row goes through the dirty-row path, not
+    // a full repaint, so a broken clear would leave the M ink behind.
+    guard
+      let cleared = renderer.render(
+        header: header(cols: cols, rows: rows, generation: 2),
+        cells: grid("", cols: cols, rows: rows), metrics: m
+      )
+    else { return XCTFail("no image") }
+    XCTAssertEqual(
+      inkedPixels(cleared), 0,
+      "a repainted row kept last frame's glyphs — the dirty-row clear is broken"
+    )
+  }
+
+  /// A non-default cell background must actually paint its colour. Inverse video
+  /// and any coloured background land through this span path; a regression here
+  /// shows blank where a highlighted line should be.
+  func testColoredBackgroundPaintsItsColor() {
+    let renderer = TerminalGridRenderer()
+    let cols = 4
+    let rows = 1
+    let red: UInt32 = 0xFFFF_0000
+    var cells = grid("", cols: cols, rows: rows)
+    for i in cells.indices { cells[i].background = red }
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: rows, generation: 1), cells: cells,
+        metrics: metrics(cols: cols, rows: rows)
+      )
+    else { return XCTFail("no image") }
+    let mass = channelMass(image)
+    XCTAssertGreaterThan(mass.r, 0, "the red background never painted")
+    XCTAssertGreaterThan(mass.r, mass.g * 4, "background is not red")
+    XCTAssertGreaterThan(mass.r, mass.b * 4, "background is not red")
+  }
+
+  /// A coloured foreground glyph must draw in its own colour, not the default.
+  func testColoredForegroundGlyphIsThatColor() {
+    let renderer = TerminalGridRenderer()
+    let cols = 4
+    let rows = 1
+    var cells = grid("H", cols: cols, rows: rows)
+    cells[0].foreground = 0xFF00_FF00  // green
+    guard
+      let image = renderer.render(
+        header: header(cols: cols, rows: rows, generation: 1), cells: cells,
+        metrics: metrics(cols: cols, rows: rows)
+      )
+    else { return XCTFail("no image") }
+    let mass = channelMass(image)
+    XCTAssertGreaterThan(mass.g, 0, "the green glyph never landed")
+    XCTAssertGreaterThan(mass.g, mass.r * 4, "glyph is not green")
+    XCTAssertGreaterThan(mass.g, mass.b * 4, "glyph is not green")
+  }
+
+  /// `attrDim` halves the glyph's alpha. The same character dimmed must put down
+  /// strictly less ink than at full strength — but still some.
+  func testDimAttributeReducesInk() {
+    let cols = 4
+    let rows = 1
+    let m = metrics(cols: cols, rows: rows)
+
+    let plain = TerminalGridRenderer()
+    guard
+      let bright = plain.render(
+        header: header(cols: cols, rows: rows, generation: 1),
+        cells: grid("H", cols: cols, rows: rows), metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let dimmed = TerminalGridRenderer()
+    var cells = grid("H", cols: cols, rows: rows)
+    cells[0].attrs = GridSnapshot.attrDim
+    guard
+      let dim = dimmed.render(
+        header: header(cols: cols, rows: rows, generation: 1), cells: cells, metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    XCTAssertGreaterThan(inkMass(dim), 0, "the dimmed glyph vanished entirely")
+    XCTAssertLessThan(inkMass(dim), inkMass(bright), "attrDim did not dim the glyph")
+  }
+
+  /// `attrUnderline` strokes a line under the run, so an underlined glyph carries
+  /// more total ink than the same glyph plain.
+  func testUnderlineAddsInk() {
+    let cols = 4
+    let rows = 1
+    let m = metrics(cols: cols, rows: rows)
+
+    let plain = TerminalGridRenderer()
+    guard
+      let bare = plain.render(
+        header: header(cols: cols, rows: rows, generation: 1),
+        cells: grid("H", cols: cols, rows: rows), metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    let underlined = TerminalGridRenderer()
+    var cells = grid("H", cols: cols, rows: rows)
+    cells[0].attrs = GridSnapshot.attrUnderline
+    guard
+      let lined = underlined.render(
+        header: header(cols: cols, rows: rows, generation: 1), cells: cells, metrics: m
+      )
+    else { return XCTFail("no image") }
+
+    XCTAssertGreaterThan(inkMass(lined), inkMass(bare), "the underline stroke never landed")
+  }
+
+  /// Total per-channel coverage — sums the R, G and B of every pixel. Unlike
+  /// `inkedPixels` (a count over a threshold) this is sensitive to how much and
+  /// what colour was drawn, which is what the attribute/colour tests turn on.
+  private func channelMass(_ image: CGImage) -> (r: Int, g: Int, b: Int) {
+    let width = image.width
+    let height = image.height
+    var raw = [UInt8](repeating: 0, count: width * height * 4)
+    guard
+      let context = CGContext(
+        data: &raw, width: width, height: height, bitsPerComponent: 8,
+        bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      )
+    else { return (0, 0, 0) }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    var r = 0, g = 0, b = 0
+    for pixel in stride(from: 0, to: raw.count, by: 4) {
+      r += Int(raw[pixel])
+      g += Int(raw[pixel + 1])
+      b += Int(raw[pixel + 2])
+    }
+    return (r, g, b)
+  }
+
+  private func inkMass(_ image: CGImage) -> Int {
+    let m = channelMass(image)
+    return m.r + m.g + m.b
   }
 }
 #endif

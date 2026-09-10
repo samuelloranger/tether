@@ -47,6 +47,24 @@ impl Default for CoreBridge {
     }
 }
 
+impl CoreBridge {
+    /// Like `default`, but persists replay cursors to `replay_path` so they
+    /// survive app relaunch — reconnect replays only the `sinceId` delta, not
+    /// the whole retained tail.
+    fn with_replay_path(replay_path: std::path::PathBuf) -> Self {
+        let persistence =
+            std::sync::Arc::new(tether_core::store::FileCursorPersistence::new(replay_path));
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            cancels: Mutex::new(HashMap::new()),
+            replay: Arc::new(tether_core::store::ReplayStore::with_persistence(
+                persistence,
+            )),
+            noise_sessions: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
 pub struct AppState {
     pub bridge: CoreBridge,
     pub hosts: Mutex<DesktopHostStore>,
@@ -62,8 +80,12 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(storage_path: std::path::PathBuf) -> Self {
+        let replay_path = storage_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("replay_cursors.json");
         Self {
-            bridge: CoreBridge::default(),
+            bridge: CoreBridge::with_replay_path(replay_path),
             hosts: Mutex::new(new_host_store(storage_path)),
             health: Mutex::new(HashMap::new()),
             polling: Mutex::new(HostPolling::new()),

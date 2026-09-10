@@ -207,6 +207,17 @@ public final class TetherSurfaceView: UIView {
     }
   }
 
+  /// A session switch that has a cached grid to show. Clears the generation
+  /// gate so the next frame paints, but leaves the current image up until it
+  /// does — `clearSnapshot` is the blank flash.
+  public func prepareForSessionChange() {
+    frameEpoch &+= 1
+    isRendering = false
+    renderQueue.async { [worker] in
+      worker.forgetGeneration()
+    }
+  }
+
   /// Plain text of each visible row (trailing spaces trimmed).
   public func rowTexts() -> [String] {
     cachedRowTexts
@@ -257,7 +268,7 @@ public final class TetherSurfaceView: UIView {
 
     withoutAnimations {
       if let image = output.image {
-        textLayer.frame = bounds
+        textLayer.frame = CGRect(x: gridOriginX, y: 0, width: bounds.width, height: bounds.height)
         textLayer.contents = image
       }
       // The grid now reflects every line the pan sent, so the sub-cell offset
@@ -306,7 +317,7 @@ public final class TetherSurfaceView: UIView {
     }
     cursorLayer.isHidden = false
     cursorLayer.frame = CGRect(
-      x: CGFloat(header.cursorCol) * cellWidth,
+      x: CGFloat(header.cursorCol) * cellWidth + gridOriginX,
       y: CGFloat(header.cursorRow) * cellHeight + gridOriginY,
       width: cellWidth,
       height: cellHeight
@@ -338,7 +349,7 @@ public final class TetherSurfaceView: UIView {
       guard let first, let last else { continue }
       path.addRect(
         CGRect(
-          x: CGFloat(first) * cellWidth,
+          x: CGFloat(first) * cellWidth + gridOriginX,
           y: CGFloat(row) * cellHeight + originY,
           width: CGFloat(last - first + 1) * cellWidth,
           height: cellHeight
@@ -353,11 +364,11 @@ public final class TetherSurfaceView: UIView {
       startHandleLayer.isHidden = false
       endHandleLayer.isHidden = false
       startHandleLayer.position = CGPoint(
-        x: CGFloat(normalized.startCol) * cellWidth,
+        x: CGFloat(normalized.startCol) * cellWidth + gridOriginX,
         y: CGFloat(normalized.startRow) * cellHeight + originY
       )
       endHandleLayer.position = CGPoint(
-        x: CGFloat(normalized.endCol + 1) * cellWidth,
+        x: CGFloat(normalized.endCol + 1) * cellWidth + gridOriginX,
         y: CGFloat(normalized.endRow + 1) * cellHeight + originY
       )
     }
@@ -385,7 +396,12 @@ public final class TetherSurfaceView: UIView {
   /// bar, where it is indistinguishable from empty scrollback.
   private var gridOriginY: CGFloat {
     guard let header else { return 0 }
-    let drawn = CGFloat(header.rows) * cellHeight
+    let cols = Int(header.cols)
+    let rows = Int(header.rows)
+    let drawRows = TerminalGridLayout.paintedRows(
+      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen
+    )
+    let drawn = CGFloat(drawRows) * cellHeight
     return max(0, bounds.height - drawn)
   }
 
@@ -393,7 +409,7 @@ public final class TetherSurfaceView: UIView {
     super.layoutSubviews()
     withoutAnimations {
       contentLayer.frame = bounds
-      textLayer.frame = bounds
+      textLayer.frame = CGRect(x: gridOriginX, y: 0, width: bounds.width, height: bounds.height)
       textLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
     }
     reportGridSize()
@@ -438,9 +454,20 @@ public final class TetherSurfaceView: UIView {
 
   private func currentGridSize() -> (cols: UInt16, rows: UInt16)? {
     guard bounds.width > 0, bounds.height > 0, cellWidth > 0, cellHeight > 0 else { return nil }
+    let cols = TerminalGridInset.columns(viewWidth: bounds.width, cellWidth: cellWidth)
     return (
-      UInt16(max(1, min(500, Int(bounds.width / cellWidth)))),
+      UInt16(max(1, min(500, cols))),
       UInt16(max(1, min(300, Int(bounds.height / cellHeight))))
+    )
+  }
+
+  /// Left edge of the grid, mirroring `gridOriginY` on the horizontal axis: a
+  /// symmetric inset with the sub-column leftover split evenly, so text has a
+  /// gutter on both sides instead of running to the right edge.
+  private var gridOriginX: CGFloat {
+    guard let header, cellWidth > 0 else { return 0 }
+    return TerminalGridInset.originX(
+      viewWidth: bounds.width, cellWidth: cellWidth, cols: Int(header.cols)
     )
   }
 
@@ -466,7 +493,7 @@ public final class TetherSurfaceView: UIView {
 
   private func cellAt(_ point: CGPoint) -> (row: Int, col: Int)? {
     guard let header, cellWidth > 0, cellHeight > 0 else { return nil }
-    let col = Int(point.x / cellWidth)
+    let col = Int((point.x - gridOriginX) / cellWidth)
     let row = Int((point.y - gridOriginY) / cellHeight)
     guard col >= 0, row >= 0, col < Int(header.cols), row < Int(header.rows) else {
       return nil
@@ -528,7 +555,7 @@ public final class TetherSurfaceView: UIView {
   private func handleMousePan(_ gesture: UIPanGestureRecognizer, point: CGPoint) {
     guard let header else { return }
     let cell = MouseSeq.cellFromPoint(
-      x: point.x, y: point.y, bounds: bounds,
+      x: point.x - gridOriginX, y: point.y, bounds: bounds,
       cols: Int(header.cols), rows: Int(header.rows),
       cellWidth: cellWidth, cellHeight: cellHeight
     )

@@ -37,8 +37,10 @@ public enum DPadModel {
   /// iOS HIG floor — matches `MIN_TOUCH_TARGET` on mobile.
   public static let buttonSize: CGFloat = 44
   public static let threshold: CGFloat = 8
-  /// Leading axis must beat the trailing one by this factor before a cardinal locks.
-  public static let dominance: CGFloat = 1.5
+  /// Wait this long, then lock to the axis of the accumulated translation.
+  /// UIScrollView's directional lock does the same: a short delay so the first
+  /// noisy pixels do not pick vertical when the drag is horizontal (and vice versa).
+  public static let sampleMs: Int = 100
   public static let repeatDelayMs: Int = 350
   public static let repeatMs: Int = 60
   public static let maxRepeats: Int = 120
@@ -48,21 +50,25 @@ public enum DPadModel {
   /// Direction is locked for the whole gesture once picked — a diagonal drag
   /// must not flip between axes mid-hold. Re-resolving only happens once the
   /// finger returns inside the center threshold.
+  ///
+  /// `sampled` is false until `sampleMs` of finger movement have been measured
+  /// (or the finger lifts). Until then this returns nil so the first 8 px of a
+  /// thumb plant cannot steal the axis.
   public static func resolveDirection(
     dx: CGFloat,
     dy: CGFloat,
-    active: DPadDirection?
+    active: DPadDirection?,
+    sampled: Bool
   ) -> DPadDirection? {
     let horizontal = abs(dx)
     let vertical = abs(dy)
     if max(horizontal, vertical) < threshold { return nil }
     if let active { return active }
+    if !sampled { return nil }
 
     if horizontal >= vertical {
-      if horizontal < dominance * vertical { return nil }
       return dx >= 0 ? .C : .D
     }
-    if vertical < dominance * horizontal { return nil }
     return dy >= 0 ? .B : .A
   }
 

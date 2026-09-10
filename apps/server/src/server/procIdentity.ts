@@ -39,13 +39,27 @@ export function processStartTime(pid: number): string | null {
 // same information, ~5x cheaper (roughly 270ms vs 1.4s). Still far too slow for
 // a hot path, which is fine: the only callers are the daemon's start/stop/status
 // control commands (main.ts), each of which runs this at most twice.
+// A process's start time never changes while it is alive, so a successful
+// answer is cached for the life of THIS process. That collapses repeat lookups
+// of the same pid — the daemon polling its own recorded pid across start/stop/
+// status — from several cold powershell.exe spawns to none, which on a
+// contended Windows CI runner is the difference between finishing inside the
+// test budget and timing out. Only non-null answers are cached: a "gone" pid
+// must stay re-queryable, and a live pid never yields null in a way the retry
+// below has not already covered.
+const startTimeCache = new Map<number, string>();
+
 function windowsStartTime(pid: number): string | null {
+  const cached = startTimeCache.get(pid);
+  if (cached !== undefined) return cached;
   // Retried once. An empty answer is ambiguous — it means EITHER the pid is
   // gone (the documented case below) OR powershell.exe never got far enough to
   // answer, which happens on a cold start under load and made this return null
   // for a process that was plainly alive. The retry costs one extra spawn on
   // the genuinely-gone path, and the callers run this at most twice.
-  return queryWindowsStartTime(pid) ?? queryWindowsStartTime(pid);
+  const answer = queryWindowsStartTime(pid) ?? queryWindowsStartTime(pid);
+  if (answer !== null) startTimeCache.set(pid, answer);
+  return answer;
 }
 
 function queryWindowsStartTime(pid: number): string | null {

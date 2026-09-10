@@ -2,11 +2,11 @@
 
 ## The trust model
 
-Access is **per-device**. A paired device mints a short-lived bearer token over its already-authenticated Noise session (`{t:'auth.token'}`) and presents it as `Authorization: Bearer <token>` on every `/api/*` HTTP request and the WebSocket upgrade. There is no shared password, no `tether set-password`, and no `/api/setup` TOFU flow.
+Access is **per-device**. A paired device mints a short-lived bearer token over its already-authenticated Noise session (`{t:'auth.token'}`) and presents it as `Authorization: Bearer <token>` on every `/api/*` HTTP request and on the leftover `/api/ws` upgrade. The live terminal stream is `/api/noise/session`, where the handshake *is* the authentication. There is no shared password, no `tether set-password`, and no `/api/setup` TOFU flow.
 
 `authMiddleware` verifies the token (HMAC signature, expiry, and that the device is still in the registry). Revoking a device is enough: the next request with its token is 401. Public exceptions are `/api/status` (discovery) and the `/api/noise/*` handshake sockets — those authenticate via Noise itself.
 
-The **terminal stream is end-to-end encrypted over Noise**. REST confidentiality is TLS.
+The **terminal stream is end-to-end encrypted over Noise** (`/api/noise/session`). REST confidentiality is TLS.
 
 ## Transport encryption
 

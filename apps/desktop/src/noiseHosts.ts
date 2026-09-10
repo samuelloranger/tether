@@ -1,3 +1,6 @@
+import { resolveScheme } from './hostScheme';
+import type { HostProfile } from './types';
+
 // There is no `authMode` field on HostProfile yet, so we record a host as
 // "noise" here when paired, and read it back to pick the transport.
 const KEY = 'tether_noise_hosts';
@@ -33,7 +36,13 @@ export function unmarkNoiseHost(hostId: string): void {
   if (ids.delete(hostId)) write(ids);
 }
 
-/** The Noise session endpoint for a host — where `core_noise_connect` reconnects. */
-export function noiseSessionAddress(host: string, port: string): string {
-  return `ws://${host}:${port}/api/noise/session`;
+/**
+ * The Noise session endpoint for a host — where `core_noise_connect` reconnects.
+ *
+ * Reads the same recorded scheme REST does, so a host paired over TLS is dialled
+ * `wss://` rather than plaintext (which the server rejects).
+ */
+export function noiseSessionAddress(profile: HostProfile): string {
+  const proto = resolveScheme(profile.scheme, profile.port) === 'https' ? 'wss' : 'ws';
+  return `${proto}://${profile.host}:${profile.port}/api/noise/session`;
 }

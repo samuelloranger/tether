@@ -207,6 +207,7 @@ impl Server {
                 port: self.port.to_string(),
                 identity_name: "e2e".to_string(),
                 order: 0,
+                scheme: None,
             },
             self.token.clone(),
         )
@@ -224,6 +225,7 @@ impl Server {
                 port: self.port.to_string(),
                 identity_name: "e2e-alt".to_string(),
                 order: 0,
+                scheme: None,
             },
             bearer.to_string(),
         )

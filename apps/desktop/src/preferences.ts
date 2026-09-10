@@ -250,15 +250,15 @@ function defaultDark(): UiTheme {
       border: '#232333',
       overlay: '#08080ecc',
       selected: '#191926',
-      accent: '#7c8cf8',
+      accent: '#3ddc97',
       accentText: '#08080e',
       success: '#6ee7a8',
       warning: '#f2b34c',
       danger: '#ff7050',
-      info: '#7c8cf8',
+      info: '#4d8dff',
     },
     terminal: { background: '#0b0b13', foreground: '#ccccdf', cursor: '#f5e0dc' },
-    heat: { working: '#f2b34c', waiting: '#ff7050', done: '#6ee7a8', cool: '#7c8cf8' },
+    heat: { working: '#f2b34c', waiting: '#ff7050', done: '#6ee7a8', cool: '#4d8dff' },
   };
 }
 
@@ -276,15 +276,15 @@ function defaultLight(): UiTheme {
       border: '#dcdce6',
       overlay: '#14141b66',
       selected: '#e9e9f2',
-      accent: '#4353d0',
+      accent: '#0b7a4b',
       accentText: '#ffffff',
       success: '#1c7a4f',
       warning: '#8a5a00',
       danger: '#c4381c',
-      info: '#4353d0',
+      info: '#002fa7',
     },
     terminal: fromCatppuccin('latte').terminal,
-    heat: { working: '#8a5a00', waiting: '#c4381c', done: '#1c7a4f', cool: '#4353d0' },
+    heat: { working: '#8a5a00', waiting: '#c4381c', done: '#1c7a4f', cool: '#002fa7' },
   };
 }
 

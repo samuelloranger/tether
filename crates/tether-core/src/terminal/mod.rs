@@ -35,6 +35,7 @@ pub struct TerminalSnapshot {
     pub cursor_row: u16,
     pub generation: u64,
     pub cursor_visible: bool,
+    pub alt_screen: bool,
     pub cells: Vec<TerminalCell>,
 }
 

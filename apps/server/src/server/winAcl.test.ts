@@ -1,20 +1,14 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { currentUserPrincipal, icaclsArgs, secureCreatedDir, secureWindowsPath } from './winAcl';
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/**
- * How long a PowerShell probe may take before it counts as a failure.
- *
- * Only ever hit on a runner that is thrashing; a warm powershell.exe answers in
- * well under a second. Large rather than tight because the cost of overshooting
- * is a slow test and the cost of undershooting is a red release gate.
- */
-const PS_TIMEOUT_MS = 30_000;
+// System32, for calling whoami by absolute path — see readUserSid.
+const SYSTEM32 = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
 
 // Pure argument shaping. Runs on every platform, which is the whole reason
 // icaclsArgs and currentUserPrincipal are exported separately from the spawn:
@@ -75,6 +69,61 @@ test('secureWindowsPath is inert off Windows', () => {
   }
 });
 
+// SDDL parsing + canonicalisation. Pure, so it runs on every platform — which
+// is the point: the failure it guards against showed up only on the GitHub
+// runner (which logs in AS the built-in Administrator, RID 500, so `icacls
+// /save` writes our own grant as the `LA` alias) and a Windows-only test could
+// not have caught it before a red CI run.
+
+test('machineSidPrefix strips the RID off an account SID', () => {
+  expect(machineSidPrefix('S-1-5-21-1-2-3-500')).toBe('S-1-5-21-1-2-3');
+  expect(machineSidPrefix('S-1-5-18')).toBeNull(); // not an S-1-5-21 account SID
+  expect(machineSidPrefix(null)).toBeNull();
+});
+
+test('canonicalizeSddlPrincipal maps aliases to SIDs and leaves raw SIDs alone', () => {
+  const prefix = 'S-1-5-21-1-2-3';
+  expect(canonicalizeSddlPrincipal('SY', prefix)).toBe('S-1-5-18');
+  expect(canonicalizeSddlPrincipal('BA', prefix)).toBe('S-1-5-32-544');
+  expect(canonicalizeSddlPrincipal('LA', prefix)).toBe('S-1-5-21-1-2-3-500');
+  expect(canonicalizeSddlPrincipal('S-1-5-21-1-2-3-1000', prefix)).toBe('S-1-5-21-1-2-3-1000');
+  expect(canonicalizeSddlPrincipal('WD', prefix)).toBe('WD'); // unknown alias kept, reads as a stranger
+});
+
+test('the owner-only check tolerates the GitHub-runner ACL where we ARE the built-in Administrator', () => {
+  // Exact shape from the runner: SYSTEM + Administrators as raw SIDs, and our
+  // own grant — the built-in Administrator — as the LA alias.
+  const mine = 'S-1-5-21-1456194669-2875347699-3862154473-500';
+  const prefix = machineSidPrefix(mine);
+  const sddl = 'D:PAI(A;OICIID;FA;;;S-1-5-18)(A;OICIID;FA;;;S-1-5-32-544)(A;OICI;FA;;;LA)';
+  const sids = sidsFromSddl(sddl, prefix);
+  const privileged = new Set([
+    ...FIXED_PRIVILEGED_SIDS,
+    `${prefix}-500`,
+    `${prefix}-512`,
+    `${prefix}-519`,
+  ]);
+  const strangers = sids.filter((sid) => sid !== mine && !privileged.has(sid));
+  expect(strangers).toEqual([]);
+  expect(sids).toContain(mine); // LA canonicalised to our SID
+});
+
+test('the owner-only check still flags an ordinary second user', () => {
+  const mine = 'S-1-5-21-1-2-3-1000';
+  const prefix = machineSidPrefix(mine);
+  const sddl = `D:(A;;FA;;;${mine})(A;;FA;;;S-1-5-21-1-2-3-1001)`;
+  const sids = sidsFromSddl(sddl, prefix);
+  const privileged = new Set([
+    ...FIXED_PRIVILEGED_SIDS,
+    `${prefix}-500`,
+    `${prefix}-512`,
+    `${prefix}-519`,
+  ]);
+  const strangers = sids.filter((sid) => sid !== mine && !privileged.has(sid));
+  expect(strangers).toEqual(['S-1-5-21-1-2-3-1001']);
+});
+
+// ---------------------------------------------------------------------------
 // End-to-end, Windows only.
 //
 // test-preload.ts sets TETHER_SKIP_WINDOWS_ACL=1 for the whole suite, so
@@ -106,60 +155,92 @@ function secureInChild(target: string, isDir: boolean): string {
 }
 
 /**
- * The SID of every principal granted access to `target`.
+ * The SID of every principal granted access to `target`, read from the object's
+ * own SDDL via `icacls <target> /save`.
  *
- * Read through Get-Acl and translated to SIDs rather than scraped out of
- * `icacls` text. Account *names* are neither stable nor parseable: icacls
- * prints a bare SID when a name does not resolve, localises the well-known
- * ones ("AUTORITE NT\Système" here, "NT AUTHORITY\SYSTEM" on an English
- * install), and lays them out positionally. A SID is the identity itself.
+ * This deliberately replaces an older `icacls`-text-plus-`NTAccount.Translate`
+ * path. Parsing icacls' human output means dealing with account *names*, which
+ * are localised ("AUTORITE NT\Système" vs "NT AUTHORITY\SYSTEM") and positional,
+ * so the old code shelled out to powershell.exe to translate them back to SIDs —
+ * and a cold powershell.exe under CI load was THE server-windows flake: it
+ * returned empty and a perfectly correct ACL read as an empty one. `/save`
+ * writes the raw SDDL (works for a file or a directory), whose ACEs already
+ * carry SIDs; no PowerShell, no cold start.
  */
-function grantedSids(target: string): string[] {
-  const shown = spawnSync('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
-  // `<path> ACCOUNT:(FLAGS)` on the first line, then `ACCOUNT:(FLAGS)` indented.
-  // The trailing summary line is localised ("1 fichiers correctement traités")
-  // and carries no ':(', so it drops out here rather than needing a match.
-  const names = (shown.stdout ?? '')
-    .split('\n')
-    .map((line) => line.replace(target, '').trim())
-    .filter((line) => line.includes(':('))
-    .map((line) => line.slice(0, line.indexOf(':(')).trim())
-    .filter(Boolean);
-  return names.length === 0 ? [] : translateToSids(names);
+function grantedSids(target: string, machinePrefix: string | null): string[] {
+  const out = path.join(tmpdir(), `tether-acl-sddl-${process.pid}-${aclNonce()}.txt`);
+  try {
+    const saved = spawnSync('icacls.exe', [target, '/save', out], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (saved.status !== 0) return [];
+    let sddl: string;
+    try {
+      sddl = readFileSync(out, 'utf16le');
+    } catch {
+      return [];
+    }
+    return sidsFromSddl(sddl, machinePrefix);
+  } finally {
+    rmSync(out, { force: true });
+  }
+}
+
+let aclNonceCounter = 0;
+const aclNonce = () => `${Date.now()}-${aclNonceCounter++}`;
+
+/**
+ * Every ACE's principal as a SID, from an SDDL string. An ACE is
+ * `(type;flags;rights;object;inherit;principal)`; the principal is the 6th
+ * field. `icacls /save` writes it inconsistently — an ordinary account as a raw
+ * `S-1-...` SID, a well-known one as a two-letter alias, and even the same
+ * well-known principal one way here and the other on another host (the GitHub
+ * runner prints SYSTEM/Administrators as raw SIDs but the built-in
+ * Administrator as `LA`). `canonicalizeSddlPrincipal` maps every alias back to
+ * a SID so a caller compares like with like.
+ */
+function sidsFromSddl(sddl: string, machinePrefix: string | null): string[] {
+  const sids: string[] = [];
+  for (const ace of sddl.matchAll(/\(([^)]*)\)/g)) {
+    const principal = ace[1].split(';')[5]?.trim();
+    if (principal) sids.push(canonicalizeSddlPrincipal(principal, machinePrefix));
+  }
+  return sids;
 }
 
 /**
- * Account names to SIDs.
- *
- * Deliberately NOT `Get-Acl`: that cmdlet lives in Microsoft.PowerShell.Security,
- * which fails to load on this development machine ("le module n'a pas pu être
- * chargé"), so it returned an empty access list and made a perfectly correct ACL
- * look like an empty one. `icacls` is the tool the implementation itself uses and
- * is always present; `NTAccount.Translate` is a plain .NET type and needs no
- * module.
- *
- * A name that will not translate is passed through unchanged, which is right in
- * the one case it happens: icacls prints a bare SID when it cannot resolve the
- * account, and that string is already the answer.
+ * An SDDL principal to a SID. A raw SID passes through. Fixed aliases map to
+ * their constant SIDs; the machine/domain-relative ones (LA = the built-in
+ * Administrator, RID 500 — which is the account the GitHub runner itself logs
+ * in as, so our OWN grant comes back as `LA`) only become a SID once combined
+ * with a machine SID, which we take from our own SID's prefix. An unknown alias
+ * is kept verbatim so it still reads as a stranger rather than silently
+ * vanishing.
  */
-function translateToSids(names: string[]): string[] {
-  const list = names.map((n) => `'${n.replace(/'/g, "''")}'`).join(',');
-  const ps = spawnSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `foreach ($n in @(${list})) { try { ` +
-        '[System.Security.Principal.NTAccount]::new($n).Translate(' +
-        '[System.Security.Principal.SecurityIdentifier]).Value } catch { $n } }',
-    ],
-    { encoding: 'utf8', windowsHide: true, timeout: PS_TIMEOUT_MS },
-  );
-  return (ps.stdout ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+function canonicalizeSddlPrincipal(principal: string, machinePrefix: string | null): string {
+  const fixed: Record<string, string> = {
+    SY: 'S-1-5-18', // NT AUTHORITY\SYSTEM
+    BA: 'S-1-5-32-544', // BUILTIN\Administrators
+    CO: 'S-1-3-0', // CREATOR OWNER
+    OW: 'S-1-3-4', // OWNER RIGHTS
+  };
+  if (fixed[principal]) return fixed[principal];
+  if (machinePrefix) {
+    const relative: Record<string, string> = {
+      LA: `${machinePrefix}-500`, // built-in Administrator account
+      DA: `${machinePrefix}-512`, // Domain Admins
+      EA: `${machinePrefix}-519`, // Enterprise Admins
+    };
+    if (relative[principal]) return relative[principal];
+  }
+  return principal;
+}
+
+/** The machine/domain SID that an `S-1-5-21-…-<RID>` account SID hangs off. */
+function machineSidPrefix(sid: string | null): string | null {
+  const m = sid?.match(/^(S-1-5-21-\d+-\d+-\d+)-\d+$/);
+  return m ? m[1] : null;
 }
 
 /**
@@ -171,57 +252,50 @@ function translateToSids(names: string[]): string[] {
  * be, and they are the Windows equivalent of root — POSIX makes exactly the
  * same concession, since root reads a 0700 file regardless. What must never
  * appear is an ordinary second user.
+ *
+ * The machine-relative admins (the built-in Administrator, Domain/Enterprise
+ * Admins) are added per-check in `expectOwnerOnly`, since their SIDs depend on
+ * the machine prefix.
  */
-const PRIVILEGED_SIDS = new Set([
+const FIXED_PRIVILEGED_SIDS = [
   'S-1-5-18', // NT AUTHORITY\SYSTEM
   'S-1-5-32-544', // BUILTIN\Administrators
   'S-1-3-0', // CREATOR OWNER
   'S-1-3-4', // OWNER RIGHTS
-]);
+];
 
 /**
  * Our own SID, the one identity that must be granted.
- *
- * Asked of .NET rather than of `whoami /user`, which looks like the obvious
- * tool and is a trap: Git for Windows ships a POSIX `whoami` that wins on PATH
- * inside a Git Bash environment, rejects `/user`, and exits 1 with empty
- * stdout — so the SID silently came back null and every assertion below
- * collapsed into "expected not null".
  */
 let cachedUserSid: string | null | undefined;
 
 function currentUserSid(): string | null {
   // The SID cannot change inside one test process, and every assertion asks for
-  // it — so pay for PowerShell once rather than per check.
+  // it — so read it once and cache.
   if (cachedUserSid !== undefined) return cachedUserSid;
-  cachedUserSid = readUserSid() ?? readUserSid();
+  cachedUserSid = readUserSid();
   return cachedUserSid;
 }
 
 /**
- * One attempt at the SID.
+ * Our own SID, from the header-less `NAME SID` line of `whoami /user /nh`.
  *
- * The timeout is explicit and generous on purpose. A cold `powershell.exe` on a
- * loaded CI runner takes seconds to start, and when the budget ran out
- * spawnSync returned empty stdout — indistinguishable from "no SID" — so the
- * assertion failed as a bare `Received: null` and this suite flaked on Windows
- * about half the time, blocking the release gate for reasons that had nothing
- * to do with the release. `currentUserSid` retries once on top of this: a
- * runner slow enough to miss the budget once is not necessarily slow twice.
+ * Called by absolute path out of System32, never bare `whoami`: Git for Windows
+ * ships a POSIX `whoami.exe` that wins on PATH inside a Git Bash environment,
+ * rejects `/user`, and exits 1 empty — which silently returned null and
+ * collapsed every assertion into "expected not null". The System32 tool answers
+ * in milliseconds with no cold start, which is the point of not asking
+ * powershell.exe: on a loaded CI runner its cold start was the flake this whole
+ * change removes. (`/user /fmt:list` is NOT valid — whoami rejects it; `/nh`
+ * drops the table header instead.)
  */
 function readUserSid(): string | null {
-  const ps = spawnSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
-    ],
-    { encoding: 'utf8', windowsHide: true, timeout: PS_TIMEOUT_MS },
-  );
-  const sid = (ps.stdout ?? '').trim();
-  return /^S-1-[\d-]+$/.test(sid) ? sid : null;
+  const r = spawnSync(path.join(SYSTEM32, 'whoami.exe'), ['/user', '/nh'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const sid = (r.stdout ?? '').match(/S-1-[\d-]+/);
+  return sid ? sid[0] : null;
 }
 
 /**
@@ -234,8 +308,17 @@ function readUserSid(): string | null {
 function expectOwnerOnly(target: string, label: string): void {
   const mine = currentUserSid();
   expect(mine).not.toBeNull();
-  const sids = grantedSids(target);
-  const strangers = sids.filter((sid) => sid !== mine && !PRIVILEGED_SIDS.has(sid));
+  const prefix = machineSidPrefix(mine);
+  // The privileged set includes the machine-relative admins, whose SIDs only
+  // exist once combined with this machine's prefix. On the GitHub runner our
+  // OWN account IS the built-in Administrator (RID 500), so `mine` is one of
+  // these too — harmless, the `sid !== mine` guard below covers it.
+  const privileged = new Set([
+    ...FIXED_PRIVILEGED_SIDS,
+    ...(prefix ? [`${prefix}-500`, `${prefix}-512`, `${prefix}-519`] : []),
+  ]);
+  const sids = grantedSids(target, prefix);
+  const strangers = sids.filter((sid) => sid !== mine && !privileged.has(sid));
   if (strangers.length > 0) {
     throw new Error(
       `${label}: unprivileged principals still have access: ${strangers.join(', ')}\n` +

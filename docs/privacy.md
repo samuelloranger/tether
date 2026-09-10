@@ -32,7 +32,9 @@ Tether only connects where you point it:
 
 ## Transport security
 
-Every connection between a client and your server is **end-to-end encrypted with the Noise protocol** — the same handshake WireGuard uses — confidential, tamper-proof, and MITM-proof on first contact, independent of any TLS. There is no shared password: each device holds its own keypair and is authorized by shell access to the host (`tether pair`), the SSH `authorized_keys` model. A leaked credential can't be replayed because none travels on the wire.
+Every terminal connection between a client and your server is **end-to-end encrypted with the Noise protocol** — the same handshake WireGuard uses — confidential and tamper-proof, independent of any TLS. There is no shared password: each device holds its own keypair and is authorized by shell access to the host (`tether pair`), the SSH `authorized_keys` model. A leaked bearer can't be replayed for long because it expires, and revoking the device invalidates the next one.
+
+Pairing is as good as the path you run `tether pair` on. Do that on the LAN or a tunnel you already trust, and confirm the fingerprint the CLI prints. The self-signed TLS certificate the server also presents is pinned on first HTTPS contact; an unpinned first contact there is MITM-able, which is why a tunnel is still the right place to pair. See [Security & networking](/security).
 
 To reach the server from outside your LAN, put it behind a tunnel you already run — **Tailscale**, **WireGuard**, or **Cloudflare Tunnel** — none of which need an open inbound port; the Noise encryption rides safely over any of them. See [Reach your server from anywhere](/reach-from-anywhere) for the walkthrough and [Security & networking](/security) for the full model. One honest limit stands out for this page: because the server runs your shell, a compromised server inherently sees your terminal contents — Noise protects the wire and pairing, not the host against itself.
 

@@ -23,17 +23,17 @@ the server binaries.
 
 ## Monorepo layout (Bun workspaces)
 
-- `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary. **Source lives in `apps/server/src/server/`** — every filename in the bullets below is relative to that directory (so `main.ts` is `apps/server/src/server/main.ts`). Routes are split under `src/server/routes/` (`sessions.ts`, `git.ts`, `presentations.ts`, …). `src/web/dist/` holds the built web assets the binary serves.
+- `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary. **Source lives in `apps/server/src/server/`** — every filename in the bullets below is relative to that directory (so `main.ts` is `apps/server/src/server/main.ts`). Routes are split under `src/server/routes/` (`sessions.ts`, `git.ts`, `presentations.ts`, `noise.ts`, …).
   - Entry/lifecycle: `main.ts` (argv dispatch + control CLI + `holder` subcommand), `serve.ts` (`serve()` — reattach holders + the http/https `Bun.serve` listeners), `index.ts` (dev entry), `app.ts` (Hono routes + WS gateway), `paths.ts` / `runtime.ts`, `update.ts` (self-update).
-  - PTY: `pty.ts` (session registry, holder spawn/reattach, subscribe/write/resize/kill), `holder.ts` (the detached one-PTY-per-process owner), `procCwd.ts` / `procIdentity.ts` / `liveCwd.ts` (cwd + process tracking), `sessionActivity.ts` (`working`/`waiting`/`idle` inference from output), `sessionTitle.ts` (OSC title + auto-title).
-  - Data/auth: `db.ts` (bun:sqlite + versioned migrations), `auth.ts` (argon2 password + tokens), `config.ts` (zod-typed settings over the `settings` table, client-editable).
-  - Transport: `x509.ts` (hand-rolled DER + self-signed cert generation, no deps), `tlsStore.ts` (`~/.tether/config/tls/`, generate-once), `tlsConfig.ts` (listener plan from env — pure), `tlsRuntime.ts` (the report the routes read).
-  - Features: `gitDiff.ts` / `gitOps.ts` / `gitRoot.ts` / `gitWatch.ts`, `workspaceFile.ts`, `upload.ts`, `presentations.ts` / `presentCli.ts`, `push.ts` / `pushCrypto.ts` / `pushDevices.ts` / `pushRelay.ts` (native APNs push via the relay), `admin.ts` (password/update/restart/test-notification).
+  - PTY: `pty.ts` (session registry, holder spawn/reattach, subscribe/write/resize/kill), `holder.ts` (the detached one-PTY-per-process owner), `holderFrame.ts` (binary dialect), `procCwd.ts` / `procIdentity.ts` / `liveCwd.ts` (cwd + process tracking), `sessionActivity.ts` (`working`/`waiting`/`done`/`idle` inference from output), `sessionTitle.ts` (OSC title + auto-title).
+  - Data/auth: `db.ts` (bun:sqlite + versioned migrations), `auth.ts` (per-device bearer verify), `deviceToken.ts` / `deviceRegistry.ts` / `noiseIdentity.ts` / `pairControl.ts`, `config.ts` (zod-typed settings over the `settings` table, client-editable).
+  - Transport: `x509.ts` (hand-rolled DER + self-signed cert generation, no deps), `tlsStore.ts` (`~/.tether/config/tls/`, generate-once), `tlsConfig.ts` (listener plan from env — pure), `tlsRuntime.ts` (the report the routes read), `noiseChannel.ts` / `noiseFfi.ts` / `noiseSessionProtocol.ts`.
+  - Features: `gitDiff.ts` / `gitOps.ts` / `gitRoot.ts` / `gitWatch.ts`, `workspaceFile.ts`, `upload.ts`, `presentations.ts` / `presentCli.ts`, `push.ts` / `pushCrypto.ts` / `pushDevices.ts` / `pushRelay.ts` (native APNs push via the relay), `admin.ts` (update/restart/test-notification).
 - `apps/desktop/` — Tauri 2 desktop client (`tether-desktop`). Vite + React + xterm.js frontend; Rust commands in `src-tauri/` link `tether-core` directly.
 - `apps/relay/` — Bun + Hono push relay (`tether-relay`), deployed separately (`Dockerfile` + `docker-compose.yml`). Routes ciphertext it cannot read from a tether server to APNs; see **Push notifications** below. Own tests (`bun --cwd apps/relay run test`).
 - `clients/apple/` — native iOS app (`TetherIOS` + `TetherKit` SPM package + `TetherNotificationService`).
 - `crates/` — `tether-core`, `tether-proto`, `tether-ffi` (UniFFI → Swift).
-- `docs/` — VitePress site (`architecture.md`, `data-flow.md`, `security.md`, `terminal/`, `superpowers/specs/` design docs, `superpowers/plans/` implementation plans).
+- `docs/` — VitePress site (`architecture.md`, `data-flow.md`, `security.md`, `terminal/`).
 - `icon.png` — brand mark at repo root (also used by the iOS AppIcon / README).
 
 ## Commands
@@ -55,7 +55,7 @@ Per workspace:
 - iOS: see `clients/apple/README.md` (`scripts/build-xcframework.sh`, then `xcodebuild -project clients/apple/Tether.xcodeproj -scheme TetherIOS …`)
 - Desktop: `bun --cwd apps/desktop run tauri:dev` / `tauri:build`
 
-**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | pair | present | signal | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
+**Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | pair | present | signal | devices | device | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
 
 ## Runtime requirement (important)
 
@@ -65,11 +65,12 @@ Development and CI run **Bun 1.4.x** (`bun-version: latest`); 1.3.14 stays the f
 
 ## Data flow (the core loop)
 
-1. Client opens `GET /api/ws?sessionId=&sinceId=&cols=&rows=` (token-authed).
-2. `startSession` (`pty.ts`) spawns a detached **holder** process (`tether holder <sock> <cols> <rows> <cwd> <cmd>`) that owns the PTY; the server talks to it over a unix socket in `~/.tether/holders/<id>.sock` with newline-delimited JSON frames (`i`/`r`/`k` down, `o`/`x`/`c` up, base64 payloads).
+1. Client reconnects Noise IK to `GET /api/noise/session` (handshake is auth; no bearer on that socket).
+2. Over the sealed channel: `{t:'start', id, cols, rows, sinceId?}` → `startSession` (`pty.ts`) spawns a detached **holder** (`tether holder <sock> <cols> <rows> <cwd> <cmd>`) that owns the PTY. The server talks to it over a unix socket in `~/.tether/holders/<id>.sock` with length-prefixed binary frames (`holderFrame.ts`).
 3. Every output chunk → `addTerminalLog` (SQLite) → broadcast to subscribers, and feeds `sessionActivity`, `sessionTitle`, `liveCwd`.
-4. On WS open the server replays `getLogs(sessionId, sinceId)`, then streams live. Clients track `sinceId` **in memory only** — it is *not* persisted anywhere, so an LRU eviction, an app restart, or a server-sent `reset` drops it and the next connect replays the whole retained tail. That churn is board task #731.
-5. Client → server: `{type:'input'|'resize'|'focus'}`. Server → client: `output | exit | title | activity | diff | reset | ping`.
+4. On start the server replays `getReplayLogs(sessionId, sinceId)` (byte-budgeted; `reset` if the cursor predates a prune or the span exceeds the budget), then streams live. Clients track `sinceId` **in memory only** — it is *not* persisted anywhere, so an LRU eviction, an app restart, or a server-sent `reset` drops it and the next connect replays the whole retained tail. That churn is board task #731.
+5. Client → server (sealed JSON): `{t:'input'|'resize'|'focus'|'start'|…}`. Server → client: `{t:'output'|'exit'|'title'|'activity'|'diff'|'reset'|…}`. REST uses a bearer minted on the same channel (`{t:'auth.token'}`).
+6. `GET /api/ws` still exists as a bearer-authed JSON WebSocket (`proto=1`; optional binary `proto=2`). Shipping clients do not use it.
 
 **Push notifications:** the server encrypts a notification for each registered device and posts it to the relay (`apps/relay`, URL baked in at build time by `pushRelay.ts` — not a user setting) when a session flips to `waiting`, emits an OSC 9/777 notify, exits, or finishes a long job. iOS only; `TetherNotificationService` decrypts on arrival, so the relay never sees plaintext. ntfy was removed in favour of this. A session is suppressed only while an attached subscriber reports `focused: true` — a backgrounded phone keeps its socket, so it still gets pushed. Notification delivery is advisory and never blocks the PTY path.
 
@@ -103,7 +104,7 @@ Because the holder is a separate detached process, **the shell survives both cli
 
 ## HTTP API surface (`app.ts`)
 
-`/api/status` · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/control/signal` for program-declared session state, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices` and `tls`) · `/api/push/{register,unregister}` · `/api/admin/{update,restart,test-notification}` (token-authed; no password in the body) · `/api/noise/*` (pairing + session + device management).
+`/api/status` · `/api/health` · `/api/sessions` (list/start/kill/rename) · `/api/sessions/:id/logs` · `/api/sessions/:id/diff{,/file,/summary}` · `/api/sessions/:id/git/{log,commit,commit/:sha/diff}` · `/api/sessions/:id/git/{stage,unstage,discard,stage-hunk,unstage-hunk}` · `/api/sessions/:id/file` · `/api/sessions/:id/upload` · `/api/presentations` (+ `/control/presentations` for the local CLI, `/control/signal` for program-declared session state, `/control/pair` for enrollment, `/preview/:token/*` for serving them) · `/api/config` (GET/PATCH; the GET also reports read-only `pushDevices` and `tls`) · `/api/push/{register,unregister}` · `/api/admin/{update,restart,test-notification}` (token-authed) · `/api/noise/{pair,session}` (handshake sockets) · `/api/ws` (legacy bearer-authed JSON terminal socket).
 
 ## Conventions & gotchas
 

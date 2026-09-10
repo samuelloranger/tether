@@ -48,6 +48,8 @@ struct RemoteSessionRow {
     auto_title: Option<String>,
     #[serde(default)]
     activity: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 /// Reduces one completed `/api/sessions` request. Fetching and observer calls
@@ -91,6 +93,7 @@ pub fn reduce_session_list_response(
                 name: row.name,
                 auto_title: row.auto_title,
                 activity: row.activity,
+                kind: row.kind,
             })
             .collect(),
         notify_waiting: profile.id == active_host_id,
@@ -200,6 +203,7 @@ mod tests {
             port: "8085".to_string(),
             identity_name: id.to_string(),
             order: 0,
+            scheme: None,
         }
     }
 
@@ -212,6 +216,7 @@ mod tests {
             name: None,
             auto_title: None,
             activity: None,
+            kind: None,
         }
     }
 

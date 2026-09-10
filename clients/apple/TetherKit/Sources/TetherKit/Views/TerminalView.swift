@@ -140,8 +140,7 @@ public struct TerminalAccessoryBar: View {
       Self.armFeedback.selectionChanged()
       model.ctrlArmed.toggle()
     } label: {
-      Text(model.ctrlArmed ? "Ctrl ✓" : "Ctrl")
-        .contentTransition(.opacity)
+      Text("Ctrl")
     }
     .buttonStyle(TerminalKeyStyle(armed: model.ctrlArmed))
     .accessibilityLabel("Control modifier")
@@ -241,6 +240,16 @@ public struct TerminalInputBridge: UIViewRepresentable {
     } else if !isFocused.wrappedValue, uiView.isFirstResponder {
       uiView.resignFirstResponder()
     }
+  }
+
+  // SwiftUI does not resign a first responder whose host view it removes, and
+  // this view's inputAccessoryView (the key bar) lives in the keyboard window
+  // above the app. So when the terminal is swapped out — e.g. switching to an
+  // agent-chat tab — a lingering responder keeps the bar docked over whatever
+  // replaced it and routes keystrokes to both surfaces (doubled input). Resign
+  // on teardown so the bar and the responder go with the terminal.
+  public static func dismantleUIView(_ uiView: TerminalInputTextView, coordinator: Coordinator) {
+    uiView.resignFirstResponder()
   }
 
   public final class Coordinator: NSObject, UITextViewDelegate {
@@ -590,6 +599,7 @@ public struct TerminalView: View {
         } else {
         TetherSurfaceRepresentable(
           snapshot: $store.terminalSnapshot,
+          sessionKey: [store.activeHostId, store.activeSessionId].compactMap { $0 }.joined(separator: ":"),
           fontName: preferences.terminalFont.postScriptName,
           fontSize: preferences.terminalFontSize,
           onGridSizeChange: { cols, rows in store.updateGrid(cols: cols, rows: rows) },
@@ -717,7 +727,9 @@ public struct TerminalView: View {
     .onChange(of: overlayPresented) { _, presented in
       if presented {
         keyboardFocused = false
-      } else if placeholderReason == nil {
+      } else if placeholderReason == nil, store.activeAgentModel == nil {
+        // Never reclaim when the overlay closed to hand off to an agent chat —
+        // reclaiming here re-docks the key bar over the chat composer.
         keyboardFocused = true
       }
     }

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import type { SignalState } from './sessionActivity';
 
 export type SignalArgs =
@@ -30,9 +29,8 @@ export function parseSignalArgs(argv: string[]): SignalArgs {
 }
 
 export interface SignalDeps {
-  /** Loopback origin of the running daemon, chosen by main.ts from the listener plan. */
-  baseUrl: string;
-  tokenFile: string;
+  /** The daemon's loopback control socket (~/.tether/control.sock). */
+  sock: string;
   /** `TETHER_SESSION_ID`, exported into every session by pty.ts. */
   sessionId?: string;
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -55,19 +53,16 @@ export async function runSignal(args: SignalArgs, deps: SignalDeps): Promise<voi
   if (!deps.sessionId) {
     throw new Error('No TETHER_SESSION_ID — run this from inside a tether session.');
   }
-  const token = readFileSync(deps.tokenFile, 'utf8').trim();
-  const res = await (deps.fetch ?? fetch)(`${deps.baseUrl}/control/signal`, {
+  const res = await (deps.fetch ?? fetch)('http://localhost/control/signal', {
+    unix: deps.sock,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Tether-Present-Control': token },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       sessionId: deps.sessionId,
       state: args.state,
       ...(args.title ? { title: args.title } : {}),
       ...(args.body ? { body: args.body } : {}),
     }),
-    // Loopback to our own self-signed certificate. The control token, not the
-    // certificate chain, is what authorises this call.
-    tls: { rejectUnauthorized: false },
   } as RequestInit);
   if (!res.ok) throw new Error(`Tether signal failed (${res.status}). Is tether running?`);
 }

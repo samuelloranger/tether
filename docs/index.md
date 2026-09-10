@@ -20,7 +20,7 @@ features:
   - title: Sessions that survive
     details: Each shell lives in a detached holder process, logged to SQLite. Disconnect, sleep your phone, restart the server — reconnect and replay exactly where you left off.
   - title: Phone and desktop
-    details: The same VT emulator, tuned per device — a mobile key layer (Ctrl, Tab, arrows, voice/swipe) on iOS, and a docked session sidebar with a real physical keyboard and mouse selection on the Linux/Windows/macOS desktop app.
+    details: The same VT emulator, tuned per device — a mobile key layer (Ctrl, Tab, D-pad, voice/swipe) on iOS, and a docked session sidebar with splits, a real physical keyboard, and mouse selection on the Linux/Windows/macOS desktop app.
   - title: One binary to self-host
     details: Install with one command, no bun or node_modules on the box. Pair each device with tether pair; tether update swaps the binary atomically.
 ---

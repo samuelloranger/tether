@@ -4,31 +4,30 @@ import { type ServerSettingsProps, useServerSettings } from './useServerSettings
 export function ServerSettingsScreen(props: ServerSettingsProps) {
   const s = useServerSettings(props);
 
-  if (props.health === 'unauthorized') {
+  // A host that can't be reached (or was revoked) still needs its address
+  // editable and removable — that edit is often what fixes the reachability.
+  // The server-config sections below need a live server, so they stay hidden.
+  if (props.health === 'unauthorized' || props.health === 'unreachable') {
     return (
       <div className="panel settings-panel server-settings">
         <button type="button" className="linkish back-link" onClick={() => void s.close()}>
           ← Back
         </button>
         <h1>{props.host.name}</h1>
-        <p className="error">Unauthorized. This device may have been revoked.</p>
+        <p className="error">
+          {props.health === 'unauthorized'
+            ? 'Unauthorized. This device may have been revoked.'
+            : 'Host unreachable.'}
+        </p>
         <button type="button" onClick={props.onRetry}>
           Retry
         </button>
-      </div>
-    );
-  }
-
-  if (props.health === 'unreachable') {
-    return (
-      <div className="panel settings-panel server-settings">
-        <button type="button" className="linkish back-link" onClick={() => void s.close()}>
-          ← Back
-        </button>
-        <h1>{props.host.name}</h1>
-        <p className="error">Host unreachable.</p>
-        <button type="button" onClick={props.onRetry}>
-          Retry
+        {s.message ? (
+          <p className={s.message.kind === 'error' ? 'error' : 'success-msg'}>{s.message.text}</p>
+        ) : null}
+        <ConnectionSection s={s} />
+        <button type="button" className="secondary danger" onClick={() => void s.removeHost()}>
+          Remove this host
         </button>
       </div>
     );
@@ -46,27 +45,7 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
         <p className={s.message.kind === 'error' ? 'error' : 'success-msg'}>{s.message.text}</p>
       ) : null}
 
-      <section className="settings-section">
-        <h2>Connection</h2>
-        <label>
-          Address
-          <input value={s.connectionHost} onChange={(e) => s.setConnectionHost(e.target.value)} />
-        </label>
-        <label>
-          Port
-          <input value={s.connectionPort} onChange={(e) => s.setConnectionPort(e.target.value)} />
-        </label>
-        {!s.connectionOk && s.connectionReason ? (
-          <p className="error">{s.connectionReason}</p>
-        ) : null}
-        <button
-          type="button"
-          disabled={!s.connectionDirty || !s.connectionOk || s.saving}
-          onClick={() => void s.saveConnection()}
-        >
-          {s.connectionDirty ? 'Save connection' : 'Connection saved'}
-        </button>
-      </section>
+      <ConnectionSection s={s} />
 
       {s.draft ? <DraftForm s={s} draft={s.draft} /> : null}
 
@@ -104,6 +83,30 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
         Remove this host
       </button>
     </div>
+  );
+}
+
+function ConnectionSection({ s }: { s: ReturnType<typeof useServerSettings> }) {
+  return (
+    <section className="settings-section">
+      <h2>Connection</h2>
+      <label>
+        Address
+        <input value={s.connectionHost} onChange={(e) => s.setConnectionHost(e.target.value)} />
+      </label>
+      <label>
+        Port
+        <input value={s.connectionPort} onChange={(e) => s.setConnectionPort(e.target.value)} />
+      </label>
+      {!s.connectionOk && s.connectionReason ? <p className="error">{s.connectionReason}</p> : null}
+      <button
+        type="button"
+        disabled={!s.connectionDirty || !s.connectionOk || s.saving}
+        onClick={() => void s.saveConnection()}
+      >
+        {s.connectionDirty ? 'Save connection' : 'Connection saved'}
+      </button>
+    </section>
   );
 }
 

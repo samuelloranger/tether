@@ -13,6 +13,7 @@ final class GridSnapshotDecoderTests: XCTestCase {
     cursorRow: UInt16 = 0,
     generation: UInt64 = 0,
     cursorVisible: Bool = true,
+    altScreen: Bool = false,
     cells: [GridSnapshot.Cell],
     magic: UInt32 = GridSnapshot.magic,
     version: UInt16 = GridSnapshot.version
@@ -29,7 +30,9 @@ final class GridSnapshotDecoderTests: XCTestCase {
     put(cursorCol)
     put(cursorRow)
     put(generation)
-    put(cursorVisible ? GridSnapshot.flagCursorVisible : UInt16(0))
+    var flags = cursorVisible ? GridSnapshot.flagCursorVisible : UInt16(0)
+    if altScreen { flags |= GridSnapshot.flagAltScreen }
+    put(flags)
     XCTAssertEqual(data.count, GridSnapshot.headerSize)
     for cell in cells {
       put(cell.codepoint)
@@ -75,6 +78,21 @@ final class GridSnapshotDecoderTests: XCTestCase {
   func testCursorHiddenWhenFlagIsClear() throws {
     let data = encode(cols: 1, rows: 1, cursorVisible: false, cells: [cell(0x20)])
     XCTAssertFalse(try GridSnapshotDecoder.decode(data).0.cursorVisible)
+  }
+
+  func testAltScreenFlagRoundTrips() throws {
+    let on = encode(cols: 1, rows: 1, altScreen: true, cells: [cell(0x20)])
+    XCTAssertTrue(try GridSnapshotDecoder.decode(on).0.altScreen)
+    let off = encode(cols: 1, rows: 1, altScreen: false, cells: [cell(0x20)])
+    XCTAssertFalse(try GridSnapshotDecoder.decode(off).0.altScreen)
+  }
+
+  func testPeekHeaderReadsFlagsWithoutTheCellArray() throws {
+    let data = encode(cols: 2, rows: 1, generation: 7, altScreen: true, cells: [cell(0x41), cell(0x42)])
+    let header = try GridSnapshotDecoder.peekHeader(data)
+    XCTAssertEqual(header.cols, 2)
+    XCTAssertEqual(header.generation, 7)
+    XCTAssertTrue(header.altScreen)
   }
 
   func testEmptyGridDecodesToNoCells() throws {

@@ -34,30 +34,30 @@ test('installs the requested Claude skill idempotently', async () => {
   }
 });
 
-test('sends the local control token without using the mobile password', async () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'tether-control-'));
+test('posts over the control socket without any token header', async () => {
   // Developers often run this suite from inside a tether shell, where
   // TETHER_SESSION_ID is set and would add a sessionId field to the body.
   const originalSessionId = process.env.TETHER_SESSION_ID;
   try {
     delete process.env.TETHER_SESSION_ID;
-    const tokenFile = path.join(root, 'token');
-    await Bun.write(tokenFile, 'local-token');
-    let request: Request | undefined;
+    let call: { url: string; init: RequestInit } | undefined;
     await runPresent(
       { kind: 'open', entry: 'index.html', project: 'creneau', title: 'UI' },
       {
-        port: '8085',
-        tokenFile,
+        sock: '/tmp/tether-control.sock',
         fetch: async (input, init) => {
-          request = new Request(input, init);
+          call = { url: String(input), init: init ?? {} };
           return new Response('{}');
         },
       },
     );
-    expect(request?.url).toBe('http://127.0.0.1:8085/control/presentations');
-    expect(request?.headers.get('X-Tether-Present-Control')).toBe('local-token');
-    expect(await request?.json()).toEqual({
+    if (!call) throw new Error('fetch was not called');
+    expect(call.url).toBe('http://localhost/control/presentations');
+    expect((call.init as { unix?: string }).unix).toBe('/tmp/tether-control.sock');
+    expect(
+      (call.init.headers as Record<string, string>)['X-Tether-Present-Control'],
+    ).toBeUndefined();
+    expect(JSON.parse(String(call.init.body))).toEqual({
       entry: path.resolve('index.html'),
       project: 'creneau',
       title: 'UI',
@@ -65,52 +65,33 @@ test('sends the local control token without using the mobile password', async ()
   } finally {
     if (originalSessionId === undefined) delete process.env.TETHER_SESSION_ID;
     else process.env.TETHER_SESSION_ID = originalSessionId;
-    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('includes the session id from TETHER_SESSION_ID when present, omits it when absent', async () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'tether-control-'));
   const originalSessionId = process.env.TETHER_SESSION_ID;
-  try {
-    const tokenFile = path.join(root, 'token');
-    await Bun.write(tokenFile, 'local-token');
-
-    process.env.TETHER_SESSION_ID = 'term-4';
-    let withSession: Request | undefined;
+  const bodyOf = async (): Promise<unknown> => {
+    let body: string | undefined;
     await runPresent(
       { kind: 'open', entry: 'index.html' },
       {
-        port: '8085',
-        tokenFile,
-        fetch: async (input, init) => {
-          withSession = new Request(input, init);
+        sock: '/tmp/tether-control.sock',
+        fetch: async (_input, init) => {
+          body = String(init?.body);
           return new Response('{}');
         },
       },
     );
-    expect(await withSession?.json()).toEqual({
-      entry: path.resolve('index.html'),
-      sessionId: 'term-4',
-    });
+    return JSON.parse(String(body));
+  };
+  try {
+    process.env.TETHER_SESSION_ID = 'term-4';
+    expect(await bodyOf()).toEqual({ entry: path.resolve('index.html'), sessionId: 'term-4' });
 
     delete process.env.TETHER_SESSION_ID;
-    let withoutSession: Request | undefined;
-    await runPresent(
-      { kind: 'open', entry: 'index.html' },
-      {
-        port: '8085',
-        tokenFile,
-        fetch: async (input, init) => {
-          withoutSession = new Request(input, init);
-          return new Response('{}');
-        },
-      },
-    );
-    expect(await withoutSession?.json()).toEqual({ entry: path.resolve('index.html') });
+    expect(await bodyOf()).toEqual({ entry: path.resolve('index.html') });
   } finally {
     if (originalSessionId === undefined) delete process.env.TETHER_SESSION_ID;
     else process.env.TETHER_SESSION_ID = originalSessionId;
-    rmSync(root, { recursive: true, force: true });
   }
 });

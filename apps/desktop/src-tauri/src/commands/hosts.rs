@@ -39,6 +39,7 @@ pub fn core_hosts_save_noise(
     name: String,
     host: String,
     port: String,
+    scheme: Option<String>,
 ) -> Result<HostProfile, String> {
     let state = shared_from_app(&app);
     let profile = {
@@ -50,6 +51,7 @@ pub fn core_hosts_save_noise(
                 host,
                 port,
                 identity_name: String::new(),
+                scheme,
             })
             .map_err(|error| error.to_string())?
     };

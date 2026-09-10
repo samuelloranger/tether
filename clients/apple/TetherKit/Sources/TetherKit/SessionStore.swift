@@ -59,7 +59,48 @@ public final class SessionStore {
   )
   /// Owns the socket and the VT emulator on its OWN executor. See
   /// `TerminalPipeline` for why none of that may run on the main actor.
-  @ObservationIgnored private let pipeline = TerminalPipeline()
+  /// One shared cursor store for every pipeline — a per-pipeline path-backed
+  /// store would put N writers on the same file. Built once here.
+  @ObservationIgnored private let replayStore = SessionStore.makeReplayStore()
+  /// Live pipelines keyed by host-qualified session key. Background (non-active)
+  /// pipelines keep their socket + emulator but stop rasterizing snapshots.
+  @ObservationIgnored private var pipelines: [String: TerminalPipeline] = [:]
+  /// Recency order of session keys (front = newest) driving the resident set.
+  @ObservationIgnored private var lruOrder: [String] = []
+  /// Which key `terminalSnapshot` (and the ~active outbound sites) is bound to.
+  /// Held explicitly so the unfocus frame on a switch still reaches the OLD
+  /// pipeline after `activeSessionId` has already flipped to the new tab.
+  @ObservationIgnored private var activePipelineKey: String?
+  private static let residentCap = 8
+
+  private func pipelineFor(_ key: String) -> TerminalPipeline {
+    if let existing = pipelines[key] { return existing }
+    let created = TerminalPipeline(replayStore: replayStore)
+    pipelines[key] = created
+    observeForever(created, key: key)
+    return created
+  }
+
+  /// The pipeline the active-session outbound sites (input, focus, paste,
+  /// agent, resize, scroll) operate on. Follows `activePipelineKey`, which only
+  /// moves after the outgoing tab's unfocus frame has been sent.
+  private var pipeline: TerminalPipeline { pipelineFor(activePipelineKey ?? "") }
+
+  /// Persist replay cursors to Application Support so a relaunch / tab eviction
+  /// replays only the `sinceId` delta instead of the whole retained tail.
+  /// Fail-open: if the directory can't be prepared, fall back to the in-memory
+  /// store — a lost cursor costs one slower reconnect, never a crash.
+  private static func makeReplayStore() -> FfiReplayStore {
+    let fm = FileManager.default
+    guard let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    else { return FfiReplayStore() }
+    do {
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+      return FfiReplayStore.withPath(path: dir.appendingPathComponent("replay_cursors.json").path)
+    } catch {
+      return FfiReplayStore()
+    }
+  }
   /// `lazy` + `@ObservationIgnored`: the coordinator's closures capture `self`,
   /// which cannot happen inside `init` before every stored property is
   /// initialized. Building it on first use sidesteps that. It is internal
@@ -79,8 +120,6 @@ public final class SessionStore {
   /// Coalesces drawer refreshes: N taps on the drawer button must produce ONE
   /// fetch, not N. See `refreshDrawerInBackground`.
   @ObservationIgnored private var drawerRefreshTask: Task<Void, Never>?
-  @ObservationIgnored private var snapshotObserver: Task<Void, Never>?
-  @ObservationIgnored private var eventObserver: Task<Void, Never>?
   /// Only `pullTerminalSnapshot` uses this now — the render path's own
   /// generation check lives inside `TerminalPipeline`.
   @ObservationIgnored private var lastRenderedGeneration: UInt64?
@@ -92,6 +131,17 @@ public final class SessionStore {
   /// stale `GET /api/sessions` (or a test double that still returns the row)
   /// must not put a just-killed tab back in the drawer.
   @ObservationIgnored private var locallyKilled: [String: Set<String>] = [:]
+  /// Live `AgentChatModel`s, keyed the same way scrollback grids are
+  /// (`terminalKey`) — a chat tab keeps its transcript across a drawer
+  /// round-trip the same way a terminal keeps its scrollback.
+  @ObservationIgnored private var agentModels: [String: AgentChatModel] = [:]
+
+  /// The chat model for the ACTIVE tab, when it is an agent tab. `RootView`
+  /// branches on this to decide between `AgentChatView` and `TerminalView`.
+  public var activeAgentModel: AgentChatModel? {
+    guard let activeSessionId else { return nil }
+    return agentModels[terminalKey(activeSessionId)]
+  }
 
   public init(
     hostStore: HostStoreAdapter = HostStoreAdapter(),
@@ -104,28 +154,24 @@ public final class SessionStore {
     self.remoteSessions = remoteSessions
     self.remoteKill = remoteKill
     noiseClient = NoiseSessionClient(keyStore: noiseKeyStore)
-    observePipeline()
   }
 
-  /// Drains the pipeline's two streams onto the main actor.
-  ///
-  /// Snapshots come through a `bufferingNewest(1)` stream, so when the main
-  /// actor is busy the intermediate grids are DROPPED rather than queued —
-  /// a terminal only ever needs to draw the newest one. Events are unbounded
-  /// because losing "the session list changed" would leave the UI stale.
-  private func observePipeline() {
-    let snapshots = pipeline.snapshots
-    let events = pipeline.events
-    snapshotObserver = Task { [weak self] in
-      for await snapshot in snapshots {
+  /// Drains a pipeline's two streams onto the main actor for the LIFE of the
+  /// pipeline, applying only while it is the active tab. Bound once per pipeline
+  /// (in `pipelineFor`), never re-iterated: `AsyncStream` is single-consumer, so
+  /// a fresh `for await` on switch-back — the old per-switch `observe` — silently
+  /// received nothing and the returned-to terminal stopped updating.
+  private func observeForever(_ pipeline: TerminalPipeline, key: String) {
+    Task { [weak self] in
+      for await snapshot in pipeline.snapshots {
         guard let self else { return }
-        self.terminalSnapshot = snapshot
+        if self.activePipelineKey == key { self.terminalSnapshot = snapshot }
       }
     }
-    eventObserver = Task { [weak self] in
-      for await event in events {
+    Task { [weak self] in
+      for await event in pipeline.events {
         guard let self else { return }
-        self.apply(event)
+        if self.activePipelineKey == key { self.apply(event) }
       }
     }
   }
@@ -139,6 +185,8 @@ public final class SessionStore {
       Task { await refreshSessions() }
     case let .error(message):
       errorMessage = message
+    case let .agent(msg):
+      activeAgentModel?.apply(msg)
     }
   }
 
@@ -179,6 +227,7 @@ public final class SessionStore {
     host: String,
     port: String,
     pairHostId: String,
+    scheme: String? = nil,
     color: String = "#89b4fa"
   ) throws -> HostProfileModel {
     let displayName = name.isEmpty ? host : name
@@ -196,7 +245,8 @@ public final class SessionStore {
       color: color.isEmpty ? "#89b4fa" : color,
       host: host,
       port: port,
-      identityName: displayName
+      identityName: displayName,
+      scheme: scheme
     )
     // Migrate the keys onto the profile id atomically: if either save fails, roll
     // the profile back so we don't persist an orphan without its keys.
@@ -208,12 +258,9 @@ public final class SessionStore {
       try? noiseKeyStore.clear(hostId: profile.id)
       throw error
     }
-    // Carry the transport scheme captured at pairing onto the profile id.
-    HostScheme.record(HostScheme.scheme(forHost: pairHostId, port: port), forHost: profile.id)
     // Both keys now live under the profile id; drop the throwaway pairing id.
     if pairHostId != profile.id {
       try? noiseKeyStore.clear(hostId: pairHostId)
-      HostScheme.forget(pairHostId)
     }
     reloadHosts()
     healthByHost[profile.id] = .reachable
@@ -320,8 +367,8 @@ public final class SessionStore {
         available: SessionResume.restorable(sessions.map { ($0.id, $0.status) })
       )
     else { return }
-    activeSessionId = id
-    await connectTerminal(sessionId: id)
+    let changed = activateSession(hostId: hostId, sessionId: id)
+    await connectActiveSession(changed: changed)
   }
 
   public func newTerminal() async {
@@ -360,6 +407,77 @@ public final class SessionStore {
     activeSessionId = id
     sessions = next
     await connectTerminal(sessionId: id)
+  }
+
+  /// Opens an agent-chat tab on a NAMED host, rooted at `cwd`, and switches to
+  /// it. Mirrors `newNoiseTerminal`: no REST `startSession` for a Noise host —
+  /// the tab is synthesized locally, and `agent.start` (sent AFTER the
+  /// terminal-shaped Noise channel connects, same as a plain terminal's
+  /// `start` frame) both spawns and attaches the agent server-side.
+  /// Synchronous on purpose: the tab flip (session + model) must land in the same
+  /// transaction that closes the drawer, or the terminal reclaims the keyboard in
+  /// the gap and strands its key bar over the new chat — see `activateSession`.
+  /// The network connect trails in a detached task.
+  public func newAgentChat(hostId: String, cwd: String) {
+    let known = sessionsByHost[hostId] ?? []
+    let id = nextAgentSessionId(among: known)
+    let changed = activeHostId != hostId || activeSessionId != id
+    let synthesized = RemoteSession(
+      id: id, status: "running", lastOutputAt: nil, name: nil, autoTitle: nil, activity: nil,
+      kind: "agent"
+    )
+    var next = known
+    next.append(synthesized)
+    sessionsByHost[hostId] = next
+    hasRestoredSession = true
+    activeHostId = hostId
+    activeSessionId = id
+    sessions = next
+    let key = terminalKey(id, hostId: hostId)
+    let model = AgentChatModel(
+      sessionId: id, cwd: cwd,
+      send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
+    )
+    model.onFirstPrompt = { [weak self] text in
+      self?.renameAgentSessionLocally(id: id, hostId: hostId, name: Self.promptGist(text))
+    }
+    agentModels[key] = model
+    Task {
+      if changed {
+        await pipeline.sendFocus(focused: false)
+      }
+      await connectAgent(sessionId: id)
+      // Brand-new chat, empty model — sinceSeq 0 (nothing to replay).
+      pipeline.outbound.yield(.agentStart(id: id, cwd: cwd, sinceSeq: 0))
+    }
+  }
+
+  /// Routes an `AgentChatModel`'s outbound intent onto the pipeline's outbound
+  /// stream, the same FIFO path a keystroke takes — see `OutboundFrame`.
+  private func routeAgentOutbound(_ outbound: AgentOutbound) {
+    switch outbound {
+    case let .prompt(text):
+      pipeline.outbound.yield(.agentPrompt(text))
+    case .interrupt:
+      pipeline.outbound.yield(.agentInterrupt)
+    case .permission:
+      // Approval routing over Noise is a later pass (P3) — the model already
+      // clears `pendingApproval` locally on decision.
+      break
+    }
+  }
+
+  /// Picks a free `agent-N` against ONE host's session list, mirroring
+  /// `nextSessionId` — agent chats and terminals share the id namespace per
+  /// host but use a different prefix so the drawer's two affordances never
+  /// collide.
+  private func nextAgentSessionId(among known: [RemoteSession]) -> String {
+    let existing = Set(known.map(\.id))
+    var index = 1
+    while existing.contains("agent-\(index)") {
+      index += 1
+    }
+    return "agent-\(index)"
   }
 
   public var activeSession: RemoteSession? {
@@ -420,9 +538,16 @@ public final class SessionStore {
       }
       locallyKilled[targetHostId, default: []].insert(id)
       dropSession(id: id, hostId: targetHostId)
-      await pipeline.forget(key: terminalKey(id, hostId: targetHostId))
+      let key = terminalKey(id, hostId: targetHostId)
+      if let p = pipelines[key] {
+        await p.release()
+        pipelines[key] = nil
+      }
+      lruOrder.removeAll { $0 == key }
+      // Shared store: forget the cursor so a reused id starts clean.
+      replayStore.forget(sessionId: key)
+      if activePipelineKey == key { activePipelineKey = nil }
       if activeSessionId == id, activeHostId == targetHostId {
-        await pipeline.release()
         activeSessionId = nil
       }
       await refreshSessions()
@@ -447,23 +572,54 @@ public final class SessionStore {
     case .inactive:
       isAppActive = false
       sendFocus(focused: false)
+      // The OS suspends a backgrounded app, so keep no sockets open. Cursors
+      // live in the shared store; foreground reconnect replays only the delta.
+      let live = Array(pipelines.values)
+      Task {
+        for p in live { await p.disconnect() }
+      }
     }
   }
 
   /// Re-evaluate the active socket after suspension (port of RN `onResumeActive`).
   public func resumeFromForeground() async {
-    guard let sessionId = activeSessionId else {
-      await pipeline.sendFocus(focused: true)
-      return
+    guard let activeKey = activePipelineKey, activeSessionId != nil else { return }
+    let resident = TerminalResidency.resident(
+      active: activeKey, order: lruOrder,
+      live: Set(pipelines.keys), cap: SessionStore.residentCap)
+    var first = true
+    for key in resident {
+      if !first { try? await Task.sleep(nanoseconds: 120_000_000) }
+      first = false
+      if key == activeKey {
+        // Full path: agent-aware, observes, renders, focuses.
+        await connectActiveSession(changed: false)
+      } else {
+        guard let parsed = SessionStore.parseTerminalKey(key) else { continue }
+        // Background agents reconnect on their next switch (they re-send
+        // agent.start there); reconnect only background terminals here.
+        if isAgentSession(id: parsed.sessionId, hostId: parsed.hostId) { continue }
+        await pipelineFor(key).setRendering(false)
+        await reconnectResident(key: key, hostId: parsed.hostId, sessionId: parsed.sessionId)
+      }
     }
-    let now = Int64(Date().timeIntervalSince1970 * 1000)
-    switch await pipeline.resumeAction(nowMs: now) {
-    case .reconnect, .close:
-      // Native has no onClose→backoff reconnect path, so both actions reconnect.
-      await connectTerminal(sessionId: sessionId)
-    case .none:
-      await pipeline.sendFocus(focused: true)
-    }
+  }
+
+  /// Reconnects a background resident terminal WITHOUT making it active — no
+  /// observe, no focus, rendering stays off. Keeps its cursor current so a later
+  /// switch replays nothing.
+  private func reconnectResident(key: String, hostId: String, sessionId: String) async {
+    guard
+      let host = hosts.first(where: { $0.id == hostId }),
+      let url = SessionStore.noiseBaseURL(for: host)
+    else { return }
+    await pipelineFor(key).connectNoise(
+      client: noiseClient, hostId: hostId, url: url,
+      sessionId: sessionId, key: key, sendStart: true)
+  }
+
+  private func isAgentSession(id: String, hostId: String) -> Bool {
+    (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == id })?.kind == "agent"
   }
 
   /// `{ type: "focus", focused }` — the server suppresses push while focused
@@ -484,22 +640,94 @@ public final class SessionStore {
     }
   }
 
-  /// Switches the active terminal tab and opens its live stream.
-  public func selectSession(hostId: String, sessionId: String) async {
-    // The user has chosen a terminal, so the cold-launch restore has no more
+  /// First line of a prompt, clipped to a drawer-friendly length — used to title
+  /// an agent tab from its first user message instead of leaving it "agent-N".
+  private static func promptGist(_ text: String) -> String {
+    let firstLine = text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? text
+    let limit = 40
+    if firstLine.count <= limit { return firstLine }
+    return String(firstLine.prefix(limit)) + "…"
+  }
+
+  /// Renames an agent tab in local state only — no REST call, since agent
+  /// sessions are synthesized client-side (see `newAgentChat`) and have no
+  /// server-side session row to rename.
+  public func renameAgentSessionLocally(id: String, hostId: String, name: String) {
+    var list = sessionsByHost[hostId] ?? []
+    guard let index = list.firstIndex(where: { $0.id == id }) else { return }
+    list[index].name = name
+    sessionsByHost[hostId] = list
+    if activeHostId == hostId { sessions = list }
+  }
+
+  /// Flips the active tab SYNCHRONOUSLY, ahead of any network work. `RootView`
+  /// branches Terminal vs AgentChat on `activeAgentModel`, so the branch has to
+  /// settle in the same transaction that closes the drawer. When this trailed the
+  /// `sendFocus` await, the terminal stayed mounted for a frame after the drawer
+  /// closed, reclaimed the keyboard, and re-docked its input-accessory key bar
+  /// over the agent composer. Returns whether focus actually changed, which the
+  /// caller hands to `connectActiveSession` to gate the unfocus-previous frame.
+  @discardableResult
+  public func activateSession(hostId: String, sessionId: String) -> Bool {
+    // The user has chosen a session, so the cold-launch restore has no more
     // work to do. Without this the latch could still be unspent — a launch whose
     // first fetch returned nothing never spends it — and killing this session
     // later would let the poll open another one, which is the "I closed that and
     // it came back" behaviour the latch exists to prevent.
     hasRestoredSession = true
-    if activeSessionId != sessionId || activeHostId != hostId {
-      // Awaited, not queued: this frame has to reach the OLD socket before
-      // `connectTerminal` tears it down.
-      await pipeline.sendFocus(focused: false)
-    }
+    let changed = activeSessionId != sessionId || activeHostId != hostId
     activeHostId = hostId
     activeSessionId = sessionId
-    await connectTerminal(sessionId: sessionId)
+    let isAgent =
+      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
+    // Build the model NOW so `activeAgentModel` is non-nil this frame — that is
+    // what lets RootView show the agent surface instead of the terminal.
+    if isAgent {
+      let key = terminalKey(sessionId, hostId: hostId)
+      if agentModels[key] == nil {
+        agentModels[key] = AgentChatModel(
+          sessionId: sessionId, cwd: "",
+          send: { [weak self] outbound in self?.routeAgentOutbound(outbound) }
+        )
+      }
+    }
+    return changed
+  }
+
+  /// Opens the live stream for whatever tab `activateSession` last selected.
+  /// `changed` comes from that call: the focus flip is UI state and the socket
+  /// is untouched until `connect*` below, so the unfocus frame still reaches the
+  /// OLD socket even though `activeSessionId` already points at the new tab.
+  public func connectActiveSession(changed: Bool) async {
+    guard let sessionId = activeSessionId, let hostId = activeHostId else { return }
+    if changed {
+      await pipeline.sendFocus(focused: false)
+    }
+    let isAgent =
+      (sessionsByHost[hostId] ?? sessions).first(where: { $0.id == sessionId })?.kind == "agent"
+    if isAgent {
+      await connectAgent(sessionId: sessionId)
+      // The server-owned AgentRegistry survives a disconnect, but this
+      // channel's per-connection attachment does not — `agent.start` has to be
+      // re-sent every time a chat tab is reselected, not just on first open.
+      // sinceSeq replays whatever this local model hasn't seen yet: 0 for a
+      // freshly created model (cold app launch), or its tracked `lastSeq` for
+      // one that already streamed some of this transcript in this app session.
+      let key = terminalKey(sessionId, hostId: hostId)
+      let cwd = agentModels[key]?.cwd ?? ""
+      let sinceSeq = agentModels[key]?.lastSeq ?? 0
+      pipeline.outbound.yield(.agentStart(id: sessionId, cwd: cwd, sinceSeq: sinceSeq))
+    } else {
+      await connectTerminal(sessionId: sessionId)
+    }
+  }
+
+  /// Switches the active tab and opens its live stream. Convenience for callers
+  /// with no keyboard to strand (deep links); the drawer flips + connects in two
+  /// steps so the flip lands synchronously with the drawer dismissal.
+  public func selectSession(hostId: String, sessionId: String) async {
+    let changed = activateSession(hostId: hostId, sessionId: sessionId)
+    await connectActiveSession(changed: changed)
   }
 
   /// Adopts the grid the surface can actually display.
@@ -607,6 +835,14 @@ public final class SessionStore {
     )
   }
 
+  /// Backs the agent-chat folder picker — lists subdirectories of `path` (the
+  /// server's home dir when `nil`) on a named host over the ordinary
+  /// bearer-authed REST path (`GET /api/fs/dirs`), not Noise.
+  public func listDirs(hostId: String, path: String? = nil) async throws -> DirListing {
+    guard let client = client(for: hostId) else { throw HostClientError.invalidURL }
+    return try await client.listDirs(path: path)
+  }
+
   /// Mint a REST device token for a Noise host over its Noise channel. Backs
   /// `noiseTokenCache`; resolves the host's Noise base URL and delegates to
   /// `NoiseSessionClient.requestToken`.
@@ -678,20 +914,56 @@ public final class SessionStore {
     "\(hostId ?? activeHostId ?? "-"):\(sessionId)"
   }
 
+  /// Inverts `terminalKey` — splits on the FIRST colon (host ids carry none).
+  static func parseTerminalKey(_ key: String) -> (hostId: String, sessionId: String)? {
+    guard let sep = key.firstIndex(of: ":") else { return nil }
+    let hostId = String(key[key.startIndex..<sep])
+    let sessionId = String(key[key.index(after: sep)...])
+    guard !hostId.isEmpty, !sessionId.isEmpty else { return nil }
+    return (hostId, sessionId)
+  }
+
   private func connectTerminal(sessionId: String) async {
-    // Disconnect first even when there is no usable client: leaving the old
-    // socket open under a host that cannot be reached is how the server keeps
-    // believing a session is on screen.
-    await pipeline.disconnect()
     guard let hostId = activeHostId else { return }
-    await connectTerminalNoise(hostId: hostId, sessionId: sessionId)
+    await connectTerminalNoise(hostId: hostId, sessionId: sessionId, sendStart: true)
+  }
+
+  /// Agent tabs establish the SAME Noise channel + read loop a terminal does —
+  /// `AgentChatModel` needs live `agent.*` frames and a socket to send
+  /// `agent.prompt`/`agent.interrupt` over — but must NEVER send the PTY
+  /// `start` frame `connectTerminal` sends: the id is an `agent-N`, not a PTY
+  /// session, and a `start` for it makes the server spawn a holder for it too
+  /// (double-start, mixed session type). `agent.start` is the only start frame
+  /// an agent tab ever sends — see `newAgentChat` / `selectSession`.
+  private func connectAgent(sessionId: String) async {
+    guard let hostId = activeHostId else { return }
+    await connectTerminalNoise(hostId: hostId, sessionId: sessionId, sendStart: false)
   }
 
   /// Establishes the Noise transport for a session and hands the pipeline a live
   /// `NoiseChannel` to pump. The URL is `https://host:port`;
   /// `NoiseSessionClient.reconnect` maps it to `wss` and appends
-  /// `/api/noise/session` itself.
-  private func connectTerminalNoise(hostId: String, sessionId: String) async {
+  /// `/api/noise/session` itself. `sendStart` gates the PTY `start` frame only —
+  /// the channel, read loop, and outbound pump are identical either way.
+  private func connectTerminalNoise(hostId: String, sessionId: String, sendStart: Bool) async {
+    let newKey = terminalKey(sessionId, hostId: hostId)
+    // Background the outgoing tab: keep its socket, stop rasterizing.
+    if let oldKey = activePipelineKey, oldKey != newKey {
+      await pipelineFor(oldKey).setRendering(false)
+    }
+    activePipelineKey = newKey
+    let target = pipelineFor(newKey)
+    await target.setRendering(true)
+    lruOrder = TerminalResidency.touch(lruOrder, newKey)
+
+    // Already streaming in the background → just take focus, no reconnect,
+    // nothing to replay.
+    if await target.isConnected {
+      if isAppActive { await target.sendFocus(focused: true) }
+      await evictBeyondCap()
+      return
+    }
+
     guard
       let host = hosts.first(where: { $0.id == hostId }),
       let url = SessionStore.noiseBaseURL(for: host)
@@ -699,19 +971,38 @@ public final class SessionStore {
       errorMessage = HostClientError.invalidURL.localizedDescription
       return
     }
-    await pipeline.connectNoise(
+    await target.connectNoise(
       client: noiseClient,
       hostId: hostId,
       url: url,
       sessionId: sessionId,
-      key: terminalKey(sessionId)
+      key: newKey,
+      sendStart: sendStart
     )
+    await evictBeyondCap()
+  }
+
+  /// Drops pipelines beyond the resident cap (active always kept). Evicted
+  /// pipelines lose their socket but not their cursor (shared store), so a
+  /// later return replays only the delta.
+  private func evictBeyondCap() async {
+    guard let activeKey = activePipelineKey else { return }
+    let keep = Set(
+      TerminalResidency.resident(
+        active: activeKey, order: lruOrder,
+        live: Set(pipelines.keys), cap: SessionStore.residentCap))
+    for (key, p) in pipelines where !keep.contains(key) {
+      await p.disconnect()
+      await p.release()
+      pipelines[key] = nil
+    }
+    lruOrder = lruOrder.filter { keep.contains($0) }
   }
 
   /// `http`/`https` base for the Noise handshake, matching the host's scheme;
   /// `NoiseSessionClient` maps it to `ws`/`wss`.
   nonisolated static func noiseBaseURL(for host: HostProfileModel) -> URL? {
-    let scheme = HostScheme.scheme(forHost: host.id, port: host.port)
+    let scheme = HostScheme.resolve(host.scheme, port: host.port)
     return URL(string: "\(scheme)://\(host.host):\(host.port)")
   }
 

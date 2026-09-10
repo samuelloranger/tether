@@ -72,7 +72,7 @@ public struct TerminalTitleBar<Overflow: View>: View {
       HStack(spacing: 0) {
         iconButton("plus", label: "New terminal", action: onNewSession)
         iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
-          .disabled(store.activeSessionId == nil)
+          .disabled(store.activeSessionId == nil || store.activeSession?.kind == "agent")
         iconButton("gearshape", label: "Settings", action: onSettings)
         Menu {
           overflow()

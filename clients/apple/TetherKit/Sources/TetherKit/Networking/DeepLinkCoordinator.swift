@@ -58,7 +58,8 @@ public final class DeepLinkCoordinator: HostProfileProvider, DeepLinkSessionCall
         host: $0.host,
         port: $0.port,
         identityName: $0.identityName,
-        order: $0.order
+        order: $0.order,
+        scheme: $0.scheme
       )
     }
   }

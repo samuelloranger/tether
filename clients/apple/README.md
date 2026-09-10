@@ -36,9 +36,9 @@ The XCFramework and Swift binding paths are fixed contracts — do not relocate 
 
 - **TetherKit** wraps UniFFI types, implements `UserDefaultsHostStorage`, and exposes `@Observable SessionStore`.
 - **TetherSurfaceView** decodes packed TGRD grid snapshots and draws with CoreText (generation-gated redraw).
-- **TetherIOS** is the app shell: NavigationSplitView (hosts + sessions drawer, terminal detail), deep links (`tether://session/<id>?host=<identityName>`), native keyboard.
+- **TetherIOS** is the app shell: NavigationSplitView (hosts + sessions drawer, terminal detail), deep links (`tether://session/<id>?host=<identityName>`), native keyboard, git/workspace/previews, Noise pairing.
 
-Session REST/WebSocket transport currently lives in `NativeHostClient` (shell layer) until tether-ffi exports full session/terminal APIs. Replay cursors use `FfiReplayStore` from the core.
+Session REST lives in `NativeHostClient`; the terminal stream is `NoiseSessionClient` (`/api/noise/session`). Replay cursors use `FfiReplayStore` from the core.
 
 ## Running the TetherKit tests
 

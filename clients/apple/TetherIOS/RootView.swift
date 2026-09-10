@@ -51,22 +51,31 @@ struct RootView: View {
 
         PresentationBannerSlot(store: store, workspace: workspace)
 
-        TerminalView(
-          store: store,
-          preferences: preferences,
-          onAddHost: { showPairing = true },
-          // The key bar is an inputAccessoryView in the keyboard window ABOVE the
-          // app; an in-app overlay can't hide it, so covering views must take it.
-          overlayPresented: drawerOpen
-            || workspace.activePresentation != nil
-            || workspace.fileView != nil
-            || workspace.fileError != nil
-            || workspace.fileLoading,
-          onOpenFile: { path, line, column in
-            Task { await workspace.openFile(store: store, path: path, line: line, column: column) }
-          }
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Branch on the model, not `activeSession?.kind`: a session-list refresh
+        // can momentarily drop the just-synthesized agent row before the server
+        // lists it, which would flip this to the terminal fallback mid-open. The
+        // model is keyed by the active session and is untouched by refresh.
+        if let agentModel = store.activeAgentModel {
+          AgentChatView(model: agentModel)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+          TerminalView(
+            store: store,
+            preferences: preferences,
+            onAddHost: { showPairing = true },
+            // The key bar is an inputAccessoryView in the keyboard window ABOVE the
+            // app; an in-app overlay can't hide it, so covering views must take it.
+            overlayPresented: drawerOpen
+              || workspace.activePresentation != nil
+              || workspace.fileView != nil
+              || workspace.fileError != nil
+              || workspace.fileLoading,
+            onOpenFile: { path, line, column in
+              Task { await workspace.openFile(store: store, path: path, line: line, column: column) }
+            }
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
       }
 
       #if canImport(UIKit)
@@ -76,9 +85,11 @@ struct RootView: View {
         isPresented: $drawerOpen,
         store: store,
         onSelectSession: { hostId, sessionId in
-          Task {
-            await store.selectSession(hostId: hostId, sessionId: sessionId)
-          }
+          // Flip the tab synchronously, in the same transaction the drawer
+          // closes — a terminal→agent switch that trails an await lets the
+          // terminal reclaim the keyboard and strand its key bar over the chat.
+          let changed = store.activateSession(hostId: hostId, sessionId: sessionId)
+          Task { await store.connectActiveSession(changed: changed) }
         },
         onHostSettings: { hostId in
           settingsHostId = hostId
@@ -118,9 +129,15 @@ struct RootView: View {
     }
     .sheet(isPresented: $showPairing) {
       NavigationStack {
-        PairDeviceView(hostId: UUID().uuidString) { pairId, host, port, _ in
+        PairDeviceView(hostId: UUID().uuidString) { pairId, host, port, scheme, _ in
           do {
-            try store.createNoiseHost(name: "", host: host, port: port, pairHostId: pairId)
+            try store.createNoiseHost(
+              name: "",
+              host: host,
+              port: port,
+              pairHostId: pairId,
+              scheme: scheme
+            )
           } catch {
             store.errorMessage = error.localizedDescription
           }

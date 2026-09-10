@@ -276,7 +276,7 @@ export function subscribeToSession(
 
 /** Re-send the current PTY size so the holder raises SIGWINCH even when the
  *  fit did not move. Ink/cursor-agent only redraw on SIGWINCH. */
-function kickPtySize(id: string): void {
+export function kickPtySize(id: string): void {
   const inst = instances.get(id);
   if (!inst) return;
   const dims = inst.ptyDims ?? planPtyResize(null, inst.clientDims.values());
