@@ -1,8 +1,4 @@
-import { dlopen, FFIType, type Pointer, ptr, suffix } from 'bun:ffi';
-import { copyFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
+import { dlopen, FFIType, type Pointer, ptr } from 'bun:ffi';
 // The Noise crypto lives in a native cdylib (crates/tether-noise-ffi). We embed
 // it into the binary as a file asset: `bun build --compile` bundles the file at
 // this specifier, and at runtime `embeddedNoiseLib` is a path to it. `build:ffi`
@@ -13,22 +9,9 @@ import { join } from 'node:path';
 // inside the compiled binary, so the shipped server crashed on boot.
 import embeddedNoiseLib from './noiseNativeLib' with { type: 'file' };
 
-// dlopen(3) on Linux/macOS loads any filename, including bun's extension-less
-// `$bunfs` extraction path, so use it as-is. Windows' LoadLibrary appends `.dll`
-// to an extension-less path and then fails to find it, so materialize a copy
-// with the real suffix and load that. The destination is per-process (pid): the
-// server test suite runs `bun test --parallel`, and a shared destination would
-// have every worker copy/lock the same .dll at once — which on Windows blocks
-// on the file lock and hangs the run. This module is imported once per process,
-// so the copy happens at most once.
-function resolveNoiseLib(): string {
-  if (process.platform !== 'win32') return embeddedNoiseLib;
-  const dest = join(tmpdir(), `tether-noise-${process.pid}.${suffix}`);
-  if (!existsSync(dest)) copyFileSync(embeddedNoiseLib, dest);
-  return dest;
-}
-
-const { symbols } = dlopen(resolveNoiseLib(), {
+// dlopen(3) loads any filename, including bun's extension-less `$bunfs`
+// extraction path, so it is handed over as-is.
+const { symbols } = dlopen(embeddedNoiseLib, {
   tether_noise_gen_keypair: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
   tether_noise_derive_psk: {
     args: [FFIType.ptr, FFIType.u64_fast, FFIType.ptr],
@@ -62,14 +45,11 @@ const { symbols } = dlopen(resolveNoiseLib(), {
   },
   tether_noise_free: { args: [FFIType.ptr], returns: FFIType.void },
 });
-
 const OK = 0;
-
 // Scratch buffer for a single Noise message / framed payload. Callers keep
 // individual frames well under this (session output is chunked to ~16 KiB of
 // plaintext); the margin absorbs JSON escaping expansion + Noise framing.
 const BUF = 512 * 1024;
-
 type IoFn = (
   h: Pointer,
   input: Pointer | null,
@@ -78,14 +58,12 @@ type IoFn = (
   outCap: bigint,
   written: Pointer | null,
 ) => number;
-
 export function genKeypair(): { pub: Uint8Array; priv: Uint8Array } {
   const pub = new Uint8Array(32);
   const priv = new Uint8Array(32);
   if (symbols.tether_noise_gen_keypair(ptr(pub), ptr(priv)) !== OK) throw new Error('keypair');
   return { pub, priv };
 }
-
 export function derivePsk(code: string): Uint8Array {
   const codeBytes = new TextEncoder().encode(code);
   const out = new Uint8Array(32);
@@ -93,12 +71,10 @@ export function derivePsk(code: string): Uint8Array {
     throw new Error('psk');
   return out;
 }
-
 export class NoiseHandle {
   constructor(private h: Pointer) {
     if (!h) throw new Error('null handle');
   }
-
   private io(fn: IoFn, input: Uint8Array): Uint8Array {
     const out = new Uint8Array(BUF);
     const written = new BigUint64Array(1);
@@ -109,7 +85,6 @@ export class NoiseHandle {
     if (rc !== OK) throw new Error(`ffi ${rc}`);
     return out.slice(0, Number(written[0]));
   }
-
   writeMessage(payload: Uint8Array = new Uint8Array()): Uint8Array {
     return this.io(symbols.tether_noise_write_message as IoFn, payload);
   }
@@ -139,7 +114,6 @@ export class NoiseHandle {
     symbols.tether_noise_free(this.h);
   }
 }
-
 export function pairInitiator(devicePriv: Uint8Array, psk: Uint8Array): NoiseHandle {
   const h = symbols.tether_noise_pair_initiator_new(ptr(devicePriv), ptr(psk));
   return new NoiseHandle(h as Pointer);

@@ -4,17 +4,13 @@ import path from 'node:path';
 import { logInfo } from './log';
 import { DB_PATH, OLD_DB_PATH, USING_DEFAULT_DB } from './paths';
 import { COMPILED } from './runtime';
-import { secureCreatedDir } from './winAcl';
 
 const DB_DIR = path.dirname(DB_PATH);
 // The DB holds sessions, the device registry, and bearer tokens — keep the dir owner-only.
-const createdDbDir = mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
+mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
 try {
   chmodSync(DB_DIR, 0o700);
 } catch {}
-// Both lines above are silent no-ops on Windows (chmod maps to read-only attr);
-// secureCreatedDir applies the equivalent ACL grant on the boot that created the dir.
-secureCreatedDir(createdDbDir);
 
 // One-time migration: pre-binary installs kept the DB in the ~/.tether/app
 // source copy. Only for the installed binary on its default path (never a dev

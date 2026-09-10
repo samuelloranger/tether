@@ -34,64 +34,21 @@ test('resolveUploadPath collision-suffixes an existing file', () => {
   }
 });
 
-// The Windows-specific hazards. Gated on the host, because resolveUploadPath is
-// gated on the host: `a:b` and `CON` are legal, ordinary filenames on Linux
-// and macOS, so the same call must SUCCEED there. Both directions are asserted
-// below rather than skipping one platform, so neither branch can rot.
-const IS_WINDOWS = process.platform === 'win32';
-
-test('rejects an alternate-data-stream filename on Windows, accepts it on POSIX', () => {
-  // "notes.txt:hidden" writes into an NTFS stream hanging off notes.txt that no
-  // directory listing shows, and that the collision loop cannot see either. On
-  // POSIX ':' is just a character in a name.
-  if (IS_WINDOWS) {
-    expect(() => resolveUploadPath(WORKSPACE, 'notes.txt:hidden')).toThrow(/invalid filename/);
-    expect(() => resolveUploadPath(WORKSPACE, 'a:b')).toThrow(/invalid filename/);
-  } else {
-    expect(resolveUploadPath(WORKSPACE, 'notes.txt:hidden')).toBe(
-      path.join(WORKSPACE, 'notes.txt:hidden'),
-    );
+// POSIX accepts names Win32 could not: ":" is an ordinary character, a file
+// called CON is unremarkable, and a trailing dot or space is part of the name.
+test('accepts names that only a Win32 filesystem would reject', () => {
+  expect(resolveUploadPath(WORKSPACE, 'notes.txt:hidden')).toBe(
+    path.join(WORKSPACE, 'notes.txt:hidden'),
+  );
+  for (const name of ['CON', 'NUL', 'COM1', 'CON.txt']) {
+    expect(resolveUploadPath(WORKSPACE, name)).toBe(path.join(WORKSPACE, name));
   }
-});
-
-test('rejects reserved Windows device names, including with an extension', () => {
-  const reserved = ['CON', 'con', 'PRN', 'AUX', 'NUL', 'COM1', 'LPT9', 'CON.txt', 'nul.log'];
-  for (const name of reserved) {
-    if (IS_WINDOWS) {
-      expect(() => resolveUploadPath(WORKSPACE, name)).toThrow(/reserved Windows device name/);
-    } else {
-      // A file called CON is unremarkable on Linux; rejecting it there would be
-      // a functional regression bought for no security at all.
-      expect(resolveUploadPath(WORKSPACE, name)).toBe(path.join(WORKSPACE, name));
-    }
-  }
+  expect(resolveUploadPath(WORKSPACE, 'evil.txt.')).toBe(path.join(WORKSPACE, 'evil.txt.'));
 });
 
 test('a name that merely starts with a device name is still allowed', () => {
-  // The reservation covers the stem before the first dot, not any prefix —
-  // "CONTACTS.txt" and "console.log" are ordinary files on Windows too.
   expect(resolveUploadPath(WORKSPACE, 'CONTACTS.txt')).toBe(path.join(WORKSPACE, 'CONTACTS.txt'));
   expect(resolveUploadPath(WORKSPACE, 'console.log')).toBe(path.join(WORKSPACE, 'console.log'));
-  expect(resolveUploadPath(WORKSPACE, 'COM10.txt')).toBe(path.join(WORKSPACE, 'COM10.txt'));
-});
-
-test('rejects trailing dots and spaces on Windows, where they are silently stripped', () => {
-  // Win32 strips them on the way to the filesystem, so "evil.txt." opens
-  // "evil.txt" — two spellings racing for one file, which defeats the
-  // collision-suffix logic entirely.
-  if (IS_WINDOWS) {
-    expect(() => resolveUploadPath(WORKSPACE, 'evil.txt.')).toThrow(/silently strips/);
-    expect(() => resolveUploadPath(WORKSPACE, 'evil.txt ')).toThrow(/silently strips/);
-  } else {
-    expect(resolveUploadPath(WORKSPACE, 'evil.txt.')).toBe(path.join(WORKSPACE, 'evil.txt.'));
-  }
-});
-
-test('rejects characters NTFS cannot store, on Windows', () => {
-  if (!IS_WINDOWS) return;
-  for (const name of ['a<b.txt', 'a>b.txt', 'a"b.txt', 'a|b.txt', 'a?b.txt', 'a*b.txt']) {
-    expect(() => resolveUploadPath(WORKSPACE, name)).toThrow(/Windows cannot store/);
-  }
 });
 
 test('rejects an empty filename and a NUL byte on every platform', () => {

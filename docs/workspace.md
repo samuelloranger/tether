@@ -9,7 +9,7 @@ Open the git panel from the toolbar (desktop) or the overflow menu (iOS). It has
 - **Changes** — unstaged and staged files in the session's repo. Stage or unstage a file or a hunk, discard, write a commit message, amend HEAD when that's safe (no upstream, or the local tip is ahead). Push and undo-last-commit are on the same surface; undo moves HEAD back one commit and leaves the changes staged.
 - **History** — recent commits. Tap one to see its diff, including image diffs.
 
-The panel tracks the live cwd, so `cd` into another repo (and wait for the prompt to redraw) and it follows. A session whose directory Tether cannot resolve — see the [Windows Git Bash warning](/windows#shells) — shows an empty tree rather than the wrong repo.
+The panel tracks the live cwd, so `cd` into another repo (and wait for the prompt to redraw) and it follows. A session whose directory Tether cannot resolve shows an empty tree rather than the wrong repo.
 
 ## Files
 

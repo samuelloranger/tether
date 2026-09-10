@@ -7,7 +7,7 @@ export function prepareControlSocket(sock: string): void {
   try {
     chmodSync(path.dirname(sock), 0o700);
   } catch {
-    // ignore (e.g. Windows)
+    // ignore: a filesystem that does not implement mode bits
   }
   // A prior daemon that did not shut down cleanly leaves the socket file behind;
   // Bun.serve refuses to bind an existing path. force:true = no throw if absent.
@@ -15,8 +15,8 @@ export function prepareControlSocket(sock: string): void {
 }
 
 export function hardenControlSocket(sock: string): void {
-  // Filesystem perms are the auth here. On a FS that ignores mode (Windows), the
-  // socket is already confined to the local machine, so a failure is not fatal.
+  // Filesystem perms are the auth here. On a FS that ignores mode the socket is
+  // still confined to the local machine, so a failure is not fatal.
   try {
     chmodSync(sock, 0o600);
   } catch {

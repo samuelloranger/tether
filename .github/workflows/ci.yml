@@ -52,7 +52,14 @@ jobs:
       - name: Server tests
         # A hung test used to stall this step until the 6h job ceiling and
         # publish nothing. Bounded so it fails fast and the log is available.
-        timeout-minutes: 10
+        #
+        # 3, not 10: this step measures ~6s green, and the runner still hangs
+        # here occasionally (runs 34405535702 and 34351661642 both burned the
+        # full 10 minutes and reported nothing). The hang is not understood yet
+        # — it is not platform-specific, so it outlived the Windows leg — and
+        # until it is, the cap is what decides what a recurrence costs. 30x
+        # margin over green is plenty.
+        timeout-minutes: 3
         run: bun run test
         working-directory: apps/server
 
@@ -115,52 +122,6 @@ jobs:
       - name: Desktop web bundle
         run: bun run build
         working-directory: apps/desktop
-
-  # The server suite on Windows, where the server actually ships: release.yml
-  # cross-compiles tether-windows-x64.exe on Ubuntu and never runs a line of it,
-  # so every Windows-only defect (no tail(1), backslash paths, no unix sockets,
-  # console windows on a detached spawn) reached users unopposed.
-  #
-  # A separate job rather than a matrix on lint-test: lint, the release-script
-  # tests, both Rust crates, the desktop bundle and the proto conformance run
-  # are all platform-independent, and a matrix would pay for a second copy of
-  # every one of them to learn nothing. This leg installs and runs exactly the
-  # thing that differs.
-  server-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: latest
-
-      # Same key shape as the other jobs; runner.os scopes it to Windows so this
-      # never overwrites the Linux cache that tag releases restore from.
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-install-${{ runner.os }}-
-
-      - name: Install
-        run: bun install --frozen-lockfile
-
-      # The noise suite dlopens crates/tether-noise-ffi's cdylib
-      # (libtether_noise_ffi.dll here); without it the 18 noise tests fail with
-      # ERR_DLOPEN_FAILED (Windows error 126).
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-      - name: Build the Noise FFI cdylib (server noise tests dlopen it)
-        run: bun run build:ffi
-        working-directory: apps/server
-
-      # `bun run test`, never bare `bun test`: the built-in runner shadows the
-      # script name and silently drops the --parallel flag it carries.
-      - name: Server tests
-        timeout-minutes: 15
-        run: bun run test
-        working-directory: apps/server
 
   # The desktop client's Rust half, on every OS it ships to.
   #

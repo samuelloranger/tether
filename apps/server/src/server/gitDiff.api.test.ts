@@ -30,7 +30,7 @@ async function git(cwd: string, ...args: string[]): Promise<void> {
  * default and died as an opaque timeout. 20s is a backstop; the same test
  * finishes in under a second on an idle machine.
  */
-const GIT_TEST_TIMEOUT_MS = process.platform === 'win32' ? 20_000 : 5_000;
+const GIT_TEST_TIMEOUT_MS = 5_000;
 
 test(
   'diff routes summarize and return an in-progress change',

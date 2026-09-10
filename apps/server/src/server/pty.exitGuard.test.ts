@@ -2,8 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { getSession, upsertSession } from './db';
 import { SessionExitedError, startSession } from './pty';
 
-const IS_WINDOWS = process.platform === 'win32';
-
 describe('startSession exit guard', () => {
   test('does not resurrect a session that exited on its own', async () => {
     // A shell that ran and exited (e.g. while the client was backgrounded and
@@ -18,7 +16,7 @@ describe('startSession exit guard', () => {
   });
 
   // Spawns a real holder, so gate it to where /bin/sh exists.
-  test.skipIf(IS_WINDOWS)('a brand-new id still starts normally', async () => {
+  test('a brand-new id still starts normally', async () => {
     const inst = await startSession('fresh-1', '/bin/sh');
     expect(inst).toBeDefined();
     expect(getSession('fresh-1')?.status).toBe('running');

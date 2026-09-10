@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { CAN_SYMLINK } from '../../test-paths';
 import { PresentationRegistry, resolvePresentationFile } from './presentations';
 
 function tempDir(prefix: string) {
@@ -48,8 +47,7 @@ test('associates a preview with the session that created it, and allows none', (
   }
 });
 
-// Needs a symlink fixture, which a default Windows install refuses to create.
-test.skipIf(!CAN_SYMLINK)('rejects traversal and symlinks that escape a preview root', () => {
+test('rejects traversal and symlinks that escape a preview root', () => {
   const root = tempDir('tether-preview-');
   const outside = tempDir('tether-outside-');
   try {

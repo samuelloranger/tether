@@ -16,7 +16,7 @@ Newest first. Full notes on each [GitHub release](https://github.com/samuelloran
 
 ## v3.2 — Windows server
 
-- The server runs natively on Windows (ConPTY). See [Windows server](/windows).
+- The server runs natively on Windows (ConPTY). *(Windows server support was removed in a later release.)*
 - iOS: the session drawer stays usable while the terminal is streaming.
 
 ## v3.1 — agent `done` vs `waiting`

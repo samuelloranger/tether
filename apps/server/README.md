@@ -56,7 +56,7 @@ Run the compiled binary:
 ```bash
 bun run start          # ./dist/tether serve
 ```
-It listens on port `8085` (or `process.env.TETHER_PORT`) and TLS on `8443` (`TETHER_TLS_PORT`) unless `TETHER_TLS=off`. For distribution, CI cross-compiles the release binaries (`tether-{linux,darwin}-{x64,arm64}` and `tether-windows-x64.exe`); end users install via [`install.sh`](../../install.sh) / [`install.ps1`](../../install.ps1) and manage the daemon with `tether start | stop | status | update`.
+It listens on port `8085` (or `process.env.TETHER_PORT`) and TLS on `8443` (`TETHER_TLS_PORT`) unless `TETHER_TLS=off`. For distribution, CI cross-compiles the release binaries (`tether-{linux,darwin}-{x64,arm64}`); end users install via [`install.sh`](../../install.sh) and manage the daemon with `tether start | stop | status | update`.
 
 ---
 

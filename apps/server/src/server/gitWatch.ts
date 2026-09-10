@@ -28,12 +28,9 @@ const MAX_WATCHED_DIRS = 4096;
 // because setRoot is called from the PTY output path: `cd` must not wait on it.
 const SCAN_SLICE_MS = 8;
 
-// Off on Windows by default: each git spawn there flashes a console window
-// (spawnWindow.ts) and an active repo turns that into a continuous stream.
-// TETHER_GIT_WATCH=1/0 overrides; read once at load so a session is never half-watched.
-const GIT_WATCH_ENABLED =
-  process.env.TETHER_GIT_WATCH === '1' ||
-  (process.platform !== 'win32' && process.env.TETHER_GIT_WATCH !== '0');
+// TETHER_GIT_WATCH=0 disables it; read once at load so a session is never
+// half-watched.
+const GIT_WATCH_ENABLED = process.env.TETHER_GIT_WATCH !== '0';
 
 /** The two git reads the watcher publishes, injectable so tests can slow them down. */
 export type GitWatchReaders = {
@@ -121,7 +118,7 @@ export class GitWatch {
     this.scanTimer = undefined;
     if (this.disposed || gen !== this.scanGen) return;
 
-    // Watching disabled (Windows): publish one summary and stop, no watchers installed.
+    // Watching disabled: publish one summary and stop, no watchers installed.
     if (!GIT_WATCH_ENABLED) {
       this.refresh();
       this.settle();

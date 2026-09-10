@@ -17,7 +17,6 @@ describe('noise identity', () => {
   });
 
   test('private key file is owner-only (0600)', () => {
-    if (process.platform === 'win32') return;
     const dir = path.join(mkdtempSync(path.join(tmpdir(), 'tether-noise-')), 'noise');
     loadOrCreateServerKeypair(dir);
     const mode = statSync(path.join(dir, 'server.key')).mode & 0o777;

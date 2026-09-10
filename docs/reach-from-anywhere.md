@@ -19,8 +19,6 @@ The tunnel and Tether's own encryption are independent layers. Even a plain LAN 
    sudo tailscale up
    ```
 
-   (On Windows, install the Tailscale app and sign in.)
-
 2. **Note the host's tailnet address.** `tailscale ip -4` prints a `100.x.x.x` address; the host also has a MagicDNS name like `homelab.tailnet-name.ts.net`.
 
 3. **Install Tailscale on your phone / laptop** — the same app, signed into the same account — and enable it.
