@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Tether is a persistent remote-shell console. A Bun/Hono server spawns real PTY shell processes through detached *holder* processes, streams their output over WebSocket, and logs every byte to SQLite so clients can reconnect and replay missed output. Around that core it also serves git diff/stage/commit, a workspace file tree/viewer, file uploads, and HTML "presentations" (previews pushed from a coding agent to the client).
 
+**The server is POSIX-only — Linux and macOS.** Windows server support existed
+through v4.4.1 and was removed: it cost ~1200 lines of Windows-only code
+(ConPTY Ctrl+C emulation, `icacls` ACLs, PEB cwd reads, console-window
+suppression, MSYS shell classification) plus a branch in most spawn sites, was
+the source of nearly every CI de-flake commit, and had no users. Do not
+reintroduce `process.platform === 'win32'` branches in `apps/server`. Note the
+asymmetry: the **desktop client still ships for Windows** and talks to a
+Linux/macOS server like any other client.
+
 Clients are native and share one Rust core (`crates/tether-core`):
 
 - **`apps/desktop`** — Linux/Windows/macOS, a Tauri app (vite + xterm.js over the

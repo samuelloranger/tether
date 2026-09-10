@@ -24,7 +24,6 @@ import { getDefaultShell, shellInvocation } from './ptyShell';
 import { COMPILED, selfArgv } from './runtime';
 import { clearActivity, recordInput } from './sessionActivity';
 import { clearTitle } from './sessionTitle';
-import { killWindowsTree } from './spawnWindow';
 import { testEvent } from './testEvents';
 
 export type { FocusSubscriber, SessionFrame, Subscriber } from './ptyHolder';
@@ -35,17 +34,11 @@ export { getDefaultShell, type ShellInvocation, shellInvocation } from './ptyShe
 const MAX_SESSIONS = Number(process.env.TETHER_MAX_SESSIONS || 50);
 
 // How long to wait for a freshly spawned holder to start accepting on its
-// socket. A `bun main.ts holder` is listening in well under a second, which is
-// what the old fixed 25×80ms=2s budget was sized for. The compiled binary on
-// Windows has to unpack and boot a ~90MB image — and be scanned on the way —
-// which measures at 1.4-1.5s on a warm cache: inside the old budget, but only
-// just, so session starts failed intermittently and left the tab 'stopped'.
-// Generous rather than tuned: the loop exits as soon as the socket answers, so
-// a high ceiling costs nothing on the happy path and only bounds the genuinely
-// broken case.
-const HOLDER_START_TIMEOUT_MS = Number(
-  process.env.TETHER_HOLDER_START_TIMEOUT_MS || (process.platform === 'win32' ? 15_000 : 2_000),
-);
+// socket. A `bun main.ts holder` is listening in well under a second. Generous
+// rather than tuned: the loop exits as soon as the socket answers, so a high
+// ceiling costs nothing on the happy path and only bounds the genuinely broken
+// case.
+const HOLDER_START_TIMEOUT_MS = Number(process.env.TETHER_HOLDER_START_TIMEOUT_MS || 2_000);
 const HOLDER_POLL_MS = 80;
 
 // If the daemon was (re)started from inside a Claude Code Bash tool, its env
@@ -176,9 +169,6 @@ async function doStartSession(
     detached: true,
     stdio: ['ignore', logFd, logFd],
     env: sessionEnv(id, process.env, shellEnv),
-    // Without this the detached holder gets its own console window, which
-    // flashes on screen for every session started on a desktop Windows host.
-    windowsHide: true,
   });
   holder.unref();
 
@@ -346,17 +336,9 @@ export function killSession(id: string) {
   if (!hadInstance) {
     try {
       const pid = Number(readFileSync(`${sockPathFor(id)}.pid`, 'utf8'));
-      // On Windows a signal only ever terminates the one pid, so the holder's
-      // shell (and everything under it) would survive this fallback. /T takes
-      // the tree, matching what SIGTERM reaching the holder achieves on POSIX
-      // by way of its own killHolderPty handler.
-      if (pid > 0) {
-        if (process.platform === 'win32') {
-          killWindowsTree(pid);
-        } else {
-          process.kill(pid, 'SIGTERM');
-        }
-      }
+      // SIGTERM reaching the holder gets its own killHolderPty handler to sweep
+      // the shell and everything under it.
+      if (pid > 0) process.kill(pid, 'SIGTERM');
     } catch {}
   }
   try {

@@ -11,7 +11,6 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { HAS_POSIX_MODES } from '../../test-paths';
 import { CERT_VALID_DAYS, ensureTlsMaterial, localAltNames, tlsPaths } from './tlsStore';
 
 const dirs: string[] = [];
@@ -54,21 +53,15 @@ describe('ensureTlsMaterial', () => {
     expect(second.certPem).toBe(first.certPem);
   });
 
-  // Windows has no mode bits to assert — see HAS_POSIX_MODES. The key still
-  // lands under the user profile, whose ACL is the protection there, but that
-  // is a different mechanism and this test cannot speak to it.
-  test.skipIf(!HAS_POSIX_MODES)(
-    'the private key is owner-read-only and the directory is owner-only',
-    () => {
-      const dir = tempDir();
-      ensureTlsMaterial(dir);
-      const paths = tlsPaths(dir);
-      expect(statSync(paths.keyPath).mode & 0o777).toBe(0o600);
-      expect(statSync(dir).mode & 0o777).toBe(0o700);
-      // The certificate is public by nature — readable is correct.
-      expect(statSync(paths.certPath).mode & 0o777).toBe(0o644);
-    },
-  );
+  test('the private key is owner-read-only and the directory is owner-only', () => {
+    const dir = tempDir();
+    ensureTlsMaterial(dir);
+    const paths = tlsPaths(dir);
+    expect(statSync(paths.keyPath).mode & 0o777).toBe(0o600);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    // The certificate is public by nature — readable is correct.
+    expect(statSync(paths.certPath).mode & 0o777).toBe(0o644);
+  });
 
   // The mode is unassertable on Windows, but "the key exists and is not
   // world-readable by construction" still is: it must at least be there, and

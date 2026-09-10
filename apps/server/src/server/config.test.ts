@@ -82,12 +82,14 @@ test('the shell report follows the configured default shell', async () => {
   expect(getShellSupport().shell).toBe('nu');
 });
 
-test('a known-broken shell is accepted, but reported as broken', async () => {
+test('a shell with no cwd hook is accepted, and reported as unintegrated', async () => {
   const next = await patchConfig({ session: { defaultShell: 'bash.exe' } });
   expect(next.session.defaultShell).toBe('bash.exe');
-  const support = describeShellSupport('bash.exe', true);
-  expect(support.integration).toBe('broken');
-  expect(support.reason).toContain('/c/Users/you');
+  // Classified on the literal basename, so the .exe matches no hook — the point
+  // is that an unrecognized shell is still usable, and says so.
+  const support = describeShellSupport('bash.exe');
+  expect(support.integration).toBe('none');
+  expect(support.reason).toContain('Everything else works');
 });
 
 test('the shell report is not a config key and cannot be patched', async () => {

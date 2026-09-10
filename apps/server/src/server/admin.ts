@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { selfArgv, VERSION } from './runtime';
-import { HIDE_CONSOLE } from './spawnWindow';
 
 const attempts = new Map<string, number[]>();
 const MAX_ATTEMPTS = 5;
@@ -19,7 +18,7 @@ export function allowAdminRequest(client: string, now = Date.now()): boolean {
 export function scheduleAdminCommand(command: 'update' | 'restart'): void {
   setTimeout(() => {
     const [cmd, ...args] = selfArgv(command);
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', ...HIDE_CONSOLE });
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
     child.unref();
   }, 0);
 }

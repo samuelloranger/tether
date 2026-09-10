@@ -12,9 +12,7 @@ describe('prepareControlSocket', () => {
     writeFileSync(sock, 'stale'); // simulate a crashed daemon's leftover socket
     prepareControlSocket(sock); // must not throw, must unlink the stale file
     expect(() => statSync(sock)).toThrow();
-    if (process.platform !== 'win32') {
-      expect(statSync(path.dirname(sock)).mode & 0o777).toBe(0o700);
-    }
+    expect(statSync(path.dirname(sock)).mode & 0o777).toBe(0o700);
   });
 
   test('hardenControlSocket does not throw when the socket is absent', () => {

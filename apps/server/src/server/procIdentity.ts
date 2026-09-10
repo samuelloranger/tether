@@ -1,12 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { HIDE_CONSOLE } from './spawnWindow';
 
 // A per-process identity token that changes if the PID is recycled. On Linux we
 // read starttime (field 22 of /proc/<pid>/stat, clock ticks since boot). On
 // other platforms we fall back to `ps -o lstart=`. Returns null if the pid is
 // gone or unreadable.
 export function processStartTime(pid: number): string | null {
-  if (process.platform === 'win32') return windowsStartTime(pid);
   if (process.platform === 'linux') {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -25,60 +23,6 @@ export function processStartTime(pid: number): string | null {
       .stdout.toString()
       .trim();
     return out || null;
-  } catch {
-    return null;
-  }
-}
-
-// Windows has neither /proc nor `ps`. Get-Process exposes the creation time as
-// .NET ticks, which is exactly the stable, PID-recycle-detecting token we want.
-// `-NoProfile` matters for more than speed here: a user profile that prints a
-// banner would corrupt the value we parse back out.
-//
-// Deliberately spawns PowerShell rather than reading Win32_Process over CIM —
-// same information, ~5x cheaper (roughly 270ms vs 1.4s). Still far too slow for
-// a hot path, which is fine: the only callers are the daemon's start/stop/status
-// control commands (main.ts), each of which runs this at most twice.
-// A process's start time never changes while it is alive, so a successful
-// answer is cached for the life of THIS process. That collapses repeat lookups
-// of the same pid — the daemon polling its own recorded pid across start/stop/
-// status — from several cold powershell.exe spawns to none, which on a
-// contended Windows CI runner is the difference between finishing inside the
-// test budget and timing out. Only non-null answers are cached: a "gone" pid
-// must stay re-queryable, and a live pid never yields null in a way the retry
-// below has not already covered.
-const startTimeCache = new Map<number, string>();
-
-function windowsStartTime(pid: number): string | null {
-  const cached = startTimeCache.get(pid);
-  if (cached !== undefined) return cached;
-  // Retried once. An empty answer is ambiguous — it means EITHER the pid is
-  // gone (the documented case below) OR powershell.exe never got far enough to
-  // answer, which happens on a cold start under load and made this return null
-  // for a process that was plainly alive. The retry costs one extra spawn on
-  // the genuinely-gone path, and the callers run this at most twice.
-  const answer = queryWindowsStartTime(pid) ?? queryWindowsStartTime(pid);
-  if (answer !== null) startTimeCache.set(pid, answer);
-  return answer;
-}
-
-function queryWindowsStartTime(pid: number): string | null {
-  try {
-    const proc = Bun.spawnSync(
-      [
-        'powershell.exe',
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).StartTime.Ticks`,
-      ],
-      HIDE_CONSOLE,
-    );
-    const out = proc.stdout.toString().trim();
-    // A missing pid yields an empty string (SilentlyContinue swallows the
-    // error and .Ticks on $null produces nothing) — same "gone" signal the
-    // POSIX branches return null for.
-    return /^\d+$/.test(out) ? out : null;
   } catch {
     return null;
   }

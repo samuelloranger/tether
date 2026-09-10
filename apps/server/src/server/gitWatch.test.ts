@@ -8,28 +8,12 @@ import type { DiffSummary } from './gitDiff';
 import { EMPTY_REPO_STATUS } from './gitStatus';
 import { GitWatch } from './gitWatch';
 
-const IS_WINDOWS = process.platform === 'win32';
+// Named rather than inlined so the fs.watch-driven tests are greppable as a
+// group, the way they were when they had a platform gate.
+const watchTest = test;
 
-// The live watcher is OFF on Windows in production (GIT_WATCH_ENABLED, gitWatch.ts),
-// and bun's Windows fs.watch is unreliable (`handle.on is not a function`), which
-// intermittently hung this job to the 15-min cap. Exercise the fs.watch-driven
-// tests only where the watcher actually ships; the pure logic stays covered on
-// Linux/macOS.
-const watchTest = test.skipIf(IS_WINDOWS);
-
-// On Windows, closing a ReadDirectoryChangesW handle only queues the
-// cancellation — the directory stays EBUSY briefly after dispose(). Retry.
 async function removeFixture(root: string): Promise<void> {
-  // ~500ms of headroom in 25ms steps; observed to clear on the first retry.
-  for (let attempt = 0; ; attempt++) {
-    try {
-      rmSync(root, { recursive: true, force: true });
-      return;
-    } catch (err) {
-      if (!IS_WINDOWS || attempt >= 20) throw err;
-      await Bun.sleep(25);
-    }
-  }
+  rmSync(root, { recursive: true, force: true });
 }
 
 // Async on purpose: a synchronous shell-out pins the JS thread, so a slow git
@@ -61,9 +45,9 @@ const noIgnoredDirs = async () => new Set<string>();
 
 // Windows pays double: git spawns cost 200-380ms under parallel load (vs ~5ms
 // on Linux), and event delivery is slower too. 5s isn't enough; 20s is a backstop, not a delay.
-const REPO_TEST_TIMEOUT_MS = IS_WINDOWS ? 20_000 : 5_000;
+const REPO_TEST_TIMEOUT_MS = 5_000;
 
-async function waitFor(condition: () => boolean, timeout = IS_WINDOWS ? 8_000 : 2_000) {
+async function waitFor(condition: () => boolean, timeout = 2_000) {
   const deadline = Date.now() + timeout;
   while (!condition() && Date.now() < deadline) await Bun.sleep(20);
   expect(condition()).toBe(true);
@@ -558,33 +542,30 @@ watchTest(
 // is right to watch it. Real Windows ACLs could deny traversal, but building
 // that fixture needs icacls and a second principal — far more machinery than
 // the behaviour under test is worth.
-test.skipIf(process.platform === 'win32')(
-  'skips unreadable directories without attempting a watch',
-  async () => {
-    await withRepo(async (root) => {
-      const locked = path.join(root, 'locked');
-      mkdirSync(locked);
-      chmodSync(locked, 0o000);
-      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-      const watchSpy = spyOn(nodeFs, 'watch');
-      const watcher = new GitWatch(() => {}, 50, undefined, undefined, noIgnoredDirs);
-      try {
-        watcher.setRoot(root);
-        await watcher.whenScanned();
-        const watchedPaths = watchSpy.mock.calls.map((call) => String(call[0]));
-        expect(watchedPaths).not.toContain(locked);
-        expect(warnSpy.mock.calls.some((call) => call.map(String).join(' ').includes(locked))).toBe(
-          false,
-        );
-      } finally {
-        chmodSync(locked, 0o700);
-        watcher.dispose();
-        watchSpy.mockRestore();
-        warnSpy.mockRestore();
-      }
-    });
-  },
-);
+test('skips unreadable directories without attempting a watch', async () => {
+  await withRepo(async (root) => {
+    const locked = path.join(root, 'locked');
+    mkdirSync(locked);
+    chmodSync(locked, 0o000);
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    const watchSpy = spyOn(nodeFs, 'watch');
+    const watcher = new GitWatch(() => {}, 50, undefined, undefined, noIgnoredDirs);
+    try {
+      watcher.setRoot(root);
+      await watcher.whenScanned();
+      const watchedPaths = watchSpy.mock.calls.map((call) => String(call[0]));
+      expect(watchedPaths).not.toContain(locked);
+      expect(warnSpy.mock.calls.some((call) => call.map(String).join(' ').includes(locked))).toBe(
+        false,
+      );
+    } finally {
+      chmodSync(locked, 0o700);
+      watcher.dispose();
+      watchSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+});
 
 /**
  * How long the stand-in "slow git" read takes, and how late the 10ms timer
@@ -602,8 +583,8 @@ test.skipIf(process.platform === 'win32')(
  * budget. Raising only the budget would have been the wrong fix — at 400ms
  * against a 200ms read, a fully blocking read would have passed.
  */
-const READ_MS = IS_WINDOWS ? 800 : 200;
-const EVENT_BUDGET_MS = IS_WINDOWS ? 400 : 100;
+const READ_MS = 200;
+const EVENT_BUDGET_MS = 100;
 
 // The whole point of the watcher: a slow repository must cost the diff badge
 // its freshness, never the PTY. `git diff` + `git status` + one `git diff
@@ -693,17 +674,8 @@ watchTest(
           await Bun.sleep(5);
         }
         await Bun.sleep(400);
-        // One in-flight read plus one coalesced follow-up — not five. Windows is
-        // allowed one extra: ReadDirectoryChangesW reports a single write as
-        // several events, so the 10ms debounce can close twice across the 25ms
-        // the five kicks span. The property under test is that kicks coalesce at
-        // all, and 3 ≪ 5 still demonstrates it.
-        if (process.platform === 'win32') {
-          expect(reads).toBeGreaterThanOrEqual(2);
-          expect(reads).toBeLessThanOrEqual(3);
-        } else {
-          expect(reads).toBe(2);
-        }
+        // One in-flight read plus one coalesced follow-up — not five.
+        expect(reads).toBe(2);
       } finally {
         watcher.dispose();
       }

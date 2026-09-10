@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { CAN_SYMLINK } from '../../test-paths';
 import { readWorkspaceDir } from './workspaceDir';
 import { canonicalPath, WorkspaceFileError } from './workspaceFile';
 
@@ -78,26 +77,23 @@ test('rejects absolute path with 400', () => {
 });
 
 // Needs a symlink fixture, which a default Windows install refuses to create.
-test.skipIf(!CAN_SYMLINK)(
-  'symlink pointing outside the root is reported as file size 0, not escaping',
-  () => {
-    withRoot((root) => {
-      const outside = mkdtempSync(path.join(tmpdir(), 'tether-outside-dir-'));
-      try {
-        writeFileSync(path.join(outside, 'secret.txt'), 'nope\n');
-        symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'escape.txt'));
-        writeFileSync(path.join(root, 'safe.txt'), 'ok\n');
+test('symlink pointing outside the root is reported as file size 0, not escaping', () => {
+  withRoot((root) => {
+    const outside = mkdtempSync(path.join(tmpdir(), 'tether-outside-dir-'));
+    try {
+      writeFileSync(path.join(outside, 'secret.txt'), 'nope\n');
+      symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'escape.txt'));
+      writeFileSync(path.join(root, 'safe.txt'), 'ok\n');
 
-        const result = readWorkspaceDir(root, '');
-        const escapeEntry = result.entries.find((e) => e.name === 'escape.txt');
-        expect(escapeEntry).toEqual({ name: 'escape.txt', kind: 'file', size: 0 });
-        expect(result.entries.some((e) => e.name === 'safe.txt')).toBe(true);
-      } finally {
-        rmSync(outside, { recursive: true, force: true });
-      }
-    });
-  },
-);
+      const result = readWorkspaceDir(root, '');
+      const escapeEntry = result.entries.find((e) => e.name === 'escape.txt');
+      expect(escapeEntry).toEqual({ name: 'escape.txt', kind: 'file', size: 0 });
+      expect(result.entries.some((e) => e.name === 'safe.txt')).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
 
 test('rejects a file path with 415', () => {
   withRoot((root) => {
@@ -118,7 +114,7 @@ test('rejects a file path with 415', () => {
 // through the filter-driver stack (Defender included). That blows bun:test's
 // 5s default and fails a test that is not actually slow at what it measures, so
 // the budget is scaled to the filesystem rather than the assertion.
-const BIG_DIR_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 15_000;
+const BIG_DIR_TIMEOUT_MS = 15_000;
 
 test(
   'caps listing at 2000 entries and sets truncated',
@@ -146,14 +142,12 @@ test(
 // Containment, mirroring workspaceFile.test.ts. The listing route resolves paths
 // with the same helpers, so the same Windows spelling hazards apply to it.
 
-const IS_WINDOWS = process.platform === 'win32';
-
 test('lists a directory however the root and cwd are spelled', () => {
   withRoot((root) => {
     mkdirSync(path.join(root, 'src'));
     writeFileSync(path.join(root, 'src', 'main.ts'), 'export {};\n');
     const longRoot = canonicalPath(root);
-    const cwd = IS_WINDOWS ? path.join(root.toUpperCase(), 'SRC') : path.join(root, 'src');
+    const cwd = path.join(root, 'src');
     const result = readWorkspaceDir(longRoot, '', cwd);
     // Reported back workspace-relative, so a divergent spelling must not leak
     // into the path the client sees either.
@@ -167,9 +161,7 @@ test('a cwd outside the root is rejected however it is spelled', () => {
     const outside = mkdtempSync(path.join(tmpdir(), 'tether-outside-dir-cwd-'));
     try {
       writeFileSync(path.join(outside, 'secret.txt'), 'nope\n');
-      const spellings = IS_WINDOWS
-        ? [outside, outside.toUpperCase(), canonicalPath(outside)]
-        : [outside];
+      const spellings = [outside];
       for (const cwd of spellings) {
         try {
           readWorkspaceDir(root, '', cwd);
@@ -180,8 +172,7 @@ test('a cwd outside the root is rejected however it is spelled', () => {
           expect((error as WorkspaceFileError).message).toBe('working directory escapes workspace');
         }
       }
-      // A sibling sharing the root's prefix must not read as being inside it —
-      // the case folding added for Windows must not open this up.
+      // A sibling sharing the root's prefix must not read as being inside it.
       const sibling = `${root}-evil`;
       mkdirSync(sibling);
       try {
@@ -231,29 +222,17 @@ test('lstat ino is populated and distinguishes directories on this host', () => 
     // check cannot produce spurious 409s on an untouched directory.
     expect(lstatSync(a, { bigint: true }).ino).toBe(idA.ino);
 
-    // ...and stable across spellings, which is what lets it be compared against
-    // a canonicalPath-resolved target.
-    if (IS_WINDOWS) {
-      expect(lstatSync(a.toUpperCase(), { bigint: true }).ino).toBe(idA.ino);
-      expect(lstatSync(canonicalPath(a), { bigint: true }).ino).toBe(idA.ino);
-    }
+    // ...and stable when reached through canonicalPath, which is what lets it
+    // be compared against a canonicalPath-resolved target.
+    expect(lstatSync(canonicalPath(a), { bigint: true }).ino).toBe(idA.ino);
 
-    // A replaced directory reads as a different object — on Windows.
-    //
-    // Deliberately not asserted on POSIX: inode numbers are RECYCLED there, and
-    // the allocator commonly hands the just-freed one straight back, so a
-    // recreated directory often has the identity of the one it replaced. That
-    // is not a flake to paper over; it is why readWorkspaceDir does not rest on
-    // dev+ino alone and re-checks `realpathSync(target) === target` afterwards.
-    // The delete-and-recreate case is caught by that second guard, not this one.
-    //
-    // (Observed: ext4 on the CI runner recycled it; the WSL2 volume here did
-    // not. Either is legal, which is exactly why nothing may depend on it.)
-    if (IS_WINDOWS) {
-      rmSync(b, { recursive: true, force: true });
-      mkdirSync(b);
-      expect(lstatSync(b, { bigint: true }).ino).not.toBe(idB.ino);
-    }
+    // A replaced directory is deliberately NOT asserted to read as a different
+    // object: inode numbers are RECYCLED here, and the allocator commonly hands
+    // the just-freed one straight back, so a recreated directory often has the
+    // identity of the one it replaced. That is not a flake to paper over; it is
+    // why readWorkspaceDir does not rest on dev+ino alone and re-checks
+    // `realpathSync(target) === target` afterwards. The delete-and-recreate case
+    // is caught by that second guard, not this one.
   });
 });
 

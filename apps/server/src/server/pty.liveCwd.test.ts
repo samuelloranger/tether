@@ -138,7 +138,7 @@ test(
 // Depends on the live gitWatch, which is off on Windows in production
 // (gitWatch.ts) and no longer forced on there in tests — skip rather than
 // exercise a path that never ships on Windows on a flaky fs.watch.
-test.skipIf(process.platform === 'win32')(
+test(
   'starts watching when a repository is initialized without changing cwd',
   async () => {
     const id = 'git-init-in-place';
@@ -160,7 +160,7 @@ test.skipIf(process.platform === 'win32')(
       writeToSession(
         id,
         'git init -q && git config user.email test@example.com && git config user.name test && git add main.txt && git commit -q -m initial' +
-          (process.platform === 'win32' ? '\r' : '\n'),
+          '\n',
       );
       await waitFor(() => frames.some((frame) => frame.type === 'diff'));
       frames.length = 0;

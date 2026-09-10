@@ -9,7 +9,7 @@
   <a href="https://github.com/samuelloranger/tether/releases"><img src="https://img.shields.io/github/v/release/samuelloranger/tether" alt="Latest release" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/ci.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/release.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/release.yml/badge.svg" alt="Release builds" /></a>
-  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Linux%20%7C%20Windows%20%7C%20macOS-blue" alt="Platforms: iOS, Linux, Windows, macOS" />
+  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Linux%20%7C%20macOS-blue" alt="Platforms: iOS, Linux, macOS" />
   <a href="https://buymeacoffee.com/samlo122"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy me a coffee" /></a>
 </p>
 
@@ -22,12 +22,10 @@ Every link below always resolves to the **newest release** — no need to hunt t
 | What | Platform | Get the latest |
 | --- | --- | --- |
 | **Server** | Linux / macOS | `curl -fsSL https://samlo.cloud/tether/install.sh \| sh` (auto-detects OS/arch) |
-| **Server** | Windows | `irm https://samlo.cloud/tether/install.ps1 \| iex` (PowerShell, x64) |
 | Server binary | Linux x64 | [`tether-linux-x64`](https://github.com/samuelloranger/tether/releases/latest/download/tether-linux-x64) |
 | Server binary | Linux arm64 | [`tether-linux-arm64`](https://github.com/samuelloranger/tether/releases/latest/download/tether-linux-arm64) |
 | Server binary | macOS Apple Silicon | [`tether-darwin-arm64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-arm64.tar.gz) |
 | Server binary | macOS Intel | [`tether-darwin-x64.tar.gz`](https://github.com/samuelloranger/tether/releases/latest/download/tether-darwin-x64.tar.gz) |
-| Server binary | Windows x64 | [`tether-windows-x64.exe`](https://github.com/samuelloranger/tether/releases/latest/download/tether-windows-x64.exe) |
 | **Mobile** | iOS | [TestFlight beta](https://testflight.apple.com/join/j7rPkfhq) (auto-updates) |
 | **Desktop** | Linux / Windows / macOS | see [Desktop app](#desktop-app-linux--windows--macos) below |
 
@@ -44,16 +42,6 @@ tether pair
 ```
 
 The installer detects your OS/arch and downloads a single self-contained binary (no bun, git, or node_modules needed) from the latest release into `~/.local/bin/tether`. If `tether` isn't found afterward, add `~/.local/bin` to your PATH (the installer prints the exact line, and the commands it prints use the full path meanwhile).
-
-Windows (PowerShell, x64 only):
-
-```powershell
-irm https://samlo.cloud/tether/install.ps1 | iex
-tether start
-tether pair
-```
-
-Same single binary, installed to `%LOCALAPPDATA%\Programs\tether\tether.exe` without an admin prompt, with that directory added to your user PATH — open a new terminal for it to take effect. See [the Windows server page](https://samlo.cloud/tether/windows) for supported shells, the firewall prompt on first start, and the platform's known limitations.
 
 ```bash
 tether serve | start | stop | restart | status | logs | present | pair | signal | devices | device | update | version

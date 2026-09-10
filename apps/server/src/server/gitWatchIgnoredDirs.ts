@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { HIDE_CONSOLE } from './spawnWindow';
 
 // Discover directories git considers ignored under `root` (as absolute paths).
 // This is async on purpose: spawning git synchronously can stall the event loop.
@@ -17,7 +16,7 @@ export async function listIgnoredDirs(root: string): Promise<Set<string>> {
       '--directory',
       '--no-empty-directory',
     ],
-    { stdout: 'pipe', stderr: 'ignore', ...HIDE_CONSOLE },
+    { stdout: 'pipe', stderr: 'ignore' },
   );
   const [stdout, exitCode] = await Promise.all([
     new Response(process.stdout).text(),

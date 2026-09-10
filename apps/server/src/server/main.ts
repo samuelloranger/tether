@@ -101,13 +101,6 @@ async function start(): Promise<void> {
     env,
     detached: true,
     stdio: ['ignore', out, out],
-    // Without this the detached daemon gets its own console window (documented
-    // behaviour of `detached` on Windows), which sticks on screen for as long
-    // as the server runs — from `tether start` and from `tether update`, which
-    // restarts through here. Same fix as the PTY holder spawn in pty.ts. It
-    // only affects the window: verified that the daemon still outlives the
-    // shell that launched it and `tether status` still finds it.
-    windowsHide: true,
   });
   child.unref();
   if (!child.pid) {
