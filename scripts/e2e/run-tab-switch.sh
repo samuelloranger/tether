@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Test #5 orchestration: switching back to a live session must trigger a SIGWINCH
-# so a full-screen TUI repaints (the Noise reattach does not replay). Drives
-# TabSwitchTests and asserts the oracle logged sigwinch + noise_start wasLive.
+# Test #5 orchestration: switching back to a resident session must REUSE its live
+# socket (no reconnect, no replay) and re-focus it — the client repaints from the
+# retained grid. Drives TabSwitchTests and asserts the resident path: the suite
+# passed, no switch-back reconnect (no noise_start wasLive:true), and the
+# switched-back tab was re-focused (noise_focus focused:true).
 set -euo pipefail
 export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -48,20 +50,32 @@ TEST_RUNNER_TETHER_UITEST_PRESEED="$FIXTURE" \
   CODE_SIGNING_ALLOWED=YES AD_HOC_CODE_SIGNING_ALLOWED=YES \
   >"$E2E_DIR/xcodebuild.log" 2>&1 || true
 
-SIGWINCH="$(grep -c '"ev":"sigwinch"' "$EVT" 2>/dev/null || echo 0)"
-WASLIVE="$(grep -c '"wasLive":true' "$EVT" 2>/dev/null || echo 0)"
-STARTS="$(grep -c '"ev":"noise_start"' "$EVT" 2>/dev/null || echo 0)"
+# grep -c prints "0" AND exits 1 on zero matches, so `|| echo 0` would append a
+# SECOND "0" and break the numeric guards. `|| true` keeps the single count.
+XC_PASS=0; grep -q "Test Suite 'TabSwitchTests' passed" "$E2E_DIR/xcodebuild.log" 2>/dev/null && XC_PASS=1
+WASLIVE="$(grep -c '"wasLive":true' "$EVT" 2>/dev/null || true)"
+FOCUS_BACK="$(grep -cE '"ev":"noise_focus".*"focused":true' "$EVT" 2>/dev/null || true)"
+STARTS="$(grep -c '"ev":"noise_start"' "$EVT" 2>/dev/null || true)"
 
 echo "=== oracle events (tail) ==="
 tail -20 "$EVT" 2>/dev/null || true
 echo "=== counts ==="
-echo "sigwinch: $SIGWINCH   noise_start(wasLive:true): $WASLIVE   noise_start total: $STARTS"
+echo "noise_start total: $STARTS   switch-back reconnect (wasLive:true): $WASLIVE   re-focus (focused:true): $FOCUS_BACK"
+echo "xcodebuild suite passed: $XC_PASS"
 echo "=== verdict ==="
-if [ "$SIGWINCH" -gt 0 ] && [ "$WASLIVE" -gt 0 ]; then
-  echo "PASS: switch-back to a live session kicked SIGWINCH (repaint path fires)"
-else
-  echo "FAIL: no SIGWINCH on switch-back (sigwinch=$SIGWINCH wasLive=$WASLIVE)"
-  echo "--- xcodebuild tail ---"
-  tail -30 "$E2E_DIR/xcodebuild.log"
-  exit 1
+# Resident model: both sessions stay live, so switch-back reuses the socket —
+# it must NOT reconnect (wasLive:true stays 0) and must re-focus the tab. The
+# repaint itself is client-side and is what the passing sim suite verifies.
+if [ "$XC_PASS" -ne 1 ]; then
+  echo "FAIL: the sim suite did not pass — incidental events do not count"
+  echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
 fi
+if [ "$WASLIVE" -ne 0 ]; then
+  echo "FAIL: switch-back reconnected a resident session (noise_start wasLive:true=$WASLIVE); socket was not reused"
+  echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
+fi
+if [ "$FOCUS_BACK" -lt 1 ]; then
+  echo "FAIL: switch-back never re-focused a live session (no noise_focus focused:true)"
+  echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
+fi
+echo "PASS: switch-back reused the live socket (no reconnect) and re-focused the tab"

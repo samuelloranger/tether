@@ -1,10 +1,11 @@
 import XCTest
 
-/// Test #5 — switching between session tabs must repaint. Switch-back drops the
-/// Noise socket; `start` now replays missed logs and still kicks SIGWINCH so a
-/// live TUI can repaint. This drives two sessions, switches between them via
-/// the drawer, and the orchestration asserts `sigwinch` + `noise_start` with
-/// wasLive=true.
+/// Test #5 — switching between session tabs must repaint. Resident sessions keep
+/// their live socket, so switch-back reuses it (no reconnect, no replay) and
+/// re-focuses the tab; the client repaints from the retained grid. This drives
+/// two sessions, switches between them via the drawer, and the orchestration
+/// asserts the resident path: no `noise_start` wasLive=true, and a
+/// `noise_focus` focused=true on switch-back.
 final class TabSwitchTests: XCTestCase {
   override func setUpWithError() throws {
     continueAfterFailure = false

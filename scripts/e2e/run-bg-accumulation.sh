@@ -60,21 +60,20 @@ XC_PASS=0; grep -q "Test Suite 'BackgroundAccumulationRenderTests' passed" "$E2E
 SENT_A="$(TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts AGENT_A_DONE_SENTINEL 2>/dev/null || echo 0)"
 SENT_B="$(TETHER_DB_PATH="$DB" bun scripts/e2e/count-log-marker.ts AGENT_B_DONE_SENTINEL 2>/dev/null || echo 0)"
 WASLIVE_BACK="$(grep -c '"wasLive":true' "$EVT" 2>/dev/null || true)"
-SIGWINCH="$(grep -c '"ev":"sigwinch"' "$EVT" 2>/dev/null || true)"
-REPLAY_BYTES="$(grep '"ev":"replay"' "$EVT" 2>/dev/null | grep -cE '"reset":true|"bytes":[1-9]' || true)"
+FOCUS_BACK="$(grep -cE '"ev":"noise_focus".*"focused":true' "$EVT" 2>/dev/null || true)"
 
-echo "=== oracle events (replay + noise_start + sigwinch) ==="
-grep -E '"ev":"replay"|"ev":"noise_start"|"ev":"sigwinch"' "$EVT" 2>/dev/null | tail -20 || true
+echo "=== oracle events (replay + noise_start + noise_focus) ==="
+grep -E '"ev":"replay"|"ev":"noise_start"|"ev":"noise_focus"' "$EVT" 2>/dev/null | tail -20 || true
 echo "=== counts ==="
 echo "AGENT_A sentinel chunks: $SENT_A   AGENT_B sentinel chunks: $SENT_B"
-echo "switch-back re-subscribe (wasLive:true): $WASLIVE_BACK   sigwinch(repaint kick): $SIGWINCH   replay-with-content: $REPLAY_BYTES"
+echo "switch-back reconnect (wasLive:true): $WASLIVE_BACK   re-focus (focused:true): $FOCUS_BACK"
 echo "xcodebuild suite passed: $XC_PASS"
 echo "=== verdict ==="
-# Two sessions stay RESIDENT, so a backgrounded tab streams live — nothing is
-# missed and replay is empty by design (replay-with-content is informational,
-# not required). The return path proven here is: the agent's 30s of output
-# persisted (sentinels), switch-back re-subscribed to the LIVE session, and the
-# server kicked a SIGWINCH so a full-screen TUI repaints its current frame.
+# Two sessions stay RESIDENT, so a backgrounded tab streams live: its 30s of
+# output persists (sentinels), switch-back reuses the socket rather than
+# reconnecting (wasLive:true stays 0) and re-focuses the tab. The repaint of the
+# current frame is client-side, from the retained grid — the passing sim suite
+# is what verifies it rendered.
 if [ "$XC_PASS" -ne 1 ]; then
   echo "FAIL: the sim suite did not pass — incidental events do not count"
   echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
@@ -83,12 +82,12 @@ if [ "$SENT_A" -eq 0 ] || [ "$SENT_B" -eq 0 ]; then
   echo "FAIL: an agent's 30s run never reached its sentinel in terminal_logs (A=$SENT_A B=$SENT_B)"
   echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
 fi
-if [ "$WASLIVE_BACK" -eq 0 ]; then
-  echo "FAIL: switching back never re-subscribed to a live session (no noise_start wasLive:true)"
+if [ "$WASLIVE_BACK" -ne 0 ]; then
+  echo "FAIL: switch-back reconnected a resident session (noise_start wasLive:true=$WASLIVE_BACK); socket was not reused"
   echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
 fi
-if [ "$SIGWINCH" -eq 0 ]; then
-  echo "FAIL: switch-back kicked no SIGWINCH — a returning full-screen TUI would not repaint"
+if [ "$FOCUS_BACK" -lt 1 ]; then
+  echo "FAIL: switch-back never re-focused a live session (no noise_focus focused:true)"
   echo "--- xcodebuild tail ---"; tail -30 "$E2E_DIR/xcodebuild.log"; exit 1
 fi
-echo "PASS: 30s of tabbed-away agent output persisted (both sentinels); switch-back re-subscribed live and kicked SIGWINCH (returning tab repaints current frame)"
+echo "PASS: 30s of tabbed-away agent output persisted (both sentinels); switch-back reused the live socket (no reconnect) and re-focused the tab"

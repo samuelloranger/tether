@@ -4,7 +4,8 @@ import XCTest
 /// return, not a stale or blank one. Two synthetic agents (standing in for
 /// claude / cursor-agent) repaint for ~30s while one tab is backgrounded, then
 /// we switch back. The oracle (run-bg-accumulation.sh) checks both sentinels
-/// persisted and the switch-back re-subscribed live + kicked a SIGWINCH repaint.
+/// persisted and that switch-back reused the live socket (no reconnect) and
+/// re-focused the tab; the returning tab repaints from its retained grid.
 final class BackgroundAccumulationRenderTests: TetherUITestCase {
   func testAgentOutputWhileTabbedAwayRendersOnReturn() throws {
     let app = launchApp()
