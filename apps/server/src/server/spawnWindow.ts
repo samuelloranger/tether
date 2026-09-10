@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 // Why every child spawn in this server passes `windowsHide`.
 //
 // The daemon is started detached (main.ts), which on Windows means
@@ -26,6 +28,24 @@
 // also keeps the option object's shape identical across platforms.
 export const HIDE_CONSOLE = { windowsHide: true } as const;
 
+// Why every *synchronous* child spawn also needs a deadline.
+//
+// spawnSync blocks the JS thread, so nothing running on the event loop can
+// interrupt it — including bun:test's per-test timeout, which is just a timer.
+// A child that never exits therefore has no ceiling short of the CI step's own
+// cap: a powershell.exe caught stuck for 890s took its whole `bun test` worker
+// with it, stranding every file still queued to that worker and reporting
+// nothing at all. Raising test timeouts cannot fix that shape of hang; only a
+// spawn-level deadline can, and only node:child_process offers one (Bun.spawnSync
+// has no timeout option).
+//
+// Generous on purpose — this is a liveness bound, not a performance budget. git
+// on a large repository is allowed to be slow; it is not allowed to be
+// infinite. Every call site here already treats `status === null` as a failure,
+// so a killed child surfaces as an error rather than truncated output parsed as
+// if it were complete.
+export const SPAWN_TIMEOUT_MS = 60_000;
+
 // Kill a process and its whole descendant tree on Windows.
 //
 // A signal on Windows only ever terminates the one pid, leaving the shell's
@@ -34,10 +54,14 @@ export const HIDE_CONSOLE = { windowsHide: true } as const;
 // matches the POSIX process-group kill. `/F` because an interactive shell will
 // not close on the polite request either. Shared so the holder's PTY teardown
 // and pty.ts's detached-holder fallback stay one implementation, not two.
+// node:child_process rather than Bun.spawnSync for the timeout alone: this is on
+// the session-teardown path, and a blocking spawn with no deadline would hang
+// the kill instead of failing it.
 export function killWindowsTree(pid: number): void {
   try {
-    Bun.spawnSync(['taskkill.exe', '/PID', String(pid), '/T', '/F'], {
+    spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
       stdio: ['ignore', 'ignore', 'ignore'],
+      timeout: SPAWN_TIMEOUT_MS,
       ...HIDE_CONSOLE,
     });
   } catch {}

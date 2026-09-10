@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { HIDE_CONSOLE } from './spawnWindow';
 
@@ -45,39 +46,73 @@ export function processStartTime(pid: number): string | null {
 // status — from several cold powershell.exe spawns to none, which on a
 // contended Windows CI runner is the difference between finishing inside the
 // test budget and timing out. Only non-null answers are cached: a "gone" pid
-// must stay re-queryable, and a live pid never yields null in a way the retry
-// below has not already covered.
+// must stay re-queryable, and caching a live pid's null would freeze one slow
+// interpreter start into a permanently wrong answer.
 const startTimeCache = new Map<number, string>();
+
+// Is `pid` gone, cheaply? An empty answer from powershell.exe used to be
+// ambiguous — gone, or just too slow — and the old retry paid a second cold
+// spawn to guess. Signal 0 settles it for ~2µs and no subprocess: ESRCH is the
+// only answer that means "not there". EPERM means the process exists and is
+// merely protected (pid 4, System), which is alive.
+function definitelyGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
 
 function windowsStartTime(pid: number): string | null {
   const cached = startTimeCache.get(pid);
   if (cached !== undefined) return cached;
-  // Retried once. An empty answer is ambiguous — it means EITHER the pid is
-  // gone (the documented case below) OR powershell.exe never got far enough to
-  // answer, which happens on a cold start under load and made this return null
-  // for a process that was plainly alive. The retry costs one extra spawn on
-  // the genuinely-gone path, and the callers run this at most twice.
-  const answer = queryWindowsStartTime(pid) ?? queryWindowsStartTime(pid);
+  // A gone pid answers empty no matter how long powershell.exe is given, so
+  // asking it at all was two cold spawns spent confirming what the kernel
+  // already knows. Ask the kernel first.
+  if (definitelyGone(pid)) return null;
+  // One patient attempt, not two impatient ones. The retry this replaces existed
+  // because a cold powershell.exe under load answered empty for a process that
+  // was plainly alive — but a second cold start races the same contention and
+  // is no likelier to win it, and paying two of them is what pushed this past
+  // the test budget. Now that a dead pid never reaches here, an empty answer
+  // means only "too slow", and the fix for too slow is a longer single deadline.
+  const answer = queryWindowsStartTime(pid);
   if (answer !== null) startTimeCache.set(pid, answer);
   return answer;
 }
 
+// A powershell.exe that never finishes starting is not a hypothetical: one was
+// caught 890 seconds into a `bun test` worker with the run's other 47 files
+// still queued behind it. spawnSync blocks the JS thread, so bun's per-test
+// timeout — a timer on the event loop that blocking call owns — can never fire;
+// nothing below the CI step's own cap bounds it. That is why raising test
+// timeouts never fixed the server-windows hang. A spawn-level timeout is the
+// only thing that can, and it must come from node:child_process: Bun.spawnSync
+// has no equivalent.
+//
+// Sized to be the single attempt's whole budget: generous enough that a cold
+// interpreter on a loaded runner still answers (measured at ~1s idle, and two
+// 5s attempts were not enough under a deliberately starved 20-worker run),
+// while leaving room under the caller's own 20s ceiling.
+const POWERSHELL_TIMEOUT_MS = 12_000;
+
 function queryWindowsStartTime(pid: number): string | null {
   try {
-    const proc = Bun.spawnSync(
+    const proc = spawnSync(
+      'powershell.exe',
       [
-        'powershell.exe',
         '-NoProfile',
         '-NonInteractive',
         '-Command',
         `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).StartTime.Ticks`,
       ],
-      HIDE_CONSOLE,
+      { encoding: 'utf8', timeout: POWERSHELL_TIMEOUT_MS, ...HIDE_CONSOLE },
     );
-    const out = proc.stdout.toString().trim();
+    const out = (proc.stdout ?? '').trim();
     // A missing pid yields an empty string (SilentlyContinue swallows the
     // error and .Ticks on $null produces nothing) — same "gone" signal the
-    // POSIX branches return null for.
+    // POSIX branches return null for. A killed-on-timeout child lands here too.
     return /^\d+$/.test(out) ? out : null;
   } catch {
     return null;

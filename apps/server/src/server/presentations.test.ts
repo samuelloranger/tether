@@ -94,9 +94,16 @@ test('debounces changes and resets all previews for a project', async () => {
     registry.create({ entry, project: 'creneau', title: 'Second' });
 
     writeFileSync(css, 'body{color:red}');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Poll for the debounce to land rather than sleeping a flat 50ms: the wait
+    // is for an fs-watch event, and on a loaded CI worker that arrives late
+    // through no fault of the code. A fixed sleep turns "slow" into "wrong".
+    const revisionOf = () => registry.list().find((preview) => preview.id === first.id)?.revision;
+    const deadline = Date.now() + 10_000;
+    while (revisionOf() !== 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
 
-    expect(registry.list().find((preview) => preview.id === first.id)?.revision).toBe(1);
+    expect(revisionOf()).toBe(1);
     expect(registry.reset('creneau')).toBe(2);
     expect(registry.list()).toEqual([]);
   } finally {

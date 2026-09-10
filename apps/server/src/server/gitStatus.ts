@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { HIDE_CONSOLE } from './spawnWindow';
+import { HIDE_CONSOLE, SPAWN_TIMEOUT_MS } from './spawnWindow';
 
 // Client mirror: parseRepoStatus / canPushHead live in tether-core (git_status).
 // Keep formatRepoStatusLabel / canRewriteHead semantics identical when changing either.
@@ -40,7 +40,11 @@ export function formatRepoStatusLabel(status: RepoStatus): string | null {
 }
 
 function gitOut(root: string, args: string[]): { status: number | null; stdout: string } {
-  const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', ...HIDE_CONSOLE });
+  const result = spawnSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    timeout: SPAWN_TIMEOUT_MS,
+    ...HIDE_CONSOLE,
+  });
   return { status: result.status, stdout: (result.stdout || '').trim() };
 }
 

@@ -157,12 +157,19 @@ describe('noise channel — pairing timeouts', () => {
     const psk = derivePsk('011B-2345-6789');
     const [serverIo, clientIo] = pipe();
 
+    // The two bounds only have to be ORDERED (confirm outlasts the handshake
+    // window) for this to still catch a confirm wrongly bounded by
+    // handshakeTimeoutMs. They were 60ms/150ms, which also demanded that the
+    // crypto exchange itself win a race against a 60ms wall clock — measured at
+    // 3-6ms of actual work, so a starved CI worker missed the deadline while
+    // doing nothing wrong, and this was the top server-windows flake. Keep the
+    // ordering, give the exchange a margin it cannot plausibly lose.
     const serverPromise = acceptPairing(serverIo, server.priv, {
       psk,
-      // Resolves well after the 60ms handshake window, within the confirm window.
-      confirm: () => new Promise((r) => setTimeout(() => r(true), 150)),
-      handshakeTimeoutMs: 60,
-      confirmTimeoutMs: 2_000,
+      // Resolves after the handshake window has closed, inside the confirm one.
+      confirm: () => new Promise((r) => setTimeout(() => r(true), 2_400)),
+      handshakeTimeoutMs: 2_000,
+      confirmTimeoutMs: 60_000,
     });
 
     const i = pairInitiator(device.priv, psk);

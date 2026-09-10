@@ -32,6 +32,7 @@
 // scratch needs SetNamedSecurityInfo plus a hand-built ACL, which is a large
 // amount of FFI for something the in-box tool does correctly in one call.
 import { spawnSync } from 'node:child_process';
+import { SPAWN_TIMEOUT_MS } from './spawnWindow';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -91,6 +92,10 @@ export function secureWindowsPath(target: string, isDir: boolean): AclResult {
   try {
     const proc = spawnSync('icacls.exe', icaclsArgs(target, principal, isDir), {
       stdio: ['ignore', 'ignore', 'ignore'],
+      // Bounded because this sits on the boot path and spawnSync is blocking: a
+      // wedged icacls would hang startup itself, not just fail it. Expiry gives
+      // status null, which the best-effort contract already reads as 'failed'.
+      timeout: SPAWN_TIMEOUT_MS,
       windowsHide: true,
     });
     return proc.status === 0 ? 'applied' : 'failed';
