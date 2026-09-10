@@ -370,6 +370,22 @@ export function App() {
     if (!layout.docked) setDrawerOpen(false);
   };
 
+  // /resume: open the picked past Claude session in a fresh agent tab.
+  const resumeAgentChat = (hostId: string, cwd: string | undefined, claudeSessionId: string) => {
+    void app.newAgentChat(hostId).then((sessionId) => {
+      if (!sessionId) return;
+      const current = viewStateRef.current;
+      const solo = newSoloView({
+        hostId,
+        sessionId,
+        kind: 'agent',
+        cwd,
+        resumeSessionId: claudeSessionId,
+      });
+      applyViews({ views: [...current.views, solo], activeViewId: solo.id });
+    });
+  };
+
   useEffect(() => {
     void ensureNotificationPermission();
   }, []);
@@ -613,6 +629,7 @@ export function App() {
                     fontFamily={prefs.terminalFont}
                     onFrame={app.handleWsFrame}
                     onDisconnected={(hostId) => app.retryHost(hostId)}
+                    onResumeSession={resumeAgentChat}
                     onFocusPane={(paneId) => {
                       const current = viewStateRef.current;
                       applyViews({

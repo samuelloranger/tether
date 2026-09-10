@@ -6,6 +6,8 @@ export interface SessionRef {
   kind?: string;
   /** cwd for a freshly-created agent chat's first agent.start. */
   cwd?: string;
+  /** A past Claude session id to resume into this agent tab (`/resume`). */
+  resumeSessionId?: string;
 }
 export type PaneDir = 'row' | 'col';
 export type PaneSide = 'a' | 'b';

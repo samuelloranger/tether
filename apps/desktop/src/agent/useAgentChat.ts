@@ -12,6 +12,7 @@ export function useAgentChat(input: {
   sessionId: string;
   noiseAddress: string;
   cwd?: string;
+  resumeSessionId?: string;
 }) {
   const modelRef = useRef<AgentChatModel | null>(null);
   if (!modelRef.current) modelRef.current = new AgentChatModel();
@@ -27,13 +28,14 @@ export function useAgentChat(input: {
       sessionId: input.sessionId,
       noiseAddress: input.noiseAddress,
       cwd: input.cwd,
+      resumeSessionId: input.resumeSessionId,
     });
     bindingRef.current = binding;
     return () => {
       binding.close();
       bindingRef.current = null;
     };
-  }, [model, input.hostId, input.sessionId, input.noiseAddress, input.cwd]);
+  }, [model, input.hostId, input.sessionId, input.noiseAddress, input.cwd, input.resumeSessionId]);
 
   const send = useCallback((payload: unknown) => {
     bindingRef.current?.send(payload);

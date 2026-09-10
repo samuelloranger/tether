@@ -102,3 +102,13 @@ export function toolStyle(name: string): AgentToolStyle {
       return { accent: 'muted', glyph: '⚙' };
   }
 }
+
+/** One past Claude Code session offered in the /resume picker (mirror of the
+ * server's ClaudeSessionMeta). */
+export interface ClaudeSessionMeta {
+  id: string;
+  label: string;
+  mtimeMs: number;
+  msgCount: number;
+  cwd: string;
+}

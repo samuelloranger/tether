@@ -1,4 +1,4 @@
-import type { UsageWindow } from './agentTypes';
+import type { ClaudeSessionMeta, UsageWindow } from './agentTypes';
 
 export type AgentFrame =
   | { t: 'agent.user'; seq: number; text: string }
@@ -8,6 +8,8 @@ export type AgentFrame =
   | { t: 'agent.permission_req'; reqId: string; name: string; input: unknown }
   | { t: 'agent.done'; seq: number; cost?: number; usage?: unknown }
   | { t: 'agent.error'; seq?: number; message: string }
+  // Reply to agent.list-sessions: past Claude sessions for the /resume picker.
+  | { t: 'agent.sessions'; sessions: ClaudeSessionMeta[] }
   // Ephemeral, no seq: account model + 5h/7day usage for the info strip.
   | {
       t: 'agent.status';
@@ -29,8 +31,23 @@ export function decodeAgentFrame(json: string): AgentFrame | null {
   return v as unknown as AgentFrame;
 }
 
-export function agentStart(input: { id: string; cwd: string; sinceSeq: number }) {
-  return { t: 'agent.start' as const, id: input.id, cwd: input.cwd, sinceSeq: input.sinceSeq };
+export function agentStart(input: {
+  id: string;
+  cwd: string;
+  sinceSeq: number;
+  resumeClaudeSessionId?: string;
+}) {
+  return {
+    t: 'agent.start' as const,
+    id: input.id,
+    cwd: input.cwd,
+    sinceSeq: input.sinceSeq,
+    ...(input.resumeClaudeSessionId ? { resumeClaudeSessionId: input.resumeClaudeSessionId } : {}),
+  };
+}
+
+export function agentListSessions(cwd: string) {
+  return { t: 'agent.list-sessions' as const, cwd };
 }
 
 export function agentPrompt(text: string) {

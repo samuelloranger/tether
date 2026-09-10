@@ -221,3 +221,14 @@ describe('AgentChatModel palette', () => {
     expect(m.snapshot().messages.length).toBe(0);
   });
 });
+
+describe('AgentChatModel resume list', () => {
+  test('agent.sessions frame populates resumeSessions', () => {
+    const m = new AgentChatModel();
+    m.apply({
+      t: 'agent.sessions',
+      sessions: [{ id: 's1', label: 'x', mtimeMs: 1, msgCount: 2, cwd: '/x' }],
+    });
+    expect(m.snapshot().resumeSessions.map((s) => s.id)).toEqual(['s1']);
+  });
+});

@@ -1,7 +1,13 @@
 import { matchCommands } from './agentCommands';
 import { deriveDiff, summarize } from './agentDiff';
 import type { AgentFrame } from './agentFrames';
-import type { AgentMessage, AgentStatus, AgentTurn, AgentUsage } from './agentTypes';
+import type {
+  AgentMessage,
+  AgentStatus,
+  AgentTurn,
+  AgentUsage,
+  ClaudeSessionMeta,
+} from './agentTypes';
 
 /** Map the server's `done` cost + usage blob into our AgentUsage. */
 function toUsage(cost: number | undefined, usage: unknown): AgentUsage | undefined {
@@ -58,6 +64,8 @@ export interface AgentSnapshot {
   paletteIndex: number;
   /** Which sub-picker is open over the composer, or null. */
   pendingPicker: 'model' | 'resume' | null;
+  /** Past Claude sessions for the /resume picker (from agent.sessions). */
+  resumeSessions: ClaudeSessionMeta[];
 }
 
 /**
@@ -78,6 +86,7 @@ export class AgentChatModel {
   private lastUserPrompt: string | null = null;
   private paletteIndex = 0;
   private pendingPicker: 'model' | 'resume' | null = null;
+  private resumeSessions: ClaudeSessionMeta[] = [];
   private listeners = new Set<() => void>();
   private cached: AgentSnapshot | null = null;
 
@@ -105,6 +114,7 @@ export class AgentChatModel {
         status: this.statusValue,
         paletteIndex: this.paletteIndex,
         pendingPicker: this.pendingPicker,
+        resumeSessions: this.resumeSessions,
       };
     }
     return this.cached;
@@ -221,6 +231,10 @@ export class AgentChatModel {
           fiveHour: frame.fiveHour ?? prev?.fiveHour ?? null,
           sevenDay: frame.sevenDay ?? prev?.sevenDay ?? null,
         };
+        break;
+      }
+      case 'agent.sessions': {
+        this.resumeSessions = frame.sessions;
         break;
       }
       case 'agent.permission_req': {
