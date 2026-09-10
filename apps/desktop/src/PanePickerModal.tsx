@@ -5,8 +5,8 @@ import { sessionLabel, tabLabels } from './sessionLabel';
 import type { DrawerSession, HostProfile } from './types';
 
 /**
- * Chooser for an empty pane: pick an existing session (any host) or start a new
- * one. Labels reuse the cross-host tab labelling so collisions stay legible.
+ * Chooser for an empty pane: pick an existing session (any host) or start a new one.
+ * Labels reuse the cross-host tab labelling so collisions stay legible.
  */
 export function PanePickerModal({
   hosts,

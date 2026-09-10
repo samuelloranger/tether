@@ -1,9 +1,6 @@
 /**
- * What the screen says when a host has no terminal open.
- *
- * A launch is not allowed to open one for you — the WebSocket open path calls
- * `startSession`, so restoring onto nothing would spawn a shell nobody asked
- * for. So the screen asks instead of guessing.
+ * Shown when a host has no terminal open. A launch must not open one — the WS open
+ * path calls `startSession` — so the screen asks instead of spawning a shell.
  */
 export function TerminalEmpty(props: { open: boolean; hostName: string; onNew: () => void }) {
   const { hostName, onNew, open } = props;

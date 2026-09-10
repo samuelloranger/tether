@@ -31,10 +31,8 @@ filesRoutes.get('/api/sessions/:id/dir', async (c) => {
   }
 });
 
-// Receive an uploaded file (mobile image-picker, iOS/iPadOS drag-drop, desktop
-// drag-drop all funnel through here) and write it into a per-session upload
-// dir under ~/.tether/uploads, not the session's live cwd — keeps uploads out
-// of whatever project the user happens to be working in.
+// Uploads land in a per-session dir under ~/.tether/uploads, not the session's
+// live cwd — keeps them out of whatever project the user is working in.
 filesRoutes.post('/api/sessions/:id/upload', async (c) => {
   const sessionId = c.req.param('id');
   const form = await c.req.formData().catch(() => null);

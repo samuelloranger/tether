@@ -67,7 +67,6 @@ test('a test notification whose devices are all stale reports failure, not succe
 
     expect(res.status).toBe(502);
     expect((await res.json()).error).toContain('removed');
-    // The pruning itself must still have happened.
     expect(countPushDevices()).toBe(0);
   } finally {
     globalThis.fetch = previous;

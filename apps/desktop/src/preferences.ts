@@ -16,9 +16,8 @@ export type ResolvedFlavor = Exclude<ThemePreference, 'system'>;
 export type DarkFlavor = Exclude<ResolvedFlavor, 'latte' | 'default-light'>;
 
 /**
- * Whether a flavour is a light one. The native title bar follows the *window*
- * theme rather than our CSS, so the shell has to tell the window which way to
- * dress — otherwise a light palette renders under a dark title bar.
+ * The native title bar follows the *window* theme rather than our CSS, so the
+ * shell has to tell the window which way to dress.
  */
 export function isLightFlavor(flavor: ResolvedFlavor): boolean {
   return flavor === 'latte' || flavor === 'default-light';
@@ -26,10 +25,8 @@ export function isLightFlavor(flavor: ResolvedFlavor): boolean {
 export type CatppuccinFlavor = 'latte' | 'frappe' | 'macchiato' | 'mocha';
 
 /**
- * Only faces the app actually ships. The list used to offer Fira Code, IBM Plex
- * Mono and Source Code Pro, none of which were bundled — so they resolved to
- * whatever the OS had, and `loadPreferences` did not accept them back anyway,
- * which meant picking one appeared to work and silently reverted on reload.
+ * Only faces the app actually ships — the list used to offer unbundled fonts
+ * that silently reverted on reload since `loadPreferences` rejected them.
  */
 export type TerminalFont = 'JetBrains Mono Variable' | 'monospace';
 
@@ -77,12 +74,8 @@ export interface TerminalThemeColors {
 }
 
 /**
- * The three colours a session's state can be wearing.
- *
- * These are not decoration and not a second accent palette: the chrome reads
- * whichever one matches the state of the session you are looking at (see
- * `litTheme.ts`), so switching sessions re-tints the app. Every flavour carries
- * its own triple so a Catppuccin theme stays inside its own palette.
+ * Not decoration and not a second accent palette: the chrome reads whichever
+ * one matches the state of the session you are looking at (see `litTheme.ts`).
  */
 export interface HeatColors {
   /** producing output */

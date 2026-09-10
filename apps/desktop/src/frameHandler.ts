@@ -14,14 +14,8 @@ export type FrameApplyResult = {
 };
 
 /**
- * Hooks that bracket the window in which xterm is parsing SERVER output.
- *
- * This is how a parser-generated auto-reply (a Device Attributes or cursor
- * position answer) is told apart from a user keystroke: replies are emitted
- * synchronously while `term.write` parses the bytes that asked for them, so
- * anything arriving on `onData` outside that window is the user typing.
- * Without this distinction the only way to suppress replies is to drop
- * `onData` wholesale, which silently swallows real keystrokes.
+ * Brackets xterm's SERVER-output parsing so a parser-generated auto-reply
+ * (DA/cursor-position) can be told apart from a user keystroke on `onData`.
  */
 export interface FrameSinkHooks {
   beginWrite(): void;

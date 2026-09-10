@@ -3,14 +3,8 @@ import { useEffect } from 'react';
 import { isLightFlavor, type ResolvedFlavor } from './preferences';
 
 /**
- * Keeps the native window chrome in step with the palette.
- *
- * The title bar follows the *window* theme, not our CSS variables, so choosing a
- * light flavour used to leave a black title bar above a light app — which reads
- * as a broken window rather than a light theme.
- *
- * Failure is swallowed on purpose: this is cosmetic, and a window API that
- * rejects must not take the app down with it.
+ * The title bar follows the *window* theme, not our CSS, so a light flavour would
+ * leave a black title bar above a light app. Failure is swallowed — it's cosmetic.
  */
 export function useWindowTheme(flavor: ResolvedFlavor): void {
   useEffect(() => {

@@ -1,8 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { HIDE_CONSOLE } from './spawnWindow';
 
-// Server-side RepoStatus + pure helpers. Client mirror:
-// parseRepoStatus / canPushHead live in tether-core (git_status).
+// Client mirror: parseRepoStatus / canPushHead live in tether-core (git_status).
 // Keep formatRepoStatusLabel / canRewriteHead semantics identical when changing either.
 export interface RepoStatus {
   branch: string;
@@ -69,13 +68,8 @@ export function readRepoStatus(root: string): RepoStatus {
   return { branch, shortSha, detached, upstream, ahead, behind };
 }
 
-/**
- * Same reads as readRepoStatus, off the event loop.
- *
- * The git watcher runs on every worktree change, so it must never hold the loop:
- * one blocked read stalls the PTY of every session on the server. HTTP handlers
- * keep the sync twin — they are per-request, not per-keystroke.
- */
+// Same reads as readRepoStatus, off the event loop: the git watcher must never
+// hold the loop — one blocked read stalls every session's PTY on the server.
 function gitOutAsync(
   root: string,
   args: string[],

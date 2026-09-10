@@ -3,9 +3,7 @@ import type { DividerRect } from './layoutRects';
 
 /**
  * A draggable branch boundary. `ratio` is measured against the branch's own box
- * (`divider.containerRect`), so nested dividers track correctly rather than
- * against the whole terminal area. The container's on-screen origin is
- * `containerOrigin` (the `.resident-terminals` box top-left in client space).
+ * (`divider.containerRect`), so nested dividers track correctly.
  */
 export function PaneDivider({
   divider,

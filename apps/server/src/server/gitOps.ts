@@ -5,9 +5,8 @@ import { MAX_DIFF_BYTES, readDiffSummary } from './gitDiff';
 import { canRewriteHead, readRepoStatus } from './gitStatus';
 import { HIDE_CONSOLE } from './spawnWindow';
 
-// Write-side git operations for the diff view: staging, discarding, committing,
-// and history. Same trust anchor as the read side — the session's live cwd
-// resolved to its git root, a tree the shell user already fully controls.
+// Same trust anchor as the read side — the session's live cwd resolved to its
+// git root, a tree the shell user already fully controls.
 export class GitOpsError extends Error {
   constructor(
     readonly status: 400 | 404 | 409,
@@ -23,9 +22,8 @@ function validatePath(requestedPath: string) {
   }
 }
 
-// Runs git, surfacing failures as 409 with git's own stderr — the client
-// shows it verbatim (hooks, conflicts, nothing-staged all self-explain).
-// `okStatuses` lets callers accept `git diff --no-index`'s exit-1-on-diff.
+// Surfaces failures as 409 with git's own stderr — the client shows it
+// verbatim (hooks, conflicts, nothing-staged all self-explain).
 function runGit(root: string, args: string[], input?: string, okStatuses: number[] = [0]): string {
   const result = spawnSync('git', ['-C', root, ...args], {
     encoding: 'utf8',
@@ -70,15 +68,8 @@ function splitHunks(diff: string): { header: string; hunks: string[] } {
   return { header, hunks };
 }
 
-// Stages (or unstages, reverse=true) one hunk by re-reading the file's current
-// diff server-side, extracting the hunk at hunkIndex, and applying just that
-// patch to the index. The client never sends patch content — only an index
-// into the server's own view. If the file changed since the client rendered
-// (index out of range), 409 tells it to refresh.
-//
-// Untracked files must use `git diff --no-index` against /dev/null — plain
-// `git diff -- path` is empty for them, which is exactly what readDiff shows
-// the client. Without this, Stage hunk always 409s on new files.
+// Client only sends a hunk index into the server's own diff view, never patch
+// content. Untracked files need `git diff --no-index` — plain `git diff` is empty for them.
 function applyHunk(root: string, requestedPath: string, hunkIndex: number, reverse: boolean): void {
   validatePath(requestedPath);
   let diff: string;

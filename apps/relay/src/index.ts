@@ -50,9 +50,8 @@ const app = new Hono();
 app.get('/health', (c) => c.json({ ok: true }));
 
 app.post('/push', async (c) => {
-  // Rate-limit BEFORE reading the body. /push is public and unauthenticated, so
-  // parsing first would let an attacker spend our memory and CPU on a huge JSON
-  // document that the schema was always going to reject.
+  // Rate-limit BEFORE reading the body: /push is public, so parsing first lets an
+  // attacker spend memory/CPU on a huge JSON the schema was always going to reject.
   const ip = clientIpFromForwarded(c.req.header('x-forwarded-for'), TRUSTED_PROXY_HOPS);
   if (!perIp.take(ip)) return c.json({ error: 'rate_limited' }, 429);
 

@@ -8,7 +8,6 @@ import AppKit
 #endif
 #endif
 
-/// Banner announcing a presentation — port of `PresentationBanner.tsx`.
 public struct PresentationBannerView: View {
   public var label: String
   public var systemImage: String
@@ -44,9 +43,8 @@ public struct PresentationBannerView: View {
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 6)
-      // When this sits inside a wider header row, that row owns the background
-      // and the hairline; drawing them here left the surface stopping short of
-      // the close button, with a visible seam between the two.
+      // Inside a wider header row that row owns the background and hairline;
+      // drawing them here left a seam short of the close button.
       .background(showsChrome ? TetherColors.surface : Color.clear)
       .overlay(alignment: .bottom) {
         if showsChrome {
@@ -61,7 +59,6 @@ public struct PresentationBannerView: View {
   }
 }
 
-/// Full-screen presentation host with back banner.
 public struct PresentationPaneView: View {
   public var preview: Presentation
   public var url: URL
@@ -109,12 +106,8 @@ public struct PresentationPaneView: View {
       }
       PresentationView(preview: preview, url: url)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The page owns everything below the header, home-indicator strip
-        // included. A chrome colour down there is a different colour from
-        // whatever the page paints, so it reads as a black bar under the
-        // content — and the page's colour is arbitrary, so no chrome colour can
-        // ever match it. WebKit re-adds the safe-area inset to its own scroll
-        // view, so nothing ends up stranded under the indicator.
+        // The page paints below the header (indicator included); any chrome colour
+        // there reads as a bar. WebKit re-adds the safe-area inset in its scroll view.
         .ignoresSafeArea(.container, edges: .bottom)
     }
     // ignoresSafeAreaEdges defaults to .all — that default is what painted the
@@ -123,10 +116,8 @@ public struct PresentationPaneView: View {
   }
 }
 
-/// Renders agent-pushed HTML in a WKWebView — port of `PresentationView.native.tsx`.
-///
-/// SECURITY: matches RN (`originWhitelist=['*']`, JS left at platform default =
-/// enabled). No script message handlers, no bridge to SessionStore / Keychain.
+/// SECURITY: originWhitelist ['*'], JS enabled, but NO script message handlers
+/// and no bridge to SessionStore / Keychain.
 public struct PresentationView: View {
   public var preview: Presentation
   public var url: URL
@@ -159,9 +150,8 @@ private func makePresentationWebView() -> WKWebView {
   let webView = WKWebView(frame: .zero, configuration: config)
   webView.allowsBackForwardNavigationGestures = false
   #if os(iOS)
-  // The view reaches the screen's bottom edge on purpose, so WebKit has to be
-  // the one adding the safe-area inset back — .automatic does not, outside a
-  // scroll-view-in-navigation context.
+  // View reaches the bottom edge on purpose, so WebKit must add the safe-area
+  // inset back; .automatic does not, outside a scroll-view-in-navigation context.
   webView.scrollView.contentInsetAdjustmentBehavior = .always
   #endif
   return webView

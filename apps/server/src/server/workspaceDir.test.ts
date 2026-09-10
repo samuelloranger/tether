@@ -143,10 +143,8 @@ test(
   BIG_DIR_TIMEOUT_MS,
 );
 
-// ---------------------------------------------------------------------------
 // Containment, mirroring workspaceFile.test.ts. The listing route resolves paths
 // with the same helpers, so the same Windows spelling hazards apply to it.
-// ---------------------------------------------------------------------------
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -197,7 +195,6 @@ test('a cwd outside the root is rejected however it is spelled', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // The dev/ino identity check that closes the read-then-swap window.
 //
 // Measured on Windows 11 / NTFS before this was trusted: libuv DOES populate ino
@@ -213,7 +210,6 @@ test('a cwd outside the root is rejected however it is spelled', () => {
 // differ by one and collapse onto the same number. 500 sibling directories gave
 // 500 distinct BigInt ids but only 497 distinct number ids. Hence
 // `lstatSync(..., {bigint: true})` in workspaceDir.ts.
-// ---------------------------------------------------------------------------
 
 test('lstat ino is populated and distinguishes directories on this host', () => {
   withRoot((root) => {

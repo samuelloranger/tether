@@ -5,9 +5,8 @@ import { db } from './db';
 import { addDevice } from './deviceRegistry';
 import { mintToken } from './deviceToken';
 
-// Isolation is guaranteed by test-preload.ts (bunfig.toml), which pins
-// TETHER_DB_PATH to a temp file BEFORE any test file imports ./db — so this
-// suite never touches the developer's live config database.
+// Isolation is guaranteed by test-preload.ts, which pins TETHER_DB_PATH to a
+// temp file before any test imports ./db — this suite never touches the live config DB.
 
 afterEach(() => {
   db.query('DELETE FROM auth_devices').run();

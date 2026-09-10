@@ -1,7 +1,5 @@
-// Token-bucket limiter. The relay is a public endpoint with no accounts, so
-// this is the only thing standing between one looping self-hosted server and
-// the whole APNs quota. Keyed per device token AND per source IP: the first
-// bounds damage to a single device, the second bounds a single bad actor.
+// Token-bucket limiter — the only thing between one looping self-hosted server and the
+// whole APNs quota. Keyed per device token AND source IP: bound one device, one bad actor.
 export interface BucketConfig {
   capacity: number;
   refillPerSecond: number;

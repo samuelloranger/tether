@@ -60,7 +60,6 @@ test('recordChunk/getLiveCwd/clearLiveCwd track state per session id', () => {
   expect(getLiveCwd('live-cwd-session')).toBeNull();
 });
 
-// --- Windows: a file URI path is not a native path -------------------------
 // The URI is always rooted at "/", so a Windows cwd arrives as "/C:/Users/x".
 // The leading slash is URI syntax and the separators depend on which shell
 // emitted it (our PowerShell profile writes "/", cmd.exe's $P writes "\").
