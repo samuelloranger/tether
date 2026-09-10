@@ -3239,3 +3239,59 @@ label > textarea {
   justify-content: center;
   z-index: 50;
 }
+
+/* Slash-command palette (agent chat composer) */
+.agent-palette {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+.agent-palette-row {
+  display: grid;
+  grid-template-columns: 20px auto auto 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.agent-palette-row.sel {
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface-raised));
+}
+.agent-palette-glyph {
+  color: var(--text-faint);
+}
+.agent-palette-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.agent-palette-args {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.agent-palette-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-palette-tag {
+  font-size: 10px;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+}

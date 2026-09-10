@@ -1,10 +1,11 @@
-import type { KeyboardEvent } from 'react';
 import { AgentInfoStrip } from './AgentInfoStrip';
+import { AgentPalette } from './AgentPalette';
 import type { AgentChatModel, AgentSnapshot } from './agentChatModel';
-import { agentInterrupt, agentPermission, agentPrompt } from './agentFrames';
+import { agentInterrupt } from './agentFrames';
+import { useAgentComposer } from './useAgentComposer';
 
-/** Input bar: prompt/queue, send/stop, and permission approve/deny. Port of
- * Swift AgentComposerView + QueuedRow + permission UI. */
+/** Input bar: prompt/queue, send/stop, permission approve/deny, and the
+ * slash-command palette. Port of Swift AgentComposerView + QueuedRow. */
 export function AgentComposer({
   model,
   snapshot,
@@ -16,30 +17,11 @@ export function AgentComposer({
 }) {
   const { draft, turn, queued, pendingApproval, sessionUsage, status } = snapshot;
   const streaming = turn !== 'idle';
-
-  const submit = () => {
-    const text = draft.trim();
-    if (!text) return;
-    if (streaming) {
-      model.enqueue(text);
-    } else {
-      model.notePromptSent();
-      send(agentPrompt(text));
-    }
-    model.setDraft('');
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
-  };
-
-  const resolve = (allow: boolean) => {
-    const r = model.resolvePermission(allow);
-    if (r) send(agentPermission({ reqId: r.id, allow }));
-  };
+  const { matches, paletteOpen, submit, runCommand, onKeyDown, resolve } = useAgentComposer(
+    model,
+    snapshot,
+    send,
+  );
 
   return (
     <div className="agent-composer">
@@ -80,6 +62,10 @@ export function AgentComposer({
             </button>
           ))}
         </div>
+      ) : null}
+
+      {paletteOpen ? (
+        <AgentPalette matches={matches} index={snapshot.paletteIndex} onRun={runCommand} />
       ) : null}
 
       <AgentInfoStrip status={status} sessionUsage={sessionUsage} />
