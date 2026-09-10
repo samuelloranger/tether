@@ -176,8 +176,7 @@ public struct TerminalAccessoryBar: View {
       Self.armFeedback.selectionChanged()
       model.ctrlArmed.toggle()
     } label: {
-      Text(model.ctrlArmed ? "Ctrl ✓" : "Ctrl")
-        .contentTransition(.opacity)
+      Text("Ctrl")
     }
     .buttonStyle(TerminalKeyStyle(armed: model.ctrlArmed))
     .accessibilityLabel("Control modifier")
