@@ -2,6 +2,13 @@ import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
 import { applyAgentStart, defaultGetAgentMessages, sendAgentStatus } from './agentReplay';
 import { type AgentUsageLimits, fetchAgentUsage } from './agentUsage';
+import {
+  type ClaudeSessionMeta,
+  listClaudeSessions,
+  sessionJsonlPath,
+  type TranslatedMessage,
+  translateSessionJsonl,
+} from './claudeSessions';
 import { patchConfig } from './config';
 import { db, getSession, setSessionModel } from './db';
 import type { AuthDevice } from './deviceRegistry';
@@ -68,6 +75,10 @@ export interface SessionDeps {
   getAgentMessages: (sessionId: string, sinceSeq: number) => AgentMessageRow[];
   /** Account 5h/7day usage for the `agent.status` frame; null = unavailable. */
   fetchAgentUsage: () => Promise<AgentUsageLimits | null>;
+  /** Past Claude Code sessions under this cwd (`/resume` picker). */
+  listClaudeSessions: (cwd: string) => ClaudeSessionMeta[];
+  /** Translate a past Claude session's transcript into stored rows (`/resume`). */
+  translateClaudeSession: (claudeSessionId: string, cwd: string) => TranslatedMessage[];
 }
 
 function defaultGetReplayLogs(sessionId: string, sinceId: number) {
@@ -102,6 +113,8 @@ const defaultDeps: SessionDeps = {
   agentRegistry: sharedAgentRegistry,
   getAgentMessages: defaultGetAgentMessages,
   fetchAgentUsage: () => fetchAgentUsage(),
+  listClaudeSessions: (cwd) => listClaudeSessions(cwd),
+  translateClaudeSession: (id, cwd) => translateSessionJsonl(sessionJsonlPath(cwd, id)),
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
@@ -116,6 +129,7 @@ type ClientMessage =
   | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number; resumeClaudeSessionId?: string }
   | { t: 'agent.prompt'; text: string }
   | { t: 'agent.model'; name: string }
+  | { t: 'agent.list-sessions'; cwd: string }
   | { t: 'agent.interrupt' };
 
 /** One row of the `devices` reply — the wire shape an iOS client mirrors. */
@@ -323,6 +337,8 @@ async function applyMessage(
       void patchConfig({ agent: { defaultModel: msg.name } });
       void sendAgentStatus(agent.currentId, d, sendSealed, agent);
     }
+  } else if (msg.t === 'agent.list-sessions') {
+    sendSealed({ t: 'agent.sessions', sessions: d.listClaudeSessions(msg.cwd) });
   } else if (msg.t === 'agent.interrupt') {
     if (agent.currentId) agent.registry.interrupt(agent.currentId);
   }

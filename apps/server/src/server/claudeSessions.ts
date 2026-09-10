@@ -20,6 +20,11 @@ function defaultProjectsDir(): string {
   return join(homedir(), '.claude', 'projects');
 }
 
+/** Absolute path of a session's transcript file for a given cwd. */
+export function sessionJsonlPath(cwd: string, id: string, projectsDir?: string): string {
+  return join(projectsDir ?? defaultProjectsDir(), slugForCwd(cwd), `${id}.jsonl`);
+}
+
 /** Best-effort last user-message text + a user-message count for a session file. */
 function labelFor(path: string): { label: string; msgCount: number } {
   let label = '';

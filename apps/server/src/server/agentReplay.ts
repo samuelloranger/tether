@@ -1,5 +1,5 @@
 import type { AgentFrame } from './agentDriver';
-import { type AgentMessageRow, getAgentMessages } from './agentMessages';
+import { type AgentMessageRow, appendAgentMessage, getAgentMessages } from './agentMessages';
 import { getConfig } from './config';
 import { createAgentSession, db, getSession } from './db';
 import { logError } from './log';
@@ -73,6 +73,23 @@ export async function applyAgentStart(
       const persisted = existing?.workspace_root ?? null;
       const cwd = persisted && persisted.length > 0 ? persisted : msg.cwd;
       createAgentSession(db, { id: msg.id, workspaceRoot: cwd });
+      // Graft the picked Claude session's history into this fresh tab as stored
+      // rows (fresh seqs) so the standard replay renders it; the driver then
+      // resumes that same Claude session so its context continues live.
+      if (msg.resumeClaudeSessionId) {
+        const rows = d.translateClaudeSession(msg.resumeClaudeSessionId, cwd);
+        let seq = 0;
+        for (const r of rows) {
+          appendAgentMessage(db, {
+            sessionId: msg.id,
+            seq: ++seq,
+            kind: r.kind,
+            text: r.text ?? null,
+            toolJson: r.toolJson ?? null,
+            isError: r.isError,
+          });
+        }
+      }
       const model = existing?.model ?? (getConfig().agent.defaultModel || null);
       await agent.registry.start(msg.id, cwd, {
         model,
