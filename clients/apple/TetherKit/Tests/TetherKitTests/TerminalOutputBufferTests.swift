@@ -38,8 +38,27 @@ final class TerminalResizeStrategyTests: XCTestCase {
     )
   }
 
-  func testPrimaryScreenKeepsAlacrittyReflow() {
+  func testPrimaryScreenShrinkAndColumnChangeKeepAlacrittyReflow() {
+    // Shrink: reflow is clean, and rebuilding would drop scrollback past the
+    // buffer budget for nothing.
     XCTAssertFalse(
+      TerminalResizeStrategy.shouldRebuildFromBuffer(
+        altScreen: false, oldCols: 20, oldRows: 12, newCols: 20, newRows: 8
+      )
+    )
+    // Column-only change: alacritty's column reflow is correct here.
+    XCTAssertFalse(
+      TerminalResizeStrategy.shouldRebuildFromBuffer(
+        altScreen: false, oldCols: 80, oldRows: 24, newCols: 100, newRows: 24
+      )
+    )
+  }
+
+  func testPrimaryScreenGrowRebuildsToAvoidReflowDuplication() {
+    // A row grow on the primary screen makes alacritty's reflow duplicate a
+    // content row into the newly exposed rows (the agent-TUI line-doubling bug).
+    // Rebuild from the buffer at the new size instead.
+    XCTAssertTrue(
       TerminalResizeStrategy.shouldRebuildFromBuffer(
         altScreen: false, oldCols: 20, oldRows: 8, newCols: 20, newRows: 12
       )
