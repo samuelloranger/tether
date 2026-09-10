@@ -8,9 +8,6 @@ export default defineConfig({
   sitemap: { hostname: "https://samlo.cloud/tether/" },
   cleanUrls: true,
   appearance: false,
-  // Internal planning docs live under docs/superpowers/ — keep them in the repo
-  // but don't publish them on the site.
-  srcExclude: ["superpowers/**"],
   themeConfig: {
     logo: { src: "/icon.svg", alt: "Tether" },
     nav: [
@@ -27,6 +24,7 @@ export default defineConfig({
           { text: "Terminal basics", link: "/terminal/basics" },
           { text: "Sessions & tabs", link: "/terminal/sessions" },
           { text: "Saved commands & search", link: "/terminal/saved-commands" },
+          { text: "Git, files & previews", link: "/workspace" },
           { text: "Security & networking", link: "/security" },
           { text: "Reach from anywhere", link: "/reach-from-anywhere" },
           { text: "Privacy", link: "/privacy" },
@@ -41,6 +39,7 @@ export default defineConfig({
           { text: "Data flow", link: "/data-flow" },
           { text: "Decisions", link: "/decisions" },
           { text: "Contributing", link: "/development/contributing" },
+          { text: "Desktop signing", link: "/development/desktop-signing" },
         ],
       },
     ],

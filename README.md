@@ -56,13 +56,13 @@ tether pair
 Same single binary, installed to `%LOCALAPPDATA%\Programs\tether\tether.exe` without an admin prompt, with that directory added to your user PATH — open a new terminal for it to take effect. See [the Windows server page](https://samlo.cloud/tether/windows) for supported shells, the firewall prompt on first start, and the platform's known limitations.
 
 ```bash
-tether serve | start | stop | restart | status | logs | present | pair | update | version
+tether serve | start | stop | restart | status | logs | present | pair | signal | devices | device | update | version
 ```
 
 - **Update later:** `tether update` downloads the newest release binary and restarts.
 - **macOS** binaries are unsigned — the first run may need: `xattr -d com.apple.quarantine ~/.local/bin/tether`.
 - **Data** (sessions + device registry) lives in `~/.tether/config/tether.db`; override with `TETHER_DB_PATH`.
-- Environment: `TETHER_PORT` (default 8085), `TETHER_DB_PATH`, `TETHER_REPO_SLUG`.
+- Environment: `TETHER_PORT` (default 8085), `TETHER_TLS` (`both` | `only` | `off`), `TETHER_TLS_PORT` (default 8443), `TETHER_DB_PATH`, `TETHER_REPO_SLUG`.
 
 > **Security:** access is per-device. Pair with `tether pair`; clients mint a short-lived bearer over Noise. The server serves TLS on `:8443` from a self-signed certificate clients pin on first pairing, alongside the plaintext `:8085` older clients use. The certificate is self-signed and CORS is open, so still run tether behind a tunnel (Tailscale / WireGuard / SSH) or keep it LAN-only.
 
@@ -70,9 +70,9 @@ tether serve | start | stop | restart | status | logs | present | pair | update 
 
 - **Persistent sessions** — each shell runs in a detached holder process. Client disconnects, server restarts, even `tether restart` upgrades: the shell (and whatever runs in it) keeps going.
 - **Replay** — every byte is logged to SQLite; reconnecting clients catch up from where they left off, with no output lost while the server was down.
-- **Mobile client** — multi-session tabs, full VT emulator (TUIs, box drawing, CJK/emoji), key repeat, search, snippets.
-- **Desktop client** — the same terminal as a native Linux/Windows/macOS app (docked sidebar, physical keyboard, mouse selection, self-update).
-- **Agent previews** — Codex CLI or Claude Code can run `tether present ./preview/index.html --project <name>` to open a watched HTML/CSS/JS preview on desktop or iOS. Install the optional agent skills with `tether present agent-install`; clear previews with `tether present reset [project-name]`.
+- **Mobile client** — multi-session tabs grouped by host, full VT emulator (TUIs, box drawing, CJK/emoji), D-pad, search, snippets, git/files/previews.
+- **Desktop client** — the same terminal as a native Linux/Windows/macOS app (docked sidebar, split view, physical keyboard, mouse selection, self-update).
+- **Agent previews** — Codex CLI or Claude Code can run `tether present ./preview/index.html --project <name>` to open a watched HTML/CSS/JS preview on desktop or iOS. Install the optional agent skills with `tether present agent-install`; declare session state with `tether signal`; clear previews with `tether present reset [project-name]`.
 
 ## Mobile app (iOS)
 
@@ -86,7 +86,7 @@ New builds arrive automatically; each is testable for 90 days. No Mac, no AltSer
 
 Native push notifications — the ones that arrive in Tether itself — require this build. Apple only issues push entitlements to properly signed apps, which is why sideloading is no longer offered.
 
-Point the app at your server's IP and port on first launch.
+On first launch, pair the phone: enter the server's host/IP and port, then the 12-char code from `tether pair` (or scan the QR).
 
 ## Android
 

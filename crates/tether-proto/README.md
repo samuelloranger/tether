@@ -34,5 +34,7 @@ described here because nothing outside the server process ever sees it.
 ## Compatibility
 
 Field numbers are explicit and are never reused; a retired field or enum value
-becomes `reserved`. Protocol v1 — the JSON protocol the Expo client speaks — is
-frozen and deliberately absent from this schema.
+becomes `reserved`. Protocol v1 — the JSON codec on `GET /api/ws?proto=1` — is
+frozen and deliberately absent from this schema. Shipping native clients stream
+JSON application frames *sealed over Noise* (`/api/noise/session`), not this
+binary codec; `proto=2` is the binary alternative on `/api/ws`.

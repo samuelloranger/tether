@@ -73,4 +73,41 @@ final class SessionListHydrationTests: XCTestCase {
     XCTAssertEqual(store.sessions, [])
     XCTAssertEqual(store.healthByHost[profile.id]?.isUnavailable, true)
   }
+
+  func testColdRefreshRestoresRememberedAgentSessionAndBuildsModel() async throws {
+    let hostStore = HostStoreAdapter(storage: InMemoryHostStorage())
+    let profile = try hostStore.create(
+      name: "box",
+      color: "#89b4fa",
+      host: "192.168.1.9",
+      port: "8443",
+      identityName: "box"
+    )
+    defer {
+      UserDefaults.standard.removeObject(forKey: "tether.lastSessionId.\(profile.id)")
+    }
+    ResumeMemory.rememberSession("agent-1", forHost: profile.id)
+
+    let listed = [
+      RemoteSession(
+        id: "agent-1", status: "running", lastOutputAt: nil, name: nil, autoTitle: nil, activity: nil,
+        kind: "agent"
+      ),
+      RemoteSession(
+        id: "term-1", status: "running", lastOutputAt: nil, name: nil, autoTitle: nil, activity: nil
+      ),
+    ]
+    let store = SessionStore(
+      hostStore: hostStore,
+      noiseKeyStore: FakeNoiseKeyStore(),
+      remoteSessions: { _ in listed }
+    )
+    store.reloadHosts()
+    store.activeHostId = profile.id
+
+    await store.refreshHost(hostId: profile.id)
+
+    XCTAssertEqual(store.activeSessionId, "agent-1")
+    XCTAssertEqual(store.activeAgentModel?.sessionId, "agent-1")
+  }
 }

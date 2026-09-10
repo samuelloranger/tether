@@ -87,7 +87,7 @@ An agent can then create a preview directory and open its entry file:
 tether present ./preview/index.html --project creneau --title "New feature"
 ```
 
-The preview appears beside terminals in the workspace navigator. Tether watches its directory and reloads it automatically after changes. Preview URLs are capability-scoped and can only serve files below that preview directory; previews are ephemeral and are cleared when Tether restarts.
+The preview appears beside terminals in the workspace navigator. Tether watches its directory and reloads it automatically after changes. Preview URLs are capability-scoped and can only serve files below that preview directory; previews are ephemeral and are cleared when Tether restarts. Git, the file tree, and uploads live on the same surface — see [Git, files & previews](/workspace).
 
 Clear generated previews when the work is accepted or abandoned:
 
@@ -95,3 +95,11 @@ Clear generated previews when the work is accepted or abandoned:
 tether present reset             # every preview
 tether present reset creneau     # one project
 ```
+
+Coding agents can also tell Tether whether a turn is in progress, blocked on you, or finished, so the tab colour and notifications stay honest:
+
+```sh
+tether signal hooks              # print the Claude Code snippet
+```
+
+Paste that into `~/.claude/settings.json`. See [Sessions](/terminal/sessions#activity).

@@ -82,7 +82,7 @@ public struct TerminalTitleBar<Overflow: View>: View {
         iconButton("plus", label: "New terminal", action: onNewSession)
           .accessibilityIdentifier("newTerminalButton")
         iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
-          .disabled(store.activeSessionId == nil)
+          .disabled(store.activeSessionId == nil || store.activeSession?.kind == "agent")
         iconButton("gearshape", label: "Settings", action: onSettings)
         Menu {
           overflow()

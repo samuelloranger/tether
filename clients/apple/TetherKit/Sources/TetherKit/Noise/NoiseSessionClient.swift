@@ -39,6 +39,29 @@ public enum NoiseServerMessage: Sendable, Equatable {
   /// Reply to `auth.token`: an opaque bearer token for REST calls plus its
   /// ISO8601 expiry (`{t:"auth.token",token,expiresAt}`).
   case authToken(token: String, expiresAt: String)
+  /// Agent chat: one streamed assistant text chunk.
+  case agentDelta(seq: Int, text: String)
+  /// Agent chat: a tool call (auto-run, or already approved). `input` is the
+  /// tool's arguments as a pretty JSON string.
+  case agentTool(seq: Int, name: String, input: String)
+  /// Agent chat: the output of a tool call.
+  case agentToolResult(seq: Int, text: String, isError: Bool)
+  /// Agent chat: a tool wants approval before it runs (P3).
+  case agentPermissionReq(reqId: String, name: String, input: String)
+  /// Agent chat: the turn finished. `cost` is the turn's USD cost; `inputTokens`
+  /// / `outputTokens` are the turn's token usage (0 when the host didn't report).
+  case agentDone(seq: Int, cost: Double, inputTokens: Int, outputTokens: Int)
+  /// Agent chat: the turn failed.
+  case agentError(message: String)
+  /// Agent chat: the user's own prompt, echoed by the host so the bubble is
+  /// server-authoritative (survives reconnect, syncs across devices).
+  case agentUser(seq: Int, text: String)
+  /// Agent chat: ephemeral model + 5h/7day account usage for the info strip.
+  /// Not seq-ordered; refreshed on attach and after each turn.
+  case agentStatus(model: String?, fiveHour: UsageWindow?, sevenDay: UsageWindow?)
+  /// A frame type this client does not understand — ignored, never fatal, so a
+  /// newer host can add frames without tearing down older clients' sessions.
+  case ignored
 }
 
 /// One paired device as reported by the server over the authenticated Noise
@@ -289,6 +312,40 @@ public final class NoiseChannel {
     try await sendSealed(Self.focusRequest(id: id, focused: focused))
   }
 
+  /// Starts an agent-chat session on the host (`{t:"agent.start",id,cwd,sinceSeq}`).
+  /// `sinceSeq` is the highest frame seq this client already applied — 0 for a
+  /// cold/empty model, which asks the host to replay the full transcript.
+  public func sendAgentStart(id: String, cwd: String, sinceSeq: Int = 0) async throws {
+    try await sendSealed(Self.agentStartRequest(id: id, cwd: cwd, sinceSeq: sinceSeq))
+  }
+
+  /// Sends a prompt to the last-started agent (`{t:"agent.prompt",text}`).
+  /// Carries no id — the server tracks the last-started agent id.
+  public func sendAgentPrompt(text: String) async throws {
+    try await sendSealed(Self.agentPromptRequest(text: text))
+  }
+
+  /// Interrupts the running agent (`{t:"agent.interrupt"}`). Carries no id —
+  /// see `sendAgentPrompt`.
+  public func sendAgentInterrupt() async throws {
+    try await sendSealed(Self.agentInterruptRequest())
+  }
+
+  /// The `agent.start` request body. Pure + static, as above.
+  static func agentStartRequest(id: String, cwd: String, sinceSeq: Int = 0) -> [String: Any] {
+    ["t": "agent.start", "id": id, "cwd": cwd, "sinceSeq": sinceSeq]
+  }
+
+  /// The `agent.prompt` request body. Pure + static, as above.
+  static func agentPromptRequest(text: String) -> [String: Any] {
+    ["t": "agent.prompt", "text": text]
+  }
+
+  /// The `agent.interrupt` request body. Pure + static, as above.
+  static func agentInterruptRequest() -> [String: Any] {
+    ["t": "agent.interrupt"]
+  }
+
   /// Ask the host for its full device roster (`{t:"devices.list"}`). The reply
   /// arrives through `receive()` as `.devices`.
   public func sendDevicesList() async throws {
@@ -367,6 +424,21 @@ public final class NoiseChannel {
 extension NoiseServerMessage: Decodable {
   private enum CodingKeys: String, CodingKey {
     case t, id, chunk, exitCode, items, target, ok, error, token, expiresAt
+    case seq, text, name, input, isError, reqId, cost, message, usage
+    case model, fiveHour, sevenDay
+  }
+
+  /// The `usage` sub-object on an `agent.done` frame. Tokens are optional so an
+  /// older host that omits them decodes as 0 rather than failing the frame.
+  private struct AgentUsageWire: Decodable {
+    let input_tokens: Int?
+    let output_tokens: Int?
+  }
+
+  /// One 5h/7day window on an `agent.status` frame.
+  private struct UsageWindowWire: Decodable {
+    let utilization: Int
+    let resetsAt: String?
   }
 
   public init(from decoder: Decoder) throws {
@@ -393,12 +465,59 @@ extension NoiseServerMessage: Decodable {
       let token = try container.decode(String.self, forKey: .token)
       let expiresAt = try container.decode(String.self, forKey: .expiresAt)
       self = .authToken(token: token, expiresAt: expiresAt)
-    default:
-      throw DecodingError.dataCorruptedError(
-        forKey: .t,
-        in: container,
-        debugDescription: "Unknown server message type '\(t)'"
+    case "agent.delta":
+      self = .agentDelta(
+        seq: try container.decode(Int.self, forKey: .seq),
+        text: try container.decode(String.self, forKey: .text)
       )
+    case "agent.tool":
+      let input = try container.decode(AgentJSONValue.self, forKey: .input)
+      self = .agentTool(
+        seq: try container.decode(Int.self, forKey: .seq),
+        name: try container.decode(String.self, forKey: .name),
+        input: input.prettyString
+      )
+    case "agent.tool_result":
+      self = .agentToolResult(
+        seq: try container.decode(Int.self, forKey: .seq),
+        text: try container.decode(String.self, forKey: .text),
+        isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false
+      )
+    case "agent.permission_req":
+      let input = try container.decode(AgentJSONValue.self, forKey: .input)
+      self = .agentPermissionReq(
+        reqId: try container.decode(String.self, forKey: .reqId),
+        name: try container.decode(String.self, forKey: .name),
+        input: input.prettyString
+      )
+    case "agent.done":
+      let usage = try container.decodeIfPresent(AgentUsageWire.self, forKey: .usage)
+      self = .agentDone(
+        seq: try container.decode(Int.self, forKey: .seq),
+        cost: try container.decodeIfPresent(Double.self, forKey: .cost) ?? 0,
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0
+      )
+    case "agent.error":
+      self = .agentError(message: try container.decode(String.self, forKey: .message))
+    case "agent.user":
+      self = .agentUser(
+        seq: try container.decode(Int.self, forKey: .seq),
+        text: try container.decode(String.self, forKey: .text)
+      )
+    case "agent.status":
+      let five = try container.decodeIfPresent(UsageWindowWire.self, forKey: .fiveHour)
+      let seven = try container.decodeIfPresent(UsageWindowWire.self, forKey: .sevenDay)
+      self = .agentStatus(
+        model: try container.decodeIfPresent(String.self, forKey: .model),
+        fiveHour: five.map { UsageWindow(utilization: $0.utilization, resetsAt: $0.resetsAt) },
+        sevenDay: seven.map { UsageWindow(utilization: $0.utilization, resetsAt: $0.resetsAt) }
+      )
+    default:
+      // Forward-compat: a frame type this client predates. Ignore it rather than
+      // throwing — a thrown decode error tears down the whole session, which is
+      // how a newer host emitting new agent frames silently killed older clients.
+      self = .ignored
     }
   }
 

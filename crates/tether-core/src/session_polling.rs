@@ -148,6 +148,7 @@ mod tests {
             name: None,
             auto_title: None,
             activity: None,
+            kind: None,
         }
     }
 

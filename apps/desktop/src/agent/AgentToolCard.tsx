@@ -1,0 +1,100 @@
+import { useState } from 'react';
+import { highlightLine } from '../git/codeHighlight';
+import type { AgentToolCall, DerivedDiff } from './agentTypes';
+import { toolStyle } from './agentTypes';
+
+function ToolDiff({ diff }: { diff: DerivedDiff }) {
+  return (
+    <div className="agent-tool-diff">
+      {diff.hunks.flatMap((hunk, hi) =>
+        hunk.lines.map((line, li) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: positional diff lines
+          <div key={`${hi}-${li}`} className={`agent-diff-row agent-diff-${line.kind}`}>
+            <span className="agent-diff-marker">
+              {line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}
+            </span>
+            <span className="agent-diff-code">
+              {highlightLine(line.text, null).map((tok, ti) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: positional tokens
+                <span key={ti} className={tok.className}>
+                  {tok.text}
+                </span>
+              ))}
+            </span>
+          </div>
+        )),
+      )}
+    </div>
+  );
+}
+
+function isShellTool(name: string): boolean {
+  const n = name.toLowerCase();
+  return n === 'bash' || n === 'shell';
+}
+
+function shellCommand(inputJson: string): string | null {
+  try {
+    const obj = JSON.parse(inputJson) as Record<string, unknown>;
+    return typeof obj.command === 'string' ? obj.command : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Pretty-print the tool input JSON, falling back to the raw string. */
+function formatInput(tool: AgentToolCall): string {
+  if (isShellTool(tool.name)) {
+    const cmd = shellCommand(tool.inputJson) ?? tool.summary;
+    return `$ ${String(cmd ?? '').trim()}`.trim();
+  }
+  try {
+    return JSON.stringify(JSON.parse(tool.inputJson), null, 2);
+  } catch {
+    return tool.inputJson;
+  }
+}
+
+/** Console-style card for one tool invocation; the header toggles an expandable
+ * body showing the diff (or raw arguments) and result. Port of Swift
+ * AgentToolCard. */
+export function AgentToolCard({ tool }: { tool: AgentToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  const style = toolStyle(tool.name);
+  const shell = isShellTool(tool.name);
+  return (
+    <div className={`agent-tool-card agent-tool-${style.accent}${shell ? ' agent-tool-bash' : ''}`}>
+      <button
+        type="button"
+        className="agent-tool-head"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <span className="agent-tool-glyph">{style.glyph}</span>
+        <span className="agent-tool-name">{tool.name.toLowerCase()}</span>
+        <span className="agent-tool-summary">{tool.summary}</span>
+        {tool.isError ? <span className="agent-tool-err">⚠</span> : null}
+        <span className="agent-tool-chevron">{expanded ? '▲' : '▼'}</span>
+      </button>
+      {expanded ? (
+        <div className="agent-tool-body">
+          {tool.diff ? (
+            <ToolDiff diff={tool.diff} />
+          ) : (
+            <pre className={`agent-tool-input${shell ? ' bash' : ''}`}>{formatInput(tool)}</pre>
+          )}
+          {tool.result ? (
+            <>
+              <div className={`agent-tool-result-label${tool.isError ? ' error' : ''}`}>
+                {tool.isError ? 'error' : 'output'}
+              </div>
+              <pre className={`agent-tool-result${tool.isError ? ' error' : ''}`}>
+                {tool.result}
+              </pre>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}

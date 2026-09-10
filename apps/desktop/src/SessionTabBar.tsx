@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
+import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { parseSessionKey, sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
@@ -27,6 +28,7 @@ interface SessionTabBarProps {
   activeHostId: string | null;
   onSelectView: (viewId: string) => void;
   onNew: (hostId: string) => void;
+  onNewAgentChat: (hostId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
   onRequestKillMembers: (
     members: Array<{ hostId: string; sessionId: string }>,
@@ -104,6 +106,7 @@ function SessionTab({
         onClick={onSelect}
       >
         <span className={`activity-dot dot-${dot}`} aria-hidden />
+        <SessionKindIcon kind={session.kind} />
         <span className="session-tab-title">{label}</span>
       </button>
       <button
@@ -204,6 +207,7 @@ function GroupTab({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: tab strip + toolbar buttons (new terminal, new agent chat) in one render
 export function SessionTabBar({
   hosts,
   healthByHost,
@@ -213,6 +217,7 @@ export function SessionTabBar({
   activeHostId,
   onSelectView,
   onNew,
+  onNewAgentChat,
   onRequestKill,
   onRequestKillMembers,
   onOpenHosts,
@@ -287,6 +292,18 @@ export function SessionTabBar({
       >
         +
       </button>
+      <button
+        type="button"
+        className="session-tab-new session-tab-new-agent"
+        aria-label="New agent chat"
+        title="New agent chat"
+        disabled={!activeHostId}
+        onClick={() => {
+          if (activeHostId) onNewAgentChat(activeHostId);
+        }}
+      >
+        <AgentIcon />
+      </button>
     </div>
   );
 }
@@ -301,6 +318,7 @@ export function SessionChrome({
   dot,
   hasSession,
   onNew,
+  onNewAgentChat,
   onKill,
   onKillMembers,
   onWorkspace,
@@ -318,6 +336,7 @@ export function SessionChrome({
   dot: DotKey | null;
   hasSession: boolean;
   onNew: (hostId: string) => void;
+  onNewAgentChat: (hostId: string) => void;
   onKill: (hostId: string, sessionId: string, label: string) => void;
   onKillMembers: (
     members: Array<{ hostId: string; sessionId: string }>,
@@ -344,6 +363,7 @@ export function SessionChrome({
           activeHostId={app.activeHostId}
           onSelectView={onSelectView}
           onNew={onNew}
+          onNewAgentChat={onNewAgentChat}
           onRequestKill={onKill}
           onRequestKillMembers={onKillMembers}
           onOpenHosts={() => app.setScreen('hosts')}

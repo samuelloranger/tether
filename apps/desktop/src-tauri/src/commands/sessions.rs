@@ -60,6 +60,7 @@ pub async fn core_sessions_kill(
             name: None,
             auto_title: None,
             activity: None,
+            kind: None,
         })
         .collect();
     let plan = plan_kill_session(&client, &key, &rows);

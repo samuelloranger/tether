@@ -11,6 +11,8 @@ public enum TerminalPipelineEvent: Sendable {
   /// A `title`/`activity`/`exit` frame — the session list is out of date.
   case sessionsChanged
   case error(String)
+  /// An `agent.*` frame, forwarded as-is for `AgentChatModel.apply(_:)`.
+  case agent(NoiseServerMessage)
 }
 
 /// A frame the UI wants on the wire, in the order the UI produced it.
@@ -30,6 +32,9 @@ enum OutboundFrame: Sendable {
   case paste(String, key: String?)
   case focus(Bool)
   case resize(cols: UInt16, rows: UInt16)
+  case agentStart(id: String, cwd: String, sinceSeq: Int)
+  case agentPrompt(String)
+  case agentInterrupt
 }
 
 /// Owns the Noise session channel and the VT emulator, off the main actor.
@@ -53,7 +58,7 @@ actor TerminalPipeline {
   private let eventSink: AsyncStream<TerminalPipelineEvent>.Continuation
   private let outboundFrames: AsyncStream<OutboundFrame>
 
-  private let replayStore = FfiReplayStore()
+  private let replayStore: FfiReplayStore
   private let snapshotCache = TerminalSnapshotCache()
   private let sessionGrids = TerminalSessionGrids()
   private var currentGrid: TerminalSessionGrid?
@@ -75,12 +80,19 @@ actor TerminalPipeline {
   private var lastMouseMode: MouseMode = .off
   private var lastMouseSgr = true
   private var lastAltScreen = false
+  /// When false, output is still fed to the emulator and the replay cursor still
+  /// advances, but grid snapshots are not produced — a background (non-visible)
+  /// session stays current without paying to rasterize.
+  private var rendering = true
   /// One source of truth for the grid size: the channel, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
   private var cols: UInt16 = 80
   private var rows: UInt16 = 24
 
-  init() {
+  /// The replay cursor store is injected (and shared across every pipeline) so
+  /// N concurrent sessions never write the persisted cursor file at once.
+  init(replayStore: FfiReplayStore) {
+    self.replayStore = replayStore
     (snapshots, snapshotSink) = AsyncStream.makeStream(
       of: Optional<Data>.self,
       bufferingPolicy: .bufferingNewest(1)
@@ -108,7 +120,8 @@ actor TerminalPipeline {
     hostId: String,
     url: URL,
     sessionId: String,
-    key: String
+    key: String,
+    sendStart: Bool = true
   ) async {
     disconnect()
     startOutboundPumpIfNeeded()
@@ -134,20 +147,27 @@ actor TerminalPipeline {
     resetMouseModes()
     do {
       let channel = try await client.reconnect(hostId: hostId, url: url)
-      try await channel.sendStart(
-        id: sessionId,
-        cols: cols,
-        rows: rows,
-        sinceId: replayStore.sinceId(sessionId: key)
-      )
+      // Agent tabs (`sendStart: false`) share this channel/read-loop wiring
+      // but must never send the PTY `start` frame: the id is an `agent-N`,
+      // not a PTY session, and a `start` for it makes the server spawn a
+      // holder for it too (double-start, mixed session type). `agent.start`
+      // is the only start frame an agent tab sends — see `SessionStore`.
+      if sendStart {
+        try await channel.sendStart(
+          id: sessionId,
+          cols: cols,
+          rows: rows,
+          sinceId: replayStore.sinceId(sessionId: key)
+        )
+        // Layout often reports a size while the channel is still nil; start
+        // may have used 80×24. Send the current grid so a TUI gets SIGWINCH.
+        try? await channel.sendResize(id: sessionId, cols: cols, rows: rows)
+        if let focused = lastFocusSent {
+          try? await channel.sendFocus(id: sessionId, focused: focused)
+        }
+      }
       noiseChannel = channel
       noiseSessionId = sessionId
-      // Layout often reports a size while the channel is still nil; start may
-      // have used 80×24. Send the current grid so a TUI gets SIGWINCH.
-      try? await channel.sendResize(id: sessionId, cols: cols, rows: rows)
-      if let focused = lastFocusSent {
-        try? await channel.sendFocus(id: sessionId, focused: focused)
-      }
       noteTraffic()
       noiseReadTask = Task { [weak self] in
         await self?.readLoopNoise(key: key, channel: channel)
@@ -187,12 +207,27 @@ actor TerminalPipeline {
           // channel; they are driven over their own short-lived sessions
           // (`DevicesView`, `NoiseTokenCache`). Ignore.
           break
+        case .agentDelta, .agentTool, .agentToolResult, .agentPermissionReq, .agentDone,
+          .agentError, .agentUser, .agentStatus:
+          // Agent-chat frames are consumed by AgentChatModel, not the terminal
+          // emulator pipeline — forward to the event sink for SessionStore to
+          // dispatch into the active AgentChatModel.
+          eventSink.yield(.agent(message))
+        case .ignored:
+          // A frame this client does not understand — already dropped at decode.
+          break
         }
       } catch {
         // A deliberate teardown cancels this task; anything else is an
-        // unexpected drop. No backoff here (see `connectNoise` TODOs) — just
-        // report it so the UI can reflect a closed connection.
+        // unexpected drop. No backoff here (see `connectNoise` TODOs).
         if !Task.isCancelled {
+          // Clear the dead channel so `isConnected` stops lying — otherwise the
+          // switch-back reuse path writes into it and `try?` swallows the loss.
+          // A real reconnect cancels this task first, so this is an unsolicited
+          // drop and `noiseChannel` is still this one.
+          noiseChannel = nil
+          noiseSessionId = nil
+          Task { await channel.close() }
           eventSink.yield(.error("Connection closed"))
         }
         break
@@ -285,6 +320,15 @@ actor TerminalPipeline {
       applyLocalResize(cols: newCols, rows: newRows)
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
+    case let .agentStart(id, cwd, sinceSeq):
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentStart(id: id, cwd: cwd, sinceSeq: sinceSeq)
+    case let .agentPrompt(text):
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentPrompt(text: text)
+    case .agentInterrupt:
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentInterrupt()
     }
   }
 
@@ -334,6 +378,40 @@ actor TerminalPipeline {
     publishSnapshot()
   }
 
+  /// Toggle grid rasterization. A background (non-visible) session sets this
+  /// false: output keeps feeding the emulator and advancing the replay cursor,
+  /// but no snapshot is produced until it becomes visible again.
+  func setRendering(_ on: Bool) {
+    rendering = on
+    if on {
+      // Force a fresh frame even when the grid is unchanged since it last
+      // rendered. A resident session switched back into view was quiescent while
+      // backgrounded, so its generation still equals `lastRenderedGeneration` and
+      // `publishSnapshot`'s guard would skip it — leaving the surface stuck on the
+      // previous tab's frame until the next byte of output arrives.
+      lastRenderedGeneration = nil
+      publishSnapshot()
+    }
+  }
+
+  /// True while a live Noise channel is attached — used to reuse a background
+  /// pipeline on switch-back instead of reconnecting (and replaying).
+  var isConnected: Bool { noiseChannel != nil }
+
+  #if DEBUG
+  /// Test seam: stand up a live emulator without a Noise connection.
+  func attachForTest(cols: UInt16, rows: UInt16) {
+    let attached = sessionGrids.attach(key: "test", cols: cols, rows: rows)
+    currentGrid = attached.grid
+    emulatorKey = "test"
+    self.cols = cols
+    self.rows = rows
+  }
+
+  /// Test seam: feed bytes through the normal output path.
+  func feedForTest(_ bytes: Data) { applyOutput(bytes) }
+  #endif
+
   /// Tracks the last focus value so `.inactive` then `.background` for one
   /// scenePhase transition is not treated as two events.
   func sendFocus(focused: Bool) {
@@ -350,6 +428,7 @@ actor TerminalPipeline {
   /// packed bytes, so a burst of output that does not alter the viewport costs
   /// nothing beyond the counter read.
   private func publishSnapshot() {
+    guard rendering else { return }
     guard let emulator else { return }
     let generation = emulator.generation()
     // Mouse mode can flip without a viewport change (e.g. vim entering or

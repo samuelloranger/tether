@@ -1,13 +1,8 @@
 import type { FitAddon } from '@xterm/addon-fit';
 import type { SearchAddon } from '@xterm/addon-search';
 import type { Terminal } from '@xterm/xterm';
-import {
-  forgetCoreSession,
-  nextConnId,
-  openNoiseSocket,
-  sendJson,
-  type TerminalSocket,
-} from './coreTransport';
+import { nextConnId, openNoiseSocket, sendJson, type TerminalSocket } from './coreTransport';
+import { fitTerminal } from './fitTerminal';
 import { applyServerFrame, createFrameSink, type FrameApplyResult } from './frameHandler';
 import { shouldSendOutbound } from './ptyOutbound';
 import { createReplayGate, type ReplayGate } from './replayGate';
@@ -109,8 +104,7 @@ function openSocket(
     state.closed = true;
     input.onDisconnected();
   };
-  input.fit.fit();
-  const dims = input.fit.proposeDimensions();
+  const dims = fitTerminal(input.term, input.fit, input.term.element);
   const connId = nextConnId();
   const params = { sessionId: input.sessionId, cols: dims?.cols ?? 80, rows: dims?.rows ?? 24 };
   const handlers = {
@@ -135,8 +129,10 @@ function openSocket(
     // resizes were dropped. Re-fit now and send resize+focus so a TUI
     // (cursor-agent) gets SIGWINCH / DECSET 1004 instead of staying at the
     // 80×24 `start` geometry.
-    input.fit.fit();
-    const [resize, focus] = socketOpenFrames(input.fit.proposeDimensions(), input.isInteractive());
+    const [resize, focus] = socketOpenFrames(
+      fitTerminal(input.term, input.fit, input.term.element),
+      input.isInteractive(),
+    );
     sendJson(s, resize);
     lastFocus.value = null;
     sendFocusFrame(s, focus.focused, lastFocus, input.term);
@@ -190,10 +186,9 @@ export function bindTerminalSession(input: {
   const dataSub = input.term.onData((text) => sendInput(text, writeDepth > 0));
 
   const observer = new ResizeObserver(() => {
-    input.fit.fit();
+    const next = fitTerminal(input.term, input.fit, input.term.element);
     if (!state.socket) return;
-    const next = input.fit.proposeDimensions();
-    sendJson(state.socket, { type: 'resize', cols: next?.cols ?? 80, rows: next?.rows ?? 24 });
+    sendJson(state.socket, { type: 'resize', cols: next.cols, rows: next.rows });
   });
   if (input.term.element?.parentElement) observer.observe(input.term.element.parentElement);
 
@@ -207,7 +202,10 @@ export function bindTerminalSession(input: {
       dataSub.dispose();
       features.dispose();
       state.socket?.close();
-      void forgetCoreSession(input.sessionId);
+      // Do NOT forget the replay cursor here. Unmount happens on every tab
+      // switch; dropping the cursor made switch-back replay the whole retained
+      // tail. ResidentTerminals forgets a cursor only when the session leaves
+      // the drawer for good (see reconcileResidency).
     },
   };
 }

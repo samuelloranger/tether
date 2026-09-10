@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -41,12 +41,8 @@ export interface InstallDeps {
 }
 
 export interface PresentDeps {
-  port: string;
-  // Loopback origin of the running daemon's control listener. Defaults to plain
-  // http on `port`; main.ts overrides it when the daemon is https-only, because
-  // then there is no plaintext port for this CLI to talk to.
-  baseUrl?: string;
-  tokenFile: string;
+  // The daemon's loopback control socket (~/.tether/control.sock).
+  sock: string;
   // Just the call signature we use — not `typeof fetch`, whose extra members
   // (preconnect) a plain test double has no reason to implement.
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -62,7 +58,6 @@ export async function runPresent(args: PresentArgs, deps: PresentDeps): Promise<
       console.log(`Installed ${target} skill: ${installAgentSkill(target, { hasCommand })}`);
     return;
   }
-  const token = readFileSync(deps.tokenFile, 'utf8').trim();
   const endpoint =
     args.kind === 'reset' ? '/control/presentations/reset' : '/control/presentations';
   // Resolve here, against this short-lived CLI process's own cwd — the entry
@@ -77,14 +72,11 @@ export async function runPresent(args: PresentArgs, deps: PresentDeps): Promise<
           title: args.title,
           sessionId: process.env.TETHER_SESSION_ID,
         };
-  const base = deps.baseUrl ?? `http://127.0.0.1:${deps.port}`;
-  const res = await (deps.fetch ?? fetch)(`${base}${endpoint}`, {
+  const res = await (deps.fetch ?? fetch)(`http://localhost${endpoint}`, {
+    unix: deps.sock,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Tether-Present-Control': token },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    // Loopback to our own self-signed certificate. The control token, not the
-    // certificate chain, is what authorises this call.
-    tls: { rejectUnauthorized: false },
   } as RequestInit);
   if (!res.ok) throw new Error(`Tether preview request failed (${res.status}). Is tether running?`);
   console.log(args.kind === 'reset' ? 'Previews cleared.' : 'Preview opened.');

@@ -7,12 +7,17 @@ export interface TransportHandlers {
   onOpen: () => void;
   onMessage: (data: string) => void;
   onClose: () => void;
+  /** Fires on each (re)connect for agent sessions — the hook (re)sends
+   * `agent.start{sinceSeq}` here, since only the reducer knows the cursor. */
+  onReady?: () => void;
 }
 
 export interface CoreConnectParams {
   sessionId: string;
   cols?: number;
   rows?: number;
+  /** 'agent' suppresses the terminal `start` frame; the hook sends agent.start. */
+  kind?: string;
 }
 
 let connSeq = 0;
@@ -40,9 +45,15 @@ export async function openNoiseSocket(
   const { listen } = await import('@tauri-apps/api/event');
   const unMsg = await listen<string>(`core-message-${connId}`, (e) => h.onMessage(e.payload));
   const unClose = await listen(`core-closed-${connId}`, () => h.onClose());
+  const unStatus = h.onReady
+    ? await listen<string>(`core-status-${connId}`, (e) => {
+        if (e.payload === 'connected') h.onReady?.();
+      })
+    : () => {};
   const cleanup = () => {
     unMsg();
     unClose();
+    unStatus();
   };
   try {
     await invoke('core_noise_connect', {
@@ -52,6 +63,7 @@ export async function openNoiseSocket(
       sessionId: params.sessionId,
       cols: params.cols ?? 80,
       rows: params.rows ?? 24,
+      kind: params.kind,
     });
     h.onOpen();
   } catch {

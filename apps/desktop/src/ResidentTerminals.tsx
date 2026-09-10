@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AgentChatPane } from './agent/AgentChatPane';
 import { coreCacheDelete, coreCacheIds, coreCacheTouch } from './coreApi';
+import { forgetCoreSession } from './coreTransport';
 import { EmptyPanePicker } from './EmptyPanePicker';
 import type { FrameApplyResult } from './frameHandler';
 import { layoutTree } from './layoutRects';
@@ -8,9 +10,11 @@ import { PaneControls } from './PaneControls';
 import { PaneDivider } from './PaneDivider';
 import type { PaneDir, PaneNode, PaneSide } from './paneTree';
 import type { UI_THEMES } from './preferences';
+import { reconcileResidency } from './residencyReconcile';
 import { residentKeys } from './residentKeys';
+import { residentSessions } from './residentSessions';
 import { SplitPreviewOverlay } from './SplitPreviewOverlay';
-import { sessionKey } from './sessionKey';
+import { parseSessionKey, sessionKey } from './sessionKey';
 import { TerminalPane } from './TerminalPane';
 import type { DrawerSession, HostProfile } from './types';
 import type { TabDropTarget } from './useTabDrag';
@@ -32,6 +36,8 @@ export interface ResidentTerminalsProps {
   onClosePane: (paneId: string) => void;
   /** Live drop target during a pointer tab-drag, resolved by the parent. */
   preview: TabDropTarget | null;
+  /** Most-recently-active session keys (front = newest) for background residency. */
+  lruOrder: string[];
 }
 
 interface Box {
@@ -40,6 +46,18 @@ interface Box {
   left: number;
   top: number;
 }
+
+const RESIDENT_CAP = 8;
+/** Where a non-visible resident pane parks: real size, far offscreen, inert. */
+const OFFSCREEN_STYLE = {
+  position: 'absolute' as const,
+  left: -100000,
+  top: 0,
+  width: 800,
+  height: 600,
+  visibility: 'hidden' as const,
+  pointerEvents: 'none' as const,
+};
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: measures the container, keeps the resident cache in sync, and lays out slots + dividers + drop preview in one place
 export function ResidentTerminals(props: ResidentTerminalsProps) {
@@ -59,24 +77,44 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
     return () => observer.disconnect();
   }, []);
 
-  const keys = useMemo(() => residentKeys(props.tree).join('|'), [props.tree]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `keys` is the stable digest of the tree's session set
+  // Sessions that keep a live socket: visible panes plus recently-active tabs,
+  // capped. A tab in this set streams in the background, so switching to it
+  // replays nothing.
+  const resident = useMemo(
+    () =>
+      residentSessions({
+        drawerKeys: props.sessions
+          .filter((row) => row.kind !== 'agent')
+          .map((row) => sessionKey(row.hostId, row.id)),
+        visibleKeys: residentKeys(props.tree),
+        lruOrder: props.lruOrder,
+        cap: RESIDENT_CAP,
+      }),
+    [props.sessions, props.tree, props.lruOrder],
+  );
+  const residentDigest = resident.join('|');
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `residentDigest` is the stable digest of the resident set
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      for (const key of residentKeys(props.tree)) await coreCacheTouch(key);
-      const valid = new Set(props.sessions.map((row) => sessionKey(row.hostId, row.id)));
-      const wanted = new Set(residentKeys(props.tree));
-      const ids = await coreCacheIds();
-      for (const id of ids) {
-        if (!valid.has(id) && !wanted.has(id)) await coreCacheDelete(id);
-      }
+      for (const key of resident) await coreCacheTouch(key);
+      const plan = reconcileResidency({
+        drawerKeys: props.sessions.map((row) => sessionKey(row.hostId, row.id)),
+        wantedKeys: resident,
+        cachedIds: await coreCacheIds(),
+      });
+      // A tab merely switched away stays a drawer key, so its cursor is kept —
+      // switch-back replays only the `sinceId` delta. Only sessions gone from
+      // the drawer entirely lose their snapshot and replay cursor here.
+      for (const id of plan.deleteCache) await coreCacheDelete(id);
+      for (const id of plan.forgetCursor) await forgetCoreSession(id);
       if (cancelled) return;
     })();
     return () => {
       cancelled = true;
     };
-  }, [keys, props.sessions]);
+  }, [residentDigest, props.sessions]);
 
   const layout = useMemo(
     () => layoutTree(props.tree, box.width, box.height),
@@ -87,8 +125,21 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
     ? layout.leaves.find((l) => l.paneId === props.preview?.paneId)?.rect
     : undefined;
 
+  const visibleBySession = new Map<string, { rect: Box; paneId: string }>();
+  for (const leaf of layout.leaves) {
+    if (leaf.session) {
+      visibleBySession.set(sessionKey(leaf.session.hostId, leaf.session.sessionId), {
+        rect: leaf.rect,
+        paneId: leaf.paneId,
+      });
+    }
+  }
+
   return (
     <div className="resident-terminals" ref={containerRef}>
+      {/* Per-pane chrome: focus ring, controls, empty pickers, agent panes.
+          Terminals live in the resident layer below so a tab switch repositions
+          an existing instance instead of remounting it. */}
       {layout.leaves.map((leaf) => {
         const style = {
           position: 'absolute' as const,
@@ -113,6 +164,12 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         const session = leaf.session;
         const host = props.hosts.find((row) => row.id === session.hostId);
         if (!host) return null;
+        const drawer = props.sessions.find(
+          (row) => row.hostId === session.hostId && row.id === session.sessionId,
+        );
+        // Leaf kind is durable; DrawerSession.kind is poll-transient. Either
+        // marking the session agent is authoritative.
+        const isAgent = session.kind === 'agent' || drawer?.kind === 'agent';
         return (
           <div
             key={leaf.paneId}
@@ -128,20 +185,57 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
                 onClose={props.onClosePane}
               />
             )}
+            {isAgent ? (
+              <AgentChatPane
+                hostId={session.hostId}
+                sessionId={session.sessionId}
+                noiseAddress={noiseSessionAddress(host)}
+                cwd={session.cwd ?? drawer?.cwd ?? undefined}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+
+      {/* Resident terminals: one instance per resident session, keyed by session
+          so a switch repositions (no remount, no socket drop). Shown into the
+          pane rect, else parked offscreen but streaming. */}
+      {resident.map((key) => {
+        const { hostId, sessionId } = parseSessionKey(key);
+        const host = props.hosts.find((row) => row.id === hostId);
+        if (!host) return null;
+        const shown = visibleBySession.get(key);
+        const style = shown
+          ? {
+              position: 'absolute' as const,
+              left: shown.rect.left,
+              top: shown.rect.top,
+              width: shown.rect.width,
+              height: shown.rect.height,
+            }
+          : OFFSCREEN_STYLE;
+        return (
+          <div
+            key={key}
+            className="resident-terminal-holder"
+            style={style}
+            onPointerDownCapture={shown ? () => props.onFocusPane(shown.paneId) : undefined}
+          >
             <TerminalPane
-              hostId={session.hostId}
-              sessionId={session.sessionId}
-              interactive={leaf.paneId === props.focusedPaneId}
+              hostId={hostId}
+              sessionId={sessionId}
+              interactive={!!shown && shown.paneId === props.focusedPaneId}
               noiseAddress={noiseSessionAddress(host)}
               terminalTheme={props.terminalTheme}
               fontFamily={props.fontFamily}
               fontSize={props.fontSize}
               onFrame={props.onFrame}
-              onDisconnected={() => props.onDisconnected(session.hostId)}
+              onDisconnected={() => props.onDisconnected(hostId)}
             />
           </div>
         );
       })}
+
       {layout.dividers.map((divider) => (
         <PaneDivider
           key={divider.branchId}

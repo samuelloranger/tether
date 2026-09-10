@@ -295,6 +295,7 @@ mod tests {
             name: name.map(str::to_string),
             auto_title: None,
             activity: None,
+            kind: None,
         }
     }
 

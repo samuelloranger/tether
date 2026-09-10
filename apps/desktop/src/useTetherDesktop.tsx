@@ -1,5 +1,6 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: desktop app state hook — owns hosts, sessions, pairing, and the screen state machine in one place
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { nextAgentSessionId } from './agent/newChat';
 import {
   coreCacheDelete,
   coreHostRetry,
@@ -24,10 +25,12 @@ import {
   listenSessions,
 } from './coreApi';
 import type { FrameApplyResult } from './frameHandler';
+import { hostsBecomingReachable } from './hostRecovery';
 import type { PairScheme } from './hostScheme';
 import { markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
 import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
+import { applyKillTombstones, dropSession, rememberKill, replaceHostSessions } from './sessionList';
 import { pickResume, restorableIds } from './sessionResume';
 import {
   activeSessionStorageKey,
@@ -62,11 +65,55 @@ export function useTetherDesktop() {
   const hostsRef = useRef<HostProfile[]>([]);
   const sessionsRef = useRef<DrawerSession[]>([]);
   const activeSessionIdRef = useRef(activeSessionId);
+  const locallyKilledRef = useRef<Record<string, Set<string>>>({});
+  // Agent chats just created but not yet confirmed in the server's session list.
+  // Their view leaf must stay live across a poll until agent.start registers the
+  // session; bounded so a start that never lands (bad cwd) doesn't leave a zombie.
+  const pendingAgentsRef = useRef<Map<string, number>>(new Map());
+  const AGENT_PENDING_MS = 30_000;
+
+  const pendingAgentKeys = useCallback((): string[] => {
+    const now = Date.now();
+    const confirmed = new Set(sessionsRef.current.map((row) => sessionKey(row.hostId, row.id)));
+    for (const [key, at] of pendingAgentsRef.current) {
+      if (confirmed.has(key) || now - at > AGENT_PENDING_MS) {
+        pendingAgentsRef.current.delete(key);
+      }
+    }
+    return [...pendingAgentsRef.current.keys()];
+  }, []);
 
   activeHostIdRef.current = activeHostId;
   hostsRef.current = hosts;
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
+
+  const ingestHostSessions = useCallback((hostId: string, rows: DrawerSession[]) => {
+    const applied = applyKillTombstones(hostId, rows, locallyKilledRef.current);
+    locallyKilledRef.current = applied.killed;
+    setSessions((previous) => replaceHostSessions(previous, hostId, applied.rows));
+    return applied.rows;
+  }, []);
+
+  /**
+   * Pull `/api/sessions` into drawer state now, not on the next poll tick.
+   *
+   * iOS used to leave the drawer blank until New terminal; desktop fetched the
+   * list to pick a resume id but never wrote it into `sessions`, so tabs stayed
+   * empty until polling landed.
+   */
+  const hydrateHost = useCallback(
+    async (hostId: string): Promise<DrawerSession[]> => {
+      let rows = sessionsRef.current.filter((row) => row.hostId === hostId);
+      try {
+        rows = await coreSessionsList(hostId);
+      } catch {
+        return rows;
+      }
+      return ingestHostSessions(hostId, rows);
+    },
+    [ingestHostSessions],
+  );
 
   /**
    * Open the terminal the user was last in on this host — but only if it is
@@ -77,18 +124,16 @@ export function useTetherDesktop() {
    * `startSession` server-side, resurrecting a shell the user killed. A choice
    * made while the fetch is in flight wins over the restore.
    */
-  const restoreSession = useCallback(async (hostId: string) => {
-    const remembered = localStorage.getItem(activeSessionStorageKey(hostId));
-    let rows = sessionsRef.current.filter((row) => row.hostId === hostId);
-    try {
-      rows = await coreSessionsList(hostId);
-    } catch {
-      // the poll's copy stands in
-    }
-    if (activeHostIdRef.current !== hostId || activeSessionIdRef.current !== '') return;
-    const picked = pickResume(remembered, restorableIds(rows, hostId));
-    if (picked) setActiveSessionId(picked);
-  }, []);
+  const restoreSession = useCallback(
+    async (hostId: string) => {
+      const remembered = localStorage.getItem(activeSessionStorageKey(hostId));
+      const rows = await hydrateHost(hostId);
+      if (activeHostIdRef.current !== hostId || activeSessionIdRef.current !== '') return;
+      const picked = pickResume(remembered, restorableIds(rows, hostId));
+      if (picked) setActiveSessionId(picked);
+    },
+    [hydrateHost],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +150,12 @@ export function useTetherDesktop() {
       const savedHost = localStorage.getItem(KEY_ACTIVE_HOST);
       const initialHost =
         listed.find((profile) => profile.id === savedHost)?.id ?? listed[0]?.id ?? null;
+      unlistenSessions = await listenSessions((hostId, rows) => {
+        ingestHostSessions(hostId, rows);
+      });
+      if (cancelled) return;
+      await Promise.all(listed.map((profile) => hydrateHost(profile.id)));
+      if (cancelled) return;
       if (initialHost) {
         setActiveHostId(initialHost);
         // Eagerly, because restoreSession checks the refs to see whether its
@@ -114,9 +165,6 @@ export function useTetherDesktop() {
         await corePollingSetActive(initialHost);
         void restoreSession(initialHost);
       }
-      unlistenSessions = await listenSessions((hostId, rows) => {
-        setSessions((previous) => [...previous.filter((row) => row.hostId !== hostId), ...rows]);
-      });
       if (listed.length > 0) await corePollingStart();
       setReady(true);
     })();
@@ -125,7 +173,7 @@ export function useTetherDesktop() {
       unlistenSessions?.();
       void corePollingStop();
     };
-  }, [restoreSession]);
+  }, [restoreSession, hydrateHost, ingestHostSessions]);
 
   useEffect(() => {
     if (!ready) return;
@@ -160,6 +208,26 @@ export function useTetherDesktop() {
       clearInterval(timer);
     };
   }, [ready]);
+
+  // Recover the drawer + last terminal when a host comes back. The startup
+  // effect hydrates and restores exactly once; if that first pull raced a host
+  // still coming up (VPN not yet connected, server mid-restart, keyring not
+  // ready) the drawer stayed blank and the last terminal never reopened, and
+  // only a manual action fixed it. On each edge into `reachable`, re-pull the
+  // list — and, for the active host with nothing open, reopen the last
+  // terminal. `restoreSession` checks the refs, so it never lands on a tab the
+  // user chose in the meantime.
+  const prevHealthRef = useRef<Record<string, HostHealthStatus>>({});
+  useEffect(() => {
+    if (!ready) return;
+    for (const hostId of hostsBecomingReachable(prevHealthRef.current, healthByHost)) {
+      void hydrateHost(hostId);
+      if (hostId === activeHostIdRef.current && activeSessionIdRef.current === '') {
+        void restoreSession(hostId);
+      }
+    }
+    prevHealthRef.current = healthByHost;
+  }, [ready, healthByHost, hydrateHost, restoreSession]);
 
   const activeHost = hosts.find((host) => host.id === activeHostId) ?? null;
 
@@ -200,12 +268,7 @@ export function useTetherDesktop() {
   const newSession = useCallback(
     async (hostId: string): Promise<string | null> => {
       const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
-      let ids = sessionsRef.current.filter((row) => row.hostId === hostId).map((row) => row.id);
-      try {
-        ids = (await coreSessionsList(hostId)).map((row) => row.id);
-      } catch {
-        // the poll's copy stands in
-      }
+      const ids = (await hydrateHost(hostId)).map((row) => row.id);
       const nextId = await coreNextTermId(ids);
       // A slow host must not take the screen from wherever the user went while
       // it was answering — the same trade the restore path makes.
@@ -231,7 +294,32 @@ export function useTetherDesktop() {
       selectSession(hostId, nextId);
       return nextId;
     },
-    [selectSession],
+    [hydrateHost, selectSession],
+  );
+
+  const newAgentChat = useCallback(
+    async (hostId: string): Promise<string | null> => {
+      const from = { host: activeHostIdRef.current, session: activeSessionIdRef.current };
+      const serverIds = (await hydrateHost(hostId)).map((row) => row.id);
+      // Also avoid ids still pending (created, not yet server-confirmed) so a
+      // second new chat doesn't collide with the first and lose the dedup.
+      const pendingIds = pendingAgentKeys()
+        .filter((k) => k.startsWith(`${hostId}:`))
+        .map((k) => k.slice(hostId.length + 1));
+      const nextId = nextAgentSessionId([...serverIds, ...pendingIds]);
+      if (activeHostIdRef.current !== from.host || activeSessionIdRef.current !== from.session) {
+        return null;
+      }
+      // No optimistic session row: the kind-tagged view leaf carries the chat's
+      // existence, kept live by `pendingAgentKeys` until the server confirms it
+      // on agent.start (bounded, so a failed start doesn't leave a zombie).
+      // Adding it to `sessions` would make reconcileViews auto-place a kind-less
+      // duplicate view before startAgentChat's tagged one lands.
+      pendingAgentsRef.current.set(sessionKey(hostId, nextId), Date.now());
+      selectSession(hostId, nextId);
+      return nextId;
+    },
+    [hydrateHost, selectSession, pendingAgentKeys],
   );
 
   const killSessionById = useCallback(
@@ -248,6 +336,8 @@ export function useTetherDesktop() {
           })),
         });
         await coreCacheDelete(sessionKey(hostId, sessionId));
+        locallyKilledRef.current = rememberKill(locallyKilledRef.current, hostId, sessionId);
+        setSessions((previous) => dropSession(previous, hostId, sessionId));
         if (switchTo !== null && switchTo !== undefined) {
           selectSession(hostId, switchTo);
         }
@@ -429,6 +519,8 @@ export function useTetherDesktop() {
     selectHost,
     selectSession,
     newSession,
+    newAgentChat,
+    pendingAgentKeys,
     killSessionById,
     renameSessionById,
     retryHost,

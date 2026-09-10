@@ -1,17 +1,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  type FSWatcher,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  statSync,
-  watch,
-  writeSync,
-} from 'node:fs';
+import { type FSWatcher, statSync, watch } from 'node:fs';
 import path from 'node:path';
-import { secureWindowsPath } from './winAcl';
 import { canonicalPath, inside } from './workspaceFile';
+
+// A preview URL carries its capability token in plaintext; bound its lifetime so
+// a leaked link (chat log, browser history, Referer) dies instead of living for
+// the daemon's whole run. The authed poll (list()) renews it — see below.
+export const PREVIEW_TTL_MS = 15 * 60_000;
 
 export interface Presentation {
   id: string;
@@ -22,37 +17,10 @@ export interface Presentation {
   sessionId?: string;
 }
 
-export function createControlToken(file: string): string {
-  mkdirSync(path.dirname(file), { recursive: true });
-  try {
-    // 'wx' plus 0o600: create-or-fail, owner-only. The mode is the whole point —
-    // this token authorises /control/signal and /control/presentations, so any
-    // account that can read the file can drive every session's activity state
-    // and register previews.
-    const fd = openSync(file, 'wx', 0o600);
-    const token = randomBytes(24).toString('hex');
-    writeSync(fd, token);
-    closeSync(fd);
-    // The 0o600 above is a no-op on Windows, and this file's parent is ~/.tether
-    // — created without a mode and shared with the pid file and the log, so
-    // there is no owner-only directory grant here for the token to inherit.
-    // Unlike the holder sockets it has to be secured in its own right.
-    //
-    // After closeSync, not before: icacls opens the target itself, and rewriting
-    // the DACL of a file we still hold a write handle to is needless contention.
-    // Only in the create branch — on every later boot the open throws EEXIST and
-    // the ACL set on first boot is still in force, so there is nothing to redo.
-    secureWindowsPath(file, false);
-    return token;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    return readFileSync(file, 'utf8').trim();
-  }
-}
-
 interface InternalPresentation extends Presentation {
   root: string;
   token: string;
+  expiresAt: number;
   watcher: FSWatcher;
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -83,7 +51,11 @@ export function resolvePresentationFile(root: string, requested: string): string
 export class PresentationRegistry {
   private readonly previews = new Map<string, InternalPresentation>();
 
-  constructor(private readonly debounceMs = 150) {}
+  constructor(
+    private readonly debounceMs = 150,
+    private readonly ttlMs = PREVIEW_TTL_MS,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   create(input: {
     entry: string;
@@ -108,6 +80,7 @@ export class PresentationRegistry {
       sessionId: input.sessionId,
       root,
       token,
+      expiresAt: this.now() + this.ttlMs,
       watcher: undefined as unknown as FSWatcher,
       timer: null,
     };
@@ -117,7 +90,17 @@ export class PresentationRegistry {
   }
 
   list(): Presentation[] {
-    return [...this.previews.values()].map((preview) => this.public(preview));
+    // The renewal path. GET /api/presentations is bearer-gated, so only a paired
+    // device polling here extends a preview's life; a naked /preview GET cannot
+    // slide its own window. Same token string back → the client's iframe/webview
+    // src is unchanged, so no reload churn.
+    const renewed = this.now() + this.ttlMs;
+    const out: Presentation[] = [];
+    for (const preview of this.previews.values()) {
+      preview.expiresAt = renewed;
+      out.push(this.public(preview));
+    }
+    return out;
   }
 
   close(id: string): boolean {
@@ -139,7 +122,14 @@ export class PresentationRegistry {
 
   findByToken(token: string): (Presentation & { root: string; token: string }) | null {
     const preview = [...this.previews.values()].find((item) => item.token === token);
-    return preview ? { ...this.public(preview), root: preview.root, token: preview.token } : null;
+    if (!preview) return null;
+    // Expired: treat as absent and drop it, releasing the watcher. Renewal is the
+    // authed poll's job (list()); a request on the token itself never renews.
+    if (this.now() > preview.expiresAt) {
+      this.close(preview.id);
+      return null;
+    }
+    return { ...this.public(preview), root: preview.root, token: preview.token };
   }
 
   dispose(): void {

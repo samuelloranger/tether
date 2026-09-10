@@ -163,6 +163,9 @@ pub struct SessionRow {
     pub auto_title: Option<String>,
     #[serde(default)]
     pub activity: Option<String>,
+    /// `pty` (default) or `agent` — distinguishes chat sessions from terminals.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +276,7 @@ pub fn apply_session_metadata(rows: &mut [SessionRow], effect: &FrameEffect) -> 
                 name: None,
                 auto_title: None,
                 activity: Some(activity.clone()),
+                kind: None,
             }]
         }
         _ => Vec::new(),
@@ -369,6 +373,7 @@ mod tests {
             name: None,
             auto_title: None,
             activity: None,
+            kind: None,
         }
     }
 

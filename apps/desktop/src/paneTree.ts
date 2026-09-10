@@ -1,6 +1,11 @@
 export interface SessionRef {
   hostId: string;
   sessionId: string;
+  /** 'agent' marks a chat pane durably on the leaf, so the render branch does
+   * not depend on the poll-transient DrawerSession.kind. */
+  kind?: string;
+  /** cwd for a freshly-created agent chat's first agent.start. */
+  cwd?: string;
 }
 export type PaneDir = 'row' | 'col';
 export type PaneSide = 'a' | 'b';
