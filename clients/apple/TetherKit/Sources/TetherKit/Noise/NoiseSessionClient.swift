@@ -59,6 +59,8 @@ public enum NoiseServerMessage: Sendable, Equatable {
   /// Agent chat: ephemeral model + 5h/7day account usage for the info strip.
   /// Not seq-ordered; refreshed on attach and after each turn.
   case agentStatus(model: String?, fiveHour: UsageWindow?, sevenDay: UsageWindow?)
+  /// Agent chat: reply to `agent.list-sessions` — past sessions for /resume.
+  case agentSessions(sessions: [ClaudeSessionMeta])
   /// A frame type this client does not understand — ignored, never fatal, so a
   /// newer host can add frames without tearing down older clients' sessions.
   case ignored
@@ -315,8 +317,14 @@ public final class NoiseChannel {
   /// Starts an agent-chat session on the host (`{t:"agent.start",id,cwd,sinceSeq}`).
   /// `sinceSeq` is the highest frame seq this client already applied — 0 for a
   /// cold/empty model, which asks the host to replay the full transcript.
-  public func sendAgentStart(id: String, cwd: String, sinceSeq: Int = 0) async throws {
-    try await sendSealed(Self.agentStartRequest(id: id, cwd: cwd, sinceSeq: sinceSeq))
+  /// `resumeClaudeSessionId`, when set, grafts a past Claude session into this
+  /// fresh tab (history + live resume) — the `/resume` path.
+  public func sendAgentStart(
+    id: String, cwd: String, sinceSeq: Int = 0, resumeClaudeSessionId: String? = nil
+  ) async throws {
+    try await sendSealed(
+      Self.agentStartRequest(
+        id: id, cwd: cwd, sinceSeq: sinceSeq, resumeClaudeSessionId: resumeClaudeSessionId))
   }
 
   /// Sends a prompt to the last-started agent (`{t:"agent.prompt",text}`).
@@ -331,9 +339,23 @@ public final class NoiseChannel {
     try await sendSealed(Self.agentInterruptRequest())
   }
 
+  /// Sets the model for the running agent (`{t:"agent.model",name}`).
+  public func sendAgentModel(name: String) async throws {
+    try await sendSealed(Self.agentModelRequest(name: name))
+  }
+
+  /// Asks the host for this project's past sessions (`{t:"agent.list-sessions",cwd}`).
+  public func sendAgentListSessions(cwd: String) async throws {
+    try await sendSealed(Self.agentListSessionsRequest(cwd: cwd))
+  }
+
   /// The `agent.start` request body. Pure + static, as above.
-  static func agentStartRequest(id: String, cwd: String, sinceSeq: Int = 0) -> [String: Any] {
-    ["t": "agent.start", "id": id, "cwd": cwd, "sinceSeq": sinceSeq]
+  static func agentStartRequest(
+    id: String, cwd: String, sinceSeq: Int = 0, resumeClaudeSessionId: String? = nil
+  ) -> [String: Any] {
+    var body: [String: Any] = ["t": "agent.start", "id": id, "cwd": cwd, "sinceSeq": sinceSeq]
+    if let resumeClaudeSessionId { body["resumeClaudeSessionId"] = resumeClaudeSessionId }
+    return body
   }
 
   /// The `agent.prompt` request body. Pure + static, as above.
@@ -344,6 +366,16 @@ public final class NoiseChannel {
   /// The `agent.interrupt` request body. Pure + static, as above.
   static func agentInterruptRequest() -> [String: Any] {
     ["t": "agent.interrupt"]
+  }
+
+  /// The `agent.model` request body. Pure + static, as above.
+  static func agentModelRequest(name: String) -> [String: Any] {
+    ["t": "agent.model", "name": name]
+  }
+
+  /// The `agent.list-sessions` request body. Pure + static, as above.
+  static func agentListSessionsRequest(cwd: String) -> [String: Any] {
+    ["t": "agent.list-sessions", "cwd": cwd]
   }
 
   /// Ask the host for its full device roster (`{t:"devices.list"}`). The reply
@@ -425,7 +457,7 @@ extension NoiseServerMessage: Decodable {
   private enum CodingKeys: String, CodingKey {
     case t, id, chunk, exitCode, items, target, ok, error, token, expiresAt
     case seq, text, name, input, isError, reqId, cost, message, usage
-    case model, fiveHour, sevenDay
+    case model, fiveHour, sevenDay, sessions
   }
 
   /// The `usage` sub-object on an `agent.done` frame. Tokens are optional so an
@@ -512,6 +544,10 @@ extension NoiseServerMessage: Decodable {
         model: try container.decodeIfPresent(String.self, forKey: .model),
         fiveHour: five.map { UsageWindow(utilization: $0.utilization, resetsAt: $0.resetsAt) },
         sevenDay: seven.map { UsageWindow(utilization: $0.utilization, resetsAt: $0.resetsAt) }
+      )
+    case "agent.sessions":
+      self = .agentSessions(
+        sessions: try container.decodeIfPresent([ClaudeSessionMeta].self, forKey: .sessions) ?? []
       )
     default:
       // Forward-compat: a frame type this client predates. Ignore it rather than

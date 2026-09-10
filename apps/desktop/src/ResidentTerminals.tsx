@@ -34,6 +34,8 @@ export interface ResidentTerminalsProps {
   onPickSession: (paneId: string) => void;
   onSplit: (paneId: string, dir: PaneDir, side: PaneSide) => void;
   onClosePane: (paneId: string) => void;
+  /** Open a past Claude session (from an agent pane's /resume) in a new tab. */
+  onResumeSession: (hostId: string, cwd: string | undefined, claudeSessionId: string) => void;
   /** Live drop target during a pointer tab-drag, resolved by the parent. */
   preview: TabDropTarget | null;
   /** Most-recently-active session keys (front = newest) for background residency. */
@@ -191,6 +193,14 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
                 sessionId={session.sessionId}
                 noiseAddress={noiseSessionAddress(host)}
                 cwd={session.cwd ?? drawer?.cwd ?? undefined}
+                resumeSessionId={session.resumeSessionId}
+                onResumeSession={(picked) =>
+                  props.onResumeSession(
+                    session.hostId,
+                    session.cwd ?? drawer?.cwd ?? picked.cwd,
+                    picked.id,
+                  )
+                }
               />
             ) : null}
           </div>

@@ -1,7 +1,14 @@
 import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
-import { applyAgentStart, defaultGetAgentMessages } from './agentReplay';
+import { applyAgentMessage, defaultGetAgentMessages } from './agentReplay';
 import { type AgentUsageLimits, fetchAgentUsage } from './agentUsage';
+import {
+  type ClaudeSessionMeta,
+  listClaudeSessions,
+  sessionJsonlPath,
+  type TranslatedMessage,
+  translateSessionJsonl,
+} from './claudeSessions';
 import { getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
@@ -67,6 +74,10 @@ export interface SessionDeps {
   getAgentMessages: (sessionId: string, sinceSeq: number) => AgentMessageRow[];
   /** Account 5h/7day usage for the `agent.status` frame; null = unavailable. */
   fetchAgentUsage: () => Promise<AgentUsageLimits | null>;
+  /** Past Claude Code sessions under this cwd (`/resume` picker). */
+  listClaudeSessions: (cwd: string) => ClaudeSessionMeta[];
+  /** Translate a past Claude session's transcript into stored rows (`/resume`). */
+  translateClaudeSession: (claudeSessionId: string, cwd: string) => TranslatedMessage[];
 }
 
 function defaultGetReplayLogs(sessionId: string, sinceId: number) {
@@ -101,6 +112,8 @@ const defaultDeps: SessionDeps = {
   agentRegistry: sharedAgentRegistry,
   getAgentMessages: defaultGetAgentMessages,
   fetchAgentUsage: () => fetchAgentUsage(),
+  listClaudeSessions: (cwd) => listClaudeSessions(cwd),
+  translateClaudeSession: (id, cwd) => translateSessionJsonl(sessionJsonlPath(cwd, id)),
 };
 
 /** Client -> server application messages, after Noise decryption + JSON parse. */
@@ -112,8 +125,10 @@ type ClientMessage =
   | { t: 'devices.list' }
   | { t: 'devices.revoke'; target: string }
   | { t: 'auth.token' }
-  | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number }
+  | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number; resumeClaudeSessionId?: string }
   | { t: 'agent.prompt'; text: string }
+  | { t: 'agent.model'; name: string }
+  | { t: 'agent.list-sessions'; cwd: string }
   | { t: 'agent.interrupt' };
 
 /** One row of the `devices` reply — the wire shape an iOS client mirrors. */
@@ -300,21 +315,14 @@ async function applyMessage(
     const mint = d.mintToken ?? defaultMintToken;
     const { token, expiresAt } = mint(d.identity.deviceId);
     sendSealed({ t: 'auth.token', token, expiresAt });
-  } else if (msg.t === 'agent.start') {
-    await applyAgentStart(msg, d, sendSealed, agent);
-  } else if (msg.t === 'agent.prompt') {
-    // Un-awaited so `agent.interrupt` can still land while a prompt streams — but
-    // a driver can reject mid-stream, and an unhandled rejection here would
-    // escape this loop's try/catch and crash the whole process. Catch and
-    // report it to this client instead.
-    if (agent.currentId) {
-      agent.registry.prompt(agent.currentId, msg.text).catch((err) => {
-        logError(`Noise session: agent.prompt failed:`, err);
-        sendSealed({ t: 'agent.error', message: 'agent prompt failed' });
-      });
-    }
-  } else if (msg.t === 'agent.interrupt') {
-    if (agent.currentId) agent.registry.interrupt(agent.currentId);
+  } else if (
+    msg.t === 'agent.start' ||
+    msg.t === 'agent.prompt' ||
+    msg.t === 'agent.model' ||
+    msg.t === 'agent.list-sessions' ||
+    msg.t === 'agent.interrupt'
+  ) {
+    await applyAgentMessage(msg, d, sendSealed, agent);
   }
 }
 

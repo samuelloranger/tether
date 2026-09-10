@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { AgentComposer } from './AgentComposer';
 import { AgentMessageRow } from './AgentMessageRow';
-import { agentPrompt } from './agentFrames';
+import { AgentPanePickers } from './AgentPanePickers';
+import { agentListSessions, agentPrompt } from './agentFrames';
+import type { ClaudeSessionMeta } from './agentTypes';
 import { useAgentChat } from './useAgentChat';
 
 /** Full agent chat surface: transcript (auto-following) + composer. Port of
@@ -11,13 +13,23 @@ export function AgentChatPane({
   sessionId,
   noiseAddress,
   cwd,
+  resumeSessionId,
+  onResumeSession,
 }: {
   hostId: string;
   sessionId: string;
   noiseAddress: string;
   cwd?: string;
+  resumeSessionId?: string;
+  onResumeSession?: (session: ClaudeSessionMeta) => void;
 }) {
-  const { model, snapshot, send } = useAgentChat({ hostId, sessionId, noiseAddress, cwd });
+  const { model, snapshot, send } = useAgentChat({
+    hostId,
+    sessionId,
+    noiseAddress,
+    cwd,
+    resumeSessionId,
+  });
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
 
@@ -38,6 +50,11 @@ export function AgentChatPane({
       }
     }
   }, [snapshot.turn, snapshot.queued.length, model, send]);
+
+  // Fetch the past-session list once when the /resume picker opens.
+  useEffect(() => {
+    if (snapshot.pendingPicker === 'resume') send(agentListSessions(cwd ?? ''));
+  }, [snapshot.pendingPicker, cwd, send]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -81,6 +98,13 @@ export function AgentChatPane({
         ) : null}
       </div>
       <AgentComposer model={model} snapshot={snapshot} send={send} />
+      <AgentPanePickers
+        model={model}
+        snapshot={snapshot}
+        send={send}
+        cwd={cwd}
+        onResumeSession={onResumeSession}
+      />
     </div>
   );
 }

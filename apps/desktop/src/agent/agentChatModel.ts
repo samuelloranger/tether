@@ -1,6 +1,13 @@
+import { matchCommands } from './agentCommands';
 import { deriveDiff, summarize } from './agentDiff';
 import type { AgentFrame } from './agentFrames';
-import type { AgentMessage, AgentStatus, AgentTurn, AgentUsage } from './agentTypes';
+import type {
+  AgentMessage,
+  AgentStatus,
+  AgentTurn,
+  AgentUsage,
+  ClaudeSessionMeta,
+} from './agentTypes';
 
 /** Map the server's `done` cost + usage blob into our AgentUsage. */
 function toUsage(cost: number | undefined, usage: unknown): AgentUsage | undefined {
@@ -53,6 +60,12 @@ export interface AgentSnapshot {
   sessionUsage: AgentUsage | null;
   /** Model + account 5h/7day usage from the server; null until first status. */
   status: AgentStatus | null;
+  /** Highlighted row in the slash-command palette (0 when closed). */
+  paletteIndex: number;
+  /** Which sub-picker is open over the composer, or null. */
+  pendingPicker: 'model' | 'resume' | null;
+  /** Past Claude sessions for the /resume picker (from agent.sessions). */
+  resumeSessions: ClaudeSessionMeta[];
 }
 
 /**
@@ -71,6 +84,9 @@ export class AgentChatModel {
   private draft = '';
   private statusValue: AgentStatus | null = null;
   private lastUserPrompt: string | null = null;
+  private paletteIndex = 0;
+  private pendingPicker: 'model' | 'resume' | null = null;
+  private resumeSessions: ClaudeSessionMeta[] = [];
   private listeners = new Set<() => void>();
   private cached: AgentSnapshot | null = null;
 
@@ -96,6 +112,9 @@ export class AgentChatModel {
         canRetry: this.turn === 'idle' && this.lastUserPrompt != null,
         sessionUsage: sumUsage(this.messages),
         status: this.statusValue,
+        paletteIndex: this.paletteIndex,
+        pendingPicker: this.pendingPicker,
+        resumeSessions: this.resumeSessions,
       };
     }
     return this.cached;
@@ -214,6 +233,10 @@ export class AgentChatModel {
         };
         break;
       }
+      case 'agent.sessions': {
+        this.resumeSessions = frame.sessions;
+        break;
+      }
       case 'agent.permission_req': {
         const inputJson = JSON.stringify(frame.input ?? {});
         const req = {
@@ -266,6 +289,30 @@ export class AgentChatModel {
 
   setDraft(text: string): void {
     this.draft = text;
+    const count = matchCommands(text).length;
+    this.paletteIndex = count === 0 ? 0 : Math.min(this.paletteIndex, count - 1);
+    this.changed();
+  }
+
+  movePalette(delta: number): void {
+    const count = matchCommands(this.draft).length;
+    if (count === 0) return;
+    this.paletteIndex = (this.paletteIndex + delta + count) % count;
+    this.changed();
+  }
+
+  openPicker(kind: 'model' | 'resume'): void {
+    this.pendingPicker = kind;
+    this.changed();
+  }
+
+  closePicker(): void {
+    this.pendingPicker = null;
+    this.changed();
+  }
+
+  clearTranscript(): void {
+    this.messages = [];
     this.changed();
   }
 

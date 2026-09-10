@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { AgentChatModel } from './agentChatModel';
+import { matchCommands } from './agentCommands';
 
 describe('AgentChatModel core', () => {
   test('coalesces deltas into one streaming assistant message', () => {
@@ -189,5 +190,45 @@ describe('AgentChatModel core', () => {
     });
     m.apply({ t: 'agent.delta', seq: 1, text: 'x' });
     expect(hits).toBe(1);
+  });
+});
+
+describe('AgentChatModel palette', () => {
+  test('setDraft resets palette index; movePalette wraps within matches', () => {
+    const m = new AgentChatModel();
+    m.setDraft('/c'); // matches clear, copy, compact, commit
+    const n = matchCommands('/c').length;
+    expect(m.snapshot().paletteIndex).toBe(0);
+    m.movePalette(-1);
+    expect(m.snapshot().paletteIndex).toBe(n - 1); // wraps to last
+    m.movePalette(1);
+    expect(m.snapshot().paletteIndex).toBe(0);
+  });
+
+  test('openPicker/closePicker toggle pendingPicker', () => {
+    const m = new AgentChatModel();
+    m.openPicker('model');
+    expect(m.snapshot().pendingPicker).toBe('model');
+    m.closePicker();
+    expect(m.snapshot().pendingPicker).toBeNull();
+  });
+
+  test('clearTranscript empties messages', () => {
+    const m = new AgentChatModel();
+    m.apply({ t: 'agent.user', seq: 1, text: 'hi' });
+    expect(m.snapshot().messages.length).toBe(1);
+    m.clearTranscript();
+    expect(m.snapshot().messages.length).toBe(0);
+  });
+});
+
+describe('AgentChatModel resume list', () => {
+  test('agent.sessions frame populates resumeSessions', () => {
+    const m = new AgentChatModel();
+    m.apply({
+      t: 'agent.sessions',
+      sessions: [{ id: 's1', label: 'x', mtimeMs: 1, msgCount: 2, cwd: '/x' }],
+    });
+    expect(m.snapshot().resumeSessions.map((s) => s.id)).toEqual(['s1']);
   });
 });

@@ -503,7 +503,7 @@ public final class SessionStore {
   /// transaction that closes the drawer, or the terminal reclaims the keyboard in
   /// the gap and strands its key bar over the new chat — see `activateSession`.
   /// The network connect trails in a detached task.
-  public func newAgentChat(hostId: String, cwd: String) {
+  public func newAgentChat(hostId: String, cwd: String, resumeSessionId: String? = nil) {
     let known = sessionsByHost[hostId] ?? []
     let id = nextAgentSessionId(among: known)
     let changed = activeHostId != hostId || activeSessionId != id
@@ -526,14 +526,20 @@ public final class SessionStore {
     model.onFirstPrompt = { [weak self] text in
       self?.renameAgentSessionLocally(id: id, hostId: hostId, name: Self.promptGist(text))
     }
+    // /resume: picking a past session opens it in a fresh tab on the same host.
+    model.onResume = { [weak self] picked in
+      self?.newAgentChat(hostId: hostId, cwd: picked.cwd, resumeSessionId: picked.id)
+    }
     agentModels[key] = model
     Task {
       if changed {
         await pipeline.sendFocus(focused: false)
       }
       await connectAgent(sessionId: id)
-      // Brand-new chat, empty model — sinceSeq 0 (nothing to replay).
-      pipeline.outbound.yield(.agentStart(id: id, cwd: cwd, sinceSeq: 0))
+      // Brand-new chat, empty model — sinceSeq 0 (nothing to replay). A resume id
+      // grafts a past Claude session's history + live context into this tab.
+      pipeline.outbound.yield(
+        .agentStart(id: id, cwd: cwd, sinceSeq: 0, resumeClaudeSessionId: resumeSessionId))
     }
   }
 
@@ -549,6 +555,10 @@ public final class SessionStore {
       // Approval routing over Noise is a later pass (P3) — the model already
       // clears `pendingApproval` locally on decision.
       break
+    case let .model(name):
+      pipeline.outbound.yield(.agentModel(name))
+    case let .listSessions(cwd):
+      pipeline.outbound.yield(.agentListSessions(cwd: cwd))
     }
   }
 
@@ -801,7 +811,10 @@ public final class SessionStore {
       let key = terminalKey(sessionId, hostId: hostId)
       let cwd = agentModels[key]?.cwd ?? ""
       let sinceSeq = agentModels[key]?.lastSeq ?? 0
-      pipeline.outbound.yield(.agentStart(id: sessionId, cwd: cwd, sinceSeq: sinceSeq))
+      // Reattach never re-resumes: the server keeps the session (or the history
+      // is already persisted), so resumeClaudeSessionId is nil here.
+      pipeline.outbound.yield(
+        .agentStart(id: sessionId, cwd: cwd, sinceSeq: sinceSeq, resumeClaudeSessionId: nil))
     } else {
       await connectTerminal(sessionId: sessionId)
     }

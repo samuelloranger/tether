@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AgentDriver } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
+import { getAgentMessages } from './agentMessages';
 import { AgentRegistry } from './agentRegistry';
+import { getConfig } from './config';
 import { db } from './db';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
@@ -139,6 +141,8 @@ function fakePty(): FakePty {
     getReplayLogs: () => ({ reset: false, logs: [] }),
     getAgentMessages: () => [],
     fetchAgentUsage: async () => null,
+    listClaudeSessions: () => [],
+    translateClaudeSession: () => [],
     ...emptyRegistry(),
     identity: { deviceId: '' },
   };
@@ -643,6 +647,85 @@ describe('runNoiseSession — agent chat', () => {
       { t: 'agent.delta', seq: 2, text: 'Hi' },
       { t: 'agent.done', seq: 3, cost: 0, usage: {} },
     ]);
+  });
+
+  test("'agent.list-sessions' replies with agent.sessions", async () => {
+    const pty = fakePty();
+    const io = scriptedIo([jsonFrame({ t: 'agent.list-sessions', cwd: '/work/repo' })]);
+    const sessions = [{ id: 's1', label: 'x', mtimeMs: 1, msgCount: 2, cwd: '/work/repo' }];
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      listClaudeSessions: () => sessions,
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent.map((f) => JSON.parse(dec.decode(f)));
+    expect(msgs).toContainEqual({ t: 'agent.sessions', sessions });
+  });
+
+  test("resume 'agent.start' persists translated history before the first prompt", async () => {
+    const pty = fakePty();
+    const seeded: string[] = [];
+    class ResumeDriver extends FakeAgentDriver {
+      seedResume(s: string) {
+        seeded.push(s);
+      }
+    }
+    const io = scriptedIo([
+      jsonFrame({
+        t: 'agent.start',
+        id: 'a-resume',
+        cwd: '/tmp',
+        resumeClaudeSessionId: 'claude-1',
+      }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentRegistry: new AgentRegistry(() => new ResumeDriver([])),
+      getAgentMessages: (id, since) => getAgentMessages(db, id, since),
+      translateClaudeSession: () => [
+        { kind: 'user', text: 'old-a' },
+        { kind: 'delta', text: 'old-b' },
+      ],
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const msgs = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t !== 'agent.status');
+    expect(msgs).toEqual([
+      { t: 'agent.user', seq: 1, text: 'old-a' },
+      { t: 'agent.delta', seq: 2, text: 'old-b' },
+    ]);
+    expect(seeded).toEqual(['claude-1']);
+  });
+
+  test("'agent.model' sets the driver model, persists the default, re-emits status", async () => {
+    const pty = fakePty();
+    class ModelDriver extends FakeAgentDriver {
+      private m: string | null = null;
+      setModel(n: string | null) {
+        this.m = n;
+      }
+      getModel(): string | null {
+        return this.m;
+      }
+    }
+    const io = scriptedIo([
+      jsonFrame({ t: 'agent.start', id: 'a-model', cwd: '/tmp' }),
+      jsonFrame({ t: 'agent.model', name: 'opus' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentRegistry: new AgentRegistry(() => new ModelDriver([])),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const statuses = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t === 'agent.status');
+    expect(statuses.at(-1)?.model).toBe('opus');
+    expect(getConfig().agent.defaultModel).toBe('opus');
   });
 
   test("'agent.start' whose driver fails to start is caught, not an unhandled rejection, and tells the client", async () => {

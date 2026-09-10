@@ -157,6 +157,32 @@ export function extractModel(line: string): string | null {
 type ClaudeProc = ReturnType<typeof Bun.spawn>;
 
 /** Wraps the `claude` CLI in headless streaming mode as the production AgentDriver. */
+/** Assemble the `claude --print` argv. Pure so the flag logic is unit-tested
+ * without spawning. `--dangerously-skip-permissions`: headless `--print`
+ * otherwise auto-DENIES any tool needing approval (Write/Edit/Bash), so nothing
+ * could mutate files. Real per-tool approval (canUseTool) is a later pass.
+ * `--` terminates option parsing so a prompt starting with `-` can't be misread
+ * as an option. */
+export function buildClaudeArgs(opts: {
+  text: string;
+  sessionId: string | null;
+  model: string | null;
+}): string[] {
+  const args = [
+    'claude',
+    '--print',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+    '--dangerously-skip-permissions',
+  ];
+  if (opts.model) args.push('--model', opts.model);
+  if (opts.sessionId) args.push('--resume', opts.sessionId);
+  args.push('--', opts.text);
+  return args;
+}
+
 export class AgentClaudeDriver implements AgentDriver {
   private cwd = '';
   private sessionId: string | null = null;
@@ -171,33 +197,28 @@ export class AgentClaudeDriver implements AgentDriver {
     return this.currentModel;
   }
 
-  /** Capture session id + model from a `system`/init line (both no-ops otherwise). */
+  /** Client-chosen model for this chat's next spawns (`/model`). */
+  setModel(name: string | null): void {
+    this.currentModel = name;
+  }
+
+  /** Resume a foreign Claude session id (`/resume`) — the first spawn passes it
+   * to `--resume` and the CLI continues that conversation. */
+  seedResume(sessionId: string): void {
+    this.sessionId = sessionId;
+  }
+
+  /** Capture session id + model from a `system`/init line (both no-ops otherwise).
+   * A user-set model wins: only adopt the CLI's reported model if none is set. */
   private captureInit(line: string): void {
     const sid = extractSessionId(line);
     if (sid) this.sessionId = sid;
     const model = extractModel(line);
-    if (model) this.currentModel = model;
+    if (model && this.currentModel === null) this.currentModel = model;
   }
 
   async *prompt(text: string): AsyncIterable<AgentEvent> {
-    const args = [
-      'claude',
-      '--print',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--include-partial-messages',
-      // P1 scope: tools auto-approve. Headless `--print` otherwise auto-DENIES
-      // any tool that needs approval (Write/Edit/Bash), so nothing could mutate
-      // files. Real per-tool approval (a phone prompt via canUseTool) is P3 and
-      // will replace this flag.
-      '--dangerously-skip-permissions',
-    ];
-    if (this.sessionId) args.push('--resume', this.sessionId);
-    // `--` terminates option parsing so a prompt starting with `-` (a pasted
-    // diff line, a flag-like string, a negative number) can't be misread as
-    // an option by the claude CLI.
-    args.push('--', text);
+    const args = buildClaudeArgs({ text, sessionId: this.sessionId, model: this.currentModel });
 
     // Force the CLI's own subscription login (claude login), never API billing.
     // Both credential envs are stripped so a stray key/token in the daemon's

@@ -30,6 +30,7 @@ export function bindAgentSession(input: {
   sessionId: string;
   noiseAddress: string;
   cwd?: string;
+  resumeSessionId?: string;
   open?: AgentOpener;
 }): AgentBinding {
   const open = input.open ?? openNoiseSocket;
@@ -47,7 +48,12 @@ export function bindAgentSession(input: {
     readyPending = false;
     sendJson(
       socket,
-      agentStart({ id: input.sessionId, cwd: input.cwd ?? '', sinceSeq: input.model.lastSeq }),
+      agentStart({
+        id: input.sessionId,
+        cwd: input.cwd ?? '',
+        sinceSeq: input.model.lastSeq,
+        resumeClaudeSessionId: input.resumeSessionId,
+      }),
     );
   };
 

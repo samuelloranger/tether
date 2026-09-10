@@ -32,9 +32,11 @@ enum OutboundFrame: Sendable {
   case paste(String, key: String?)
   case focus(Bool)
   case resize(cols: UInt16, rows: UInt16)
-  case agentStart(id: String, cwd: String, sinceSeq: Int)
+  case agentStart(id: String, cwd: String, sinceSeq: Int, resumeClaudeSessionId: String?)
   case agentPrompt(String)
   case agentInterrupt
+  case agentModel(String)
+  case agentListSessions(cwd: String)
 }
 
 /// Owns the Noise session channel and the VT emulator, off the main actor.
@@ -208,7 +210,7 @@ actor TerminalPipeline {
           // (`DevicesView`, `NoiseTokenCache`). Ignore.
           break
         case .agentDelta, .agentTool, .agentToolResult, .agentPermissionReq, .agentDone,
-          .agentError, .agentUser, .agentStatus:
+          .agentError, .agentUser, .agentStatus, .agentSessions:
           // Agent-chat frames are consumed by AgentChatModel, not the terminal
           // emulator pipeline — forward to the event sink for SessionStore to
           // dispatch into the active AgentChatModel.
@@ -320,15 +322,22 @@ actor TerminalPipeline {
       applyLocalResize(cols: newCols, rows: newRows)
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
-    case let .agentStart(id, cwd, sinceSeq):
+    case let .agentStart(id, cwd, sinceSeq, resumeClaudeSessionId):
       guard let channel = noiseChannel else { return }
-      try? await channel.sendAgentStart(id: id, cwd: cwd, sinceSeq: sinceSeq)
+      try? await channel.sendAgentStart(
+        id: id, cwd: cwd, sinceSeq: sinceSeq, resumeClaudeSessionId: resumeClaudeSessionId)
     case let .agentPrompt(text):
       guard let channel = noiseChannel else { return }
       try? await channel.sendAgentPrompt(text: text)
     case .agentInterrupt:
       guard let channel = noiseChannel else { return }
       try? await channel.sendAgentInterrupt()
+    case let .agentModel(name):
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentModel(name: name)
+    case let .agentListSessions(cwd):
+      guard let channel = noiseChannel else { return }
+      try? await channel.sendAgentListSessions(cwd: cwd)
     }
   }
 

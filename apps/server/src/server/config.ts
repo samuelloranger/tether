@@ -28,6 +28,8 @@ export const configSchema = z
       scrollbackRows: nonNegativeInt.min(100).max(100_000),
       silenceMs: nonNegativeInt.min(1000).max(3_600_000),
     }),
+    // `/model` sticky default for new agent chats. Empty = let the CLI decide.
+    agent: z.object({ defaultModel: z.string().max(200).default('') }),
   })
   .strict();
 
@@ -49,6 +51,7 @@ export const DEFAULT_CONFIG: Config = {
     scrollbackRows: 2000,
     silenceMs: 15_000,
   },
+  agent: { defaultModel: '' },
 };
 
 let cached: Config | null = null;
@@ -85,6 +88,7 @@ export function getConfig(): Config {
       longJobSeconds: readScalar('longJobSeconds'),
       identity: readTopLevel('identity'),
       session: readTopLevel('session'),
+      agent: readTopLevel('agent'),
     });
   }
   return cached;
@@ -98,6 +102,7 @@ export async function patchConfig(partial: unknown): Promise<Config> {
       longJobSeconds: configSchema.shape.longJobSeconds.optional(),
       identity: configSchema.shape.identity.partial().strict().optional(),
       session: configSchema.shape.session.partial().strict().optional(),
+      agent: configSchema.shape.agent.partial().strict().optional(),
     })
     .strict()
     .parse(partial);
@@ -109,6 +114,7 @@ export async function patchConfig(partial: unknown): Promise<Config> {
     triggers: { ...current.triggers, ...patch.triggers },
     identity: { ...current.identity, ...patch.identity },
     session: { ...current.session, ...patch.session },
+    agent: { ...current.agent, ...patch.agent },
   });
   for (const key of Object.keys(patch) as (keyof Config)[]) {
     setSetting(`config.${key}`, JSON.stringify(next[key]));

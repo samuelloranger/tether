@@ -28,6 +28,10 @@ export interface AgentDriver {
   close(): void;
   /** The model the CLI reported on its init line, once a prompt has run. */
   getModel?(): string | null;
+  /** Set the model for this chat's subsequent spawns (`/model`). */
+  setModel?(name: string | null): void;
+  /** Seed a foreign Claude session id to resume on the next spawn (`/resume`). */
+  seedResume?(sessionId: string): void;
 }
 
 export class FakeAgentDriver implements AgentDriver {

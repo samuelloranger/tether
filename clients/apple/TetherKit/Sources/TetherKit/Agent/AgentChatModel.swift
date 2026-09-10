@@ -5,6 +5,8 @@ public enum AgentOutbound: Sendable, Equatable {
   case prompt(String)
   case interrupt
   case permission(reqId: String, decision: String)  // 'allow' | 'deny' | 'allow_always'
+  case model(String)
+  case listSessions(cwd: String)
 }
 
 /// Per-chat state + reducer. Server `agent.*` frames go through `apply`; the
@@ -34,6 +36,14 @@ public final class AgentChatModel {
   /// Fired once, on the first user prompt this model ever sends (immediate or
   /// queued) — lets `SessionStore` rename the drawer tab from a gist of it.
   public var onFirstPrompt: ((String) -> Void)?
+
+  /// Which sub-picker is open over the composer (`/model` or `/resume`), or nil.
+  public var pendingPicker: AgentPickerKind?
+  /// Past Claude sessions for the /resume picker, from an `agent.sessions` frame.
+  public private(set) var resumeSessions: [ClaudeSessionMeta] = []
+  /// Fired when the user picks a session in /resume — `SessionStore` opens it in
+  /// a new tab (mirrors `onFirstPrompt`; keeps the view free of store access).
+  public var onResume: ((ClaudeSessionMeta) -> Void)?
 
   /// Highest frame `seq` this model has applied. Sent back as `sinceSeq` on the
   /// next `agent.start` (reconnect or app relaunch) so the host replays only
@@ -142,6 +152,33 @@ public final class AgentChatModel {
     send(.interrupt)
   }
 
+  // MARK: slash-command palette + pickers
+
+  public func clearTranscript() {
+    messages = []
+    revision += 1
+  }
+
+  public func openPicker(_ kind: AgentPickerKind) {
+    pendingPicker = kind
+    revision += 1
+  }
+
+  public func closePicker() {
+    pendingPicker = nil
+    revision += 1
+  }
+
+  /// Set the model for this chat's next turns (`/model`).
+  public func setModel(_ name: String) {
+    send(.model(name))
+  }
+
+  /// Ask the host for this project's past sessions (fills `resumeSessions`).
+  public func requestSessions() {
+    send(.listSessions(cwd: cwd))
+  }
+
   public func resolveApproval(_ decision: String) {
     guard let pending = pendingApproval else { return }
     send(.permission(reqId: pending.id.uuidString, decision: decision))
@@ -247,6 +284,9 @@ public final class AgentChatModel {
       interrupting = false
     case let .agentStatus(model, fiveHour, sevenDay):
       applyStatus(model: model, fiveHour: fiveHour, sevenDay: sevenDay)
+    case let .agentSessions(sessions):
+      resumeSessions = sessions
+      revision += 1
     default:
       break
     }
