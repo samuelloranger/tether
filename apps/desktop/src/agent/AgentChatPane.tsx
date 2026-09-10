@@ -1,9 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { AgentComposer } from './AgentComposer';
 import { AgentMessageRow } from './AgentMessageRow';
-import { AgentModelPicker } from './AgentModelPicker';
-import { AgentResumePicker } from './AgentResumePicker';
-import { agentListSessions, agentModel, agentPrompt } from './agentFrames';
+import { AgentPanePickers } from './AgentPanePickers';
+import { agentListSessions, agentPrompt } from './agentFrames';
 import type { ClaudeSessionMeta } from './agentTypes';
 import { useAgentChat } from './useAgentChat';
 
@@ -99,27 +98,13 @@ export function AgentChatPane({
         ) : null}
       </div>
       <AgentComposer model={model} snapshot={snapshot} send={send} />
-      {snapshot.pendingPicker === 'model' ? (
-        <AgentModelPicker
-          current={snapshot.status?.model}
-          onPick={(name) => {
-            send(agentModel(name));
-            model.closePicker();
-          }}
-          onClose={() => model.closePicker()}
-        />
-      ) : null}
-      {snapshot.pendingPicker === 'resume' ? (
-        <AgentResumePicker
-          sessions={snapshot.resumeSessions}
-          cwd={cwd}
-          onPick={(session) => {
-            model.closePicker();
-            onResumeSession?.(session);
-          }}
-          onClose={() => model.closePicker()}
-        />
-      ) : null}
+      <AgentPanePickers
+        model={model}
+        snapshot={snapshot}
+        send={send}
+        cwd={cwd}
+        onResumeSession={onResumeSession}
+      />
     </div>
   );
 }

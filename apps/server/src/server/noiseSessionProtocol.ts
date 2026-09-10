@@ -1,6 +1,6 @@
 import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
-import { applyAgentStart, defaultGetAgentMessages, sendAgentStatus } from './agentReplay';
+import { applyAgentMessage, defaultGetAgentMessages } from './agentReplay';
 import { type AgentUsageLimits, fetchAgentUsage } from './agentUsage';
 import {
   type ClaudeSessionMeta,
@@ -9,8 +9,7 @@ import {
   type TranslatedMessage,
   translateSessionJsonl,
 } from './claudeSessions';
-import { patchConfig } from './config';
-import { db, getSession, setSessionModel } from './db';
+import { getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
@@ -316,31 +315,14 @@ async function applyMessage(
     const mint = d.mintToken ?? defaultMintToken;
     const { token, expiresAt } = mint(d.identity.deviceId);
     sendSealed({ t: 'auth.token', token, expiresAt });
-  } else if (msg.t === 'agent.start') {
-    await applyAgentStart(msg, d, sendSealed, agent);
-  } else if (msg.t === 'agent.prompt') {
-    // Un-awaited so `agent.interrupt` can still land while a prompt streams — but
-    // a driver can reject mid-stream, and an unhandled rejection here would
-    // escape this loop's try/catch and crash the whole process. Catch and
-    // report it to this client instead.
-    if (agent.currentId) {
-      agent.registry.prompt(agent.currentId, msg.text).catch((err) => {
-        logError(`Noise session: agent.prompt failed:`, err);
-        sendSealed({ t: 'agent.error', message: 'agent prompt failed' });
-      });
-    }
-  } else if (msg.t === 'agent.model') {
-    if (agent.currentId) {
-      const name = msg.name || null;
-      agent.registry.setModel(agent.currentId, name);
-      setSessionModel(db, agent.currentId, name);
-      void patchConfig({ agent: { defaultModel: msg.name } });
-      void sendAgentStatus(agent.currentId, d, sendSealed, agent);
-    }
-  } else if (msg.t === 'agent.list-sessions') {
-    sendSealed({ t: 'agent.sessions', sessions: d.listClaudeSessions(msg.cwd) });
-  } else if (msg.t === 'agent.interrupt') {
-    if (agent.currentId) agent.registry.interrupt(agent.currentId);
+  } else if (
+    msg.t === 'agent.start' ||
+    msg.t === 'agent.prompt' ||
+    msg.t === 'agent.model' ||
+    msg.t === 'agent.list-sessions' ||
+    msg.t === 'agent.interrupt'
+  ) {
+    await applyAgentMessage(msg, d, sendSealed, agent);
   }
 }
 

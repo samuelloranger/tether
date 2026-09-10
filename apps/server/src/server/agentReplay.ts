@@ -1,9 +1,52 @@
 import type { AgentFrame } from './agentDriver';
 import { type AgentMessageRow, appendAgentMessage, getAgentMessages } from './agentMessages';
-import { getConfig } from './config';
-import { createAgentSession, db, getSession } from './db';
+import { getConfig, patchConfig } from './config';
+import { createAgentSession, db, getSession, setSessionModel } from './db';
 import { logError } from './log';
 import type { AgentState, SessionDeps } from './noiseSessionProtocol';
+
+/** The `agent.*` client messages, dispatched by applyAgentMessage. */
+type AgentClientMessage =
+  | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number; resumeClaudeSessionId?: string }
+  | { t: 'agent.prompt'; text: string }
+  | { t: 'agent.model'; name: string }
+  | { t: 'agent.list-sessions'; cwd: string }
+  | { t: 'agent.interrupt' };
+
+/** Route one agent-chat message. Extracted from noiseSessionProtocol's
+ * applyMessage so that file stays under its size limit. */
+export async function applyAgentMessage(
+  msg: AgentClientMessage,
+  d: SessionDeps,
+  sendSealed: (obj: unknown) => boolean,
+  agent: AgentState,
+): Promise<void> {
+  if (msg.t === 'agent.start') {
+    await applyAgentStart(msg, d, sendSealed, agent);
+  } else if (msg.t === 'agent.prompt') {
+    // Un-awaited so `agent.interrupt` can still land while a prompt streams — but
+    // a driver can reject mid-stream, and an unhandled rejection would escape the
+    // caller's try/catch and crash the process. Catch and report to the client.
+    if (agent.currentId) {
+      agent.registry.prompt(agent.currentId, msg.text).catch((err) => {
+        logError('Noise session: agent.prompt failed:', err);
+        sendSealed({ t: 'agent.error', message: 'agent prompt failed' });
+      });
+    }
+  } else if (msg.t === 'agent.model') {
+    if (agent.currentId) {
+      const name = msg.name || null;
+      agent.registry.setModel(agent.currentId, name);
+      setSessionModel(db, agent.currentId, name);
+      void patchConfig({ agent: { defaultModel: msg.name } });
+      void sendAgentStatus(agent.currentId, d, sendSealed, agent);
+    }
+  } else if (msg.t === 'agent.list-sessions') {
+    sendSealed({ t: 'agent.sessions', sessions: d.listClaudeSessions(msg.cwd) });
+  } else if (msg.t === 'agent.interrupt') {
+    if (agent.currentId) agent.registry.interrupt(agent.currentId);
+  }
+}
 
 export function defaultGetAgentMessages(sessionId: string, sinceSeq: number): AgentMessageRow[] {
   return getAgentMessages(db, sessionId, sinceSeq);
