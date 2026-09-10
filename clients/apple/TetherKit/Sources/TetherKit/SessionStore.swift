@@ -77,6 +77,7 @@ public final class SessionStore {
     if let existing = pipelines[key] { return existing }
     let created = TerminalPipeline(replayStore: replayStore)
     pipelines[key] = created
+    observeForever(created, key: key)
     return created
   }
 
@@ -119,8 +120,6 @@ public final class SessionStore {
   /// Coalesces drawer refreshes: N taps on the drawer button must produce ONE
   /// fetch, not N. See `refreshDrawerInBackground`.
   @ObservationIgnored private var drawerRefreshTask: Task<Void, Never>?
-  @ObservationIgnored private var snapshotObserver: Task<Void, Never>?
-  @ObservationIgnored private var eventObserver: Task<Void, Never>?
   /// Only `pullTerminalSnapshot` uses this now — the render path's own
   /// generation check lives inside `TerminalPipeline`.
   @ObservationIgnored private var lastRenderedGeneration: UInt64?
@@ -155,37 +154,24 @@ public final class SessionStore {
     self.remoteSessions = remoteSessions
     self.remoteKill = remoteKill
     noiseClient = NoiseSessionClient(keyStore: noiseKeyStore)
-    observePipeline()
   }
 
-  /// Drains the pipeline's two streams onto the main actor.
-  ///
-  /// Snapshots come through a `bufferingNewest(1)` stream, so when the main
-  /// actor is busy the intermediate grids are DROPPED rather than queued —
-  /// a terminal only ever needs to draw the newest one. Events are unbounded
-  /// because losing "the session list changed" would leave the UI stale.
-  private func observePipeline() {
-    observe(pipeline)
-  }
-
-  /// Binds the surface to `target`'s streams, cancelling any prior binding.
-  /// Called on every tab switch so `terminalSnapshot` follows the active
-  /// pipeline instead of a fixed one.
-  private func observe(_ target: TerminalPipeline) {
-    snapshotObserver?.cancel()
-    eventObserver?.cancel()
-    let snapshots = target.snapshots
-    let events = target.events
-    snapshotObserver = Task { [weak self] in
-      for await snapshot in snapshots {
+  /// Drains a pipeline's two streams onto the main actor for the LIFE of the
+  /// pipeline, applying only while it is the active tab. Bound once per pipeline
+  /// (in `pipelineFor`), never re-iterated: `AsyncStream` is single-consumer, so
+  /// a fresh `for await` on switch-back — the old per-switch `observe` — silently
+  /// received nothing and the returned-to terminal stopped updating.
+  private func observeForever(_ pipeline: TerminalPipeline, key: String) {
+    Task { [weak self] in
+      for await snapshot in pipeline.snapshots {
         guard let self else { return }
-        self.terminalSnapshot = snapshot
+        if self.activePipelineKey == key { self.terminalSnapshot = snapshot }
       }
     }
-    eventObserver = Task { [weak self] in
-      for await event in events {
+    Task { [weak self] in
+      for await event in pipeline.events {
         guard let self else { return }
-        self.apply(event)
+        if self.activePipelineKey == key { self.apply(event) }
       }
     }
   }
@@ -967,7 +953,6 @@ public final class SessionStore {
     }
     activePipelineKey = newKey
     let target = pipelineFor(newKey)
-    observe(target)
     await target.setRendering(true)
     lruOrder = TerminalResidency.touch(lruOrder, newKey)
 
