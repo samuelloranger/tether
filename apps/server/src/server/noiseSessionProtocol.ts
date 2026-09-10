@@ -13,6 +13,7 @@ import {
   getActiveSession,
   kickPtySize,
   resizeSession,
+  SessionExitedError,
   setSessionFocus,
   startSession,
   subscribeToSession,
@@ -244,6 +245,12 @@ async function applyMessage(
     try {
       await d.startSession(msg.id, msg.command, cols, rows);
     } catch (err) {
+      if (err instanceof SessionExitedError) {
+        // The session exited on its own; surface that instead of resurrecting
+        // it, so the client shows it stopped rather than a fresh shell.
+        sendSealed({ t: 'exit', id: msg.id });
+        return;
+      }
       logError(`Noise session: startSession('${msg.id}') failed:`, err);
       return;
     }

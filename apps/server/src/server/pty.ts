@@ -3,7 +3,7 @@ import { openSync, readdirSync, readFileSync, realpathSync, unlinkSync } from 'n
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { getConfig } from './config';
-import { deleteSession, upsertSession } from './db';
+import { deleteSession, getSession, upsertSession } from './db';
 import { clearLiveCwd } from './liveCwd';
 import { OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import {
@@ -25,6 +25,7 @@ import { COMPILED, selfArgv } from './runtime';
 import { clearActivity, recordInput } from './sessionActivity';
 import { clearTitle } from './sessionTitle';
 import { killWindowsTree } from './spawnWindow';
+import { testEvent } from './testEvents';
 
 export type { FocusSubscriber, SessionFrame, Subscriber } from './ptyHolder';
 export { sockPathFor } from './ptyHolder';
@@ -91,6 +92,14 @@ export function sessionEnv(
 // two racing callers from both missing it and both spawning a duplicate holder.
 const pendingStarts = new Map<string, Promise<SessionInstance>>();
 
+/** A `start` arrived for a session that already ran and exited on its own. */
+export class SessionExitedError extends Error {
+  constructor(public readonly id: string) {
+    super(`session "${id}" has exited`);
+    this.name = 'SessionExitedError';
+  }
+}
+
 export async function startSession(
   id: string,
   command?: string,
@@ -126,13 +135,24 @@ async function doStartSession(
   rows: number,
 ): Promise<SessionInstance> {
   const dims = clampDims(cols, rows);
-  killed.delete(id); // a reused id is a new session, not the killed one
-  upsertSession(id, command, 'running', realpathSync(process.cwd()));
+  const wasKilled = killed.delete(id); // a reused id after an explicit kill is a new session
 
-  // A holder may already be running from before a server restart — reattach.
+  // A holder may already be running (still live, or from before a server
+  // restart) — reattach and mark it running.
   try {
-    return await attach(id);
+    const instance = await attach(id);
+    upsertSession(id, command, 'running', realpathSync(process.cwd()));
+    return instance;
   } catch {}
+
+  // No live holder. A `start` for an id that already ran and exited on its own
+  // (not an explicit kill) is a stale reattach — the shell exited while the
+  // client was away and missed the exit frame. Surface the exit; do NOT spawn a
+  // fresh shell under the dead session's id.
+  if (!wasKilled && getSession(id)?.status === 'stopped') {
+    throw new SessionExitedError(id);
+  }
+  upsertSession(id, command, 'running', realpathSync(process.cwd()));
 
   // No live holder: spawn one, detached so it outlives this server process.
   // shellInvocation wires up OSC 7 cwd tracking per-shell (bash/zsh/fish);
@@ -281,6 +301,7 @@ export function kickPtySize(id: string): void {
   if (!inst) return;
   const dims = inst.ptyDims ?? planPtyResize(null, inst.clientDims.values());
   if (!dims) return;
+  testEvent('sigwinch', { session: id, cols: dims.cols, rows: dims.rows });
   sendHolderResize(id, dims.cols, dims.rows);
 }
 

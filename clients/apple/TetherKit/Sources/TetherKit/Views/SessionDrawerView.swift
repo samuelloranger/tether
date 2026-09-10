@@ -180,6 +180,7 @@ private struct HostDrawerSection: View {
             onSelect: { onSelectSession(host.id, session.id) },
             onKill: { onKillSession(session.id) }
           )
+          .accessibilityIdentifier("sessionRow")
           // Fade the row and let the list close the gap, so a kill/add keeps the
           // reader's place in a list of look-alike rows.
           .transition(.opacity)
@@ -387,12 +388,17 @@ private struct SessionDrawerRow: View {
       // title-bar overflow used to hit). A Menu presents from the button.
       Menu {
         Button("Kill terminal", role: .destructive, action: onKill)
+          .accessibilityIdentifier("confirmKill")
+          // Distinct from the trigger's "Kill terminal" label so a UI test can
+          // tell the menu item apart from the kebab that opens it.
+          .accessibilityLabel("Confirm kill terminal")
       } label: {
         Image(systemName: "xmark")
           .foregroundStyle(TetherColors.danger)
           .tapTarget()
       }
       .accessibilityLabel("Kill terminal")
+      .accessibilityIdentifier("killMenu")
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)

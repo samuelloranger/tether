@@ -98,6 +98,20 @@ struct RootView: View {
       )
       #endif
 
+      #if DEBUG
+      // A hidden text mirror of the terminal grid so an XCUITest can read what
+      // the client actually renders. Near-zero visual footprint.
+      Text(verbatim: store.terminalGridText)
+        .frame(width: 1, height: 1)
+        .opacity(0.001)
+        .accessibilityIdentifier("terminalGrid")
+      // The active session id, so a test can verify WHICH tab it is reading.
+      Text(verbatim: store.activeSessionId ?? "-")
+        .frame(width: 1, height: 1)
+        .opacity(0.001)
+        .accessibilityIdentifier("activeSession")
+      #endif
+
     }
     // The terminal applies its own keyboard inset; this must sit at the ROOT or
     // SwiftUI's automatic avoidance stacks a second inset, collapsing it to a strip.

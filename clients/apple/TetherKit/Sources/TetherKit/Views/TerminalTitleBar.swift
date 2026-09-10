@@ -71,6 +71,7 @@ public struct TerminalTitleBar<Overflow: View>: View {
       // pushed the row wide enough to truncate the session title.
       HStack(spacing: 0) {
         iconButton("plus", label: "New terminal", action: onNewSession)
+          .accessibilityIdentifier("newTerminalButton")
         iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
           .disabled(store.activeSessionId == nil || store.activeSession?.kind == "agent")
         iconButton("gearshape", label: "Settings", action: onSettings)

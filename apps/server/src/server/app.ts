@@ -15,6 +15,7 @@ import { noiseRoutes } from './routes/noise';
 import { presentationsRoutes } from './routes/presentations';
 import { sessionsRoutes } from './routes/sessions';
 import { VERSION } from './runtime';
+import { testEvent } from './testEvents';
 import { getTlsReport, isSecureRequest } from './tlsRuntime';
 
 /** Bindings come from Bun.serve's fetch wrapper in serve.ts (peer + server). */
@@ -63,12 +64,13 @@ app.use('/api/*', authMiddleware);
 
 // Unauthenticated discovery. `secure` reflects the actual socket (TLS vs
 // plaintext), never a header — a client may only pin a fingerprint read over TLS.
-app.get('/api/status', (c) =>
-  c.json({
+app.get('/api/status', (c) => {
+  testEvent('status', { secure: isSecureRequest(c.req.url) });
+  return c.json({
     secure: isSecureRequest(c.req.url),
     tls: getTlsReport(),
-  }),
-);
+  });
+});
 
 // Lightweight authed reachability probe for the client's Test connection.
 app.get('/api/health', (c) => c.json({ ok: true, version: VERSION }));

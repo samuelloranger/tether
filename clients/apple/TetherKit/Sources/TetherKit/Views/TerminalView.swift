@@ -218,6 +218,9 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.backgroundColor = .clear
     view.textColor = .clear
     view.tintColor = .clear
+    // Lets an XCUITest target the input to type into a session. Harmless in prod.
+    view.accessibilityIdentifier = "terminalInput"
+    view.isAccessibilityElement = true
     view.accessoryHosting.rootView = accessory
     view.showsAccessory = showsAccessory
     Self.wire(view, onSubmitBytes: onSubmitBytes)
@@ -615,6 +618,8 @@ public struct TerminalView: View {
           mouseMode: store.terminalMouseMode,
           mouseSgr: store.terminalMouseSgr
         )
+        // Lets an XCUITest tap the surface to focus the keyboard. Harmless in prod.
+        .accessibilityIdentifier("terminalSurface")
         // No inset: the old gutter cost two columns and, a different colour from
         // the grid, was itself half the frame the terminal appeared to sit inside.
         .frame(maxWidth: .infinity, maxHeight: .infinity)

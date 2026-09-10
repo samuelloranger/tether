@@ -190,7 +190,82 @@ public final class SessionStore {
     }
   }
 
+  #if DEBUG
+  /// Test-only: the visible terminal grid as plain text, so an XCUITest can read
+  /// what the CLIENT actually renders (the server oracle cannot see this). Rows
+  /// are joined with newlines and trailing blanks trimmed.
+  public var terminalGridText: String {
+    guard let bytes = terminalSnapshot,
+          let (header, cells) = try? GridSnapshotDecoder.decode(bytes)
+    else { return "" }
+    let cols = Int(header.cols)
+    let rows = Int(header.rows)
+    guard cols > 0, cells.count >= cols * rows else { return "" }
+    var out = ""
+    for r in 0..<rows {
+      var line = ""
+      for c in 0..<cols {
+        let cp = cells[r * cols + c].codepoint
+        line.append(cp == 0 ? " " : Character(UnicodeScalar(cp) ?? " "))
+      }
+      while line.hasSuffix(" ") { line.removeLast() }
+      out += line + "\n"
+    }
+    return out
+  }
+
+  private struct PreseedHost: Decodable {
+    let name: String
+    let host: String
+    let port: String
+    let scheme: String?
+    let devicePrivB64: String
+    let serverPubB64: String
+  }
+
+  /// Test-only: seed a paired host from JSON in `TETHER_UITEST_PRESEED` so an
+  /// XCUITest launches already paired, skipping the interactive pairing UI. It
+  /// mirrors `createNoiseHost` but with key material supplied by the fixture
+  /// (which enrolled the matching device pubkey on the server). No-op unless the
+  /// env var is set, so it never affects a normal launch.
+  func preseedHostFromEnvironmentForTesting() {
+    // TETHER_UITEST_PRESEED seeds the first host; TETHER_UITEST_PRESEED2 an
+    // optional second one for the multi-host test.
+    for key in ["TETHER_UITEST_PRESEED", "TETHER_UITEST_PRESEED2"] {
+      if let raw = ProcessInfo.processInfo.environment[key] { preseedOneHostForTesting(raw) }
+    }
+  }
+
+  private func preseedOneHostForTesting(_ raw: String) {
+    guard let data = raw.data(using: .utf8),
+          let seed = try? JSONDecoder().decode(PreseedHost.self, from: data),
+          let devicePriv = Data(base64Encoded: seed.devicePrivB64),
+          let serverPub = Data(base64Encoded: seed.serverPubB64)
+    else { return }
+    let displayName = seed.name.isEmpty ? seed.host : seed.name
+    do {
+      let already = try hostStore.list()
+      if already.contains(where: { $0.host == seed.host && $0.port == seed.port }) { return }
+      let profile = try hostStore.create(
+        name: displayName,
+        color: "#89b4fa",
+        host: seed.host,
+        port: seed.port,
+        identityName: displayName,
+        scheme: seed.scheme
+      )
+      try noiseKeyStore.saveDevicePrivateKey(devicePriv, hostId: profile.id)
+      try noiseKeyStore.saveServerPublicKey(serverPub, hostId: profile.id)
+    } catch {
+      // Best-effort in tests; a failed preseed surfaces as an unpaired app.
+    }
+  }
+  #endif
+
   public func bootstrap() async {
+    #if DEBUG
+    preseedHostFromEnvironmentForTesting()
+    #endif
     do {
       hosts = try hostStore.list()
       for host in hosts {
@@ -204,6 +279,16 @@ public final class SessionStore {
       }
       startPolling()
       rememberSessionTitle()
+      #if DEBUG
+      // Test-only: replay a `tether://` deep link at launch the same way a
+      // notification tap would (NotificationTapRouter also funnels into
+      // handleDeepLink), so an XCUITest can exercise tap-to-session routing
+      // without APNs. No-op unless the env var is set.
+      if let raw = ProcessInfo.processInfo.environment["TETHER_UITEST_DEEPLINK"],
+         let url = URL(string: raw) {
+        handleDeepLink(url)
+      }
+      #endif
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -924,6 +1009,9 @@ public final class SessionStore {
   }
 
   private func connectTerminal(sessionId: String) async {
+    #if DEBUG
+    NSLog("TETHERTRACE switch connectTerminal session=%@", sessionId)
+    #endif
     guard let hostId = activeHostId else { return }
     await connectTerminalNoise(hostId: hostId, sessionId: sessionId, sendStart: true)
   }
