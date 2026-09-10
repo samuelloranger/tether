@@ -1,8 +1,9 @@
 import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
-import { applyAgentStart, defaultGetAgentMessages } from './agentReplay';
+import { applyAgentStart, defaultGetAgentMessages, sendAgentStatus } from './agentReplay';
 import { type AgentUsageLimits, fetchAgentUsage } from './agentUsage';
-import { getSession } from './db';
+import { patchConfig } from './config';
+import { db, getSession, setSessionModel } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
@@ -112,8 +113,9 @@ type ClientMessage =
   | { t: 'devices.list' }
   | { t: 'devices.revoke'; target: string }
   | { t: 'auth.token' }
-  | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number }
+  | { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number; resumeClaudeSessionId?: string }
   | { t: 'agent.prompt'; text: string }
+  | { t: 'agent.model'; name: string }
   | { t: 'agent.interrupt' };
 
 /** One row of the `devices` reply — the wire shape an iOS client mirrors. */
@@ -312,6 +314,14 @@ async function applyMessage(
         logError(`Noise session: agent.prompt failed:`, err);
         sendSealed({ t: 'agent.error', message: 'agent prompt failed' });
       });
+    }
+  } else if (msg.t === 'agent.model') {
+    if (agent.currentId) {
+      const name = msg.name || null;
+      agent.registry.setModel(agent.currentId, name);
+      setSessionModel(db, agent.currentId, name);
+      void patchConfig({ agent: { defaultModel: msg.name } });
+      void sendAgentStatus(agent.currentId, d, sendSealed, agent);
     }
   } else if (msg.t === 'agent.interrupt') {
     if (agent.currentId) agent.registry.interrupt(agent.currentId);

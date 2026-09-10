@@ -1,5 +1,6 @@
 import type { AgentFrame } from './agentDriver';
 import { type AgentMessageRow, getAgentMessages } from './agentMessages';
+import { getConfig } from './config';
 import { createAgentSession, db, getSession } from './db';
 import { logError } from './log';
 import type { AgentState, SessionDeps } from './noiseSessionProtocol';
@@ -46,7 +47,13 @@ export function rowToAgentFrame(row: AgentMessageRow): AgentFrame | null {
  * limit and to keep the replay reconstruction (rowToAgentFrame) colocated.
  */
 export async function applyAgentStart(
-  msg: { t: 'agent.start'; id: string; cwd: string; sinceSeq?: number },
+  msg: {
+    t: 'agent.start';
+    id: string;
+    cwd: string;
+    sinceSeq?: number;
+    resumeClaudeSessionId?: string;
+  },
   d: SessionDeps,
   sendSealed: (obj: unknown) => boolean,
   agent: AgentState,
@@ -62,10 +69,15 @@ export async function applyAgentStart(
       // msg.cwd here would respawn `claude` in the server's own dir ($HOME)
       // instead of the chat's folder. Fall back to msg.cwd only for a brand-new
       // chat that has no row yet.
-      const persisted = getSession(msg.id)?.workspace_root ?? null;
+      const existing = getSession(msg.id);
+      const persisted = existing?.workspace_root ?? null;
       const cwd = persisted && persisted.length > 0 ? persisted : msg.cwd;
       createAgentSession(db, { id: msg.id, workspaceRoot: cwd });
-      await agent.registry.start(msg.id, cwd);
+      const model = existing?.model ?? (getConfig().agent.defaultModel || null);
+      await agent.registry.start(msg.id, cwd, {
+        model,
+        resumeSessionId: msg.resumeClaudeSessionId,
+      });
     }
   } catch (err) {
     logError(`Noise session: agent.start('${msg.id}') failed:`, err);
@@ -101,7 +113,7 @@ export async function applyAgentStart(
  * it is ephemeral account state, refreshed on attach and after each turn. Usage
  * is advisory: a null fetch just omits the windows.
  */
-async function sendAgentStatus(
+export async function sendAgentStatus(
   id: string,
   d: SessionDeps,
   sendSealed: (obj: unknown) => boolean,

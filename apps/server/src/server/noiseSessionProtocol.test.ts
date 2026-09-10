@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AgentDriver } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
 import { AgentRegistry } from './agentRegistry';
+import { getConfig } from './config';
 import { db } from './db';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
@@ -643,6 +644,34 @@ describe('runNoiseSession — agent chat', () => {
       { t: 'agent.delta', seq: 2, text: 'Hi' },
       { t: 'agent.done', seq: 3, cost: 0, usage: {} },
     ]);
+  });
+
+  test("'agent.model' sets the driver model, persists the default, re-emits status", async () => {
+    const pty = fakePty();
+    class ModelDriver extends FakeAgentDriver {
+      private m: string | null = null;
+      setModel(n: string | null) {
+        this.m = n;
+      }
+      getModel(): string | null {
+        return this.m;
+      }
+    }
+    const io = scriptedIo([
+      jsonFrame({ t: 'agent.start', id: 'a-model', cwd: '/tmp' }),
+      jsonFrame({ t: 'agent.model', name: 'opus' }),
+    ]);
+    void runNoiseSession(identityChannel(), io, {
+      ...pty.deps,
+      agentRegistry: new AgentRegistry(() => new ModelDriver([])),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const statuses = io.sent
+      .map((f) => JSON.parse(dec.decode(f)))
+      .filter((m) => m.t === 'agent.status');
+    expect(statuses.at(-1)?.model).toBe('opus');
+    expect(getConfig().agent.defaultModel).toBe('opus');
   });
 
   test("'agent.start' whose driver fails to start is caught, not an unhandled rejection, and tells the client", async () => {
