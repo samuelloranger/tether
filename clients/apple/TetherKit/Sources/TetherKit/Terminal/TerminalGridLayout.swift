@@ -68,8 +68,15 @@ enum TerminalResizePublish {
   }
 }
 
-/// Growing (or reflowing) an alt-screen TUI with `resize()` leaves CUP-clamped
-/// rows missing. Re-feeding the buffered bytes at the new size restores them.
+/// When a `resize()` reflow leaves the grid wrong, re-feeding the buffered bytes
+/// at the new size rebuilds it correctly.
+///
+/// - Alt-screen: any size change clamps CUP rows and needs a rebuild.
+/// - Primary screen: a row GROW makes alacritty's reflow duplicate a content row
+///   into the newly exposed rows. Agent TUIs redraw with cursor-home rather than
+///   a full clear, so the stale copy sticks and scrolls into scrollback — the
+///   line-doubling bug. Shrink and column-only changes reflow cleanly, so they
+///   keep the cheap path (and their scrollback beyond the buffer budget).
 enum TerminalResizeStrategy {
   static func shouldRebuildFromBuffer(
     altScreen: Bool,
@@ -78,7 +85,7 @@ enum TerminalResizeStrategy {
     newCols: UInt16,
     newRows: UInt16
   ) -> Bool {
-    guard altScreen else { return false }
-    return newCols != oldCols || newRows != oldRows
+    if altScreen { return newCols != oldCols || newRows != oldRows }
+    return newRows > oldRows
   }
 }
