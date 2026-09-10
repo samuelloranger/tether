@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentMessageRow } from './agentMessages';
 
 export interface ClaudeSessionMeta {
   id: string;
@@ -72,4 +73,83 @@ export function listClaudeSessions(
   });
   out.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return out.slice(0, opts?.cap ?? 50);
+}
+
+export interface TranslatedMessage {
+  kind: AgentMessageRow['kind'];
+  text?: string;
+  toolJson?: string;
+  isError?: boolean;
+}
+
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const block = content.find((b) => (b as { type?: string }).type === 'text') as
+      | { text?: string }
+      | undefined;
+    return block?.text ?? '';
+  }
+  return '';
+}
+
+/**
+ * Turn a persisted Claude session `.jsonl` into stored agent-message rows so a
+ * resumed chat can replay its history. Tolerant by design (unknown/corrupt lines
+ * are skipped, never thrown) since the file shape drifts across CLI versions,
+ * and capped to the last `maxTurns` rows so a huge session degrades gracefully.
+ */
+export function translateSessionJsonl(
+  path: string,
+  opts?: { maxTurns?: number },
+): TranslatedMessage[] {
+  let lines: string[];
+  try {
+    lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+  const rows: TranslatedMessage[] = [];
+  for (const line of lines) {
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (obj.isSidechain === true) continue;
+    const message = obj.message as { role?: string; content?: unknown } | undefined;
+    if (!message) continue;
+    const content = message.content;
+    if (message.role === 'user') {
+      if (typeof content === 'string') {
+        rows.push({ kind: 'user', text: content });
+      } else if (Array.isArray(content)) {
+        for (const b of content as Array<Record<string, unknown>>) {
+          if (b.type === 'tool_result') {
+            rows.push({
+              kind: 'tool_result',
+              text: textOf(b.content),
+              isError: b.is_error === true,
+            });
+          } else if (b.type === 'text' && typeof b.text === 'string') {
+            rows.push({ kind: 'user', text: b.text });
+          }
+        }
+      }
+    } else if (message.role === 'assistant' && Array.isArray(content)) {
+      for (const b of content as Array<Record<string, unknown>>) {
+        if (b.type === 'text' && typeof b.text === 'string') {
+          rows.push({ kind: 'delta', text: b.text });
+        } else if (b.type === 'tool_use') {
+          rows.push({
+            kind: 'tool',
+            toolJson: JSON.stringify({ name: b.name ?? '', input: b.input ?? {} }),
+          });
+        }
+      }
+    }
+  }
+  const maxTurns = opts?.maxTurns ?? 400;
+  return rows.length > maxTurns ? rows.slice(rows.length - maxTurns) : rows;
 }
