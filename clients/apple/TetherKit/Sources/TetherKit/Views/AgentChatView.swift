@@ -45,6 +45,16 @@ public struct AgentChatView: View {
         .presentationDetents([.medium, .large])
         .presentationBackground(TetherColors.surface)
     }
+    .sheet(item: $model.pendingPicker) { kind in
+      Group {
+        switch kind {
+        case .model: AgentModelSheet(model: model)
+        case .resume: AgentResumeSheet(model: model)
+        }
+      }
+      .presentationDetents([.medium, .large])
+      .presentationBackground(TetherColors.surface)
+    }
   }
 
   #if canImport(UIKit)
@@ -258,6 +268,42 @@ struct AgentComposerView: View {
 
   var body: some View {
     VStack(spacing: 8) {
+      // Slash-command palette rises over the input while the draft is a bare
+      // `/word`. Touch-first: tap a row, no keyboard navigation.
+      let matches = matchCommands(model.draft)
+      if !matches.isEmpty {
+        VStack(spacing: 0) {
+          ForEach(matches) { cmd in
+            Button { runCommand(cmd) } label: {
+              HStack(spacing: 10) {
+                Text(cmd.glyph).foregroundStyle(TetherColors.textFaint)
+                Text(cmd.trigger)
+                  .font(.system(.callout, design: .monospaced))
+                  .foregroundStyle(TetherColors.accent)
+                if let a = cmd.args {
+                  Text(a)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(TetherColors.textFaint)
+                }
+                Spacer()
+                Text(cmd.desc)
+                  .font(.caption)
+                  .foregroundStyle(TetherColors.textSecondary)
+                  .lineLimit(1)
+              }
+              .padding(.horizontal, 10)
+              .padding(.vertical, 7)
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .background(TetherColors.surfaceRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+          RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .stroke(TetherColors.border, lineWidth: 1)
+        )
+      }
       // Stats strip sits atop the input, sharing the composer's surface.
       AgentInfoStrip(status: model.status, usage: model.sessionUsage)
       HStack(alignment: .bottom, spacing: 10) {
@@ -317,8 +363,48 @@ struct AgentComposerView: View {
       model.interrupt()
       return
     }
-    model.submit(model.draft)
+    switch dispatchDraft(model.draft) {
+    case let .local(id, _):
+      model.draft = ""
+      runLocal(id)
+    case let .agentText(text):
+      model.draft = ""
+      model.submit(text)
+    case .none:
+      model.submit(model.draft)
+      model.draft = ""
+    }
+  }
+
+  private func runCommand(_ cmd: AgentCommand) {
     model.draft = ""
+    if cmd.kind == .local {
+      runLocal(cmd.id)
+    } else {
+      model.submit(cmd.trigger)
+    }
+  }
+
+  private func runLocal(_ id: String) {
+    switch id {
+    case "clear": model.clearTranscript()
+    case "retry": model.retryLast()
+    case "copy": copyTranscript()
+    case "model": model.openPicker(.model)
+    case "resume":
+      model.openPicker(.resume)
+      model.requestSessions()
+    default: break
+    }
+  }
+
+  private func copyTranscript() {
+    let text = model.messages
+      .map { "\($0.role == .user ? "You" : "Claude"): \($0.plainText)" }
+      .joined(separator: "\n\n")
+    #if canImport(UIKit)
+      UIPasteboard.general.string = text
+    #endif
   }
 }
 
@@ -852,5 +938,109 @@ struct AgentApprovalSheet: View {
       .padding(.vertical, 12)
       .background(filled ? TetherColors.accent : TetherColors.accent.opacity(0.12))
       .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+}
+
+/// `/model` picker: the static aliases (current one checked) plus a free-text
+/// row for any full model ID. Picking sets the model and closes.
+struct AgentModelSheet: View {
+  @Bindable var model: AgentChatModel
+  @State private var custom = ""
+
+  var body: some View {
+    NavigationStack {
+      List {
+        Section {
+          ForEach(agentModelAliases, id: \.name) { alias in
+            Button {
+              model.setModel(alias.name)
+              model.closePicker()
+            } label: {
+              HStack {
+                Image(systemName: model.status?.model == alias.name ? "checkmark" : "")
+                  .frame(width: 16)
+                  .foregroundStyle(TetherColors.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                  Text(alias.name).font(.system(.body, design: .monospaced))
+                  Text(alias.desc).font(.caption).foregroundStyle(TetherColors.textSecondary)
+                }
+              }
+            }
+          }
+        }
+        Section("Custom") {
+          HStack {
+            TextField("type a model ID…", text: $custom)
+              .font(.system(.body, design: .monospaced))
+              .autocorrectionDisabled()
+            Button("Set") {
+              let name = custom.trimmingCharacters(in: .whitespacesAndNewlines)
+              guard !name.isEmpty else { return }
+              model.setModel(name)
+              model.closePicker()
+            }
+            .disabled(custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          }
+        }
+      }
+      .navigationTitle("Model")
+      #if canImport(UIKit)
+        .navigationBarTitleDisplayMode(.inline)
+      #endif
+    }
+  }
+}
+
+/// `/resume` browser: past Claude sessions for this project. Picking one opens a
+/// new agent tab resumed at that session (via `model.onResume`).
+struct AgentResumeSheet: View {
+  @Bindable var model: AgentChatModel
+
+  var body: some View {
+    NavigationStack {
+      List {
+        if model.resumeSessions.isEmpty {
+          Text("No past sessions for this folder.")
+            .font(.callout)
+            .foregroundStyle(TetherColors.textSecondary)
+        } else {
+          ForEach(model.resumeSessions) { session in
+            Button {
+              model.closePicker()
+              model.onResume?(session)
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(session.label.isEmpty ? session.id : session.label)
+                  .font(.body)
+                  .lineLimit(1)
+                HStack(spacing: 8) {
+                  Text(Self.relativeTime(session.mtimeMs))
+                  Text("\(session.msgCount) msgs")
+                  if session.cwd != model.cwd {
+                    Text("⌂ \(session.cwd)").foregroundStyle(TetherColors.warning).lineLimit(1)
+                  }
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(TetherColors.textFaint)
+              }
+            }
+          }
+        }
+      }
+      .navigationTitle("Resume")
+      #if canImport(UIKit)
+        .navigationBarTitleDisplayMode(.inline)
+      #endif
+    }
+  }
+
+  private static func relativeTime(_ ms: Double) -> String {
+    let s = max(0, (Date().timeIntervalSince1970 * 1000 - ms) / 1000)
+    if s < 90 { return "just now" }
+    let m = s / 60
+    if m < 90 { return "\(Int(m.rounded()))m ago" }
+    let h = m / 60
+    if h < 36 { return "\(Int(h.rounded()))h ago" }
+    return "\(Int((h / 24).rounded()))d ago"
   }
 }
