@@ -1,3 +1,4 @@
+import { matchCommands } from './agentCommands';
 import { deriveDiff, summarize } from './agentDiff';
 import type { AgentFrame } from './agentFrames';
 import type { AgentMessage, AgentStatus, AgentTurn, AgentUsage } from './agentTypes';
@@ -53,6 +54,10 @@ export interface AgentSnapshot {
   sessionUsage: AgentUsage | null;
   /** Model + account 5h/7day usage from the server; null until first status. */
   status: AgentStatus | null;
+  /** Highlighted row in the slash-command palette (0 when closed). */
+  paletteIndex: number;
+  /** Which sub-picker is open over the composer, or null. */
+  pendingPicker: 'model' | 'resume' | null;
 }
 
 /**
@@ -71,6 +76,8 @@ export class AgentChatModel {
   private draft = '';
   private statusValue: AgentStatus | null = null;
   private lastUserPrompt: string | null = null;
+  private paletteIndex = 0;
+  private pendingPicker: 'model' | 'resume' | null = null;
   private listeners = new Set<() => void>();
   private cached: AgentSnapshot | null = null;
 
@@ -96,6 +103,8 @@ export class AgentChatModel {
         canRetry: this.turn === 'idle' && this.lastUserPrompt != null,
         sessionUsage: sumUsage(this.messages),
         status: this.statusValue,
+        paletteIndex: this.paletteIndex,
+        pendingPicker: this.pendingPicker,
       };
     }
     return this.cached;
@@ -266,6 +275,30 @@ export class AgentChatModel {
 
   setDraft(text: string): void {
     this.draft = text;
+    const count = matchCommands(text).length;
+    this.paletteIndex = count === 0 ? 0 : Math.min(this.paletteIndex, count - 1);
+    this.changed();
+  }
+
+  movePalette(delta: number): void {
+    const count = matchCommands(this.draft).length;
+    if (count === 0) return;
+    this.paletteIndex = (this.paletteIndex + delta + count) % count;
+    this.changed();
+  }
+
+  openPicker(kind: 'model' | 'resume'): void {
+    this.pendingPicker = kind;
+    this.changed();
+  }
+
+  closePicker(): void {
+    this.pendingPicker = null;
+    this.changed();
+  }
+
+  clearTranscript(): void {
+    this.messages = [];
     this.changed();
   }
 
