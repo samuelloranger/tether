@@ -1,21 +1,21 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: root app shell — routes every screen and wires the drawer, terminal panes, git, and workspace panels
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { type DrawerSession, type HostHealthStatus, httpOriginFor } from '@/core/types';
+import { httpOriginFor } from '@/core/types';
 import { DevicesScreen } from '@/host/DevicesScreen';
 import { HostsScreen } from '@/host/HostsScreen';
 import { PairDeviceScreen } from '@/host/PairDeviceScreen';
 import type { DropIntent } from '@/pane/dropZone';
 import { PanePickerModal } from '@/pane/PanePickerModal';
-import { leaves } from '@/pane/paneTree';
 import { useViewState } from '@/pane/useViewState';
-import type { View } from '@/pane/viewModel';
 import { ensureNotificationPermission } from '@/platform/desktopNotifications';
 import { useDeepLinks } from '@/platform/useDeepLinks';
 import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
+import { useMediaScheme, useWideLayout } from '@/platform/useViewport';
 import { useWindowTheme } from '@/platform/useWindowTheme';
 import { PresentationBanner, PresentationView } from '@/presentations/PresentationView';
 import { activeSessionDot, litStateFor, shellVars } from '@/session/litTheme';
 import { ResidentTerminals } from '@/session/ResidentTerminals';
+import { liveSessionKeys } from '@/session/residentKeys';
 import { SessionDrawer } from '@/session/SessionDrawer';
 import { SessionModalHost, useSessionModals } from '@/session/SessionModals';
 import { SessionChrome } from '@/session/SessionTabBar';
@@ -44,51 +44,6 @@ import { AgentFolderPicker } from './agent/AgentFolderPicker';
 import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
-
-function useMediaScheme(): 'light' | 'dark' {
-  const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
-    window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
-  );
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: light)');
-    const onChange = () => setScheme(mq.matches ? 'light' : 'dark');
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-  return scheme;
-}
-
-function useWideLayout(): boolean {
-  const [wide, setWide] = useState(() => window.innerWidth >= 720);
-  useEffect(() => {
-    const onResize = () => setWide(window.innerWidth >= 720);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return wide;
-}
-
-function liveSessionKeys(
-  sessions: DrawerSession[],
-  views: View[],
-  healthByHost: Record<string, HostHealthStatus>,
-): Set<string> {
-  const live = new Set(sessions.map((row) => sessionKey(row.hostId, row.id)));
-  const known = new Set(
-    Object.entries(healthByHost)
-      .filter(([, status]) => status !== 'unknown')
-      .map(([id]) => id),
-  );
-  for (const view of views) {
-    for (const leaf of leaves(view.tree)) {
-      if (!leaf.session) continue;
-      if (!known.has(leaf.session.hostId)) {
-        live.add(sessionKey(leaf.session.hostId, leaf.session.sessionId));
-      }
-    }
-  }
-  return live;
-}
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: root shell routes between drawer, terminal, and settings flows
 export function App() {
