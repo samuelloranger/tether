@@ -121,6 +121,24 @@ class AgentChatUITestCase: XCTestCase {
     tagged(app, "agentToolCard")
   }
 
+  /// The ways a finger could reach the composer, in the order a person would
+  /// expect them to work.
+  func taps(_ app: XCUIApplication, _ input: XCUIElement) -> [(String, () -> Void)] {
+    [
+      ("element.tap", { input.tap() }),
+      ("coord 0.2/0.5", { input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap() }),
+      (
+        "app coord at field centre",
+        {
+          let f = input.frame
+          app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: f.midX, dy: f.midY))
+            .tap()
+        }
+      ),
+    ]
+  }
+
   func shot(_ app: XCUIApplication, _ name: String) {
     let a = XCTAttachment(screenshot: app.screenshot())
     a.name = name
@@ -242,14 +260,22 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     let input = composer(app)
     XCTAssertTrue(input.waitForExistence(timeout: 10), "composer never appeared")
 
-    // Baseline: focusable before any scrolling.
-    input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+    // Baseline: focusable before any scrolling. Report the geometry too — a tap
+    // that misses is indistinguishable from a field that refuses focus unless
+    // you can see where the tap went.
+    print(
+      "GEOMETRY app=\(app.frame) field=\(input.frame) hittable=\(input.isHittable) "
+        + "jump=\(app.buttons["agentJumpToLatest"].firstMatch.exists)")
     var up = false
-    for _ in 0..<8 where !up {
-      up = key.exists && key.isHittable
-      usleep(500_000)
+    for (label, action) in taps(app, input) {
+      action()
+      for _ in 0..<6 where !up {
+        up = key.exists && key.isHittable
+        usleep(500_000)
+      }
+      print("FOCUS_BEFORE_SCROLL via \(label) = \(up)")
+      if up { break }
     }
-    print("FOCUS_BEFORE_SCROLL=\(up)")
     XCTAssertTrue(up, "composer could not be focused even before scrolling")
     shot(app, "focus-before-scroll")
 
