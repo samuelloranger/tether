@@ -47,12 +47,26 @@ class AgentChatUITestCase: XCTestCase {
   func requireSoftwareKeyboard(_ app: XCUIApplication) {
     let input = composer(app)
     XCTAssertTrue(input.waitForExistence(timeout: 15), "composer never appeared")
+    // A tap arriving while the transcript is still decelerating only stops the
+    // scroll — it never reaches the composer. Let the scroll settle first.
+    usleep(900_000)
     input.tap()
-    XCTAssertTrue(
-      app.keyboards.firstMatch.waitForExistence(timeout: 8),
-      "no software keyboard — the simulator has a hardware keyboard connected. "
-        + "Simulator ▸ I/O ▸ Keyboard ▸ Connect Hardware Keyboard (off), or "
-        + "`defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`.")
+    // `app.keyboards.firstMatch.exists` is true even when nothing is drawn (it
+    // matches a dismissed keyboard), which let a test with no keyboard at all
+    // pass. Height is the honest signal.
+    let keyboard = app.keyboards.firstMatch
+    var height: CGFloat = 0
+    for _ in 0..<16 {
+      height = keyboard.exists ? keyboard.frame.height : 0
+      if height > 150 { break }
+      usleep(500_000)
+    }
+    XCTAssertGreaterThan(
+      height, 150,
+      "no software keyboard on screen (height=\(height)). Either the tap did not focus the "
+        + "composer, or the simulator has a hardware keyboard connected — Simulator ▸ I/O ▸ "
+        + "Keyboard ▸ Connect Hardware Keyboard (off), or `defaults write "
+        + "com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`.")
     // The field takes first responder a beat after the keyboard animates in;
     // typing into the gap drops the first character.
     usleep(600_000)
@@ -152,7 +166,9 @@ final class AgentChatSendTests: AgentChatUITestCase {
     let app = launchChat("live")
     requireSoftwareKeyboard(app)
 
-    type(app, "First ask")
+    // "slow" makes the host hold the turn open, so the second prompt really does
+    // land on a busy agent instead of racing a turn that already finished.
+    type(app, "First ask, slow please")
     tapSend(app)
     waitForText(app, "On it [t1]")  // turn is running
 
@@ -191,9 +207,10 @@ final class AgentChatSendTests: AgentChatUITestCase {
     allow.tap()
 
     waitForText(app, "[approved]")
-    XCTAssertTrue(
-      toolCards(app).firstMatch.waitForExistence(timeout: 10),
-      "the approved tool never rendered a card")
+    let card = app.buttons.matching(
+      NSPredicate(format: "label CONTAINS %@", "node_modules")
+    ).firstMatch
+    XCTAssertTrue(card.waitForExistence(timeout: 10), "the approved tool never rendered a card")
     shot(app, "chat-approved")
   }
 }
@@ -249,9 +266,15 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     shot(app, "arrival-at-foot-before")
 
     waitForText(app, "INBOUND prompt from another device", timeout: 25)
-    let tail = text(app, containing: "INBOUND turn finished")
-    XCTAssertTrue(tail.waitForExistence(timeout: 25), "arriving turn never finished")
-    XCTAssertTrue(tail.isHittable, "pinned at the foot, the arriving turn must scroll into view")
+    // Following means the arriving turn is carried into view as it streams —
+    // its opening line must be on screen, not waiting behind jump-to-latest.
+    let opening = text(app, containing: "INBOUND turn: picking this up now")
+    XCTAssertTrue(opening.waitForExistence(timeout: 25), "arriving turn never streamed")
+    XCTAssertTrue(opening.isHittable, "pinned at the foot, the arriving turn must scroll into view")
+    XCTAssertFalse(
+      app.buttons["agentJumpToLatest"].firstMatch.exists,
+      "follow was dropped while the turn arrived")
+    waitForText(app, "INBOUND turn finished", timeout: 25)
     shot(app, "arrival-followed")
   }
 
@@ -289,7 +312,9 @@ final class AgentChatScrollTests: AgentChatUITestCase {
   func testDraggingTranscriptDismissesKeyboard() throws {
     let app = launchChat("liveLong")
     requireSoftwareKeyboard(app)
-    XCTAssertTrue(app.keyboards.firstMatch.exists, "keyboard should be up before the drag")
+    XCTAssertGreaterThan(
+      app.keyboards.firstMatch.frame.height, 150, "keyboard should be up before the drag")
+    shot(app, "scroll-keyboard-up")
 
     // A real finger drag, not `swipeDown()`: interactive dismissal tracks the
     // gesture, and a flick is over before it can take the keyboard with it.

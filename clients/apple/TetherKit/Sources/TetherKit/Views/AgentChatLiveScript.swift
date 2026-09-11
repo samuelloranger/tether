@@ -84,6 +84,9 @@
       model.apply(.agentDelta(seq: next(), text: "On it \(tag). Reading the route first."))
       await step(0.35)
       model.apply(.agentDelta(seq: next(), text: " Then I'll add the limiter."))
+      // "slow" holds the turn open long enough for a test to type the next
+      // prompt into a busy agent and watch it queue.
+      if prompt.lowercased().contains("slow") { await step(12) }
       // A prompt that would run something destructive stops for approval instead
       // of finishing the turn — the sheet path, driven from the same script.
       if prompt.lowercased().contains("install") {
