@@ -58,11 +58,11 @@ class AgentChatUITestCase: XCTestCase {
     // The first tap after a scroll is swallowed (the scroll view eats it), so
     // retry — and say which attempt worked, because "always needs two taps" and
     // "never focuses" are different bugs.
-    for attempt in 1...3 where !up {
-      // Left of centre, not `input.tap()`: the element's centre is close enough
-      // to the jump-to-latest button that the tap can hit that instead, which
-      // scrolls the transcript to the foot and leaves the composer unfocused.
-      input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+    // The field's element frame is only the 21pt text line, and a coordinate tap
+    // inside it does not reliably focus it while `element.tap()` does — so try
+    // each route rather than trusting one.
+    for (label, tap) in taps(app, input) where !up {
+      tap()
       for _ in 0..<8 {
         up = keyboardIsUp(app)
         if up { break }
@@ -70,8 +70,8 @@ class AgentChatUITestCase: XCTestCase {
       }
       let kb = app.keyboards.firstMatch
       print(
-        "KEYBOARD_ATTEMPT=\(attempt) up=\(up) exists=\(kb.exists) frame=\(kb.frame) "
-          + "keys=\(kb.keys.count)")
+        "KEYBOARD_ATTEMPT via \(label) up=\(up) exists=\(kb.exists) frame=\(kb.frame) "
+          + "screen=\(app.frame) keys=\(kb.keys.count)")
       if !up { usleep(700_000) }
     }
     XCTAssertTrue(
