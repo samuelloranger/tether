@@ -1,7 +1,7 @@
 # Desktop frontend reorganization
 
 **Date:** 2026-09-11
-**Scope:** `apps/desktop/src`, `apps/desktop/src-tauri/src`, `apps/desktop/tsconfig.json`, `apps/desktop/vite.config.ts`, new `apps/desktop/CLAUDE.md`
+**Scope:** `apps/desktop/src`, `apps/desktop/src-tauri/src`, `apps/desktop/tsconfig.json`, `apps/desktop/vite.config.ts`, `apps/desktop/package.json`, new `apps/desktop/CLAUDE.md`
 **Status:** approved, ready for implementation plan
 
 Follows `docs/superpowers/specs/2026-09-11-server-reorg-design.md`, which did the
@@ -25,7 +25,7 @@ addressed here (see **Out of scope**).
 | Grouping | By domain, extending `agent/` and `git/` | yes |
 | Filenames | **Keep** the domain prefix | **no — server dropped it** |
 | Cross-domain imports | `@/*` alias | yes |
-| Alias wiring | tsconfig `paths` **and** vite `resolve.alias` | **no — bun needed only tsconfig** |
+| Alias wiring | tsconfig `paths` + `vite-tsconfig-paths` plugin | **no — bun needed only tsconfig** |
 | Rust side | group `noise_*` only; leave `commands/` | n/a |
 | Delivery | one PR, ~13 commits | yes |
 
@@ -165,20 +165,48 @@ Add to `apps/desktop/tsconfig.json`:
 No `baseUrl` — TypeScript 7 removed it (`TS5102`).
 
 **This is not sufficient on its own.** The server got away with tsconfig alone
-because Bun reads tsconfig `paths` natively. Vite does not. Without a matching
-`resolve.alias`, `tsc --noEmit` passes clean while `vite build` and `tauri dev`
-fail to resolve every `@/` import.
+because Bun reads tsconfig `paths` natively. Vite does not.
 
-That is the dangerous shape: the typecheck lies. So `vite.config.ts` also gets:
+This was measured, not assumed. With `paths` set and no vite wiring, on the real
+workspace with one real import switched to `@/viewModel`:
+
+| | `tsc --noEmit` | `vite build` |
+|---|---|---|
+| no vite wiring | **exit 0 — passes** | `[vite]: Rollup failed to resolve import "@/viewModel" from ".../src/App.tsx"` |
+| with the plugin | exit 0 | exit 0 |
+
+That is the dangerous shape: the typecheck passes while the build is broken.
+
+**Use `vite-tsconfig-paths`, not a hand-written `resolve.alias`.** The plugin
+reads the same `tsconfig.json`, so the alias has exactly one definition and the
+two configs cannot drift:
 
 ```ts
-import path from 'node:path';
-// …
-resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
+// vite.config.ts
+import tsconfigPaths from 'vite-tsconfig-paths';
+
+export default defineConfig({
+  plugins: [react(), tsconfigPaths()],
+});
 ```
 
-and the implementation plan gates every task on a real `vite build`, not just
-`tsc`. One task adds both and proves them together before anything moves.
+Installed as `vite-tsconfig-paths@6.1.1` (dev dependency, `apps/desktop`).
+
+Its README documents `paths` alongside `baseUrl`, but **`paths` alone is enough** —
+confirmed by building this workspace with `paths` and no `baseUrl`, which matters
+because TypeScript 7 removed `baseUrl` outright.
+
+All three toolchains that consume this code were verified against the alias:
+
+| Toolchain | Resolves `@/` via | Verified |
+|---|---|---|
+| `tsc --noEmit` | tsconfig `paths` | `bun run --cwd apps/desktop build` |
+| vite / tauri | `vite-tsconfig-paths` reading that tsconfig | same command; fails without the plugin |
+| `bun test` | tsconfig `paths`, natively | a throwaway test importing `@/paneTree` |
+
+The implementation plan still gates every task on the desktop `build` script
+rather than a bare typecheck, since that script is `tsc --noEmit && vite build`
+and so covers both halves.
 
 Same convention as the server otherwise: cross-domain uses `@/domain/module`,
 same-folder stays relative.
@@ -237,7 +265,7 @@ the desktop client ships for Windows while the server does not.
 
 One branch, one PR:
 
-1. `build(desktop): @/* alias in tsconfig and vite` — both, proven together
+1. `build(desktop): @/* alias via tsconfig paths + vite-tsconfig-paths` — **already done**, see below
 2-11. one commit per domain folder, in dependency order: `core`, `platform`,
    `terminal`, `session`, `pane`, `host`, `workspace`, `settings`,
    `presentations`, `shell`
