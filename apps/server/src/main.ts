@@ -10,10 +10,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
+import { CONTROL_SOCK, LOG_FILE, PID_FILE, STATE_DIR } from '@/infra/paths';
+import { COMPILED, selfArgv, VERSION } from '@/infra/runtime';
 import { followFile } from './logTail';
-import { CONTROL_SOCK, LOG_FILE, PID_FILE, STATE_DIR } from './paths';
 import { processStartTime } from './procIdentity';
-import { COMPILED, selfArgv, VERSION } from './runtime';
 import { resolveListenerPlan } from './tlsConfig';
 
 const PORT = process.env.TETHER_PORT ?? '8085';

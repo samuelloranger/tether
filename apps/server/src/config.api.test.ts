@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
+import { db } from '@/infra/db';
+import { resetConfigCache } from '@/infra/settings';
+import { testAuthHeaders } from '@/testing/auth';
 import { app } from './app';
-import { resetConfigCache } from './config';
-import { db } from './db';
 import { registerPushDevice, removePushDevice } from './pushDevices';
-import { testAuthHeaders } from './testAuth';
 
 afterEach(() => {
   db.query("DELETE FROM settings WHERE key LIKE 'config.%'").run();

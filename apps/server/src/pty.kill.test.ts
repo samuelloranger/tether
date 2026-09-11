@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { getSession, listSessions } from './db';
+import { getSession, listSessions } from '@/infra/db';
 import { killSession, startSession } from './pty';
 
 // Regression: the holder answers `{t:'k'}` with a `{t:'x'}` exit frame shortly

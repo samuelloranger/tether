@@ -1,4 +1,4 @@
-import { getConfig } from './config';
+import { getConfig } from '@/infra/settings';
 
 // Per-session activity classification: is the foreground program busy
 // (`working`), blocked on user input (`waiting`), or sitting at a shell prompt

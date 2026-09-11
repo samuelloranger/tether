@@ -1,9 +1,9 @@
 import { beforeEach, expect, test } from 'bun:test';
+import { db } from '@/infra/db';
 import type { AgentDriver, AgentEvent, AgentFrame } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
 import type { AgentMessageInsert } from './agentMessages';
 import { AgentRegistry } from './agentRegistry';
-import { db } from './db';
 
 // Tests using the default persist write rows to the shared per-process DB, and
 // tests using the default seqSeed read MAX(seq) back from it — so without this,

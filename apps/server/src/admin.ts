@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { selfArgv, VERSION } from './runtime';
+import { selfArgv, VERSION } from '@/infra/runtime';
 
 const attempts = new Map<string, number[]>();
 const MAX_ATTEMPTS = 5;

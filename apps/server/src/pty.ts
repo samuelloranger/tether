@@ -2,10 +2,12 @@ import { spawn } from 'node:child_process';
 import { openSync, readdirSync, readFileSync, realpathSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { getConfig } from './config';
-import { deleteSession, getSession, upsertSession } from './db';
+import { deleteSession, getSession, upsertSession } from '@/infra/db';
+import { OLD_HOLDERS_DIR, USING_DEFAULT_DB } from '@/infra/paths';
+import { COMPILED, selfArgv } from '@/infra/runtime';
+import { getConfig } from '@/infra/settings';
+import { testEvent } from '@/infra/testEvents';
 import { clearLiveCwd } from './liveCwd';
-import { OLD_HOLDERS_DIR, USING_DEFAULT_DB } from './paths';
 import {
   attach,
   broadcast,
@@ -21,10 +23,8 @@ import {
 } from './ptyHolder';
 import { clampDims, planPtyResize, shouldKickPtyOnFocus } from './ptyResize';
 import { getDefaultShell, shellInvocation } from './ptyShell';
-import { COMPILED, selfArgv } from './runtime';
 import { clearActivity, recordInput } from './sessionActivity';
 import { clearTitle } from './sessionTitle';
-import { testEvent } from './testEvents';
 
 export type { FocusSubscriber, SessionFrame, Subscriber } from './ptyHolder';
 export { sockPathFor } from './ptyHolder';

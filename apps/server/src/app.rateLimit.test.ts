@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { testAuthHeaders } from '@/testing/auth';
 import { resetAdminRateLimit } from './admin';
 import { app } from './app';
-import { testAuthHeaders } from './testAuth';
 
 afterEach(() => resetAdminRateLimit());
 

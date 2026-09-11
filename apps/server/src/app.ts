@@ -1,9 +1,11 @@
 import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { logError, logInfo } from '@/infra/log';
+import { VERSION } from '@/infra/runtime';
+import { getConfig } from '@/infra/settings';
+import { testEvent } from '@/infra/testEvents';
 import { allowAdminRequest, scheduleAdminCommand, updateTargetVersion } from './admin';
 import { authMiddleware } from './auth';
-import { getConfig } from './config';
-import { logError, logInfo } from './log';
 import { sendTestPush } from './push';
 import { isValidSecretKey } from './pushCrypto';
 import { registerPushDevice, removePushDevice } from './pushDevices';
@@ -14,8 +16,6 @@ import { gitRoutes } from './routes/git';
 import { noiseRoutes } from './routes/noise';
 import { presentationsRoutes } from './routes/presentations';
 import { sessionsRoutes } from './routes/sessions';
-import { VERSION } from './runtime';
-import { testEvent } from './testEvents';
 import { getTlsReport, isSecureRequest } from './tlsRuntime';
 
 /** Bindings come from Bun.serve's fetch wrapper in serve.ts (peer + server). */

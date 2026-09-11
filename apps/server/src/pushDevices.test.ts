@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { db } from './db';
+import { db } from '@/infra/db';
 import { addDevice, revokeDevice } from './deviceRegistry';
 import { listPushDevices, registerPushDevice, removePushDevicesForAuthDevice } from './pushDevices';
 

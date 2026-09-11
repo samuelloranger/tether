@@ -8,6 +8,7 @@ import {
   watch,
 } from 'node:fs';
 import path from 'node:path';
+import { logWarn } from '@/infra/log';
 import {
   type DiffSummary,
   EMPTY_DIFF_SUMMARY,
@@ -18,7 +19,6 @@ import { resolveGitDir } from './gitRoot';
 import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './gitStatus';
 import { shouldSkipWatchDirName } from './gitWatchIgnore';
 import { isEacces, listIgnoredDirs } from './gitWatchIgnoredDirs';
-import { logWarn } from './log';
 
 // Hard ceiling on watched directories, so an unanticipated tree degrades into
 // "watch less" instead of freezing the server and exhausting inotify's allowance.

@@ -1,15 +1,15 @@
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
+import { logError, logInfo } from '@/infra/log';
+import { testEvent } from '@/infra/testEvents';
 import { runReconnect } from '../authGate';
 import { trackDeviceChannel } from '../deviceChannels';
 import { getDeviceByPubkey, touchDevice } from '../deviceRegistry';
-import { logError, logInfo } from '../log';
 import { ChannelError } from '../noiseChannel';
 import { loadOrCreateServerKeypair } from '../noiseIdentity';
 import { runNoiseSession } from '../noiseSessionProtocol';
 import { toFrameBytes, WsFrameIO, type WsSender } from '../noiseWsAdapter';
 import { handlePairingConnection } from '../pairControl';
-import { testEvent } from '../testEvents';
 
 export const noiseRoutes = new Hono();
 

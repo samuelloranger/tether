@@ -5,7 +5,7 @@
  * the whole retained scrollback: see replayPlan.ts for why an unbounded catch-up
  * is a death spiral.
  */
-import { db, getLogs, retainedBytes, type TerminalLog } from './db';
+import { db, getLogs, retainedBytes, type TerminalLog } from '@/infra/db';
 import { type ReplayPlan, selectReplayNewest } from './replayPlan';
 
 /**

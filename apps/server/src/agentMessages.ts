@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import { db } from './db';
+import { db } from '@/infra/db';
 
 /**
  * Persisted agent-chat transcript rows. One row per emitted frame, keyed by

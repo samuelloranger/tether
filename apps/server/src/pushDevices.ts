@@ -1,4 +1,4 @@
-import { db } from './db';
+import { db } from '@/infra/db';
 
 export interface PushDevice {
   deviceToken: string;

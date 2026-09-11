@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
-import { UPLOADS_DIR } from '../paths';
+import { UPLOADS_DIR } from '@/infra/paths';
 import { resolveUploadPath } from '../upload';
 import { readWorkspaceDir } from '../workspaceDir';
 import { readWorkspaceFile, WorkspaceFileError } from '../workspaceFile';

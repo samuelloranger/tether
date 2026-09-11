@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
+import { deleteSession, upsertSession } from '@/infra/db';
+import { testAuthHeaders } from '@/testing/auth';
 import { app } from './app';
-import { deleteSession, upsertSession } from './db';
 import { clearLiveCwd, reportCwd } from './liveCwd';
 import { clearTitle, recordTitleChunk } from './sessionTitle';
-import { testAuthHeaders } from './testAuth';
 
 test('GET /api/sessions annotates rows with auto_title', async () => {
   const AUTH = testAuthHeaders();

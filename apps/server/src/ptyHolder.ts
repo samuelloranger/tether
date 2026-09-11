@@ -1,9 +1,17 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Socket } from 'bun';
-import { getConfig } from './config';
+import {
+  addTerminalLog,
+  clearInsertCount,
+  deleteSession,
+  getSession,
+  upsertSession,
+} from '@/infra/db';
+import { logError, logInfo } from '@/infra/log';
+import { CONFIG_DIR } from '@/infra/paths';
+import { getConfig } from '@/infra/settings';
 import { CwdRefreshGate } from './cwdRefresh';
-import { addTerminalLog, clearInsertCount, deleteSession, getSession, upsertSession } from './db';
 import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
 import { findGitRoot } from './gitRoot';
 import { EMPTY_REPO_STATUS, type RepoStatus } from './gitStatus';
@@ -22,9 +30,7 @@ import {
   takeLegacyLines,
 } from './holderFrame';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
-import { logError, logInfo } from './log';
 import { type NotificationEvent, pushesFromOutput, pushFromExit } from './notifications';
-import { CONFIG_DIR } from './paths';
 import { FrameDecoder } from './proto/frame';
 import type { Dims } from './ptyResize';
 import { buildPushContent, sendPush } from './push';

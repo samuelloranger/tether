@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { upsertSession } from '@/infra/db';
+import { testAuthHeaders } from '@/testing/auth';
 import { canonicalFixture, osc7Chunk } from '../test-paths';
 import { app } from './app';
-import { upsertSession } from './db';
 import { clearLiveCwd, recordChunk } from './liveCwd';
-import { testAuthHeaders } from './testAuth';
 
 /**
  * Runs git without blocking the event loop.

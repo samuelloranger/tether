@@ -1,8 +1,8 @@
 import { homedir } from 'node:os';
 import { z } from 'zod';
+import { describeShellSupport, getDefaultShell, type ShellSupport } from '../ptyShell';
 import { getSetting, setSetting } from './db';
 import { logWarn } from './log';
-import { describeShellSupport, getDefaultShell, type ShellSupport } from './ptyShell';
 
 const nonNegativeInt = z.number().int().nonnegative();
 

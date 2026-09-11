@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getSession, upsertSession } from './db';
+import { getSession, upsertSession } from '@/infra/db';
 import { SessionExitedError, startSession } from './pty';
 
 describe('startSession exit guard', () => {

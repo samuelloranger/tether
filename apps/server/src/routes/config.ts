@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { type Config, getConfig, getShellSupport, patchConfig } from '../config';
+import { type Config, getConfig, getShellSupport, patchConfig } from '@/infra/settings';
 import { countPushDevices } from '../pushDevices';
 import { getTlsReport } from '../tlsRuntime';
 

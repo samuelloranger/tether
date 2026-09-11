@@ -26,7 +26,9 @@ export const VERSION = process.env.TETHER_VERSION || 'dev';
 export const COMPILED = import.meta.dir.includes('$bunfs') || import.meta.dir.includes('~BUN');
 
 // main.ts path, used only in the non-compiled (bun reexec) branch of selfArgv.
-const MAIN_PATH = path.join(import.meta.dir, 'main.ts');
+// '..' because this module lives in src/infra/ while main.ts is at src/ — get
+// this wrong and every holder spawn silently fails to start.
+const MAIN_PATH = path.join(import.meta.dir, '..', 'main.ts');
 
 // Build the argv to re-invoke THIS program with a subcommand. Compiled binary:
 // [binary, sub, ...extra]. Dev (bun run): [bun, main.ts, sub, ...extra]. Either

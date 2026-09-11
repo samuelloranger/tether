@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
+import { createAgentSession, db } from '@/infra/db';
 import type { AgentDriver, AgentEvent } from './agentDriver';
 import { AgentRegistry } from './agentRegistry';
 import { applyAgentStart } from './agentReplay';
-import { createAgentSession, db } from './db';
 import type { AgentState } from './noiseSessionProtocol';
 
 /** Captures the cwd a driver was started with, so we can assert what

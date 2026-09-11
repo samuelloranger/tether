@@ -1,5 +1,5 @@
-import type { Config } from './config';
-import { logWarn } from './log';
+import { logWarn } from '@/infra/log';
+import type { Config } from '@/infra/settings';
 import type { NotificationContext, NotificationEvent } from './notifications';
 import { encryptPushContent, type PushContent } from './pushCrypto';
 import { listPushDevices, markPushDeviceUsed, removePushDevice } from './pushDevices';

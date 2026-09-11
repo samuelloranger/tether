@@ -1,7 +1,7 @@
+import { logError, logInfo } from '@/infra/log';
+import { CONTROL_SOCK } from '@/infra/paths';
 import { controlApp } from './controlApp';
 import { hardenControlSocket, prepareControlSocket } from './controlSocket';
-import { logError, logInfo } from './log';
-import { CONTROL_SOCK } from './paths';
 
 export function serveControl(sock: string = CONTROL_SOCK) {
   prepareControlSocket(sock);

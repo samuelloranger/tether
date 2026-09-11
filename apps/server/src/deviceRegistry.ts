@@ -1,4 +1,4 @@
-import { db } from './db';
+import { db } from '@/infra/db';
 import { closeDeviceChannels } from './deviceChannels';
 import { removePushDevicesForAuthDevice } from './pushDevices';
 

@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 
-import { getSession } from '../db';
+import { getSession } from '@/infra/db';
 import { GitRootError, resolveGitRoot } from '../gitRoot';
 import { getLiveCwd } from '../liveCwd';
 import { refreshLiveCwd } from '../ptyHolder';

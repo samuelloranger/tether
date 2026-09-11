@@ -1,13 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
+import { describeShellSupport } from '../ptyShell';
+import { db, setSetting } from './db';
 import {
   DEFAULT_CONFIG,
   getConfig,
   getShellSupport,
   patchConfig,
   resetConfigCache,
-} from './config';
-import { db, setSetting } from './db';
-import { describeShellSupport } from './ptyShell';
+} from './settings';
 
 afterEach(() => {
   db.query("DELETE FROM settings WHERE key LIKE 'config.%'").run();

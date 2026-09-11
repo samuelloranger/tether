@@ -1,4 +1,4 @@
-import { getSession } from './db';
+import { getSession } from '@/infra/db';
 import { broadcast, notify } from './ptyHolder';
 import { recordSignal, type SignalState } from './sessionActivity';
 

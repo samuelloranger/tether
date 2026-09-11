@@ -326,9 +326,12 @@ distinct paths, no collisions.
 Add to `apps/server/tsconfig.json`:
 
 ```json
-"baseUrl": ".",
 "paths": { "@/*": ["./src/*"] }
 ```
+
+**No `baseUrl`.** TypeScript 7 removed it (`TS5102: Option 'baseUrl' has been
+removed`), and `paths` now resolves relative to the tsconfig's own directory,
+which is what we want anyway.
 
 - Same-folder imports stay relative: `import { parseDiff } from './diff';`
 - Cross-domain imports use the alias: `import { getDb } from '@/infra/db';`

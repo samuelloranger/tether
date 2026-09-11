@@ -1,3 +1,6 @@
+import { getSession } from '@/infra/db';
+import { logError } from '@/infra/log';
+import { testEvent } from '@/infra/testEvents';
 import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
 import { applyAgentMessage, defaultGetAgentMessages } from './agentReplay';
@@ -9,11 +12,9 @@ import {
   type TranslatedMessage,
   translateSessionJsonl,
 } from './claudeSessions';
-import { getSession } from './db';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
-import { logError } from './log';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import {
   type FocusSubscriber,
@@ -28,7 +29,6 @@ import {
 } from './pty';
 import { REPLAY_BYTE_BUDGET, replayOutputFrames } from './replayPlan';
 import { getReplayLogs as readReplayLogs } from './replayRead';
-import { testEvent } from './testEvents';
 
 /**
  * The identity of the device on the far end of this Noise session — already

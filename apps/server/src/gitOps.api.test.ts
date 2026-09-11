@@ -3,10 +3,10 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { deleteSession, upsertSession } from '@/infra/db';
+import { testAuthHeaders } from '@/testing/auth';
 import { app } from './app';
-import { deleteSession, upsertSession } from './db';
 import { clearLiveCwd, reportCwd } from './liveCwd';
-import { testAuthHeaders } from './testAuth';
 
 let AUTH: Record<string, string>;
 const ID = 'gitops-api';

@@ -34,6 +34,14 @@ These are the five places a naive `sed 's|from ...|...|'` pass will miss or corr
 | `dbStartup.test.ts` | 99, 148 | `new URL('./db.ts', import.meta.url)` ×2 | **Leave alone.** Runtime URL resolution — an alias does not resolve here. Both files land in `infra/`, so `./db.ts` stays correct. |
 | `pty.ts` | 29-32 | `export … from './ptyHolder'` / `'./ptyResize'` / `'./ptyShell'` | Caught by the `from '…'` pattern. No special handling, but verify. |
 | `noiseFfi.ts` | 10 | `import embeddedNoiseLib from './noiseNativeLib' with { type: 'file' }` | Caught by the `from '…'` pattern; the `with` clause is after the quote. Verify the asset path still resolves by running the build. |
+| `runtime.ts` | 29 | `path.join(import.meta.dir, 'main.ts')` | **Hand-edit, and it fails silently.** `import.meta.dir` tracks the file's own location, so moving the file one level deeper breaks the path with no type error and no import error — the holder subprocess just never starts and every PTY test times out at ~2s. After moving any file, re-run the audit in "Pass A3" below. |
+
+**A note on how these surface.** `tsc` catches a missed `from '…'` specifier
+instantly. It does **not** catch `import.meta.dir`-relative path construction,
+`require()` strings, or `new URL(...)` — those fail at runtime, and in this
+codebase the runtime failure mode is a 2-second test timeout with no useful
+message. Treat a sudden cluster of PTY timeouts as "a path was computed wrong",
+not "a flaky test".
 
 Six test files also reach outside `src/` for shared helpers (`../../test-paths`, `../../test-shell`): `gitDiff.api.test.ts`, `gitRoot.test.ts`, `gitWatch.test.ts`, `pty.liveCwd.test.ts`, `pty.title.test.ts`, `workspaceFile.api.test.ts`. The helpers live at `apps/server/test-paths.ts` and `apps/server/test-shell.ts` and do **not** move. Their relative depth changes twice: `../../` → `../` in Task 3 (collapse), then `../` → `../../` when the file lands in a domain folder.
 
@@ -63,6 +71,37 @@ rewrite() {
 folder(s) that task just created must be skipped in the second `find`, or Pass B
 would rewrite the sibling imports Pass A just fixed. Every task below spells the
 helper out in full; copy it from the task you are on, not from here.
+
+**Pass A2 — dangling relative imports.** A file moved into a new folder still
+imports modules that have *not* moved yet as `./x`, which now resolves inside the
+new folder and breaks. Rewrite those to `../x`; later tasks' Pass B converts them
+to aliases automatically when those modules move. Run this after Pass A for every
+folder the task created:
+
+```bash
+fix_dangling() {
+  for f in "$1"/*.ts; do
+    for mod in $(grep -o "from '\./[A-Za-z0-9_]*'" "$f" | sed "s|from '\./||; s|'||" | sort -u); do
+      [ -f "$1/$mod.ts" ] || sed -i "s|from '\./$mod'|from '../$mod'|g" "$f"
+    done
+  done
+}
+fix_dangling src/<new-folder>
+```
+
+**Pass A3 — non-import path resolution.** Grep the moved files for path
+construction that no `from '…'` rewrite can see:
+
+```bash
+grep -rn "import\.meta\.\(dir\|url\)\|require(\|await import(" src/<new-folder>
+```
+
+Every hit must be checked by hand against its new depth. `import.meta.dir` joins
+are the dangerous ones — they fail at runtime, not at typecheck.
+
+**After every task's rewrites, run `bun format`.** Changing `./x` to `@/domain/x`
+reorders imports under Biome's `organizeImports` assist, which is an *error*, not
+a warning. Formatting is mechanical and keeps `bun lint` green.
 
 The trailing quote in the pattern anchors the match, so `'./log'` never matches `'./logTail'`, and `'./routes/config'` never matches the `'./config'` pattern.
 
@@ -469,10 +508,12 @@ In `apps/server/tsconfig.json`, inside `compilerOptions`:
 ```diff
      "skipLibCheck": true,
      "noEmit": true,
-+    "baseUrl": ".",
 +    "paths": { "@/*": ["./src/*"] },
      "types": ["bun-types"]
 ```
+
+Do **not** add `baseUrl`. TypeScript 7 removed it and errors with `TS5102`;
+`paths` resolves relative to the tsconfig's directory on its own.
 
 - [ ] **Step 2: Prove the alias resolves before moving anything**
 

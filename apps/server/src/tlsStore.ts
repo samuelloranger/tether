@@ -10,7 +10,7 @@ import { X509Certificate } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import path from 'node:path';
-import { CONFIG_DIR } from './paths';
+import { CONFIG_DIR } from '@/infra/paths';
 import { certFingerprint, generateSelfSignedCert, normalizeAltNames } from './x509';
 
 // Sits beside config/tether.db, so a dev run (repo-local DB) never reads or

@@ -1,4 +1,6 @@
 // Run: TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/db.test.ts
+
+import { getReplayLogs } from '../replayRead';
 import {
   addTerminalLog,
   createAgentSession,
@@ -11,7 +13,6 @@ import {
   resetRunningSessions,
   upsertSession,
 } from './db';
-import { getReplayLogs } from './replayRead';
 
 let pass = 0;
 function ok(cond: boolean, msg: string) {

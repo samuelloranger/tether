@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
+import { deleteSession, upsertSession } from '@/infra/db';
+import { testAuthHeaders } from '@/testing/auth';
 import { app } from './app';
-import { deleteSession, upsertSession } from './db';
 import { clearActivity, recordOutput } from './sessionActivity';
-import { testAuthHeaders } from './testAuth';
 
 test('GET /api/sessions annotates rows with live activity', async () => {
   const AUTH = testAuthHeaders();

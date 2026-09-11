@@ -1,8 +1,8 @@
+import { db } from '@/infra/db';
 import { AgentClaudeDriver } from './agentClaudeDriver';
 import type { AgentDriver, AgentFrame } from './agentDriver';
 import { FrameSeq, toFrame } from './agentEventMap';
 import { type AgentMessageInsert, appendAgentMessage, maxAgentSeq } from './agentMessages';
-import { db } from './db';
 
 export type FrameSink = (f: AgentFrame) => void;
 /** Injectable so tests can spy on writes without touching the real DB. */

@@ -1,8 +1,8 @@
+import { createAgentSession, db, getSession, setSessionModel } from '@/infra/db';
+import { logError } from '@/infra/log';
+import { getConfig, patchConfig } from '@/infra/settings';
 import type { AgentFrame } from './agentDriver';
 import { type AgentMessageRow, appendAgentMessage, getAgentMessages } from './agentMessages';
-import { getConfig, patchConfig } from './config';
-import { createAgentSession, db, getSession, setSessionModel } from './db';
-import { logError } from './log';
 import type { AgentState, SessionDeps } from './noiseSessionProtocol';
 
 /** The `agent.*` client messages, dispatched by applyAgentMessage. */

@@ -12,7 +12,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { deleteSession, upsertSession } from './db';
+import { deleteSession, upsertSession } from '@/infra/db';
 import {
   decodeHolderFrame,
   decodeLegacyHolderLine,

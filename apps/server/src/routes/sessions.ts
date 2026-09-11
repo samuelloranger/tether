@@ -1,11 +1,12 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
+import { deleteSession, getSession, listSessions, renameSession } from '@/infra/db';
+import { logError, logInfo, logWarn } from '@/infra/log';
+import { testEvent } from '@/infra/testEvents';
 import { deleteAgentMessages } from '../agentMessages';
 import { sharedAgentRegistry } from '../agentRegistry';
-import { deleteSession, getSession, listSessions, renameSession } from '../db';
 import { trackDeviceChannel } from '../deviceChannels';
 import { getLiveCwd } from '../liveCwd';
-import { logError, logInfo, logWarn } from '../log';
 import {
   type FocusSubscriber,
   getActiveSession,
@@ -20,7 +21,6 @@ import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '../replayPlan';
 import { getReplayLogs } from '../replayRead';
 import { getActivity } from '../sessionActivity';
 import { autoTitle, getOscTitle } from '../sessionTitle';
-import { testEvent } from '../testEvents';
 import { codecFor, type TerminalCodec, type WireData } from './terminalCodec';
 
 export const sessionsRoutes = new Hono();

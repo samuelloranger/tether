@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
+import { createAgentSession, db, deleteSession, getSession } from '@/infra/db';
 import {
   appendAgentMessage,
   deleteAgentMessages,
   getAgentMessages,
   pruneAgentMessages,
 } from './agentMessages';
-import { createAgentSession, db, deleteSession, getSession } from './db';
 
 test('getAgentMessages returns rows ordered by seq, filtered by sinceSeq', () => {
   createAgentSession(db, { id: 'am1', workspaceRoot: '/tmp' });
