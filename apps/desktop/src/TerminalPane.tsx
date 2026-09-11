@@ -3,7 +3,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
-import { sendJson, type TerminalSocket } from './coreTransport';
+import { sendJson, type TerminalSocket } from '@/core/coreTransport';
 import { fitTerminal } from './fitTerminal';
 import type { FrameApplyResult } from './frameHandler';
 import { setPasteListener } from './pasteBus';

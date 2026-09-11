@@ -1,8 +1,8 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { PairScheme } from './hostScheme';
+import type { PairScheme } from '../hostScheme';
+import type { ServerConfig, ServerConfigPatch } from '../serverSettingsModel';
 import { normalizeInvokeError } from './invokeError';
-import type { ServerConfig, ServerConfigPatch } from './serverSettingsModel';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 
 /// Every core command routes through here so a failure arrives as an Error

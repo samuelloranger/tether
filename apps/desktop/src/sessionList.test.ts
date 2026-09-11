@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import type { DrawerSession } from '@/core/types';
 import { applyKillTombstones, dropSession, rememberKill, replaceHostSessions } from './sessionList';
-import type { DrawerSession } from './types';
 
 function row(id: string, hostId = 'box'): DrawerSession {
   return { hostId, id, status: 'running', last_output_at: null };

@@ -1,11 +1,11 @@
 import { useState } from 'react';
+import type { DrawerSession, HostHealthStatus, HostProfile } from '@/core/types';
 import { activityDotKey, activityLabel } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
 import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { sessionLabel, sessionLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
-import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 import type { BeginTabDrag } from './useTabDrag';
 
 interface SessionDrawerProps {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import { type HostProfile, httpOriginFor } from '@/core/types';
 import { resolveScheme } from './hostScheme';
-import { type HostProfile, httpOriginFor } from './types';
 
 function profile(port: string, scheme?: 'http' | 'https'): HostProfile {
   return {

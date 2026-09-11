@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { HostHealthStatus, HostProfile } from '@/core/types';
 import { validateAddress } from './address';
 import { loadServerConfig, loadServerVersion } from './serverConfig';
 import {
@@ -17,7 +18,6 @@ import {
   type ServerSettingsDraft,
   validateServerSettingsDraft,
 } from './serverSettingsModel';
-import type { HostHealthStatus, HostProfile } from './types';
 
 export type ServerSettingsProps = {
   host: HostProfile;

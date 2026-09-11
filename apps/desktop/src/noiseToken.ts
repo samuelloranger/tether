@@ -67,7 +67,7 @@ export function createTokenCache(opts: TokenCacheOptions): TokenCache {
 let defaultCache: TokenCache | null = null;
 
 function defaultMint(hostId: string, address: string): Promise<MintedToken> {
-  return import('./coreApi').then((mod) => mod.coreNoiseToken(hostId, address));
+  return import('@/core/coreApi').then((mod) => mod.coreNoiseToken(hostId, address));
 }
 
 function defaultTokenCache(): TokenCache {

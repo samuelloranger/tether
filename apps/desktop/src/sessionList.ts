@@ -1,4 +1,4 @@
-import type { DrawerSession } from './types';
+import type { DrawerSession } from '@/core/types';
 
 /** Replace one host's rows; other hosts stay. */
 export function replaceHostSessions(previous: DrawerSession[], hostId: string, rows: DrawerSession[]): DrawerSession[] {

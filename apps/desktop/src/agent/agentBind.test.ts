@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { CoreConnectParams, TerminalSocket, TransportHandlers } from '../coreTransport';
+import type { CoreConnectParams, TerminalSocket, TransportHandlers } from '@/core/coreTransport';
 import { type AgentOpener, bindAgentSession } from './agentBind';
 import { AgentChatModel } from './agentChatModel';
 

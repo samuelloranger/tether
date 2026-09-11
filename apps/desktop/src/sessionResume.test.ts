@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import type { DrawerSession } from '@/core/types';
 import { pickResume, restorableIds } from './sessionResume';
-import type { DrawerSession } from './types';
 
 function row(id: string, hostId: string, status: 'running' | 'stopped'): DrawerSession {
   return { hostId, id, status, last_output_at: null };

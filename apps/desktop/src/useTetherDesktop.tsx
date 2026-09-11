@@ -1,6 +1,5 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: desktop app state hook — owns hosts, sessions, pairing, and the screen state machine in one place
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { nextAgentSessionId } from './agent/newChat';
 import {
   coreCacheDelete,
   coreHostRetry,
@@ -23,7 +22,16 @@ import {
   coreSessionsList,
   coreSessionsRename,
   listenSessions,
-} from './coreApi';
+} from '@/core/coreApi';
+import {
+  activeSessionStorageKey,
+  type DrawerSession,
+  HOST_PROFILES_KEY,
+  type HostHealthStatus,
+  type HostProfile,
+  KEY_ACTIVE_HOST,
+} from '@/core/types';
+import { nextAgentSessionId } from './agent/newChat';
 import type { FrameApplyResult } from './frameHandler';
 import { hostsBecomingReachable } from './hostRecovery';
 import type { PairScheme } from './hostScheme';
@@ -32,16 +40,8 @@ import { sessionKey } from './sessionKey';
 import { sessionLabel } from './sessionLabel';
 import { applyKillTombstones, dropSession, rememberKill, replaceHostSessions } from './sessionList';
 import { pickResume, restorableIds } from './sessionResume';
-import {
-  activeSessionStorageKey,
-  type DrawerSession,
-  HOST_PROFILES_KEY,
-  type HostHealthStatus,
-  type HostProfile,
-  KEY_ACTIVE_HOST,
-} from './types';
 
-export type { DrawerSession } from './types';
+export type { DrawerSession } from '@/core/types';
 
 type Screen = 'main' | 'hosts' | 'pair-device' | 'settings' | 'local-settings' | 'devices';
 

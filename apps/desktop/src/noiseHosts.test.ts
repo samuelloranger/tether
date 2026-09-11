@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import type { HostProfile } from '@/core/types';
 import { noiseSessionAddress } from './noiseHosts';
-import type { HostProfile } from './types';
 
 function profile(port: string, scheme?: 'http' | 'https'): HostProfile {
   return {

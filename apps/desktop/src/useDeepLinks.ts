@@ -1,7 +1,7 @@
 import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { coreDeepLinkResolve } from './coreApi';
-import type { HostProfile } from './types';
+import { coreDeepLinkResolve } from '@/core/coreApi';
+import type { HostProfile } from '@/core/types';
 
 /**
  * Resolve `tether://session/<id>?host=<identityName>` via the Rust parser

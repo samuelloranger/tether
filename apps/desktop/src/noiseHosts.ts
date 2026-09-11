@@ -1,5 +1,5 @@
+import type { HostProfile } from '@/core/types';
 import { resolveScheme } from './hostScheme';
-import type { HostProfile } from './types';
 
 // There is no `authMode` field on HostProfile yet, so we record a host as
 // "noise" here when paired, and read it back to pick the transport.

@@ -1,4 +1,4 @@
-import type { DrawerSession } from './types';
+import type { DrawerSession } from '@/core/types';
 
 /**
  * Running sessions only: opening a WS calls `startSession`, so restoring onto a

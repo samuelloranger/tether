@@ -1,5 +1,5 @@
 import type { Terminal } from '@xterm/xterm';
-import { coreMouseCell, coreMouseEncode } from './coreApi';
+import { coreMouseCell, coreMouseEncode } from '@/core/coreApi';
 
 export type MouseModeName = 'off' | 'x10' | 'normal' | 'button' | 'any';
 

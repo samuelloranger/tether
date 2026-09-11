@@ -5,7 +5,7 @@ import {
   coreConfigGet,
   coreConfigPatch,
   coreHealthVersion,
-} from './coreApi';
+} from '@/core/coreApi';
 import type { ServerConfig, ServerConfigPatch } from './serverSettingsModel';
 
 export async function loadServerConfig(hostId: string): Promise<ServerConfig> {

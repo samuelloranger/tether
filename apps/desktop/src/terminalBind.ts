@@ -1,7 +1,7 @@
 import type { FitAddon } from '@xterm/addon-fit';
 import type { SearchAddon } from '@xterm/addon-search';
 import type { Terminal } from '@xterm/xterm';
-import { nextConnId, openNoiseSocket, sendJson, type TerminalSocket } from './coreTransport';
+import { nextConnId, openNoiseSocket, sendJson, type TerminalSocket } from '@/core/coreTransport';
 import { fitTerminal } from './fitTerminal';
 import { applyServerFrame, createFrameSink, type FrameApplyResult } from './frameHandler';
 import { shouldSendOutbound } from './ptyOutbound';

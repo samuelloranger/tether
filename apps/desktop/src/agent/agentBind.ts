@@ -1,5 +1,5 @@
-import type { CoreConnectParams, TerminalSocket, TransportHandlers } from '../coreTransport';
-import { openNoiseSocket, sendJson } from '../coreTransport';
+import type { CoreConnectParams, TerminalSocket, TransportHandlers } from '@/core/coreTransport';
+import { openNoiseSocket, sendJson } from '@/core/coreTransport';
 import type { AgentChatModel } from './agentChatModel';
 import { agentStart, decodeAgentFrame } from './agentFrames';
 

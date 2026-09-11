@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
+import type { DrawerSession, HostProfile } from '@/core/types';
 import type { SessionRef } from './paneTree';
 import { sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
-import type { DrawerSession, HostProfile } from './types';
 
 /**
  * Chooser for an empty pane: pick an existing session (any host) or start a new one.

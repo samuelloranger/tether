@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { normalizeInvokeError } from './invokeError';
+import { normalizeInvokeError } from '@/core/invokeError';
 import type { WorkspaceDirListing } from './workspaceDirLogic';
 import type { FileStat, FileTreeNode, FileView, Presentation } from './workspaceTypes';
 

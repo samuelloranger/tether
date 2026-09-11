@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { coreNoiseDevicesList, coreNoiseRevoke, type DeviceInfo } from './coreApi';
+import { coreNoiseDevicesList, coreNoiseRevoke, type DeviceInfo } from '@/core/coreApi';
+import type { HostProfile } from '@/core/types';
 import { lastSeenText, shortFingerprint } from './devicesText';
 import { confirmAction } from './dialog';
 import { noiseSessionAddress } from './noiseHosts';
-import type { HostProfile } from './types';
 
 interface DevicesScreenProps {
   host: HostProfile;

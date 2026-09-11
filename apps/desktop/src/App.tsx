@@ -1,5 +1,6 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: root app shell — routes every screen and wires the drawer, terminal panes, git, and workspace panels
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { type DrawerSession, type HostHealthStatus, httpOriginFor } from '@/core/types';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
 import { AgentFolderPicker } from './agent/AgentFolderPicker';
@@ -48,7 +49,6 @@ import { LocalSettingsScreen } from './SettingsScreen';
 import { sessionKey } from './sessionKey';
 import { touchLru } from './sessionLru';
 import { TerminalEmpty } from './TerminalEmpty';
-import { type DrawerSession, type HostHealthStatus, httpOriginFor } from './types';
 import { useDeepLinks } from './useDeepLinks';
 import { useShellChrome } from './useHeatArrival';
 import { useLaunchUpdateCheck } from './useLaunchUpdateCheck';

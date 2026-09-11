@@ -1,4 +1,4 @@
-import type { HostHealthStatus } from './types';
+import type { HostHealthStatus } from '@/core/types';
 
 /**
  * Host ids that just crossed into `reachable`.

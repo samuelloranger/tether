@@ -1,7 +1,7 @@
+import type { DrawerSession } from '@/core/types';
 import { activityDotKey, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { UiTheme } from './preferences';
-import type { DrawerSession } from './types';
 
 /**
  * `none` is not "idle": a stopped session, or no session at all, must not tint

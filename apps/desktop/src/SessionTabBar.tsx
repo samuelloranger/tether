@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { DrawerSession, HostHealthStatus, HostProfile } from '@/core/types';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { isRecentlyActive } from './desktopNavigation';
 import type { PaneDir, PaneSide } from './paneTree';
@@ -7,7 +8,6 @@ import { parseSessionKey, sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
 import { TerminalToolbar } from './TerminalToolbar';
-import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 import type { BeginTabDrag } from './useTabDrag';
 import type { TetherDesktop } from './useTetherDesktop';
 import { aggregateDot, groupHostIds, groupLabel, isGroup, type View, viewMemberKeys } from './viewModel';

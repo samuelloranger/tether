@@ -1,5 +1,5 @@
 import type { IDisposable, ILink, Terminal } from '@xterm/xterm';
-import { coreDetectLinks, coreOpenExternal, type DetectedLinkSpan } from './coreApi';
+import { coreDetectLinks, coreOpenExternal, type DetectedLinkSpan } from '@/core/coreApi';
 import { requestFileOpen } from './fileOpenBus';
 
 /** When true, Ctrl/Cmd+click is required so a drag-select isn't hijacked. */
