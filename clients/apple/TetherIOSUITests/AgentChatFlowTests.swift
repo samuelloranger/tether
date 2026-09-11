@@ -54,7 +54,6 @@ class AgentChatUITestCase: XCTestCase {
     // keyboard is on screen — a dismissed keyboard still matches and still
     // reports full height, which passed a test whose screenshot had no keyboard
     // in it at all. A key you could actually press is the honest signal.
-    let key = app.keyboards.firstMatch.keys["space"]
     var up = false
     // The first tap after a scroll is swallowed (the scroll view eats it), so
     // retry — and say which attempt worked, because "always needs two taps" and
@@ -65,11 +64,14 @@ class AgentChatUITestCase: XCTestCase {
       // scrolls the transcript to the foot and leaves the composer unfocused.
       input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
       for _ in 0..<8 {
-        up = key.exists && key.isHittable
+        up = keyboardIsUp(app)
         if up { break }
         usleep(500_000)
       }
-      print("KEYBOARD_ATTEMPT=\(attempt) up=\(up)")
+      let kb = app.keyboards.firstMatch
+      print(
+        "KEYBOARD_ATTEMPT=\(attempt) up=\(up) exists=\(kb.exists) frame=\(kb.frame) "
+          + "keys=\(kb.keys.count)")
       if !up { usleep(700_000) }
     }
     XCTAssertTrue(
@@ -119,6 +121,20 @@ class AgentChatUITestCase: XCTestCase {
 
   func toolCards(_ app: XCUIApplication) -> XCUIElementQuery {
     tagged(app, "agentToolCard")
+  }
+
+  /// Whether a keyboard a finger could actually press is on screen.
+  ///
+  /// Every cheaper check lied: `app.keyboards.firstMatch.exists` is true for a
+  /// dismissed keyboard, so is its full `frame.height`, and `keys["space"]`
+  /// never matches at all on this simulator's EN/FR keyboard (key identifiers
+  /// are localised). A hittable key — any key — plus a frame that is actually on
+  /// screen is the combination that holds.
+  func keyboardIsUp(_ app: XCUIApplication) -> Bool {
+    let kb = app.keyboards.firstMatch
+    guard kb.exists, kb.keys.count > 8 else { return false }
+    guard kb.frame.minY < app.frame.maxY - 100 else { return false }
+    return kb.keys.element(boundBy: 0).isHittable
   }
 
   /// The ways a finger could reach the composer, in the order a person would
@@ -256,7 +272,6 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     let scroll = transcript(app)
     XCTAssertTrue(scroll.waitForExistence(timeout: 15), "transcript never appeared")
 
-    let key = app.keyboards.firstMatch.keys["space"]
     let input = composer(app)
     XCTAssertTrue(input.waitForExistence(timeout: 10), "composer never appeared")
 
@@ -270,7 +285,7 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     for (label, action) in taps(app, input) {
       action()
       for _ in 0..<6 where !up {
-        up = key.exists && key.isHittable
+        up = keyboardIsUp(app)
         usleep(500_000)
       }
       print("FOCUS_BEFORE_SCROLL via \(label) = \(up)")
@@ -288,7 +303,7 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
     var afterTap = false
     for _ in 0..<8 where !afterTap {
-      afterTap = key.exists && key.isHittable
+      afterTap = keyboardIsUp(app)
       usleep(500_000)
     }
     print("FOCUS_AFTER_SCROLL_BY_TAP=\(afterTap)")
@@ -301,7 +316,7 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     let typed = (input.value as? String) ?? ""
     var keyboardAfterTyping = false
     for _ in 0..<8 where !keyboardAfterTyping {
-      keyboardAfterTyping = key.exists && key.isHittable
+      keyboardAfterTyping = keyboardIsUp(app)
       usleep(500_000)
     }
     print("FOCUS_AFTER_SCROLL_VALUE=\(typed) KEYBOARD=\(keyboardAfterTyping)")
@@ -433,8 +448,7 @@ final class AgentChatScrollTests: AgentChatUITestCase {
         + "testComposerFocusesAfterScrollingHistory")
     let app = launchChat("liveLong")
     requireSoftwareKeyboard(app)
-    XCTAssertTrue(
-      app.keyboards.firstMatch.keys["space"].isHittable, "keyboard should be up before the drag")
+    XCTAssertTrue(keyboardIsUp(app), "keyboard should be up before the drag")
     shot(app, "scroll-keyboard-up")
 
     // A real finger drag, not `swipeDown()`: interactive dismissal tracks the
@@ -448,7 +462,7 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     top.press(forDuration: 0.2, thenDragTo: bottom)
     let gone = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "isHittable == false"),
-      object: app.keyboards.firstMatch.keys["space"])
+      object: app.keyboards.firstMatch.keys.element(boundBy: 0))
     XCTAssertEqual(
       XCTWaiter.wait(for: [gone], timeout: 8), .completed,
       "dragging the transcript did not dismiss the keyboard")
