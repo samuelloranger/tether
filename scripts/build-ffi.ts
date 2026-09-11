@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Builds the tether-noise-ffi cdylib and stages it where noiseFfi.ts embeds it
-// (`apps/server/src/server/noiseNativeLib`). Run before any server test or
+// (`apps/server/src/noiseNativeLib`). Run before any server test or
 // `bun build --compile` of the server: the server imports that file as a
 // `{ type: 'file' }` asset, so it must exist and hold the correct-arch cdylib.
 //
@@ -51,6 +51,6 @@ const builtDir = join(
   release ? 'release' : 'debug',
 );
 const built = join(builtDir, `${libPrefix}tether_noise_ffi.${libSuffix}`);
-const dest = join(root, 'apps/server/src/server/noiseNativeLib');
+const dest = join(root, 'apps/server/src/noiseNativeLib');
 copyFileSync(built, dest);
 console.log(`build-ffi: ${built} -> ${dest}`);

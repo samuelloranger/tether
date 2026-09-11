@@ -3,7 +3,7 @@ import * as nodeFs from 'node:fs';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canonicalFixture } from '../../test-paths';
+import { canonicalFixture } from '../test-paths';
 import type { DiffSummary } from './gitDiff';
 import { EMPTY_REPO_STATUS } from './gitStatus';
 import { GitWatch } from './gitWatch';

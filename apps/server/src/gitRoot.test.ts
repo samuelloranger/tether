@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canonicalFixture } from '../../test-paths';
+import { canonicalFixture } from '../test-paths';
 import { findGitRoot, GitRootError, resolveGitDir, resolveGitRoot } from './gitRoot';
 
 test('resolves the git top-level for a nested cwd inside a repo', () => {

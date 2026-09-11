@@ -30,7 +30,7 @@ cleanup() {
 trap cleanup EXIT
 
 TETHER_DB_PATH="$DB" TETHER_PORT="$PORT" TETHER_TLS=off TETHER_TEST_LOG="$EVT" \
-  bun apps/server/src/server/main.ts serve >"$E2E_DIR/server.log" 2>&1 &
+  bun apps/server/src/main.ts serve >"$E2E_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 ready=0
 for _ in $(seq 1 40); do

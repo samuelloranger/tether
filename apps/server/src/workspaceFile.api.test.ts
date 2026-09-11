@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canonicalFixture, osc7Chunk } from '../../test-paths';
+import { canonicalFixture, osc7Chunk } from '../test-paths';
 import { app } from './app';
 import { upsertSession } from './db';
 import { clearLiveCwd, recordChunk } from './liveCwd';

@@ -1,4 +1,4 @@
-// Dev entry: `bun dev:server` / `bun run src/server/index.ts`. The compiled
+// Dev entry: `bun dev:server` / `bun run src/index.ts`. The compiled
 // binary uses main.ts instead; both call serve().
 import { serve } from './serve';
 

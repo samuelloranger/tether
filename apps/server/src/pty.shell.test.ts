@@ -1,4 +1,4 @@
-// Run: bun run src/server/pty.shell.test.ts
+// Run: bun run src/pty.shell.test.ts
 // Pure-function test only — does not spawn a PTY.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';

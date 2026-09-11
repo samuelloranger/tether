@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canonicalFixture, osc7Chunk } from '../../test-paths';
+import { canonicalFixture, osc7Chunk } from '../test-paths';
 import { app } from './app';
 import { upsertSession } from './db';
 import { clearLiveCwd, recordChunk } from './liveCwd';

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { PTY_TEST_TIMEOUT_MS, SHELL_TIMEOUT_MS, TEST_SHELL, titleLine } from '../../test-shell';
+import { PTY_TEST_TIMEOUT_MS, SHELL_TIMEOUT_MS, TEST_SHELL, titleLine } from '../test-shell';
 import {
   killSession,
   type Subscriber,

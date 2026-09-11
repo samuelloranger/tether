@@ -1,4 +1,4 @@
-// Run: bun run src/server/pty.env.test.ts
+// Run: bun run src/pty.env.test.ts
 // Pure-function test only — does not spawn a PTY.
 import { scrubAgentEnv, sessionEnv, withTermEnv } from './pty';
 

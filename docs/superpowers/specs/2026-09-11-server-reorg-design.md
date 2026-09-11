@@ -404,6 +404,22 @@ on `db.ts` immediately.
 | `scripts/e2e/run-scrollback.sh` | 31 | same |
 | `apps/server/src/infra/paths.ts` | 15 | comment naming the dev DB path |
 | `apps/server/src/tls/store.ts` | 16 | comment naming `config/tether.db` |
+| `buf.gen.yaml` | 5, 12 | **functional** — `out:` dir for `bun gen:proto` |
+| `crates/tether-core/tests/proto2_conformance.rs` | 52, 80, 88 | **functional** — spawns `bun run src/server/index.ts` and `src/server/main.ts` |
+| `bun.lock` | 60 | workspace `bin` path |
+| `apps/server/src/{index,db.test,pty.env.test,pty.shell.test}.ts` | 1 | "Run:" header comments |
+| `crates/tether-proto/README.md` | 20, 27, 32 | prose |
+| `crates/tether-proto/src/frame.rs` | 1 | doc comment |
+| `clients/apple/.../PushClient.swift` | 7 | doc comment |
+| `apps/relay/README.md` | 69 | prose |
+| `CLAUDE.md` | 35 | layout prose (rewritten in full later) |
+
+The bottom eleven rows were **missed in the first pass of this table** and found
+only by running the Step 6 verification grep repo-wide. Two of them are
+functional, not cosmetic: `buf.gen.yaml` would have regenerated protobuf output
+into a directory that no longer exists, and the Rust conformance test would have
+failed to spawn the server. The lesson for the verification step: grep the whole
+repo, not just the directories the design predicted.
 
 Verify no reference was missed with
 `grep -rn "src/server" --exclude-dir=node_modules --exclude-dir=.git .`

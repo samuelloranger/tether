@@ -48,7 +48,7 @@ export TETHER_PORT="$PORT"
 export TETHER_TLS=off
 export TETHER_TEST_LOG="$EVT"
 echo \$\$ > "$E2E_DIR/server.pid"
-exec caffeinate -d -i -s bun apps/server/src/server/main.ts serve >"$E2E_DIR/server.log" 2>&1
+exec caffeinate -d -i -s bun apps/server/src/main.ts serve >"$E2E_DIR/server.log" 2>&1
 EOF
 chmod +x "$START_CMD"
 open "$START_CMD"

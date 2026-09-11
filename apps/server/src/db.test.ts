@@ -1,4 +1,4 @@
-// Run: TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/server/db.test.ts
+// Run: TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/db.test.ts
 import {
   addTerminalLog,
   createAgentSession,

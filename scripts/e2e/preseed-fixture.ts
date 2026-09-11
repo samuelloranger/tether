@@ -5,9 +5,9 @@
 // enrollment and server keypair match the server under test.
 //
 //   TETHER_DB_PATH=~/.tether-e2e/tether.db bun scripts/e2e/preseed-fixture.ts
-import { upsertDevice } from '../../apps/server/src/server/deviceRegistry';
-import { genKeypair } from '../../apps/server/src/server/noiseFfi';
-import { loadOrCreateServerKeypair } from '../../apps/server/src/server/noiseIdentity';
+import { upsertDevice } from '../../apps/server/src/deviceRegistry';
+import { genKeypair } from '../../apps/server/src/noiseFfi';
+import { loadOrCreateServerKeypair } from '../../apps/server/src/noiseIdentity';
 
 const host = process.env.FIX_HOST ?? '127.0.0.1';
 const port = process.env.FIX_PORT ?? '8085';

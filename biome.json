@@ -12,7 +12,7 @@
       "*.json",
       "!apps/**/dist",
       "!apps/**/node_modules",
-      "!apps/server/src/server/proto/gen"
+      "!apps/server/src/proto/gen"
     ]
   },
   "formatter": {

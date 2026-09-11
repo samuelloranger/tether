@@ -32,7 +32,7 @@ the server binaries.
 
 ## Monorepo layout (Bun workspaces)
 
-- `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary. **Source lives in `apps/server/src/server/`** — every filename in the bullets below is relative to that directory (so `main.ts` is `apps/server/src/server/main.ts`). Routes are split under `src/server/routes/` (`sessions.ts`, `git.ts`, `presentations.ts`, `noise.ts`, …).
+- `apps/server/` — Bun + Hono backend (`tether`), compiled to one binary. **Source lives in `apps/server/src/`** — every filename in the bullets below is relative to that directory (so `main.ts` is `apps/server/src/main.ts`). Routes are split under `src/routes/` (`sessions.ts`, `git.ts`, `presentations.ts`, `noise.ts`, …).
   - Entry/lifecycle: `main.ts` (argv dispatch + control CLI + `holder` subcommand), `serve.ts` (`serve()` — reattach holders + the http/https `Bun.serve` listeners), `index.ts` (dev entry), `app.ts` (Hono routes + WS gateway), `paths.ts` / `runtime.ts`, `update.ts` (self-update).
   - PTY: `pty.ts` (session registry, holder spawn/reattach, subscribe/write/resize/kill), `holder.ts` (the detached one-PTY-per-process owner), `holderFrame.ts` (binary dialect), `procCwd.ts` / `procIdentity.ts` / `liveCwd.ts` (cwd + process tracking), `sessionActivity.ts` (`working`/`waiting`/`done`/`idle` inference from output), `sessionTitle.ts` (OSC title + auto-title).
   - Data/auth: `db.ts` (bun:sqlite + versioned migrations), `auth.ts` (per-device bearer verify), `deviceToken.ts` / `deviceRegistry.ts` / `noiseIdentity.ts` / `pairControl.ts`, `config.ts` (zod-typed settings over the `settings` table, client-editable).
