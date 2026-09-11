@@ -94,6 +94,10 @@ struct AgentTranscriptView: View {
           emptyState.padding(.top, 80)
         } else {
           LazyVStack(alignment: .leading, spacing: 24) {
+            // No accessibilityIdentifier on the row: SwiftUI pushes a container's
+            // identifier down onto every leaf inside it, which would shadow the
+            // per-part ids (agentUserBubble / agentAssistantTurn / agentToolCard)
+            // that the UI tests query.
             ForEach(model.messages) { message in
               AgentMessageRow(
                 message: message,
@@ -101,7 +105,6 @@ struct AgentTranscriptView: View {
                   ? { model.retryLast() } : nil
               )
               .id(message.id)
-              .accessibilityIdentifier("agentMessageRow")
             }
             if model.turn == .thinking {
               ThinkingRow().accessibilityIdentifier("agentThinking")

@@ -123,13 +123,12 @@ final class AgentChatSendTests: AgentChatUITestCase {
     XCTAssertEqual(userBubbles(app).count, 1, "one send must make exactly one user bubble")
 
     // The host streams two deltas before the tool call; both belong to the same
-    // assistant turn, so the tag from the first must still be there after the
-    // second (a new bubble per delta would be the regression).
+    // assistant turn, so the first's text must still be on screen after the
+    // second lands. (Per-element coalescing is asserted in AgentChatModelTests —
+    // an identifier on a SwiftUI container propagates to every leaf under it, so
+    // counting tagged elements here would count paragraphs, not turns.)
     waitForText(app, "On it [t1]")
     waitForText(app, "Then I'll add the limiter")
-    XCTAssertEqual(
-      tagged(app, "agentAssistantTurn").count, 1,
-      "streamed deltas must coalesce into one assistant turn")
 
     XCTAssertTrue(
       toolCards(app).firstMatch.waitForExistence(timeout: 15), "tool call never rendered a card")
