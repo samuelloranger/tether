@@ -87,6 +87,9 @@ struct AgentTranscriptView: View {
   /// screen sat at the foot showing jump-to-latest and refused to follow new
   /// output until the user tapped it.
   @State private var settled = false
+  /// Whether the scroll is currently being driven by a finger. Only a finger may
+  /// turn `following` off — see the tracker below.
+  @State private var userScrolling = false
   @State private var viewportHeight: CGFloat = 0
   @State private var bottomY: CGFloat = 0
 
@@ -166,10 +169,22 @@ struct AgentTranscriptView: View {
           #endif
         }
       )
-      .agentNearBottomTracker { near in
-        guard settled else { return }
-        following = near
-      }
+      // Follow is re-armed whenever the foot comes back into view, but it is only
+      // dropped by the USER scrolling away. Geometry alone is not enough: every
+      // `scrollTo` while streaming reports an intermediate offset that is not at
+      // the foot, which dropped follow mid-turn and left jump-to-latest showing
+      // over a transcript that was already at the bottom.
+      .agentScrollTracker(
+        nearBottom: { near in
+          guard settled else { return }
+          if near {
+            following = true
+          } else if userScrolling {
+            following = false
+          }
+        },
+        userScrolling: { userScrolling = $0 }
+      )
       .onChange(of: model.revision) {
         guard following else { return }
         scrollToBottom(proxy)
@@ -266,14 +281,23 @@ private struct BottomYKey: PreferenceKey {
 
 private extension View {
   @ViewBuilder
-  func agentNearBottomTracker(_ onChange: @escaping (Bool) -> Void) -> some View {
+  func agentScrollTracker(
+    nearBottom: @escaping (Bool) -> Void,
+    userScrolling: @escaping (Bool) -> Void
+  ) -> some View {
     if #available(iOS 18.0, *) {
-      self.onScrollGeometryChange(for: Bool.self) { geo in
-        geo.contentOffset.y >= geo.contentSize.height - geo.containerSize.height
-          - geo.contentInsets.bottom - 48
-      } action: { _, nearBottom in
-        onChange(nearBottom)
-      }
+      self
+        .onScrollGeometryChange(for: Bool.self) { geo in
+          geo.contentOffset.y >= geo.contentSize.height - geo.containerSize.height
+            - geo.contentInsets.bottom - 48
+        } action: { _, near in
+          nearBottom(near)
+        }
+        // `.animating` is our own scrollTo; the three finger-driven phases are
+        // what may drop follow.
+        .onScrollPhaseChange { _, phase in
+          userScrolling(phase == .tracking || phase == .interacting || phase == .decelerating)
+        }
     } else {
       self
     }
