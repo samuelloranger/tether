@@ -1,9 +1,6 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: root app shell — routes every screen and wires the drawer, terminal panes, git, and workspace panels
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { httpOriginFor } from '@/core/types';
-import { DevicesScreen } from '@/host/DevicesScreen';
-import { HostsScreen } from '@/host/HostsScreen';
-import { PairDeviceScreen } from '@/host/PairDeviceScreen';
 import type { DropIntent } from '@/pane/dropZone';
 import { PanePickerModal } from '@/pane/PanePickerModal';
 import { useViewState } from '@/pane/useViewState';
@@ -30,10 +27,9 @@ import {
   sidebarLayout,
   UI_THEMES,
 } from '@/settings/preferences';
-import { ServerSettingsScreen } from '@/settings/ServerSettingsScreen';
-import { LocalSettingsScreen } from '@/settings/SettingsScreen';
 import { AlertModal } from '@/shell/AlertModal';
 import { AppOverflowMenu } from '@/shell/AppOverflowMenu';
+import { appScreen } from '@/shell/AppScreens';
 import { useShellChrome } from '@/shell/useHeatArrival';
 import { useTetherDesktop } from '@/shell/useTetherDesktop';
 import { TerminalEmpty } from '@/terminal/TerminalEmpty';
@@ -161,84 +157,11 @@ export function App() {
     );
   }
 
-  if (app.hosts.length === 0 || app.screen === 'pair-device') {
+  const screen = appScreen({ app, prefs, setPrefs, settingsHost });
+  if (screen) {
     return (
       <div className="app-shell centered" {...shellProps}>
-        <PairDeviceScreen
-          onPair={app.pairHost}
-          onDone={() => app.setScreen('hosts')}
-          onCancel={() => app.setScreen(app.hosts.length > 0 ? 'hosts' : 'main')}
-        />
-        <AlertModal />
-      </div>
-    );
-  }
-
-  if (app.screen === 'devices' && settingsHost) {
-    return (
-      <div className="app-shell centered" {...shellProps}>
-        <DevicesScreen
-          host={settingsHost}
-          onBack={() => {
-            app.setSettingsHostId(null);
-            app.setScreen('hosts');
-          }}
-        />
-        <AlertModal />
-      </div>
-    );
-  }
-
-  if (app.screen === 'hosts') {
-    return (
-      <div className="app-shell centered" {...shellProps}>
-        <HostsScreen
-          hosts={app.hosts}
-          healthByHost={app.healthByHost}
-          onBack={() => app.setScreen('main')}
-          onAdd={() => app.setScreen('pair-device')}
-          onDevices={(hostId) => {
-            app.setSettingsHostId(hostId);
-            app.setScreen('devices');
-          }}
-          onRemove={(hostId) => void app.removeHost(hostId)}
-          onSelect={app.selectHost}
-        />
-        <AlertModal />
-      </div>
-    );
-  }
-
-  if (app.screen === 'local-settings') {
-    return (
-      <div className="app-shell centered" {...shellProps}>
-        <LocalSettingsScreen prefs={prefs} onPrefsChange={setPrefs} onBack={() => app.setScreen('main')} />
-        <AlertModal />
-      </div>
-    );
-  }
-
-  if (app.screen === 'settings' && settingsHost) {
-    return (
-      <div className="app-shell centered" {...shellProps}>
-        <ServerSettingsScreen
-          host={settingsHost}
-          health={app.healthByHost[settingsHost.id] ?? 'unknown'}
-          onBack={() => {
-            app.setSettingsHostId(null);
-            app.setScreen('main');
-          }}
-          onRetry={() => app.retryHost(settingsHost.id)}
-          onIdentitySaved={(identity) => {
-            void app.updateHostIdentity(settingsHost.id, identity);
-          }}
-          onConnectionSaved={async (changes) => {
-            await app.updateHostConnection(settingsHost.id, changes);
-          }}
-          onRemoveHost={async () => {
-            await app.removeHost(settingsHost.id);
-          }}
-        />
+        {screen}
         <AlertModal />
       </div>
     );
