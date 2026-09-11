@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { coreCacheDelete, coreCacheIds, coreCacheTouch } from '@/core/coreApi';
 import { forgetCoreSession } from '@/core/coreTransport';
 import type { DrawerSession, HostProfile } from '@/core/types';
+import type { FrameApplyResult } from '@/terminal/frameHandler';
+import { TerminalPane } from '@/terminal/TerminalPane';
 import { AgentChatPane } from './agent/AgentChatPane';
 import { EmptyPanePicker } from './EmptyPanePicker';
-import type { FrameApplyResult } from './frameHandler';
 import { layoutTree } from './layoutRects';
 import { noiseSessionAddress } from './noiseHosts';
 import { PaneControls } from './PaneControls';
@@ -16,7 +17,6 @@ import { residentKeys } from './residentKeys';
 import { residentSessions } from './residentSessions';
 import { SplitPreviewOverlay } from './SplitPreviewOverlay';
 import { parseSessionKey, sessionKey } from './sessionKey';
-import { TerminalPane } from './TerminalPane';
 import type { TabDropTarget } from './useTabDrag';
 
 export interface ResidentTerminalsProps {

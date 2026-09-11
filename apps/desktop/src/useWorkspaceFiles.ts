@@ -1,7 +1,7 @@
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { requestPaste } from './pasteBus';
+import { requestPaste } from '@/terminal/pasteBus';
 import { coreWorkspaceDir, coreWorkspaceFile, coreWorkspaceUpload } from './workspaceApi';
 import { createDirListingCache, type DirLoadOk, entriesToTreeNodes, joinDirPath } from './workspaceDirLogic';
 import type { FileTreeNode, FileView } from './workspaceTypes';

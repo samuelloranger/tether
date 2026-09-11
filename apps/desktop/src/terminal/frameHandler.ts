@@ -1,5 +1,5 @@
 import type { Terminal } from '@xterm/xterm';
-import type { SessionActivity } from './activity';
+import type { SessionActivity } from '../activity';
 
 export interface FrameSink {
   write(chunk: string): void;

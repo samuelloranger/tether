@@ -31,8 +31,8 @@ import {
   type HostProfile,
   KEY_ACTIVE_HOST,
 } from '@/core/types';
+import type { FrameApplyResult } from '@/terminal/frameHandler';
 import { nextAgentSessionId } from './agent/newChat';
-import type { FrameApplyResult } from './frameHandler';
 import { hostsBecomingReachable } from './hostRecovery';
 import type { PairScheme } from './hostScheme';
 import { markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';

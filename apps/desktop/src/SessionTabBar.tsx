@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import type { DrawerSession, HostHealthStatus, HostProfile } from '@/core/types';
 import { isRecentlyActive } from '@/platform/desktopNavigation';
+import { TerminalToolbar } from '@/terminal/TerminalToolbar';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import type { PaneDir, PaneSide } from './paneTree';
 import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { parseSessionKey, sessionKey } from './sessionKey';
 import { sessionLabel, tabLabels } from './sessionLabel';
 import { TabContextMenu } from './TabContextMenu';
-import { TerminalToolbar } from './TerminalToolbar';
 import type { BeginTabDrag } from './useTabDrag';
 import type { TetherDesktop } from './useTetherDesktop';
 import { aggregateDot, groupHostIds, groupLabel, isGroup, type View, viewMemberKeys } from './viewModel';
