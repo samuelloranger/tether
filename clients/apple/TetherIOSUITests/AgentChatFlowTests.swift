@@ -81,12 +81,19 @@ class AgentChatUITestCase: XCTestCase {
       "never saw text containing \"\(needle)\"")
   }
 
+  /// SwiftUI does not necessarily hang an `accessibilityIdentifier` on the leaf
+  /// static text (a `contextMenu` wrapper is enough to move it), so identifier
+  /// queries here match any element type.
+  func tagged(_ app: XCUIApplication, _ identifier: String) -> XCUIElementQuery {
+    app.descendants(matching: .any).matching(identifier: identifier)
+  }
+
   func userBubbles(_ app: XCUIApplication) -> XCUIElementQuery {
-    app.staticTexts.matching(identifier: "agentUserBubble")
+    tagged(app, "agentUserBubble")
   }
 
   func toolCards(_ app: XCUIApplication) -> XCUIElementQuery {
-    app.descendants(matching: .any).matching(identifier: "agentToolCard")
+    tagged(app, "agentToolCard")
   }
 
   func shot(_ app: XCUIApplication, _ name: String) {
@@ -121,7 +128,7 @@ final class AgentChatSendTests: AgentChatUITestCase {
     waitForText(app, "On it [t1]")
     waitForText(app, "Then I'll add the limiter")
     XCTAssertEqual(
-      app.descendants(matching: .any).matching(identifier: "agentAssistantTurn").count, 1,
+      tagged(app, "agentAssistantTurn").count, 1,
       "streamed deltas must coalesce into one assistant turn")
 
     XCTAssertTrue(
@@ -143,7 +150,7 @@ final class AgentChatSendTests: AgentChatUITestCase {
 
     type(app, "Second ask")
     tapSend(app)
-    let queued = app.descendants(matching: .any).matching(identifier: "agentQueuedRow").firstMatch
+    let queued = tagged(app, "agentQueuedRow").firstMatch
     XCTAssertTrue(queued.waitForExistence(timeout: 5), "prompt sent mid-turn never queued")
     shot(app, "chat-queued")
 
