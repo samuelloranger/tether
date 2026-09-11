@@ -1,5 +1,5 @@
+import { sessionKey } from '@/session/sessionKey';
 import type { Branch, PaneNode } from './paneTree';
-import { sessionKey } from './sessionKey';
 
 export function serializePaneTree(tree: PaneNode): string {
   return JSON.stringify(tree);

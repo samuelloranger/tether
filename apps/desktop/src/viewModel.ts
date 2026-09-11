@@ -1,6 +1,8 @@
 import type { DrawerSession, HostProfile } from '@/core/types';
 import { isRecentlyActive } from '@/platform/desktopNavigation';
-import { activityDotKey, type DotKey } from './activity';
+import { activityDotKey, type DotKey } from '@/session/activity';
+import { parseSessionKey, sessionKey } from '@/session/sessionKey';
+import { tabLabels } from '@/session/sessionLabel';
 import {
   closePane,
   findLeaf,
@@ -14,8 +16,6 @@ import {
   setSession,
   splitLeaf,
 } from './paneTree';
-import { parseSessionKey, sessionKey } from './sessionKey';
-import { tabLabels } from './sessionLabel';
 
 export interface View {
   id: string;

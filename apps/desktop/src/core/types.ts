@@ -1,4 +1,4 @@
-import type { SessionActivity } from '../activity';
+import type { SessionActivity } from '@/session/activity';
 import { type PairScheme, resolveScheme } from '../hostScheme';
 
 export const KEY_ACTIVE_HOST = 'tether_active_host';

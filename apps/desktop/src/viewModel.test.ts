@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { DrawerSession, HostProfile } from '@/core/types';
+import { sessionKey } from '@/session/sessionKey';
 import type { Branch, Leaf, PaneNode } from './paneTree';
 import { closePane, firstLeafId, leaves, splitLeaf } from './paneTree';
-import { sessionKey } from './sessionKey';
 import {
   aggregateDot,
   groupLabel,

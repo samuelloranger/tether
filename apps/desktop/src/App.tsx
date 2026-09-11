@@ -5,6 +5,14 @@ import { ensureNotificationPermission } from '@/platform/desktopNotifications';
 import { useDeepLinks } from '@/platform/useDeepLinks';
 import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
 import { useWindowTheme } from '@/platform/useWindowTheme';
+import { activeSessionDot, litStateFor, shellVars } from '@/session/litTheme';
+import { ResidentTerminals } from '@/session/ResidentTerminals';
+import { SessionDrawer } from '@/session/SessionDrawer';
+import { SessionModalHost, useSessionModals } from '@/session/SessionModals';
+import { SessionChrome } from '@/session/SessionTabBar';
+import { sessionKey } from '@/session/sessionKey';
+import { touchLru } from '@/session/sessionLru';
+import { useTabDrag } from '@/session/useTabDrag';
 import { TerminalEmpty } from '@/terminal/TerminalEmpty';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
@@ -17,7 +25,6 @@ import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
 import { HostsScreen } from './HostsScreen';
-import { activeSessionDot, litStateFor, shellVars } from './litTheme';
 import { PairDeviceScreen } from './PairDeviceScreen';
 import { PanePickerModal } from './PanePickerModal';
 import { PresentationBanner, PresentationView } from './PresentationView';
@@ -44,16 +51,9 @@ import {
   sidebarLayout,
   UI_THEMES,
 } from './preferences';
-import { ResidentTerminals } from './ResidentTerminals';
 import { ServerSettingsScreen } from './ServerSettingsScreen';
-import { SessionDrawer } from './SessionDrawer';
-import { SessionModalHost, useSessionModals } from './SessionModals';
-import { SessionChrome } from './SessionTabBar';
 import { LocalSettingsScreen } from './SettingsScreen';
-import { sessionKey } from './sessionKey';
-import { touchLru } from './sessionLru';
 import { useShellChrome } from './useHeatArrival';
-import { useTabDrag } from './useTabDrag';
 import { useTetherDesktop } from './useTetherDesktop';
 import { useWorkspace, WorkspacePanel } from './useWorkspace';
 import {

@@ -54,6 +54,15 @@ rewrite() {
     | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 
+# After fix_dangling: a '../<domain>/x' that points at a real domain folder
+# resolves, but the convention is the alias. Normalize every one of them.
+normalize_cross_domain() {
+  for d in $(ls -d src/*/ | xargs -n1 basename); do
+    find src -mindepth 2 -maxdepth 2 \( "${TSX[@]}" \) -not -path "src/$d/*" -print0 \
+      | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$d/#\1'@/$d/#g"
+  done
+}
+
 audit() {
   echo "--- dangling relative imports in $* ---"
   for d in "$@"; do for f in "$d"/*.ts "$d"/*.tsx; do [ -e "$f" ] || continue
@@ -141,6 +150,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/core
+normalize_cross_domain
 audit src/core
 ```
 
@@ -243,6 +253,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/platform
+normalize_cross_domain
 audit src/platform
 ```
 
@@ -363,6 +374,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/terminal
+normalize_cross_domain
 audit src/terminal
 ```
 
@@ -487,6 +499,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/session
+normalize_cross_domain
 audit src/session
 ```
 
@@ -608,6 +621,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/pane
+normalize_cross_domain
 audit src/pane
 ```
 
@@ -715,6 +729,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/host
+normalize_cross_domain
 audit src/host
 ```
 
@@ -814,6 +829,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/workspace
+normalize_cross_domain
 audit src/workspace
 ```
 
@@ -908,6 +924,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/settings
+normalize_cross_domain
 audit src/settings
 ```
 
@@ -993,6 +1010,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/presentations
+normalize_cross_domain
 audit src/presentations
 ```
 
@@ -1076,6 +1094,7 @@ Pass B turns them into aliases when those modules move.
 cd /home/samuelloranger/sites/tether/apps/desktop
 . /tmp/claude-1000/-home-samuelloranger-sites-tether/5edeb6d5-ed1c-43ca-847a-bd0322fb6513/scratchpad/desktop-reorg.sh
 fix_dangling src/shell
+normalize_cross_domain
 audit src/shell
 ```
 

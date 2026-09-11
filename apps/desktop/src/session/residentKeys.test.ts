@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { newLeaf, splitLeaf } from './paneTree';
+import { newLeaf, splitLeaf } from '../paneTree';
 import { residentKeys } from './residentKeys';
 
 const S = (id: string) => ({ hostId: 'h', sessionId: id });

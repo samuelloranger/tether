@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { highlightLine } from '../git/codeHighlight';
+import { highlightLine } from '@/git/codeHighlight';
 import type { AgentToolCall, DerivedDiff } from './agentTypes';
 import { toolStyle } from './agentTypes';
 

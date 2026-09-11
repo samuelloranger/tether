@@ -1,7 +1,7 @@
 import type { ComponentPropsWithoutRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { highlightLine } from '../git/codeHighlight';
+import { highlightLine } from '@/git/codeHighlight';
 
 /** A fenced code block, syntax-highlit through the shared tokenizer. */
 function CodeBlock({ language, code }: { language: string | null; code: string }) {

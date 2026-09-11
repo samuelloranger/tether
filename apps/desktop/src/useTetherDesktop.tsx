@@ -31,15 +31,15 @@ import {
   type HostProfile,
   KEY_ACTIVE_HOST,
 } from '@/core/types';
+import { sessionKey } from '@/session/sessionKey';
+import { sessionLabel } from '@/session/sessionLabel';
+import { applyKillTombstones, dropSession, rememberKill, replaceHostSessions } from '@/session/sessionList';
+import { pickResume, restorableIds } from '@/session/sessionResume';
 import type { FrameApplyResult } from '@/terminal/frameHandler';
 import { nextAgentSessionId } from './agent/newChat';
 import { hostsBecomingReachable } from './hostRecovery';
 import type { PairScheme } from './hostScheme';
 import { markNoiseHost, noiseSessionAddress, unmarkNoiseHost } from './noiseHosts';
-import { sessionKey } from './sessionKey';
-import { sessionLabel } from './sessionLabel';
-import { applyKillTombstones, dropSession, rememberKill, replaceHostSessions } from './sessionList';
-import { pickResume, restorableIds } from './sessionResume';
 
 export type { DrawerSession } from '@/core/types';
 

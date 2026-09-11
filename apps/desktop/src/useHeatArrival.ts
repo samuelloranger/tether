@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { ARRIVAL_MS, type LitState, shouldAnnounceArrival } from './litTheme';
+import { ARRIVAL_MS, type LitState, shouldAnnounceArrival } from '@/session/litTheme';
 
 /**
  * Drives `data-arriving`: the state just ENTERED while the swell runs, else null. `settled`

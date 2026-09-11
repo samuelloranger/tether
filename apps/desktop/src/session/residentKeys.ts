@@ -1,4 +1,4 @@
-import { leaves, type PaneNode } from './paneTree';
+import { leaves, type PaneNode } from '../paneTree';
 import { sessionKey } from './sessionKey';
 
 export function residentKeys(tree: PaneNode): string[] {

@@ -1,4 +1,4 @@
-import { activityLabel, type DotKey } from '../activity';
+import { activityLabel, type DotKey } from '@/session/activity';
 
 interface TerminalToolbarProps {
   sessionLabel: string;
