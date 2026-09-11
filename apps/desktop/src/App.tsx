@@ -6,30 +6,9 @@ import { HostsScreen } from '@/host/HostsScreen';
 import { PairDeviceScreen } from '@/host/PairDeviceScreen';
 import type { DropIntent } from '@/pane/dropZone';
 import { PanePickerModal } from '@/pane/PanePickerModal';
-import {
-  findLeaf,
-  firstLeafId,
-  leaves,
-  type PaneDir,
-  type PaneNode,
-  type PaneSide,
-  type SessionRef,
-} from '@/pane/paneTree';
-import { newSoloView, type View, type ViewState, viewMemberKeys } from '@/pane/viewModel';
-import {
-  addSoloViewOp,
-  closePaneOp,
-  dropIntoPaneOp,
-  fillPaneOp,
-  focusPaneOp,
-  openSessionOp,
-  openViewOp,
-  reconcileOp,
-  setRatioOp,
-  splitFromTabOp,
-  splitPaneOp,
-  statesEqual,
-} from '@/pane/viewOps';
+import { leaves } from '@/pane/paneTree';
+import { useViewState } from '@/pane/useViewState';
+import { newSoloView, type View } from '@/pane/viewModel';
 import { ensureNotificationPermission } from '@/platform/desktopNotifications';
 import { useDeepLinks } from '@/platform/useDeepLinks';
 import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
@@ -41,15 +20,12 @@ import { SessionDrawer } from '@/session/SessionDrawer';
 import { SessionModalHost, useSessionModals } from '@/session/SessionModals';
 import { SessionChrome } from '@/session/SessionTabBar';
 import { sessionKey } from '@/session/sessionKey';
-import { touchLru } from '@/session/sessionLru';
 import { useTabDrag } from '@/session/useTabDrag';
 import {
   type AppPreferences,
   loadPreferences,
-  loadViews,
   resolveFlavor,
   savePreferences,
-  saveViews,
   sidebarLayout,
   UI_THEMES,
 } from '@/settings/preferences';
@@ -155,120 +131,31 @@ export function App() {
   });
   const modals = useSessionModals();
 
-  // Per-view layouts: solo (1 leaf) or group (2+). The active view's focused
-  // pane is the app-wide active session, so git/workspace/tint keep following it.
-  const initialViews = useMemo(() => loadViews(), []);
-  const [views, setViews] = useState<View[]>(initialViews.views);
-  const [activeViewId, setActiveViewId] = useState(initialViews.activeViewId);
   const [panePickerFor, setPanePickerFor] = useState<string | null>(null);
   const [agentChatFor, setAgentChatFor] = useState<string | null>(null);
-  const viewStateRef = useRef<ViewState>({ views, activeViewId });
-  viewStateRef.current = { views, activeViewId };
-  const applyViews = (next: ViewState) => {
-    viewStateRef.current = next;
-    setViews(next.views);
-    setActiveViewId(next.activeViewId);
-    saveViews(next);
-  };
-  const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
-  const tree: PaneNode = activeView?.tree ?? { kind: 'leaf', id: 'empty', session: null };
-  const focusedPaneId = activeView?.focusedPaneId ?? firstLeafId(tree);
-  // Recency order of active sessions — feeds residentSessions so recently-used
-  // background tabs keep a live socket (zero replay on switch-back).
-  const [lruOrder, setLruOrder] = useState<string[]>([]);
-  const liveKeys = () =>
-    new Set([
-      ...liveSessionKeys(app.sessions, viewStateRef.current.views, app.healthByHost),
-      ...app.pendingAgentKeys(),
-    ]);
-
-  const openSessionKeys = useMemo(() => new Set(views.flatMap((view) => viewMemberKeys(view))), [views]);
-
-  // Every live session belongs to exactly one view leaf.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the live session list; latest views are read from the ref
-  useEffect(() => {
-    const current = viewStateRef.current;
-    const next = reconcileOp(current, liveKeys());
-    if (!statesEqual(current, next)) applyViews(next);
-  }, [app.sessions, app.healthByHost]);
-
-  // Focused pane → active session, so the rest of the app follows the focus.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: app.selectSession is stable; this mirrors focus into the active session
-  useEffect(() => {
-    const leaf = findLeaf(tree, focusedPaneId);
-    if (leaf?.session) {
-      app.selectSession(leaf.session.hostId, leaf.session.sessionId);
-      const key = sessionKey(leaf.session.hostId, leaf.session.sessionId);
-      setLruOrder((order) => touchLru(order, key));
-    }
-  }, [focusedPaneId, tree]);
-
-  const splitPane = (paneId: string, dir: PaneDir, side: PaneSide) => {
-    applyViews(splitPaneOp(viewStateRef.current, paneId, dir, side));
-  };
-  // Split/close shortcuts. Gate on Cmd, or Ctrl+Shift — never plain Ctrl+D,
-  // which is the terminal's EOF and must still reach the PTY.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: splitPane/closePane_ close over the current view via the listed deps
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const active = e.metaKey || (e.ctrlKey && e.shiftKey);
-      if (!active) return;
-      const k = e.key.toLowerCase();
-      if (k === 'd') {
-        e.preventDefault();
-        splitPane(focusedPaneId, 'row', 'b');
-      } else if (k === 'e') {
-        e.preventDefault();
-        splitPane(focusedPaneId, 'col', 'b');
-      } else if (k === 'w') {
-        e.preventDefault();
-        closePane_(focusedPaneId);
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [focusedPaneId, tree, views, activeViewId]);
-  const closePane_ = (paneId: string) => {
-    applyViews(closePaneOp(viewStateRef.current, paneId, liveKeys()));
-  };
-  const fillPane = (paneId: string, ref: SessionRef) => {
-    applyViews(fillPaneOp(viewStateRef.current, paneId, ref, liveKeys()));
-  };
-  // Right-click a tab → split the active view's focused pane and move that session in.
-  const splitFromTab = (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => {
-    applyViews(
-      splitFromTabOp(viewStateRef.current, sessionKey(hostId, sessionId), dir, side, focusedPaneId, liveKeys()),
-    );
-  };
-  // Drag a tab onto a pane → split at the drop edge, or replace on a center drop.
-  const dropSessionIntoPane = (paneId: string, intent: DropIntent, key: string) => {
-    applyViews(dropIntoPaneOp(viewStateRef.current, paneId, intent, key, liveKeys()));
-  };
+  const viewState = useViewState({
+    liveKeysFor: (views) =>
+      new Set([...liveSessionKeys(app.sessions, views, app.healthByHost), ...app.pendingAgentKeys()]),
+    sessions: app.sessions,
+    healthByHost: app.healthByHost,
+    onFocusSession: app.selectSession,
+  });
+  const { tree, focusedPaneId } = viewState;
+  const dropSessionIntoPane = (paneId: string, intent: DropIntent, key: string) =>
+    viewState.dropIntoPane(paneId, intent, key);
   // Pointer-driven drag: Tauri's native drag-drop handler (kept for OS
   // file-drop upload) swallows in-webview HTML5 DnD on Windows/WebView2.
   const tabDrag = useTabDrag(dropSessionIntoPane);
 
-  const openView = (viewId: string) => {
-    applyViews(openViewOp(viewStateRef.current, viewId));
-  };
-
+  const openView = viewState.openView;
   // Drawer click: activate the view that holds this session (and focus its pane).
-  const openSession = (hostId: string, sessionId: string) => {
-    applyViews(openSessionOp(viewStateRef.current, hostId, sessionId, focusedPaneId, liveKeys()));
-  };
+  const openSession = viewState.openSession;
 
   const newTerminalOn = (hostId: string | null) => {
     if (!hostId) return;
     void app.newSession(hostId).then((sessionId) => {
       if (!sessionId) return;
-      const current = viewStateRef.current;
-      const key = sessionKey(hostId, sessionId);
-      const existing = current.views.find((view) => viewMemberKeys(view).includes(key));
-      if (existing) {
-        applyViews({ views: current.views, activeViewId: existing.id });
-        return;
-      }
-      applyViews(addSoloViewOp(current, newSoloView({ hostId, sessionId })));
+      viewState.openSession(hostId, sessionId);
     });
     if (!layout.docked) setDrawerOpen(false);
   };
@@ -283,8 +170,7 @@ export function App() {
     if (!hostId) return;
     void app.newAgentChat(hostId).then((sessionId) => {
       if (!sessionId) return;
-      const current = viewStateRef.current;
-      applyViews(addSoloViewOp(current, newSoloView({ hostId, sessionId, kind: 'agent', cwd })));
+      viewState.addSoloView(newSoloView({ hostId, sessionId, kind: 'agent', cwd }));
     });
     if (!layout.docked) setDrawerOpen(false);
   };
@@ -293,13 +179,7 @@ export function App() {
   const resumeAgentChat = (hostId: string, cwd: string | undefined, claudeSessionId: string) => {
     void app.newAgentChat(hostId).then((sessionId) => {
       if (!sessionId) return;
-      const current = viewStateRef.current;
-      applyViews(
-        addSoloViewOp(
-          current,
-          newSoloView({ hostId, sessionId, kind: 'agent', cwd, resumeSessionId: claudeSessionId }),
-        ),
-      );
+      viewState.addSoloView(newSoloView({ hostId, sessionId, kind: 'agent', cwd, resumeSessionId: claudeSessionId }));
     });
   };
 
@@ -485,7 +365,7 @@ export function App() {
               app.setSettingsHostId(hostId);
               app.setScreen('settings');
             }}
-            onSplitFromTab={splitFromTab}
+            onSplitFromTab={viewState.splitFromTab}
             onBeginDrag={tabDrag.begin}
           />
         </>
@@ -497,8 +377,8 @@ export function App() {
               showTabBar={layout.showTabBar}
               inset={layout.showMenuButton}
               app={app}
-              views={views}
-              activeViewId={activeViewId}
+              views={viewState.views}
+              activeViewId={viewState.activeViewId}
               dot={activeDot}
               hasSession={hasSession}
               onNew={newTerminalOn}
@@ -508,7 +388,7 @@ export function App() {
               onWorkspace={() => workspace.setWorkspaceOpen(true)}
               onUpload={() => void workspace.pickAndUpload()}
               onOverflow={() => openOverflow('end')}
-              onSplitFromTab={splitFromTab}
+              onSplitFromTab={viewState.splitFromTab}
               onSelectView={openView}
               onBeginDrag={tabDrag.begin}
             />
@@ -535,17 +415,17 @@ export function App() {
                     sessions={app.sessions}
                     tree={tree}
                     focusedPaneId={focusedPaneId}
-                    lruOrder={lruOrder}
+                    lruOrder={viewState.lruOrder}
                     terminalTheme={theme.terminal}
                     fontFamily={prefs.terminalFont}
                     onFrame={app.handleWsFrame}
                     onDisconnected={(hostId) => app.retryHost(hostId)}
                     onResumeSession={resumeAgentChat}
-                    onFocusPane={(paneId) => applyViews(focusPaneOp(viewStateRef.current, paneId))}
-                    onSetRatio={(branchId, ratio) => applyViews(setRatioOp(viewStateRef.current, branchId, ratio))}
+                    onFocusPane={viewState.focusPane}
+                    onSetRatio={viewState.setPaneRatio}
                     onPickSession={(paneId) => setPanePickerFor(paneId)}
-                    onSplit={splitPane}
-                    onClosePane={closePane_}
+                    onSplit={viewState.splitPane}
+                    onClosePane={viewState.closePane}
                     preview={tabDrag.drag?.target ?? null}
                   />
                 </div>
@@ -609,9 +489,9 @@ export function App() {
       {panePickerFor && (
         <PanePickerModal
           hosts={app.hosts}
-          sessions={app.sessions.filter((row) => !openSessionKeys.has(sessionKey(row.hostId, row.id)))}
+          sessions={app.sessions.filter((row) => !viewState.openSessionKeys.has(sessionKey(row.hostId, row.id)))}
           onPick={(ref) => {
-            fillPane(panePickerFor, ref);
+            viewState.fillPane(panePickerFor, ref);
             setPanePickerFor(null);
           }}
           onNew={(hostId) => {
@@ -620,7 +500,7 @@ export function App() {
             // Route the new terminal into the pane the picker was opened for,
             // not the focused pane (newTerminalOn's default).
             void app.newSession(hostId).then((sessionId) => {
-              if (target && sessionId) fillPane(target, { hostId, sessionId });
+              if (target && sessionId) viewState.fillPane(target, { hostId, sessionId });
             });
           }}
           onClose={() => setPanePickerFor(null)}
