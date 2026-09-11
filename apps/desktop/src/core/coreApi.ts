@@ -1,0 +1,348 @@
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { PairScheme } from '@/host/hostScheme';
+import type { ServerConfig, ServerConfigPatch } from '@/settings/serverSettingsModel';
+import { normalizeInvokeError } from './invokeError';
+import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
+
+/// Every core command routes through here so a failure arrives as an Error
+/// with the Rust message intact — Tauri otherwise rejects with a bare string.
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await tauriInvoke<T>(command, args);
+  } catch (error) {
+    throw normalizeInvokeError(error);
+  }
+}
+
+export async function coreHostsMigrate(profilesJson: string | null): Promise<HostProfile[]> {
+  return invoke<HostProfile[]>('core_hosts_migrate', {
+    profilesJson,
+  });
+}
+
+export async function coreHostsList(): Promise<HostProfile[]> {
+  return invoke<HostProfile[]>('core_hosts_list');
+}
+
+export async function coreHostsRemove(hostId: string): Promise<void> {
+  await invoke('core_hosts_remove', { hostId });
+}
+
+export async function coreNextTermId(existing: string[]): Promise<string> {
+  return invoke<string>('core_next_term_id', { existing });
+}
+
+export async function coreSessionsKill(input: {
+  hostId: string;
+  sessionId: string;
+  activeHostId: string | null;
+  activeSessionId: string | null;
+  drawerSessions: Array<{ hostId: string; id: string }>;
+}): Promise<string | null> {
+  return invoke<string | null>('core_sessions_kill', {
+    hostId: input.hostId,
+    sessionId: input.sessionId,
+    activeHostId: input.activeHostId,
+    activeSessionId: input.activeSessionId,
+    drawerSessions: input.drawerSessions,
+  });
+}
+
+/** One host's session list, fetched now rather than read off the poll. */
+export async function coreSessionsList(hostId: string): Promise<DrawerSession[]> {
+  return invoke<DrawerSession[]>('core_sessions_list', { hostId });
+}
+
+export async function coreSessionsRename(hostId: string, sessionId: string, name: string): Promise<void> {
+  await invoke('core_sessions_rename', { hostId, sessionId, name });
+}
+
+export async function corePollingStart(): Promise<void> {
+  await invoke('core_polling_start');
+}
+
+export async function corePollingStop(): Promise<void> {
+  await invoke('core_polling_stop');
+}
+
+export async function corePollingRestart(): Promise<void> {
+  await invoke('core_polling_restart');
+}
+
+export async function corePollingSetActive(hostId: string | null): Promise<void> {
+  await invoke('core_polling_set_active', { hostId });
+}
+
+export async function coreHostRetry(hostId: string): Promise<void> {
+  await invoke('core_host_retry', { hostId });
+}
+
+/**
+ * Runs the Noise pairing handshake and pins the server key. `hostId` must be
+ * the host profile's id — that's the keyring key `coreNoiseReconnect` looks up later.
+ */
+export async function coreNoisePair(input: { hostId: string; address: string; code: string }): Promise<string> {
+  return invoke<string>('core_noise_pair', {
+    hostId: input.hostId,
+    address: input.address,
+    code: input.code,
+  });
+}
+
+/**
+ * This device's Noise fingerprint for `hostId`; generates the device keypair
+ * if missing so it can be read aloud on the pairing screen, matching iOS.
+ */
+export async function coreNoiseDeviceFingerprint(hostId: string): Promise<string> {
+  return invoke<string>('core_noise_device_fingerprint', { hostId });
+}
+
+/** Reconnect to an already-paired host using the pinned keys under `hostId`. */
+export async function coreNoiseReconnect(hostId: string, address: string): Promise<void> {
+  await invoke('core_noise_reconnect', { hostId, address });
+}
+
+/**
+ * Reachability check for a Noise host via the IK reconnect handshake. Used
+ * instead of `/api/status`, which always 401s a Noise host.
+ */
+export async function coreNoisePing(hostId: string, address: string): Promise<boolean> {
+  return invoke<boolean>('core_noise_ping', { hostId, address });
+}
+
+/** Mint a per-device REST bearer over the authenticated Noise session. */
+export async function coreNoiseToken(hostId: string, address: string): Promise<{ token: string; expiresAt: string }> {
+  return invoke<{ token: string; expiresAt: string }>('core_noise_token', { hostId, address });
+}
+
+/**
+ * One paired device as the server reports it. camelCase keys match the wire
+ * reply byte-for-byte (Rust re-serializes with `rename_all = "camelCase"`).
+ */
+export interface DeviceInfo {
+  id: string;
+  label: string;
+  fingerprint: string;
+  pairedAt: string;
+  lastSeenAt: string | null;
+  lastAddress: string | null;
+  isSelf: boolean;
+}
+
+/**
+ * Lists devices paired with a Noise host over a short-lived management session
+ * on the same channel the terminal uses. Rejects if this device was revoked.
+ */
+export async function coreNoiseDevicesList(hostId: string, address: string): Promise<DeviceInfo[]> {
+  return invoke<DeviceInfo[]>('core_noise_devices_list', { hostId, address });
+}
+
+/**
+ * Revoke one device on a Noise host by its exact `target` id. Relays the
+ * server's verdict — `ok:false` with an `error` when the server declined.
+ */
+export async function coreNoiseRevoke(
+  hostId: string,
+  address: string,
+  target: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return invoke<{ ok: boolean; error?: string }>('core_noise_revoke', {
+    hostId,
+    address,
+    target,
+  });
+}
+
+/**
+ * Persist a Noise-paired host without a connection test. Pairing
+ * (`coreNoisePair`) is the trust step; this only records the profile.
+ */
+export async function coreHostsSaveNoise(input: {
+  name: string;
+  host: string;
+  port: string;
+  scheme?: PairScheme;
+}): Promise<HostProfile> {
+  return invoke<HostProfile>('core_hosts_save_noise', {
+    name: input.name,
+    host: input.host,
+    port: input.port,
+    scheme: input.scheme ?? null,
+  });
+}
+
+/**
+ * Opens a terminal session over Noise, emitting `core-message-{connId}` /
+ * `core-closed-{connId}`. Drive it with `coreNoiseSend`/`coreNoiseClose`.
+ */
+export async function coreNoiseConnect(input: {
+  connId: string;
+  hostId: string;
+  address: string;
+  sessionId: string;
+  cols: number;
+  rows: number;
+}): Promise<void> {
+  await invoke('core_noise_connect', {
+    connId: input.connId,
+    hostId: input.hostId,
+    address: input.address,
+    sessionId: input.sessionId,
+    cols: input.cols,
+    rows: input.rows,
+  });
+}
+
+export async function coreNoiseSend(connId: string, text: string): Promise<void> {
+  await invoke('core_noise_send', { connId, text });
+}
+
+export async function coreNoiseClose(connId: string): Promise<void> {
+  await invoke('core_noise_close', { connId });
+}
+
+export interface DetectedLinkSpan {
+  start: number;
+  end: number;
+  target: { kind: 'external'; url: string } | { kind: 'file'; path: string; line?: number; column?: number };
+}
+
+export async function coreDetectLinks(texts: string[], wrapped: boolean[]): Promise<DetectedLinkSpan[][]> {
+  return invoke<DetectedLinkSpan[][]>('core_detect_links', { texts, wrapped });
+}
+
+export async function coreOpenExternal(url: string): Promise<void> {
+  await invoke('open_external', { url });
+}
+
+export async function coreOsc52Decode(data: string): Promise<string | null> {
+  return invoke<string | null>('core_osc52_decode', { data });
+}
+
+export async function coreMouseCell(input: {
+  x: number;
+  y: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  cols: number;
+  rows: number;
+}): Promise<{ col: number; row: number }> {
+  return invoke<{ col: number; row: number }>('core_mouse_cell', { args: input });
+}
+
+export async function coreMouseEncode(input: {
+  kind: string;
+  col: number;
+  row: number;
+  mode: string;
+  sgr: boolean;
+  btn: number;
+  mods: number;
+}): Promise<string[]> {
+  return invoke<string[]>('core_mouse_encode', { args: input });
+}
+
+export async function coreCacheTouch(id: string): Promise<string | null> {
+  return invoke<string | null>('core_cache_touch', { id });
+}
+
+export async function coreCacheDelete(id: string): Promise<void> {
+  await invoke('core_cache_delete', { id });
+}
+
+export async function coreCacheIds(): Promise<string[]> {
+  return invoke<string[]>('core_cache_ids');
+}
+
+export function listenHostHealth(handler: (hostId: string, status: HostHealthStatus) => void): Promise<UnlistenFn> {
+  return listen<{ hostId: string; status: HostHealthStatus }>('core-host-health', (event) => {
+    handler(event.payload.hostId, event.payload.status);
+  });
+}
+
+export function listenSessions(handler: (hostId: string, sessions: DrawerSession[]) => void): Promise<UnlistenFn> {
+  return listen<{ hostId: string; sessions: DrawerSession[] }>('core-sessions', (event) => {
+    handler(event.payload.hostId, event.payload.sessions);
+  });
+}
+
+export async function coreConfigGet(hostId: string): Promise<ServerConfig> {
+  return invoke<ServerConfig>('core_config_get', { hostId });
+}
+
+export async function coreConfigPatch(hostId: string, patch: ServerConfigPatch): Promise<ServerConfig> {
+  return invoke<ServerConfig>('core_config_patch', { hostId, patch });
+}
+
+export async function coreAdminUpdate(hostId: string): Promise<void> {
+  await invoke('core_admin_update', { hostId });
+}
+
+export async function coreAdminRestart(hostId: string): Promise<void> {
+  await invoke('core_admin_restart', { hostId });
+}
+
+export async function coreAdminTestNotification(hostId: string): Promise<void> {
+  await invoke('core_admin_test_notification', { hostId });
+}
+
+export async function coreHealthVersion(hostId: string): Promise<string | null> {
+  return invoke<string | null>('core_health_version', { hostId });
+}
+
+export async function coreHostsUpdateIdentity(
+  hostId: string,
+  identity: { name: string; color: string },
+): Promise<HostProfile> {
+  return invoke<HostProfile>('core_hosts_update_identity', { hostId, identity });
+}
+
+export async function coreHostsUpdateConnection(
+  hostId: string,
+  update: { host: string; port: string },
+): Promise<HostProfile> {
+  return invoke<HostProfile>('core_hosts_update_connection', {
+    hostId,
+    update: {
+      host: update.host,
+      port: update.port,
+    },
+  });
+}
+
+export type DeepLinkResolveResult =
+  | { kind: 'matched'; hostId: string; sessionId: string }
+  | { kind: 'unknownHost'; identityName: string }
+  | { kind: 'invalid' };
+
+export async function coreDeepLinkResolve(url: string): Promise<DeepLinkResolveResult> {
+  return invoke<DeepLinkResolveResult>('core_deep_link_resolve', { url });
+}
+
+export async function coreNotifyDecide(edge: {
+  notifyFired: boolean;
+  bellFired: boolean;
+  oscTitle: string;
+  oscBody: string;
+  label: string;
+  notificationsEnabled: boolean;
+  sessionIsActive: boolean;
+  windowFocused: boolean;
+}): Promise<{ shouldNotify: boolean; title?: string; body?: string }> {
+  return invoke('core_notify_decide', { edge });
+}
+
+export async function coreNotifyWaitingEdge(
+  prevActivity: string | null | undefined,
+  nextActivity: string | null | undefined,
+  isActive: boolean,
+): Promise<boolean> {
+  return invoke<boolean>('core_notify_waiting_edge', {
+    prevActivity: prevActivity ?? null,
+    nextActivity: nextActivity ?? null,
+    isActive,
+  });
+}

@@ -3,10 +3,7 @@
 
 mod commands;
 mod http;
-mod noise_session;
-mod noise_store;
-mod noise_token;
-mod noise_ws;
+mod noise;
 mod state;
 mod storage;
 

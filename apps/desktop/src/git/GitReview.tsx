@@ -33,10 +33,7 @@ export function GitReview({
   const entries = reviewFileEntries(panel.summary);
   const changes = changesPaneContent(panel.error, panel.summary.files.length);
 
-  useEffect(
-    () => loadReviewSlots(hostId, sessionId, panel.summary, setSlots),
-    [hostId, sessionId, panel.summary],
-  );
+  useEffect(() => loadReviewSlots(hostId, sessionId, panel.summary, setSlots), [hostId, sessionId, panel.summary]);
 
   return (
     <aside className="git-review" aria-label="Git review">
@@ -53,13 +50,7 @@ export function GitReview({
         stagedCount={panel.groups.staged.length}
         committing={form.committing}
       />
-      <ReviewScroll
-        changes={changes}
-        entries={entries}
-        slots={slots}
-        sideBySide={sideBySide}
-        panel={panel}
-      />
+      <ReviewScroll changes={changes} entries={entries} slots={slots} sideBySide={sideBySide} panel={panel} />
     </aside>
   );
 }
@@ -77,11 +68,7 @@ function ReviewHeader({
     <header className="git-drawer-header">
       <strong>Review changes</strong>
       <div className="git-drawer-header-actions">
-        <button
-          type="button"
-          className="secondary small"
-          onClick={() => setSideBySide((value) => !value)}
-        >
+        <button type="button" className="secondary small" onClick={() => setSideBySide((value) => !value)}>
           {sideBySide ? 'Unified' : 'Side by side'}
         </button>
         <button type="button" className="secondary small" onClick={onClose}>
@@ -96,9 +83,7 @@ function loadReviewSlots(
   hostId: string,
   sessionId: string,
   summary: GitPanelState['summary'],
-  setSlots: (
-    updater: Record<string, Slot> | ((prev: Record<string, Slot>) => Record<string, Slot>),
-  ) => void,
+  setSlots: (updater: Record<string, Slot> | ((prev: Record<string, Slot>) => Record<string, Slot>)) => void,
 ): () => void {
   let cancelled = false;
   const current = reviewFileEntries(summary);
@@ -159,9 +144,7 @@ function ReviewScroll({
             entry={entry}
             slot={slots[reviewDiffKey(entry.mode, entry.path)]}
             sideBySide={sideBySide}
-            onToggleHunk={(hunkIndex) =>
-              void panel.toggleHunk(entry.path, hunkIndex, entry.mode === 'staged')
-            }
+            onToggleHunk={(hunkIndex) => void panel.toggleHunk(entry.path, hunkIndex, entry.mode === 'staged')}
           />
         ))
       )}

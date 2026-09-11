@@ -12,14 +12,14 @@
       "*.json",
       "!apps/**/dist",
       "!apps/**/node_modules",
-      "!apps/server/src/server/proto/gen"
+      "!apps/server/src/proto/gen"
     ]
   },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
     "indentWidth": 2,
-    "lineWidth": 100
+    "lineWidth": 120
   },
   "javascript": {
     "formatter": {

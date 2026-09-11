@@ -83,9 +83,7 @@ export function AgentChatPane({
             <AgentMessageRow
               key={m.id}
               message={m}
-              onRetry={
-                i === lastIndex && m.role === 'error' && snapshot.canRetry ? retryLast : undefined
-              }
+              onRetry={i === lastIndex && m.role === 'error' && snapshot.canRetry ? retryLast : undefined}
             />
           ))
         )}
@@ -98,13 +96,7 @@ export function AgentChatPane({
         ) : null}
       </div>
       <AgentComposer model={model} snapshot={snapshot} send={send} />
-      <AgentPanePickers
-        model={model}
-        snapshot={snapshot}
-        send={send}
-        cwd={cwd}
-        onResumeSession={onResumeSession}
-      />
+      <AgentPanePickers model={model} snapshot={snapshot} send={send} cwd={cwd} onResumeSession={onResumeSession} />
     </div>
   );
 }

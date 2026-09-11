@@ -4,7 +4,7 @@ import Foundation
 /// can keep editing `NativeHostClient.swift`; request construction mirrors that
 /// type's private helpers (Bearer + JSON) using the public profile + Keychain.
 extension NativeHostClient {
-  /// POST `/api/push/register` — body shape from `apps/server/src/server/app.ts`:
+  /// POST `/api/push/register` — body shape from `apps/server/src/app.ts`:
   /// `{ deviceToken: 64-hex, secretKey: base64(32 bytes), label?: string≤100 }`.
   public func registerPushDevice(
     deviceToken: String,

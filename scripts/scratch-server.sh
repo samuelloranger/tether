@@ -2,7 +2,7 @@
 # Start or stop a throwaway tether server for manual/E2E testing.
 #
 # Scratch servers used to be started by hand as
-#   TETHER_DB_PATH=/tmp/... TETHER_PORT=80xx bun apps/server/src/server/main.ts serve &
+#   TETHER_DB_PATH=/tmp/... TETHER_PORT=80xx bun apps/server/src/main.ts serve &
 # and then never stopped. Three of them were found holding ports 8097-8099 hours
 # after the work that spawned them finished, each still owning PTY holders. The
 # cost is not the memory: a stale server *answering* on the port a test expects
@@ -110,7 +110,7 @@ case "$cmd" in
     marker="$(db_marker "$dir")"
     cat >"$dir/run" <<EOF
 #!/usr/bin/env bash
-exec -a "$marker" bun "$ROOT/apps/server/src/server/main.ts" serve
+exec -a "$marker" bun "$ROOT/apps/server/src/main.ts" serve
 EOF
     chmod +x "$dir/run"
     # `cd` on its own line, NOT joined with && to the backgrounded command:

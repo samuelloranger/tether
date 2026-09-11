@@ -14,13 +14,7 @@ function UsageFooter({ usage }: { usage: AgentUsage }) {
 
 /** One transcript row: user bubble, assistant turn, or error. Port of Swift
  * AgentMessageRow (AgentChatView.swift:256). */
-export function AgentMessageRow({
-  message,
-  onRetry,
-}: {
-  message: AgentMessage;
-  onRetry?: () => void;
-}) {
+export function AgentMessageRow({ message, onRetry }: { message: AgentMessage; onRetry?: () => void }) {
   if (message.role === 'error') {
     const text = message.blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
     return (

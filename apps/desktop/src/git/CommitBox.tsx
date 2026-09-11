@@ -49,32 +49,17 @@ export function CommitBox({
           {committing ? '…' : 'Commit'}
         </button>
         {onAmend ? (
-          <button
-            type="button"
-            className="secondary small"
-            disabled={!amendEnabled}
-            onClick={onAmend}
-          >
+          <button type="button" className="secondary small" disabled={!amendEnabled} onClick={onAmend}>
             Amend
           </button>
         ) : null}
         {onUndoCommit ? (
-          <button
-            type="button"
-            className="secondary small"
-            disabled={!undoEnabled}
-            onClick={onUndoCommit}
-          >
+          <button type="button" className="secondary small" disabled={!undoEnabled} onClick={onUndoCommit}>
             Undo
           </button>
         ) : null}
         {onPush ? (
-          <button
-            type="button"
-            className="secondary small"
-            disabled={!pushEnabled}
-            onClick={onPush}
-          >
+          <button type="button" className="secondary small" disabled={!pushEnabled} onClick={onPush}>
             Push
           </button>
         ) : null}

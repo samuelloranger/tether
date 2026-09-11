@@ -579,7 +579,7 @@ jobs:
         if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       # Builds the release cdylib for this leg's target and stages it at
-      # apps/server/src/server/noiseNativeLib, which the next step embeds.
+      # apps/server/src/noise/nativeLib, which the next step embeds.
       - name: Build the Noise FFI cdylib (${{ matrix.rust_target }})
         working-directory: apps/server
         shell: bash
@@ -611,7 +611,7 @@ jobs:
             --define 'process.env.TETHER_VERSION="'"${TAG}"'"' \
             --define 'process.env.TETHER_DEFAULT_PUSH_RELAY_URL="'"${RELAY_URL}"'"' \
             --outfile tether \
-            src/server/main.ts
+            src/main.ts
           # Stable (un-versioned) name — makes
           # github.com/.../releases/latest/download/<name> a one-click link, and
           # is what `tether update` (v1.13.0+) resolves. The transitional

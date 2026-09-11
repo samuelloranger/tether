@@ -51,9 +51,7 @@ export function buildApnsPayload(req: PushRequest): ApnsPayload {
 
 // APNs status codes the caller can act on. 410 = app uninstalled; the stateless
 // relay reports it upstream so the Tether server prunes its own registration.
-export function classifyApnsStatus(
-  status: number,
-): 'ok' | 'unregistered' | 'bad-request' | 'retry' {
+export function classifyApnsStatus(status: number): 'ok' | 'unregistered' | 'bad-request' | 'retry' {
   if (status === 200) return 'ok';
   if (status === 410) return 'unregistered';
   if (status === 429 || status >= 500) return 'retry';

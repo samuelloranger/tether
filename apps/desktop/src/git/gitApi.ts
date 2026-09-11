@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { normalizeInvokeError } from '../invokeError';
+import { normalizeInvokeError } from '@/core/invokeError';
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
@@ -94,11 +94,7 @@ export async function coreGitStatus(hostId: string, sessionId: string): Promise<
   return invoke('core_git_status', { hostId, sessionId });
 }
 
-export async function coreGitLog(
-  hostId: string,
-  sessionId: string,
-  limit = 50,
-): Promise<GitLogEntry[]> {
+export async function coreGitLog(hostId: string, sessionId: string, limit = 50): Promise<GitLogEntry[]> {
   return invoke('core_git_log', { hostId, sessionId, limit });
 }
 
@@ -120,19 +116,11 @@ export async function coreGitStage(hostId: string, sessionId: string, path: stri
   await invoke('core_git_stage', { hostId, sessionId, path });
 }
 
-export async function coreGitUnstage(
-  hostId: string,
-  sessionId: string,
-  path: string,
-): Promise<void> {
+export async function coreGitUnstage(hostId: string, sessionId: string, path: string): Promise<void> {
   await invoke('core_git_unstage', { hostId, sessionId, path });
 }
 
-export async function coreGitDiscard(
-  hostId: string,
-  sessionId: string,
-  path: string,
-): Promise<void> {
+export async function coreGitDiscard(hostId: string, sessionId: string, path: string): Promise<void> {
   await invoke('core_git_discard', { hostId, sessionId, path });
 }
 
@@ -166,12 +154,7 @@ export async function coreGitDiscardAll(hostId: string, sessionId: string): Prom
   await invoke('core_git_discard_all', { hostId, sessionId });
 }
 
-export async function coreGitCommit(
-  hostId: string,
-  sessionId: string,
-  message: string,
-  amend = false,
-): Promise<void> {
+export async function coreGitCommit(hostId: string, sessionId: string, message: string, amend = false): Promise<void> {
   await invoke('core_git_commit', { hostId, sessionId, message, amend });
 }
 

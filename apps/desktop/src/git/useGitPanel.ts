@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { confirmAction } from '../dialog';
+import { confirmAction } from '@/platform/dialog';
 import {
   bytesToDataUrl,
   canPushHead,
@@ -53,9 +53,7 @@ export function useGitPanel(hostId: string | null, sessionId: string | null, ope
   const [diffTruncated, setDiffTruncated] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffParsed, setDiffParsed] = useState<ParsedDiffView | null>(null);
-  const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(
-    null,
-  );
+  const [diffImage, setDiffImage] = useState<{ old: string | null; new: string | null } | null>(null);
   const [historyEntries, setHistoryEntries] = useState<GitLogEntry[] | null>(null);
   const [historyCommit, setHistoryCommit] = useState<{
     entry: GitLogEntry;
@@ -188,13 +186,9 @@ export function useGitPanel(hostId: string | null, sessionId: string | null, ope
       setDiffImage(null);
     },
     stageFile: (path: string) =>
-      hostId && sessionId
-        ? runOp(() => coreGitStage(hostId, sessionId, path))
-        : Promise.resolve(false),
+      hostId && sessionId ? runOp(() => coreGitStage(hostId, sessionId, path)) : Promise.resolve(false),
     unstageFile: (path: string) =>
-      hostId && sessionId
-        ? runOp(() => coreGitUnstage(hostId, sessionId, path))
-        : Promise.resolve(false),
+      hostId && sessionId ? runOp(() => coreGitUnstage(hostId, sessionId, path)) : Promise.resolve(false),
     discardFile: async (path: string) => {
       const ok = await confirmAction('Discard changes', `Discard changes to ${path}?`, {
         confirmLabel: 'Discard',
@@ -203,20 +197,14 @@ export function useGitPanel(hostId: string | null, sessionId: string | null, ope
       if (!ok) return false;
       return hostId && sessionId ? runOp(() => coreGitDiscard(hostId, sessionId, path)) : false;
     },
-    stageAll: () =>
-      hostId && sessionId
-        ? runOp(() => coreGitStageAll(hostId, sessionId))
-        : Promise.resolve(false),
+    stageAll: () => (hostId && sessionId ? runOp(() => coreGitStageAll(hostId, sessionId)) : Promise.resolve(false)),
     unstageAll: () =>
-      hostId && sessionId
-        ? runOp(() => coreGitUnstageAll(hostId, sessionId))
-        : Promise.resolve(false),
+      hostId && sessionId ? runOp(() => coreGitUnstageAll(hostId, sessionId)) : Promise.resolve(false),
     discardAll: async () => {
-      const ok = await confirmAction(
-        'Discard all changes',
-        'Discard all unstaged changes? This cannot be undone.',
-        { confirmLabel: 'Discard all', destructive: true },
-      );
+      const ok = await confirmAction('Discard all changes', 'Discard all unstaged changes? This cannot be undone.', {
+        confirmLabel: 'Discard all',
+        destructive: true,
+      });
       if (!ok) return false;
       return hostId && sessionId ? runOp(() => coreGitDiscardAll(hostId, sessionId)) : false;
     },

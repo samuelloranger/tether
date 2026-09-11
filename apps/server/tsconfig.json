@@ -8,6 +8,7 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "paths": { "@/*": ["./src/*"] },
     "types": ["bun-types"]
   },
   "include": ["src/**/*"]

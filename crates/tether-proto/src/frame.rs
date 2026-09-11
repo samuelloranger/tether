@@ -1,4 +1,4 @@
-//! Length-prefixed binary framing, matching `apps/server/src/server/proto/frame.ts`
+//! Length-prefixed binary framing, matching `apps/server/src/proto/frame.ts`
 //! byte for byte:
 //!
 //! ```text

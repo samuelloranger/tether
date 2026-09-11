@@ -5,7 +5,7 @@ import UIKit
 #endif
 
 /// Aurora chrome tokens, resolved per appearance. Hex values match desktop
-/// `default-dark` / `default-light` in `apps/desktop/src/preferences.ts` — keep in step.
+/// `default-dark` / `default-light` in `apps/desktop/src/settings/preferences.ts` — keep in step.
 public enum TetherColors {
   public static let background = dynamic(dark: 0x08_08_0E, light: 0xF1_F1_F6)
   public static let surface = dynamic(dark: 0x12_12_1D, light: 0xFF_FF_FF)

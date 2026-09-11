@@ -17,19 +17,19 @@ u32 len         (big-endian)
 Every other kind carries the protobuf message named after it.
 
 The server ↔ holder unix socket uses the *same* framing with its own kinds and
-hand-rolled payloads (see `apps/server/src/server/holderFrame.ts`); it is not
+hand-rolled payloads (see `apps/server/src/holderFrame.ts`); it is not
 described here because nothing outside the server process ever sees it.
 
 ## Code generation
 
 - **TypeScript** (`@bufbuild/protobuf` / protobuf-es): `bun run gen:proto` from
   the repo root, driven by `buf.gen.yaml`. The output lands in
-  `apps/server/src/server/proto/gen/` and **is committed** — CI never runs buf or
+  `apps/server/src/proto/gen/` and **is committed** — CI never runs buf or
   protoc. Rerun it only when this schema changes, and commit the result with it.
 - **Rust** (`prost`): `build.rs` compiles `schema/wire.proto` with
   `protoc-bin-vendored`, so neither developers nor CI need a system `protoc`.
   Generated types land in `OUT_DIR` (not committed). Framing lives in
-  `src/frame.rs` and mirrors `apps/server/src/server/proto/frame.ts`.
+  `src/frame.rs` and mirrors `apps/server/src/proto/frame.ts`.
 
 ## Compatibility
 
