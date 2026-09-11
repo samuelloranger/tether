@@ -36,7 +36,7 @@ Three separate problems ride along with it:
 | Filenames | Drop the redundant domain prefix (`gitDiff.ts` → `git/diff.ts`) |
 | Cross-domain imports | tsconfig path alias `@/*` → `./src/*` |
 | `CLAUDE.md` | Trim and reorder in place, single file |
-| Delivery | One PR, five ordered commits |
+| Delivery | One PR, thirteen ordered commits |
 | `lineWidth` | 100 → 120 |
 | `noExcessiveLinesPerFile` | Keep at 400 |
 | `noExcessiveLinesPerFunction` | Keep at 60 |
@@ -428,7 +428,7 @@ linked from section 6.
 
 ## Commit sequence
 
-One branch, one PR, five commits in this order:
+One branch, one PR, thirteen commits in this order:
 
 1. `chore(server): untrack accidental runtime config dir`
    `git rm --cached` the six files under `src/server/config/`, delete
@@ -437,13 +437,27 @@ One branch, one PR, five commits in this order:
    Config change plus `bun format`. Nothing else in this commit.
 3. `refactor(server): collapse src/server -> src`
    Pure path change. Every external reference in the table above.
-4. `refactor(server): group server modules by domain`
-   `git mv` into domain folders with renames, add the `@/*` alias, rewrite all
-   imports.
-5. `docs: restructure CLAUDE.md`
+4. `refactor(server): move infra and test helpers into folders` — also adds the
+   `@/*` alias, since `infra/` is its first consumer.
+5. `refactor(server): group pty modules`
+6. `refactor(server): group agent modules`
+7. `refactor(server): group auth, device and pairing modules`
+8. `refactor(server): split noise and tls into sibling folders`
+9. `refactor(server): group git and workspace modules`
+10. `refactor(server): group push and presentation modules`
+11. `refactor(server): group cli subcommands and the control surface`
+12. `refactor(server): group the Hono app and routes under http`
+13. `docs: restructure CLAUDE.md`
 
-Commits 2 and 4 are kept apart so the reformat diff never mixes with the move
-diff, and so `git log --follow` survives on the moved files.
+The domain move is split one folder-group per commit rather than landing as a
+single commit. Each one leaves the tree green — `tsc --noEmit` plus the full
+suite pass after every commit — so a bisect lands on a working tree and a
+reviewer can read one domain at a time. `infra/` goes first because it carries
+the highest fan-in (`db` alone has 33 importers), which exercises the alias
+across nearly the whole tree in one step.
+
+Commit 2 stays alone so the reformat diff never mixes with a move diff, and so
+`git log --follow` survives on the moved files.
 
 ## Verification
 
