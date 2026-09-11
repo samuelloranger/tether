@@ -1,6 +1,6 @@
 import type { DrawerSession } from '@/core/types';
 import { isRecentlyActive } from '@/platform/desktopNavigation';
-import type { UiTheme } from '../preferences';
+import type { UiTheme } from '@/settings/preferences';
 import { activityDotKey, type DotKey } from './activity';
 
 /**

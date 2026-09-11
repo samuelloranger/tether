@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { corePresentationClose, corePresentationsList } from './workspaceApi';
-import { findSessionPreview, type Presentation, pickAutoSelectPreview, previewUrl } from './workspaceTypes';
+import { corePresentationClose, corePresentationsList } from '@/workspace/workspaceApi';
+import { findSessionPreview, type Presentation, pickAutoSelectPreview, previewUrl } from '@/workspace/workspaceTypes';
 
 export function usePresentations({
   hostId,

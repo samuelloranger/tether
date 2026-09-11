@@ -40,16 +40,6 @@ import { SessionChrome } from '@/session/SessionTabBar';
 import { sessionKey } from '@/session/sessionKey';
 import { touchLru } from '@/session/sessionLru';
 import { useTabDrag } from '@/session/useTabDrag';
-import { TerminalEmpty } from '@/terminal/TerminalEmpty';
-import { AlertModal } from './AlertModal';
-import { AppOverflowMenu } from './AppOverflowMenu';
-import { AgentFolderPicker } from './agent/AgentFolderPicker';
-import { FileViewer } from './FileViewer';
-import { setFileOpenListener } from './fileOpenBus';
-import { GitDrawer } from './git/GitDrawer';
-import { GitReview } from './git/GitReview';
-import { useGitPanel } from './git/useGitPanel';
-import { PresentationBanner, PresentationView } from './PresentationView';
 import {
   type AppPreferences,
   loadPreferences,
@@ -59,12 +49,22 @@ import {
   saveViews,
   sidebarLayout,
   UI_THEMES,
-} from './preferences';
-import { ServerSettingsScreen } from './ServerSettingsScreen';
-import { LocalSettingsScreen } from './SettingsScreen';
+} from '@/settings/preferences';
+import { ServerSettingsScreen } from '@/settings/ServerSettingsScreen';
+import { LocalSettingsScreen } from '@/settings/SettingsScreen';
+import { TerminalEmpty } from '@/terminal/TerminalEmpty';
+import { FileViewer } from '@/workspace/FileViewer';
+import { setFileOpenListener } from '@/workspace/fileOpenBus';
+import { useWorkspace, WorkspacePanel } from '@/workspace/useWorkspace';
+import { AlertModal } from './AlertModal';
+import { AppOverflowMenu } from './AppOverflowMenu';
+import { AgentFolderPicker } from './agent/AgentFolderPicker';
+import { GitDrawer } from './git/GitDrawer';
+import { GitReview } from './git/GitReview';
+import { useGitPanel } from './git/useGitPanel';
+import { PresentationBanner, PresentationView } from './PresentationView';
 import { useShellChrome } from './useHeatArrival';
 import { useTetherDesktop } from './useTetherDesktop';
-import { useWorkspace, WorkspacePanel } from './useWorkspace';
 
 function useMediaScheme(): 'light' | 'dark' {
   const [scheme, setScheme] = useState<'light' | 'dark'>(() =>

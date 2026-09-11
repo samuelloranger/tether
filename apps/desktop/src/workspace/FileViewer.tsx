@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
+import type { UiTheme } from '@/settings/preferences';
 import { CodeHighlight } from './CodeHighlight';
-import type { UiTheme } from './preferences';
 import { type FileView, lineOffset } from './workspaceTypes';
 
 export function FileViewer({

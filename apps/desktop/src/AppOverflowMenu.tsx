@@ -1,7 +1,7 @@
 import { sendOsNotification } from '@/platform/desktopNotifications';
 import { checkForUpdates } from '@/platform/desktopUpdater';
+import { type AppPreferences, savePreferences } from '@/settings/preferences';
 import { OverflowMenu } from './OverflowMenu';
-import { type AppPreferences, savePreferences } from './preferences';
 
 /**
  * Every item dismisses the menu except the notifications toggle, whose

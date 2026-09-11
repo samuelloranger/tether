@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { UI_THEMES } from '../preferences';
+import { UI_THEMES } from '@/settings/preferences';
 import { ARRIVAL_MS, litColor, litStateFor, litVars, shouldAnnounceArrival } from './litTheme';
 
 const dark = UI_THEMES['default-dark'];

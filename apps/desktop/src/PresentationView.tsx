@@ -1,4 +1,4 @@
-import type { Presentation } from './workspaceTypes';
+import type { Presentation } from '@/workspace/workspaceTypes';
 
 export function PresentationBanner({ label, onPress }: { label: string; onPress: () => void }) {
   return (
