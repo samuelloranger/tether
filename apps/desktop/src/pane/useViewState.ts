@@ -31,6 +31,31 @@ export interface UseViewStateOpts {
   onFocusSession: (hostId: string, sessionId: string) => void;
 }
 
+export type PaneShortcut = 'split-row' | 'split-col' | 'close';
+
+/**
+ * Which pane action a keydown means, or null to let it through.
+ *
+ * Gate on Cmd, or Ctrl+Shift — never plain Ctrl+D, which is the terminal's EOF
+ * and must still reach the PTY. Getting this wrong means Ctrl+D splits a pane
+ * instead of exiting the user's shell, so it is pinned by tests.
+ */
+export function paneShortcutAction(
+  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey'>,
+): PaneShortcut | null {
+  if (!(e.metaKey || (e.ctrlKey && e.shiftKey))) return null;
+  switch (e.key.toLowerCase()) {
+    case 'd':
+      return 'split-row';
+    case 'e':
+      return 'split-col';
+    case 'w':
+      return 'close';
+    default:
+      return null;
+  }
+}
+
 interface PaneShortcutOpts {
   focusedPaneId: string;
   splitPane: (paneId: string, dir: PaneDir, side: PaneSide) => void;
@@ -46,19 +71,11 @@ function usePaneShortcuts({ focusedPaneId, splitPane, closePane, tree, views, ac
   // biome-ignore lint/correctness/useExhaustiveDependencies: the handlers close over the current view via the listed deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const active = e.metaKey || (e.ctrlKey && e.shiftKey);
-      if (!active) return;
-      const k = e.key.toLowerCase();
-      if (k === 'd') {
-        e.preventDefault();
-        splitPane(focusedPaneId, 'row', 'b');
-      } else if (k === 'e') {
-        e.preventDefault();
-        splitPane(focusedPaneId, 'col', 'b');
-      } else if (k === 'w') {
-        e.preventDefault();
-        closePane(focusedPaneId);
-      }
+      const action = paneShortcutAction(e);
+      if (!action) return;
+      e.preventDefault();
+      if (action === 'close') closePane(focusedPaneId);
+      else splitPane(focusedPaneId, action === 'split-row' ? 'row' : 'col', 'b');
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
