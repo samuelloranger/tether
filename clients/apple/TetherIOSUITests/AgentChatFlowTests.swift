@@ -50,20 +50,27 @@ class AgentChatUITestCase: XCTestCase {
     // A tap arriving while the transcript is still decelerating only stops the
     // scroll — it never reaches the composer. Let the scroll settle first.
     usleep(900_000)
-    // Left of centre, not `input.tap()`: the element's centre is close enough to
-    // the jump-to-latest button that the tap hit that instead, which scrolled the
-    // transcript to the foot and left the composer unfocused.
-    input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
     // Neither `app.keyboards.firstMatch.exists` nor its `frame.height` proves a
     // keyboard is on screen — a dismissed keyboard still matches and still
     // reports full height, which passed a test whose screenshot had no keyboard
     // in it at all. A key you could actually press is the honest signal.
     let key = app.keyboards.firstMatch.keys["space"]
     var up = false
-    for _ in 0..<16 {
-      up = key.exists && key.isHittable
-      if up { break }
-      usleep(500_000)
+    // The first tap after a scroll is swallowed (the scroll view eats it), so
+    // retry — and say which attempt worked, because "always needs two taps" and
+    // "never focuses" are different bugs.
+    for attempt in 1...3 where !up {
+      // Left of centre, not `input.tap()`: the element's centre is close enough
+      // to the jump-to-latest button that the tap can hit that instead, which
+      // scrolls the transcript to the foot and leaves the composer unfocused.
+      input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+      for _ in 0..<8 {
+        up = key.exists && key.isHittable
+        if up { break }
+        usleep(500_000)
+      }
+      print("KEYBOARD_ATTEMPT=\(attempt) up=\(up)")
+      if !up { usleep(700_000) }
     }
     XCTAssertTrue(
       up,
