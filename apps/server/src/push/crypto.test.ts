@@ -4,7 +4,7 @@ import {
   encryptPushContent,
   generateSecretKeyBase64,
   isValidSecretKey,
-} from './pushCrypto';
+} from './crypto';
 
 const CONTENT = { title: 'alpha · vim README.md', body: 'Waiting for input', link: 'tether://x' };
 

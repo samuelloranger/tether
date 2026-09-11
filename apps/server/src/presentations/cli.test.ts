@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { installAgentSkill, parsePresentArgs, runPresent } from './presentCli';
+import { installAgentSkill, parsePresentArgs, runPresent } from './cli';
 
 test('parses documented present command forms', () => {
   expect(parsePresentArgs(['index.html', '--project', 'creneau', '--title', 'UI'])).toEqual({

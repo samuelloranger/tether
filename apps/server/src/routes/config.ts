@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { type Config, getConfig, getShellSupport, patchConfig } from '@/infra/settings';
+import { countPushDevices } from '@/push/devices';
 import { getTlsReport } from '@/tls/runtime';
-import { countPushDevices } from '../pushDevices';
 
 // pushDevices and tls are reported alongside the config but are derived state,
 // not settings: a client that could patch tls off would lock out other clients.

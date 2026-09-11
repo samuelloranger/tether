@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { presentations } from '../presentationRegistry';
-import { resolvePresentationFile } from '../presentations';
+import { presentations } from '@/presentations/instance';
+import { resolvePresentationFile } from '@/presentations/registry';
 import { previewMime } from './previewMime';
 
 export const presentationsRoutes = new Hono();

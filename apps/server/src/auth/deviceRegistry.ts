@@ -1,5 +1,5 @@
 import { db } from '@/infra/db';
-import { removePushDevicesForAuthDevice } from '../pushDevices';
+import { removePushDevicesForAuthDevice } from '@/push/devices';
 import { closeDeviceChannels } from './deviceChannels';
 
 export interface AuthDevice {

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PresentationRegistry, resolvePresentationFile } from './presentations';
+import { PresentationRegistry, resolvePresentationFile } from './registry';
 
 function tempDir(prefix: string) {
   return mkdtempSync(path.join(tmpdir(), prefix));

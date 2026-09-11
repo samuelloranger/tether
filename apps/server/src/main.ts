@@ -248,7 +248,7 @@ switch (cmd) {
     logs();
     break;
   case 'present': {
-    const { parsePresentArgs, runPresent } = await import('./presentCli');
+    const { parsePresentArgs, runPresent } = await import('@/presentations/cli');
     try {
       await runPresent(parsePresentArgs(process.argv.slice(3)), { sock: CONTROL_SOCK });
     } catch (error) {

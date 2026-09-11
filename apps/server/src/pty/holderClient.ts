@@ -16,8 +16,8 @@ import { logError, logInfo } from '@/infra/log';
 import { CONFIG_DIR } from '@/infra/paths';
 import { getConfig } from '@/infra/settings';
 import { FrameDecoder } from '@/proto/frame';
-import { type NotificationEvent, pushesFromOutput, pushFromExit } from '../notifications';
-import { buildPushContent, sendPush } from '../push';
+import { type NotificationEvent, pushesFromOutput, pushFromExit } from '@/push/notifications';
+import { buildPushContent, sendPush } from '@/push/send';
 import { type Activity, clearActivity, recordOutputEvent } from './activity';
 import { CwdRefreshGate } from './cwdRefresh';
 import {

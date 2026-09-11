@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { type Config, DEFAULT_CONFIG } from '@/infra/settings';
-import { buildPushContent } from './push';
+import { buildPushContent } from './send';
 
 const CTX = { sessionId: 'term-7', sessionTitle: 'vim README.md' };
 

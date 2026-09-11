@@ -1,9 +1,9 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { countPushDevices, registerPushDevice, removePushDevice } from '@/push/devices';
+import { PUSH_RELAY_URL } from '@/push/relay';
 import { testAuthHeaders } from '@/testing/auth';
 import { resetAdminRateLimit } from './admin';
 import { app } from './app';
-import { countPushDevices, registerPushDevice, removePushDevice } from './pushDevices';
-import { PUSH_RELAY_URL } from './pushRelay';
 
 afterEach(() => resetAdminRateLimit());
 

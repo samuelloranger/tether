@@ -1,9 +1,9 @@
 import { logWarn } from '@/infra/log';
 import type { Config } from '@/infra/settings';
+import { encryptPushContent, type PushContent } from './crypto';
+import { listPushDevices, markPushDeviceUsed, removePushDevice } from './devices';
 import type { NotificationContext, NotificationEvent } from './notifications';
-import { encryptPushContent, type PushContent } from './pushCrypto';
-import { listPushDevices, markPushDeviceUsed, removePushDevice } from './pushDevices';
-import { PUSH_RELAY_URL } from './pushRelay';
+import { PUSH_RELAY_URL } from './relay';
 
 export interface RelayRequest {
   token: string;

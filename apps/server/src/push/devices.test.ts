@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { addDevice, revokeDevice } from '@/auth/deviceRegistry';
 import { db } from '@/infra/db';
-import { listPushDevices, registerPushDevice, removePushDevicesForAuthDevice } from './pushDevices';
+import { listPushDevices, registerPushDevice, removePushDevicesForAuthDevice } from './devices';
 
 function pubkeyFill(byte: number): string {
   return Buffer.from(new Uint8Array(32).fill(byte)).toString('base64');
