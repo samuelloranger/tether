@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { FrameSeq, toFrame } from './agentEventMap';
+import { FrameSeq, toFrame } from './eventMap';
 
 test('assigns increasing seq to delta, done, and error', () => {
   const seq = new FrameSeq();

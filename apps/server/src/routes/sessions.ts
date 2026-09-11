@@ -1,5 +1,7 @@
 import { type Context, Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/bun';
+import { deleteAgentMessages } from '@/agent/messages';
+import { sharedAgentRegistry } from '@/agent/registry';
 import { deleteSession, getSession, listSessions, renameSession } from '@/infra/db';
 import { logError, logInfo, logWarn } from '@/infra/log';
 import { testEvent } from '@/infra/testEvents';
@@ -18,8 +20,6 @@ import {
 import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '@/pty/replayPlan';
 import { getReplayLogs } from '@/pty/replayRead';
 import { autoTitle, getOscTitle } from '@/pty/title';
-import { deleteAgentMessages } from '../agentMessages';
-import { sharedAgentRegistry } from '../agentRegistry';
 import { trackDeviceChannel } from '../deviceChannels';
 import { codecFor, type TerminalCodec, type WireData } from './terminalCodec';
 

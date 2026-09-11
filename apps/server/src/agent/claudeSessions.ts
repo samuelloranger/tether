@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentMessageRow } from './agentMessages';
+import type { AgentMessageRow } from './messages';
 
 export interface ClaudeSessionMeta {
   id: string;

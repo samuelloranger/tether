@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildClaudeArgs, isMessageStartEvent, mapClaudeLine } from './agentClaudeDriver';
+import { buildClaudeArgs, isMessageStartEvent, mapClaudeLine } from './claudeDriver';
 
 test('init line yields no event', () => {
   const line = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc123' });

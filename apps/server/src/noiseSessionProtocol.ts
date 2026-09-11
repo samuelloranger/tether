@@ -1,3 +1,14 @@
+import {
+  type ClaudeSessionMeta,
+  listClaudeSessions,
+  sessionJsonlPath,
+  type TranslatedMessage,
+  translateSessionJsonl,
+} from '@/agent/claudeSessions';
+import type { AgentMessageRow } from '@/agent/messages';
+import { type AgentRegistry, sharedAgentRegistry } from '@/agent/registry';
+import { applyAgentMessage, defaultGetAgentMessages } from '@/agent/replay';
+import { type AgentUsageLimits, fetchAgentUsage } from '@/agent/usage';
 import { getSession } from '@/infra/db';
 import { logError } from '@/infra/log';
 import { testEvent } from '@/infra/testEvents';
@@ -14,17 +25,6 @@ import {
 } from '@/pty/registry';
 import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '@/pty/replayPlan';
 import { getReplayLogs as readReplayLogs } from '@/pty/replayRead';
-import type { AgentMessageRow } from './agentMessages';
-import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
-import { applyAgentMessage, defaultGetAgentMessages } from './agentReplay';
-import { type AgentUsageLimits, fetchAgentUsage } from './agentUsage';
-import {
-  type ClaudeSessionMeta,
-  listClaudeSessions,
-  sessionJsonlPath,
-  type TranslatedMessage,
-  translateSessionJsonl,
-} from './claudeSessions';
 import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { fetchAgentUsage, parseUsageLimits, resetUsageCache } from './agentUsage';
+import { fetchAgentUsage, parseUsageLimits, resetUsageCache } from './usage';
 
 // Shape captured live from GET /api/oauth/usage (redacted).
 const LIVE = {

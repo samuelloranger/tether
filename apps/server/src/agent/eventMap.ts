@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentFrame } from './agentDriver';
+import type { AgentEvent, AgentFrame } from './driver';
 
 export class FrameSeq {
   // Seeded from the max persisted seq so numbering stays monotonic across server

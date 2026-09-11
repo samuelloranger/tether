@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createAgentSession, db } from '@/infra/db';
-import type { AgentDriver, AgentEvent } from './agentDriver';
-import { AgentRegistry } from './agentRegistry';
-import { applyAgentStart } from './agentReplay';
-import type { AgentState } from './noiseSessionProtocol';
+import type { AgentState } from '../noiseSessionProtocol';
+import type { AgentDriver, AgentEvent } from './driver';
+import { AgentRegistry } from './registry';
+import { applyAgentStart } from './replay';
 
 /** Captures the cwd a driver was started with, so we can assert what
  * applyAgentStart resolved for the `claude` spawn. */

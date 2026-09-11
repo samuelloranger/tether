@@ -1,4 +1,4 @@
-import type { AgentDriver, AgentEvent } from './agentDriver';
+import type { AgentDriver, AgentEvent } from './driver';
 
 const MAX_TOOL_RESULT_CHARS = 4000;
 

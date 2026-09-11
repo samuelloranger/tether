@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { FakeAgentDriver } from './agentDriver';
+import { FakeAgentDriver } from './driver';
 
 test('FakeAgentDriver yields the scripted events for a prompt', async () => {
   const driver = new FakeAgentDriver([

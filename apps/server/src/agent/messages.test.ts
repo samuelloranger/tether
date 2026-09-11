@@ -5,7 +5,7 @@ import {
   deleteAgentMessages,
   getAgentMessages,
   pruneAgentMessages,
-} from './agentMessages';
+} from './messages';
 
 test('getAgentMessages returns rows ordered by seq, filtered by sinceSeq', () => {
   createAgentSession(db, { id: 'am1', workspaceRoot: '/tmp' });
