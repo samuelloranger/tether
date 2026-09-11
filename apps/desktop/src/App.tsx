@@ -8,7 +8,7 @@ import type { DropIntent } from '@/pane/dropZone';
 import { PanePickerModal } from '@/pane/PanePickerModal';
 import { leaves } from '@/pane/paneTree';
 import { useViewState } from '@/pane/useViewState';
-import { newSoloView, type View } from '@/pane/viewModel';
+import type { View } from '@/pane/viewModel';
 import { ensureNotificationPermission } from '@/platform/desktopNotifications';
 import { useDeepLinks } from '@/platform/useDeepLinks';
 import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
@@ -20,6 +20,7 @@ import { SessionDrawer } from '@/session/SessionDrawer';
 import { SessionModalHost, useSessionModals } from '@/session/SessionModals';
 import { SessionChrome } from '@/session/SessionTabBar';
 import { sessionKey } from '@/session/sessionKey';
+import { useSessionLaunch } from '@/session/useSessionLaunch';
 import { useTabDrag } from '@/session/useTabDrag';
 import {
   type AppPreferences,
@@ -132,7 +133,6 @@ export function App() {
   const modals = useSessionModals();
 
   const [panePickerFor, setPanePickerFor] = useState<string | null>(null);
-  const [agentChatFor, setAgentChatFor] = useState<string | null>(null);
   const viewState = useViewState({
     liveKeysFor: (views) =>
       new Set([...liveSessionKeys(app.sessions, views, app.healthByHost), ...app.pendingAgentKeys()]),
@@ -151,37 +151,13 @@ export function App() {
   // Drawer click: activate the view that holds this session (and focus its pane).
   const openSession = viewState.openSession;
 
-  const newTerminalOn = (hostId: string | null) => {
-    if (!hostId) return;
-    void app.newSession(hostId).then((sessionId) => {
-      if (!sessionId) return;
-      viewState.openSession(hostId, sessionId);
-    });
-    if (!layout.docked) setDrawerOpen(false);
-  };
-
-  const newAgentChatOn = (hostId: string | null) => {
-    if (hostId) setAgentChatFor(hostId);
-  };
-
-  const startAgentChat = (cwd: string) => {
-    const hostId = agentChatFor;
-    setAgentChatFor(null);
-    if (!hostId) return;
-    void app.newAgentChat(hostId).then((sessionId) => {
-      if (!sessionId) return;
-      viewState.addSoloView(newSoloView({ hostId, sessionId, kind: 'agent', cwd }));
-    });
-    if (!layout.docked) setDrawerOpen(false);
-  };
-
-  // /resume: open the picked past Claude session in a fresh agent tab.
-  const resumeAgentChat = (hostId: string, cwd: string | undefined, claudeSessionId: string) => {
-    void app.newAgentChat(hostId).then((sessionId) => {
-      if (!sessionId) return;
-      viewState.addSoloView(newSoloView({ hostId, sessionId, kind: 'agent', cwd, resumeSessionId: claudeSessionId }));
-    });
-  };
+  const launch = useSessionLaunch({
+    app,
+    viewState,
+    onLaunched: () => {
+      if (!layout.docked) setDrawerOpen(false);
+    },
+  });
 
   useEffect(() => {
     void ensureNotificationPermission();
@@ -354,8 +330,8 @@ export function App() {
               openSession(hostId, sessionId);
               if (!layout.docked) setDrawerOpen(false);
             }}
-            onNew={newTerminalOn}
-            onNewAgentChat={newAgentChatOn}
+            onNew={launch.newTerminalOn}
+            onNewAgentChat={launch.newAgentChatOn}
             onRequestKill={modals.openKill}
             onRequestRename={modals.openRename}
             onRetryHost={app.retryHost}
@@ -381,8 +357,8 @@ export function App() {
               activeViewId={viewState.activeViewId}
               dot={activeDot}
               hasSession={hasSession}
-              onNew={newTerminalOn}
-              onNewAgentChat={newAgentChatOn}
+              onNew={launch.newTerminalOn}
+              onNewAgentChat={launch.newAgentChatOn}
               onKill={modals.openKill}
               onKillMembers={modals.openKillMembers}
               onWorkspace={() => workspace.setWorkspaceOpen(true)}
@@ -408,7 +384,7 @@ export function App() {
                   <TerminalEmpty
                     open={!hasSession}
                     hostName={app.activeHost.name}
-                    onNew={() => newTerminalOn(app.activeHostId)}
+                    onNew={() => launch.newTerminalOn(app.activeHostId)}
                   />
                   <ResidentTerminals
                     hosts={app.hosts}
@@ -420,7 +396,7 @@ export function App() {
                     fontFamily={prefs.terminalFont}
                     onFrame={app.handleWsFrame}
                     onDisconnected={(hostId) => app.retryHost(hostId)}
-                    onResumeSession={resumeAgentChat}
+                    onResumeSession={launch.resumeAgentChat}
                     onFocusPane={viewState.focusPane}
                     onSetRatio={viewState.setPaneRatio}
                     onPickSession={(paneId) => setPanePickerFor(paneId)}
@@ -498,7 +474,7 @@ export function App() {
             const target = panePickerFor;
             setPanePickerFor(null);
             // Route the new terminal into the pane the picker was opened for,
-            // not the focused pane (newTerminalOn's default).
+            // not the focused pane (launch.newTerminalOn's default).
             void app.newSession(hostId).then((sessionId) => {
               if (target && sessionId) viewState.fillPane(target, { hostId, sessionId });
             });
@@ -506,10 +482,10 @@ export function App() {
           onClose={() => setPanePickerFor(null)}
         />
       )}
-      {agentChatFor && (
-        <div className="agent-folder-backdrop" onPointerDown={() => setAgentChatFor(null)}>
+      {launch.agentChatFor && (
+        <div className="agent-folder-backdrop" onPointerDown={() => launch.setAgentChatFor(null)}>
           <div onPointerDown={(e) => e.stopPropagation()}>
-            <AgentFolderPicker onPick={startAgentChat} onCancel={() => setAgentChatFor(null)} />
+            <AgentFolderPicker onPick={launch.startAgentChat} onCancel={() => launch.setAgentChatFor(null)} />
           </div>
         </div>
       )}
