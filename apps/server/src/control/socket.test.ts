@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { hardenControlSocket, prepareControlSocket } from './controlSocket';
+import { hardenControlSocket, prepareControlSocket } from './socket';
 
 describe('prepareControlSocket', () => {
   test('creates the socket dir 0700 and removes a stale socket file', () => {

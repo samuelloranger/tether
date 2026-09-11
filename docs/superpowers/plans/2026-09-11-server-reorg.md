@@ -97,6 +97,24 @@ uses. Six `pty/` files imported `./proto/frame`; the single-segment version of
 this helper silently skipped all of them and `tsc` caught it.
 ```
 
+**Pass A2b — shadowed imports.** `fix_dangling` decides by "does `<newfolder>/<mod>.ts`
+exist". When a task's rename *creates* a name that already exists at `src/`, both
+exist and the check silently leaves `./x` pointing at the new local file instead
+of the root one it used to mean. This bit `control/serve.test.ts`, which imported
+the root Hono `app` as `./app`; after `controlApp.ts` became `control/app.ts`,
+`./app` resolved to the wrong module. Run this and check each hit by hand:
+
+```bash
+for f in src/<new-folder>/*.ts; do
+  for m in $(grep -o "from '\./[A-Za-z0-9_]*'" "$f" | sed "s|from '\./||; s|'||" | sort -u); do
+    [ -f "src/$m.ts" ] && echo "AMBIGUOUS: $f imports ./$m — exists as both src/<new-folder>/$m.ts and src/$m.ts"
+  done
+done
+```
+
+`tsc` catches these **only** when the two modules' export names differ. Identical
+export names would compile and fail at runtime, so read every hit.
+
 **Pass A3 — non-import path resolution.** Grep the moved files for path
 construction that no `from '…'` rewrite can see:
 

@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { controlApp } from '@/control/app';
 import { app } from './app';
-import { controlApp } from './controlApp';
 
 // The control app (socket) creates the preview; the network app (/preview)
 // serves it. They share one PresentationRegistry, so a URL minted on one is

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { controlApp } from '../controlApp';
+import { controlApp } from '@/control/app';
 import { clearActivity, getActivity } from './activity';
 
 async function post(body: unknown): Promise<Response> {

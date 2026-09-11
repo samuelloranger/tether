@@ -10,11 +10,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
+import { followFile } from '@/cli/logTail';
 import { CONTROL_SOCK, LOG_FILE, PID_FILE, STATE_DIR } from '@/infra/paths';
 import { COMPILED, selfArgv, VERSION } from '@/infra/runtime';
 import { processStartTime } from '@/pty/procIdentity';
 import { resolveListenerPlan } from '@/tls/config';
-import { followFile } from './logTail';
 
 const PORT = process.env.TETHER_PORT ?? '8085';
 
@@ -258,7 +258,7 @@ switch (cmd) {
     break;
   }
   case 'pair': {
-    const { runPair } = await import('./pairCli');
+    const { runPair } = await import('@/cli/pair');
     const { advertisePairUrl, firstNonLoopbackIPv4 } = await import('@/auth/pairAdvertise');
     try {
       const plan = resolveListenerPlan();
@@ -273,7 +273,7 @@ switch (cmd) {
     break;
   }
   case 'signal': {
-    const { parseSignalArgs, runSignal } = await import('./signalCli');
+    const { parseSignalArgs, runSignal } = await import('@/cli/signal');
     try {
       await runSignal(parseSignalArgs(process.argv.slice(3)), {
         sock: CONTROL_SOCK,
@@ -286,13 +286,13 @@ switch (cmd) {
     break;
   }
   case 'devices': {
-    const { runDevice } = await import('./deviceCli');
+    const { runDevice } = await import('@/cli/device');
     const result = runDevice({ kind: 'list' });
     process.exit(result.ok ? 0 : 1);
     break;
   }
   case 'device': {
-    const { parseDeviceArgs, runDevice } = await import('./deviceCli');
+    const { parseDeviceArgs, runDevice } = await import('@/cli/device');
     try {
       const result = runDevice(parseDeviceArgs(process.argv.slice(3)));
       process.exit(result.ok ? 0 : 1);
@@ -303,7 +303,7 @@ switch (cmd) {
     break;
   }
   case 'update': {
-    const { runUpdate } = await import('./update');
+    const { runUpdate } = await import('@/cli/update');
     await runUpdate({ version: VERSION, compiled: COMPILED, start, stop, runningPid });
     break;
   }

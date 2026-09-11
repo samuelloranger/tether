@@ -1,4 +1,5 @@
 import { websocket } from 'hono/bun';
+import { serveControl } from '@/control/serve';
 import { resetRunningSessions, setSessionStatus } from '@/infra/db';
 import { logError, logInfo, logWarn } from '@/infra/log';
 import { reattachHolders } from '@/pty/registry';
@@ -6,7 +7,6 @@ import { type ListenerPlan, resolveListenerPlan } from '@/tls/config';
 import { publishTlsReport } from '@/tls/runtime';
 import { ensureTlsMaterial, TLS_DIR, type TlsMaterial } from '@/tls/store';
 import { app } from './app';
-import { serveControl } from './controlServe';
 
 type PeerCapable = { requestIP?: (req: Request) => { address: string } | null };
 

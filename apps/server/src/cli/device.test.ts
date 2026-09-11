@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { type AuthDevice, RegistryError } from '@/auth/deviceRegistry';
-import { formatDeviceTable, parseDeviceArgs, runDevice } from './deviceCli';
+import { formatDeviceTable, parseDeviceArgs, runDevice } from './device';
 
 test('parseDeviceArgs maps list, revoke, and rename forms', () => {
   expect(parseDeviceArgs([])).toEqual({ kind: 'list' });

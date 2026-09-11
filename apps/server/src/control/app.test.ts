@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { controlApp } from './controlApp';
+import { controlApp } from './app';
 
 const post = (path: string, body: unknown) =>
   controlApp.request(path, {

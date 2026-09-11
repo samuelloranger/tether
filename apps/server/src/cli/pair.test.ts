@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { groupPairCode, runPair } from './pairCli';
+import { groupPairCode, runPair } from './pair';
 
 const SOCK = '/tmp/tether-control.sock';
 

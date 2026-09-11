@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { claudeHookSnippet, parseSignalArgs, runSignal } from './signalCli';
+import { claudeHookSnippet, parseSignalArgs, runSignal } from './signal';
 
 const SOCK = '/tmp/tether-control.sock';
 

@@ -2,8 +2,8 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { app } from './app';
-import { serveControl } from './controlServe';
+import { app } from '../app';
+import { serveControl } from './serve';
 
 const sock = path.join(mkdtempSync(path.join(tmpdir(), 'tether-ctl-')), 'control.sock');
 const server = serveControl(sock);
