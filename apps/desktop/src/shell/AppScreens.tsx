@@ -12,7 +12,6 @@ export interface AppScreenProps {
   app: TetherDesktop;
   prefs: AppPreferences;
   setPrefs: (prefs: AppPreferences) => void;
-  settingsHost: HostProfile | null | undefined;
 }
 
 /**
@@ -23,7 +22,12 @@ export interface AppScreenProps {
  * already-rendered element. Returning just the inner element also lets App apply
  * the shared `app-shell centered` wrapper and <AlertModal /> once.
  */
-export function appScreen({ app, prefs, setPrefs, settingsHost }: AppScreenProps): ReactNode | null {
+export function appScreen({ app, prefs, setPrefs }: AppScreenProps): ReactNode | null {
+  // Which host the settings/devices screens act on. Only these screens need it,
+  // so it is resolved here rather than in App.
+  const settingsHost: HostProfile | null | undefined =
+    app.hosts.find((host) => host.id === app.settingsHostId) ?? app.activeHost;
+
   if (app.hosts.length === 0 || app.screen === 'pair-device') {
     return (
       <PairDeviceScreen
