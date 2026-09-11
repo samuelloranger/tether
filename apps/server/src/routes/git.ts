@@ -1,6 +1,5 @@
 import { type Context, Hono } from 'hono';
-import { kickSessionGitWatch } from '@/pty/registry';
-import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from '../gitDiff';
+import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from '@/git/diff';
 import {
   commitStaged,
   discardAll,
@@ -16,9 +15,10 @@ import {
   unstageAll,
   unstageHunk,
   unstagePath,
-} from '../gitOps';
-import { GitRootError } from '../gitRoot';
-import { readRepoStatus } from '../gitStatus';
+} from '@/git/ops';
+import { GitRootError } from '@/git/root';
+import { readRepoStatus } from '@/git/status';
+import { kickSessionGitWatch } from '@/pty/registry';
 import { previewMime } from './previewMime';
 import { resolveSessionCwd } from './sessionCwd';
 

@@ -3,8 +3,8 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canonicalFixture } from '../test-paths';
-import { findGitRoot, GitRootError, resolveGitDir, resolveGitRoot } from './gitRoot';
+import { canonicalFixture } from '../../test-paths';
+import { findGitRoot, GitRootError, resolveGitDir, resolveGitRoot } from './root';
 
 test('resolves the git top-level for a nested cwd inside a repo', () => {
   const root = canonicalFixture(mkdtempSync(path.join(tmpdir(), 'tether-gitroot-')));

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { deleteSession, upsertSession } from '@/infra/db';
 import { clearLiveCwd, reportCwd } from '@/pty/liveCwd';
 import { testAuthHeaders } from '@/testing/auth';
-import { app } from './app';
+import { app } from '../app';
 
 let AUTH: Record<string, string>;
 const ID = 'gitops-api';

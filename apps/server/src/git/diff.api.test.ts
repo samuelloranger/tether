@@ -5,8 +5,8 @@ import path from 'node:path';
 import { upsertSession } from '@/infra/db';
 import { clearLiveCwd, recordChunk } from '@/pty/liveCwd';
 import { testAuthHeaders } from '@/testing/auth';
-import { canonicalFixture, osc7Chunk } from '../test-paths';
-import { app } from './app';
+import { canonicalFixture, osc7Chunk } from '../../test-paths';
+import { app } from '../app';
 
 /**
  * Runs git without blocking the event loop.

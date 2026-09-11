@@ -8,9 +8,9 @@
  */
 
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+import type { DiffSummary as DomainDiffSummary } from '@/git/diff';
+import type { RepoStatus as DomainRepoStatus } from '@/git/status';
 import type { Activity as DomainActivity } from '@/pty/activity';
-import type { DiffSummary as DomainDiffSummary } from '../gitDiff';
-import type { RepoStatus as DomainRepoStatus } from '../gitStatus';
 import { type Bytes, type DecodedFrame, encodeFrame } from './frame';
 import {
   Activity,

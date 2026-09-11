@@ -1,6 +1,10 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Socket } from 'bun';
+import { type DiffSummary, EMPTY_DIFF_SUMMARY } from '@/git/diff';
+import { findGitRoot } from '@/git/root';
+import { EMPTY_REPO_STATUS, type RepoStatus } from '@/git/status';
+import { GitWatch } from '@/git/watch';
 import {
   addTerminalLog,
   clearInsertCount,
@@ -12,10 +16,6 @@ import { logError, logInfo } from '@/infra/log';
 import { CONFIG_DIR } from '@/infra/paths';
 import { getConfig } from '@/infra/settings';
 import { FrameDecoder } from '@/proto/frame';
-import { type DiffSummary, EMPTY_DIFF_SUMMARY } from '../gitDiff';
-import { findGitRoot } from '../gitRoot';
-import { EMPTY_REPO_STATUS, type RepoStatus } from '../gitStatus';
-import { GitWatch } from '../gitWatch';
 import { type NotificationEvent, pushesFromOutput, pushFromExit } from '../notifications';
 import { buildPushContent, sendPush } from '../push';
 import { type Activity, clearActivity, recordOutputEvent } from './activity';

@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { toWorkspacePath } from './workspacePath';
+import { toWorkspacePath } from './path';
 
 const MAX_TEXT_BYTES = 1_048_576;
 

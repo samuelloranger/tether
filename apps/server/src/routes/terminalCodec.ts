@@ -3,11 +3,11 @@
  * protocol byte-for-byte — key order is a compat surface, not style; proto=2 is binary.
  */
 
+import type { DiffSummary } from '@/git/diff';
+import type { RepoStatus } from '@/git/status';
 import type { Activity } from '@/pty/activity';
 import { encodeReplayCursor, replayPositionFromCursor } from '@/pty/replayCursor';
 import type { ReplayOutputFrame } from '@/pty/replayPlan';
-import type { DiffSummary } from '../gitDiff';
-import type { RepoStatus } from '../gitStatus';
 import { type Bytes, concatFrames, FrameDecoder } from '../proto/frame';
 import {
   type ClientMessage,

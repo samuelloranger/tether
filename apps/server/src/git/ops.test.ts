@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { readDiffSummary } from './gitDiff';
+import { readDiffSummary } from './diff';
 import {
   commitStaged,
   discardAll,
@@ -19,7 +19,7 @@ import {
   unstageAll,
   unstageHunk,
   unstagePath,
-} from './gitOps';
+} from './ops';
 
 let root: string;
 
@@ -282,7 +282,7 @@ describe('readDiffSummary staged split', () => {
 
 describe('readDiff modes', () => {
   test('staged mode shows index-vs-HEAD, unstaged mode shows worktree-vs-index', async () => {
-    const { readDiff } = await import('./gitDiff');
+    const { readDiff } = await import('./diff');
     writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\nthree\nstaged-edit\n');
     git('add a.txt');
     writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\nthree\nstaged-edit\nunstaged-edit\n');
@@ -297,7 +297,7 @@ describe('readDiff modes', () => {
   });
 
   test('unstaged mode still surfaces untracked files', async () => {
-    const { readDiff } = await import('./gitDiff');
+    const { readDiff } = await import('./diff');
     writeFileSync(path.join(root, 'fresh.txt'), 'hello\n');
     const out = await readDiff(root, 'fresh.txt', 'unstaged');
     expect(out.diff).toContain('+hello');

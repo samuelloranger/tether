@@ -2,9 +2,9 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
 import { UPLOADS_DIR } from '@/infra/paths';
-import { resolveUploadPath } from '../upload';
-import { readWorkspaceDir } from '../workspaceDir';
-import { readWorkspaceFile, WorkspaceFileError } from '../workspaceFile';
+import { readWorkspaceDir } from '@/workspace/dir';
+import { readWorkspaceFile, WorkspaceFileError } from '@/workspace/file';
+import { resolveUploadPath } from '@/workspace/upload';
 import { resolveSessionCwd } from './sessionCwd';
 
 export const filesRoutes = new Hono();

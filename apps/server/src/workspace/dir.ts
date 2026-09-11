@@ -1,7 +1,7 @@
 import { lstatSync, opendirSync } from 'node:fs';
 import path from 'node:path';
-import { canonicalPath, inside, samePath, WorkspaceFileError } from './workspaceFile';
-import { toWorkspacePath } from './workspacePath';
+import { canonicalPath, inside, samePath, WorkspaceFileError } from './file';
+import { toWorkspacePath } from './path';
 
 const MAX_ENTRIES = 2000;
 // Names held while sorting. Far above MAX_ENTRIES so ordinary large directories

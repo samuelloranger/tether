@@ -3,10 +3,10 @@ import * as nodeFs from 'node:fs';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canonicalFixture } from '../test-paths';
-import type { DiffSummary } from './gitDiff';
-import { EMPTY_REPO_STATUS } from './gitStatus';
-import { GitWatch } from './gitWatch';
+import { canonicalFixture } from '../../test-paths';
+import type { DiffSummary } from './diff';
+import { EMPTY_REPO_STATUS } from './status';
+import { GitWatch } from './watch';
 
 // Named rather than inlined so the fs.watch-driven tests are greppable as a
 // group, the way they were when they had a platform gate.

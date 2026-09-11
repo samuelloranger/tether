@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { SPAWN_TIMEOUT_MS } from '@/pty/spawnLimits';
-import { MAX_DIFF_BYTES, readDiffSummary } from './gitDiff';
-import { canRewriteHead, readRepoStatus } from './gitStatus';
+import { MAX_DIFF_BYTES, readDiffSummary } from './diff';
+import { canRewriteHead, readRepoStatus } from './status';
 
 // Same trust anchor as the read side — the session's live cwd resolved to its
 // git root, a tree the shell user already fully controls.

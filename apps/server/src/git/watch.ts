@@ -9,16 +9,11 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { logWarn } from '@/infra/log';
-import {
-  type DiffSummary,
-  EMPTY_DIFF_SUMMARY,
-  GitDiffError,
-  readDiffSummaryAsync,
-} from './gitDiff';
-import { resolveGitDir } from './gitRoot';
-import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './gitStatus';
-import { shouldSkipWatchDirName } from './gitWatchIgnore';
-import { isEacces, listIgnoredDirs } from './gitWatchIgnoredDirs';
+import { type DiffSummary, EMPTY_DIFF_SUMMARY, GitDiffError, readDiffSummaryAsync } from './diff';
+import { resolveGitDir } from './root';
+import { EMPTY_REPO_STATUS, type RepoStatus, readRepoStatusAsync } from './status';
+import { shouldSkipWatchDirName } from './watchIgnore';
+import { isEacces, listIgnoredDirs } from './watchIgnoredDirs';
 
 // Hard ceiling on watched directories, so an unanticipated tree degrades into
 // "watch less" instead of freezing the server and exhausting inotify's allowance.

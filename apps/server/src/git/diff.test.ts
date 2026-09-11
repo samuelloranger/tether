@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from './gitDiff';
+import { GitDiffError, readDiff, readDiffBlob, readDiffSummary } from './diff';
 
 async function withRepo(fn: (root: string) => void | Promise<void>) {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-gitdiff-'));

@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { type FSWatcher, statSync, watch } from 'node:fs';
 import path from 'node:path';
-import { canonicalPath, inside } from './workspaceFile';
+import { canonicalPath, inside } from '@/workspace/file';
 
 // A preview URL carries its capability token in plaintext; bound its lifetime so
 // a leaked link (chat log, browser history, Referer) dies instead of living for

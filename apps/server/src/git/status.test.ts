@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canRewriteHead, formatRepoStatusLabel, readRepoStatus } from './gitStatus';
+import { canRewriteHead, formatRepoStatusLabel, readRepoStatus } from './status';
 
 function withRepo(fn: (root: string) => void) {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-gitstatus-'));

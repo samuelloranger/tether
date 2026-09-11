@@ -2,13 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import {
-  canonicalPath,
-  inside,
-  readWorkspaceFile,
-  samePath,
-  WorkspaceFileError,
-} from './workspaceFile';
+import { canonicalPath, inside, readWorkspaceFile, samePath, WorkspaceFileError } from './file';
 
 function withRoot(fn: (root: string) => void) {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-workspace-'));

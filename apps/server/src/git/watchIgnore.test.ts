@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldSkipWatchDirName } from './gitWatchIgnore';
+import { shouldSkipWatchDirName } from './watchIgnore';
 
 describe('shouldSkipWatchDirName', () => {
   test('skips dependency and build trees that churn without affecting git status', () => {
