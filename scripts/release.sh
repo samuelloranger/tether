@@ -78,12 +78,71 @@ else
   fi
 fi
 
-# Require CI to be green on the exact commit we are about to release. release.sh
-# used to validate less than CI did (lint+format here vs. lint + server tests +
-# mobile tests + build:web there) — and build:web is what broke every desktop
-# bundle in v2.0.0. Gating on CI keeps one definition of "good" instead of two
-# that drift. Runs after the pre-flight rebase so we gate on the commit we will
-# actually tag.
+# How long to wait for CI on the release commit. It has to outlast a cold run —
+# the iOS job builds tether-ffi for three targets and assembles the XCFramework
+# before it tests anything — so this is a backstop, not an expected wait.
+CI_WAIT_SECONDS=${CI_WAIT_SECONDS:-3600}
+CI_POLL_SECONDS=${CI_POLL_SECONDS:-20}
+# How long to keep looking for a run that does not exist yet. CI triggers on
+# pushes to main and on pull requests, so releasing from any other branch
+# produces no run at all — and waiting the full hour to discover that is worse
+# than saying so.
+CI_APPEAR_SECONDS=${CI_APPEAR_SECONDS:-300}
+
+# Latest CI run for one commit as "status|conclusion|url". Empty when GitHub has
+# not created the run yet, which is normal for the first seconds after a push.
+ci_run_for() {
+  gh run list --commit "$1" --workflow CI --limit 1 --json status,conclusion,url \
+    -q '.[0] // empty | "\(.status)|\(.conclusion // "none")|\(.url)"' 2>/dev/null || true
+}
+
+# Block until that run concludes. 0 = green, 1 = red, timed out, or never appeared.
+wait_for_ci() {
+  local sha=$1
+  local deadline=$(( $(date +%s) + CI_WAIT_SECONDS ))
+  local appear_by=$(( $(date +%s) + CI_APPEAR_SECONDS ))
+  local run status conclusion url reported=""
+  while :; do
+    run=$(ci_run_for "$sha")
+    if [ -z "$run" ] && [ "$(date +%s)" -ge "$appear_by" ]; then
+      echo "Error: no CI run exists for $sha after ${CI_APPEAR_SECONDS}s." >&2
+      echo "       CI runs on pushes to main and on pull requests. Releasing from" >&2
+      echo "       '${BRANCH:-this branch}' may never produce one — open a PR, dispatch the CI" >&2
+      echo "       workflow for this commit, or re-run with --force." >&2
+      return 1
+    fi
+    if [ -n "$run" ]; then
+      IFS='|' read -r status conclusion url <<< "$run"
+      if [ "$status" = "completed" ]; then
+        if [ "$conclusion" = "success" ]; then
+          echo "CI is green on $sha: $url"
+          return 0
+        fi
+        echo "Error: CI concluded '$conclusion' on $sha: $url" >&2
+        return 1
+      fi
+      if [ "$status" != "$reported" ]; then
+        echo "  CI is $status: $url"
+        reported=$status
+      fi
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "Error: CI on $sha did not finish within ${CI_WAIT_SECONDS}s" >&2
+      echo "       (last status: ${status:-no run found})." >&2
+      return 1
+    fi
+    sleep "$CI_POLL_SECONDS"
+  done
+}
+
+# Require CI to be green before we spend the work. release.sh used to validate
+# less than CI did (lint+format here vs. lint + server tests + mobile tests +
+# build:web there) — and build:web is what broke every desktop bundle in v2.0.0.
+# Gating on CI keeps one definition of "good" instead of two that drift. Runs
+# after the pre-flight rebase so the run we read belongs to the tree we release.
+#
+# This is only the fast fail: the commit that actually gets tagged does not exist
+# yet, and it is gated separately below.
 if [ "$DRY_RUN" = false ]; then
   HEAD_SHA=$(git rev-parse HEAD)
   echo "Checking CI status for $HEAD_SHA..."
@@ -238,6 +297,7 @@ echo "Preparing Git commit on branch '$BRANCH'..."
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would run: git add ... && git commit -m 'release: v$TARGET_VERSION'"
   echo "[dry-run] Would run: git push origin $BRANCH"
+  echo "[dry-run] Would wait for CI to go green on the release commit"
   echo "[dry-run] Would run: git tag -a v$TARGET_VERSION && git push origin v$TARGET_VERSION"
 else
   git add "${VERSION_FILES[@]}"
@@ -245,6 +305,27 @@ else
   git commit -m "release: v$TARGET_VERSION"
   echo "Pushing changes to origin/$BRANCH..."
   git push origin "$BRANCH"
+
+  # The gate above ran on the PARENT of this commit. The version bump is a new
+  # commit, so `release: vX` itself has never been through CI — and pushing its
+  # tag starts release.yml immediately, in parallel with the CI run for the same
+  # push. That is the v3.0.0 hole: CI went red on the release commit and every
+  # artifact published anyway, because release.yml depends on nothing. Wait here,
+  # while the only thing pushed is a version bump that ships to nobody.
+  if [ "$FORCE" = true ]; then
+    echo "Warning: --force set, tagging without waiting for CI on the release commit."
+  else
+    RELEASE_SHA=$(git rev-parse HEAD)
+    echo "Waiting for CI on the release commit $RELEASE_SHA (up to $((CI_WAIT_SECONDS / 60))m)..."
+    if ! wait_for_ci "$RELEASE_SHA"; then
+      echo >&2
+      echo "Not tagging v$TARGET_VERSION. The version bump is already pushed to" >&2
+      echo "$BRANCH, so nothing user-facing exists yet: no tag, no draft, no" >&2
+      echo "release. Fix the cause and re-run with the same version once CI is" >&2
+      echo "green, or re-run with --force to tag over the run." >&2
+      exit 1
+    fi
+  fi
 
   # Pushing the tag is what starts release.yml. That workflow opens a DRAFT
   # release, attaches every artifact to it, and only then publishes — so a failed
