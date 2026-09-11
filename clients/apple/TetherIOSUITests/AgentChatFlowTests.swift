@@ -8,8 +8,8 @@ import XCTest
 /// frames land in the right bubble, and that neither the keyboard nor new data
 /// moves the transcript out from under the reader.
 ///
-/// Requires the simulator's hardware keyboard to be DISCONNECTED, otherwise no
-/// software keyboard appears and `requireSoftwareKeyboard` fails with the fix.
+/// Requires the simulator's hardware keyboard to be DISCONNECTED, otherwise the
+/// software keyboard stays parked below the screen and `type` fails with the fix.
 class AgentChatUITestCase: XCTestCase {
   override func setUpWithError() throws {
     continueAfterFailure = false
@@ -41,53 +41,47 @@ class AgentChatUITestCase: XCTestCase {
     app.descendants(matching: .any)["agentTranscript"].firstMatch
   }
 
-  /// Focus the composer and prove the on-screen keyboard is really up — the
-  /// point of the suite. A connected hardware keyboard makes every typing test
-  /// pass for the wrong reason, so fail loudly with the remedy instead.
-  func requireSoftwareKeyboard(_ app: XCUIApplication) {
+  /// Put `text` in the composer over a real on-screen keyboard, and prove the
+  /// keyboard was actually drawn.
+  ///
+  /// A synthetic tap does NOT give this SwiftUI TextField first responder — the
+  /// keyboard stays parked below the screen (frame y=1004 on a 932pt screen) no
+  /// matter how the tap is aimed (element centre, an offset, absolute
+  /// coordinates). `typeText` focuses it and the keyboard then rises for real,
+  /// on a tall transcript as much as an empty one. So: tap for realism, type,
+  /// and only then insist on the keyboard — asserting before typing fails for a
+  /// harness reason, not a product one.
+  @discardableResult
+  func type(_ app: XCUIApplication, _ text: String) -> XCUIElement {
     let input = composer(app)
     XCTAssertTrue(input.waitForExistence(timeout: 15), "composer never appeared")
     // A tap arriving while the transcript is still decelerating only stops the
-    // scroll — it never reaches the composer. Let the scroll settle first.
+    // scroll. Let it settle so the tap reaches the composer.
     usleep(900_000)
-    // Neither `app.keyboards.firstMatch.exists` nor its `frame.height` proves a
-    // keyboard is on screen — a dismissed keyboard still matches and still
-    // reports full height, which passed a test whose screenshot had no keyboard
-    // in it at all. A key you could actually press is the honest signal.
-    var up = false
-    // The first tap after a scroll is swallowed (the scroll view eats it), so
-    // retry — and say which attempt worked, because "always needs two taps" and
-    // "never focuses" are different bugs.
-    // The field's element frame is only the 21pt text line, and a coordinate tap
-    // inside it does not reliably focus it while `element.tap()` does — so try
-    // each route rather than trusting one.
-    for (label, tap) in taps(app, input) where !up {
-      tap()
-      for _ in 0..<8 {
-        up = keyboardIsUp(app)
-        if up { break }
-        usleep(500_000)
-      }
-      let kb = app.keyboards.firstMatch
-      print(
-        "KEYBOARD_ATTEMPT via \(label) up=\(up) exists=\(kb.exists) frame=\(kb.frame) "
-          + "screen=\(app.frame) keys=\(kb.keys.count)")
-      if !up { usleep(700_000) }
-    }
-    XCTAssertTrue(
-      up,
-      "no software keyboard on screen. Either the tap did not focus the composer, or the "
-        + "simulator has a hardware keyboard connected — Simulator ▸ I/O ▸ Keyboard ▸ "
-        + "Connect Hardware Keyboard (off), or `defaults write "
-        + "com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`.")
-    // The field takes first responder a beat after the keyboard animates in;
-    // typing into the gap drops the first character.
-    usleep(600_000)
+    input.tap()
+    usleep(400_000)
+    input.typeText(text)
+    XCTAssertTrue(waitForKeyboard(app), keyboardDiagnosis(app))
+    return input
   }
 
-  func type(_ app: XCUIApplication, _ text: String) {
-    composer(app).typeText(text)
+  /// Wait for a keyboard a finger could press.
+  func waitForKeyboard(_ app: XCUIApplication, timeout: Int = 12) -> Bool {
+    for _ in 0..<timeout {
+      if keyboardIsUp(app) { return true }
+      usleep(500_000)
+    }
+    return false
   }
+
+  func keyboardDiagnosis(_ app: XCUIApplication) -> String {
+    let kb = app.keyboards.firstMatch
+    return "no software keyboard on screen (keyboard frame \(kb.frame) vs screen \(app.frame), "
+      + "keys=\(kb.keys.count)). A keyboard parked below the screen means the simulator has a "
+      + "hardware keyboard connected — Simulator ▸ I/O ▸ Keyboard ▸ Connect Hardware Keyboard "
+      + "(off), or `defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`."
+  }
+
 
   func tapSend(_ app: XCUIApplication) {
     let send = app.buttons["agentSendButton"].firstMatch
@@ -170,7 +164,6 @@ final class AgentChatSendTests: AgentChatUITestCase {
   /// deltas coalescing into one assistant turn → tool card → usage footer.
   func testTypedPromptStreamsReplyWithToolCard() throws {
     let app = launchChat("live")
-    requireSoftwareKeyboard(app)
 
     let prompt = "Add a rate limiter to the login route"
     type(app, prompt)
@@ -209,7 +202,6 @@ final class AgentChatSendTests: AgentChatUITestCase {
   /// row, and then fire on its own once `agent.done` lands.
   func testSecondPromptQueuesThenFlushes() throws {
     let app = launchChat("live")
-    requireSoftwareKeyboard(app)
 
     // "slow" makes the host hold the turn open, so the second prompt really does
     // land on a busy agent instead of racing a turn that already finished.
@@ -238,7 +230,6 @@ final class AgentChatSendTests: AgentChatUITestCase {
   /// decision typed by the user is what resumes it.
   func testApprovalSheetResumesTheTurn() throws {
     let app = launchChat("live")
-    requireSoftwareKeyboard(app)
 
     type(app, "Clean reinstall: rm -rf node_modules && bun install")
     tapSend(app)
@@ -263,95 +254,35 @@ final class AgentChatSendTests: AgentChatUITestCase {
 // MARK: - Scrolling + arriving data
 
 final class AgentChatScrollTests: AgentChatUITestCase {
-  /// Read history, then answer: the composer must still take focus after the
-  /// transcript has been scrolled. Tries a tap first, then typing straight into
-  /// the field, and says which one worked — "needs a second tap" and "cannot be
-  /// focused at all" are different bugs.
-  func testComposerFocusesAfterScrollingHistory() throws {
+  /// Read history, then answer: after the transcript has been scrolled up, the
+  /// composer must still take text over a real keyboard.
+  func testComposerTakesTextAfterScrollingHistory() throws {
     let app = launchChat("liveLong")
     let scroll = transcript(app)
     XCTAssertTrue(scroll.waitForExistence(timeout: 15), "transcript never appeared")
 
-    let input = composer(app)
-    XCTAssertTrue(input.waitForExistence(timeout: 10), "composer never appeared")
-
-    // Baseline: focusable before any scrolling. Report the geometry too — a tap
-    // that misses is indistinguishable from a field that refuses focus unless
-    // you can see where the tap went.
-    print(
-      "GEOMETRY app=\(app.frame) field=\(input.frame) hittable=\(input.isHittable) "
-        + "jump=\(app.buttons["agentJumpToLatest"].firstMatch.exists)")
-    var up = false
-    for (label, action) in taps(app, input) {
-      action()
-      for _ in 0..<6 where !up {
-        up = keyboardIsUp(app)
-        usleep(500_000)
-      }
-      print("FOCUS_BEFORE_SCROLL via \(label) = \(up)")
-      if up { break }
-    }
-    shot(app, "focus-before-scroll")
-    let baseline = up
-
-    // Dismiss, scroll into history, and try again.
-    scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
-    usleep(1_200_000)
     for _ in 0..<4 { scroll.swipeDown() }
     usleep(1_500_000)
+    XCTAssertTrue(
+      app.buttons["agentJumpToLatest"].firstMatch.exists, "expected to be parked up in history")
 
-    input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
-    var afterTap = false
-    for _ in 0..<8 where !afterTap {
-      afterTap = keyboardIsUp(app)
-      usleep(500_000)
-    }
-    print("FOCUS_AFTER_SCROLL_BY_TAP=\(afterTap)")
-
-    // Whether the FIELD is focused is a separate question from whether the
-    // KEYBOARD is drawn: a recording of this showed a blinking caret in the
-    // composer with no keyboard on screen, which is unusable but would pass any
-    // focus-only check.
-    input.typeText("zz")
+    let input = type(app, "answer while reading history")
     let typed = (input.value as? String) ?? ""
-    var keyboardAfterTyping = false
-    for _ in 0..<8 where !keyboardAfterTyping {
-      keyboardAfterTyping = keyboardIsUp(app)
-      usleep(500_000)
-    }
-    print("FOCUS_AFTER_SCROLL_VALUE=\(typed) KEYBOARD=\(keyboardAfterTyping)")
+    XCTAssertTrue(
+      typed.contains("answer while reading history"),
+      "the composer took no text after the transcript was scrolled (value=\(typed))")
     shot(app, "focus-after-scroll")
 
-    // One verdict with the whole picture, so the failure says what the state is
-    // rather than which line tripped first.
+    // Typing must not have thrown the reader back to the foot.
     XCTAssertTrue(
-      baseline && afterTap,
-      """
-      software keyboard never came up on a tall transcript.
-        keyboard before any scroll: \(baseline) (tried element.tap, an offset tap, and an \
-      absolute tap at the field's centre)
-        keyboard after scrolling: \(afterTap)
-        keyboard after typing into it: \(keyboardAfterTyping)
-        field took text: \(typed.contains("zz")) (value=\(typed))
-      The same taps DO raise the keyboard on the empty transcript (-agentDemo live), so this is \
-      specific to a transcript taller than the screen. A recording of an earlier run shows a \
-      blinking caret in the composer with no keyboard drawn: the field takes focus, the keyboard \
-      does not appear.
-      """)
+      app.buttons["agentJumpToLatest"].firstMatch.exists,
+      "typing scrolled the transcript to the foot")
   }
 
   /// Scrolled up to read history, the keyboard rising must not scroll the
   /// transcript: the same message stays on screen and follow stays off (the
   /// jump-to-latest affordance is still offered).
   func testKeyboardRiseDoesNotMoveTheTranscript() throws {
-    // Blocked by the symptom `testComposerFocusesAfterScrollingHistory` pins
-    // down: on a transcript taller than the screen the software keyboard never
-    // comes up, so there is no keyboard rise to observe. Recorded as an expected
-    // failure rather than deleted — it is the test that proves the fix when the
-    // focus problem is solved.
-    XCTExpectFailure(
-      "software keyboard does not rise on a tall transcript — see "
-        + "testComposerFocusesAfterScrollingHistory")
     let app = launchChat("liveLong")
     let scroll = transcript(app)
     XCTAssertTrue(scroll.waitForExistence(timeout: 15), "transcript never appeared")
@@ -366,7 +297,7 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     let before = anchor.frame
     shot(app, "scroll-before-keyboard")
 
-    requireSoftwareKeyboard(app)
+    type(app, "x")
     shot(app, "scroll-after-keyboard")
 
     let same = text(app, containing: label)
@@ -440,14 +371,8 @@ final class AgentChatScrollTests: AgentChatUITestCase {
   /// Dragging the transcript with the keyboard up dismisses it
   /// (`scrollDismissesKeyboard(.interactively)`) instead of scrolling under it.
   func testDraggingTranscriptDismissesKeyboard() throws {
-    // Same block: no keyboard on a tall transcript, so there is nothing for the
-    // drag to dismiss. A 469-frame recording of this test contains no
-    // keyboard-down caused by a drag at all.
-    XCTExpectFailure(
-      "software keyboard does not rise on a tall transcript — see "
-        + "testComposerFocusesAfterScrollingHistory")
     let app = launchChat("liveLong")
-    requireSoftwareKeyboard(app)
+    type(app, "x")
     XCTAssertTrue(keyboardIsUp(app), "keyboard should be up before the drag")
     shot(app, "scroll-keyboard-up")
 
