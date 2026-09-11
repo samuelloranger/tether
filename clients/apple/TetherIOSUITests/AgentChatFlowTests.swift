@@ -229,6 +229,67 @@ final class AgentChatSendTests: AgentChatUITestCase {
 // MARK: - Scrolling + arriving data
 
 final class AgentChatScrollTests: AgentChatUITestCase {
+  /// Read history, then answer: the composer must still take focus after the
+  /// transcript has been scrolled. Tries a tap first, then typing straight into
+  /// the field, and says which one worked — "needs a second tap" and "cannot be
+  /// focused at all" are different bugs.
+  func testComposerFocusesAfterScrollingHistory() throws {
+    let app = launchChat("liveLong")
+    let scroll = transcript(app)
+    XCTAssertTrue(scroll.waitForExistence(timeout: 15), "transcript never appeared")
+
+    let key = app.keyboards.firstMatch.keys["space"]
+    let input = composer(app)
+    XCTAssertTrue(input.waitForExistence(timeout: 10), "composer never appeared")
+
+    // Baseline: focusable before any scrolling.
+    input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+    var up = false
+    for _ in 0..<8 where !up {
+      up = key.exists && key.isHittable
+      usleep(500_000)
+    }
+    print("FOCUS_BEFORE_SCROLL=\(up)")
+    XCTAssertTrue(up, "composer could not be focused even before scrolling")
+    shot(app, "focus-before-scroll")
+
+    // Dismiss, scroll into history, and try again.
+    scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
+    usleep(1_200_000)
+    for _ in 0..<4 { scroll.swipeDown() }
+    usleep(1_500_000)
+
+    input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+    var afterTap = false
+    for _ in 0..<8 where !afterTap {
+      afterTap = key.exists && key.isHittable
+      usleep(500_000)
+    }
+    print("FOCUS_AFTER_SCROLL_BY_TAP=\(afterTap)")
+
+    // Whether the FIELD is focused is a separate question from whether the
+    // KEYBOARD is drawn: a recording of this showed a blinking caret in the
+    // composer with no keyboard on screen, which is unusable but would pass any
+    // focus-only check.
+    input.typeText("zz")
+    let typed = (input.value as? String) ?? ""
+    var keyboardAfterTyping = false
+    for _ in 0..<8 where !keyboardAfterTyping {
+      keyboardAfterTyping = key.exists && key.isHittable
+      usleep(500_000)
+    }
+    print("FOCUS_AFTER_SCROLL_VALUE=\(typed) KEYBOARD=\(keyboardAfterTyping)")
+    shot(app, "focus-after-scroll")
+
+    XCTAssertTrue(
+      typed.contains("zz"),
+      "the composer took no text after the transcript was scrolled (value=\(typed))")
+    XCTAssertTrue(
+      afterTap || keyboardAfterTyping,
+      "the composer accepts text but no software keyboard is drawn once the transcript has "
+        + "been scrolled — nothing a real finger could type into")
+  }
+
   /// Scrolled up to read history, the keyboard rising must not scroll the
   /// transcript: the same message stays on screen and follow stays off (the
   /// jump-to-latest affordance is still offered).
@@ -329,9 +390,12 @@ final class AgentChatScrollTests: AgentChatUITestCase {
 
     // A real finger drag, not `swipeDown()`: interactive dismissal tracks the
     // gesture, and a flick is over before it can take the keyboard with it.
+    // Both ends stay in the upper half: the transcript ignores the keyboard's
+    // safe area, so its element frame runs UNDER the keyboard and a drag ending
+    // at dy 0.95 lands on the keys and scrolls nothing at all.
     let scroll = transcript(app)
     let top = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15))
-    let bottom = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
+    let bottom = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
     top.press(forDuration: 0.2, thenDragTo: bottom)
     let gone = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "isHittable == false"),
