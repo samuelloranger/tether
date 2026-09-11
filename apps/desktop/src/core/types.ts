@@ -1,5 +1,5 @@
+import { type PairScheme, resolveScheme } from '@/host/hostScheme';
 import type { SessionActivity } from '@/session/activity';
-import { type PairScheme, resolveScheme } from '../hostScheme';
 
 export const KEY_ACTIVE_HOST = 'tether_active_host';
 export const HOST_PROFILES_KEY = 'tether_host_profiles';

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HostHealthStatus, HostProfile } from '@/core/types';
-import { validateAddress } from './address';
+import { validateAddress } from '@/host/address';
 import { loadServerConfig, loadServerVersion } from './serverConfig';
 import {
   type AdminOperation,
