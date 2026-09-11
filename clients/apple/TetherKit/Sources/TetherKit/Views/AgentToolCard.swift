@@ -43,6 +43,7 @@ public struct AgentToolCard: View {
         .stroke(TetherColors.border, lineWidth: 1)
     )
     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .accessibilityIdentifier("agentToolCard")
   }
 
   private var header: some View {

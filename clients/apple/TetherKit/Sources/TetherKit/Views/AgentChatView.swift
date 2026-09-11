@@ -101,10 +101,14 @@ struct AgentTranscriptView: View {
                   ? { model.retryLast() } : nil
               )
               .id(message.id)
+              .accessibilityIdentifier("agentMessageRow")
             }
-            if model.turn == .thinking { ThinkingRow() }
+            if model.turn == .thinking {
+              ThinkingRow().accessibilityIdentifier("agentThinking")
+            }
             ForEach(Array(model.queued.enumerated()), id: \.offset) { index, text in
               QueuedRow(text: text) { model.cancelQueued(at: index) }
+                .accessibilityIdentifier("agentQueuedRow")
             }
             // Zero-height sentinel the reader scrolls to. Anchoring on a fixed
             // trailing element (not `.defaultScrollAnchor`) means only an
@@ -123,6 +127,7 @@ struct AgentTranscriptView: View {
           .padding(.vertical, 18)
         }
       }
+      .accessibilityIdentifier("agentTranscript")
       .coordinateSpace(name: Self.scrollSpace)
       .background(
         GeometryReader { geo in
@@ -210,6 +215,7 @@ struct AgentTranscriptView: View {
     .padding(.bottom, 14)
     .transition(.scale.combined(with: .opacity))
     .accessibilityLabel("Scroll to latest")
+    .accessibilityIdentifier("agentJumpToLatest")
   }
 
   private var emptyState: some View {
@@ -312,6 +318,7 @@ struct AgentComposerView: View {
           .font(.body)
           .foregroundStyle(TetherColors.textPrimary)
           .focused($focused)
+          .accessibilityIdentifier("agentComposerInput")
           .padding(.horizontal, 13)
           .padding(.vertical, 9)
           .background(TetherColors.input)
@@ -336,6 +343,7 @@ struct AgentComposerView: View {
           .clipShape(Circle())
         }
         .disabled(!sendEnabled || showSpinner)
+        .accessibilityIdentifier("agentSendButton")
       }
     }
     .padding(.horizontal, 14)
@@ -534,6 +542,7 @@ struct AgentMessageRow: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .contextMenu { CopyButton(message.plainText) }
+        .accessibilityIdentifier("agentUserBubble")
     }
   }
 
@@ -560,6 +569,7 @@ struct AgentMessageRow: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .contextMenu { CopyButton(message.plainText) }
+    .accessibilityIdentifier("agentAssistantTurn")
   }
 
   /// Cost + tokens for a finished turn, muted and small under the reply.
