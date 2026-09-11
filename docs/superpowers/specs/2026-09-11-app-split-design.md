@@ -67,6 +67,25 @@ Only render-time code executes — which is exactly the code this refactor moves
 Output is state-sensitive: the empty state produced 1644 characters of HTML, a
 single populated session pane produced 2291.
 
+### Snapshot determinism (required)
+
+`newLeaf` and `newSoloView` mint pane and view ids with `crypto.randomUUID()`,
+and `ResidentTerminals` renders the pane id into the DOM as `data-pane-id`. A
+probe confirmed that a state which falls through to `loadViews()`'s
+`newSoloView()` default renders **different HTML on every run**, while a state
+whose views are preseeded into `localStorage` with fixed ids is byte-stable.
+
+Nondeterministic goldens are worse than no goldens: they fail at random and get
+"repaired" by regenerating the snapshot, which is precisely how a real
+regression gets waved through. The test kit therefore does both:
+
+1. stubs `globalThis.crypto.randomUUID` with a counter (`uuid-0`, `uuid-1`, …)
+   and exposes a reset called before every render, and
+2. preseeds `tether_pane_tree` with fixed pane and view ids for every state.
+
+Both were verified together: with the stub in place, the empty state and the
+populated state each render identically across repeated calls.
+
 Two layers result:
 
 **Layer 1 — golden render snapshots (initial render).** Written and committed
@@ -224,3 +243,4 @@ contract.
 | A prop silently dropped while moving JSX | golden snapshots, committed before the move, fail on any HTML diff |
 | Effect and event wiring unverified | stated limit; manual smoke of the three behaviors listed above |
 | Snapshots accidentally regenerated to hide a regression | snapshot updates are reviewed as part of the diff; no task may update one |
+| Random pane/view uuids make snapshots flaky | `crypto.randomUUID` stubbed with a counter, reset before each render; every state preseeds fixed ids |
