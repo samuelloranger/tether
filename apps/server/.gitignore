@@ -3,11 +3,9 @@ node_modules/
 
 # Build outputs
 dist/
-src/web/dist/
 
 # Local databases and runtime state
-config/*.db
-config/*.db-journal
+**/config/
 
 # Environment files
 .env

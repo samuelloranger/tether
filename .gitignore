@@ -5,13 +5,10 @@ apps/**/node_modules/
 # Build outputs
 dist/
 apps/server/dist/
-apps/server/src/web/dist/
 
 # Local databases and runtime state
 config/*.db
 config/*.db-journal
-apps/server/config/*.db
-apps/server/config/*.db-journal
 
 # Environment files
 .env
@@ -28,14 +25,13 @@ apps/mobile/.expo/
 apps/mobile/ios/
 apps/mobile/android/
 
-# SQLite WAL sidecars
-apps/server/config/*.db-wal
-apps/server/config/*.db-shm
-
 # Root-level runtime state (rcfile/db written when server runs from repo root)
 /config/
 
-apps/server/config/
+# Runtime config dir (db + generated shell rcfiles). Written relative to the
+# server's cwd, so match it at any depth — a stray cwd once committed six
+# generated files under src/server/config.
+apps/server/**/config/
 
 # CodeGraph local index
 .codegraph/
