@@ -18,7 +18,9 @@ export function useAgentChat(input: {
   if (!modelRef.current) modelRef.current = new AgentChatModel();
   const model = modelRef.current;
 
-  const snapshot = useSyncExternalStore(model.subscribe, model.snapshot);
+  // Third arg is the server snapshot: unused by the running app (it never
+  // hydrates), required by renderToString in the golden tests.
+  const snapshot = useSyncExternalStore(model.subscribe, model.snapshot, model.snapshot);
   const bindingRef = useRef<AgentBinding | null>(null);
 
   useEffect(() => {
