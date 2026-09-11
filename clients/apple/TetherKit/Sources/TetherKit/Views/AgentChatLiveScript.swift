@@ -87,7 +87,10 @@
       // A prompt that would run something destructive stops for approval instead
       // of finishing the turn — the sheet path, driven from the same script.
       if prompt.lowercased().contains("install") {
-        let reqId = "req-\(turn)"
+        // A UUID string on purpose: the client parses reqId with
+        // `UUID(uuidString:) ?? UUID()` and echoes the parsed value back, so a
+        // non-UUID id never round-trips and the decision is dropped.
+        let reqId = UUID().uuidString
         pendingReqId = reqId
         await step(0.3)
         model.apply(

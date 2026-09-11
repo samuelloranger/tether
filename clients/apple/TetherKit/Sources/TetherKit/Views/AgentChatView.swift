@@ -81,6 +81,12 @@ struct AgentTranscriptView: View {
   /// starts true (a fresh chat opens pinned) and flips off the moment the user
   /// scrolls up to read history, so streamed deltas stop yanking them back.
   @State private var following = true
+  /// False until the open-time scroll to the foot has landed. The geometry
+  /// callbacks fire during that first layout with the PRE-scroll offset, which
+  /// latched `following` off — so a chat opened on a transcript taller than the
+  /// screen sat at the foot showing jump-to-latest and refused to follow new
+  /// output until the user tapped it.
+  @State private var settled = false
   @State private var viewportHeight: CGFloat = 0
   @State private var bottomY: CGFloat = 0
 
@@ -160,7 +166,10 @@ struct AgentTranscriptView: View {
           #endif
         }
       )
-      .agentNearBottomTracker { following = $0 }
+      .agentNearBottomTracker { near in
+        guard settled else { return }
+        following = near
+      }
       .onChange(of: model.revision) {
         guard following else { return }
         scrollToBottom(proxy)
@@ -171,6 +180,10 @@ struct AgentTranscriptView: View {
         Task { @MainActor in
           await Task.yield()
           scrollToBottom(proxy)
+          // Only now may the trackers speak: see `settled`.
+          try? await Task.sleep(nanoseconds: 250_000_000)
+          following = true
+          settled = true
         }
       }
       // Jump-to-latest: only while the user has scrolled up off the foot (and
@@ -197,7 +210,7 @@ struct AgentTranscriptView: View {
 
   private func updateFollowingForLegacyScroll() {
     if #available(iOS 18.0, *) { return }
-    guard viewportHeight > 0 else { return }
+    guard settled, viewportHeight > 0 else { return }
     let nearBottom = bottomY <= viewportHeight + 48
     if nearBottom != following {
       following = nearBottom

@@ -130,10 +130,19 @@ final class AgentChatSendTests: AgentChatUITestCase {
     waitForText(app, "On it [t1]")
     waitForText(app, "Then I'll add the limiter")
 
-    XCTAssertTrue(
-      toolCards(app).firstMatch.waitForExistence(timeout: 15), "tool call never rendered a card")
+    // The tool card, asserted the way the user sees it: the collapsed header
+    // names the file, and tapping it reveals the tool's result.
+    let card = app.buttons.matching(
+      NSPredicate(format: "label CONTAINS %@", "src/routes/login.ts")
+    ).firstMatch
+    XCTAssertTrue(card.waitForExistence(timeout: 15), "tool call never rendered a card")
+    card.tap()
+    waitForText(app, "export function login")
+
     waitForText(app, "function allow")  // the code fence from the closing delta
     waitForText(app, "Done [t1]")
+    // agent.done carries the turn's usage, which the row shows under the reply.
+    waitForText(app, "12.0k↑")
     shot(app, "chat-turn-complete")
   }
 
@@ -149,14 +158,18 @@ final class AgentChatSendTests: AgentChatUITestCase {
 
     type(app, "Second ask")
     tapSend(app)
-    let queued = tagged(app, "agentQueuedRow").firstMatch
-    XCTAssertTrue(queued.waitForExistence(timeout: 5), "prompt sent mid-turn never queued")
+    // It must show up immediately even though the agent is busy — as a queued
+    // row, which is the only thing on screen carrying that text until it fires.
+    let second = text(app, containing: "Second ask")
+    XCTAssertTrue(second.waitForExistence(timeout: 5), "prompt sent mid-turn vanished")
+    XCTAssertEqual(
+      userBubbles(app).count, 1, "a queued prompt must not become a user bubble yet")
     shot(app, "chat-queued")
 
     // Turn 2 only exists if the queue flushed after turn 1 finished.
     waitForText(app, "On it [t2]", timeout: 30)
     XCTAssertEqual(userBubbles(app).count, 2, "both prompts must end up as user bubbles")
-    XCTAssertFalse(queued.exists, "queued row must clear once the prompt is sent")
+    XCTAssertTrue(text(app, containing: "Second ask").exists, "the flushed prompt lost its text")
     shot(app, "chat-queue-flushed")
   }
 
@@ -224,8 +237,16 @@ final class AgentChatScrollTests: AgentChatUITestCase {
   /// Sitting at the foot, a turn arriving from the server must scroll into view
   /// on its own.
   func testArrivingTurnFollowsTheFootWhenPinned() throws {
-    let app = launchChat("liveLong", arriveAfter: 4)
+    let app = launchChat("liveLong", arriveAfter: 6)
     XCTAssertTrue(transcript(app).waitForExistence(timeout: 15), "transcript never appeared")
+
+    // A chat that opens at the foot is FOLLOWING: no jump-to-latest offered.
+    // (It was offered here, because the open-time geometry latched follow off.)
+    sleep(2)
+    XCTAssertFalse(
+      app.buttons["agentJumpToLatest"].firstMatch.exists,
+      "a chat opened at the foot must not start out unfollowed")
+    shot(app, "arrival-at-foot-before")
 
     waitForText(app, "INBOUND prompt from another device", timeout: 25)
     let tail = text(app, containing: "INBOUND turn finished")
@@ -270,7 +291,12 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     requireSoftwareKeyboard(app)
     XCTAssertTrue(app.keyboards.firstMatch.exists, "keyboard should be up before the drag")
 
-    transcript(app).swipeDown()
+    // A real finger drag, not `swipeDown()`: interactive dismissal tracks the
+    // gesture, and a flick is over before it can take the keyboard with it.
+    let scroll = transcript(app)
+    let top = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15))
+    let bottom = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
+    top.press(forDuration: 0.2, thenDragTo: bottom)
     let gone = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)
     XCTAssertEqual(
