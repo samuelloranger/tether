@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { usePresentations } from '../usePresentations';
+import { usePresentations } from '@/presentations/usePresentations';
 import { FileTree } from './FileTree';
 import { useWorkspaceFiles, useWorkspaceUpload } from './useWorkspaceFiles';
 

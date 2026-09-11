@@ -32,6 +32,7 @@ import { ensureNotificationPermission } from '@/platform/desktopNotifications';
 import { useDeepLinks } from '@/platform/useDeepLinks';
 import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
 import { useWindowTheme } from '@/platform/useWindowTheme';
+import { PresentationBanner, PresentationView } from '@/presentations/PresentationView';
 import { activeSessionDot, litStateFor, shellVars } from '@/session/litTheme';
 import { ResidentTerminals } from '@/session/ResidentTerminals';
 import { SessionDrawer } from '@/session/SessionDrawer';
@@ -62,7 +63,6 @@ import { AgentFolderPicker } from './agent/AgentFolderPicker';
 import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
-import { PresentationBanner, PresentationView } from './PresentationView';
 import { useShellChrome } from './useHeatArrival';
 import { useTetherDesktop } from './useTetherDesktop';
 
