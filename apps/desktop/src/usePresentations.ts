@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { corePresentationClose, corePresentationsList } from './workspaceApi';
-import {
-  findSessionPreview,
-  type Presentation,
-  pickAutoSelectPreview,
-  previewUrl,
-} from './workspaceTypes';
+import { findSessionPreview, type Presentation, pickAutoSelectPreview, previewUrl } from './workspaceTypes';
 
 export function usePresentations({
   hostId,
@@ -61,10 +56,7 @@ export function usePresentations({
     [presentations, activePresentationId],
   );
 
-  const sessionPreview = useMemo(
-    () => findSessionPreview(presentations, sessionId),
-    [presentations, sessionId],
-  );
+  const sessionPreview = useMemo(() => findSessionPreview(presentations, sessionId), [presentations, sessionId]);
 
   const activePresentationUrl = useMemo(() => {
     if (!activePresentation || !baseUrl) return null;

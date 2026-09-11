@@ -1,19 +1,11 @@
 import type { DrawerSession } from './types';
 
 /** Replace one host's rows; other hosts stay. */
-export function replaceHostSessions(
-  previous: DrawerSession[],
-  hostId: string,
-  rows: DrawerSession[],
-): DrawerSession[] {
+export function replaceHostSessions(previous: DrawerSession[], hostId: string, rows: DrawerSession[]): DrawerSession[] {
   return [...previous.filter((row) => row.hostId !== hostId), ...rows];
 }
 
-export function dropSession(
-  previous: DrawerSession[],
-  hostId: string,
-  sessionId: string,
-): DrawerSession[] {
+export function dropSession(previous: DrawerSession[], hostId: string, sessionId: string): DrawerSession[] {
   return previous.filter((row) => !(row.hostId === hostId && row.id === sessionId));
 }
 

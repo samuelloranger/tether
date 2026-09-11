@@ -1,10 +1,4 @@
-import {
-  type AgentStatus,
-  type AgentUsage,
-  formatCost,
-  formatTokens,
-  type UsageWindow,
-} from './agentTypes';
+import { type AgentStatus, type AgentUsage, formatCost, formatTokens, type UsageWindow } from './agentTypes';
 
 function severity(pct: number): 'ok' | 'warn' | 'crit' {
   if (pct >= 90) return 'crit';

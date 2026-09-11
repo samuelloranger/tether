@@ -103,11 +103,7 @@ function patchTree(view: View, tree: PaneNode): View {
   return { ...view, tree };
 }
 
-export function reconcileViews(
-  views: View[],
-  liveSessionKeys: Iterable<string>,
-  activeViewId: string,
-): ViewState {
+export function reconcileViews(views: View[], liveSessionKeys: Iterable<string>, activeViewId: string): ViewState {
   const live = liveSessionKeys instanceof Set ? liveSessionKeys : new Set(liveSessionKeys);
 
   let next = views.map((v) => patchTree(v, clearDeadLeaves(v.tree, live)));

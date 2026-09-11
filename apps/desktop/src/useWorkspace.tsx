@@ -110,11 +110,7 @@ export function WorkspacePanel({ workspace }: { workspace: WorkspaceState }) {
         </button>
       </form>
       <div className="workspace-actions">
-        <button
-          type="button"
-          className="secondary small"
-          onClick={() => void workspace.pickAndUpload()}
-        >
+        <button type="button" className="secondary small" onClick={() => void workspace.pickAndUpload()}>
           Upload file…
         </button>
         <span className="muted workspace-drop-hint">or drop a file on the window</span>
@@ -134,9 +130,7 @@ export function WorkspacePanel({ workspace }: { workspace: WorkspaceState }) {
         </div>
       ) : null}
       {workspace.uploadError ? <p className="error">{workspace.uploadError}</p> : null}
-      {workspace.rootTruncated ? (
-        <p className="muted">Listing truncated (2000-entry limit)</p>
-      ) : null}
+      {workspace.rootTruncated ? <p className="muted">Listing truncated (2000-entry limit)</p> : null}
       <div className="workspace-tree">
         <WorkspaceTreeBody workspace={workspace} />
       </div>

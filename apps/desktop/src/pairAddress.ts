@@ -10,9 +10,7 @@ const DEFAULT_HTTPS_PORT = '443';
  */
 export function parsePairAddress(
   input: string,
-):
-  | { ok: true; scheme: PairScheme; host: string; port: string; wsAddress: string }
-  | { ok: false; reason: string } {
+): { ok: true; scheme: PairScheme; host: string; port: string; wsAddress: string } | { ok: false; reason: string } {
   const trimmed = input.trim();
   if (!trimmed) return { ok: false, reason: 'Enter a server host or IP.' };
 

@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  APNS_MAX_PAYLOAD_BYTES,
-  buildApnsPayload,
-  classifyApnsStatus,
-  pushRequestSchema,
-} from './payload';
+import { APNS_MAX_PAYLOAD_BYTES, buildApnsPayload, classifyApnsStatus, pushRequestSchema } from './payload';
 
 const TOKEN = 'a'.repeat(64);
 

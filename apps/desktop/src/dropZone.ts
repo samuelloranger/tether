@@ -5,12 +5,7 @@ export type DropIntent = { kind: 'split'; dir: PaneDir; side: PaneSide } | { kin
 
 export const EDGE_FRAC = 0.33;
 
-export function dropIntent(
-  px: number,
-  py: number,
-  rect: Rect,
-  edgeFrac: number = EDGE_FRAC,
-): DropIntent {
+export function dropIntent(px: number, py: number, rect: Rect, edgeFrac: number = EDGE_FRAC): DropIntent {
   const fx = rect.width > 0 ? px / rect.width : 0.5;
   const fy = rect.height > 0 ? py / rect.height : 0.5;
   const distLeft = fx;

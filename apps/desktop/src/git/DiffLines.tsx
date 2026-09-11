@@ -29,15 +29,7 @@ function LineTokens({ content, path }: { content: string; path: string }) {
   );
 }
 
-function DiffContentRow({
-  line,
-  path,
-  numberWidth,
-}: {
-  line: DiffLine;
-  path: string;
-  numberWidth: number;
-}) {
+function DiffContentRow({ line, path, numberWidth }: { line: DiffLine; path: string; numberWidth: number }) {
   return (
     <div className={`git-diff-row git-diff-${line.kind}`}>
       <span className="git-diff-gutter" style={{ width: numberWidth }}>
@@ -46,9 +38,7 @@ function DiffContentRow({
       <span className="git-diff-gutter" style={{ width: numberWidth }}>
         {line.newLine ?? ''}
       </span>
-      <span className="git-diff-marker">
-        {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}
-      </span>
+      <span className="git-diff-marker">{line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}</span>
       <span className="git-diff-code">
         <LineTokens content={line.content} path={path} />
       </span>
@@ -56,15 +46,7 @@ function DiffContentRow({
   );
 }
 
-function SideCell({
-  line,
-  path,
-  side,
-}: {
-  line: DiffLine | null;
-  path: string;
-  side: 'left' | 'right';
-}) {
+function SideCell({ line, path, side }: { line: DiffLine | null; path: string; side: 'left' | 'right' }) {
   if (!line) return <div className="git-sbs-cell git-sbs-empty" />;
   const lineNumber = side === 'left' ? line.oldLine : line.newLine;
   return (
@@ -111,20 +93,14 @@ export function DiffLines({
             if (row.span && row.left) {
               const leftText = row.left.text;
               const hunkContext = leftText.match(HUNK_HEADER)?.[1] ?? '';
-              const lineIndex = parsed.lines.findIndex(
-                (line) => line.kind === 'meta' && line.text === leftText,
-              );
+              const lineIndex = parsed.lines.findIndex((line) => line.kind === 'meta' && line.text === leftText);
               const hunkIndex = lineIndex >= 0 ? parsed.hunkIndices[lineIndex] : null;
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: diff rows lack stable ids
                 <div key={index} className="git-diff-hunk git-sbs-span">
                   <span className="muted">⋯ {hunkContext}</span>
                   {onHunkPress && hunkIndex != null ? (
-                    <button
-                      type="button"
-                      className="linkish small"
-                      onClick={() => onHunkPress(hunkIndex)}
-                    >
+                    <button type="button" className="linkish small" onClick={() => onHunkPress(hunkIndex)}>
                       {hunkActionLabel ?? 'Stage'}
                     </button>
                   ) : null}
@@ -144,10 +120,7 @@ export function DiffLines({
     );
   }
 
-  const maxLineNumber = parsed.lines.reduce(
-    (max, line) => Math.max(max, line.oldLine ?? 0, line.newLine ?? 0),
-    1,
-  );
+  const maxLineNumber = parsed.lines.reduce((max, line) => Math.max(max, line.oldLine ?? 0, line.newLine ?? 0), 1);
   const numberWidth = String(maxLineNumber).length * 8 + 8;
   let hunkOrdinal = -1;
 
@@ -164,11 +137,7 @@ export function DiffLines({
               <div key={index} className="git-diff-hunk">
                 <span className="muted">⋯ {hunkContext}</span>
                 {onHunkPress ? (
-                  <button
-                    type="button"
-                    className="linkish small"
-                    onClick={() => onHunkPress(hunkIndex)}
-                  >
+                  <button type="button" className="linkish small" onClick={() => onHunkPress(hunkIndex)}>
                     {hunkActionLabel ?? 'Stage'}
                   </button>
                 ) : null}

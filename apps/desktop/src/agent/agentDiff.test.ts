@@ -22,10 +22,7 @@ describe('unifiedLineDiff', () => {
 
 describe('deriveDiff', () => {
   test('Edit derives a diff at file_path', () => {
-    const d = deriveDiff(
-      'Edit',
-      JSON.stringify({ file_path: '/foo', old_string: 'a', new_string: 'b' }),
-    );
+    const d = deriveDiff('Edit', JSON.stringify({ file_path: '/foo', old_string: 'a', new_string: 'b' }));
     expect(d?.path).toBe('/foo');
     expect(d?.hunks[0].lines.some((l) => l.kind === 'del')).toBe(true);
   });

@@ -18,15 +18,7 @@ interface HostsScreenProps {
   onSelect: (hostId: string) => void;
 }
 
-export function HostsScreen({
-  hosts,
-  healthByHost,
-  onBack,
-  onAdd,
-  onDevices,
-  onRemove,
-  onSelect,
-}: HostsScreenProps) {
+export function HostsScreen({ hosts, healthByHost, onBack, onAdd, onDevices, onRemove, onSelect }: HostsScreenProps) {
   return (
     <div className="panel hosts-panel">
       <button type="button" className="linkish back-link" onClick={onBack}>

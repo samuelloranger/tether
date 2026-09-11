@@ -9,12 +9,7 @@ import { type DropIntent, dropIntent } from './dropZone';
 
 const DRAG_THRESHOLD_PX = 5;
 
-export type BeginTabDrag = (
-  e: React.PointerEvent,
-  hostId: string,
-  sessionId: string,
-  label: string,
-) => void;
+export type BeginTabDrag = (e: React.PointerEvent, hostId: string, sessionId: string, label: string) => void;
 
 export interface TabDropTarget {
   paneId: string;
@@ -61,9 +56,7 @@ function resolveTarget(x: number, y: number): TabDropTarget | null {
 
 export function useTabDrag(onDrop: (paneId: string, intent: DropIntent, key: string) => void) {
   const [drag, setDrag] = useState<TabDragState | null>(null);
-  const pending = useRef<{ key: string; label: string; startX: number; startY: number } | null>(
-    null,
-  );
+  const pending = useRef<{ key: string; label: string; startX: number; startY: number } | null>(null);
   const dragRef = useRef<TabDragState | null>(null);
   dragRef.current = drag;
 
@@ -94,10 +87,7 @@ export function useTabDrag(onDrop: (paneId: string, intent: DropIntent, key: str
         return;
       }
       if (dragRef.current) {
-        setDrag(
-          (d) =>
-            d && { ...d, x: e.clientX, y: e.clientY, target: resolveTarget(e.clientX, e.clientY) },
-        );
+        setDrag((d) => d && { ...d, x: e.clientX, y: e.clientY, target: resolveTarget(e.clientX, e.clientY) });
       }
     };
     const up = () => {

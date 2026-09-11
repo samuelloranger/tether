@@ -122,13 +122,7 @@ export function entriesToTreeNodes(
         type: 'dir' as const,
         name: entry.name,
         path,
-        children: entriesToTreeNodes(
-          path,
-          child.entries,
-          loadedChildren,
-          loadingPaths,
-          errorByPath,
-        ),
+        children: entriesToTreeNodes(path, child.entries, loadedChildren, loadingPaths, errorByPath),
         browse: {
           loaded: true,
           truncated: child.truncated || undefined,

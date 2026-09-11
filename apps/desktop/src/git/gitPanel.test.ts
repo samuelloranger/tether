@@ -24,10 +24,7 @@ test('reviewFileEntries lists staged then unstaged', () => {
       { path: 'a.ts', insertions: 1, deletions: 0, binary: false, staged: true },
     ],
   });
-  expect(entries.map((e) => reviewDiffKey(e.mode, e.path))).toEqual([
-    'staged:a.ts',
-    'unstaged:b.ts',
-  ]);
+  expect(entries.map((e) => reviewDiffKey(e.mode, e.path))).toEqual(['staged:a.ts', 'unstaged:b.ts']);
 });
 
 test('canCommit and submitGitMessage gate empty commits', async () => {

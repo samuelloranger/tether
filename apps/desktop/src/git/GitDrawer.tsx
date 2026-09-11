@@ -35,8 +35,7 @@ export function GitDrawer({ panel, onClose }: GitDrawerProps) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       const target = event.target as HTMLElement | null;
-      const isField =
-        target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT' || target?.isContentEditable;
+      const isField = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT' || target?.isContentEditable;
       if (isField) {
         target.blur();
         return;
@@ -65,10 +64,7 @@ export function GitDrawer({ panel, onClose }: GitDrawerProps) {
   const diffHasContent = Boolean(
     panel.diffParsed?.lines.length || panel.diffImage || panel.historyCommit?.parsed?.lines.length,
   );
-  const diffPane = loadPaneContent(
-    panel.selectedPath || viewingCommit ? panel.error : null,
-    diffHasContent,
-  );
+  const diffPane = loadPaneContent(panel.selectedPath || viewingCommit ? panel.error : null, diffHasContent);
   const errorShownInPane =
     (tab === 'changes' && changes.type === 'error') ||
     (tab === 'history' && historyPane.type === 'error') ||
@@ -134,22 +130,14 @@ export function GitDrawer({ panel, onClose }: GitDrawerProps) {
           if (next === 'changes') void panel.selectCommit(null);
         }}
       />
-      {panel.error && !errorShownInPane ? (
-        <p className="error git-pane-message">{panel.error}</p>
-      ) : null}
+      {panel.error && !errorShownInPane ? <p className="error git-pane-message">{panel.error}</p> : null}
       <div className="git-drawer-body" ref={bodyRef}>
         <div className="git-drawer-left" style={{ width: leftWidth }}>
           {tab === 'history' ? (
             historyPane.type === 'error' ? (
-              <GitPaneError
-                message={historyPane.message}
-                onRetry={() => void panel.loadHistory()}
-              />
+              <GitPaneError message={historyPane.message} onRetry={() => void panel.loadHistory()} />
             ) : (
-              <HistoryList
-                entries={panel.historyEntries}
-                onSelect={(entry) => void panel.selectCommit(entry)}
-              />
+              <HistoryList entries={panel.historyEntries} onSelect={(entry) => void panel.selectCommit(entry)} />
             )
           ) : changes.type === 'error' ? (
             <GitPaneError message={changes.message} onRetry={() => void panel.refresh()} />
@@ -269,9 +257,7 @@ export function GitDrawer({ panel, onClose }: GitDrawerProps) {
           ) : (
             <p className="muted git-pane-message">Select a file to review</p>
           )}
-          {panel.diffTruncated ? (
-            <p className="muted git-pane-message">Diff truncated at 1 MiB</p>
-          ) : null}
+          {panel.diffTruncated ? <p className="muted git-pane-message">Diff truncated at 1 MiB</p> : null}
         </div>
       </div>
     </aside>

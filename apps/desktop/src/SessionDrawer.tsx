@@ -81,11 +81,7 @@ function HostHeader({
 }) {
   return (
     <div className="drawer-host-header">
-      <button
-        type="button"
-        className="linkish drawer-host-name"
-        onClick={() => onOpenHostSettings(host.id)}
-      >
+      <button type="button" className="linkish drawer-host-name" onClick={() => onOpenHostSettings(host.id)}>
         {host.name}
       </button>
       {count > 0 ? <span className="drawer-host-count">{count}</span> : null}
@@ -207,11 +203,7 @@ function HostNewButtons({
       <button type="button" className="secondary drawer-host-new" onClick={() => onNew(hostId)}>
         New terminal
       </button>
-      <button
-        type="button"
-        className="secondary drawer-host-new"
-        onClick={() => onNewAgentChat(hostId)}
-      >
+      <button type="button" className="secondary drawer-host-new" onClick={() => onNewAgentChat(hostId)}>
         <AgentIcon />
         New agent chat
       </button>
@@ -259,13 +251,7 @@ export function SessionDrawer({
               <PinIcon />
             </button>
           ) : null}
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Hosts"
-            title="Hosts"
-            onClick={onOpenHosts}
-          >
+          <button type="button" className="icon-button" aria-label="Hosts" title="Hosts" onClick={onOpenHosts}>
             <HostsIcon />
           </button>
           <button

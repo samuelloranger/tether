@@ -12,10 +12,7 @@ export async function loadServerConfig(hostId: string): Promise<ServerConfig> {
   return coreConfigGet(hostId);
 }
 
-export async function patchServerConfig(
-  hostId: string,
-  patch: ServerConfigPatch,
-): Promise<ServerConfig> {
+export async function patchServerConfig(hostId: string, patch: ServerConfigPatch): Promise<ServerConfig> {
   return coreConfigPatch(hostId, patch);
 }
 

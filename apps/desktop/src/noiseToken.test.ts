@@ -18,9 +18,7 @@ describe('createTokenCache', () => {
       now: () => 1_000_000,
     });
 
-    await expect(cache.getToken('host-1', 'ws://example:8085/api/noise/session')).resolves.toBe(
-      'tok-1',
-    );
+    await expect(cache.getToken('host-1', 'ws://example:8085/api/noise/session')).resolves.toBe('tok-1');
     expect(calls).toBe(1);
   });
 

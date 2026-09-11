@@ -261,7 +261,12 @@ find apps clients crates -name '*.ts' ! -name '*.test.ts' -not -path '*/node_mod
 diff /tmp/over400-before.txt /tmp/over400-after.txt || true
 ```
 
-Note the files still over 400 in the PR description. Splitting them is explicitly out of scope for this plan — do not split anything here.
+Expect **no change** between the two lists. The three files over 400 physical
+lines (`db.ts`, `noiseSessionProtocol.ts`, `ptyHolder.ts`) contain no lines wider
+than 100 columns, so the reformat does not touch them — and they pass
+`noExcessiveLinesPerFile` anyway, because that rule counts code lines and skips
+blanks and comments. None carries a suppression. Splitting them is out of scope
+for this plan.
 
 - [ ] **Step 6: Run the suite**
 
@@ -1707,6 +1712,7 @@ EOF
 
 ## Follow-up, not part of this plan
 
-Files still over 400 lines after the Task 2 reformat (recorded in
-`/tmp/over400-after.txt`) currently carry Biome suppressions. Splitting them is
-separate work — do not attempt it here.
+`db.ts` (458), `noiseSessionProtocol.ts` (437) and `ptyHolder.ts` (428) exceed
+400 physical lines but pass `noExcessiveLinesPerFile`, which counts code lines
+only. They carry no suppressions. Whether to split them — or to tighten the rule
+so it matches intuition — is separate work.

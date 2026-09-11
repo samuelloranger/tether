@@ -54,11 +54,7 @@ export async function coreSessionsList(hostId: string): Promise<DrawerSession[]>
   return invoke<DrawerSession[]>('core_sessions_list', { hostId });
 }
 
-export async function coreSessionsRename(
-  hostId: string,
-  sessionId: string,
-  name: string,
-): Promise<void> {
+export async function coreSessionsRename(hostId: string, sessionId: string, name: string): Promise<void> {
   await invoke('core_sessions_rename', { hostId, sessionId, name });
 }
 
@@ -86,11 +82,7 @@ export async function coreHostRetry(hostId: string): Promise<void> {
  * Runs the Noise pairing handshake and pins the server key. `hostId` must be
  * the host profile's id — that's the keyring key `coreNoiseReconnect` looks up later.
  */
-export async function coreNoisePair(input: {
-  hostId: string;
-  address: string;
-  code: string;
-}): Promise<string> {
+export async function coreNoisePair(input: { hostId: string; address: string; code: string }): Promise<string> {
   return invoke<string>('core_noise_pair', {
     hostId: input.hostId,
     address: input.address,
@@ -120,10 +112,7 @@ export async function coreNoisePing(hostId: string, address: string): Promise<bo
 }
 
 /** Mint a per-device REST bearer over the authenticated Noise session. */
-export async function coreNoiseToken(
-  hostId: string,
-  address: string,
-): Promise<{ token: string; expiresAt: string }> {
+export async function coreNoiseToken(hostId: string, address: string): Promise<{ token: string; expiresAt: string }> {
   return invoke<{ token: string; expiresAt: string }>('core_noise_token', { hostId, address });
 }
 
@@ -216,15 +205,10 @@ export async function coreNoiseClose(connId: string): Promise<void> {
 export interface DetectedLinkSpan {
   start: number;
   end: number;
-  target:
-    | { kind: 'external'; url: string }
-    | { kind: 'file'; path: string; line?: number; column?: number };
+  target: { kind: 'external'; url: string } | { kind: 'file'; path: string; line?: number; column?: number };
 }
 
-export async function coreDetectLinks(
-  texts: string[],
-  wrapped: boolean[],
-): Promise<DetectedLinkSpan[][]> {
+export async function coreDetectLinks(texts: string[], wrapped: boolean[]): Promise<DetectedLinkSpan[][]> {
   return invoke<DetectedLinkSpan[][]>('core_detect_links', { texts, wrapped });
 }
 
@@ -273,17 +257,13 @@ export async function coreCacheIds(): Promise<string[]> {
   return invoke<string[]>('core_cache_ids');
 }
 
-export function listenHostHealth(
-  handler: (hostId: string, status: HostHealthStatus) => void,
-): Promise<UnlistenFn> {
+export function listenHostHealth(handler: (hostId: string, status: HostHealthStatus) => void): Promise<UnlistenFn> {
   return listen<{ hostId: string; status: HostHealthStatus }>('core-host-health', (event) => {
     handler(event.payload.hostId, event.payload.status);
   });
 }
 
-export function listenSessions(
-  handler: (hostId: string, sessions: DrawerSession[]) => void,
-): Promise<UnlistenFn> {
+export function listenSessions(handler: (hostId: string, sessions: DrawerSession[]) => void): Promise<UnlistenFn> {
   return listen<{ hostId: string; sessions: DrawerSession[] }>('core-sessions', (event) => {
     handler(event.payload.hostId, event.payload.sessions);
   });
@@ -293,10 +273,7 @@ export async function coreConfigGet(hostId: string): Promise<ServerConfig> {
   return invoke<ServerConfig>('core_config_get', { hostId });
 }
 
-export async function coreConfigPatch(
-  hostId: string,
-  patch: ServerConfigPatch,
-): Promise<ServerConfig> {
+export async function coreConfigPatch(hostId: string, patch: ServerConfigPatch): Promise<ServerConfig> {
   return invoke<ServerConfig>('core_config_patch', { hostId, patch });
 }
 

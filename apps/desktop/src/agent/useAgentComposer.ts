@@ -7,18 +7,12 @@ import { transcriptText } from './transcriptText';
 /** All composer command logic: the palette match set plus the key/run
  * handlers. Kept out of the component so the JSX stays small and this stays
  * unit-testable without React. */
-export function useAgentComposer(
-  model: AgentChatModel,
-  snapshot: AgentSnapshot,
-  send: (payload: unknown) => void,
-) {
+export function useAgentComposer(model: AgentChatModel, snapshot: AgentSnapshot, send: (payload: unknown) => void) {
   const { draft, turn } = snapshot;
   const streaming = turn !== 'idle';
   const matches = matchCommands(draft);
   const paletteOpen = matches.length > 0;
-  const highlighted = paletteOpen
-    ? matches[Math.min(snapshot.paletteIndex, matches.length - 1)]
-    : null;
+  const highlighted = paletteOpen ? matches[Math.min(snapshot.paletteIndex, matches.length - 1)] : null;
 
   const sendPrompt = (text: string) => {
     if (streaming) model.enqueue(text);
@@ -41,8 +35,7 @@ export function useAgentComposer(
     else if (id === 'retry') {
       const t = model.retryLast();
       if (t) send(agentPrompt(t));
-    } else if (id === 'copy')
-      void navigator.clipboard.writeText(transcriptText(snapshot.messages, args));
+    } else if (id === 'copy') void navigator.clipboard.writeText(transcriptText(snapshot.messages, args));
     else if (id === 'model') model.openPicker('model');
     else if (id === 'resume') model.openPicker('resume');
   };

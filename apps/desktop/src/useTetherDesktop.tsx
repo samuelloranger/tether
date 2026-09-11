@@ -142,8 +142,7 @@ export function useTetherDesktop() {
         setHealthByHost((current) => ({ ...current, [profile.id]: 'unknown' }));
       }
       const savedHost = localStorage.getItem(KEY_ACTIVE_HOST);
-      const initialHost =
-        listed.find((profile) => profile.id === savedHost)?.id ?? listed[0]?.id ?? null;
+      const initialHost = listed.find((profile) => profile.id === savedHost)?.id ?? listed[0]?.id ?? null;
       unlistenSessions = await listenSessions((hostId, rows) => {
         ingestHostSessions(hostId, rows);
       });
@@ -339,9 +338,7 @@ export function useTetherDesktop() {
   const renameSessionById = useCallback(async (hostId: string, sessionId: string, name: string) => {
     await coreSessionsRename(hostId, sessionId, name);
     setSessions((previous) =>
-      previous.map((row) =>
-        row.hostId === hostId && row.id === sessionId ? { ...row, name: name || null } : row,
-      ),
+      previous.map((row) => (row.hostId === hostId && row.id === sessionId ? { ...row, name: name || null } : row)),
     );
   }, []);
 
@@ -415,65 +412,44 @@ export function useTetherDesktop() {
     [activeHostId],
   );
 
-  const updateHostIdentity = useCallback(
-    async (hostId: string, identity: { name: string; color: string }) => {
-      const profile = await coreHostsUpdateIdentity(hostId, identity);
-      setHosts(await coreHostsList());
-      return profile;
-    },
-    [],
-  );
+  const updateHostIdentity = useCallback(async (hostId: string, identity: { name: string; color: string }) => {
+    const profile = await coreHostsUpdateIdentity(hostId, identity);
+    setHosts(await coreHostsList());
+    return profile;
+  }, []);
 
-  const updateHostConnection = useCallback(
-    async (hostId: string, changes: Pick<HostProfile, 'host' | 'port'>) => {
-      await coreHostsUpdateConnection(hostId, {
-        host: changes.host,
-        port: changes.port,
+  const updateHostConnection = useCallback(async (hostId: string, changes: Pick<HostProfile, 'host' | 'port'>) => {
+    await coreHostsUpdateConnection(hostId, {
+      host: changes.host,
+      port: changes.port,
+    });
+    setHosts(await coreHostsList());
+  }, []);
+
+  const handleWsFrame = useCallback((hostId: string, sessionId: string, frame: FrameApplyResult) => {
+    if (frame.kind === 'title' && frame.title !== undefined) {
+      setSessions((previous) =>
+        previous.map((row) =>
+          row.hostId === hostId && row.id === sessionId ? { ...row, auto_title: frame.title ?? null } : row,
+        ),
+      );
+    }
+    if (frame.kind === 'activity' && frame.activity !== undefined) {
+      const previous = sessionsRef.current.find((row) => row.hostId === hostId && row.id === sessionId);
+      const isActive = activeHostIdRef.current === hostId && activeSessionIdRef.current === sessionId;
+      void coreNotifyWaitingEdge(previous?.activity, frame.activity, isActive).then(async (should) => {
+        if (!should) return;
+        if (localStorage.getItem('tether_notifications_enabled') === 'false') return;
+        const { sendOsNotification } = await import('./desktopNotifications');
+        await sendOsNotification(previous ? sessionLabel(previous) : sessionId, 'Needs your input');
       });
-      setHosts(await coreHostsList());
-    },
-    [],
-  );
-
-  const handleWsFrame = useCallback(
-    (hostId: string, sessionId: string, frame: FrameApplyResult) => {
-      if (frame.kind === 'title' && frame.title !== undefined) {
-        setSessions((previous) =>
-          previous.map((row) =>
-            row.hostId === hostId && row.id === sessionId
-              ? { ...row, auto_title: frame.title ?? null }
-              : row,
-          ),
-        );
-      }
-      if (frame.kind === 'activity' && frame.activity !== undefined) {
-        const previous = sessionsRef.current.find(
-          (row) => row.hostId === hostId && row.id === sessionId,
-        );
-        const isActive =
-          activeHostIdRef.current === hostId && activeSessionIdRef.current === sessionId;
-        void coreNotifyWaitingEdge(previous?.activity, frame.activity, isActive).then(
-          async (should) => {
-            if (!should) return;
-            if (localStorage.getItem('tether_notifications_enabled') === 'false') return;
-            const { sendOsNotification } = await import('./desktopNotifications');
-            await sendOsNotification(
-              previous ? sessionLabel(previous) : sessionId,
-              'Needs your input',
-            );
-          },
-        );
-        setSessions((previous) =>
-          previous.map((row) =>
-            row.hostId === hostId && row.id === sessionId
-              ? { ...row, activity: frame.activity ?? null }
-              : row,
-          ),
-        );
-      }
-    },
-    [],
-  );
+      setSessions((previous) =>
+        previous.map((row) =>
+          row.hostId === hostId && row.id === sessionId ? { ...row, activity: frame.activity ?? null } : row,
+        ),
+      );
+    }
+  }, []);
 
   const activeSessionLabel = useMemo(() => {
     if (!activeSessionId) return 'No terminal';

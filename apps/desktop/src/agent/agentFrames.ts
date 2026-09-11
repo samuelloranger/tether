@@ -31,12 +31,7 @@ export function decodeAgentFrame(json: string): AgentFrame | null {
   return v as unknown as AgentFrame;
 }
 
-export function agentStart(input: {
-  id: string;
-  cwd: string;
-  sinceSeq: number;
-  resumeClaudeSessionId?: string;
-}) {
+export function agentStart(input: { id: string; cwd: string; sinceSeq: number; resumeClaudeSessionId?: string }) {
   return {
     t: 'agent.start' as const,
     id: input.id,

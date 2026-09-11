@@ -6,10 +6,7 @@ export function shortFingerprint(fingerprint: string): string {
   return fingerprint.slice(0, 23);
 }
 
-export function lastSeenText(device: {
-  lastSeenAt: string | null;
-  lastAddress: string | null;
-}): string {
+export function lastSeenText(device: { lastSeenAt: string | null; lastAddress: string | null }): string {
   if (!device.lastSeenAt) return 'Never connected';
   if (device.lastAddress) return `Last seen ${device.lastSeenAt} · ${device.lastAddress}`;
   return `Last seen ${device.lastSeenAt}`;

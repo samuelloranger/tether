@@ -188,10 +188,7 @@ export function App() {
       ...app.pendingAgentKeys(),
     ]);
 
-  const openSessionKeys = useMemo(
-    () => new Set(views.flatMap((view) => viewMemberKeys(view))),
-    [views],
-  );
+  const openSessionKeys = useMemo(() => new Set(views.flatMap((view) => viewMemberKeys(view))), [views]);
 
   // Every live session belongs to exactly one view leaf.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the live session list; latest views are read from the ref
@@ -251,9 +248,7 @@ export function App() {
       return {
         ...view,
         tree: nextTree,
-        focusedPaneId: findLeaf(nextTree, view.focusedPaneId)
-          ? view.focusedPaneId
-          : firstLeafId(nextTree),
+        focusedPaneId: findLeaf(nextTree, view.focusedPaneId) ? view.focusedPaneId : firstLeafId(nextTree),
       };
     });
     applyViews(reconcileViews(nextViews, liveKeys(), current.activeViewId));
@@ -277,9 +272,7 @@ export function App() {
         current.activeViewId,
         {
           kind: 'split',
-          paneId:
-            current.views.find((v) => v.id === current.activeViewId)?.focusedPaneId ??
-            focusedPaneId,
+          paneId: current.views.find((v) => v.id === current.activeViewId)?.focusedPaneId ?? focusedPaneId,
           dir,
           side,
         },
@@ -295,16 +288,7 @@ export function App() {
       intent.kind === 'replace'
         ? { kind: 'replace' as const, paneId }
         : { kind: 'split' as const, paneId, dir: intent.dir, side: intent.side };
-    applyViews(
-      moveSessionIntoView(
-        current.views,
-        key,
-        current.activeViewId,
-        op,
-        liveKeys(),
-        current.activeViewId,
-      ),
-    );
+    applyViews(moveSessionIntoView(current.views, key, current.activeViewId, op, liveKeys(), current.activeViewId));
   };
   // Pointer-driven drag: Tauri's native drag-drop handler (kept for OS
   // file-drop upload) swallows in-webview HTML5 DnD on Windows/WebView2.
@@ -414,9 +398,7 @@ export function App() {
 
   // A file viewer/presentation owns the pane while up, so git overlays stand
   // down rather than stack — git returns when the viewer closes.
-  const fileOrPreviewUp = Boolean(
-    workspace.fileView || workspace.fileLoading || workspace.activePresentation,
-  );
+  const fileOrPreviewUp = Boolean(workspace.fileView || workspace.fileLoading || workspace.activePresentation);
 
   const shellProps = useShellChrome(litState, {
     ...shellVars(theme, litState),
@@ -486,11 +468,7 @@ export function App() {
   if (app.screen === 'local-settings') {
     return (
       <div className="app-shell centered" {...shellProps}>
-        <LocalSettingsScreen
-          prefs={prefs}
-          onPrefsChange={setPrefs}
-          onBack={() => app.setScreen('main')}
-        />
+        <LocalSettingsScreen prefs={prefs} onPrefsChange={setPrefs} onBack={() => app.setScreen('main')} />
         <AlertModal />
       </div>
     );
@@ -667,9 +645,7 @@ export function App() {
                     onClose={() => app.setGitOpen(false)}
                   />
                 ) : null}
-                {workspace.fileLoading && (
-                  <div className="workspace-cover muted">Loading file…</div>
-                )}
+                {workspace.fileLoading && <div className="workspace-cover muted">Loading file…</div>}
                 {workspace.uploading && <div className="workspace-cover muted">Uploading…</div>}
                 {workspace.fileView && (
                   <FileViewer
@@ -705,11 +681,7 @@ export function App() {
       </main>
 
       {tabDrag.drag && (
-        <div
-          className="tab-drag-ghost"
-          style={{ left: tabDrag.drag.x, top: tabDrag.drag.y }}
-          aria-hidden
-        >
+        <div className="tab-drag-ghost" style={{ left: tabDrag.drag.x, top: tabDrag.drag.y }} aria-hidden>
           {tabDrag.drag.label}
         </div>
       )}
@@ -722,9 +694,7 @@ export function App() {
       {panePickerFor && (
         <PanePickerModal
           hosts={app.hosts}
-          sessions={app.sessions.filter(
-            (row) => !openSessionKeys.has(sessionKey(row.hostId, row.id)),
-          )}
+          sessions={app.sessions.filter((row) => !openSessionKeys.has(sessionKey(row.hostId, row.id)))}
           onPick={(ref) => {
             fillPane(panePickerFor, ref);
             setPanePickerFor(null);
@@ -756,12 +726,7 @@ export function App() {
         onPrefsChange={setPrefs}
         onRename={() => {
           if (!app.activeHost) return;
-          modals.openRename(
-            app.activeHost.id,
-            app.activeSessionId,
-            app.activeSessionLabel,
-            app.activeSessionLabel,
-          );
+          modals.openRename(app.activeHost.id, app.activeSessionId, app.activeSessionLabel, app.activeSessionLabel);
         }}
         onAppearance={() => app.setScreen('local-settings')}
         onOpenServerSettings={() => {

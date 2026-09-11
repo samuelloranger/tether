@@ -36,8 +36,6 @@ describe('normalizeInvokeError', () => {
   });
 
   test('ignores an empty string field and keeps looking', () => {
-    expect(normalizeInvokeError({ message: '', msg: 'second choice' }).message).toBe(
-      'second choice',
-    );
+    expect(normalizeInvokeError({ message: '', msg: 'second choice' }).message).toBe('second choice');
   });
 });

@@ -29,11 +29,7 @@ function dequeueAndShowNext() {
   showNext();
 }
 
-export async function notify(
-  title: string,
-  body: string,
-  kind: 'info' | 'error' = 'info',
-): Promise<void> {
+export async function notify(title: string, body: string, kind: 'info' | 'error' = 'info'): Promise<void> {
   return new Promise<void>((resolve) => {
     queue.push({
       kind: 'notify',

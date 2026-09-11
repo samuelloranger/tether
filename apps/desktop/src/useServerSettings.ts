@@ -29,15 +29,7 @@ export type ServerSettingsProps = {
   onRemoveHost: () => Promise<void>;
 };
 
-const IDENTITY_COLORS = [
-  '#89b4fa',
-  '#cba6f7',
-  '#f38ba8',
-  '#a6e3a1',
-  '#fab387',
-  '#94e2d5',
-  '#f9e2af',
-];
+const IDENTITY_COLORS = ['#89b4fa', '#cba6f7', '#f38ba8', '#a6e3a1', '#fab387', '#94e2d5', '#f9e2af'];
 
 function useConnectionFields(host: HostProfile) {
   const [connectionHost, setConnectionHost] = useState(host.host);
@@ -115,10 +107,7 @@ export function useServerSettings(p: ServerSettingsProps) {
     () => !!load.config && !!load.draft && isServerSettingsDirty(load.config, load.draft),
     [load.config, load.draft],
   );
-  const validationErrors = useMemo(
-    () => (load.draft ? validateServerSettingsDraft(load.draft) : {}),
-    [load.draft],
-  );
+  const validationErrors = useMemo(() => (load.draft ? validateServerSettingsDraft(load.draft) : {}), [load.draft]);
   const set = <K extends keyof ServerSettingsDraft>(key: K, value: ServerSettingsDraft[K]) =>
     load.setDraft((current) => (current ? { ...current, [key]: value } : current));
 

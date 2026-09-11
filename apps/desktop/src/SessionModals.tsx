@@ -112,14 +112,11 @@ export function useSessionModals() {
       setRename({ hostId, sessionId, text, placeholder }),
     openKill: (hostId: string, sessionId: string, label: string) =>
       setKill({ members: [{ hostId, sessionId }], memberLabels: [label] }),
-    openKillMembers: (
-      members: Array<{ hostId: string; sessionId: string }>,
-      memberLabels: string[],
-    ) => setKill({ members, memberLabels }),
+    openKillMembers: (members: Array<{ hostId: string; sessionId: string }>, memberLabels: string[]) =>
+      setKill({ members, memberLabels }),
     closeRename: () => setRename(null),
     closeKill: () => setKill(null),
-    setRenameText: (text: string) =>
-      setRename((current) => (current ? { ...current, text } : null)),
+    setRenameText: (text: string) => setRename((current) => (current ? { ...current, text } : null)),
   };
 }
 

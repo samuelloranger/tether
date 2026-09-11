@@ -1,7 +1,4 @@
-export function validateAddress(
-  host: string,
-  port: string,
-): { ok: true } | { ok: false; reason: string } {
+export function validateAddress(host: string, port: string): { ok: true } | { ok: false; reason: string } {
   if (!host.trim()) return { ok: false, reason: 'Enter a server host or IP.' };
   const p = Number(port);
   if (!Number.isInteger(p) || p < 1 || p > 65535) {

@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  createDirListingCache,
-  entriesToTreeNodes,
-  joinDirPath,
-  type WorkspaceDirListing,
-} from './workspaceDirLogic';
+import { createDirListingCache, entriesToTreeNodes, joinDirPath, type WorkspaceDirListing } from './workspaceDirLogic';
 
 describe('workspaceDirLogic', () => {
   test('joinDirPath nests under parent and keeps root names bare', () => {

@@ -65,12 +65,7 @@ export function TitleBar({ title }: TitleBarProps) {
       </span>
       {showControls ? (
         <div className="titlebar-controls">
-          <button
-            type="button"
-            className="titlebar-btn"
-            aria-label="Minimize"
-            onClick={() => void minimizeWindow()}
-          >
+          <button type="button" className="titlebar-btn" aria-label="Minimize" onClick={() => void minimizeWindow()}>
             <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
               <path d="M0 5h10" stroke="currentColor" strokeWidth="1" fill="none" />
             </svg>
@@ -83,24 +78,11 @@ export function TitleBar({ title }: TitleBarProps) {
           >
             {maximized ? (
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                <path
-                  d="M2.5 2.5h5v5h-5z M3.5 2.5V1.5h5v5h-1"
-                  stroke="currentColor"
-                  strokeWidth="1"
-                  fill="none"
-                />
+                <path d="M2.5 2.5h5v5h-5z M3.5 2.5V1.5h5v5h-1" stroke="currentColor" strokeWidth="1" fill="none" />
               </svg>
             ) : (
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                <rect
-                  x="1"
-                  y="1"
-                  width="8"
-                  height="8"
-                  stroke="currentColor"
-                  strokeWidth="1"
-                  fill="none"
-                />
+                <rect x="1" y="1" width="8" height="8" stroke="currentColor" strokeWidth="1" fill="none" />
               </svg>
             )}
           </button>

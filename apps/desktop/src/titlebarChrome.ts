@@ -5,10 +5,7 @@
 // confirm against the real Overlay geometry during manual testing.
 export const MAC_TRAFFIC_LIGHT_INSET = 72;
 
-export function titlebarChrome(
-  isMac: boolean,
-  isFullscreen = false,
-): { showControls: boolean; leftInset: number } {
+export function titlebarChrome(isMac: boolean, isFullscreen = false): { showControls: boolean; leftInset: number } {
   return {
     showControls: !isMac,
     // macOS reserves space for the native traffic lights — except in fullscreen,

@@ -2,10 +2,7 @@
  * Rate-limit key from X-Forwarded-For. Each proxy APPENDS the peer it saw, so anything
  * left of our `trustedHops` is attacker-supplied — count from the RIGHT for the real peer.
  */
-export function clientIpFromForwarded(
-  forwardedFor: string | undefined,
-  trustedHops: number,
-): string {
+export function clientIpFromForwarded(forwardedFor: string | undefined, trustedHops: number): string {
   if (!forwardedFor) return 'direct';
   const parts = forwardedFor
     .split(',')

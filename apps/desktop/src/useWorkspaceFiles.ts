@@ -3,12 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requestPaste } from './pasteBus';
 import { coreWorkspaceDir, coreWorkspaceFile, coreWorkspaceUpload } from './workspaceApi';
-import {
-  createDirListingCache,
-  type DirLoadOk,
-  entriesToTreeNodes,
-  joinDirPath,
-} from './workspaceDirLogic';
+import { createDirListingCache, type DirLoadOk, entriesToTreeNodes, joinDirPath } from './workspaceDirLogic';
 import type { FileTreeNode, FileView } from './workspaceTypes';
 import { shellQuote } from './workspaceTypes';
 
@@ -152,13 +147,7 @@ export function useWorkspaceFiles({
   const tree = useMemo((): FileTreeNode[] => {
     const root = loadedByPath.get('');
     if (!root) return [];
-    return entriesToTreeNodes(
-      rootListingPath,
-      root.entries,
-      loadedByPath,
-      loadingPaths,
-      errorByPath,
-    );
+    return entriesToTreeNodes(rootListingPath, root.entries, loadedByPath, loadingPaths, errorByPath);
   }, [loadedByPath, loadingPaths, errorByPath, rootListingPath]);
 
   const rootListing = loadedByPath.get('');

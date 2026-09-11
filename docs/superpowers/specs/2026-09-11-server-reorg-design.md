@@ -355,10 +355,15 @@ by that tsconfig — it keeps relative imports, updated to the new paths.
 ```
 
 `noExcessiveLinesPerFile` stays at 400 and `noExcessiveLinesPerFunction` stays
-at 60. The 120-column reformat removes roughly 8-12% of physical lines from the
-files that currently exceed 400, so the rule gets looser in practice without
-being relaxed on paper. After the reformat, audit which files still exceed 400
-and split them for real rather than carrying a suppression.
+at 60.
+
+Note how the per-file rule actually counts: it measures **code** lines, not
+physical ones, and it skips blank lines and comments. Three non-test files
+exceed 400 physical lines (`db.ts` 458, `noiseSessionProtocol.ts` 437,
+`ptyHolder.ts` 428) and all three pass the rule cleanly — none carries a
+suppression. So the rule is active and enforcing, just against a different
+measure than `wc -l`; verified by dropping `maxLines` to 10, which makes it fire
+on `db.ts` immediately.
 
 ### `apps/server/package.json`
 

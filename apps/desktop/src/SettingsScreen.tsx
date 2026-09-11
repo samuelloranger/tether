@@ -36,10 +36,7 @@ export function LocalSettingsScreen({ onBack, prefs, onPrefsChange }: LocalSetti
       <h1>Appearance</h1>
       <label>
         Theme
-        <select
-          value={prefs.theme}
-          onChange={(e) => update({ theme: e.target.value as ThemePreference })}
-        >
+        <select value={prefs.theme} onChange={(e) => update({ theme: e.target.value as ThemePreference })}>
           {THEME_OPTIONS.map((theme) => (
             <option key={theme} value={theme}>
               {THEME_LABELS[theme]}
@@ -49,10 +46,7 @@ export function LocalSettingsScreen({ onBack, prefs, onPrefsChange }: LocalSetti
       </label>
       <label>
         Terminal font
-        <select
-          value={prefs.terminalFont}
-          onChange={(e) => update({ terminalFont: e.target.value as TerminalFont })}
-        >
+        <select value={prefs.terminalFont} onChange={(e) => update({ terminalFont: e.target.value as TerminalFont })}>
           {TERMINAL_FONTS.map((font) => (
             <option key={font} value={font}>
               {TERMINAL_FONT_LABELS[font]}
@@ -70,10 +64,7 @@ export function LocalSettingsScreen({ onBack, prefs, onPrefsChange }: LocalSetti
       </label>
       <label>
         Tab layout
-        <select
-          value={prefs.tabLayout}
-          onChange={(e) => update({ tabLayout: e.target.value as TabLayout })}
-        >
+        <select value={prefs.tabLayout} onChange={(e) => update({ tabLayout: e.target.value as TabLayout })}>
           {TAB_LAYOUTS.map((layout) => (
             <option key={layout} value={layout}>
               {TAB_LAYOUT_LABELS[layout]}

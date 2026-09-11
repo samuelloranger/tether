@@ -36,9 +36,7 @@ export function AgentResumePicker({
               <span className="agent-resume-when">{relativeTime(s.mtimeMs)}</span>
               <span className="agent-resume-sub">
                 {s.msgCount} msgs
-                {cwd && s.cwd !== cwd ? (
-                  <span className="agent-resume-altcwd"> ⌂ {s.cwd}</span>
-                ) : null}
+                {cwd && s.cwd !== cwd ? <span className="agent-resume-altcwd"> ⌂ {s.cwd}</span> : null}
               </span>
             </button>
           ))

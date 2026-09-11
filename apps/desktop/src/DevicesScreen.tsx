@@ -110,9 +110,7 @@ export function DevicesScreen({ host, onBack }: DevicesScreenProps) {
       {phase.kind === 'loaded' ? (
         <section className="settings-section">
           <h2>Paired devices</h2>
-          {phase.devices.every((device) => device.isSelf) ? (
-            <p className="hint">No other devices paired.</p>
-          ) : null}
+          {phase.devices.every((device) => device.isSelf) ? <p className="hint">No other devices paired.</p> : null}
           <ul className="devices-list">
             {phase.devices.map((device) => (
               <li key={device.id} className="devices-row">

@@ -25,12 +25,7 @@ export interface Layout {
 
 export const DIVIDER_PX = 6;
 
-export function layoutTree(
-  tree: PaneNode,
-  width: number,
-  height: number,
-  dividerPx: number = DIVIDER_PX,
-): Layout {
+export function layoutTree(tree: PaneNode, width: number, height: number, dividerPx: number = DIVIDER_PX): Layout {
   const out: Layout = { leaves: [], dividers: [] };
   walk(tree, { left: 0, top: 0, width, height }, dividerPx, out);
   return out;

@@ -37,11 +37,7 @@ export function createFrameSink(term: Terminal, hooks?: FrameSinkHooks): FrameSi
   };
 }
 
-export function applyServerFrame(
-  sink: FrameSink,
-  raw: string,
-  lastAppliedId: number,
-): FrameApplyResult {
+export function applyServerFrame(sink: FrameSink, raw: string, lastAppliedId: number): FrameApplyResult {
   let payload: unknown;
   try {
     payload = JSON.parse(raw);
@@ -51,8 +47,7 @@ export function applyServerFrame(
   if (typeof payload !== 'object' || payload === null) return { lastAppliedId, kind: 'none' };
   const frame = payload as Record<string, unknown>;
   if (frame.type === 'output') {
-    if (typeof frame.id !== 'number' || frame.id <= lastAppliedId)
-      return { lastAppliedId, kind: 'none' };
+    if (typeof frame.id !== 'number' || frame.id <= lastAppliedId) return { lastAppliedId, kind: 'none' };
     if (typeof frame.chunk !== 'string') return { lastAppliedId, kind: 'none' };
     sink.write(frame.chunk);
     return { lastAppliedId: frame.id, kind: 'output' };
@@ -66,12 +61,7 @@ export function applyServerFrame(
   }
   if (frame.type === 'activity' && typeof frame.activity === 'string') {
     const activity = frame.activity;
-    if (
-      activity === 'working' ||
-      activity === 'waiting' ||
-      activity === 'done' ||
-      activity === 'idle'
-    ) {
+    if (activity === 'working' || activity === 'waiting' || activity === 'done' || activity === 'idle') {
       return { lastAppliedId, kind: 'activity', activity };
     }
   }

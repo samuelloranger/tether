@@ -44,12 +44,7 @@ export function AgentFolderPicker({
         <button type="button" className="agent-folder-cancel" onClick={onCancel}>
           Cancel
         </button>
-        <button
-          type="button"
-          className="agent-folder-confirm"
-          onClick={confirm}
-          disabled={!path.trim()}
-        >
+        <button type="button" className="agent-folder-confirm" onClick={confirm} disabled={!path.trim()}>
           Start
         </button>
       </div>

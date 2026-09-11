@@ -11,7 +11,5 @@ export function transcriptText(messages: AgentMessage[], mode: string): string {
     const last = [...messages].reverse().find((m) => m.role === 'assistant');
     return last ? messageText(last) : '';
   }
-  return messages
-    .map((m) => `${m.role === 'user' ? 'You' : 'Claude'}: ${messageText(m)}`)
-    .join('\n\n');
+  return messages.map((m) => `${m.role === 'user' ? 'You' : 'Claude'}: ${messageText(m)}`).join('\n\n');
 }

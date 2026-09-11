@@ -46,21 +46,11 @@ export function OverflowMenu({
         <button type="button" className="overflow-row" role="menuitem" onClick={onAppearance}>
           Appearance
         </button>
-        <button
-          type="button"
-          className="overflow-row"
-          role="menuitem"
-          onClick={onToggleNotifications}
-        >
+        <button type="button" className="overflow-row" role="menuitem" onClick={onToggleNotifications}>
           Notifications {notificationsEnabled ? 'on' : 'off'}
         </button>
         {notificationsEnabled ? (
-          <button
-            type="button"
-            className="overflow-row"
-            role="menuitem"
-            onClick={onTestNotification}
-          >
+          <button type="button" className="overflow-row" role="menuitem" onClick={onTestNotification}>
             Test notification
           </button>
         ) : null}

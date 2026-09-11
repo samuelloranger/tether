@@ -88,12 +88,7 @@ function bindMountedTerminal(input: {
   sendFocus: (focused: boolean) => void;
   dispose: () => void;
 } {
-  const mounted = mountTerminal(
-    input.container,
-    input.boot.theme,
-    input.boot.fontFamily,
-    input.boot.fontSize,
-  );
+  const mounted = mountTerminal(input.container, input.boot.theme, input.boot.fontFamily, input.boot.fontSize);
   const bound = bindTerminalSession({
     term: mounted.term,
     fit: mounted.fit,
@@ -179,8 +174,10 @@ function useTerminalMount(props: TerminalPaneProps, interactiveRef: { current: b
 export function TerminalPane(props: TerminalPaneProps) {
   const interactiveRef = useRef(props.interactive);
   interactiveRef.current = props.interactive;
-  const { hostRef, termRef, fitRef, getSocketRef, sendFocusRef, search, findOpen, setFindOpen } =
-    useTerminalMount(props, interactiveRef);
+  const { hostRef, termRef, fitRef, getSocketRef, sendFocusRef, search, findOpen, setFindOpen } = useTerminalMount(
+    props,
+    interactiveRef,
+  );
 
   useEffect(() => {
     const term = termRef.current;
@@ -195,15 +192,7 @@ export function TerminalPane(props: TerminalPaneProps) {
       const dims = fitTerminal(term, fit, host);
       if (socket) sendJson(socket, resizeFrame(dims));
     }
-  }, [
-    props.terminalTheme,
-    props.fontFamily,
-    props.fontSize,
-    termRef,
-    fitRef,
-    hostRef,
-    getSocketRef,
-  ]);
+  }, [props.terminalTheme, props.fontFamily, props.fontSize, termRef, fitRef, hostRef, getSocketRef]);
 
   // Sprint D's paste bridge, gated to the active tab: every resident session
   // keeps a live socket, but only the focused one may receive a paste.
@@ -289,9 +278,7 @@ export function TerminalPane(props: TerminalPaneProps) {
 
   return (
     <div className={`resident-pane${props.interactive ? ' active' : ' inactive'}`}>
-      {props.interactive && findOpen ? (
-        <TerminalFindBar search={search} onClose={() => setFindOpen(false)} />
-      ) : null}
+      {props.interactive && findOpen ? <TerminalFindBar search={search} onClose={() => setFindOpen(false)} /> : null}
       <div className="terminal-host" ref={hostRef} />
     </div>
   );

@@ -1,13 +1,7 @@
 import { matchCommands } from './agentCommands';
 import { deriveDiff, summarize } from './agentDiff';
 import type { AgentFrame } from './agentFrames';
-import type {
-  AgentMessage,
-  AgentStatus,
-  AgentTurn,
-  AgentUsage,
-  ClaudeSessionMeta,
-} from './agentTypes';
+import type { AgentMessage, AgentStatus, AgentTurn, AgentUsage, ClaudeSessionMeta } from './agentTypes';
 
 /** Map the server's `done` cost + usage blob into our AgentUsage. */
 function toUsage(cost: number | undefined, usage: unknown): AgentUsage | undefined {
@@ -346,11 +340,7 @@ export class AgentChatModel {
         if (block.type === 'tool' && block.tool.result === undefined) {
           const blocks = [...msg.blocks];
           blocks[bi] = { type: 'tool', tool: { ...block.tool, result: text, isError } };
-          this.messages = [
-            ...this.messages.slice(0, mi),
-            { ...msg, blocks },
-            ...this.messages.slice(mi + 1),
-          ];
+          this.messages = [...this.messages.slice(0, mi), { ...msg, blocks }, ...this.messages.slice(mi + 1)];
           return;
         }
       }
