@@ -293,6 +293,11 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     XCTAssertTrue(tail.waitForExistence(timeout: 10), "transcript did not open at the foot")
 
     type(app, "x")
+    sleep(1)
+    shot(app, "keyboard-up-at-foot")
+    print(
+      "FOOT tail=\(tail.frame) hittable=\(tail.isHittable) keyboard="
+        + "\(app.keyboards.firstMatch.frame) screen=\(app.frame)")
     XCTAssertTrue(
       tail.isHittable,
       "raising the keyboard hid the newest line behind it while the chat was pinned at the foot")
