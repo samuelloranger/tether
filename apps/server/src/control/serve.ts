@@ -3,8 +3,8 @@ import { CONTROL_SOCK } from '@/infra/paths';
 import { controlApp } from './app';
 import { hardenControlSocket, prepareControlSocket } from './socket';
 
-export function serveControl(sock: string = CONTROL_SOCK) {
-  prepareControlSocket(sock);
+export async function serveControl(sock: string = CONTROL_SOCK) {
+  await prepareControlSocket(sock);
   const server = Bun.serve({
     unix: sock,
     fetch: (req) => controlApp.fetch(req),

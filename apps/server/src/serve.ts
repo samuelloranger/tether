@@ -103,6 +103,12 @@ export async function serve(): Promise<void> {
 
   publishTlsReport({ ...plan, httpPort, httpsPort }, tls?.fingerprintSha256 ?? null);
 
+  // The control plane (present/signal/pair CLIs) rides a loopback unix socket,
+  // never the network listeners — its filesystem perms are the auth. Before the
+  // ports, so a second daemon contending for the socket dies before it has
+  // announced itself as listening.
+  await serveControl();
+
   if (httpPort !== null) {
     Bun.serve({ ...baseServeOptions(), port: httpPort });
     logInfo(`Tether server listening on :${httpPort} (http)`);
@@ -116,10 +122,6 @@ export async function serve(): Promise<void> {
     logInfo(`Tether server listening on :${httpsPort} (https)`);
     logInfo(`TLS certificate fingerprint: sha256:${tls.fingerprintSha256}`);
   }
-
-  // The control plane (present/signal/pair CLIs) rides a loopback unix socket,
-  // never the network listeners — its filesystem perms are the auth.
-  serveControl();
 
   logInfo('Auth: /api routes require a per-device bearer token.');
 
