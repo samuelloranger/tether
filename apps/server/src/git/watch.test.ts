@@ -43,11 +43,15 @@ async function withRepo(fn: (root: string) => void | Promise<void>) {
 // spawn; stub it elsewhere so the suite stays deterministic and fast.
 const noIgnoredDirs = async () => new Set<string>();
 
-// Windows pays double: git spawns cost 200-380ms under parallel load (vs ~5ms
-// on Linux), and event delivery is slower too. 5s isn't enough; 20s is a backstop, not a delay.
-const REPO_TEST_TIMEOUT_MS = 5_000;
+// Backstops, not delays: every wait below returns as soon as the watcher
+// publishes. They are this generous because the CI macOS runner is nothing like
+// a dev box — a git spawn there costs 200-380ms under parallel load against ~5ms
+// on Linux, and fs.watch is FSEvents, whose delivery latency runs to hundreds of
+// ms. Two releases published over a red CI run whose only failure was one of
+// these waits expiring (board #872).
+const REPO_TEST_TIMEOUT_MS = 20_000;
 
-async function waitFor(condition: () => boolean, timeout = 2_000) {
+async function waitFor(condition: () => boolean, timeout = 10_000) {
   const deadline = Date.now() + timeout;
   while (!condition() && Date.now() < deadline) await Bun.sleep(20);
   expect(condition()).toBe(true);
@@ -69,29 +73,37 @@ watchTest(
       await watch.whenScanned();
       expect(seen).toEqual([{ files: [] }]);
 
+      const oneEdit = {
+        files: [
+          {
+            path: 'main.ts',
+            insertions: 1,
+            deletions: 1,
+            binary: false,
+            staged: false,
+            untracked: false,
+          },
+        ],
+      };
+
       writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
       writeFileSync(path.join(root, 'main.ts'), 'export const answer = 44;\n');
       writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
-      await waitFor(() => seen.length === 2);
-      expect(seen).toEqual([
-        { files: [] },
-        {
-          files: [
-            {
-              path: 'main.ts',
-              insertions: 1,
-              deletions: 1,
-              binary: false,
-              staged: false,
-              untracked: false,
-            },
-          ],
-        },
-      ]);
+      // Settle on the value, not the count. All three writes produce the same
+      // one-insertion-one-deletion summary, so the debounce and the dedupe both
+      // collapse them — but a read that catches the file mid-truncate publishes a
+      // deletion-only summary on the way, and asserting `length === 2` turns that
+      // into a failure of a test that is not about truncation.
+      await waitFor(() => seen.length > 1 && seen[seen.length - 1].files.length === 1);
+      expect(seen[0]).toEqual({ files: [] });
+      expect(seen[seen.length - 1]).toEqual(oneEdit);
 
+      // The dedupe: rewriting identical content changes no summary, so nothing
+      // new may be published — however many made it through above.
+      const published = seen.length;
       writeFileSync(path.join(root, 'main.ts'), 'export const answer = 43;\n');
       await Bun.sleep(250);
-      expect(seen).toHaveLength(2);
+      expect(seen).toHaveLength(published);
 
       await git(root, 'add', 'main.ts');
       await git(root, 'commit', '-q', '-m', 'update');
@@ -125,8 +137,12 @@ watchTest(
       await git(root, 'add', 'main.ts');
       // Bypass inotify: HTTP stage/commit path calls kick() after the write.
       watch.kick();
-      await waitFor(() => seen.length === 2);
-      expect(seen[1]).toEqual({
+      // Not `seen[1]`: staging is a process spawn, and on a loaded runner it
+      // costs several times the 50ms debounce that the write's own inotify event
+      // started — so the unstaged summary can legitimately publish first and take
+      // that slot. What kick() owes us is that the staged summary lands at all.
+      await waitFor(() => seen[seen.length - 1]?.files[0]?.staged === true);
+      expect(seen[seen.length - 1]).toEqual({
         files: [
           {
             path: 'main.ts',
@@ -138,6 +154,40 @@ watchTest(
           },
         ],
       });
+      watch.dispose();
+    });
+  },
+  REPO_TEST_TIMEOUT_MS,
+);
+
+// The same path with the loaded runner's ordering made explicit instead of left
+// to chance: the write's own event publishes the unstaged summary first, so the
+// staged one is the third publish rather than the second. This is the order that
+// failed CI on two release commits, and it fails deterministically against an
+// assertion that grades a fixed index.
+watchTest(
+  'kick publishes the staged summary even after the write published an unstaged one',
+  async () => {
+    await withRepo(async (root) => {
+      const seen: DiffSummary[] = [];
+      const watch = new GitWatch(
+        (summary) => seen.push(summary),
+        50,
+        undefined,
+        undefined,
+        noIgnoredDirs,
+      );
+      watch.setRoot(root);
+      await watch.whenScanned();
+      expect(seen).toEqual([{ files: [] }]);
+
+      writeFileSync(path.join(root, 'main.ts'), 'export const answer = 99;\n');
+      await waitFor(() => seen.length > 1);
+      expect(seen[1].files[0]?.staged).toBe(false);
+
+      await git(root, 'add', 'main.ts');
+      watch.kick();
+      await waitFor(() => seen[seen.length - 1]?.files[0]?.staged === true);
       watch.dispose();
     });
   },
