@@ -190,7 +190,6 @@ function GroupTab({
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: tab strip + toolbar buttons (new terminal, new agent chat) in one render
 export function SessionTabBar({
   hosts,
   healthByHost,
