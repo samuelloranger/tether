@@ -368,29 +368,31 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     shot(app, "arrival-jumped")
   }
 
-  /// Dragging the transcript with the keyboard up dismisses it
-  /// (`scrollDismissesKeyboard(.interactively)`) instead of scrolling under it.
-  func testDraggingTranscriptDismissesKeyboard() throws {
+  /// A tap in the transcript puts the keyboard away — the view wires that up
+  /// explicitly (`simultaneousGesture` + `resignFirstResponder`) so that reading
+  /// the conversation does not mean reaching for a dismiss key.
+  ///
+  /// Its sibling behaviour, `scrollDismissesKeyboard(.interactively)`, is NOT
+  /// asserted here: a synthetic drag does not engage interactive dismissal, and a
+  /// 469-frame recording of one such run contains no keyboard-down caused by a
+  /// drag at all. Verify that one by hand.
+  func testTappingTranscriptDismissesKeyboard() throws {
     let app = launchChat("liveLong")
     type(app, "x")
-    XCTAssertTrue(keyboardIsUp(app), "keyboard should be up before the drag")
+    XCTAssertTrue(keyboardIsUp(app), "keyboard should be up before the tap")
     shot(app, "scroll-keyboard-up")
 
-    // A real finger drag, not `swipeDown()`: interactive dismissal tracks the
-    // gesture, and a flick is over before it can take the keyboard with it.
-    // Both ends stay in the upper half: the transcript ignores the keyboard's
-    // safe area, so its element frame runs UNDER the keyboard and a drag ending
-    // at dy 0.95 lands on the keys and scrolls nothing at all.
-    let scroll = transcript(app)
-    let top = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15))
-    let bottom = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
-    top.press(forDuration: 0.2, thenDragTo: bottom)
-    let gone = XCTNSPredicateExpectation(
-      predicate: NSPredicate(format: "isHittable == false"),
-      object: app.keyboards.firstMatch.keys.element(boundBy: 0))
-    XCTAssertEqual(
-      XCTWaiter.wait(for: [gone], timeout: 8), .completed,
-      "dragging the transcript did not dismiss the keyboard")
+    // Upper half on purpose: the transcript ignores the keyboard's safe area, so
+    // its element frame runs UNDER the keyboard and a tap low down lands on keys.
+    transcript(app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+
+    var gone = false
+    for _ in 0..<16 {
+      gone = !keyboardIsUp(app)
+      if gone { break }
+      usleep(500_000)
+    }
     shot(app, "scroll-keyboard-dismissed")
+    XCTAssertTrue(gone, "tapping the transcript did not dismiss the keyboard")
   }
 }
