@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
+import { pairControl } from '@/auth/pairControl';
 import type { SignalState } from '@/pty/activity';
 import { signalSession } from '@/pty/signal';
-import { pairControl } from './pairControl';
 import { presentations } from './presentationRegistry';
 
 // The control plane. Served ONLY over the loopback unix socket (controlServe.ts),

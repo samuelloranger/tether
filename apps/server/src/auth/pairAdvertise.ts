@@ -1,5 +1,5 @@
 import { networkInterfaces } from 'node:os';
-import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, type TlsMode } from './tlsConfig';
+import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, type TlsMode } from '../tlsConfig';
 
 export function firstNonLoopbackIPv4(): string[] {
   const hosts: string[] = [];

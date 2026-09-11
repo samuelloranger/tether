@@ -3,10 +3,10 @@ import type { AgentDriver } from '@/agent/driver';
 import { FakeAgentDriver } from '@/agent/driver';
 import { getAgentMessages } from '@/agent/messages';
 import { AgentRegistry } from '@/agent/registry';
+import { type AuthDevice, RegistryError } from '@/auth/deviceRegistry';
 import { db } from '@/infra/db';
 import { getConfig } from '@/infra/settings';
 import type { FocusSubscriber } from '@/pty/registry';
-import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
 

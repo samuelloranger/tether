@@ -4,7 +4,7 @@ import {
   listDevices as registryList,
   renameDevice as registryRename,
   revokeDevice as registryRevoke,
-} from './deviceRegistry';
+} from '@/auth/deviceRegistry';
 
 export type DeviceArgs =
   | { kind: 'list' }
@@ -79,8 +79,8 @@ function defaultIssueToken(label: string): { token: string; id: string; label: s
   // Lazy: keep the native FFI (genKeypair) and the token secret off the import
   // path of `list`/`revoke`/`rename` and their unit tests.
   const { genKeypair } = require('./noiseFfi') as typeof import('./noiseFfi');
-  const { addDevice } = require('./deviceRegistry') as typeof import('./deviceRegistry');
-  const { mintToken } = require('./deviceToken') as typeof import('./deviceToken');
+  const { addDevice } = require('@/auth/deviceRegistry') as typeof import('@/auth/deviceRegistry');
+  const { mintToken } = require('@/auth/deviceToken') as typeof import('@/auth/deviceToken');
   const { pub } = genKeypair();
   const device = addDevice({ label, pubkey: Buffer.from(pub).toString('base64') });
   return { token: mintToken(device.id), id: device.id, label: device.label };

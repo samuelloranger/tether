@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import type { FrameIO } from '../noiseChannel';
+import { derivePsk, genKeypair, pairInitiator } from '../noiseFfi';
+import { serverFingerprint } from '../noiseIdentity';
 import { PairingError } from './enrollment';
-import type { FrameIO } from './noiseChannel';
-import { derivePsk, genKeypair, pairInitiator } from './noiseFfi';
-import { serverFingerprint } from './noiseIdentity';
 import { createPairControl, pairControlRoutes } from './pairControl';
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

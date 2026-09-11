@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { runReconnect } from './authGate';
-import type { FrameIO } from './noiseChannel';
-import { genKeypair, reconnectInitiator } from './noiseFfi';
+import type { FrameIO } from '../noiseChannel';
+import { genKeypair, reconnectInitiator } from '../noiseFfi';
+import { runReconnect } from './gate';
 
 function pipe(): [FrameIO, FrameIO] {
   const toServer: Uint8Array[] = [];

@@ -259,7 +259,7 @@ switch (cmd) {
   }
   case 'pair': {
     const { runPair } = await import('./pairCli');
-    const { advertisePairUrl, firstNonLoopbackIPv4 } = await import('./pairAdvertise');
+    const { advertisePairUrl, firstNonLoopbackIPv4 } = await import('@/auth/pairAdvertise');
     try {
       const plan = resolveListenerPlan();
       await runPair({

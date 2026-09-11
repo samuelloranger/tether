@@ -9,6 +9,9 @@ import type { AgentMessageRow } from '@/agent/messages';
 import { type AgentRegistry, sharedAgentRegistry } from '@/agent/registry';
 import { applyAgentMessage, defaultGetAgentMessages } from '@/agent/replay';
 import { type AgentUsageLimits, fetchAgentUsage } from '@/agent/usage';
+import type { AuthDevice } from '@/auth/deviceRegistry';
+import { listDevices, RegistryError, resolveTarget, revokeDevice } from '@/auth/deviceRegistry';
+import { mintToken as mintDeviceToken } from '@/auth/deviceToken';
 import { getSession } from '@/infra/db';
 import { logError } from '@/infra/log';
 import { testEvent } from '@/infra/testEvents';
@@ -25,9 +28,6 @@ import {
 } from '@/pty/registry';
 import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '@/pty/replayPlan';
 import { getReplayLogs as readReplayLogs } from '@/pty/replayRead';
-import type { AuthDevice } from './deviceRegistry';
-import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
-import { mintToken as mintDeviceToken } from './deviceToken';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 
 /**

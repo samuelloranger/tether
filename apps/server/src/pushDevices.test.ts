@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
+import { addDevice, revokeDevice } from '@/auth/deviceRegistry';
 import { db } from '@/infra/db';
-import { addDevice, revokeDevice } from './deviceRegistry';
 import { listPushDevices, registerPushDevice, removePushDevicesForAuthDevice } from './pushDevices';
 
 function pubkeyFill(byte: number): string {

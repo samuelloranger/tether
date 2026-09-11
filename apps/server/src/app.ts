@@ -1,11 +1,11 @@
 import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { authMiddleware } from '@/auth/bearer';
 import { logError, logInfo } from '@/infra/log';
 import { VERSION } from '@/infra/runtime';
 import { getConfig } from '@/infra/settings';
 import { testEvent } from '@/infra/testEvents';
 import { allowAdminRequest, scheduleAdminCommand, updateTargetVersion } from './admin';
-import { authMiddleware } from './auth';
 import { sendTestPush } from './push';
 import { isValidSecretKey } from './pushCrypto';
 import { registerPushDevice, removePushDevice } from './pushDevices';

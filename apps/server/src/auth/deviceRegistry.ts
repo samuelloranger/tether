@@ -1,6 +1,6 @@
 import { db } from '@/infra/db';
+import { removePushDevicesForAuthDevice } from '../pushDevices';
 import { closeDeviceChannels } from './deviceChannels';
-import { removePushDevicesForAuthDevice } from './pushDevices';
 
 export interface AuthDevice {
   id: string; // uuid v4

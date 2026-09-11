@@ -1,5 +1,5 @@
-import { addDevice } from '../deviceRegistry';
-import { mintToken } from '../deviceToken';
+import { addDevice } from '@/auth/deviceRegistry';
+import { mintToken } from '@/auth/deviceToken';
 
 export function randomPubkey(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');

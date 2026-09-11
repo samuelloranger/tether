@@ -1,5 +1,5 @@
 import QRCode from 'qrcode';
-import { groupPairCode } from './pairCli';
+import { groupPairCode } from '../pairCli';
 
 export function pairQrPayload(code: string, hostUrl: string): string {
   const grouped = groupPairCode(code);

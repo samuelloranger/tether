@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { db } from '@/infra/db';
-import { authMiddleware } from './auth';
+import { authMiddleware } from './bearer';
 import { addDevice } from './deviceRegistry';
 import { mintToken } from './deviceToken';
 
