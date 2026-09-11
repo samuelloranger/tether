@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
+import { app } from '@/http/app';
 import { deleteSession, upsertSession } from '@/infra/db';
 import { testAuthHeaders } from '@/testing/auth';
-import { app } from '../app';
 import { clearActivity, recordOutput } from './activity';
 
 test('GET /api/sessions annotates rows with live activity', async () => {

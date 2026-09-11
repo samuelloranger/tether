@@ -10,13 +10,13 @@ import { registerPushDevice, removePushDevice } from '@/push/devices';
 import { sendTestPush } from '@/push/send';
 import { getTlsReport, isSecureRequest } from '@/tls/runtime';
 import { allowAdminRequest, scheduleAdminCommand, updateTargetVersion } from './admin';
-import { configRoutes } from './routes/config';
-import { filesRoutes } from './routes/files';
-import { fsRoutes } from './routes/fs';
-import { gitRoutes } from './routes/git';
-import { noiseRoutes } from './routes/noise';
-import { presentationsRoutes } from './routes/presentations';
-import { sessionsRoutes } from './routes/sessions';
+import { configRoutes } from './config';
+import { filesRoutes } from './files';
+import { fsRoutes } from './fs';
+import { gitRoutes } from './git';
+import { noiseRoutes } from './noise';
+import { presentationsRoutes } from './presentations';
+import { sessionsRoutes } from './sessions';
 
 /** Bindings come from Bun.serve's fetch wrapper in serve.ts (peer + server). */
 export type AppEnv = {

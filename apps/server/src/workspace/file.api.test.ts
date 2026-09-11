@@ -3,11 +3,11 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { app } from '@/http/app';
 import { upsertSession } from '@/infra/db';
 import { clearLiveCwd, recordChunk } from '@/pty/liveCwd';
 import { testAuthHeaders } from '@/testing/auth';
 import { canonicalFixture, osc7Chunk } from '../../test-paths';
-import { app } from '../app';
 
 test('GET /api/sessions/:id/file serves workspace text once the shell has reported its cwd', async () => {
   const AUTH = testAuthHeaders();

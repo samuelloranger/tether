@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { sharedAgentRegistry } from '@/agent/registry';
 import { createAgentSession, db, deleteSession, getSession } from '@/infra/db';
 import { testAuthHeaders } from '@/testing/auth';
-import { app } from '../app';
+import { app } from './app';
 
 test('GET /api/sessions surfaces kind for agent sessions', async () => {
   const AUTH = testAuthHeaders();

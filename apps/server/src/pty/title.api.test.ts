@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
+import { app } from '@/http/app';
 import { deleteSession, upsertSession } from '@/infra/db';
 import { testAuthHeaders } from '@/testing/auth';
-import { app } from '../app';
 import { clearLiveCwd, reportCwd } from './liveCwd';
 import { clearTitle, recordTitleChunk } from './title';
 

@@ -56,7 +56,7 @@ test('deleteAgentMessages purges a session transcript', () => {
   expect(getAgentMessages(db, 'am-del', 0)).toHaveLength(0);
 });
 
-// The agent kill route (routes/sessions.ts) calls deleteAgentMessages alongside
+// The agent kill route (http/sessions.ts) calls deleteAgentMessages alongside
 // deleteSession — deleteSession itself only owns terminal_logs + the row.
 test('deleteAgentMessages + deleteSession together clear the transcript and the session row', () => {
   createAgentSession(db, { id: 'am-kill', workspaceRoot: '/tmp' });

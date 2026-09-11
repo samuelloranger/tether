@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { testAuthHeaders } from '@/testing/auth';
-import { app } from '../app';
+import { app } from './app';
 
 test('GET /api/fs/dirs lists subdirectories of a temp dir, ignoring files and dotfiles', async () => {
   const AUTH = testAuthHeaders();
