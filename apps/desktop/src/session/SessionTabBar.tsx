@@ -3,8 +3,8 @@ import type { DrawerSession, HostHealthStatus, HostProfile } from '@/core/types'
 import type { PaneDir, PaneSide } from '@/pane/paneTree';
 import { aggregateDot, groupHostIds, groupLabel, isGroup, type View, viewMemberKeys } from '@/pane/viewModel';
 import { isRecentlyActive } from '@/platform/desktopNavigation';
+import type { TetherDesktop } from '@/shell/useTetherDesktop';
 import { TerminalToolbar } from '@/terminal/TerminalToolbar';
-import type { TetherDesktop } from '../useTetherDesktop';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { parseSessionKey, sessionKey } from './sessionKey';

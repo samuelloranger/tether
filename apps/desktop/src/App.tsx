@@ -53,18 +53,18 @@ import {
 } from '@/settings/preferences';
 import { ServerSettingsScreen } from '@/settings/ServerSettingsScreen';
 import { LocalSettingsScreen } from '@/settings/SettingsScreen';
+import { AlertModal } from '@/shell/AlertModal';
+import { AppOverflowMenu } from '@/shell/AppOverflowMenu';
+import { useShellChrome } from '@/shell/useHeatArrival';
+import { useTetherDesktop } from '@/shell/useTetherDesktop';
 import { TerminalEmpty } from '@/terminal/TerminalEmpty';
 import { FileViewer } from '@/workspace/FileViewer';
 import { setFileOpenListener } from '@/workspace/fileOpenBus';
 import { useWorkspace, WorkspacePanel } from '@/workspace/useWorkspace';
-import { AlertModal } from './AlertModal';
-import { AppOverflowMenu } from './AppOverflowMenu';
 import { AgentFolderPicker } from './agent/AgentFolderPicker';
 import { GitDrawer } from './git/GitDrawer';
 import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
-import { useShellChrome } from './useHeatArrival';
-import { useTetherDesktop } from './useTetherDesktop';
 
 function useMediaScheme(): 'light' | 'dark' {
   const [scheme, setScheme] = useState<'light' | 'dark'>(() =>

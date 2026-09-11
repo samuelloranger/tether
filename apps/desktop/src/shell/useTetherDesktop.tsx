@@ -1,5 +1,6 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: desktop app state hook — owns hosts, sessions, pairing, and the screen state machine in one place
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { nextAgentSessionId } from '@/agent/newChat';
 import {
   coreCacheDelete,
   coreHostRetry,
@@ -39,7 +40,6 @@ import { sessionLabel } from '@/session/sessionLabel';
 import { applyKillTombstones, dropSession, rememberKill, replaceHostSessions } from '@/session/sessionList';
 import { pickResume, restorableIds } from '@/session/sessionResume';
 import type { FrameApplyResult } from '@/terminal/frameHandler';
-import { nextAgentSessionId } from './agent/newChat';
 
 export type { DrawerSession } from '@/core/types';
 
