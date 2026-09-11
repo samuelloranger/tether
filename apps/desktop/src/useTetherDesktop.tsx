@@ -440,7 +440,7 @@ export function useTetherDesktop() {
       void coreNotifyWaitingEdge(previous?.activity, frame.activity, isActive).then(async (should) => {
         if (!should) return;
         if (localStorage.getItem('tether_notifications_enabled') === 'false') return;
-        const { sendOsNotification } = await import('./desktopNotifications');
+        const { sendOsNotification } = await import('@/platform/desktopNotifications');
         await sendOsNotification(previous ? sessionLabel(previous) : sessionId, 'Needs your input');
       });
       setSessions((previous) =>

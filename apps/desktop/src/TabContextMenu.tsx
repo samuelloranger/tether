@@ -1,5 +1,5 @@
+import { MOD_LABEL } from '@/platform/platform';
 import type { PaneDir, PaneSide } from './paneTree';
-import { MOD_LABEL } from './platform';
 
 export function TabContextMenu({
   x,

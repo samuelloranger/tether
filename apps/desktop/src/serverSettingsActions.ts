@@ -1,4 +1,4 @@
-import { confirmAction } from './dialog';
+import { confirmAction } from '@/platform/dialog';
 import {
   loadServerVersion,
   patchServerConfig,

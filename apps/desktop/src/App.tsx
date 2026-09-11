@@ -1,11 +1,14 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: root app shell — routes every screen and wires the drawer, terminal panes, git, and workspace panels
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type DrawerSession, type HostHealthStatus, httpOriginFor } from '@/core/types';
+import { ensureNotificationPermission } from '@/platform/desktopNotifications';
+import { useDeepLinks } from '@/platform/useDeepLinks';
+import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
+import { useWindowTheme } from '@/platform/useWindowTheme';
 import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
 import { AgentFolderPicker } from './agent/AgentFolderPicker';
 import { DevicesScreen } from './DevicesScreen';
-import { ensureNotificationPermission } from './desktopNotifications';
 import type { DropIntent } from './dropZone';
 import { FileViewer } from './FileViewer';
 import { setFileOpenListener } from './fileOpenBus';
@@ -49,12 +52,9 @@ import { LocalSettingsScreen } from './SettingsScreen';
 import { sessionKey } from './sessionKey';
 import { touchLru } from './sessionLru';
 import { TerminalEmpty } from './TerminalEmpty';
-import { useDeepLinks } from './useDeepLinks';
 import { useShellChrome } from './useHeatArrival';
-import { useLaunchUpdateCheck } from './useLaunchUpdateCheck';
 import { useTabDrag } from './useTabDrag';
 import { useTetherDesktop } from './useTetherDesktop';
-import { useWindowTheme } from './useWindowTheme';
 import { useWorkspace, WorkspacePanel } from './useWorkspace';
 import {
   moveSessionIntoView,

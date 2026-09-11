@@ -1,5 +1,5 @@
+import { MOD_LABEL } from '@/platform/platform';
 import type { PaneDir, PaneSide } from './paneTree';
-import { MOD_LABEL } from './platform';
 
 const svgProps = {
   viewBox: '0 0 16 16',

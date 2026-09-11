@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { confirmAction } from '../dialog';
+import { confirmAction } from '@/platform/dialog';
 import {
   bytesToDataUrl,
   canPushHead,

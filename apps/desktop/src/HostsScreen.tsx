@@ -1,5 +1,5 @@
 import type { HostHealthStatus, HostProfile } from '@/core/types';
-import { confirmAction } from './dialog';
+import { confirmAction } from '@/platform/dialog';
 
 const HEALTH_LABEL: Record<HostHealthStatus, string> = {
   unknown: 'Checking…',

@@ -1,5 +1,5 @@
-import { sendOsNotification } from './desktopNotifications';
-import { checkForUpdates } from './desktopUpdater';
+import { sendOsNotification } from '@/platform/desktopNotifications';
+import { checkForUpdates } from '@/platform/desktopUpdater';
 import { OverflowMenu } from './OverflowMenu';
 import { type AppPreferences, savePreferences } from './preferences';
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { type AlertRequest, subscribeAlert } from './dialog';
+import { type AlertRequest, subscribeAlert } from '@/platform/dialog';
 
 export function AlertModal() {
   const [req, setReq] = useState<AlertRequest | null>(null);
