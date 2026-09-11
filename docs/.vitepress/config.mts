@@ -7,6 +7,10 @@ export default defineConfig({
   description: "Persistent remote-shell console — documentation",
   sitemap: { hostname: "https://samlo.cloud/tether/" },
   cleanUrls: true,
+  // Internal plan/spec docs, not part of the published site. VitePress compiles
+  // every .md as a Vue SFC, and these contain `{{ }}` that Vue parses as
+  // interpolation and fails on.
+  srcExclude: ["superpowers/**"],
   appearance: false,
   themeConfig: {
     logo: { src: "/icon.svg", alt: "Tether" },
@@ -23,6 +27,7 @@ export default defineConfig({
           { text: "Terminal basics", link: "/terminal/basics" },
           { text: "Sessions & tabs", link: "/terminal/sessions" },
           { text: "Saved commands & search", link: "/terminal/saved-commands" },
+          { text: "Session signals", link: "/terminal/session-signals" },
           { text: "Git, files & previews", link: "/workspace" },
           { text: "Security & networking", link: "/security" },
           { text: "Reach from anywhere", link: "/reach-from-anywhere" },

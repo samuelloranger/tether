@@ -1648,14 +1648,38 @@ cat /tmp/tether-task13/out.log
 
 Expected: `/api/status` returns JSON with a version, and the log shows no unresolved-module or missing-file errors.
 
-- [ ] **Step 5: One end-to-end run**
+- [ ] **Step 5: Prove the e2e scripts' rewritten paths**
+
+Every `scripts/e2e/run-*.sh` drives an **iOS simulator XCUITest** — it needs
+macOS, `xcodebuild`, and a booted simulator (`SIM_ID`), so it cannot run on the
+Linux host. Do not try; it exits on its `<TestClass>` argument check before
+reaching anything this refactor touched.
+
+What the refactor actually changed in those scripts is one line each — the
+server launch — plus `build-ffi.ts` and `preseed-fixture.ts`. Verify those
+directly:
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bash scripts/e2e/run-lifecycle.sh
+# 1. every rewritten launch line
+grep -hn "apps/server/src/main.ts\|apps/server/src/index.ts" scripts/e2e/*.sh scripts/scratch-server.sh
+# 2. the FFI step each script runs first
+bun scripts/build-ffi.ts
+# 3. the exact invocation the scripts use, isolated
+rm -rf /tmp/e2e-check && mkdir -p /tmp/e2e-check
+TETHER_DB_PATH=/tmp/e2e-check/tether.db TETHER_PORT=8199 TETHER_TLS=off \
+  TETHER_CONTROL_SOCK=/tmp/e2e-check/control.sock \
+  bun apps/server/src/main.ts serve >/tmp/e2e-check/server.log 2>&1 &
+sleep 6; curl -sf http://127.0.0.1:8199/api/status; kill %1
+# 4. the fixture's rewritten imports
+bun -e "await import('./scripts/e2e/preseed-fixture.ts')"
 ```
 
-Expected: PASS. This is the check that proves the rewritten `bun apps/server/src/main.ts serve` paths in the e2e runners are correct.
+Expected: 13 launch lines all reading `apps/server/src/main.ts`, the FFI copy
+landing at `apps/server/src/noise/nativeLib`, a JSON `/api/status`, and the
+fixture printing its device JSON.
+
+Running a real simulator e2e stays a macOS pre-merge step.
 
 - [ ] **Step 6: Full lint and both suites**
 
