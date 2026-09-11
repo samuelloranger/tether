@@ -3,14 +3,27 @@
 
   /// Screenshot / preview harness. Renders the agent-chat surfaces with seeded
   /// data so the UI can be captured on the simulator without a live host.
-  /// Launch with `-agentDemo <state>` where state ∈ chat|approval|picker|empty.
+  /// Launch with `-agentDemo <state>` where state ∈
+  /// chat|approval|picker|empty|diff|scroll|live|liveLong.
   public struct AgentChatDemoRoot: View {
     public init() {}
+
+    /// Held for the life of the demo: the scripted host that answers the composer
+    /// and pushes unsolicited frames. Built once, never per body pass.
+    @State private var script: AgentChatScript?
 
     public static var launchState: String? {
       let args = ProcessInfo.processInfo.arguments
       guard let i = args.firstIndex(of: "-agentDemo"), i + 1 < args.count else { return nil }
       return args[i + 1]
+    }
+
+    /// `-arriveAfter <seconds>`: when the scripted host pushes the turn nobody
+    /// asked for. Absent → it never arrives.
+    static var arriveAfter: Double? {
+      let args = ProcessInfo.processInfo.arguments
+      guard let i = args.firstIndex(of: "-arriveAfter"), i + 1 < args.count else { return nil }
+      return Double(args[i + 1])
     }
 
     public var body: some View {
@@ -35,9 +48,24 @@
         // Long, idle transcript for the scroll-stability check: it must NOT move
         // when the keyboard appears or while the composer is being typed into.
         AgentChatView(model: AgentChatSeed.longConversation())
+      case "live", "liveLong":
+        // A scripted host rather than a static transcript: sends get streamed
+        // answers and `-arriveAfter <s>` pushes an unsolicited turn, so a UI test
+        // can drive a real conversation with no server in the loop. `liveLong`
+        // starts on a transcript tall enough to scroll.
+        liveChat(seeded: state == "liveLong")
       default:
         AgentChatView(model: AgentChatSeed.conversation())
       }
+    }
+
+    @ViewBuilder private func liveChat(seeded: Bool) -> some View {
+      let live = script ?? AgentChatScript(seeded: seeded, arriveAfter: Self.arriveAfter)
+      AgentChatView(model: live.model)
+        .onAppear {
+          if script == nil { script = live }
+          live.start()
+        }
     }
   }
 

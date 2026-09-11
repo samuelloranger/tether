@@ -81,6 +81,15 @@ struct AgentTranscriptView: View {
   /// starts true (a fresh chat opens pinned) and flips off the moment the user
   /// scrolls up to read history, so streamed deltas stop yanking them back.
   @State private var following = true
+  /// False until the open-time scroll to the foot has landed. The geometry
+  /// callbacks fire during that first layout with the PRE-scroll offset, which
+  /// latched `following` off — so a chat opened on a transcript taller than the
+  /// screen sat at the foot showing jump-to-latest and refused to follow new
+  /// output until the user tapped it.
+  @State private var settled = false
+  /// Whether the scroll is currently being driven by a finger. Only a finger may
+  /// turn `following` off — see the tracker below.
+  @State private var userScrolling = false
   @State private var viewportHeight: CGFloat = 0
   @State private var bottomY: CGFloat = 0
 
@@ -94,6 +103,10 @@ struct AgentTranscriptView: View {
           emptyState.padding(.top, 80)
         } else {
           LazyVStack(alignment: .leading, spacing: 24) {
+            // No accessibilityIdentifier on the row: SwiftUI pushes a container's
+            // identifier down onto every leaf inside it, which would shadow the
+            // per-part ids (agentUserBubble / agentAssistantTurn / agentToolCard)
+            // that the UI tests query.
             ForEach(model.messages) { message in
               AgentMessageRow(
                 message: message,
@@ -102,9 +115,12 @@ struct AgentTranscriptView: View {
               )
               .id(message.id)
             }
-            if model.turn == .thinking { ThinkingRow() }
+            if model.turn == .thinking {
+              ThinkingRow().accessibilityIdentifier("agentThinking")
+            }
             ForEach(Array(model.queued.enumerated()), id: \.offset) { index, text in
               QueuedRow(text: text) { model.cancelQueued(at: index) }
+                .accessibilityIdentifier("agentQueuedRow")
             }
             // Zero-height sentinel the reader scrolls to. Anchoring on a fixed
             // trailing element (not `.defaultScrollAnchor`) means only an
@@ -123,6 +139,7 @@ struct AgentTranscriptView: View {
           .padding(.vertical, 18)
         }
       }
+      .accessibilityIdentifier("agentTranscript")
       .coordinateSpace(name: Self.scrollSpace)
       .background(
         GeometryReader { geo in
@@ -152,7 +169,22 @@ struct AgentTranscriptView: View {
           #endif
         }
       )
-      .agentNearBottomTracker { following = $0 }
+      // Follow is re-armed whenever the foot comes back into view, but it is only
+      // dropped by the USER scrolling away. Geometry alone is not enough: every
+      // `scrollTo` while streaming reports an intermediate offset that is not at
+      // the foot, which dropped follow mid-turn and left jump-to-latest showing
+      // over a transcript that was already at the bottom.
+      .agentScrollTracker(
+        nearBottom: { near in
+          guard settled else { return }
+          if near {
+            following = true
+          } else if userScrolling {
+            following = false
+          }
+        },
+        userScrolling: { userScrolling = $0 }
+      )
       .onChange(of: model.revision) {
         guard following else { return }
         scrollToBottom(proxy)
@@ -163,6 +195,10 @@ struct AgentTranscriptView: View {
         Task { @MainActor in
           await Task.yield()
           scrollToBottom(proxy)
+          // Only now may the trackers speak: see `settled`.
+          try? await Task.sleep(nanoseconds: 250_000_000)
+          following = true
+          settled = true
         }
       }
       // Jump-to-latest: only while the user has scrolled up off the foot (and
@@ -189,7 +225,7 @@ struct AgentTranscriptView: View {
 
   private func updateFollowingForLegacyScroll() {
     if #available(iOS 18.0, *) { return }
-    guard viewportHeight > 0 else { return }
+    guard settled, viewportHeight > 0 else { return }
     let nearBottom = bottomY <= viewportHeight + 48
     if nearBottom != following {
       following = nearBottom
@@ -210,6 +246,7 @@ struct AgentTranscriptView: View {
     .padding(.bottom, 14)
     .transition(.scale.combined(with: .opacity))
     .accessibilityLabel("Scroll to latest")
+    .accessibilityIdentifier("agentJumpToLatest")
   }
 
   private var emptyState: some View {
@@ -244,14 +281,23 @@ private struct BottomYKey: PreferenceKey {
 
 private extension View {
   @ViewBuilder
-  func agentNearBottomTracker(_ onChange: @escaping (Bool) -> Void) -> some View {
+  func agentScrollTracker(
+    nearBottom: @escaping (Bool) -> Void,
+    userScrolling: @escaping (Bool) -> Void
+  ) -> some View {
     if #available(iOS 18.0, *) {
-      self.onScrollGeometryChange(for: Bool.self) { geo in
-        geo.contentOffset.y >= geo.contentSize.height - geo.containerSize.height
-          - geo.contentInsets.bottom - 48
-      } action: { _, nearBottom in
-        onChange(nearBottom)
-      }
+      self
+        .onScrollGeometryChange(for: Bool.self) { geo in
+          geo.contentOffset.y >= geo.contentSize.height - geo.containerSize.height
+            - geo.contentInsets.bottom - 48
+        } action: { _, near in
+          nearBottom(near)
+        }
+        // `.animating` is our own scrollTo; the three finger-driven phases are
+        // what may drop follow.
+        .onScrollPhaseChange { _, phase in
+          userScrolling(phase == .tracking || phase == .interacting || phase == .decelerating)
+        }
     } else {
       self
     }
@@ -312,6 +358,7 @@ struct AgentComposerView: View {
           .font(.body)
           .foregroundStyle(TetherColors.textPrimary)
           .focused($focused)
+          .accessibilityIdentifier("agentComposerInput")
           .padding(.horizontal, 13)
           .padding(.vertical, 9)
           .background(TetherColors.input)
@@ -336,6 +383,7 @@ struct AgentComposerView: View {
           .clipShape(Circle())
         }
         .disabled(!sendEnabled || showSpinner)
+        .accessibilityIdentifier("agentSendButton")
       }
     }
     .padding(.horizontal, 14)
@@ -534,6 +582,7 @@ struct AgentMessageRow: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .contextMenu { CopyButton(message.plainText) }
+        .accessibilityIdentifier("agentUserBubble")
     }
   }
 
@@ -560,6 +609,7 @@ struct AgentMessageRow: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .contextMenu { CopyButton(message.plainText) }
+    .accessibilityIdentifier("agentAssistantTurn")
   }
 
   /// Cost + tokens for a finished turn, muted and small under the reply.
