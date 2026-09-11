@@ -10,7 +10,7 @@ use tether_core::session_cache::SessionCache;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::http;
-use crate::noise_token::CachedToken;
+use crate::noise::token::CachedToken;
 use crate::storage::{new_host_store, DesktopHostStore};
 
 /// Per-connection handle for a live Noise terminal session. Mirrors the password
