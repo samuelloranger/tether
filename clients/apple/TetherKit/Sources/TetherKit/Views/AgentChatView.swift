@@ -147,8 +147,14 @@ struct AgentTranscriptView: View {
         }
       )
       .onPreferenceChange(ViewportHeightKey.self) { h in
+        let shrank = viewportHeight > 0 && h < viewportHeight - 1
         viewportHeight = h
         updateFollowingForLegacyScroll()
+        // The keyboard rising shrinks the viewport without scrolling anything, so
+        // a chat pinned at the foot hid its newest line behind the keyboard — and
+        // offered no jump-to-latest either, because follow was still on. Re-pin.
+        // Only while following: a reader parked up in history must not be moved.
+        if shrank, settled, following { scrollToBottom(proxy) }
       }
       .onPreferenceChange(BottomYKey.self) { y in
         bottomY = y

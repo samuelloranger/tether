@@ -279,6 +279,29 @@ final class AgentChatScrollTests: AgentChatUITestCase {
       "typing scrolled the transcript to the foot")
   }
 
+  /// Pinned at the foot, raising the keyboard must keep the newest line visible.
+  /// The keyboard shrinks the viewport without scrolling, so the foot used to
+  /// end up behind the keys — with no jump-to-latest offered either, because
+  /// follow was still on.
+  func testKeyboardRiseKeepsTheFootVisibleWhenPinned() throws {
+    let app = launchChat("liveLong")
+    XCTAssertTrue(transcript(app).waitForExistence(timeout: 15), "transcript never appeared")
+    sleep(2)
+
+    // The tail of the seeded transcript: turn 5's usage line.
+    let tail = text(app, containing: "21.6k↑")
+    XCTAssertTrue(tail.waitForExistence(timeout: 10), "transcript did not open at the foot")
+
+    type(app, "x")
+    XCTAssertTrue(
+      tail.isHittable,
+      "raising the keyboard hid the newest line behind it while the chat was pinned at the foot")
+    XCTAssertFalse(
+      app.buttons["agentJumpToLatest"].firstMatch.exists,
+      "still pinned at the foot, so no jump-to-latest should be offered")
+    shot(app, "keyboard-up-at-foot")
+  }
+
   /// Scrolled up to read history, the keyboard rising must not scroll the
   /// transcript: the same message stays on screen and follow stays off (the
   /// jump-to-latest affordance is still offered).
