@@ -83,6 +83,11 @@ fi
 # before it tests anything — so this is a backstop, not an expected wait.
 CI_WAIT_SECONDS=${CI_WAIT_SECONDS:-3600}
 CI_POLL_SECONDS=${CI_POLL_SECONDS:-20}
+# How long to keep looking for a run that does not exist yet. CI triggers on
+# pushes to main and on pull requests, so releasing from any other branch
+# produces no run at all — and waiting the full hour to discover that is worse
+# than saying so.
+CI_APPEAR_SECONDS=${CI_APPEAR_SECONDS:-300}
 
 # Latest CI run for one commit as "status|conclusion|url". Empty when GitHub has
 # not created the run yet, which is normal for the first seconds after a push.
@@ -95,9 +100,17 @@ ci_run_for() {
 wait_for_ci() {
   local sha=$1
   local deadline=$(( $(date +%s) + CI_WAIT_SECONDS ))
+  local appear_by=$(( $(date +%s) + CI_APPEAR_SECONDS ))
   local run status conclusion url reported=""
   while :; do
     run=$(ci_run_for "$sha")
+    if [ -z "$run" ] && [ "$(date +%s)" -ge "$appear_by" ]; then
+      echo "Error: no CI run exists for $sha after ${CI_APPEAR_SECONDS}s." >&2
+      echo "       CI runs on pushes to main and on pull requests. Releasing from" >&2
+      echo "       '${BRANCH:-this branch}' may never produce one — open a PR, dispatch the CI" >&2
+      echo "       workflow for this commit, or re-run with --force." >&2
+      return 1
+    fi
     if [ -n "$run" ]; then
       IFS='|' read -r status conclusion url <<< "$run"
       if [ "$status" = "completed" ]; then

@@ -130,6 +130,18 @@ test('gives up when no run ever appears', async () => {
 });
 
 /**
+ * CI triggers on pushes to main and on pull requests. A release cut from any
+ * other branch produces no run at all, and spending the full hour to find that
+ * out — then failing with a timeout — hides the actual problem.
+ */
+test('says so quickly when the branch produces no run at all', async () => {
+  const { code, stderr } = await waitForCi([null, null], { CI_APPEAR_SECONDS: '0' });
+  expect(code).toBe(1);
+  expect(stderr).toContain('no CI run exists');
+  expect(stderr).toContain('pull requests');
+});
+
+/**
  * Order is the whole point: the wait has to sit between pushing the version bump
  * and pushing the tag. Before the push there is no run to grade; after the tag,
  * release.yml is already building and the gate is decoration.
