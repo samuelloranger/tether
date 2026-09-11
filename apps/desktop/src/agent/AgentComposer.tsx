@@ -17,11 +17,7 @@ export function AgentComposer({
 }) {
   const { draft, turn, queued, pendingApproval, sessionUsage, status } = snapshot;
   const streaming = turn !== 'idle';
-  const { matches, paletteOpen, submit, runCommand, onKeyDown, resolve } = useAgentComposer(
-    model,
-    snapshot,
-    send,
-  );
+  const { matches, paletteOpen, submit, runCommand, onKeyDown, resolve } = useAgentComposer(model, snapshot, send);
 
   return (
     <div className="agent-composer">
@@ -64,9 +60,7 @@ export function AgentComposer({
         </div>
       ) : null}
 
-      {paletteOpen ? (
-        <AgentPalette matches={matches} index={snapshot.paletteIndex} onRun={runCommand} />
-      ) : null}
+      {paletteOpen ? <AgentPalette matches={matches} index={snapshot.paletteIndex} onRun={runCommand} /> : null}
 
       <AgentInfoStrip status={status} sessionUsage={sessionUsage} />
 
@@ -80,22 +74,11 @@ export function AgentComposer({
           rows={1}
         />
         {streaming ? (
-          <button
-            type="button"
-            className="agent-stop"
-            onClick={() => send(agentInterrupt())}
-            aria-label="Stop"
-          >
+          <button type="button" className="agent-stop" onClick={() => send(agentInterrupt())} aria-label="Stop">
             ■
           </button>
         ) : (
-          <button
-            type="button"
-            className="agent-send"
-            onClick={submit}
-            disabled={!draft.trim()}
-            aria-label="Send"
-          >
+          <button type="button" className="agent-send" onClick={submit} disabled={!draft.trim()} aria-label="Send">
             ↑
           </button>
         )}

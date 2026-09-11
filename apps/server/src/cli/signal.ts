@@ -1,0 +1,100 @@
+import type { SignalState } from '@/pty/activity';
+
+export type SignalArgs =
+  | { kind: 'send'; state: SignalState; title?: string; body?: string }
+  | { kind: 'hooks' };
+
+const STATES: readonly string[] = ['working', 'waiting', 'done'];
+
+const USAGE =
+  'Usage: tether signal <working|waiting|done> [--title T] [--body B] | tether signal hooks';
+
+export function parseSignalArgs(argv: string[]): SignalArgs {
+  if (argv[0] === 'hooks') {
+    if (argv.length > 1) throw new Error(USAGE);
+    return { kind: 'hooks' };
+  }
+  if (!argv[0] || !STATES.includes(argv[0])) throw new Error(USAGE);
+  const out: Extract<SignalArgs, { kind: 'send' }> = {
+    kind: 'send',
+    state: argv[0] as SignalState,
+  };
+  for (let i = 1; i < argv.length; i += 2) {
+    const value = argv[i + 1];
+    if (!value || (argv[i] !== '--title' && argv[i] !== '--body')) throw new Error(USAGE);
+    if (argv[i] === '--title') out.title = value;
+    if (argv[i] === '--body') out.body = value;
+  }
+  return out;
+}
+
+export interface SignalDeps {
+  /** The daemon's loopback control socket (~/.tether/control.sock). */
+  sock: string;
+  /** `TETHER_SESSION_ID`, exported into every session by pty.ts. */
+  sessionId?: string;
+  fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+}
+
+export async function runSignal(args: SignalArgs, deps: SignalDeps): Promise<void> {
+  if (args.kind === 'hooks') {
+    console.log(claudeHookSnippet());
+    // Printed after the JSON, not inside it, so the block above stays pasteable.
+    console.log(
+      '\n# Paste the "hooks" block into ~/.claude/settings.json.\n' +
+        '# Then remove "preferredNotifChannel": "ghostty" if you have it — the\n' +
+        '# hooks replace it, and tether suppresses the duplicate OSC push anyway.',
+    );
+    return;
+  }
+  // Refuse rather than guess. There is no safe default session: signalling the
+  // wrong tab is worse than not signalling at all, because it marks a shell you
+  // are not looking at as finished.
+  if (!deps.sessionId) {
+    throw new Error('No TETHER_SESSION_ID — run this from inside a tether session.');
+  }
+  const res = await (deps.fetch ?? fetch)('http://localhost/control/signal', {
+    unix: deps.sock,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: deps.sessionId,
+      state: args.state,
+      ...(args.title ? { title: args.title } : {}),
+      ...(args.body ? { body: args.body } : {}),
+    }),
+  } as RequestInit);
+  if (!res.ok) throw new Error(`Tether signal failed (${res.status}). Is tether running?`);
+}
+
+/**
+ * The Claude Code hook configuration, printed for the user to paste into
+ * `~/.claude/settings.json`.
+ *
+ * Printed rather than written: this edits a file the user owns and may have
+ * hand-tuned, and a merge this CLI gets wrong costs them their whole hook
+ * setup. The two events are what make this worth doing at all — `Notification`
+ * fires when Claude is blocked on permission or input, `Stop` when a turn ends,
+ * and those are exactly the two things the OSC 777 stream cannot tell apart.
+ */
+export function claudeHookSnippet(): string {
+  const hook = (state: SignalState) => [
+    { hooks: [{ type: 'command', command: `tether signal ${state}` }] },
+  ];
+  return JSON.stringify(
+    {
+      hooks: {
+        // The prompt-submit hook is not decoration: an agent-driven session
+        // ignores its own output, so this is what re-lights it the instant you
+        // send a turn. A keystroke also ends a `done`, which is the fallback
+        // for configs written before this hook existed — but that only fires
+        // for input typed through Tether, so wire all three.
+        UserPromptSubmit: hook('working'),
+        Notification: hook('waiting'),
+        Stop: hook('done'),
+      },
+    },
+    null,
+    2,
+  );
+}

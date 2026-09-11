@@ -24,10 +24,10 @@ cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; pki
 trap cleanup EXIT
 
 TETHER_DB_PATH="$DB1" TETHER_PORT="$PORT1" TETHER_TLS=off TETHER_TEST_LOG="$EVT1" \
-  bun apps/server/src/server/main.ts serve >"$E2E_DIR/server1.log" 2>&1 &
+  bun apps/server/src/main.ts serve >"$E2E_DIR/server1.log" 2>&1 &
 PIDS+=($!)
 HOME="$HOME2" TETHER_DB_PATH="$DB2" TETHER_PORT="$PORT2" TETHER_TLS=off TETHER_TEST_LOG="$EVT2" \
-  bun apps/server/src/server/main.ts serve >"$E2E_DIR/server2.log" 2>&1 &
+  bun apps/server/src/main.ts serve >"$E2E_DIR/server2.log" 2>&1 &
 PIDS+=($!)
 
 for port in "$PORT1" "$PORT2"; do

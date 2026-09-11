@@ -15,16 +15,12 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
         </button>
         <h1>{props.host.name}</h1>
         <p className="error">
-          {props.health === 'unauthorized'
-            ? 'Unauthorized. This device may have been revoked.'
-            : 'Host unreachable.'}
+          {props.health === 'unauthorized' ? 'Unauthorized. This device may have been revoked.' : 'Host unreachable.'}
         </p>
         <button type="button" onClick={props.onRetry}>
           Retry
         </button>
-        {s.message ? (
-          <p className={s.message.kind === 'error' ? 'error' : 'success-msg'}>{s.message.text}</p>
-        ) : null}
+        {s.message ? <p className={s.message.kind === 'error' ? 'error' : 'success-msg'}>{s.message.text}</p> : null}
         <ConnectionSection s={s} />
         <button type="button" className="secondary danger" onClick={() => void s.removeHost()}>
           Remove this host
@@ -41,9 +37,7 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
       <h1>{props.host.name}</h1>
       {s.version ? <p className="muted">Server {s.version}</p> : null}
       {s.loading && !s.draft ? <p className="muted">Loading…</p> : null}
-      {s.message ? (
-        <p className={s.message.kind === 'error' ? 'error' : 'success-msg'}>{s.message.text}</p>
-      ) : null}
+      {s.message ? <p className={s.message.kind === 'error' ? 'error' : 'success-msg'}>{s.message.text}</p> : null}
 
       <ConnectionSection s={s} />
 
@@ -61,11 +55,7 @@ export function ServerSettingsScreen(props: ServerSettingsProps) {
         </div>
         {s.admin ? (
           <div className="admin-form">
-            <p>
-              {s.admin === 'update'
-                ? 'Update the server to the latest release?'
-                : 'Restart the server?'}
-            </p>
+            <p>{s.admin === 'update' ? 'Update the server to the latest release?' : 'Restart the server?'}</p>
             <p className="hint">Holder-backed sessions survive and reconnect.</p>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => s.setAdmin(null)}>
@@ -111,13 +101,7 @@ function ConnectionSection({ s }: { s: ReturnType<typeof useServerSettings> }) {
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: form sections mirror ServerSettingsSections
-function DraftForm({
-  s,
-  draft,
-}: {
-  s: ReturnType<typeof useServerSettings>;
-  draft: ServerSettingsDraft;
-}) {
+function DraftForm({ s, draft }: { s: ReturnType<typeof useServerSettings>; draft: ServerSettingsDraft }) {
   return (
     <>
       <section className="settings-section">
@@ -130,9 +114,7 @@ function DraftForm({
             onChange={(e) => s.set('identity', { ...draft.identity, name: e.target.value })}
           />
         </label>
-        {s.validationErrors.identityName ? (
-          <p className="error">{s.validationErrors.identityName}</p>
-        ) : null}
+        {s.validationErrors.identityName ? <p className="error">{s.validationErrors.identityName}</p> : null}
         <div className="color-swatches">
           {s.identityColors.map((color) => (
             <button
@@ -187,9 +169,7 @@ function DraftForm({
             onChange={(e) => s.set('longJobSeconds', e.target.value)}
           />
         </label>
-        {s.validationErrors.longJobSeconds ? (
-          <p className="error">{s.validationErrors.longJobSeconds}</p>
-        ) : null}
+        {s.validationErrors.longJobSeconds ? <p className="error">{s.validationErrors.longJobSeconds}</p> : null}
         <button
           type="button"
           className="secondary"
@@ -227,9 +207,7 @@ function DraftForm({
             onChange={(e) => s.set('session', { ...draft.session, scrollbackRows: e.target.value })}
           />
         </label>
-        {s.validationErrors.scrollbackRows ? (
-          <p className="error">{s.validationErrors.scrollbackRows}</p>
-        ) : null}
+        {s.validationErrors.scrollbackRows ? <p className="error">{s.validationErrors.scrollbackRows}</p> : null}
         <label>
           Silence threshold (seconds)
           <input
@@ -238,14 +216,10 @@ function DraftForm({
             onChange={(e) => s.set('session', { ...draft.session, silenceMs: e.target.value })}
           />
         </label>
-        {s.validationErrors.silenceMs ? (
-          <p className="error">{s.validationErrors.silenceMs}</p>
-        ) : null}
+        {s.validationErrors.silenceMs ? <p className="error">{s.validationErrors.silenceMs}</p> : null}
         <button
           type="button"
-          disabled={
-            s.readOnly || !s.dirty || Object.keys(s.validationErrors).length > 0 || s.saving
-          }
+          disabled={s.readOnly || !s.dirty || Object.keys(s.validationErrors).length > 0 || s.saving}
           onClick={() => void s.save()}
         >
           Save settings

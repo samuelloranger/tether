@@ -63,8 +63,7 @@ export function summarize(name: string, inputJson: string): string {
   } catch {
     return name;
   }
-  const str = (k: string): string | undefined =>
-    typeof obj[k] === 'string' ? (obj[k] as string) : undefined;
+  const str = (k: string): string | undefined => (typeof obj[k] === 'string' ? (obj[k] as string) : undefined);
   switch (name.toLowerCase()) {
     case 'bash':
     case 'shell':

@@ -66,7 +66,7 @@ so the schema rejects it.
 ## Pointing a Tether server at it
 
 Release binaries have the official relay stamped in at build time (see
-`apps/server/src/server/pushRelay.ts`) — it is not a user-facing setting,
+`apps/server/src/pushRelay.ts`) — it is not a user-facing setting,
 because only the relay holding the APNs key for the app's signing identity can
 deliver to that build. Turning on **Push to my devices** in the host's settings
 is all a user does.

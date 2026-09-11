@@ -52,20 +52,13 @@ export function FileTree({
                     <div className="file-tree-status" style={{ paddingLeft: (depth + 1) * 16 }}>
                       <p className="error">{browse.error}</p>
                       {onRetryDir ? (
-                        <button
-                          type="button"
-                          className="linkish"
-                          onClick={() => onRetryDir(node.path)}
-                        >
+                        <button type="button" className="linkish" onClick={() => onRetryDir(node.path)}>
                           Retry
                         </button>
                       ) : null}
                     </div>
                   ) : null}
-                  {!browse?.loading &&
-                  !browse?.error &&
-                  browse?.loaded &&
-                  node.children.length === 0 ? (
+                  {!browse?.loading && !browse?.error && browse?.loaded && node.children.length === 0 ? (
                     <p className="muted file-tree-status" style={{ paddingLeft: (depth + 1) * 16 }}>
                       Empty directory
                     </p>

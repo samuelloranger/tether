@@ -24,12 +24,7 @@ function FileRow({
   const { dir, base } = splitPath(file.path);
   return (
     <div className="git-file-row">
-      <button
-        type="button"
-        className="git-file-main"
-        onClick={() => onSelect(file.path, mode)}
-        title={file.path}
-      >
+      <button type="button" className="git-file-main" onClick={() => onSelect(file.path, mode)} title={file.path}>
         <span className="git-file-name">
           {dir ? <span className="git-file-dir">{dir}</span> : null}
           <span className="git-file-base">{base}</span>
@@ -42,11 +37,7 @@ function FileRow({
         {primaryLabel}
       </button>
       {secondaryLabel && onSecondary ? (
-        <button
-          type="button"
-          className={`linkish small${danger ? ' danger' : ''}`}
-          onClick={onSecondary}
-        >
+        <button type="button" className={`linkish small${danger ? ' danger' : ''}`} onClick={onSecondary}>
           {secondaryLabel}
         </button>
       ) : null}

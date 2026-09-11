@@ -49,7 +49,7 @@ impl LiveServer {
             .expect("apps/server");
 
         let child = Command::new("bun")
-            .args(["run", "src/server/index.ts"])
+            .args(["run", "src/index.ts"])
             .current_dir(&server_dir)
             .env("TETHER_PORT", port.to_string())
             .env("TETHER_DB_PATH", &db_path)
@@ -77,19 +77,13 @@ impl LiveServer {
         server
     }
 
-    /// Mints a per-device bearer via `bun run src/server/main.ts device token`
+    /// Mints a per-device bearer via `bun run src/main.ts device token`
     /// against the same DB the server runs on — the token-only replacement for
     /// the removed `/api/setup` TOFU pairing.
     fn mint_token(&self) -> String {
         let db_path = self.tmp.path().join("tether.db");
         let output = std::process::Command::new("bun")
-            .args([
-                "run",
-                "src/server/main.ts",
-                "device",
-                "token",
-                "conformance",
-            ])
+            .args(["run", "src/main.ts", "device", "token", "conformance"])
             .current_dir(&self.server_dir)
             .env("TETHER_DB_PATH", &db_path)
             .env("TETHER_TLS", "off")

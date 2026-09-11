@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  findSessionPreview,
-  lineOffset,
-  pickAutoSelectPreview,
-  previewUrl,
-  shellQuote,
-} from './workspaceTypes';
+import { findSessionPreview, lineOffset, pickAutoSelectPreview, previewUrl, shellQuote } from './workspaceTypes';
 
 describe('workspaceTypes', () => {
   test('shellQuote and lineOffset', () => {

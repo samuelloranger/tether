@@ -37,9 +37,7 @@ function live(...ids: string[]): Set<string> {
 
 function keysOf(views: View[]): string[] {
   return views.flatMap((v) =>
-    leaves(v.tree).flatMap((l) =>
-      l.session ? [sessionKey(l.session.hostId, l.session.sessionId)] : [],
-    ),
+    leaves(v.tree).flatMap((l) => (l.session ? [sessionKey(l.session.hostId, l.session.sessionId)] : [])),
   );
 }
 
@@ -145,11 +143,7 @@ describe('reconcileViews', () => {
   test('cross-host group is preserved', () => {
     const tree = branch('br', leaf('pa', '1', 'h'), leaf('pb', '9', 'h2'));
     const grouped = view('g', tree);
-    const { views } = reconcileViews(
-      [grouped],
-      new Set([sessionKey('h', '1'), sessionKey('h2', '9')]),
-      'g',
-    );
+    const { views } = reconcileViews([grouped], new Set([sessionKey('h', '1'), sessionKey('h2', '9')]), 'g');
     expect(views).toHaveLength(1);
     expect(isGroup(views[0])).toBe(true);
     expect(leaves(views[0].tree).map((l) => l.session)).toEqual([S('1', 'h'), S('9', 'h2')]);
@@ -250,11 +244,7 @@ describe('moveSessionIntoView', () => {
 describe('groupLabel', () => {
   test('joins member titles with plus', () => {
     const v = view('g', branch('br', leaf('pa', '1'), leaf('pb', '2')));
-    const label = groupLabel(
-      v,
-      [drawer('1', { name: 'claude' }), drawer('2', { name: 'shell' })],
-      [hostA],
-    );
+    const label = groupLabel(v, [drawer('1', { name: 'claude' }), drawer('2', { name: 'shell' })], [hostA]);
     expect(label).toBe('claude + shell');
   });
 });
@@ -262,20 +252,11 @@ describe('groupLabel', () => {
 describe('aggregateDot', () => {
   test('severity is waiting > working > done > idle', () => {
     const v = view('g', branch('br', leaf('pa', '1'), leaf('pb', '2')));
-    const waiting = aggregateDot(v, [
-      drawer('1', { activity: 'idle' }),
-      drawer('2', { activity: 'waiting' }),
-    ]);
+    const waiting = aggregateDot(v, [drawer('1', { activity: 'idle' }), drawer('2', { activity: 'waiting' })]);
     expect(waiting).toBe('waiting');
-    const working = aggregateDot(v, [
-      drawer('1', { activity: 'done' }),
-      drawer('2', { activity: 'working' }),
-    ]);
+    const working = aggregateDot(v, [drawer('1', { activity: 'done' }), drawer('2', { activity: 'working' })]);
     expect(working).toBe('working');
-    const done = aggregateDot(v, [
-      drawer('1', { activity: 'idle' }),
-      drawer('2', { activity: 'done' }),
-    ]);
+    const done = aggregateDot(v, [drawer('1', { activity: 'idle' }), drawer('2', { activity: 'done' })]);
     expect(done).toBe('done');
   });
 });

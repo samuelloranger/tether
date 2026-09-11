@@ -26,21 +26,13 @@ export function PaneControls({
 }) {
   return (
     <div className="pane-controls">
-      <button
-        type="button"
-        title={`Split right (${MOD_LABEL}D)`}
-        onClick={() => onSplit(paneId, 'row', 'b')}
-      >
+      <button type="button" title={`Split right (${MOD_LABEL}D)`} onClick={() => onSplit(paneId, 'row', 'b')}>
         <svg {...svgProps} aria-hidden>
           <rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.5" />
           <line x1="8" y1="2.75" x2="8" y2="13.25" />
         </svg>
       </button>
-      <button
-        type="button"
-        title={`Split down (${MOD_LABEL}E)`}
-        onClick={() => onSplit(paneId, 'col', 'b')}
-      >
+      <button type="button" title={`Split down (${MOD_LABEL}E)`} onClick={() => onSplit(paneId, 'col', 'b')}>
         <svg {...svgProps} aria-hidden>
           <rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.5" />
           <line x1="2.25" y1="8" x2="13.75" y2="8" />

@@ -10,14 +10,7 @@ import { TerminalToolbar } from './TerminalToolbar';
 import type { DrawerSession, HostHealthStatus, HostProfile } from './types';
 import type { BeginTabDrag } from './useTabDrag';
 import type { TetherDesktop } from './useTetherDesktop';
-import {
-  aggregateDot,
-  groupHostIds,
-  groupLabel,
-  isGroup,
-  type View,
-  viewMemberKeys,
-} from './viewModel';
+import { aggregateDot, groupHostIds, groupLabel, isGroup, type View, viewMemberKeys } from './viewModel';
 
 interface SessionTabBarProps {
   hosts: HostProfile[];
@@ -30,10 +23,7 @@ interface SessionTabBarProps {
   onNew: (hostId: string) => void;
   onNewAgentChat: (hostId: string) => void;
   onRequestKill: (hostId: string, sessionId: string, label: string) => void;
-  onRequestKillMembers: (
-    members: Array<{ hostId: string; sessionId: string }>,
-    memberLabels: string[],
-  ) => void;
+  onRequestKillMembers: (members: Array<{ hostId: string; sessionId: string }>, memberLabels: string[]) => void;
   onOpenHosts: () => void;
   onSplitFromTab?: (hostId: string, sessionId: string, dir: PaneDir, side: PaneSide) => void;
   onBeginDrag?: BeginTabDrag;
@@ -142,10 +132,7 @@ function GroupTab({
   label: string;
   labels: Map<string, string>;
   onSelect: () => void;
-  onRequestKillMembers: (
-    members: Array<{ hostId: string; sessionId: string }>,
-    memberLabels: string[],
-  ) => void;
+  onRequestKillMembers: (members: Array<{ hostId: string; sessionId: string }>, memberLabels: string[]) => void;
 }) {
   const dot = aggregateDot(view, sessions);
   const wants = !active && dot === 'waiting';
@@ -175,11 +162,7 @@ function GroupTab({
     >
       <span className="session-tab-hosts" aria-hidden>
         {shownColors.map((chip) => (
-          <span
-            key={chip.id}
-            className="session-tab-host-chip"
-            style={{ background: chip.color }}
-          />
+          <span key={chip.id} className="session-tab-host-chip" style={{ background: chip.color }} />
         ))}
       </span>
       <button
@@ -207,7 +190,6 @@ function GroupTab({
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: tab strip + toolbar buttons (new terminal, new agent chat) in one render
 export function SessionTabBar({
   hosts,
   healthByHost,
@@ -228,13 +210,7 @@ export function SessionTabBar({
 
   return (
     <div className="session-tabbar">
-      <button
-        type="button"
-        className="icon-button"
-        aria-label="Hosts"
-        title="Hosts"
-        onClick={onOpenHosts}
-      >
+      <button type="button" className="icon-button" aria-label="Hosts" title="Hosts" onClick={onOpenHosts}>
         <HostsIcon />
       </button>
       <div className="session-tabs" role="tablist">
@@ -258,9 +234,7 @@ export function SessionTabBar({
           const ref = view.tree.kind === 'leaf' ? view.tree.session : null;
           if (!ref) return null;
           const host = hosts.find((h) => h.id === ref.hostId);
-          const session = sessions.find(
-            (row) => row.hostId === ref.hostId && row.id === ref.sessionId,
-          );
+          const session = sessions.find((row) => row.hostId === ref.hostId && row.id === ref.sessionId);
           if (!host || !session) return null;
           const shown = labels.get(sessionKey(host.id, session.id)) ?? sessionLabel(session);
           const health = healthByHost[host.id] ?? 'unknown';
@@ -338,10 +312,7 @@ export function SessionChrome({
   onNew: (hostId: string) => void;
   onNewAgentChat: (hostId: string) => void;
   onKill: (hostId: string, sessionId: string, label: string) => void;
-  onKillMembers: (
-    members: Array<{ hostId: string; sessionId: string }>,
-    memberLabels: string[],
-  ) => void;
+  onKillMembers: (members: Array<{ hostId: string; sessionId: string }>, memberLabels: string[]) => void;
   onWorkspace: () => void;
   onUpload: () => void;
   onOverflow: () => void;

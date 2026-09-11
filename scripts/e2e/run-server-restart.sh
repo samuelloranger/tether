@@ -24,7 +24,7 @@ bun scripts/build-ffi.ts >/dev/null
 
 start_server() {
   TETHER_DB_PATH="$DB" TETHER_PORT="$PORT" TETHER_TLS=off TETHER_TEST_LOG="$EVT" \
-    bun apps/server/src/server/main.ts serve >>"$E2E_DIR/server.log" 2>&1 &
+    bun apps/server/src/main.ts serve >>"$E2E_DIR/server.log" 2>&1 &
   echo $! >"$E2E_DIR/server.pid"
 }
 

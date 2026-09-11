@@ -13,7 +13,5 @@ export function hostsBecomingReachable(
   previous: Record<string, HostHealthStatus>,
   current: Record<string, HostHealthStatus>,
 ): string[] {
-  return Object.keys(current).filter(
-    (id) => current[id] === 'reachable' && previous[id] !== 'reachable',
-  );
+  return Object.keys(current).filter((id) => current[id] === 'reachable' && previous[id] !== 'reachable');
 }

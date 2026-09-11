@@ -8,11 +8,7 @@ function row(id: string, hostId: string, status: 'running' | 'stopped'): DrawerS
 
 describe('restorableIds', () => {
   test('keeps running sessions of the host only', () => {
-    const rows = [
-      row('term-1', 'a', 'running'),
-      row('term-2', 'a', 'stopped'),
-      row('term-3', 'b', 'running'),
-    ];
+    const rows = [row('term-1', 'a', 'running'), row('term-2', 'a', 'stopped'), row('term-3', 'b', 'running')];
     expect(restorableIds(rows, 'a')).toEqual(['term-1']);
   });
 

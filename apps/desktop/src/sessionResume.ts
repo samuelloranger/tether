@@ -5,9 +5,7 @@ import type { DrawerSession } from './types';
  * stopped row would resurrect a shell the user had killed. Reopening starts nothing.
  */
 export function restorableIds(sessions: DrawerSession[], hostId: string): string[] {
-  return sessions
-    .filter((row) => row.hostId === hostId && row.status === 'running')
-    .map((row) => row.id);
+  return sessions.filter((row) => row.hostId === hostId && row.status === 'running').map((row) => row.id);
 }
 
 /**

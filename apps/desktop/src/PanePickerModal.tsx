@@ -26,18 +26,12 @@ export function PanePickerModal({
 
   return (
     <>
-      <button
-        type="button"
-        className="pane-picker-scrim"
-        aria-label="Close picker"
-        onClick={onClose}
-      />
+      <button type="button" className="pane-picker-scrim" aria-label="Close picker" onClick={onClose} />
       <div className="pane-picker">
         <div className="pane-picker-title">Choose a session</div>
         <div className="pane-picker-list">
           {sessions.map((session) => {
-            const label =
-              labels.get(sessionKey(session.hostId, session.id)) ?? sessionLabel(session);
+            const label = labels.get(sessionKey(session.hostId, session.id)) ?? sessionLabel(session);
             return (
               <button
                 type="button"

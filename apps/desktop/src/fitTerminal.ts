@@ -8,11 +8,7 @@ import type { Terminal } from '@xterm/xterm';
  *  paint. Those extra rows render below the fold, and xterm caps the viewport's
  *  scrollHeight at its clientHeight — so they can never be scrolled into view.
  *  Clamping to `floor(height / paintedCell)` is the ceiling the paint obeys. */
-export function rowsThatFit(
-  viewportHeight: number,
-  cellHeight: number,
-  currentRows: number,
-): number {
+export function rowsThatFit(viewportHeight: number, cellHeight: number, currentRows: number): number {
   if (!(cellHeight > 0) || !(viewportHeight > 0) || currentRows < 1) return currentRows;
   return Math.min(currentRows, Math.max(1, Math.floor(viewportHeight / cellHeight)));
 }

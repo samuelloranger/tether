@@ -76,9 +76,7 @@ export function TerminalFindBar({ search, onClose }: TerminalFindBarProps) {
           }
         }}
       />
-      <span className="terminal-find-count">
-        {count > 0 ? `${index + 1}/${count}` : query ? '0/0' : ''}
-      </span>
+      <span className="terminal-find-count">{count > 0 ? `${index + 1}/${count}` : query ? '0/0' : ''}</span>
       <button type="button" className="small secondary" onClick={() => findPrevious()}>
         Prev
       </button>

@@ -54,10 +54,7 @@ export function previewUrl(baseUrl: string, relative: string): string {
   return relative.startsWith('/') ? `${base}${relative}` : `${base}/${relative}`;
 }
 
-export function findSessionPreview(
-  presentations: Presentation[],
-  sessionId: string,
-): Presentation | null {
+export function findSessionPreview(presentations: Presentation[], sessionId: string): Presentation | null {
   let match: Presentation | null = null;
   for (const preview of presentations) {
     if (preview.sessionId === sessionId) match = preview;

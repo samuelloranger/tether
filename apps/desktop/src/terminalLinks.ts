@@ -37,10 +37,7 @@ export function rendererLinksForRow(
   }));
 }
 
-export function registerTetherLinks(
-  terminal: Terminal,
-  opts?: { requireModifierClick?: boolean },
-): IDisposable {
+export function registerTetherLinks(terminal: Terminal, opts?: { requireModifierClick?: boolean }): IDisposable {
   // Plain click opens — same as iOS tap. Drag-select still works because xterm
   // only fires link activate on click, not on drag.
   const requireModifierClick = opts?.requireModifierClick ?? false;
@@ -63,16 +60,14 @@ export function registerTetherLinks(
       // detector with an empty map, so the underline never appeared nor activate ran.
       void coreDetectLinks(texts, wrapped)
         .then((spans) => {
-          const links: ILink[] = rendererLinksForRow(texts, spans, bufferLineNumber - 1).map(
-            (link) => ({
-              range: link.range,
-              text: link.text,
-              activate: (event) => {
-                if (!shouldActivateLink(event, requireModifierClick)) return;
-                void activateLinkTarget(link.target).catch(() => {});
-              },
-            }),
-          );
+          const links: ILink[] = rendererLinksForRow(texts, spans, bufferLineNumber - 1).map((link) => ({
+            range: link.range,
+            text: link.text,
+            activate: (event) => {
+              if (!shouldActivateLink(event, requireModifierClick)) return;
+              void activateLinkTarget(link.target).catch(() => {});
+            },
+          }));
           callback(links.length ? links : undefined);
         })
         .catch(() => {

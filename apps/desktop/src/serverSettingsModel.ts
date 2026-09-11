@@ -58,10 +58,8 @@ export function patchForDraft(config: ServerConfig, draft: ServerSettingsDraft):
   const triggers = changedFields(config.triggers, draft.triggers);
   const identity = changedFields(config.identity, draft.identity);
   const session: NonNullable<ServerConfigPatch['session']> = {};
-  if (config.session.defaultShell !== draft.session.defaultShell)
-    session.defaultShell = draft.session.defaultShell;
-  if (config.session.defaultCwd !== draft.session.defaultCwd)
-    session.defaultCwd = draft.session.defaultCwd;
+  if (config.session.defaultShell !== draft.session.defaultShell) session.defaultShell = draft.session.defaultShell;
+  if (config.session.defaultCwd !== draft.session.defaultCwd) session.defaultCwd = draft.session.defaultCwd;
   const scrollbackRows = Number(draft.session.scrollbackRows);
   if (config.session.scrollbackRows !== scrollbackRows) session.scrollbackRows = scrollbackRows;
   const silenceMs = Number(draft.session.silenceMs) * 1000;
@@ -81,8 +79,7 @@ export function isServerSettingsDirty(config: ServerConfig, draft: ServerSetting
 
 export function pushStatusHint(enabled: boolean, deviceCount: number): string {
   if (!enabled) return 'Off. Nothing is sent to Apple, and no notification leaves this server.';
-  if (deviceCount === 0)
-    return 'On, but no device has registered yet. Only the iOS app can receive push.';
+  if (deviceCount === 0) return 'On, but no device has registered yet. Only the iOS app can receive push.';
   const devices = `${deviceCount} device${deviceCount === 1 ? '' : 's'}`;
   return `On. Notifications go to ${devices} — not this desktop; only the iOS app can receive push.`;
 }
@@ -93,8 +90,7 @@ export function validateServerSettingsDraft(draft: ServerSettingsDraft): ServerS
   const errors: ServerSettingsErrors = {};
   if (!draft.identity.name || draft.identity.name.length > 100)
     errors.identityName = 'Name must be between 1 and 100 characters.';
-  if (draft.identity.color.length > 32)
-    errors.identityColor = 'Color must be at most 32 characters.';
+  if (draft.identity.color.length > 32) errors.identityColor = 'Color must be at most 32 characters.';
   const longJobSeconds = Number(draft.longJobSeconds);
   if (!Number.isInteger(longJobSeconds) || longJobSeconds <= 0)
     errors.longJobSeconds = 'Long-job threshold must be a positive whole number.';
@@ -111,7 +107,6 @@ export function validateServerSettingsDraft(draft: ServerSettingsDraft): ServerS
   const silenceSeconds = Number(draft.session.silenceMs);
   if (!Number.isFinite(silenceSeconds) || silenceSeconds < 1 || silenceSeconds > 3600)
     errors.silenceMs = 'Enter a value from 1 to 3600 seconds.';
-  else if (!Number.isInteger(silenceSeconds * 1000))
-    errors.silenceMs = 'Enter seconds to the nearest millisecond.';
+  else if (!Number.isInteger(silenceSeconds * 1000)) errors.silenceMs = 'Enter seconds to the nearest millisecond.';
   return errors;
 }

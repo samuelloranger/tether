@@ -118,9 +118,7 @@ export async function runAdminOperation(opts: {
       opts.setVersion(actual);
       opts.setMessage({
         kind: 'success',
-        text: actual
-          ? `Updated. Server is now ${actual}.`
-          : 'Update requested; waiting for server reconnect.',
+        text: actual ? `Updated. Server is now ${actual}.` : 'Update requested; waiting for server reconnect.',
       });
     } else {
       opts.setMessage({

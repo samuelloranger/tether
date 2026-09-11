@@ -85,9 +85,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
   const resident = useMemo(
     () =>
       residentSessions({
-        drawerKeys: props.sessions
-          .filter((row) => row.kind !== 'agent')
-          .map((row) => sessionKey(row.hostId, row.id)),
+        drawerKeys: props.sessions.filter((row) => row.kind !== 'agent').map((row) => sessionKey(row.hostId, row.id)),
         visibleKeys: residentKeys(props.tree),
         lruOrder: props.lruOrder,
         cap: RESIDENT_CAP,
@@ -118,14 +116,9 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
     };
   }, [residentDigest, props.sessions]);
 
-  const layout = useMemo(
-    () => layoutTree(props.tree, box.width, box.height),
-    [props.tree, box.width, box.height],
-  );
+  const layout = useMemo(() => layoutTree(props.tree, box.width, box.height), [props.tree, box.width, box.height]);
 
-  const previewRect = props.preview
-    ? layout.leaves.find((l) => l.paneId === props.preview?.paneId)?.rect
-    : undefined;
+  const previewRect = props.preview ? layout.leaves.find((l) => l.paneId === props.preview?.paneId)?.rect : undefined;
 
   const visibleBySession = new Map<string, { rect: Box; paneId: string }>();
   for (const leaf of layout.leaves) {
@@ -152,13 +145,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         };
         if (!leaf.session) {
           return (
-            <div
-              key={leaf.paneId}
-              className="pane-slot"
-              style={style}
-              data-pane-id={leaf.paneId}
-              data-pane-empty="1"
-            >
+            <div key={leaf.paneId} className="pane-slot" style={style} data-pane-id={leaf.paneId} data-pane-empty="1">
               <EmptyPanePicker onPick={() => props.onPickSession(leaf.paneId)} />
             </div>
           );
@@ -166,9 +153,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
         const session = leaf.session;
         const host = props.hosts.find((row) => row.id === session.hostId);
         if (!host) return null;
-        const drawer = props.sessions.find(
-          (row) => row.hostId === session.hostId && row.id === session.sessionId,
-        );
+        const drawer = props.sessions.find((row) => row.hostId === session.hostId && row.id === session.sessionId);
         // Leaf kind is durable; DrawerSession.kind is poll-transient. Either
         // marking the session agent is authoritative.
         const isAgent = session.kind === 'agent' || drawer?.kind === 'agent';
@@ -181,11 +166,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
             onPointerDownCapture={() => props.onFocusPane(leaf.paneId)}
           >
             {leaf.paneId === props.focusedPaneId && (
-              <PaneControls
-                paneId={leaf.paneId}
-                onSplit={props.onSplit}
-                onClose={props.onClosePane}
-              />
+              <PaneControls paneId={leaf.paneId} onSplit={props.onSplit} onClose={props.onClosePane} />
             )}
             {isAgent ? (
               <AgentChatPane
@@ -195,11 +176,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
                 cwd={session.cwd ?? drawer?.cwd ?? undefined}
                 resumeSessionId={session.resumeSessionId}
                 onResumeSession={(picked) =>
-                  props.onResumeSession(
-                    session.hostId,
-                    session.cwd ?? drawer?.cwd ?? picked.cwd,
-                    picked.id,
-                  )
+                  props.onResumeSession(session.hostId, session.cwd ?? drawer?.cwd ?? picked.cwd, picked.id)
                 }
               />
             ) : null}
@@ -254,9 +231,7 @@ export function ResidentTerminals(props: ResidentTerminalsProps) {
           onRatio={(ratio) => props.onSetRatio(divider.branchId, ratio)}
         />
       ))}
-      {previewRect && props.preview && (
-        <SplitPreviewOverlay rect={previewRect} intent={props.preview.intent} />
-      )}
+      {previewRect && props.preview && <SplitPreviewOverlay rect={previewRect} intent={props.preview.intent} />}
     </div>
   );
 }

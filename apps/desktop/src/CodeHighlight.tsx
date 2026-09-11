@@ -64,11 +64,7 @@ export function CodeHighlight({
   }
 
   return (
-    <Highlight
-      theme={prismTheme(colors, foreground)}
-      code={code}
-      language={language as 'typescript'}
-    >
+    <Highlight theme={prismTheme(colors, foreground)} code={code} language={language as 'typescript'}>
       {({ tokens, getTokenProps }) => (
         <pre className="code-highlight">
           {tokens.map((lineTokens, index) => (

@@ -1,10 +1,7 @@
 import type { Terminal } from '@xterm/xterm';
 import { coreOsc52Decode } from './coreApi';
 
-export function registerOsc52Handler(
-  term: Terminal,
-  writeClipboard: (text: string) => void,
-): { dispose: () => void } {
+export function registerOsc52Handler(term: Terminal, writeClipboard: (text: string) => void): { dispose: () => void } {
   const disposable = term.parser.registerOscHandler(52, (data) => {
     void coreOsc52Decode(data).then((text) => {
       if (text) writeClipboard(text);

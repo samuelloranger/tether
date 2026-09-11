@@ -10,9 +10,7 @@ function ToolDiff({ diff }: { diff: DerivedDiff }) {
         hunk.lines.map((line, li) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: positional diff lines
           <div key={`${hi}-${li}`} className={`agent-diff-row agent-diff-${line.kind}`}>
-            <span className="agent-diff-marker">
-              {line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}
-            </span>
+            <span className="agent-diff-marker">{line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}</span>
             <span className="agent-diff-code">
               {highlightLine(line.text, null).map((tok, ti) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: positional tokens
@@ -64,12 +62,7 @@ export function AgentToolCard({ tool }: { tool: AgentToolCall }) {
   const shell = isShellTool(tool.name);
   return (
     <div className={`agent-tool-card agent-tool-${style.accent}${shell ? ' agent-tool-bash' : ''}`}>
-      <button
-        type="button"
-        className="agent-tool-head"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
+      <button type="button" className="agent-tool-head" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
         <span className="agent-tool-glyph">{style.glyph}</span>
         <span className="agent-tool-name">{tool.name.toLowerCase()}</span>
         <span className="agent-tool-summary">{tool.summary}</span>
@@ -88,9 +81,7 @@ export function AgentToolCard({ tool }: { tool: AgentToolCall }) {
               <div className={`agent-tool-result-label${tool.isError ? ' error' : ''}`}>
                 {tool.isError ? 'error' : 'output'}
               </div>
-              <pre className={`agent-tool-result${tool.isError ? ' error' : ''}`}>
-                {tool.result}
-              </pre>
+              <pre className={`agent-tool-result${tool.isError ? ' error' : ''}`}>{tool.result}</pre>
             </>
           ) : null}
         </div>
