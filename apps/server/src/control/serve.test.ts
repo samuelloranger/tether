@@ -6,7 +6,7 @@ import { app } from '@/http/app';
 import { serveControl } from './serve';
 
 const sock = path.join(mkdtempSync(path.join(tmpdir(), 'tether-ctl-')), 'control.sock');
-const server = serveControl(sock);
+const server = await serveControl(sock);
 afterAll(() => server.stop(true));
 
 const overSocket = (p: string) =>

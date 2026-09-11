@@ -1,21 +1,11 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: root app shell — routes every screen and wires the drawer, terminal panes, git, and workspace panels
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertModal } from './AlertModal';
-import { AppOverflowMenu } from './AppOverflowMenu';
-import { AgentFolderPicker } from './agent/AgentFolderPicker';
-import { DevicesScreen } from './DevicesScreen';
-import { ensureNotificationPermission } from './desktopNotifications';
-import type { DropIntent } from './dropZone';
-import { FileViewer } from './FileViewer';
-import { setFileOpenListener } from './fileOpenBus';
-import { GitDrawer } from './git/GitDrawer';
-import { GitReview } from './git/GitReview';
-import { useGitPanel } from './git/useGitPanel';
-import { HostsScreen } from './HostsScreen';
-import { activeSessionDot, litStateFor, shellVars } from './litTheme';
-import { PairDeviceScreen } from './PairDeviceScreen';
-import { PanePickerModal } from './PanePickerModal';
-import { PresentationBanner, PresentationView } from './PresentationView';
+import { type DrawerSession, type HostHealthStatus, httpOriginFor } from '@/core/types';
+import { DevicesScreen } from '@/host/DevicesScreen';
+import { HostsScreen } from '@/host/HostsScreen';
+import { PairDeviceScreen } from '@/host/PairDeviceScreen';
+import type { DropIntent } from '@/pane/dropZone';
+import { PanePickerModal } from '@/pane/PanePickerModal';
 import {
   closePane,
   findLeaf,
@@ -28,7 +18,29 @@ import {
   setRatio,
   setSession,
   splitLeaf,
-} from './paneTree';
+} from '@/pane/paneTree';
+import {
+  moveSessionIntoView,
+  newSoloView,
+  reconcileViews,
+  type View,
+  type ViewState,
+  viewMemberKeys,
+} from '@/pane/viewModel';
+import { serializeViews } from '@/pane/viewsSerialize';
+import { ensureNotificationPermission } from '@/platform/desktopNotifications';
+import { useDeepLinks } from '@/platform/useDeepLinks';
+import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
+import { useWindowTheme } from '@/platform/useWindowTheme';
+import { PresentationBanner, PresentationView } from '@/presentations/PresentationView';
+import { activeSessionDot, litStateFor, shellVars } from '@/session/litTheme';
+import { ResidentTerminals } from '@/session/ResidentTerminals';
+import { SessionDrawer } from '@/session/SessionDrawer';
+import { SessionModalHost, useSessionModals } from '@/session/SessionModals';
+import { SessionChrome } from '@/session/SessionTabBar';
+import { sessionKey } from '@/session/sessionKey';
+import { touchLru } from '@/session/sessionLru';
+import { useTabDrag } from '@/session/useTabDrag';
 import {
   type AppPreferences,
   loadPreferences,
@@ -38,33 +50,21 @@ import {
   saveViews,
   sidebarLayout,
   UI_THEMES,
-} from './preferences';
-import { ResidentTerminals } from './ResidentTerminals';
-import { ServerSettingsScreen } from './ServerSettingsScreen';
-import { SessionDrawer } from './SessionDrawer';
-import { SessionModalHost, useSessionModals } from './SessionModals';
-import { SessionChrome } from './SessionTabBar';
-import { LocalSettingsScreen } from './SettingsScreen';
-import { sessionKey } from './sessionKey';
-import { touchLru } from './sessionLru';
-import { TerminalEmpty } from './TerminalEmpty';
-import { type DrawerSession, type HostHealthStatus, httpOriginFor } from './types';
-import { useDeepLinks } from './useDeepLinks';
-import { useShellChrome } from './useHeatArrival';
-import { useLaunchUpdateCheck } from './useLaunchUpdateCheck';
-import { useTabDrag } from './useTabDrag';
-import { useTetherDesktop } from './useTetherDesktop';
-import { useWindowTheme } from './useWindowTheme';
-import { useWorkspace, WorkspacePanel } from './useWorkspace';
-import {
-  moveSessionIntoView,
-  newSoloView,
-  reconcileViews,
-  type View,
-  type ViewState,
-  viewMemberKeys,
-} from './viewModel';
-import { serializeViews } from './viewsSerialize';
+} from '@/settings/preferences';
+import { ServerSettingsScreen } from '@/settings/ServerSettingsScreen';
+import { LocalSettingsScreen } from '@/settings/SettingsScreen';
+import { AlertModal } from '@/shell/AlertModal';
+import { AppOverflowMenu } from '@/shell/AppOverflowMenu';
+import { useShellChrome } from '@/shell/useHeatArrival';
+import { useTetherDesktop } from '@/shell/useTetherDesktop';
+import { TerminalEmpty } from '@/terminal/TerminalEmpty';
+import { FileViewer } from '@/workspace/FileViewer';
+import { setFileOpenListener } from '@/workspace/fileOpenBus';
+import { useWorkspace, WorkspacePanel } from '@/workspace/useWorkspace';
+import { AgentFolderPicker } from './agent/AgentFolderPicker';
+import { GitDrawer } from './git/GitDrawer';
+import { GitReview } from './git/GitReview';
+import { useGitPanel } from './git/useGitPanel';
 
 function useMediaScheme(): 'light' | 'dark' {
   const [scheme, setScheme] = useState<'light' | 'dark'>(() =>

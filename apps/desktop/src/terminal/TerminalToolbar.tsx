@@ -1,0 +1,62 @@
+import { activityLabel, type DotKey } from '@/session/activity';
+
+interface TerminalToolbarProps {
+  sessionLabel: string;
+  /** null when nothing is running — the state chip is then omitted, not faked. */
+  dot: DotKey | null;
+  address: string;
+  /** Every action here addresses a session; with none open they have no target. */
+  hasSession: boolean;
+  /** Narrow windows put a fixed hamburger over this row, which has to be cleared. */
+  inset: boolean;
+  /** Horizontal tabs already name the session; the toolbar title would duplicate it. */
+  showSessionLabel?: boolean;
+  onGit: () => void;
+  onReview: () => void;
+  onWorkspace: () => void;
+  onUpload: () => void;
+  onOverflow: () => void;
+}
+
+/**
+ * Session identity on the left, one segmented control on the right — the actions
+ * grouped so they read as one set of things you can do to the named session.
+ */
+export function TerminalToolbar({
+  sessionLabel,
+  dot,
+  address,
+  hasSession,
+  inset,
+  showSessionLabel = true,
+  onGit,
+  onReview,
+  onWorkspace,
+  onUpload,
+  onOverflow,
+}: TerminalToolbarProps) {
+  return (
+    <header className={`terminal-toolbar${inset ? ' with-menu' : ''}`}>
+      {showSessionLabel ? <span className="terminal-label">{sessionLabel}</span> : null}
+      {dot ? <span className="session-state">{activityLabel(dot)}</span> : null}
+      <div className="toolbar-actions">
+        <button type="button" onClick={onGit} disabled={!hasSession}>
+          Git
+        </button>
+        <button type="button" onClick={onReview} disabled={!hasSession}>
+          Review
+        </button>
+        <button type="button" onClick={onWorkspace} disabled={!hasSession}>
+          Workspace
+        </button>
+        <button type="button" onClick={onUpload} disabled={!hasSession}>
+          Upload
+        </button>
+      </div>
+      <span className="terminal-host-label">{address}</span>
+      <button type="button" className="icon-button" aria-label="More actions" onClick={onOverflow}>
+        ⋯
+      </button>
+    </header>
+  );
+}

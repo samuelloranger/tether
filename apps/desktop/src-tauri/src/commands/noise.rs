@@ -14,19 +14,19 @@ use tokio::sync::mpsc;
 
 use crate::commands::connect::{now_ms, random_unit, HEALTHY_MS};
 use crate::http::{self, HttpBytesResponse, HttpResponse};
-use crate::noise_session::{
+use crate::noise::session::{
     apply_log_id, decode_server, encode_auth_token_request, encode_devices_list,
     encode_devices_revoke, encode_frontend_output, encode_frontend_reset, encode_start,
     translate_frontend, DeviceInfo, ServerMsg,
 };
-use crate::noise_store::{
+use crate::noise::store::{
     load_device_keypair_in, load_pinned_server_key_in, save_device_keypair_in,
     save_pinned_server_key_in, KeyStore, KeyringKeyStore,
 };
-use crate::noise_token::{
+use crate::noise::token::{
     cached_token_if_fresh, invalidate_token, should_remint_on_401, store_token,
 };
-use crate::noise_ws::{NoiseWs, NoiseWsRx, NoiseWsTx};
+use crate::noise::ws::{NoiseWs, NoiseWsRx, NoiseWsTx};
 use crate::state::{AppState, NoiseHandle, SharedState};
 use tether_core::workspace::UploadPlan;
 
@@ -773,7 +773,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
-    use crate::noise_store::MemoryKeyStore;
+    use crate::noise::store::MemoryKeyStore;
     use tether_core::noise::driver::Transport;
     use tether_core::noise::pairing::{generate_static_keypair, PairingResponder};
     use tether_core::noise::reconnect::ReconnectResponder;
@@ -1009,12 +1009,12 @@ mod tests {
 /// with the host auto-confirming). Mirrors the iOS Stage-1 live E2E.
 #[cfg(test)]
 mod live_e2e {
-    use crate::noise_session::{
+    use crate::noise::session::{
         decode_server, encode_devices_list, encode_devices_revoke, encode_input, encode_start,
         ServerMsg,
     };
-    use crate::noise_store::{load_device_keypair_in, load_pinned_server_key_in, MemoryKeyStore};
-    use crate::noise_ws::NoiseWs;
+    use crate::noise::store::{load_device_keypair_in, load_pinned_server_key_in, MemoryKeyStore};
+    use crate::noise::ws::NoiseWs;
     use std::time::Duration;
     use tether_core::noise::driver::{client_reconnect, Transport};
 

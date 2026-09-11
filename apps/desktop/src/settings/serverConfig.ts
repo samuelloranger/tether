@@ -1,0 +1,33 @@
+import {
+  coreAdminRestart,
+  coreAdminTestNotification,
+  coreAdminUpdate,
+  coreConfigGet,
+  coreConfigPatch,
+  coreHealthVersion,
+} from '@/core/coreApi';
+import type { ServerConfig, ServerConfigPatch } from './serverSettingsModel';
+
+export async function loadServerConfig(hostId: string): Promise<ServerConfig> {
+  return coreConfigGet(hostId);
+}
+
+export async function patchServerConfig(hostId: string, patch: ServerConfigPatch): Promise<ServerConfig> {
+  return coreConfigPatch(hostId, patch);
+}
+
+export async function sendServerNotificationTest(hostId: string): Promise<void> {
+  await coreAdminTestNotification(hostId);
+}
+
+export async function updateServer(hostId: string): Promise<void> {
+  await coreAdminUpdate(hostId);
+}
+
+export async function restartServer(hostId: string): Promise<void> {
+  await coreAdminRestart(hostId);
+}
+
+export async function loadServerVersion(hostId: string): Promise<string | null> {
+  return coreHealthVersion(hostId);
+}

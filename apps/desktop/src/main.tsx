@@ -6,7 +6,7 @@ import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import { App } from './App';
 import './index.css';
-import { TitleBar } from './TitleBar';
+import { TitleBar } from '@/platform/TitleBar';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element #root not found');
