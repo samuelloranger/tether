@@ -11,7 +11,7 @@ updates inherit the previous app's webview storage and host profiles.
 
 - `bun run --cwd apps/desktop build` — `tsc --noEmit && vite build`. **This is
   the gate**, not `typecheck`: see the alias note below.
-- `bun run --cwd apps/desktop test` — 279 tests, `bun:test`, colocated.
+- `bun run --cwd apps/desktop test` — 313 tests, `bun:test`, colocated.
 - `bun run --cwd apps/desktop tauri:dev` / `tauri:build`
 - `cd apps/desktop/src-tauri && cargo test` — CI also runs
   `cargo fmt --check && cargo clippy -- -D warnings`, so a clippy warning is a
@@ -27,7 +27,7 @@ level:
 
 | | |
 |---|---|
-| `App.tsx` `main.tsx` `index.css` `vite-env.d.ts` | root; `main.tsx` imports `./index.css`, so they stay together |
+| `App.tsx` `main.tsx` `index.css` `vite-env.d.ts` | root; `App.tsx` is a ~110-line composition root that wires hooks to `shell/MainScreen`; `main.tsx` imports `./index.css`, so they stay together |
 | `terminal/` | xterm binding, clipboard, links, mouse, OSC, search, fit, frame handling, outbound gating, replay gate, paste |
 | `session/` | drawer, tab bar, modals, icons, key/label/list/lru/resume/strip, residency, activity + lit state, tab drag |
 | `pane/` | tiling tree and serialization, layout rects, drop zones, pane pickers, split preview |
@@ -36,7 +36,7 @@ level:
 | `workspace/` | file tree, viewer, highlighting, workspace API and types |
 | `settings/` | settings screens, server-settings model, preferences |
 | `agent/` `git/` | agent chat and the git drawer — the folders this layout was extended from |
-| `shell/` | the top-level `useTetherDesktop` hook, overflow menus, alert modal |
+| `shell/` | the top-level `useTetherDesktop` hook, `MainScreen`, `appScreen`, `useAppChrome`, overflow menus, alert modal, the golden-render test kit |
 | `core/` | Tauri invoke surface, transport, error decoding, shared types |
 | `presentations/` | preview view and hook |
 
@@ -61,6 +61,16 @@ deliberately left as a layer rather than split by domain.
   not a warning.
 - Tests are colocated (`foo.ts` + `foo.test.ts`) and run under bun, not vite —
   bun resolves tsconfig `paths` natively.
+- **Golden render snapshots.** `src/App.golden.test.tsx` renders the whole `App`
+  across 16 states with `renderToString` and snapshots the HTML. It needs no DOM
+  library: `renderToString` runs no effects, so xterm never initializes and no
+  Tauri `invoke` is reached. `src/shell/appRender.testkit.tsx` supplies the
+  `window`/`localStorage` stubs and a `TetherDesktop` mock factory; it is named
+  `.testkit.tsx` so the runner does not collect it as a test.
+  `crypto.randomUUID` is stubbed with a counter because pane ids reach the DOM as
+  `data-pane-id` — with the real implementation every snapshot differs. If a
+  golden fails after a refactor, that is the signal working. Read the diff; do
+  not regenerate the snapshot to make it pass.
 - **Native drag-drop swallows in-webview HTML5 DnD on Windows.** The Tauri
   drag-drop handler is kept for file upload, so in-app dragging must use pointer
   events instead.
@@ -69,6 +79,5 @@ deliberately left as a layer rather than split by domain.
 
 ## Out of scope, tracked separately
 
-`App.tsx` is 741 lines with ~620 inside `App()` and 16 hooks;
-`src-tauri/src/commands/noise.rs` is 1217. Both are split candidates, both are
-code changes rather than moves, so each gets its own PR.
+`src-tauri/src/commands/noise.rs` is 1217 lines — a split candidate, and a code
+change rather than a move, so it gets its own PR.
