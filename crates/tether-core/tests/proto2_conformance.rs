@@ -83,13 +83,7 @@ impl LiveServer {
     fn mint_token(&self) -> String {
         let db_path = self.tmp.path().join("tether.db");
         let output = std::process::Command::new("bun")
-            .args([
-                "run",
-                "src/main.ts",
-                "device",
-                "token",
-                "conformance",
-            ])
+            .args(["run", "src/main.ts", "device", "token", "conformance"])
             .current_dir(&self.server_dir)
             .env("TETHER_DB_PATH", &db_path)
             .env("TETHER_TLS", "off")
