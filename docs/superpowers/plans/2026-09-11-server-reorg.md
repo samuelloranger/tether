@@ -14,9 +14,10 @@
 
 - **Zero behavior change.** Every commit is a move, rename, reformat, or config edit. If a task requires editing logic to make tests pass, stop — something was moved wrong.
 - **Bun ≥ 1.3.14** is the floor (`Bun.spawn(..., { terminal })`); dev and CI run 1.4.x.
-- **Run tests as `bun --cwd apps/server run test`**, never bare `bun test` — the built-in runner shadows the script name and silently drops `--parallel` (12.8s → 3.3s).
+- **Run tests as `bun run --cwd apps/server test`**, never bare `bun test` — the built-in runner shadows the script name and silently drops `--parallel` (12.8s → 3.3s).
 - **Never set `TETHER_DB_PATH` for a suite run.** `apps/server/test-preload.ts` gives each worker its own temp DB; one shared file makes parallel workers fight.
 - **No `process.platform === 'win32'` branches in `apps/server`.** Windows server support was removed in `8294d80d`.
+- **This host runs the live tether daemon** (`~/.local/bin/tether serve`, its DB at `~/.tether/config/tether.db`, listening on 8085/8443). Never `pkill` by pattern — kill only a PID this plan recorded. Every probe server must set `TETHER_DB_PATH`, `TETHER_PORT=8199`, `TETHER_TLS=off` **and `TETHER_CONTROL_SOCK`**: `paths.ts` defaults the control socket to `~/.tether/control.sock`, which the live daemon holds, so a probe without that override races the daemon for its control plane.
 - Biome formatting: 2-space indent, single quotes, semicolons, trailing commas. Width is 100 until Task 2, **120 from Task 2 onward**.
 - Comments: minimal. Only a non-obvious "why" or a gotcha. Never restate the code.
 - **No `Co-Authored-By` trailers** in commit messages.
@@ -157,6 +158,7 @@ with:
 cd /home/samuelloranger/sites/tether
 rm -rf /tmp/tether-task1 && mkdir -p /tmp/tether-task1
 TETHER_DB_PATH=/tmp/tether-task1/tether.db TETHER_PORT=8199 TETHER_TLS=off \
+  TETHER_CONTROL_SOCK=/tmp/tether-task1/control.sock \
   timeout 15 bun apps/server/src/server/main.ts serve > /tmp/tether-task1/out.log 2>&1 &
 sleep 6
 curl -sf http://127.0.0.1:8199/api/status | head -c 200; echo
@@ -176,7 +178,7 @@ Expected: only deletions under `apps/server/src/server/config/` and modification
 - [ ] **Step 7: Run the suite**
 
 ```bash
-bun --cwd apps/server run test
+bun run --cwd apps/server test
 ```
 
 Expected: PASS. Nothing in the suite reads the committed config dir.
@@ -264,8 +266,8 @@ Note the files still over 400 in the PR description. Splitting them is explicitl
 - [ ] **Step 6: Run the suite**
 
 ```bash
-bun --cwd apps/server run test
-bun --cwd apps/desktop run test
+bun run --cwd apps/server test
+bun run --cwd apps/desktop test
 ```
 
 Expected: both PASS. Formatting cannot change behavior; a failure means `bun format` touched something it should not have.
@@ -397,8 +399,8 @@ Expected: no output. `--exclude-dir=superpowers` is deliberate — `docs/superpo
 ```bash
 cd /home/samuelloranger/sites/tether
 bun lint
-bun --cwd apps/server run build
-bun --cwd apps/server run test
+bun run --cwd apps/server build
+bun run --cwd apps/server test
 ```
 
 Expected: all three PASS. The build proves the new `bin`/`build:binary` entry and the `{ type: 'file' }` cdylib import both resolve.
@@ -409,6 +411,7 @@ Expected: all three PASS. The build proves the new `bin`/`build:binary` entry an
 cd /home/samuelloranger/sites/tether
 rm -rf /tmp/tether-task3 && mkdir -p /tmp/tether-task3
 TETHER_DB_PATH=/tmp/tether-task3/tether.db TETHER_PORT=8199 TETHER_TLS=off \
+  TETHER_CONTROL_SOCK=/tmp/tether-task3/control.sock \
   timeout 15 ./apps/server/dist/tether serve > /tmp/tether-task3/out.log 2>&1 &
 sleep 6
 curl -sf http://127.0.0.1:8199/api/status | head -c 200; echo
@@ -537,7 +540,7 @@ rewrite testAuth  testing/auth    testing
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck
+bun run --cwd apps/server typecheck
 ```
 
 Expected: PASS. Any missed specifier — including the `require()` and `await import()` forms `sed` cannot see — surfaces here as an unresolved-module error. Fix each one by hand, then re-run.
@@ -546,7 +549,7 @@ Expected: PASS. Any missed specifier — including the `require()` and `await im
 
 ```bash
 bun lint
-bun --cwd apps/server run test
+bun run --cwd apps/server test
 ```
 
 Expected: both PASS.
@@ -704,9 +707,9 @@ Expected four lines, pointing at `'./holderClient'`, `'./resize'`, `'./shell'`. 
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck
+bun run --cwd apps/server typecheck
 bun lint
-bun --cwd apps/server run test
+bun run --cwd apps/server test
 ```
 
 Expected: all PASS. Fix any unresolved specifier by hand and re-run.
@@ -793,7 +796,7 @@ rewrite claudeSessions    agent/claudeSessions
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck && bun lint && bun --cwd apps/server run test
+bun run --cwd apps/server typecheck && bun lint && bun run --cwd apps/server test
 ```
 
 Expected: all PASS.
@@ -899,7 +902,7 @@ rewrite pairQr         auth/pairQr
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck && bun lint && bun --cwd apps/server run test
+bun run --cwd apps/server typecheck && bun lint && bun run --cwd apps/server test
 ```
 
 Expected: all PASS.
@@ -1060,9 +1063,9 @@ Expected: `build-ffi:` log line ending in `apps/server/src/noise/nativeLib`, and
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck && bun lint
-bun --cwd apps/server run test
-bun --cwd apps/server run build
+bun run --cwd apps/server typecheck && bun lint
+bun run --cwd apps/server test
+bun run --cwd apps/server build
 ```
 
 Expected: all PASS. The build is mandatory here — it is the only check that proves the `{ type: 'file' }` cdylib embed still resolves. Confirm `git status --porcelain` does not list `apps/server/src/noise/nativeLib` (the ignore rule must be working).
@@ -1192,7 +1195,7 @@ rewrite upload              workspace/upload
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck && bun lint && bun --cwd apps/server run test
+bun run --cwd apps/server typecheck && bun lint && bun run --cwd apps/server test
 ```
 
 Expected: all PASS.
@@ -1279,7 +1282,7 @@ rewrite presentCli           presentations/cli
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck && bun lint && bun --cwd apps/server run test
+bun run --cwd apps/server typecheck && bun lint && bun run --cwd apps/server test
 ```
 
 Expected: all PASS.
@@ -1374,7 +1377,7 @@ rewrite controlSocket control/socket
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck && bun lint && bun --cwd apps/server run test
+bun run --cwd apps/server typecheck && bun lint && bun run --cwd apps/server test
 ```
 
 Expected: all PASS. `src/cli/device.ts` still holds the three `require()` forms fixed in Tasks 7 and 8 — confirm they read `@/auth/deviceRegistry`, `@/auth/deviceToken`, `@/noise/ffi`:
@@ -1471,7 +1474,7 @@ done
 
 ```bash
 cd /home/samuelloranger/sites/tether
-bun --cwd apps/server run typecheck && bun lint && bun --cwd apps/server run test
+bun run --cwd apps/server typecheck && bun lint && bun run --cwd apps/server test
 ```
 
 Expected: all PASS.
@@ -1536,7 +1539,7 @@ Expected: no output.
 ```bash
 cd /home/samuelloranger/sites/tether
 rm -rf apps/server/dist apps/server/src/noise/nativeLib
-bun --cwd apps/server run build
+bun run --cwd apps/server build
 ls -l apps/server/dist/tether
 ```
 
@@ -1548,10 +1551,12 @@ Expected: the binary exists. `build` runs `build:ffi` first, so this also re-pro
 cd /home/samuelloranger/sites/tether
 rm -rf /tmp/tether-task13 && mkdir -p /tmp/tether-task13
 TETHER_DB_PATH=/tmp/tether-task13/tether.db TETHER_PORT=8199 TETHER_TLS=off \
+  TETHER_CONTROL_SOCK=/tmp/tether-task13/control.sock \
   ./apps/server/dist/tether serve > /tmp/tether-task13/out.log 2>&1 &
+probe_pid=$!
 sleep 6
 curl -sf http://127.0.0.1:8199/api/status; echo
-pkill -f 'dist/tether serve' || true
+kill "$probe_pid" 2>/dev/null || true
 cat /tmp/tether-task13/out.log
 ```
 
@@ -1571,8 +1576,8 @@ Expected: PASS. This is the check that proves the rewritten `bun apps/server/src
 ```bash
 cd /home/samuelloranger/sites/tether
 bun lint
-bun --cwd apps/server run test
-bun --cwd apps/desktop run test
+bun run --cwd apps/server test
+bun run --cwd apps/desktop test
 ```
 
 Expected: all PASS.

@@ -11,13 +11,13 @@
     "build:server": "bun --cwd apps/server build",
     "start:server": "bun --cwd apps/server start",
     "lint": "biome check && bun --cwd apps/server typecheck && bun --cwd apps/desktop typecheck",
-    "dev:desktop": "bun --cwd apps/desktop run tauri:dev",
+    "dev:desktop": "bun run --cwd apps/desktop tauri:dev",
     "format": "biome check --write",
     "gen:proto": "bunx --bun @bufbuild/buf@1.60.0 generate",
     "docs:dev": "vitepress dev docs",
     "docs:build": "cp install.sh docs/public/install.sh && vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "test:desktop": "bun --cwd apps/desktop run test"
+    "test:desktop": "bun run --cwd apps/desktop test"
   },
   "dependencies": {
     "bun-types": "^1.4.0"

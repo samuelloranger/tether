@@ -39,7 +39,7 @@ the server binaries.
   - Transport: `x509.ts` (hand-rolled DER + self-signed cert generation, no deps), `tlsStore.ts` (`~/.tether/config/tls/`, generate-once), `tlsConfig.ts` (listener plan from env — pure), `tlsRuntime.ts` (the report the routes read), `noiseChannel.ts` / `noiseFfi.ts` / `noiseSessionProtocol.ts`.
   - Features: `gitDiff.ts` / `gitOps.ts` / `gitRoot.ts` / `gitWatch.ts`, `workspaceFile.ts`, `upload.ts`, `presentations.ts` / `presentCli.ts`, `push.ts` / `pushCrypto.ts` / `pushDevices.ts` / `pushRelay.ts` (native APNs push via the relay), `admin.ts` (update/restart/test-notification).
 - `apps/desktop/` — Tauri 2 desktop client (`tether-desktop`). Vite + React + xterm.js frontend; Rust commands in `src-tauri/` link `tether-core` directly.
-- `apps/relay/` — Bun + Hono push relay (`tether-relay`), deployed separately (`Dockerfile` + `docker-compose.yml`). Routes ciphertext it cannot read from a tether server to APNs; see **Push notifications** below. Own tests (`bun --cwd apps/relay run test`).
+- `apps/relay/` — Bun + Hono push relay (`tether-relay`), deployed separately (`Dockerfile` + `docker-compose.yml`). Routes ciphertext it cannot read from a tether server to APNs; see **Push notifications** below. Own tests (`bun run --cwd apps/relay test`).
 - `clients/apple/` — native iOS app (`TetherIOS` + `TetherKit` SPM package + `TetherNotificationService`).
 - `crates/` — `tether-core`, `tether-proto`, `tether-ffi` (UniFFI → Swift).
 - `docs/` — VitePress site (`architecture.md`, `data-flow.md`, `security.md`, `terminal/`).
@@ -57,12 +57,15 @@ Run from repo root:
 - `bun docs:dev` / `bun docs:build` — VitePress docs
 
 Per workspace:
-- Desktop tests: `bun --cwd apps/desktop run test`; its Rust half is
+- Desktop tests: `bun run --cwd apps/desktop test`; its Rust half is
   `cd apps/desktop/src-tauri && cargo test` (CI: the `desktop-build` job)
-- Server tests: `bun --cwd apps/server run test` (bun:test — extensive, most `.ts` files have a sibling `.test.ts`)
-- Use `run test`, not `bun test`: the built-in runner wins over the script name, so bare `bun test` silently drops the `--parallel` flag the scripts carry (12.8s → 3.3s on the server suite). Never pin `TETHER_DB_PATH` for a suite run — `test-preload.ts` gives each process its own temp DB, and one shared file makes parallel workers fight over it.
+- Server tests: `bun run --cwd apps/server test` (bun:test — extensive, most `.ts` files have a sibling `.test.ts`)
+- Two invocation footguns, both of which **exit 0 while running nothing or the wrong thing**:
+  - Use `run test`, not `bun test`: the built-in runner wins over the script name, so bare `bun test` silently drops the `--parallel` flag the scripts carry (12.8s → 3.3s on the server suite).
+  - Put `run` **before** `--cwd`. `bun run --cwd apps/server test` works; `bun --cwd apps/server run test` prints the script list and exits 0 without running anything (Bun 1.4.0). `bun --cwd apps/server typecheck` — no `run` — is also fine.
+- Never pin `TETHER_DB_PATH` for a suite run — `test-preload.ts` gives each process its own temp DB, and one shared file makes parallel workers fight over it.
 - iOS: see `clients/apple/README.md` (`scripts/build-xcframework.sh`, then `xcodebuild -project clients/apple/Tether.xcodeproj -scheme TetherIOS …`)
-- Desktop: `bun --cwd apps/desktop run tauri:dev` / `tauri:build`
+- Desktop: `bun run --cwd apps/desktop tauri:dev` / `tauri:build`
 
 **Server as a daemon:** the binary *is* the CLI — `serve` (default, foreground) plus `start | stop | restart | status | logs | pair | present | signal | devices | device | update | version`; `holder` is internal. `start` re-execs itself detached; pid + log in `~/.tether/`. Installed to `~/.local/bin/tether` by `install.sh`, updated with `tether update`. Honors `TETHER_PORT` / `TETHER_TLS` / `TETHER_TLS_PORT` / `TETHER_DB_PATH` / `TETHER_REPO_SLUG`.
 
