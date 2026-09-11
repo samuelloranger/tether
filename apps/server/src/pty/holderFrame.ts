@@ -29,7 +29,7 @@
  * the dialect immediately instead of guessing from a timeout.
  */
 
-import { type Bytes, type DecodedFrame, encodeFrame } from './proto/frame';
+import { type Bytes, type DecodedFrame, encodeFrame } from '@/proto/frame';
 
 /** Bumped only on a breaking change to the payload encodings above. */
 export const HOLDER_PROTO_VERSION = 2;

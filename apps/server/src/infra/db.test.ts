@@ -1,6 +1,6 @@
 // Run: TETHER_DB_PATH=/tmp/tether-test-$$.db bun run src/db.test.ts
 
-import { getReplayLogs } from '../replayRead';
+import { getReplayLogs } from '@/pty/replayRead';
 import {
   addTerminalLog,
   createAgentSession,

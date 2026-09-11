@@ -9,7 +9,7 @@ import {
   recordSignal,
   SILENCE_MS,
   scanChunk,
-} from './sessionActivity';
+} from './activity';
 
 const T0 = 1_000_000;
 

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { getSession, listSessions } from '@/infra/db';
-import { killSession, startSession } from './pty';
+import { killSession, startSession } from './registry';
 
 // Regression: the holder answers `{t:'k'}` with a `{t:'x'}` exit frame shortly
 // after killSession returns. That handler used to re-`upsertSession` the row

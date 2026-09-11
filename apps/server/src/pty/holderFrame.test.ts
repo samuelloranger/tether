@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FrameDecoder } from '@/proto/frame';
 import {
   decodeHolderFrame,
   decodeLegacyHolderLine,
@@ -17,7 +18,6 @@ import {
   sniffDialect,
   takeLegacyLines,
 } from './holderFrame';
-import { FrameDecoder } from './proto/frame';
 
 const one = (bytes: Uint8Array) => {
   const frames = new FrameDecoder().push(bytes);

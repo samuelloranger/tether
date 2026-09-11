@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { db } from '@/infra/db';
 import { getConfig } from '@/infra/settings';
+import type { FocusSubscriber } from '@/pty/registry';
 import type { AgentDriver } from './agentDriver';
 import { FakeAgentDriver } from './agentDriver';
 import { getAgentMessages } from './agentMessages';
@@ -8,7 +9,6 @@ import { AgentRegistry } from './agentRegistry';
 import { type AuthDevice, RegistryError } from './deviceRegistry';
 import type { FrameIO, ServerChannel } from './noiseChannel';
 import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
-import type { FocusSubscriber } from './pty';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

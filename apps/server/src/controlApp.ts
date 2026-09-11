@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
+import type { SignalState } from '@/pty/activity';
+import { signalSession } from '@/pty/signal';
 import { pairControl } from './pairControl';
 import { presentations } from './presentationRegistry';
-import type { SignalState } from './sessionActivity';
-import { signalSession } from './signalSession';
 
 // The control plane. Served ONLY over the loopback unix socket (controlServe.ts),
 // never on the network listeners — so there is no token gate here: a process

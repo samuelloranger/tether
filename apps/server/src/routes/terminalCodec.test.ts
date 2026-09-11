@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { encodeReplayCursor } from '@/pty/replayCursor';
 import { FrameDecoder } from '../proto/frame';
 import {
   decodeCursorFrame,
@@ -7,7 +8,6 @@ import {
   encodeClientMessage,
   FrameKind,
 } from '../proto/wireCodec';
-import { encodeReplayCursor } from '../replayCursor';
 import { codecFor } from './terminalCodec';
 
 const SUMMARY = { files: [{ path: 'a.ts', insertions: 1, deletions: 0, binary: false }] };

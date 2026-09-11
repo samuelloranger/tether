@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { z } from 'zod';
-import { describeShellSupport, getDefaultShell, type ShellSupport } from '../ptyShell';
+import { describeShellSupport, getDefaultShell, type ShellSupport } from '@/pty/shell';
 import { getSetting, setSetting } from './db';
 import { logWarn } from './log';
 

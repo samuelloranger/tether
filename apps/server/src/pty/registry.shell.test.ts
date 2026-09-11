@@ -2,8 +2,8 @@
 // Pure-function test only — does not spawn a PTY.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { shellInvocation } from './pty';
-import { describeShellSupport } from './ptyShell';
+import { shellInvocation } from './registry';
+import { describeShellSupport } from './shell';
 
 let pass = 0;
 function eq(actual: unknown, expected: unknown, msg: string) {

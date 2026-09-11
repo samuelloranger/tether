@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { SPAWN_TIMEOUT_MS } from './spawnLimits';
+import { SPAWN_TIMEOUT_MS } from '@/pty/spawnLimits';
 
 // Client mirror: parseRepoStatus / canPushHead live in tether-core (git_status).
 // Keep formatRepoStatusLabel / canRewriteHead semantics identical when changing either.

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { SPAWN_TIMEOUT_MS } from './spawnLimits';
+import { SPAWN_TIMEOUT_MS } from '@/pty/spawnLimits';
 
 export const MAX_DIFF_BYTES = 1_048_576;
 

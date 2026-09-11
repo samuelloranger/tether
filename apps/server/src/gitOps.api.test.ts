@@ -4,9 +4,9 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { deleteSession, upsertSession } from '@/infra/db';
+import { clearLiveCwd, reportCwd } from '@/pty/liveCwd';
 import { testAuthHeaders } from '@/testing/auth';
 import { app } from './app';
-import { clearLiveCwd, reportCwd } from './liveCwd';
 
 let AUTH: Record<string, string>;
 const ID = 'gitops-api';

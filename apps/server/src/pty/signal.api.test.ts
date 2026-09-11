@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { controlApp } from './controlApp';
-import { clearActivity, getActivity } from './sessionActivity';
+import { controlApp } from '../controlApp';
+import { clearActivity, getActivity } from './activity';
 
 async function post(body: unknown): Promise<Response> {
   return controlApp.request('/control/signal', {

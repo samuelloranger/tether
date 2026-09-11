@@ -1,9 +1,9 @@
 import { websocket } from 'hono/bun';
 import { resetRunningSessions, setSessionStatus } from '@/infra/db';
 import { logError, logInfo, logWarn } from '@/infra/log';
+import { reattachHolders } from '@/pty/registry';
 import { app } from './app';
 import { serveControl } from './controlServe';
-import { reattachHolders } from './pty';
 import { type ListenerPlan, resolveListenerPlan } from './tlsConfig';
 import { publishTlsReport } from './tlsRuntime';
 import { ensureTlsMaterial, TLS_DIR, type TlsMaterial } from './tlsStore';

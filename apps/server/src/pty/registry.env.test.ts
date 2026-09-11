@@ -1,6 +1,6 @@
 // Run: bun run src/pty.env.test.ts
 // Pure-function test only — does not spawn a PTY.
-import { scrubAgentEnv, sessionEnv, withTermEnv } from './pty';
+import { scrubAgentEnv, sessionEnv, withTermEnv } from './registry';
 
 let pass = 0;
 function eq(actual: unknown, expected: unknown, msg: string) {

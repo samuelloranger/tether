@@ -9,6 +9,7 @@
 // subcommand: <socketPath> <cols> <rows> <cwd> <cmd> [args...]
 
 import { chmodSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { FrameDecoder } from '@/proto/frame';
 import {
   decodeHolderFrame,
   decodeLegacyHolderLine,
@@ -22,7 +23,6 @@ import {
   takeLegacyLines,
 } from './holderFrame';
 import { getProcessCwd } from './procCwd';
-import { FrameDecoder } from './proto/frame';
 
 /** The shell's cwd, straight from the kernel (/proc/<pid>/cwd). */
 function holderCwd(pid: number): string | null {

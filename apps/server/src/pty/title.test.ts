@@ -6,7 +6,7 @@ import {
   INITIAL_TITLE_STATE,
   recordTitleChunk,
   updateTitle,
-} from './sessionTitle';
+} from './title';
 
 describe('updateTitle', () => {
   test('captures OSC 2 title with BEL terminator', () => {

@@ -3,10 +3,8 @@ import { upgradeWebSocket } from 'hono/bun';
 import { deleteSession, getSession, listSessions, renameSession } from '@/infra/db';
 import { logError, logInfo, logWarn } from '@/infra/log';
 import { testEvent } from '@/infra/testEvents';
-import { deleteAgentMessages } from '../agentMessages';
-import { sharedAgentRegistry } from '../agentRegistry';
-import { trackDeviceChannel } from '../deviceChannels';
-import { getLiveCwd } from '../liveCwd';
+import { getActivity } from '@/pty/activity';
+import { getLiveCwd } from '@/pty/liveCwd';
 import {
   type FocusSubscriber,
   getActiveSession,
@@ -16,11 +14,13 @@ import {
   startSession,
   subscribeToSession,
   writeToSession,
-} from '../pty';
-import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '../replayPlan';
-import { getReplayLogs } from '../replayRead';
-import { getActivity } from '../sessionActivity';
-import { autoTitle, getOscTitle } from '../sessionTitle';
+} from '@/pty/registry';
+import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '@/pty/replayPlan';
+import { getReplayLogs } from '@/pty/replayRead';
+import { autoTitle, getOscTitle } from '@/pty/title';
+import { deleteAgentMessages } from '../agentMessages';
+import { sharedAgentRegistry } from '../agentRegistry';
+import { trackDeviceChannel } from '../deviceChannels';
 import { codecFor, type TerminalCodec, type WireData } from './terminalCodec';
 
 export const sessionsRoutes = new Hono();

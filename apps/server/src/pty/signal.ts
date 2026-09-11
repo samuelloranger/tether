@@ -1,6 +1,6 @@
 import { getSession } from '@/infra/db';
-import { broadcast, notify } from './ptyHolder';
-import { recordSignal, type SignalState } from './sessionActivity';
+import { recordSignal, type SignalState } from './activity';
+import { broadcast, notify } from './holderClient';
 
 /**
  * A program declaring its own state, arriving from `/control/signal`.

@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
-import { PTY_TEST_TIMEOUT_MS, SHELL_TIMEOUT_MS, TEST_SHELL, titleLine } from '../test-shell';
+import { PTY_TEST_TIMEOUT_MS, SHELL_TIMEOUT_MS, TEST_SHELL, titleLine } from '../../test-shell';
 import {
   killSession,
   type Subscriber,
   startSession,
   subscribeToSession,
   writeToSession,
-} from './pty';
-import { getOscTitle, recordTitleChunk } from './sessionTitle';
+} from './registry';
+import { getOscTitle, recordTitleChunk } from './title';
 
 async function waitFor(condition: () => boolean, timeout = SHELL_TIMEOUT_MS) {
   const deadline = Date.now() + timeout;

@@ -13,6 +13,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { deleteSession, upsertSession } from '@/infra/db';
+import { FrameDecoder } from '@/proto/frame';
+import { attach, instances, sendHolderInput, sendHolderResize } from './holderClient';
 import {
   decodeHolderFrame,
   decodeLegacyHolderLine,
@@ -23,8 +25,6 @@ import {
   type HolderMessage,
   takeLegacyLines,
 } from './holderFrame';
-import { FrameDecoder } from './proto/frame';
-import { attach, instances, sendHolderInput, sendHolderResize } from './ptyHolder';
 
 const cleanups: Array<() => void> = [];
 

@@ -1,6 +1,19 @@
 import { getSession } from '@/infra/db';
 import { logError } from '@/infra/log';
 import { testEvent } from '@/infra/testEvents';
+import {
+  type FocusSubscriber,
+  getActiveSession,
+  kickPtySize,
+  resizeSession,
+  SessionExitedError,
+  setSessionFocus,
+  startSession,
+  subscribeToSession,
+  writeToSession,
+} from '@/pty/registry';
+import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '@/pty/replayPlan';
+import { getReplayLogs as readReplayLogs } from '@/pty/replayRead';
 import type { AgentMessageRow } from './agentMessages';
 import { type AgentRegistry, sharedAgentRegistry } from './agentRegistry';
 import { applyAgentMessage, defaultGetAgentMessages } from './agentReplay';
@@ -16,19 +29,6 @@ import type { AuthDevice } from './deviceRegistry';
 import { listDevices, RegistryError, resolveTarget, revokeDevice } from './deviceRegistry';
 import { mintToken as mintDeviceToken } from './deviceToken';
 import type { FrameIO, ServerChannel } from './noiseChannel';
-import {
-  type FocusSubscriber,
-  getActiveSession,
-  kickPtySize,
-  resizeSession,
-  SessionExitedError,
-  setSessionFocus,
-  startSession,
-  subscribeToSession,
-  writeToSession,
-} from './pty';
-import { REPLAY_BYTE_BUDGET, replayOutputFrames } from './replayPlan';
-import { getReplayLogs as readReplayLogs } from './replayRead';
 
 /**
  * The identity of the device on the far end of this Noise session — already

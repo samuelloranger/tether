@@ -30,7 +30,8 @@ These are the five places a naive `sed 's|from ...|...|'` pass will miss or corr
 | File | Line(s) | Form | Handling |
 |---|---|---|---|
 | `deviceCli.ts` | 81-83 | `require('./noiseFfi') as typeof import('./noiseFfi')` ×3 (also `./deviceRegistry`, `./deviceToken`) | Hand-edit. `require()` and `typeof import()` are not `from '…'`. |
-| `gitOps.test.ts` | 285, 300 | `await import('./gitDiff')` ×2 | Hand-edit. |
+| `gitOps.test.ts` | 285, 300 | `await import('./gitDiff')` ×2 | Covered by the generalized `rewrite()` below. |
+| `main.ts` | 230-312 | **nine** `await import('./x')` lazy subcommand loads: `serve`, `presentCli`, `pairCli`, `pairAdvertise`, `signalCli`, `deviceCli` ×2, `update`, `holder` | Covered by the generalized `rewrite()`. Every one of these targets moves in Tasks 5, 11 or 12 — after each of those tasks, `grep -n "await import('\./" src/main.ts` must come back empty for the modules that task moved. |
 | `dbStartup.test.ts` | 99, 148 | `new URL('./db.ts', import.meta.url)` ×2 | **Leave alone.** Runtime URL resolution — an alias does not resolve here. Both files land in `infra/`, so `./db.ts` stays correct. |
 | `pty.ts` | 29-32 | `export … from './ptyHolder'` / `'./ptyResize'` / `'./ptyShell'` | Caught by the `from '…'` pattern. No special handling, but verify. |
 | `noiseFfi.ts` | 10 | `import embeddedNoiseLib from './noiseNativeLib' with { type: 'file' }` | Caught by the `from '…'` pattern; the `with` clause is after the quote. Verify the asset path still resolves by running the build. |
@@ -58,12 +59,12 @@ Pass B needs two `sed` invocations because depth differs. Its shape is:
 ```bash
 # rewrite <old-basename> <new-alias-path-without-leading-@/>
 rewrite() {
-  # still-flat modules at src/*.ts use './old'
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
-  # anything already in a subfolder (routes/, proto/, earlier domains) uses '../old'
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
   find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/<this-task-folder>/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 ```
 
@@ -81,12 +82,19 @@ folder the task created:
 ```bash
 fix_dangling() {
   for f in "$1"/*.ts; do
-    for mod in $(grep -o "from '\./[A-Za-z0-9_]*'" "$f" | sed "s|from '\./||; s|'||" | sort -u); do
+    # [A-Za-z0-9_/]* so nested specifiers like './proto/frame' are caught too
+    for mod in $(grep -o "from '\./[A-Za-z0-9_/]*'" "$f" | sed "s|from '\./||; s|'||" | sort -u); do
       [ -f "$1/$mod.ts" ] || sed -i "s|from '\./$mod'|from '../$mod'|g" "$f"
     done
   done
 }
 fix_dangling src/<new-folder>
+
+A nested specifier that points at a top-level folder (`./proto/frame`,
+`./routes/fs`) is better rewritten straight to its alias (`@/proto/frame`) than
+to `../proto/frame` — both resolve, but the alias is what the rest of the tree
+uses. Six `pty/` files imported `./proto/frame`; the single-segment version of
+this helper silently skipped all of them and `tsc` caught it.
 ```
 
 **Pass A3 — non-import path resolution.** Grep the moved files for path
@@ -568,10 +576,12 @@ Expected: two hits, both still `'./db.ts'`.
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
   find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/$3/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite db        infra/db        infra
 rewrite log       infra/log       infra
@@ -717,10 +727,12 @@ Expected: both files now read `'../../test-paths'` / `'../../test-shell'`.
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
   find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/pty/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite pty             pty/registry
 rewrite ptyHolder       pty/holderClient
@@ -823,10 +835,12 @@ find src/agent -name '*.ts' -print0 | xargs -0 -r sed -i \
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
   find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/agent/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite agentDriver       agent/driver
 rewrite agentClaudeDriver agent/claudeDriver
@@ -904,10 +918,12 @@ find src/auth -name '*.ts' -print0 | xargs -0 -r sed -i \
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
   find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/auth/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite auth           auth/bearer
 rewrite authGate       auth/gate
@@ -1037,11 +1053,12 @@ Expected: `import embeddedNoiseLib from './nativeLib' with { type: 'file' };`. T
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
-  find src -mindepth 2 -maxdepth 2 -name '*.ts' \
-    -not -path "src/noise/*" -not -path "src/tls/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
+  find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/noise/*" -not -path "src/tls/*" -print0 \
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite noiseChannel         noise/channel
 rewrite noiseFfi             noise/ffi
@@ -1218,11 +1235,12 @@ Expected: all four now read `'../../test-paths'` or `'../../test-shell'`.
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
-  find src -mindepth 2 -maxdepth 2 -name '*.ts' \
-    -not -path "src/git/*" -not -path "src/workspace/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
+  find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/git/*" -not -path "src/workspace/*" -print0 \
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite gitDiff             git/diff
 rewrite gitOps              git/ops
@@ -1308,11 +1326,12 @@ find src/presentations -name '*.ts' -print0 | xargs -0 -r sed -i \
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
-  find src -mindepth 2 -maxdepth 2 -name '*.ts' \
-    -not -path "src/push/*" -not -path "src/presentations/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
+  find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/push/*" -not -path "src/presentations/*" -print0 \
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite push                 push/send
 rewrite pushCrypto           push/crypto
@@ -1403,11 +1422,12 @@ find src/control -name '*.ts' -print0 | xargs -0 -r sed -i \
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
-  find src -mindepth 2 -maxdepth 2 -name '*.ts' \
-    -not -path "src/cli/*" -not -path "src/control/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
+  find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/cli/*" -not -path "src/control/*" -print0 \
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite deviceCli     cli/device
 rewrite pairCli       cli/pair
@@ -1501,10 +1521,12 @@ The three loose files at `src/` and any domain file importing `./app`, `./admin`
 ```bash
 cd /home/samuelloranger/sites/tether/apps/server
 rewrite() {
+  # covers `from '…'`, `import('…')` and `require('…')` in one pass.
+  # '#' is the sed delimiter — '|' would collide with the alternation.
   find src -maxdepth 1 -name '*.ts' -print0 \
-    | xargs -0 -r sed -i "s|from '\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\./$1'#\1'@/$2'#g"
   find src -mindepth 2 -maxdepth 2 -name '*.ts' -not -path "src/http/*" -print0 \
-    | xargs -0 -r sed -i "s|from '\.\./$1'|from '@/$2'|g"
+    | xargs -0 -r sed -i -E "s#(from |import\(|require\()'\.\./$1'#\1'@/$2'#g"
 }
 rewrite app   http/app
 rewrite admin http/admin

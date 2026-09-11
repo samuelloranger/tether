@@ -11,11 +11,15 @@ import {
 import { logError, logInfo } from '@/infra/log';
 import { CONFIG_DIR } from '@/infra/paths';
 import { getConfig } from '@/infra/settings';
+import { FrameDecoder } from '@/proto/frame';
+import { type DiffSummary, EMPTY_DIFF_SUMMARY } from '../gitDiff';
+import { findGitRoot } from '../gitRoot';
+import { EMPTY_REPO_STATUS, type RepoStatus } from '../gitStatus';
+import { GitWatch } from '../gitWatch';
+import { type NotificationEvent, pushesFromOutput, pushFromExit } from '../notifications';
+import { buildPushContent, sendPush } from '../push';
+import { type Activity, clearActivity, recordOutputEvent } from './activity';
 import { CwdRefreshGate } from './cwdRefresh';
-import { type DiffSummary, EMPTY_DIFF_SUMMARY } from './gitDiff';
-import { findGitRoot } from './gitRoot';
-import { EMPTY_REPO_STATUS, type RepoStatus } from './gitStatus';
-import { GitWatch } from './gitWatch';
 import {
   decodeHolderFrame,
   decodeLegacyHolderLine,
@@ -30,12 +34,8 @@ import {
   takeLegacyLines,
 } from './holderFrame';
 import { clearLiveCwd, getLiveCwd, recordChunk, reportCwd } from './liveCwd';
-import { type NotificationEvent, pushesFromOutput, pushFromExit } from './notifications';
-import { FrameDecoder } from './proto/frame';
-import type { Dims } from './ptyResize';
-import { buildPushContent, sendPush } from './push';
-import { type Activity, clearActivity, recordOutputEvent } from './sessionActivity';
-import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './sessionTitle';
+import type { Dims } from './resize';
+import { autoTitle, clearTitle, getOscTitle, recordTitleChunk } from './title';
 
 export const HOLDERS_DIR = path.join(CONFIG_DIR, 'holders');
 // Anyone who can open a holder socket can write bytes straight into that

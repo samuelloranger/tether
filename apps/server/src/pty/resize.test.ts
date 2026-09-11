@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { clampDims, type Dims, planPtyResize, shouldKickPtyOnFocus } from './ptyResize';
+import { clampDims, type Dims, planPtyResize, shouldKickPtyOnFocus } from './resize';
 
 test('clampDims passes sane values through', () => {
   expect(clampDims(80, 24)).toEqual({ cols: 80, rows: 24 });

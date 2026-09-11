@@ -1,4 +1,4 @@
-import type { SignalState } from './sessionActivity';
+import type { SignalState } from '@/pty/activity';
 
 export type SignalArgs =
   | { kind: 'send'; state: SignalState; title?: string; body?: string }

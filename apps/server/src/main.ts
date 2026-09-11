@@ -12,8 +12,8 @@ import {
 import { homedir } from 'node:os';
 import { CONTROL_SOCK, LOG_FILE, PID_FILE, STATE_DIR } from '@/infra/paths';
 import { COMPILED, selfArgv, VERSION } from '@/infra/runtime';
+import { processStartTime } from '@/pty/procIdentity';
 import { followFile } from './logTail';
-import { processStartTime } from './procIdentity';
 import { resolveListenerPlan } from './tlsConfig';
 
 const PORT = process.env.TETHER_PORT ?? '8085';
@@ -309,7 +309,7 @@ switch (cmd) {
   }
   case 'holder': {
     // Internal: the PTY holder process, spawned by pty.ts via selfArgv('holder').
-    const { runHolder } = await import('./holder');
+    const { runHolder } = await import('@/pty/holder');
     runHolder(process.argv.slice(3));
     break;
   }

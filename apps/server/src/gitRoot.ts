@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { SPAWN_TIMEOUT_MS } from './spawnLimits';
+import { SPAWN_TIMEOUT_MS } from '@/pty/spawnLimits';
 
 // A session's cwd can stop existing while the shell still sits in it (worktree
 // removed, rm -rf'd, branch switch). Ordinary state, not a 500.

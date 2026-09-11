@@ -7,7 +7,7 @@ import { OLD_HOLDERS_DIR, USING_DEFAULT_DB } from '@/infra/paths';
 import { COMPILED, selfArgv } from '@/infra/runtime';
 import { getConfig } from '@/infra/settings';
 import { testEvent } from '@/infra/testEvents';
-import { clearLiveCwd } from './liveCwd';
+import { clearActivity, recordInput } from './activity';
 import {
   attach,
   broadcast,
@@ -20,16 +20,16 @@ import {
   sendHolderKill,
   sendHolderResize,
   sockPathFor,
-} from './ptyHolder';
-import { clampDims, planPtyResize, shouldKickPtyOnFocus } from './ptyResize';
-import { getDefaultShell, shellInvocation } from './ptyShell';
-import { clearActivity, recordInput } from './sessionActivity';
-import { clearTitle } from './sessionTitle';
+} from './holderClient';
+import { clearLiveCwd } from './liveCwd';
+import { clampDims, planPtyResize, shouldKickPtyOnFocus } from './resize';
+import { getDefaultShell, shellInvocation } from './shell';
+import { clearTitle } from './title';
 
-export type { FocusSubscriber, SessionFrame, Subscriber } from './ptyHolder';
-export { sockPathFor } from './ptyHolder';
-export { clampDims } from './ptyResize';
-export { getDefaultShell, type ShellInvocation, shellInvocation } from './ptyShell';
+export type { FocusSubscriber, SessionFrame, Subscriber } from './holderClient';
+export { sockPathFor } from './holderClient';
+export { clampDims } from './resize';
+export { getDefaultShell, type ShellInvocation, shellInvocation } from './shell';
 
 const MAX_SESSIONS = Number(process.env.TETHER_MAX_SESSIONS || 50);
 

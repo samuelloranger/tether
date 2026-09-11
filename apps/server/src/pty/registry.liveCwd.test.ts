@@ -3,11 +3,12 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { canonicalFixture } from '../test-paths';
-import { cdLine, PTY_TEST_TIMEOUT_MS, SHELL_TIMEOUT_MS, TEST_SHELL } from '../test-shell';
+import { FrameDecoder } from '@/proto/frame';
+import { canonicalFixture } from '../../test-paths';
+import { cdLine, PTY_TEST_TIMEOUT_MS, SHELL_TIMEOUT_MS, TEST_SHELL } from '../../test-shell';
+import { refreshLiveCwd } from './holderClient';
 import { decodeHolderFrame, HOLDER_PROTO_VERSION, type HolderMessage } from './holderFrame';
 import { clearLiveCwd, getLiveCwd, recordChunk } from './liveCwd';
-import { FrameDecoder } from './proto/frame';
 import {
   killSession,
   type Subscriber,
@@ -15,8 +16,7 @@ import {
   startSession,
   subscribeToSession,
   writeToSession,
-} from './pty';
-import { refreshLiveCwd } from './ptyHolder';
+} from './registry';
 
 async function waitFor(condition: () => boolean, timeout = SHELL_TIMEOUT_MS) {
   const deadline = Date.now() + timeout;

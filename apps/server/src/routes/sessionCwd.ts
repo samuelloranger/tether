@@ -1,9 +1,9 @@
 import type { Context } from 'hono';
 
 import { getSession } from '@/infra/db';
+import { refreshLiveCwd } from '@/pty/holderClient';
+import { getLiveCwd } from '@/pty/liveCwd';
 import { GitRootError, resolveGitRoot } from '../gitRoot';
-import { getLiveCwd } from '../liveCwd';
-import { refreshLiveCwd } from '../ptyHolder';
 
 /**
  * Session cwd + its git root. The refresh matters: live cwd otherwise only moves

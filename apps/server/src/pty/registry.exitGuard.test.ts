@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { getSession, upsertSession } from '@/infra/db';
-import { SessionExitedError, startSession } from './pty';
+import { SessionExitedError, startSession } from './registry';
 
 describe('startSession exit guard', () => {
   test('does not resurrect a session that exited on its own', async () => {

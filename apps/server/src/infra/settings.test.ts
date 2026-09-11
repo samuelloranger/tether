@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { describeShellSupport } from '../ptyShell';
+import { describeShellSupport } from '@/pty/shell';
 import { db, setSetting } from './db';
 import {
   DEFAULT_CONFIG,
