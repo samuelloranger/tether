@@ -21,14 +21,22 @@ export const DB_PATH =
     : path.join(process.cwd(), 'config', 'tether.db'));
 export const CONFIG_DIR = path.dirname(DB_PATH);
 
-// The daemon's control socket. Isolated for a source run exactly like the DB is:
-// the path is a fixed name, and `prepareControlSocket` unlinks whatever sits
-// there, so a shared default let `bun dev:server` silently unlink the installed
-// daemon's socket and leave every `tether signal` from a hook failing with
-// Bun's FailedToOpenSocket ("Was there a typo in the url or port?").
+// The daemon's control socket. It follows CONFIG_DIR for the same reason the
+// holder sockets do: the path is a fixed name and `prepareControlSocket` now
+// refuses to start when something is already serving it, so anything sharing
+// the default is not merely racy but fatal to whichever daemon loses.
+//
+// Only the installed binary on its own default DB gets ~/.tether/control.sock.
+// A source run isolates to the repo config dir, and — the case the e2e suite
+// depends on — so does any run with TETHER_DB_PATH set, which is what lets
+// several test servers exist at once. That matches the contract stated in
+// crates/tether-core/tests/support/mod.rs: TETHER_DB_PATH relocates the config
+// dir, and the sockets live in the config dir.
 export const CONTROL_SOCK =
   process.env.TETHER_CONTROL_SOCK ??
-  (COMPILED ? path.join(STATE_DIR, 'control.sock') : path.join(CONFIG_DIR, 'control.sock'));
+  (COMPILED && USING_DEFAULT_DB
+    ? path.join(STATE_DIR, 'control.sock')
+    : path.join(CONFIG_DIR, 'control.sock'));
 
 // Pre-binary installs kept the DB (and holder sockets) inside the ~/.tether/app
 // source copy. Migrated / adopted once on upgrade to the installed binary.
