@@ -22,6 +22,7 @@
 - Comments: minimal — only a non-obvious "why" or a gotcha.
 - **No `Co-Authored-By` trailers** in commit messages.
 - Branch is `refactor/desktop-domain-layout`, **stacked on `refactor/server-domain-layout`** (PR #183), which reformatted most of `apps/desktop` at 120 columns. Do not rebase onto `main`.
+- **Stage with `git add apps/desktop`, never `git add -A`.** Another Claude session shares this checkout and has edited `apps/server` mid-run; `-A` would sweep unrelated work into a move commit. This reorg touches nothing outside `apps/desktop` (`src-tauri` included), so a scoped add is also a check on itself: if `git status` still shows desktop changes after committing, something was missed.
 
 ## Setup: the helper script
 
@@ -193,7 +194,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group core modules"
 ```
 
@@ -302,7 +303,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group platform modules"
 ```
 
@@ -418,7 +419,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group terminal modules"
 ```
 
@@ -554,7 +555,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group session modules"
 ```
 
@@ -658,7 +659,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group pane modules"
 ```
 
@@ -766,7 +767,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group host modules"
 ```
 
@@ -862,7 +863,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group workspace modules"
 ```
 
@@ -954,7 +955,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group settings modules"
 ```
 
@@ -1034,7 +1035,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group presentations modules"
 ```
 
@@ -1129,7 +1130,7 @@ tsconfig and would pass even if vite could not resolve it.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group shell modules"
 ```
 
@@ -1210,7 +1211,7 @@ clippy warning is a hard failure, not an advisory.
 
 ```bash
 cd /home/samuelloranger/sites/tether
-git add -A
+git add apps/desktop
 git commit -m "refactor(desktop): group the noise modules in src-tauri
 
 noise_session/store/token/ws were the only real cluster among the eight
