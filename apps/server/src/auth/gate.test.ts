@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { FrameIO } from '../noiseChannel';
-import { genKeypair, reconnectInitiator } from '../noiseFfi';
+import type { FrameIO } from '@/noise/channel';
+import { genKeypair, reconnectInitiator } from '@/noise/ffi';
 import { runReconnect } from './gate';
 
 function pipe(): [FrameIO, FrameIO] {

@@ -28,7 +28,7 @@ import {
 } from '@/pty/registry';
 import { REPLAY_BYTE_BUDGET, replayOutputFrames } from '@/pty/replayPlan';
 import { getReplayLogs as readReplayLogs } from '@/pty/replayRead';
-import type { FrameIO, ServerChannel } from './noiseChannel';
+import type { FrameIO, ServerChannel } from './channel';
 
 /**
  * The identity of the device on the far end of this Noise session — already

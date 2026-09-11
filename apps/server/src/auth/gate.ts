@@ -1,4 +1,4 @@
-import { acceptReconnect, type FrameIO, type ServerChannel } from '../noiseChannel';
+import { acceptReconnect, type FrameIO, type ServerChannel } from '@/noise/channel';
 
 /**
  * Dependencies for a reconnect: the registry lookup (the authorization gate —

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadOrCreateServerKeypair, serverFingerprint } from './noiseIdentity';
+import { loadOrCreateServerKeypair, serverFingerprint } from './identity';
 
 describe('noise identity', () => {
   test('creates a 32-byte keypair on first call, persists on the second', () => {

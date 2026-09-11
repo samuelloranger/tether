@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createAgentSession, db } from '@/infra/db';
-import type { AgentState } from '../noiseSessionProtocol';
+import type { AgentState } from '@/noise/sessionProtocol';
 import type { AgentDriver, AgentEvent } from './driver';
 import { AgentRegistry } from './registry';
 import { applyAgentStart } from './replay';

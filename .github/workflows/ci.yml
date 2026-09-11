@@ -35,7 +35,7 @@ jobs:
         run: bun lint
 
       # The server's noise suite dlopens crates/tether-noise-ffi's cdylib
-      # (apps/server/src/noiseFfi.ts resolves it at
+      # (apps/server/src/noise/ffi.ts resolves it at
       # crates/tether-noise-ffi/target/debug/libtether_noise_ffi.<suffix>). It is
       # built manually in local dev; without this step the 18 noise tests fail
       # with ERR_DLOPEN_FAILED ("cannot open shared object file"). The later

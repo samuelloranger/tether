@@ -13,8 +13,8 @@ import { homedir } from 'node:os';
 import { CONTROL_SOCK, LOG_FILE, PID_FILE, STATE_DIR } from '@/infra/paths';
 import { COMPILED, selfArgv, VERSION } from '@/infra/runtime';
 import { processStartTime } from '@/pty/procIdentity';
+import { resolveListenerPlan } from '@/tls/config';
 import { followFile } from './logTail';
-import { resolveListenerPlan } from './tlsConfig';
 
 const PORT = process.env.TETHER_PORT ?? '8085';
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { FrameIO } from '../noiseChannel';
-import { derivePsk, genKeypair, pairInitiator } from '../noiseFfi';
+import type { FrameIO } from '@/noise/channel';
+import { derivePsk, genKeypair, pairInitiator } from '@/noise/ffi';
 import { EnrollmentWindow, generateCode, PairingError, runPairing } from './enrollment';
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

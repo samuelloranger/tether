@@ -1,7 +1,7 @@
 import { createAgentSession, db, getSession, setSessionModel } from '@/infra/db';
 import { logError } from '@/infra/log';
 import { getConfig, patchConfig } from '@/infra/settings';
-import type { AgentState, SessionDeps } from '../noiseSessionProtocol';
+import type { AgentState, SessionDeps } from '@/noise/sessionProtocol';
 import type { AgentFrame } from './driver';
 import { type AgentMessageRow, appendAgentMessage, getAgentMessages } from './messages';
 

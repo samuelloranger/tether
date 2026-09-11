@@ -7,7 +7,7 @@ import { dlopen, FFIType, type Pointer, ptr } from 'bun:ffi';
 // in the correct-arch cdylib before each cross-target `bun build`. This replaced
 // an `import.meta.url`-relative path that resolved to a non-existent `/crates/…`
 // inside the compiled binary, so the shipped server crashed on boot.
-import embeddedNoiseLib from './noiseNativeLib' with { type: 'file' };
+import embeddedNoiseLib from './nativeLib' with { type: 'file' };
 
 // dlopen(3) loads any filename, including bun's extension-less `$bunfs`
 // extraction path, so it is handed over as-is.

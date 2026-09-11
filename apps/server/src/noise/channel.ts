@@ -1,4 +1,4 @@
-import { type NoiseHandle, pairResponder, reconnectResponder } from './noiseFfi';
+import { type NoiseHandle, pairResponder, reconnectResponder } from './ffi';
 
 /**
  * A transport abstraction the channel reads/writes opaque byte frames over. In

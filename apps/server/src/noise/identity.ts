@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { genKeypair } from './noiseFfi';
+import { genKeypair } from './ffi';
 
 // The server's long-term Noise static keypair — the identity every paired device
 // pins. Generated once, never auto-rotated (rotating locks out every device).

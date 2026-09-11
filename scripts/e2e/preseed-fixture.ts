@@ -6,8 +6,8 @@
 //
 //   TETHER_DB_PATH=~/.tether-e2e/tether.db bun scripts/e2e/preseed-fixture.ts
 import { upsertDevice } from '../../apps/server/src/auth/deviceRegistry';
-import { genKeypair } from '../../apps/server/src/noiseFfi';
-import { loadOrCreateServerKeypair } from '../../apps/server/src/noiseIdentity';
+import { genKeypair } from '../../apps/server/src/noise/ffi';
+import { loadOrCreateServerKeypair } from '../../apps/server/src/noise/identity';
 
 const host = process.env.FIX_HOST ?? '127.0.0.1';
 const port = process.env.FIX_PORT ?? '8085';

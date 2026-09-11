@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { acceptPairing, acceptReconnect, type FrameIO } from './noiseChannel';
-import { derivePsk, genKeypair, pairInitiator, reconnectInitiator } from './noiseFfi';
+import { acceptPairing, acceptReconnect, type FrameIO } from './channel';
+import { derivePsk, genKeypair, pairInitiator, reconnectInitiator } from './ffi';
 
 // Two linked FrameIOs: each side's send lands in the other's recv queue.
 function pipe(): [FrameIO, FrameIO] {

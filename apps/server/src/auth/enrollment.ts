@@ -1,5 +1,5 @@
-import { acceptPairing, ChannelError, type FrameIO } from '../noiseChannel';
-import { derivePsk } from '../noiseFfi';
+import { acceptPairing, ChannelError, type FrameIO } from '@/noise/channel';
+import { derivePsk } from '@/noise/ffi';
 
 // Crockford base32, excluding I L O U — must match the Rust core's alphabet.
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

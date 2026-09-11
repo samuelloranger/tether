@@ -84,7 +84,7 @@ fix_dangling() {
   for f in "$1"/*.ts; do
     # [A-Za-z0-9_/]* so nested specifiers like './proto/frame' are caught too
     for mod in $(grep -o "from '\./[A-Za-z0-9_/]*'" "$f" | sed "s|from '\./||; s|'||" | sort -u); do
-      [ -f "$1/$mod.ts" ] || sed -i "s|from '\./$mod'|from '../$mod'|g" "$f"
+      [ -f "$1/$mod.ts" ] || [ -f "$1/$mod" ] || sed -i "s|from '\./$mod'|from '../$mod'|g" "$f"
     done
   done
 }

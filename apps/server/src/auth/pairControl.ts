@@ -1,6 +1,6 @@
 import { type Context, Hono } from 'hono';
-import type { FrameIO } from '../noiseChannel';
-import { loadOrCreateServerKeypair, serverFingerprint } from '../noiseIdentity';
+import type { FrameIO } from '@/noise/channel';
+import { loadOrCreateServerKeypair, serverFingerprint } from '@/noise/identity';
 import { upsertDevice as registryAddDevice } from './deviceRegistry';
 import { EnrollmentWindow, type PairingDeps, runPairing } from './enrollment';
 

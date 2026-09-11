@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { FrameIO } from '../noiseChannel';
-import { derivePsk, genKeypair, pairInitiator } from '../noiseFfi';
-import { serverFingerprint } from '../noiseIdentity';
+import type { FrameIO } from '@/noise/channel';
+import { derivePsk, genKeypair, pairInitiator } from '@/noise/ffi';
+import { serverFingerprint } from '@/noise/identity';
 import { PairingError } from './enrollment';
 import { createPairControl, pairControlRoutes } from './pairControl';
 

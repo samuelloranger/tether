@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { CERT_VALID_DAYS, ensureTlsMaterial, localAltNames, tlsPaths } from './tlsStore';
+import { CERT_VALID_DAYS, ensureTlsMaterial, localAltNames, tlsPaths } from './store';
 
 const dirs: string[] = [];
 

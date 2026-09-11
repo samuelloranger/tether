@@ -1,4 +1,4 @@
-import type { FrameIO } from './noiseChannel';
+import type { FrameIO } from './channel';
 
 /** The one method WsFrameIO needs off a hono/bun WSContext to push bytes out. */
 export interface WsSender {

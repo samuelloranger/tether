@@ -6,10 +6,10 @@ import { runReconnect } from '@/auth/gate';
 import { handlePairingConnection } from '@/auth/pairControl';
 import { logError, logInfo } from '@/infra/log';
 import { testEvent } from '@/infra/testEvents';
-import { ChannelError } from '../noiseChannel';
-import { loadOrCreateServerKeypair } from '../noiseIdentity';
-import { runNoiseSession } from '../noiseSessionProtocol';
-import { toFrameBytes, WsFrameIO, type WsSender } from '../noiseWsAdapter';
+import { ChannelError } from '@/noise/channel';
+import { loadOrCreateServerKeypair } from '@/noise/identity';
+import { runNoiseSession } from '@/noise/sessionProtocol';
+import { toFrameBytes, WsFrameIO, type WsSender } from '@/noise/wsAdapter';
 
 export const noiseRoutes = new Hono();
 

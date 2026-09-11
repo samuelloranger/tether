@@ -5,7 +5,7 @@
 // never open a socket. Those tests get the default (TLS off) report, which is
 // exactly right — there is no TLS listener in a test that never started one.
 
-import { type ListenerPlan, type TlsReport, tlsReport } from './tlsConfig';
+import { type ListenerPlan, type TlsReport, tlsReport } from './config';
 
 const TLS_DISABLED: TlsReport = { enabled: false, plaintext: true, port: null, fingerprint: null };
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { resolveListenerPlan } from './tlsConfig';
-import { getTlsReport, isSecureRequest, publishTlsReport, resetTlsReport } from './tlsRuntime';
+import { resolveListenerPlan } from './config';
+import { getTlsReport, isSecureRequest, publishTlsReport, resetTlsReport } from './runtime';
 
 afterEach(resetTlsReport);
 

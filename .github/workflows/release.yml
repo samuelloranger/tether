@@ -579,7 +579,7 @@ jobs:
         if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       # Builds the release cdylib for this leg's target and stages it at
-      # apps/server/src/noiseNativeLib, which the next step embeds.
+      # apps/server/src/noise/nativeLib, which the next step embeds.
       - name: Build the Noise FFI cdylib (${{ matrix.rust_target }})
         working-directory: apps/server
         shell: bash

@@ -5,7 +5,7 @@ import {
   parseTlsMode,
   resolveListenerPlan,
   tlsReport,
-} from './tlsConfig';
+} from './config';
 
 const plan = (env: Record<string, string | undefined>) => resolveListenerPlan(env);
 

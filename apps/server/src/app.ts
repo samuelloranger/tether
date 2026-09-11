@@ -5,6 +5,7 @@ import { logError, logInfo } from '@/infra/log';
 import { VERSION } from '@/infra/runtime';
 import { getConfig } from '@/infra/settings';
 import { testEvent } from '@/infra/testEvents';
+import { getTlsReport, isSecureRequest } from '@/tls/runtime';
 import { allowAdminRequest, scheduleAdminCommand, updateTargetVersion } from './admin';
 import { sendTestPush } from './push';
 import { isValidSecretKey } from './pushCrypto';
@@ -16,7 +17,6 @@ import { gitRoutes } from './routes/git';
 import { noiseRoutes } from './routes/noise';
 import { presentationsRoutes } from './routes/presentations';
 import { sessionsRoutes } from './routes/sessions';
-import { getTlsReport, isSecureRequest } from './tlsRuntime';
 
 /** Bindings come from Bun.serve's fetch wrapper in serve.ts (peer + server). */
 export type AppEnv = {

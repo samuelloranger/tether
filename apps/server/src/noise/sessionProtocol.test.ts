@@ -7,8 +7,8 @@ import { type AuthDevice, RegistryError } from '@/auth/deviceRegistry';
 import { db } from '@/infra/db';
 import { getConfig } from '@/infra/settings';
 import type { FocusSubscriber } from '@/pty/registry';
-import type { FrameIO, ServerChannel } from './noiseChannel';
-import { runNoiseSession, type SessionDeps } from './noiseSessionProtocol';
+import type { FrameIO, ServerChannel } from './channel';
+import { runNoiseSession, type SessionDeps } from './sessionProtocol';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

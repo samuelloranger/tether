@@ -6,7 +6,7 @@ import {
   pairResponder,
   reconnectInitiator,
   reconnectResponder,
-} from './noiseFfi';
+} from './ffi';
 
 describe('noise ffi', () => {
   test('pair through ffi then exchange an encrypted frame', () => {

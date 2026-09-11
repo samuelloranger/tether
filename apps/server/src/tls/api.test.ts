@@ -10,10 +10,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { connect } from 'node:tls';
 import { testAuthHeaders } from '@/testing/auth';
-import { app } from './app';
-import { resolveListenerPlan } from './tlsConfig';
-import { publishTlsReport, resetTlsReport } from './tlsRuntime';
-import { ensureTlsMaterial } from './tlsStore';
+import { app } from '../app';
+import { resolveListenerPlan } from './config';
+import { publishTlsReport, resetTlsReport } from './runtime';
+import { ensureTlsMaterial } from './store';
 
 const root = mkdtempSync(path.join(tmpdir(), 'tether-tls-api-'));
 const material = ensureTlsMaterial(path.join(root, 'tls'));

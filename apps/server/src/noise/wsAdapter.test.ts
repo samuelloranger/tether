@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MAX_FRAME_BYTES, toFrameBytes, WsFrameIO } from './noiseWsAdapter';
+import { MAX_FRAME_BYTES, toFrameBytes, WsFrameIO } from './wsAdapter';
 
 function fakeWs(): { send: (data: Uint8Array) => void; sent: Uint8Array[] } {
   const sent: Uint8Array[] = [];
