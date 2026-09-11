@@ -50,22 +50,26 @@ class AgentChatUITestCase: XCTestCase {
     // A tap arriving while the transcript is still decelerating only stops the
     // scroll — it never reaches the composer. Let the scroll settle first.
     usleep(900_000)
-    input.tap()
-    // `app.keyboards.firstMatch.exists` is true even when nothing is drawn (it
-    // matches a dismissed keyboard), which let a test with no keyboard at all
-    // pass. Height is the honest signal.
-    let keyboard = app.keyboards.firstMatch
-    var height: CGFloat = 0
+    // Left of centre, not `input.tap()`: the element's centre is close enough to
+    // the jump-to-latest button that the tap hit that instead, which scrolled the
+    // transcript to the foot and left the composer unfocused.
+    input.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+    // Neither `app.keyboards.firstMatch.exists` nor its `frame.height` proves a
+    // keyboard is on screen — a dismissed keyboard still matches and still
+    // reports full height, which passed a test whose screenshot had no keyboard
+    // in it at all. A key you could actually press is the honest signal.
+    let key = app.keyboards.firstMatch.keys["space"]
+    var up = false
     for _ in 0..<16 {
-      height = keyboard.exists ? keyboard.frame.height : 0
-      if height > 150 { break }
+      up = key.exists && key.isHittable
+      if up { break }
       usleep(500_000)
     }
-    XCTAssertGreaterThan(
-      height, 150,
-      "no software keyboard on screen (height=\(height)). Either the tap did not focus the "
-        + "composer, or the simulator has a hardware keyboard connected — Simulator ▸ I/O ▸ "
-        + "Keyboard ▸ Connect Hardware Keyboard (off), or `defaults write "
+    XCTAssertTrue(
+      up,
+      "no software keyboard on screen. Either the tap did not focus the composer, or the "
+        + "simulator has a hardware keyboard connected — Simulator ▸ I/O ▸ Keyboard ▸ "
+        + "Connect Hardware Keyboard (off), or `defaults write "
         + "com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`.")
     // The field takes first responder a beat after the keyboard animates in;
     // typing into the gap drops the first character.
@@ -312,8 +316,8 @@ final class AgentChatScrollTests: AgentChatUITestCase {
   func testDraggingTranscriptDismissesKeyboard() throws {
     let app = launchChat("liveLong")
     requireSoftwareKeyboard(app)
-    XCTAssertGreaterThan(
-      app.keyboards.firstMatch.frame.height, 150, "keyboard should be up before the drag")
+    XCTAssertTrue(
+      app.keyboards.firstMatch.keys["space"].isHittable, "keyboard should be up before the drag")
     shot(app, "scroll-keyboard-up")
 
     // A real finger drag, not `swipeDown()`: interactive dismissal tracks the
@@ -323,7 +327,8 @@ final class AgentChatScrollTests: AgentChatUITestCase {
     let bottom = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
     top.press(forDuration: 0.2, thenDragTo: bottom)
     let gone = XCTNSPredicateExpectation(
-      predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)
+      predicate: NSPredicate(format: "isHittable == false"),
+      object: app.keyboards.firstMatch.keys["space"])
     XCTAssertEqual(
       XCTWaiter.wait(for: [gone], timeout: 8), .completed,
       "dragging the transcript did not dismiss the keyboard")
