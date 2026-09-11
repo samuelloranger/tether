@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { DrawerSession, HostHealthStatus, HostProfile } from '@/core/types';
+import type { PaneDir, PaneSide } from '@/pane/paneTree';
+import { aggregateDot, groupHostIds, groupLabel, isGroup, type View, viewMemberKeys } from '@/pane/viewModel';
 import { isRecentlyActive } from '@/platform/desktopNavigation';
 import { TerminalToolbar } from '@/terminal/TerminalToolbar';
-import type { PaneDir, PaneSide } from '../paneTree';
 import type { TetherDesktop } from '../useTetherDesktop';
-import { aggregateDot, groupHostIds, groupLabel, isGroup, type View, viewMemberKeys } from '../viewModel';
 import { activityDotKey, activityLabel, type DotKey } from './activity';
 import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { parseSessionKey, sessionKey } from './sessionKey';

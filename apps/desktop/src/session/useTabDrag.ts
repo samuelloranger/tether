@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type DropIntent, dropIntent } from '../dropZone';
+import { type DropIntent, dropIntent } from '@/pane/dropZone';
 
 /**
  * Pointer-driven "drag a session tab into a pane". Not HTML5 DnD: Tauri's native drag-drop

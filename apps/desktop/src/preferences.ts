@@ -1,5 +1,5 @@
-import { newSoloView, type ViewState } from './viewModel';
-import { deserializeViews, serializeViews } from './viewsSerialize';
+import { newSoloView, type ViewState } from '@/pane/viewModel';
+import { deserializeViews, serializeViews } from '@/pane/viewsSerialize';
 
 export const THEME_OPTIONS = [
   'system',

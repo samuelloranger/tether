@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { DrawerSession, HostHealthStatus, HostProfile } from '@/core/types';
+import type { PaneDir, PaneSide } from '@/pane/paneTree';
 import { isRecentlyActive } from '@/platform/desktopNavigation';
-import type { PaneDir, PaneSide } from '../paneTree';
 import { activityDotKey, activityLabel } from './activity';
 import { AgentIcon, SessionKindIcon } from './sessionIcons';
 import { sessionLabel, sessionLabels } from './sessionLabel';

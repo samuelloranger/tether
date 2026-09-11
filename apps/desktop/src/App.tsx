@@ -1,6 +1,30 @@
 // biome-ignore-all lint/style/noExcessiveLinesPerFile: root app shell — routes every screen and wires the drawer, terminal panes, git, and workspace panels
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type DrawerSession, type HostHealthStatus, httpOriginFor } from '@/core/types';
+import type { DropIntent } from '@/pane/dropZone';
+import { PanePickerModal } from '@/pane/PanePickerModal';
+import {
+  closePane,
+  findLeaf,
+  firstLeafId,
+  leaves,
+  type PaneDir,
+  type PaneNode,
+  type PaneSide,
+  type SessionRef,
+  setRatio,
+  setSession,
+  splitLeaf,
+} from '@/pane/paneTree';
+import {
+  moveSessionIntoView,
+  newSoloView,
+  reconcileViews,
+  type View,
+  type ViewState,
+  viewMemberKeys,
+} from '@/pane/viewModel';
+import { serializeViews } from '@/pane/viewsSerialize';
 import { ensureNotificationPermission } from '@/platform/desktopNotifications';
 import { useDeepLinks } from '@/platform/useDeepLinks';
 import { useLaunchUpdateCheck } from '@/platform/useLaunchUpdateCheck';
@@ -18,7 +42,6 @@ import { AlertModal } from './AlertModal';
 import { AppOverflowMenu } from './AppOverflowMenu';
 import { AgentFolderPicker } from './agent/AgentFolderPicker';
 import { DevicesScreen } from './DevicesScreen';
-import type { DropIntent } from './dropZone';
 import { FileViewer } from './FileViewer';
 import { setFileOpenListener } from './fileOpenBus';
 import { GitDrawer } from './git/GitDrawer';
@@ -26,21 +49,7 @@ import { GitReview } from './git/GitReview';
 import { useGitPanel } from './git/useGitPanel';
 import { HostsScreen } from './HostsScreen';
 import { PairDeviceScreen } from './PairDeviceScreen';
-import { PanePickerModal } from './PanePickerModal';
 import { PresentationBanner, PresentationView } from './PresentationView';
-import {
-  closePane,
-  findLeaf,
-  firstLeafId,
-  leaves,
-  type PaneDir,
-  type PaneNode,
-  type PaneSide,
-  type SessionRef,
-  setRatio,
-  setSession,
-  splitLeaf,
-} from './paneTree';
 import {
   type AppPreferences,
   loadPreferences,
@@ -56,15 +65,6 @@ import { LocalSettingsScreen } from './SettingsScreen';
 import { useShellChrome } from './useHeatArrival';
 import { useTetherDesktop } from './useTetherDesktop';
 import { useWorkspace, WorkspacePanel } from './useWorkspace';
-import {
-  moveSessionIntoView,
-  newSoloView,
-  reconcileViews,
-  type View,
-  type ViewState,
-  viewMemberKeys,
-} from './viewModel';
-import { serializeViews } from './viewsSerialize';
 
 function useMediaScheme(): 'light' | 'dark' {
   const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
