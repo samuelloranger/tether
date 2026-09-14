@@ -11,7 +11,7 @@ use tether_core::workspace::{
     Presentation, WorkspaceFile,
 };
 
-use crate::commands::noise::{execute_authed, execute_upload_authed};
+use crate::commands::noise::{execute_authed, execute_bytes_authed, execute_upload_authed};
 use crate::state::shared_from_app;
 
 fn profile_for(
@@ -173,6 +173,27 @@ pub async fn core_presentations_list(
     })
     .await?;
     parse_presentations(response.status, &response.body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn core_presentation_content(
+    app: AppHandle,
+    host_id: String,
+    id: String,
+) -> Result<String, String> {
+    let state = shared_from_app(&app);
+    let profile = profile_for(&app, &host_id)?;
+    let response = execute_bytes_authed(&state, &profile, |client| {
+        client.presentation_content_request(&id)
+    })
+    .await?;
+    if response.status == 404 {
+        return Err("preview not found".into());
+    }
+    if !(200..300).contains(&response.status) {
+        return Err(format!("preview content failed ({})", response.status));
+    }
+    String::from_utf8(response.body).map_err(|_| "preview content was not valid UTF-8".to_string())
 }
 
 #[tauri::command]

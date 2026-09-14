@@ -6,12 +6,10 @@ import { useWorkspaceFiles, useWorkspaceUpload } from './useWorkspaceFiles';
 export function useWorkspace({
   hostId,
   sessionId,
-  baseUrl,
   enabled,
 }: {
   hostId: string | null;
   sessionId: string;
-  baseUrl: string | null;
   enabled: boolean;
 }) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -27,7 +25,7 @@ export function useWorkspace({
     sessionIdRef: files.sessionIdRef,
     enabled,
   });
-  const presentations = usePresentations({ hostId, sessionId, baseUrl, enabled });
+  const presentations = usePresentations({ hostId, sessionId, enabled });
 
   const openFile = async (path: string, line?: number, column?: number) => {
     const ok = await files.openFile(path, line, column);

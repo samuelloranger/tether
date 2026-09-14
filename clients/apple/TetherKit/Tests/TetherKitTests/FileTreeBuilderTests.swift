@@ -78,7 +78,6 @@ final class WorkspaceHelperTests: XCTestCase {
         title: "Old",
         project: "p",
         revision: 1,
-        url: "/x",
         sessionId: "s1"
       ),
       Presentation(
@@ -86,7 +85,6 @@ final class WorkspaceHelperTests: XCTestCase {
         title: "New",
         project: "p",
         revision: 1,
-        url: "/y",
         sessionId: "s1"
       ),
       Presentation(
@@ -94,7 +92,6 @@ final class WorkspaceHelperTests: XCTestCase {
         title: "Other",
         project: "p",
         revision: 1,
-        url: "/z",
         sessionId: "s2"
       ),
     ]

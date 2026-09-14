@@ -189,10 +189,10 @@ export function MainScreen({
                     backLabel={app.activeSessionLabel}
                   />
                 )}
-                {workspace.activePresentation && workspace.activePresentationUrl && (
+                {workspace.activePresentation && workspace.activePresentationHtml && (
                   <PresentationView
                     preview={workspace.activePresentation}
-                    url={workspace.activePresentationUrl}
+                    html={workspace.activePresentationHtml}
                     backLabel={app.activeSessionLabel}
                     onBack={() => workspace.setActivePresentationId(null)}
                     onClose={() => {

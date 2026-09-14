@@ -43,7 +43,6 @@ public struct Presentation: Codable, Equatable, Sendable, Identifiable {
   public var title: String
   public var project: String
   public var revision: Int
-  public var url: String
   public var sessionId: String?
 
   public init(
@@ -51,14 +50,12 @@ public struct Presentation: Codable, Equatable, Sendable, Identifiable {
     title: String,
     project: String,
     revision: Int,
-    url: String,
     sessionId: String? = nil
   ) {
     self.id = id
     self.title = title
     self.project = project
     self.revision = revision
-    self.url = url
     self.sessionId = sessionId
   }
 }
@@ -107,10 +104,6 @@ public func workspaceLineOffset(content: String, line: Int?) -> Int {
 /// Quotes a value for insertion into an interactive POSIX shell.
 public func shellQuote(_ value: String) -> String {
   "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
-}
-
-public func previewURL(base: URL, relativePath: String) -> URL? {
-  URL(string: relativePath, relativeTo: base)?.absoluteURL
 }
 
 public func findSessionPreview(
@@ -298,6 +291,19 @@ extension NativeHostClient {
   public func listPresentations() async throws -> [Presentation] {
     let request = try await workspaceRequest(path: "/api/presentations")
     return try await decodeWorkspace([Presentation].self, request: request)
+  }
+
+  /// The preview's self-contained HTML, over the authed content route. Returned
+  /// as text — the server inlines every relative asset, so nothing loads by URL.
+  public func fetchPresentationContent(id: String) async throws -> String {
+    let request = try await workspaceRequest(path: "/api/presentations/\(id)/content")
+    let (data, status) = try await sendAuthorized(request: request)
+    guard status != 401 else { throw WorkspaceClientError.unauthorized }
+    guard (200..<300).contains(status) else { throw WorkspaceClientError.httpStatus(status) }
+    guard let html = String(data: data, encoding: .utf8) else {
+      throw WorkspaceClientError.decodeFailed
+    }
+    return html
   }
 
   public func closePresentation(id: String) async throws -> Bool {

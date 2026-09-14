@@ -34,7 +34,6 @@ pub struct Presentation {
     pub title: String,
     pub project: String,
     pub revision: u32,
-    pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 }
@@ -64,6 +63,10 @@ impl HostClient {
 
     pub fn presentations_list_request(&self) -> HttpRequest {
         self.get("/api/presentations", BTreeMap::new())
+    }
+
+    pub fn presentation_content_request(&self, id: &str) -> HttpRequest {
+        self.get(&format!("/api/presentations/{id}/content"), BTreeMap::new())
     }
 
     pub fn presentation_close_request(&self, id: &str) -> HttpRequest {
@@ -153,15 +156,6 @@ pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-pub fn preview_url(base_url: &str, relative: &str) -> String {
-    let base = base_url.trim_end_matches('/');
-    if relative.starts_with('/') {
-        format!("{base}{relative}")
-    } else {
-        format!("{base}/{relative}")
-    }
-}
-
 pub fn find_session_preview<'a>(
     presentations: &'a [Presentation],
     session_id: &str,
@@ -240,6 +234,18 @@ mod tests {
     }
 
     #[test]
+    fn presentation_content_gets_the_authed_content_route() {
+        let client = HostClient::new(profile(), "secret");
+        let request = client.presentation_content_request("abc");
+        assert_eq!(request.method, HttpMethod::Get);
+        assert_eq!(
+            request.url,
+            "http://studio.local:8085/api/presentations/abc/content"
+        );
+        assert_eq!(request.headers["Authorization"], "Bearer secret");
+    }
+
+    #[test]
     fn parses_workspace_file_and_upload() {
         let file =
             parse_workspace_file(200, &serde_json::json!({ "path": "a.ts", "content": "hi" }))
@@ -264,7 +270,6 @@ mod tests {
                 title: "a".into(),
                 project: "p".into(),
                 revision: 0,
-                url: "/preview/t/a.html".into(),
                 session_id: Some("term-1".into()),
             },
             Presentation {
@@ -272,7 +277,6 @@ mod tests {
                 title: "b".into(),
                 project: "p".into(),
                 revision: 1,
-                url: "/preview/t/b.html".into(),
                 session_id: Some("term-1".into()),
             },
         ];
@@ -281,10 +285,6 @@ mod tests {
         assert_eq!(
             pick_auto_select_preview(&rows, &seen, "term-1").unwrap().id,
             "2"
-        );
-        assert_eq!(
-            preview_url("http://studio.local:8085", "/preview/t/a.html"),
-            "http://studio.local:8085/preview/t/a.html"
         );
         assert_eq!(shell_quote("it's"), "'it'\"'\"'s'");
         assert_eq!(line_offset("a\nb\nc", Some(2)), 1);

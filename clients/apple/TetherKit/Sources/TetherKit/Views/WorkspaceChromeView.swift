@@ -68,18 +68,26 @@ public struct WorkspaceChromeView: View {
         .transition(reduceMotion ? .opacity : .move(edge: .trailing))
       }
 
-      if let preview = workspace.activePresentation,
-         let url = store.presentationPreviewURL(preview)
-      {
-        PresentationPaneView(
-          preview: preview,
-          url: url,
-          backLabel: store.activeSession?.displayTitle ?? "terminal",
-          onBack: { workspace.clearPresentation() },
-          onClose: {
-            Task { await workspace.closePresentation(store: store, id: preview.id) }
+      if let preview = workspace.activePresentation {
+        Group {
+          if let html = workspace.activePresentationHtml {
+            PresentationPaneView(
+              preview: preview,
+              html: html,
+              backLabel: store.activeSession?.displayTitle ?? "terminal",
+              onBack: { workspace.clearPresentation() },
+              onClose: {
+                Task { await workspace.closePresentation(store: store, id: preview.id) }
+              }
+            )
+          } else {
+            Color.clear
           }
-        )
+        }
+        // Refetch the self-contained HTML when the selection or its revision changes.
+        .task(id: "\(preview.id):\(preview.revision)") {
+          await workspace.loadActivePresentationContent(store: store)
+        }
         .transition(reduceMotion ? .opacity : .move(edge: .trailing))
       }
 

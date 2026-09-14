@@ -59,6 +59,10 @@ export async function corePresentationsList(hostId: string): Promise<Presentatio
   return invoke<Presentation[]>('core_presentations_list', { hostId });
 }
 
+export async function corePresentationContent(hostId: string, id: string): Promise<string> {
+  return invoke<string>('core_presentation_content', { hostId, id });
+}
+
 export async function corePresentationClose(hostId: string, id: string): Promise<boolean> {
   return invoke<boolean>('core_presentation_close', { hostId, id });
 }

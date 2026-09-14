@@ -13,13 +13,13 @@ export function PresentationBanner({ label, onPress }: { label: string; onPress:
 
 export function PresentationView({
   preview,
-  url,
+  html,
   backLabel,
   onBack,
   onClose,
 }: {
   preview: Presentation;
-  url: string;
+  html: string;
   backLabel: string;
   onBack: () => void;
   onClose: () => void;
@@ -38,7 +38,10 @@ export function PresentationView({
       <iframe
         key={`${preview.id}:${preview.revision}`}
         className="presentation-frame"
-        src={url}
+        // srcdoc runs in the app's own origin; without allow-same-origin the
+        // presented page cannot reach window.parent or the Tauri IPC bridge.
+        sandbox="allow-scripts"
+        srcDoc={html}
         title={preview.title}
       />
     </div>
