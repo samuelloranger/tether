@@ -38,8 +38,9 @@ export function PresentationView({
       <iframe
         key={`${preview.id}:${preview.revision}`}
         className="presentation-frame"
-        // srcdoc runs in the app's own origin; without allow-same-origin the
-        // presented page cannot reach window.parent or the Tauri IPC bridge.
+        // sandbox WITHOUT allow-same-origin forces a unique opaque origin, so the
+        // presented page cannot reach window.parent or the Tauri IPC bridge. Do
+        // not add allow-same-origin — srcdoc would then inherit the app's origin.
         sandbox="allow-scripts"
         srcDoc={html}
         title={preview.title}
