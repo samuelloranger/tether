@@ -32,12 +32,12 @@ public struct AgentChatView: View {
       .onReceive(
         NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)
       ) { note in
-        keyboardInset = Self.keyboardOverlap(note)
+        Self.animateInset(note) { keyboardInset = Self.keyboardOverlap(note) }
       }
       .onReceive(
         NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-      ) { _ in
-        keyboardInset = 0
+      ) { note in
+        Self.animateInset(note) { keyboardInset = 0 }
       }
     #endif
     .sheet(item: $model.pendingApproval) { call in
@@ -67,6 +67,25 @@ public struct AgentChatView: View {
         let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
       else { return 0 }
       return max(0, window.bounds.maxY - end.minY - window.safeAreaInsets.bottom)
+    }
+
+    /// Applies `body` in a transaction timed to match the real keyboard slide
+    /// (duration + curve from the notification), instead of SwiftUI's default
+    /// implicit animation — which races the composer's own height change and
+    /// the transcript's `disablesAnimations` scroll-to-bottom, tearing the frame.
+    private static func animateInset(_ note: Notification, _ body: () -> Void) {
+      let duration =
+        (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+      let curveRaw = (note.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int) ?? 7
+      let curve = UIView.AnimationCurve(rawValue: curveRaw) ?? .easeInOut
+      let animation: Animation
+      switch curve {
+      case .easeIn: animation = .timingCurve(0.42, 0, 1, 1, duration: duration)
+      case .easeOut: animation = .timingCurve(0, 0, 0.58, 1, duration: duration)
+      case .linear: animation = .linear(duration: duration)
+      default: animation = .timingCurve(0.42, 0, 0.58, 1, duration: duration)
+      }
+      withTransaction(Transaction(animation: animation), body)
     }
   #endif
 }
