@@ -61,20 +61,20 @@ public struct PresentationBannerView: View {
 
 public struct PresentationPaneView: View {
   public var preview: Presentation
-  public var url: URL
+  public var html: String
   public var backLabel: String
   public var onBack: () -> Void
   public var onClose: (() -> Void)?
 
   public init(
     preview: Presentation,
-    url: URL,
+    html: String,
     backLabel: String,
     onBack: @escaping () -> Void,
     onClose: (() -> Void)? = nil
   ) {
     self.preview = preview
-    self.url = url
+    self.html = html
     self.backLabel = backLabel
     self.onBack = onBack
     self.onClose = onClose
@@ -104,7 +104,7 @@ public struct PresentationPaneView: View {
           .fill(TetherColors.textSecondary.opacity(0.25))
           .frame(height: 1)
       }
-      PresentationView(preview: preview, url: url)
+      PresentationView(preview: preview, html: html)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The page paints below the header (indicator included); any chrome colour
         // there reads as a bar. WebKit re-adds the safe-area inset in its scroll view.
@@ -120,16 +120,16 @@ public struct PresentationPaneView: View {
 /// and no bridge to SessionStore / Keychain.
 public struct PresentationView: View {
   public var preview: Presentation
-  public var url: URL
+  public var html: String
 
-  public init(preview: Presentation, url: URL) {
+  public init(preview: Presentation, html: String) {
     self.preview = preview
-    self.url = url
+    self.html = html
   }
 
   public var body: some View {
     #if canImport(WebKit)
-    PresentationWebView(url: url)
+    PresentationWebView(html: html)
       .id("\(preview.id):\(preview.revision)")
     #else
     Text("WebKit unavailable")
@@ -159,31 +159,32 @@ private func makePresentationWebView() -> WKWebView {
 
 #if os(iOS)
 struct PresentationWebView: UIViewRepresentable {
-  let url: URL
+  let html: String
 
   func makeUIView(context: Context) -> WKWebView {
-    makePresentationWebView()
+    let webView = makePresentationWebView()
+    webView.loadHTMLString(html, baseURL: nil)
+    return webView
   }
 
   func updateUIView(_ webView: WKWebView, context: Context) {
-    if webView.url != url {
-      webView.load(URLRequest(url: url))
-    }
+    // The .id() reload recreates the view on revision change; a plain content
+    // update here would refetch nothing, so just keep the already-loaded HTML.
   }
 }
 
 #elseif os(macOS)
 struct PresentationWebView: NSViewRepresentable {
-  let url: URL
+  let html: String
 
   func makeNSView(context: Context) -> WKWebView {
-    makePresentationWebView()
+    let webView = makePresentationWebView()
+    webView.loadHTMLString(html, baseURL: nil)
+    return webView
   }
 
   func updateNSView(_ webView: WKWebView, context: Context) {
-    if webView.url != url {
-      webView.load(URLRequest(url: url))
-    }
+    // See the iOS note: the SwiftUI .id() drives reloads, not this method.
   }
 }
 #endif

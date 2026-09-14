@@ -13,13 +13,13 @@ export function PresentationBanner({ label, onPress }: { label: string; onPress:
 
 export function PresentationView({
   preview,
-  url,
+  html,
   backLabel,
   onBack,
   onClose,
 }: {
   preview: Presentation;
-  url: string;
+  html: string;
   backLabel: string;
   onBack: () => void;
   onClose: () => void;
@@ -38,7 +38,11 @@ export function PresentationView({
       <iframe
         key={`${preview.id}:${preview.revision}`}
         className="presentation-frame"
-        src={url}
+        // sandbox WITHOUT allow-same-origin forces a unique opaque origin, so the
+        // presented page cannot reach window.parent or the Tauri IPC bridge. Do
+        // not add allow-same-origin — srcdoc would then inherit the app's origin.
+        sandbox="allow-scripts"
+        srcDoc={html}
         title={preview.title}
       />
     </div>

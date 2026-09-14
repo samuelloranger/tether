@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { httpOriginFor } from '@/core/types';
 import { useViewState } from '@/pane/useViewState';
 import { ensureNotificationPermission } from '@/platform/desktopNotifications';
 import { useDeepLinks } from '@/platform/useDeepLinks';
@@ -28,7 +27,6 @@ export function App() {
   const workspace = useWorkspace({
     hostId: app.activeHostId,
     sessionId: app.activeSessionId,
-    baseUrl: app.activeHost ? httpOriginFor(app.activeHost) : null,
     enabled: app.ready && app.screen === 'main' && !!app.activeHost && hasSession,
   });
   const chrome = useAppChrome({ app, workspace, prefs });

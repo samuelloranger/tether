@@ -2,12 +2,13 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { addDevice } from '@/auth/deviceRegistry';
+import { mintToken } from '@/auth/deviceToken';
 import { controlApp } from '@/control/app';
 import { app } from './app';
 
-// The control app (socket) creates the preview; the network app (/preview)
-// serves it. They share one PresentationRegistry, so a URL minted on one is
-// resolvable on the other.
+// The control app (socket) creates the preview; the network app serves its
+// self-contained HTML over the authed content route. They share one registry.
 const create = (body: unknown) =>
   controlApp.request('/control/presentations', {
     method: 'POST',
@@ -22,7 +23,10 @@ const reset = (project: string) =>
     body: JSON.stringify({ project }),
   });
 
-test('opens a scoped preview through control and serves its assets by capability URL', async () => {
+const device = addDevice({ label: 'test', pubkey: 'a'.repeat(64) });
+const bearer = { Authorization: `Bearer ${mintToken(device.id)}` };
+
+test('serves inlined, self-contained HTML over the authed content route', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'tether-preview-api-'));
   try {
     const entry = path.join(root, 'index.html');
@@ -31,19 +35,36 @@ test('opens a scoped preview through control and serves its assets by capability
 
     const opened = await create({ entry, project: 'creneau', title: 'UI preview' });
     expect(opened.status).toBe(200);
-    const preview = (await opened.json()) as { url: string };
-    expect(preview.url).toMatch(/^\/preview\/[a-f0-9]+\/index.html$/);
+    const preview = (await opened.json()) as { id: string };
+    expect(preview).not.toHaveProperty('url');
 
-    const css = await app.request(preview.url.replace('index.html', 'style.css'));
-    expect(css.status).toBe(200);
-    expect(css.headers.get('Content-Type')).toContain('text/css');
-    // The capability token is in the URL; no-referrer stops it leaking to any
-    // external resource the presented HTML loads.
-    expect(css.headers.get('Referrer-Policy')).toBe('no-referrer');
-    expect(css.headers.get('Cache-Control')).toBe('no-store');
-    expect(await css.text()).toBe('body { color: papayawhip; }');
+    const res = await app.request(`/api/presentations/${preview.id}/content`, { headers: bearer });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/html');
+    expect(await res.text()).toContain('<style>body { color: papayawhip; }</style>');
 
     expect(await (await reset('creneau')).json()).toEqual({ cleared: 1 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the content route requires a bearer and 404s an unknown id', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'tether-preview-auth-'));
+  try {
+    const entry = path.join(root, 'index.html');
+    writeFileSync(entry, '<h1>hi</h1>');
+    const preview = (await (await create({ entry, project: 'authcheck' })).json()) as {
+      id: string;
+    };
+
+    const noAuth = await app.request(`/api/presentations/${preview.id}/content`);
+    expect(noAuth.status).toBe(401);
+
+    const missing = await app.request('/api/presentations/nope/content', { headers: bearer });
+    expect(missing.status).toBe(404);
+
+    await reset('authcheck');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

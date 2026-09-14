@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { corePresentationClose, corePresentationsList } from '@/workspace/workspaceApi';
-import { findSessionPreview, type Presentation, pickAutoSelectPreview, previewUrl } from '@/workspace/workspaceTypes';
+import { corePresentationClose, corePresentationContent, corePresentationsList } from '@/workspace/workspaceApi';
+import { findSessionPreview, type Presentation, pickAutoSelectPreview } from '@/workspace/workspaceTypes';
 
 export function usePresentations({
   hostId,
   sessionId,
-  baseUrl,
   enabled,
 }: {
   hostId: string | null;
   sessionId: string;
-  baseUrl: string | null;
   enabled: boolean;
 }) {
   const [presentations, setPresentations] = useState<Presentation[]>([]);
@@ -58,10 +56,7 @@ export function usePresentations({
 
   const sessionPreview = useMemo(() => findSessionPreview(presentations, sessionId), [presentations, sessionId]);
 
-  const activePresentationUrl = useMemo(() => {
-    if (!activePresentation || !baseUrl) return null;
-    return previewUrl(baseUrl, activePresentation.url);
-  }, [activePresentation, baseUrl]);
+  const activePresentationHtml = useActivePresentationHtml(hostId, activePresentation);
 
   const closePresentation = useCallback(
     async (id: string) => {
@@ -81,9 +76,34 @@ export function usePresentations({
     presentations,
     sessionPreview,
     activePresentation,
-    activePresentationUrl,
+    activePresentationHtml,
     activePresentationId,
     setActivePresentationId,
     closePresentation,
   };
+}
+
+// The self-contained HTML travels over the authed content route, refetched
+// whenever the active preview or its revision changes. Nothing is loaded by URL.
+function useActivePresentationHtml(hostId: string | null, activePresentation: Presentation | null) {
+  const [html, setHtml] = useState<string | null>(null);
+  const activeId = activePresentation?.id ?? null;
+  const activeRevision = activePresentation?.revision ?? null;
+  useEffect(() => {
+    if (!hostId || activeId === null) {
+      setHtml(null);
+      return undefined;
+    }
+    // activeRevision is a refetch trigger: a bumped revision means the inlined
+    // HTML changed on the server, so re-pull it even though the id is unchanged.
+    void activeRevision;
+    let cancelled = false;
+    void corePresentationContent(hostId, activeId)
+      .then((next) => !cancelled && setHtml(next))
+      .catch(() => !cancelled && setHtml(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [hostId, activeId, activeRevision]);
+  return html;
 }

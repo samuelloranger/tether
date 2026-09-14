@@ -78,6 +78,7 @@ fn main() {
             commands::workspace::core_workspace_file,
             commands::workspace::core_workspace_upload,
             commands::workspace::core_presentations_list,
+            commands::workspace::core_presentation_content,
             commands::workspace::core_presentation_close,
             commands::config::core_config_get,
             commands::config::core_config_patch,

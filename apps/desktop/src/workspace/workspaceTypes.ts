@@ -18,7 +18,6 @@ export interface Presentation {
   title: string;
   project: string;
   revision: number;
-  url: string;
   sessionId?: string;
 }
 
@@ -48,11 +47,6 @@ export type FileTreeNode =
       browse?: FileTreeDirBrowse;
     }
   | { type: 'file'; name: string; path: string; file: FileStat };
-
-export function previewUrl(baseUrl: string, relative: string): string {
-  const base = baseUrl.replace(/\/$/, '');
-  return relative.startsWith('/') ? `${base}${relative}` : `${base}/${relative}`;
-}
 
 export function findSessionPreview(presentations: Presentation[], sessionId: string): Presentation | null {
   let match: Presentation | null = null;

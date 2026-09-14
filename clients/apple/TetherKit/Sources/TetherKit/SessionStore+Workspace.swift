@@ -95,9 +95,14 @@ extension SessionStore {
     }
   }
 
-  public func presentationPreviewURL(_ presentation: Presentation) -> URL? {
-    guard let host = activeHost, let base = host.baseHTTPURL else { return nil }
-    return previewURL(base: base, relativePath: presentation.url)
+  public func loadPresentationContent(id: String) async -> String? {
+    guard let client = makeWorkspaceClient() else { return nil }
+    do {
+      return try await client.fetchPresentationContent(id: id)
+    } catch {
+      errorMessage = error.localizedDescription
+      return nil
+    }
   }
 }
 
@@ -116,6 +121,9 @@ public final class WorkspaceController {
 
   public var presentations: [Presentation] = []
   public var activePresentationId: String?
+  /// The active preview's self-contained HTML, fetched over the authed content
+  /// route. Nothing is loaded by URL, so this is what the web view renders.
+  public var activePresentationHtml: String?
   public var showFileImporter = false
   public var showPhotosPicker = false
   public var showOpenFileSheet = false
@@ -124,6 +132,7 @@ public final class WorkspaceController {
   public var uploadError: String?
   public var isUploading = false
 
+  @ObservationIgnored private var loadedPresentationKey: String?
   @ObservationIgnored private var seenPresentationIds = Set<String>()
   @ObservationIgnored private var presentationsPrimed = false
   @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -177,6 +186,25 @@ public final class WorkspaceController {
 
   public func clearPresentation() {
     activePresentationId = nil
+    activePresentationHtml = nil
+    loadedPresentationKey = nil
+  }
+
+  /// Fetches the active preview's HTML when the selection or its revision changes.
+  /// Driven by the view's `.task(id:)`; a no-op when the same revision is loaded.
+  public func loadActivePresentationContent(store: SessionStore) async {
+    guard let preview = activePresentation else {
+      activePresentationHtml = nil
+      loadedPresentationKey = nil
+      return
+    }
+    let key = "\(preview.id):\(preview.revision)"
+    if loadedPresentationKey == key, activePresentationHtml != nil { return }
+    let html = await store.loadPresentationContent(id: preview.id)
+    // The active preview may have changed while awaiting; only apply if it did not.
+    guard activePresentationId == preview.id else { return }
+    activePresentationHtml = html
+    loadedPresentationKey = html == nil ? nil : key
   }
 
   public func closePresentation(store: SessionStore, id: String) async {
