@@ -427,11 +427,18 @@ public final class TetherSurfaceView: UIView {
     guard reportedGrid?.cols != size.cols || reportedGrid?.rows != size.rows else { return }
 
     // Keyboard show/hide jumps many rows. Waiting out the settle window (or
-    // cancelling it every animation frame) left cursor-agent at the short size.
+    // cancelling it every animation frame) left cursor-agent at the short size,
+    // so a large jump commits immediately for responsiveness. But `bounds` mid-
+    // animation is an INTERMEDIATE frame, not the keyboard's final resting size —
+    // committing it sends the PTY a not-yet-final column/row count, and whatever
+    // the program redraws (a status line, a TUI repaint) at that wrong width is
+    // baked into scrollback once printed; a later correction can't undo it. Still
+    // fall through to schedule the settle check below so a wrong immediate commit
+    // gets corrected against the truly settled bounds shortly after, instead of
+    // skipping verification entirely.
     if GridReport.shouldCommitImmediately(previous: reportedGrid, next: size) {
       gridSettleWork?.cancel()
       commitGridSize(size)
-      return
     }
 
     gridSettleWork?.cancel()
