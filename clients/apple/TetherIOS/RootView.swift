@@ -55,27 +55,39 @@ struct RootView: View {
         // can momentarily drop the just-synthesized agent row before the server
         // lists it, which would flip this to the terminal fallback mid-open. The
         // model is keyed by the active session and is untouched by refresh.
-        if let agentModel = store.activeAgentModel {
-          AgentChatView(model: agentModel)
+        //
+        // No implicit transition: switching this branch is SwiftUI structural
+        // identity change (the whole subtree tears down/rebuilds), and the
+        // default crossfade blends the outgoing surface's last-rendered text
+        // with the incoming one — visible as spliced/garbled characters when a
+        // tab switch lands while either surface has a concurrent content update
+        // in flight (a streamed delta, a tool card filling in). Reproduced by
+        // rapidly switching tabs while a chat streamed.
+        Group {
+          if let agentModel = store.activeAgentModel {
+            AgentChatView(model: agentModel)
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+          } else {
+            TerminalView(
+              store: store,
+              preferences: preferences,
+              onAddHost: { showPairing = true },
+              // The key bar is an inputAccessoryView in the keyboard window ABOVE the
+              // app; an in-app overlay can't hide it, so covering views must take it.
+              overlayPresented: drawerOpen
+                || workspace.activePresentation != nil
+                || workspace.fileView != nil
+                || workspace.fileError != nil
+                || workspace.fileLoading,
+              onOpenFile: { path, line, column in
+                Task { await workspace.openFile(store: store, path: path, line: line, column: column) }
+              }
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-          TerminalView(
-            store: store,
-            preferences: preferences,
-            onAddHost: { showPairing = true },
-            // The key bar is an inputAccessoryView in the keyboard window ABOVE the
-            // app; an in-app overlay can't hide it, so covering views must take it.
-            overlayPresented: drawerOpen
-              || workspace.activePresentation != nil
-              || workspace.fileView != nil
-              || workspace.fileError != nil
-              || workspace.fileLoading,
-            onOpenFile: { path, line, column in
-              Task { await workspace.openFile(store: store, path: path, line: line, column: column) }
-            }
-          )
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          }
         }
+        .transition(.identity)
+        .animation(nil, value: store.activeSessionId)
       }
 
       #if canImport(UIKit)
