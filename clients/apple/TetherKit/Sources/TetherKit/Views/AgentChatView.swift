@@ -154,6 +154,13 @@ struct AgentTranscriptView: View {
                 }
               )
           }
+          // Content changes here are driven by `revision` (bumped on every
+          // streamed delta, many times a second) and must never animate: a
+          // streamed delta's text diff and `scrollToBottom`'s disabled-animation
+          // scroll land in the same frame, and if only one of the two is
+          // animated the two commits tear — stale and fresh characters of the
+          // same still-streaming line paint in the same frame.
+          .animation(nil, value: model.revision)
           .padding(.horizontal, 16)
           .padding(.vertical, 18)
         }
