@@ -279,7 +279,16 @@ export function TerminalPane(props: TerminalPaneProps) {
   return (
     <div className={`resident-pane${props.interactive ? ' active' : ' inactive'}`}>
       {props.interactive && findOpen ? <TerminalFindBar search={search} onClose={() => setFindOpen(false)} /> : null}
-      <div className="terminal-host" ref={hostRef} />
+      <div
+        className="terminal-host"
+        ref={hostRef}
+        onPointerDown={() => {
+          // Single-pane case: `interactive` is already true and never toggles on
+          // click, so the focus effect below never re-runs. Focus directly so a
+          // DOM focus loss (blur to chrome, another window, etc.) recovers on click.
+          if (interactiveRef.current) termRef.current?.focus();
+        }}
+      />
     </div>
   );
 }
