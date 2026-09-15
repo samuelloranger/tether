@@ -49,6 +49,7 @@ final class TerminalGridRenderer {
   private var lastCols = 0
   private var lastRows = 0
   private var lastOriginY: CGFloat = 0
+  private var forceFullRepaintNext = false
 
   /// Forces the next render to repaint every row (font change, resize, a new
   /// session's first frame).
@@ -61,6 +62,17 @@ final class TerminalGridRenderer {
     lastCells = []
     lastCols = 0
     lastRows = 0
+  }
+
+  /// Forces a full repaint on the next frame without touching the context or
+  /// the currently displayed image (that would be `invalidate`'s blank
+  /// flash). A session switch reuses this surface for a DIFFERENT session's
+  /// grid, so partial dirty-row diffing against `lastCells` — still the
+  /// PREVIOUS session's content — is unsound: any row that happens to match
+  /// byte-for-byte between the two sessions never repaints and keeps
+  /// showing the old session's pixels indefinitely.
+  func forceFullRepaintOnNextFrame() {
+    forceFullRepaintNext = true
   }
 
   func render(
@@ -89,6 +101,10 @@ final class TerminalGridRenderer {
     let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
     if cols != lastCols || rows != lastRows || originY != lastOriginY {
       repaintAll = true
+    }
+    if forceFullRepaintNext {
+      repaintAll = true
+      forceFullRepaintNext = false
     }
 
     let dirty: [Int]

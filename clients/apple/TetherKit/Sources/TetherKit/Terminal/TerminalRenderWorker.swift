@@ -40,8 +40,11 @@ final class TerminalRenderWorker {
   /// Drop the generation gate without clearing the last image. A session switch
   /// that shows a cached grid must not `clearSnapshot` (that is the blank flash)
   /// but two sessions both starting at generation 1 would otherwise collide.
+  /// Also forces the renderer's next frame to fully repaint: its dirty-row
+  /// diff is otherwise still comparing against the PREVIOUS session's cells.
   func forgetGeneration() {
     lastGeneration = nil
+    renderer.forceFullRepaintOnNextFrame()
   }
 
   /// `nil` when the frame carries nothing new to show.
