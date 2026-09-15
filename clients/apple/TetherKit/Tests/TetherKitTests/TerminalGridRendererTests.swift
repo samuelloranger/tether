@@ -263,8 +263,8 @@ final class TerminalGridRendererTests: XCTestCase {
       header: header(cols: cols, rows: rows, generation: 1),
       cells: grid("MMMM", cols: cols, rows: rows), metrics: m
     )
-    // Same renderer, same geometry: the row goes through the dirty-row path, not
-    // a full repaint, so a broken clear would leave the M ink behind.
+    // Same renderer, same geometry: a broken background clear would leave the
+    // M ink behind on the retained bitmap.
     guard
       let cleared = renderer.render(
         header: header(cols: cols, rows: rows, generation: 2),

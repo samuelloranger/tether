@@ -84,10 +84,8 @@ final class TerminalGridRenderer {
     let rows = Int(header.rows)
     guard cols > 0, rows > 0, cells.count == cols * rows else { return image }
 
-    var repaintAll = false
     if self.metrics != metrics || context == nil {
       guard prepareContext(metrics) else { return nil }
-      repaintAll = true
     }
     guard let context, let glyphCache else { return nil }
 
@@ -99,42 +97,29 @@ final class TerminalGridRenderer {
     // trailing empties are omitted from the draw height so they become slack
     // at the top rather than a gap under the TUI.
     let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
-    if cols != lastCols || rows != lastRows || originY != lastOriginY {
-      repaintAll = true
-    }
-    if forceFullRepaintNext {
-      repaintAll = true
-      forceFullRepaintNext = false
-    }
-
-    let dirty: [Int]
-    if repaintAll {
-      dirty = Array(0..<max(drawRows, 0))
-    } else if let changed = GridDiff.dirtyRows(
-      previous: lastCells, current: cells, cols: cols, rows: rows
-    ) {
-      dirty = changed.filter { $0 < drawRows }
-    } else {
-      dirty = Array(0..<max(drawRows, 0))
-    }
 
     lastCells = cells
     lastCols = cols
     lastRows = rows
     lastOriginY = originY
+    forceFullRepaintNext = false
 
-    if dirty.isEmpty { return image }
+    guard drawRows > 0 else { return image }
 
-    if repaintAll {
-      context.setFillColor(metrics.background)
-      context.fill(CGRect(origin: .zero, size: metrics.size))
-    }
+    // Full repaint every frame. Row-granular diffing against the retained
+    // bitmap desynced on keyboard/resize/tab-switch — a mis-diffed or
+    // partially-cleared row left stale pixels that accumulated into the
+    // spliced/torn text the terminal kept showing. Redrawing the whole grid
+    // onto a freshly cleared context each frame is cheap at phone grid sizes
+    // and cannot drift out of sync with the source cells.
+    context.setFillColor(metrics.background)
+    context.fill(CGRect(origin: .zero, size: metrics.size))
 
-    for row in dirty {
+    for row in 0..<drawRows {
       draw(
         row: row, cols: cols, cells: cells, originY: originY,
         metrics: metrics, glyphCache: glyphCache, context: context,
-        clearFirst: !repaintAll
+        clearFirst: false
       )
     }
 
