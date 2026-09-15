@@ -560,6 +560,11 @@ public final class TetherSurfaceView: UIView {
     }
   }
 
+  /// A one-finger drag in a mouse-mode TUI scrolls it with WHEEL events only.
+  /// It used to also send a button press + drag-motion + release, which the
+  /// program (Claude Code) read as a click-drag and answered by selecting text
+  /// — so every scroll attempt highlighted instead. On a touch screen one
+  /// finger means scroll; a discrete tap still sends a real click.
   private func handleMousePan(_ gesture: UIPanGestureRecognizer, point: CGPoint) {
     guard let header else { return }
     let cell = MouseSeq.cellFromPoint(
@@ -571,13 +576,7 @@ public final class TetherSurfaceView: UIView {
     case .began:
       lastPanY = point.y
       scrollRemainder = 0
-      onMouseBytes?(MouseSeq.pressSeq(col: cell.col, row: cell.row, sgr: mouseSgr))
     case .changed:
-      if let motion = MouseSeq.motionSeq(
-        col: cell.col, row: cell.row, mode: mouseMode, sgr: mouseSgr
-      ) {
-        onMouseBytes?(motion)
-      }
       let delta = lastPanY - point.y
       lastPanY = point.y
       let result = TouchScrollModel.lines(
@@ -591,11 +590,6 @@ public final class TetherSurfaceView: UIView {
         }
       }
     case .ended, .cancelled, .failed:
-      if let rel = MouseSeq.releaseSeq(
-        col: cell.col, row: cell.row, mode: mouseMode, sgr: mouseSgr
-      ) {
-        onMouseBytes?(rel)
-      }
       scrollRemainder = 0
     default:
       break
@@ -632,6 +626,11 @@ public final class TetherSurfaceView: UIView {
     let point = gesture.location(in: self)
     guard let cell = cellAt(point) else { return }
 
+    // Every tap raises the keyboard. In a mouse-mode TUI the click used to
+    // return before this, so once the keyboard was hidden a tap sent a click
+    // but never brought the keyboard back — leaving no way to type again.
+    onTapCell?(cell.col, cell.row)
+
     if mouseMode != .off {
       let oneBasedCol = cell.col + 1
       let oneBasedRow = cell.row + 1
@@ -652,7 +651,6 @@ public final class TetherSurfaceView: UIView {
       selection = nil
       onSelectionChanged?(nil)
     }
-    onTapCell?(cell.col, cell.row)
   }
 
   @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
