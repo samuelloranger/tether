@@ -8,6 +8,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var fontName: String
   public var fontSize: CGFloat
   public var onGridSizeChange: (UInt16, UInt16) -> Void
+  public var onGridSizeSettled: (UInt16, UInt16) -> Void
   public var onScrollLines: (Int32) -> Void
   public var onTap: () -> Void
   public var onSelectionText: (String?) -> Void
@@ -23,6 +24,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     fontName: String,
     fontSize: CGFloat,
     onGridSizeChange: @escaping (UInt16, UInt16) -> Void,
+    onGridSizeSettled: @escaping (UInt16, UInt16) -> Void = { _, _ in },
     onScrollLines: @escaping (Int32) -> Void = { _ in },
     onTap: @escaping () -> Void = {},
     onSelectionText: @escaping (String?) -> Void = { _ in },
@@ -37,6 +39,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.fontName = fontName
     self.fontSize = fontSize
     self.onGridSizeChange = onGridSizeChange
+    self.onGridSizeSettled = onGridSizeSettled
     self.onScrollLines = onScrollLines
     self.onTap = onTap
     self.onSelectionText = onSelectionText
@@ -56,6 +59,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     view.fontName = fontName
     view.fontSize = fontSize
     view.onGridSizeChange = { cols, rows in onGridSizeChange(cols, rows) }
+    view.onGridSizeSettled = { cols, rows in onGridSizeSettled(cols, rows) }
     bindCallbacks(view, context: context)
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)

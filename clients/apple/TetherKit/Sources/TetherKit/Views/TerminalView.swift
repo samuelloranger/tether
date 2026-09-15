@@ -606,6 +606,7 @@ public struct TerminalView: View {
           fontName: preferences.terminalFont.postScriptName,
           fontSize: preferences.terminalFontSize,
           onGridSizeChange: { cols, rows in store.updateGrid(cols: cols, rows: rows) },
+          onGridSizeSettled: { cols, rows in store.updateGridServer(cols: cols, rows: rows) },
           onScrollLines: { lines in
             store.scrollViewport(lines: lines)
             scrollOffsetFromBottom = max(0, scrollOffsetFromBottom + Int(lines))

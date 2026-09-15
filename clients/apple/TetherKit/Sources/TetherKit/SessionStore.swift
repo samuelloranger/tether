@@ -828,12 +828,19 @@ public final class SessionStore {
     await connectActiveSession(changed: changed)
   }
 
-  /// Adopts the grid the surface can actually display.
-  ///
-  /// Resizes the local emulator and tells the PTY, so the two agree and the
-  /// shell wraps at the width the user can see.
+  /// Resizes only the LOCAL emulator to the grid the surface can display, on
+  /// every reported change, so the render tracks the view without blank rows.
   public func updateGrid(cols: UInt16, rows: UInt16) {
-    pipeline.outbound.yield(.resize(cols: cols, rows: rows))
+    pipeline.outbound.yield(.localResize(cols: cols, rows: rows))
+  }
+
+  /// Tells the PTY the SETTLED grid size (debounced by the surface). Kept
+  /// separate from `updateGrid` so a keyboard animation resizes the local
+  /// emulator every frame but raises SIGWINCH on the shell only once, at the
+  /// final size — otherwise an inline TUI redraws its footer at each transient
+  /// width and the wrong-width copies pile up in scrollback.
+  public func updateGridServer(cols: UInt16, rows: UInt16) {
+    pipeline.outbound.yield(.serverResize(cols: cols, rows: rows))
   }
 
   /// Remembers the active session's title so a dropped connection does not

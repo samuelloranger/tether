@@ -31,7 +31,10 @@ enum OutboundFrame: Sendable {
   case input(String, key: String?)
   case paste(String, key: String?)
   case focus(Bool)
-  case resize(cols: UInt16, rows: UInt16)
+  /// Resize the LOCAL emulator only (fires on every reported size change).
+  case localResize(cols: UInt16, rows: UInt16)
+  /// Resize the server PTY only (fires once the bounds settle).
+  case serverResize(cols: UInt16, rows: UInt16)
   case agentStart(id: String, cwd: String, sinceSeq: Int, resumeClaudeSessionId: String?)
   case agentPrompt(String)
   case agentInterrupt
@@ -314,11 +317,15 @@ actor TerminalPipeline {
     case let .focus(focused):
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendFocus(id: id, focused: focused)
-    case let .resize(newCols, newRows):
-      // Always tell the PTY when the channel is live. Gating on "local size
-      // changed" dropped the grow after keyboard-hide: the emulator was already
-      // the new size (applied while the socket was nil) and cursor-agent stayed
-      // painted at the short PTY geometry.
+    case let .localResize(newCols, newRows):
+      // Local emulator only — no PTY resize, so no SIGWINCH. Keeps the rendered
+      // grid matching the view through a keyboard animation's every frame.
+      applyLocalResize(cols: newCols, rows: newRows)
+    case let .serverResize(newCols, newRows):
+      // Settled size → the PTY. Apply locally too in case the socket was nil
+      // while the emulator resized (reconnect): gating on "local changed"
+      // dropped the grow after keyboard-hide and left cursor-agent at the short
+      // geometry. Always send when the channel is live.
       applyLocalResize(cols: newCols, rows: newRows)
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendResize(id: id, cols: newCols, rows: newRows)

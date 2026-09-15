@@ -20,8 +20,16 @@ public final class TetherSurfaceView: UIView {
     didSet { invalidateMetrics() }
   }
 
-  /// Reports the grid size the current bounds and font can display.
+  /// Reports the grid size the current bounds can display, on EVERY change —
+  /// including the intermediate frames of a keyboard animation. Drives the
+  /// LOCAL emulator, which must track the view or a shrink leaves blank rows.
   public var onGridSizeChange: ((UInt16, UInt16) -> Void)?
+
+  /// Reports the grid size once the bounds SETTLE (keyboard animation done).
+  /// Drives the server PTY resize — debounced so an inline TUI is not made to
+  /// rewrap + redraw at every transient size, which bakes duplicate footers
+  /// into scrollback.
+  public var onGridSizeSettled: ((UInt16, UInt16) -> Void)?
 
   /// Alacritty scroll delta: positive = into history. Built from pan pixels via
   /// `TouchScrollModel` (finger-down → history).
@@ -54,13 +62,17 @@ public final class TetherSurfaceView: UIView {
     }
   }
 
-  private var reportedGrid: (cols: UInt16, rows: UInt16)?
-  /// Coalesces grid-size reports so only a SETTLED size reaches the emulator and
-  /// the PTY. A keyboard animation drives layoutSubviews once per frame, and the
-  /// intermediate heights include very short ones. Each report used to resize
-  /// both sides immediately, and a resize down to a handful of rows destroys a
-  /// full-screen TUI's screen for good — when the view settled the rows came
-  /// back but the content did not, leaving a few lines and blank space.
+  /// Size the LOCAL emulator was last told — updated on every reported change.
+  private var localGrid: (cols: UInt16, rows: UInt16)?
+  /// Size the server PTY was last told — updated only when the bounds settle.
+  private var serverGrid: (cols: UInt16, rows: UInt16)?
+  /// Debounces the SERVER resize to the settled bounds. A keyboard animation
+  /// drives layoutSubviews once per frame through very short intermediate
+  /// heights; sending each to the PTY made an inline TUI (Claude Code) rewrap
+  /// and redraw its footer at every transient width, and with no alt screen
+  /// each wrong-width copy was baked into scrollback for good. The local
+  /// emulator still follows every frame (see `onGridSizeChange`) so the render
+  /// never shows blank rows.
   private var gridSettleWork: DispatchWorkItem?
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
@@ -424,32 +436,26 @@ public final class TetherSurfaceView: UIView {
 
   private func reportGridSize() {
     guard let size = currentGridSize() else { return }
-    guard reportedGrid?.cols != size.cols || reportedGrid?.rows != size.rows else { return }
 
-    // Keyboard show/hide jumps many rows. Waiting out the settle window (or
-    // cancelling it every animation frame) left cursor-agent at the short size,
-    // so a large jump commits immediately for responsiveness. But `bounds` mid-
-    // animation is an INTERMEDIATE frame, not the keyboard's final resting size —
-    // committing it sends the PTY a not-yet-final column/row count, and whatever
-    // the program redraws (a status line, a TUI repaint) at that wrong width is
-    // baked into scrollback once printed; a later correction can't undo it. Still
-    // fall through to schedule the settle check below so a wrong immediate commit
-    // gets corrected against the truly settled bounds shortly after, instead of
-    // skipping verification entirely.
-    if GridReport.shouldCommitImmediately(previous: reportedGrid, next: size) {
-      gridSettleWork?.cancel()
-      commitGridSize(size)
+    // Local emulator follows the view immediately, every frame: the rendered
+    // grid must match the bounds or a keyboard shrink leaves blank rows.
+    if localGrid?.cols != size.cols || localGrid?.rows != size.rows {
+      localGrid = size
+      onGridSizeChange?(size.cols, size.rows)
     }
 
+    // Server PTY (SIGWINCH) is debounced to the SETTLED bounds. Re-derive from
+    // the CURRENT bounds when the timer fires so a transient animation frame is
+    // never what reaches the PTY. If the settled size equals what the PTY
+    // already has (keyboard up then back down), nothing is sent — no SIGWINCH,
+    // no redraw, no duplicate.
     gridSettleWork?.cancel()
     let work = DispatchWorkItem { [weak self] in
-      guard let self else { return }
-      // Re-derive from the CURRENT bounds rather than trusting the size that
-      // scheduled this, so a transient frame can never be what gets committed.
-      guard let settled = self.currentGridSize() else { return }
-      guard self.reportedGrid?.cols != settled.cols || self.reportedGrid?.rows != settled.rows
+      guard let self, let settled = self.currentGridSize() else { return }
+      guard self.serverGrid?.cols != settled.cols || self.serverGrid?.rows != settled.rows
       else { return }
-      self.commitGridSize(settled)
+      self.serverGrid = settled
+      self.onGridSizeSettled?(settled.cols, settled.rows)
     }
     gridSettleWork = work
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.gridSettleDelay, execute: work)
@@ -476,11 +482,6 @@ public final class TetherSurfaceView: UIView {
     return TerminalGridInset.originX(
       viewWidth: bounds.width, cellWidth: cellWidth, cols: Int(header.cols)
     )
-  }
-
-  private func commitGridSize(_ size: (cols: UInt16, rows: UInt16)) {
-    reportedGrid = size
-    onGridSizeChange?(size.cols, size.rows)
   }
 
   private func invalidateMetrics() {
