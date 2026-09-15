@@ -3,7 +3,6 @@ import SwiftUI
 public struct TerminalTitleBar<Overflow: View>: View {
   @Bindable public var store: SessionStore
   public var onOpenDrawer: () -> Void
-  public var onNewSession: () -> Void
   public var onGit: () -> Void
   public var onSettings: () -> Void
   /// The … menu's items. Presented via `Menu`, not a flag-driven
@@ -16,14 +15,12 @@ public struct TerminalTitleBar<Overflow: View>: View {
   public init(
     store: SessionStore,
     onOpenDrawer: @escaping () -> Void,
-    onNewSession: @escaping () -> Void,
     onGit: @escaping () -> Void,
     onSettings: @escaping () -> Void,
     @ViewBuilder overflow: @escaping () -> Overflow
   ) {
     self.store = store
     self.onOpenDrawer = onOpenDrawer
-    self.onNewSession = onNewSession
     self.onGit = onGit
     self.onSettings = onSettings
     self.overflow = overflow
@@ -63,15 +60,9 @@ public struct TerminalTitleBar<Overflow: View>: View {
           )
       }
 
-      if let hostId = store.activeHostId {
-        ConnectionBadge(status: store.connectionStatus(for: hostId))
-      }
-
       // No spacing: the 44pt targets already sit glyphs 44pt apart; extra gaps
       // pushed the row wide enough to truncate the session title.
       HStack(spacing: 0) {
-        iconButton("plus", label: "New terminal", action: onNewSession)
-          .accessibilityIdentifier("newTerminalButton")
         iconButton("arrow.triangle.branch", label: "Git changes", action: onGit)
           .disabled(store.activeSessionId == nil || store.activeSession?.kind == "agent")
         iconButton("gearshape", label: "Settings", action: onSettings)
@@ -131,55 +122,5 @@ public struct TerminalTitleBar<Overflow: View>: View {
     // "Select a session" told the reader to do something impossible when no
     // server was paired at all.
     return store.hosts.isEmpty ? "No server paired" : "Select a session"
-  }
-}
-
-private struct ConnectionBadge: View {
-  let status: SessionStore.ConnectionStatus
-
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  /// A dot, not a word: a status label truncated the session title. Colour carries
-  /// the state, a spinner marks connecting, and the words survive for VoiceOver.
-  var body: some View {
-    ZStack {
-      if status == .connecting {
-        ProgressView()
-          .controlSize(.mini)
-          .transition(.opacity)
-      } else {
-        Circle()
-          .fill(tint)
-          .frame(width: 8, height: 8)
-          .overlay(
-            Circle().stroke(tint.opacity(0.35), lineWidth: 3).blur(radius: 1)
-          )
-          // Keyed on status, not just dot-vs-spinner: reconnect-then-drop are
-          // distinct events, and a colour that cuts between them looks like a bug.
-          .id(status)
-          .transition(.opacity)
-      }
-    }
-    .frame(width: 14, height: 14)
-    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: status)
-    .accessibilityLabel(label)
-  }
-
-  private var label: String {
-    switch status {
-    case .online: "Connected"
-    case .connecting: "Connecting"
-    case .offline: "Offline"
-    case .authFailed: "Access rejected"
-    }
-  }
-
-  private var tint: Color {
-    switch status {
-    case .online: TetherColors.success
-    case .connecting: TetherColors.warning
-    case .offline: TetherColors.textSecondary
-    case .authFailed: TetherColors.danger
-    }
   }
 }

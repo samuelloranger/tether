@@ -39,11 +39,6 @@ struct RootView: View {
         TerminalTitleBar(
           store: store,
           onOpenDrawer: openDrawer,
-          onNewSession: {
-            Task {
-              await store.newTerminal()
-            }
-          },
           onGit: { showGit = true },
           onSettings: { showSettings = true },
           overflow: { overflowItems }
