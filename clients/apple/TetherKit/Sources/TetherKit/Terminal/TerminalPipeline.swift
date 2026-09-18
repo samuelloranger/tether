@@ -131,6 +131,17 @@ actor TerminalPipeline {
     disconnect()
     startOutboundPumpIfNeeded()
     let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
+    // A fresh emulator (not reused — cold launch, or the pipeline was evicted
+    // past the resident cap and rebuilt on switch-back) has no local grid to
+    // append a delta onto. The persisted replay cursor would make `start`
+    // request only output SINCE it, so an idle session replays nothing and the
+    // empty emulator renders blank until the next byte — which for a quiescent
+    // TUI never comes. Reset the cursor so we replay the whole retained tail and
+    // rebuild the grid; the readLoop's `shouldApply` then accepts those frames
+    // instead of dropping them under the stale cursor.
+    if !attached.reused {
+      replayStore.reset(sessionId: key)
+    }
     #if DEBUG
     NSLog(
       "TETHERTRACE connectNoise session=%@ key=%@ gridReused=%@ cachedSnapshot=%@",

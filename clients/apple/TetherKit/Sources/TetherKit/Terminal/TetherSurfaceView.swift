@@ -444,18 +444,26 @@ public final class TetherSurfaceView: UIView {
       onGridSizeChange?(size.cols, size.rows)
     }
 
-    // Server PTY (SIGWINCH) is debounced to the SETTLED bounds. Re-derive from
-    // the CURRENT bounds when the timer fires so a transient animation frame is
-    // never what reaches the PTY. If the settled size equals what the PTY
-    // already has (keyboard up then back down), nothing is sent — no SIGWINCH,
-    // no redraw, no duplicate.
+    // Re-measure once the bounds SETTLE (keyboard animation done) and re-assert
+    // BOTH grids from the final size. The immediate path above tracks the view
+    // through the animation's intermediate heights; if the view lands on a size
+    // equal to one of those transients the guard suppresses a fresh report, so
+    // the local emulator — and the bottom-anchored render that reads it — can
+    // stay at a height the view no longer has, clipping the newest rows under
+    // the key bar or leaving slack above it. The server PTY (SIGWINCH) is
+    // debounced here too so an inline TUI is not made to rewrap at every
+    // transient width. If the settled size already matches, nothing is sent.
     gridSettleWork?.cancel()
     let work = DispatchWorkItem { [weak self] in
       guard let self, let settled = self.currentGridSize() else { return }
-      guard self.serverGrid?.cols != settled.cols || self.serverGrid?.rows != settled.rows
-      else { return }
-      self.serverGrid = settled
-      self.onGridSizeSettled?(settled.cols, settled.rows)
+      if self.localGrid?.cols != settled.cols || self.localGrid?.rows != settled.rows {
+        self.localGrid = settled
+        self.onGridSizeChange?(settled.cols, settled.rows)
+      }
+      if self.serverGrid?.cols != settled.cols || self.serverGrid?.rows != settled.rows {
+        self.serverGrid = settled
+        self.onGridSizeSettled?(settled.cols, settled.rows)
+      }
     }
     gridSettleWork = work
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.gridSettleDelay, execute: work)
