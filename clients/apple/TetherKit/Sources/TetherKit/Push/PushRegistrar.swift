@@ -57,6 +57,12 @@ public final class PushRegistrar {
   /// so a newly-added host gets covered before the next APNs callback.
   public func start() {
     #if canImport(UIKit)
+    #if DEBUG
+    // A preseeded UI-test launch skips the system notification prompt: it steals
+    // first responder from the terminal and blocks the keyboard a headless-sim
+    // repro needs. No-op only under that env; normal dev/Release is untouched.
+    if ProcessInfo.processInfo.environment["TETHER_UITEST_PRESEED"] != nil { return }
+    #endif
     Task {
       let center = UNUserNotificationCenter.current()
       do {

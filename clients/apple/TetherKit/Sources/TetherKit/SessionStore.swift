@@ -288,6 +288,32 @@ public final class SessionStore {
          let url = URL(string: raw) {
         handleDeepLink(url)
       }
+      // Test-only: open a fresh terminal at launch so a sim run reaches the
+      // grid without driving the New-terminal button. No-op unless set.
+      if ProcessInfo.processInfo.environment["TETHER_UITEST_NEWTERMINAL"] == "1" {
+        Task { await newTerminal() }
+      }
+      // Test-only: open two terminals then alternate the active tab on a timer
+      // so a headless sim exercises the in-app session switch.
+      if ProcessInfo.processInfo.environment["TETHER_UITEST_SWITCHTEST"] == "1" {
+        Task {
+          guard let hostId = activeHostId else { return }
+          await newTerminal()
+          try? await Task.sleep(nanoseconds: 4_000_000_000)
+          let a = activeSessionId
+          await newTerminal()
+          try? await Task.sleep(nanoseconds: 4_000_000_000)
+          let b = activeSessionId
+          guard let a, let b, a != b else { return }
+          // Alternate between the two sessions so the in-app switch path runs.
+          var toA = true
+          while !Task.isCancelled {
+            await selectSession(hostId: hostId, sessionId: toA ? a : b)
+            toA.toggle()
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+          }
+        }
+      }
       #endif
     } catch {
       errorMessage = error.localizedDescription

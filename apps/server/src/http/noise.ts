@@ -13,6 +13,32 @@ import { toFrameBytes, WsFrameIO, type WsSender } from '@/noise/wsAdapter';
 
 export const noiseRoutes = new Hono();
 
+// DEV ONLY. When TETHER_DANGEROUS_MODE=1 the server authorizes ANY device static
+// key on IK reconnect, auto-enrolling it, so a simulator or throwaway dev client
+// connects with no pairing and no code. This removes the ONLY authorization gate
+// (bearer tokens are minted for whatever device the Noise session authorized), so
+// it must NEVER be set on a reachable/production server — anyone who can open the
+// port gets a shell. Off unless the env var is exactly "1".
+function dangerousModeEnabled(): boolean {
+  return process.env.TETHER_DANGEROUS_MODE === '1';
+}
+
+// The registry lookup used to authorize a reconnect (only the id + pubkey the
+// gate needs). In dangerous mode an unknown key is synthesized into a device
+// instead of refused.
+function deviceLookup(): (pubkey: string) => { id: string; pubkey: string } | null {
+  if (!dangerousModeEnabled()) return getDeviceByPubkey;
+  return (pubkey: string) =>
+    getDeviceByPubkey(pubkey) ?? { id: `dev-${pubkey.slice(0, 12)}`, pubkey };
+}
+
+if (dangerousModeEnabled()) {
+  logError(
+    'TETHER_DANGEROUS_MODE is ON — every Noise device is auto-authorized without pairing. ' +
+      'Dev only. Do not run this on a reachable server.',
+  );
+}
+
 // Public (pre-auth-reachable): bound in-flight Noise sockets and kill stalled
 // handshakes so idle/hostile connections can't pin fds + native handles.
 const MAX_NOISE_CONNECTIONS = 64;
@@ -120,8 +146,9 @@ noiseRoutes.get(
         const priv = loadOrCreateServerKeypair().priv;
         // Only the handshake is time-bounded; an established session runs as long
         // as the client keeps it open.
-        withHandshakeTimeout(runReconnect(adapter, priv, { getDeviceByPubkey, touchDevice }), () =>
-          adapter.close(),
+        withHandshakeTimeout(
+          runReconnect(adapter, priv, { getDeviceByPubkey: deviceLookup(), touchDevice }),
+          () => adapter.close(),
         )
           .then(async ({ channel, device }) => {
             logInfo(`Noise session authorized device ${device.id}`);

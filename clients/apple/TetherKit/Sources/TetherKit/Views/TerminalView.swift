@@ -724,9 +724,26 @@ public struct TerminalView: View {
       // with nothing open put the key bar on screen with nothing to act on.
       keyboardFocused = placeholderReason == nil
     }
-    .onChange(of: store.activeSessionId) { _, _ in
+    .onChange(of: store.activeSessionId) { _, newId in
       scrollOffsetFromBottom = 0
       selectionText = nil
+      #if DEBUG
+      // Test-only: the auto-opened session arrives after onAppear already ran
+      // (with no session, so it left the keyboard down). A headless sim has no
+      // tap to focus the input, so raise it here to reach the keyboard-up grid.
+      // No-op outside the env.
+      if newId != nil,
+         ProcessInfo.processInfo.environment["TETHER_UITEST_NEWTERMINAL"] == "1"
+           || ProcessInfo.processInfo.environment["TETHER_UITEST_SWITCHTEST"] == "1" {
+        keyboardFocused = true
+        // Drive a keyboard hide→show toggle so a headless sim exercises the
+        // resize animation the grid-measure bug rides (no tap available).
+        if ProcessInfo.processInfo.environment["TETHER_UITEST_KBTOGGLE"] == "1" {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 3) { keyboardFocused = false }
+          DispatchQueue.main.asyncAfter(deadline: .now() + 5) { keyboardFocused = true }
+        }
+      }
+      #endif
     }
     // An overlay hides the accessory bar but doesn't resign first responder, so the
     // raw keyboard stayed up behind it. Drop focus on appear, reclaim it on dismiss.
