@@ -1,5 +1,21 @@
 #include "TetherLibSSH2.h"
 
+LIBSSH2_SESSION *tether_libssh2_session_init(void) {
+  return libssh2_session_init();
+}
+
+int tether_libssh2_userauth_password(
+  LIBSSH2_SESSION *session,
+  const char *username,
+  const char *password
+) {
+  return libssh2_userauth_password(session, username, password);
+}
+
+int tether_libssh2_session_disconnect(LIBSSH2_SESSION *session, const char *description) {
+  return libssh2_session_disconnect(session, description);
+}
+
 LIBSSH2_CHANNEL *tether_libssh2_channel_open_session(LIBSSH2_SESSION *session) {
   return libssh2_channel_open_session(session);
 }
