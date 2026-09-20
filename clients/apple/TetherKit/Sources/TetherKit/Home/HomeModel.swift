@@ -9,6 +9,9 @@ public final class HomeModel {
   public private(set) var keys: [SSHKeyRecord] = []
   public var errorMessage: String?
 
+  /// TOFU host-key pins, shared with every connection this model opens.
+  let hostKeyStore = UserDefaultsHostKeyStore()
+
   private let profileStore: SSHProfileStore
   private let vault: SSHKeyVault
   private let secrets: SSHSecretStore
@@ -88,6 +91,34 @@ public final class HomeModel {
     profileStore.remove(id: id)
     secrets.setSecret(nil, forKey: passwordKey(id))
     reload()
+  }
+
+  /// Resolves a profile into a connectable config, pulling the private key PEM
+  /// or the stored password out of the vault/secret store. `nil` when the
+  /// referenced secret is missing.
+  func connectionConfig(for profile: SSHHostProfile, cols: Int = 80, rows: Int = 24) -> SSHConnectionConfig? {
+    let credentials: [SSHCredential]
+    switch profile.auth {
+    case .password:
+      guard let password = password(forHostId: profile.id) else { return nil }
+      credentials = [.password(password)]
+    case let .key(keyId):
+      guard let pem = vault.privatePEM(forKeyId: keyId) else { return nil }
+      credentials = [.privateKey(pem: pem, passphrase: nil)]
+    }
+    return SSHConnectionConfig(
+      host: profile.host, port: profile.port, username: profile.username,
+      credentials: credentials, cols: cols, rows: rows
+    )
+  }
+
+  // MARK: Last-connected memory (relaunch auto-connect)
+
+  private let lastHostKey = "tether.ssh.lastHostId"
+  public func rememberLastHost(_ id: String?) { UserDefaults.standard.set(id, forKey: lastHostKey) }
+  public var lastHostProfile: SSHHostProfile? {
+    guard let id = UserDefaults.standard.string(forKey: lastHostKey) else { return nil }
+    return profiles.first { $0.id == id }
   }
 
   public func authLabel(for profile: SSHHostProfile) -> String {

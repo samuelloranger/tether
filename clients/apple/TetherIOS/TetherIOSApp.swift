@@ -18,7 +18,11 @@ struct TetherIOSApp: App {
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      if ProcessInfo.processInfo.environment["TETHER_HOME_PREVIEW"] != nil {
+      if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {
+        AppRootView(demoModel: .preview())
+          .tint(TetherColors.accent)
+          .preferredColorScheme(.dark)
+      } else if ProcessInfo.processInfo.environment["TETHER_HOME_PREVIEW"] != nil {
         HomeView(
           model: .preview(),
           initialTab: ProcessInfo.processInfo.environment["TETHER_HOME_TAB"] == "keys" ? .keys : .machines,
@@ -38,35 +42,18 @@ struct TetherIOSApp: App {
     }
   }
 
+  // v5: SSH-first root. The Noise SessionStore/RootView remain in the repo but
+  // are no longer rooted; they are removed in the final deletion phase.
   @ViewBuilder private var appRoot: some View {
-    RootView(store: store, preferences: preferences)
-        // Without this, the SwiftUI Forms (settings, pairing) render system blue
-        // while terminal surfaces use TetherColors.accent — two identities.
+    AppRootView()
         .tint(TetherColors.accent)
-        .onOpenURL { url in
-          store.handleDeepLink(url)
-        }
         #if canImport(UIKit)
-        .onAppear {
-          appDelegate.attach(store: store)
+        .task {
+          // Device-token registration is transport-agnostic; the SSH notify path
+          // (tether-notify) reuses it later.
+          appDelegate.pushRegistrar.start()
         }
         #endif
-        .task {
-          await store.bootstrap()
-          #if canImport(UIKit)
-          appDelegate.pushRegistrar.start()
-          #endif
-        }
-        .onChange(of: scenePhase) { _, phase in
-          switch phase {
-          case .active:
-            store.handleAppLifecycle(.active)
-          case .inactive, .background:
-            store.handleAppLifecycle(.inactive)
-          @unknown default:
-            break
-          }
-        }
   }
 }
 
