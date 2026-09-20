@@ -78,6 +78,11 @@ actor TerminalPipeline {
   /// carries it.
   private var noiseSessionId: String?
   private var noiseReadTask: Task<Void, Never>?
+  /// Direct PTY transport for the v5 SSH path. It deliberately shares the
+  /// existing emulator/snapshot path with Noise rather than adding another
+  /// renderer or session store.
+  private var sshTransport: (any TerminalByteStream)?
+  private var sshReadTask: Task<Void, Never>?
   private var outboundTask: Task<Void, Never>?
   private var lastTrafficMs: Int64 = 0
   private var lastRenderedGeneration: UInt64?
@@ -193,6 +198,49 @@ actor TerminalPipeline {
     }
   }
 
+  /// Pumps an authenticated SSH PTY into the existing emulator and snapshot
+  /// stream. Connection/authentication belongs to the caller; this boundary is
+  /// just raw terminal bytes, so it is also testable without a host.
+  func connectSSH(transport: any TerminalByteStream, key: String) async {
+    disconnect()
+    startOutboundPumpIfNeeded()
+    let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
+    currentGrid = attached.grid
+    emulatorKey = key
+    lastRenderedGeneration = nil
+    lastAltScreen = attached.grid.lastAltScreen
+    if attached.reused {
+      publishSnapshot()
+    } else {
+      snapshotSink.yield(nil)
+    }
+    resetMouseModes()
+    sshTransport = transport
+    noteTraffic()
+    sshReadTask = Task { [weak self] in
+      await self?.readLoopSSH(key: key, transport: transport)
+    }
+  }
+
+  private func readLoopSSH(key: String, transport: any TerminalByteStream) async {
+    do {
+      while !Task.isCancelled, let bytes = try await transport.read() {
+        guard key == emulatorKey else { continue }
+        noteTraffic()
+        applyOutput(bytes)
+      }
+      if !Task.isCancelled, key == emulatorKey {
+        sshTransport = nil
+        eventSink.yield(.error("Connection closed"))
+      }
+    } catch {
+      if !Task.isCancelled, key == emulatorKey {
+        sshTransport = nil
+        eventSink.yield(.error(error.localizedDescription))
+      }
+    }
+  }
+
   private func readLoopNoise(key: String, channel: NoiseChannel) async {
     while !Task.isCancelled {
       do {
@@ -262,10 +310,16 @@ actor TerminalPipeline {
     lastFocusSent = nil
     noiseReadTask?.cancel()
     noiseReadTask = nil
+    sshReadTask?.cancel()
+    sshReadTask = nil
     if let channel = noiseChannel {
       noiseChannel = nil
       noiseSessionId = nil
       Task { await channel.close() }
+    }
+    if let transport = sshTransport {
+      sshTransport = nil
+      Task { await transport.close() }
     }
   }
 
@@ -320,9 +374,30 @@ actor TerminalPipeline {
   private func handleOutbound(_ frame: OutboundFrame) async {
     switch frame {
     case let .input(text, key):
+      if let transport = sshTransport, stillCurrent(key) {
+        do {
+          try await transport.write(Data(text.utf8))
+        } catch {
+          // Dropping input silently leaves a dead-looking terminal; detach so
+          // `isConnected` stops lying and the read loop's close path can fire.
+          sshTransport = nil
+          eventSink.yield(.error(error.localizedDescription))
+        }
+        return
+      }
       guard let channel = noiseChannel, let id = noiseSessionId, stillCurrent(key) else { return }
       try? await channel.sendInput(id: id, text: text)
     case let .paste(text, key):
+      if let transport = sshTransport, stillCurrent(key) {
+        let payload = emulator?.pastePayload(text: text) ?? text
+        do {
+          try await transport.write(Data(payload.utf8))
+        } catch {
+          sshTransport = nil
+          eventSink.yield(.error(error.localizedDescription))
+        }
+        return
+      }
       guard let channel = noiseChannel, let id = noiseSessionId, stillCurrent(key) else { return }
       try? await channel.sendInput(id: id, text: emulator?.pastePayload(text: text) ?? text)
     case let .focus(focused):
@@ -423,7 +498,7 @@ actor TerminalPipeline {
 
   /// True while a live Noise channel is attached — used to reuse a background
   /// pipeline on switch-back instead of reconnecting (and replaying).
-  var isConnected: Bool { noiseChannel != nil }
+  var isConnected: Bool { noiseChannel != nil || sshTransport != nil }
 
   #if DEBUG
   /// Test seam: stand up a live emulator without a Noise connection.
