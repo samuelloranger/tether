@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// The v5 Home: machines and the shared key vault. Built on the Aurora tokens;
-/// see the approved mockup (glim tether-v5-home-aurora).
 public struct HomeView: View {
   @Bindable var model: HomeModel
   var onOpen: (SSHHostProfile) -> Void

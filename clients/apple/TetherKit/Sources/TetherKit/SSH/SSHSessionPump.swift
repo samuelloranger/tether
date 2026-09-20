@@ -2,16 +2,10 @@ import CLibSSH2
 import Darwin
 import Foundation
 
-/// Drives one authenticated libssh2 session on a dedicated thread.
-///
-/// libssh2 sessions are not thread-safe, so every call on `session`/`channel`
-/// happens on this one thread. The loop is bounded-blocking: each pass drains
-/// queued terminal input, then reads with a short session timeout, so a blocked
-/// read never starves outgoing keystrokes. Input latency is at most the timeout.
-///
-/// Ownership: the pump owns the channel, session, and socket and releases all
-/// three when the loop exits (`close()`, EOF, or a fatal read). The connector
-/// hands them over on success and never frees them itself.
+/// Drives one authenticated libssh2 session on a dedicated thread (sessions are
+/// not thread-safe). Each pass drains queued input, then reads with a short
+/// timeout, so a blocked read never starves outgoing keystrokes. Owns the
+/// channel, session, and socket and frees all three when the loop exits.
 final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   private let session: OpaquePointer
   private let channel: OpaquePointer
@@ -25,7 +19,6 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   private let sink: AsyncStream<Data>.Continuation
   private var iterator: AsyncStream<Data>.AsyncIterator
 
-  /// Milliseconds a read may block before the loop cycles back to drain input.
   private static let readTimeoutMs = 30
 
   init(session: OpaquePointer, channel: OpaquePointer, socket: Int32) {
@@ -44,9 +37,7 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   }
 
   // Single-consumer: only the pipeline's SSH read loop calls this, serially.
-  func read() async -> Data? {
-    await iterator.next()
-  }
+  func read() async -> Data? { await iterator.next() }
 
   func write(_ bytes: Data) async {
     guard !bytes.isEmpty else { return }
@@ -79,20 +70,19 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
         LibSSH2TransportProbe.read(into: $0, from: channel)
       }
       if count > 0 {
-        sink.yield(Data(buffer.prefix(count).map(UInt8.init(bitPattern:))))
+        let data = buffer.withUnsafeBytes { Data(bytes: $0.baseAddress!, count: count) }
+        sink.yield(data)
       } else if count == 0 {
         if libssh2_channel_eof(channel) == 1 { break }
-      } else if count == LIBSSH2_ERROR_TIMEOUT || count == LIBSSH2_ERROR_EAGAIN {
-        continue // no data this window; loop to re-drain input and read again
+      } else if count == LibSSH2Const.timeout || count == LibSSH2Const.eagain {
+        continue
       } else {
-        break // fatal transport error
+        break
       }
     }
     teardownAndFinish()
   }
 
-  /// Writes one chunk fully, tolerating partial writes and short timeouts.
-  /// Returns false on a fatal write error.
   private func drain(_ chunk: Data) -> Bool {
     var offset = 0
     return chunk.withUnsafeBytes { raw -> Bool in
@@ -101,7 +91,7 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
         let written = tether_libssh2_channel_write(channel, base.advanced(by: offset), chunk.count - offset)
         if written > 0 {
           offset += written
-        } else if written == LIBSSH2_ERROR_TIMEOUT || written == LIBSSH2_ERROR_EAGAIN {
+        } else if written == LibSSH2Const.timeout || written == LibSSH2Const.eagain {
           continue
         } else {
           return false
@@ -119,6 +109,3 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
     sink.finish()
   }
 }
-
-private let LIBSSH2_ERROR_TIMEOUT: Int = -9
-private let LIBSSH2_ERROR_EAGAIN: Int = -37

@@ -1,8 +1,5 @@
 import Foundation
 
-/// One zmx session as reported by `zmx ls`, plus the parser for that output.
-/// Rows are two-space indented, tab-separated `key=value`; the name may contain
-/// spaces, so fields are split on tab, never whitespace.
 public struct ZmxSession: Equatable, Identifiable, Sendable {
   public var name: String
   public var pid: Int
@@ -12,7 +9,6 @@ public struct ZmxSession: Equatable, Identifiable, Sendable {
 
   public var id: String { name }
 
-  /// The cwd without the `file://<host>` prefix zmx emits.
   public var displayCwd: String {
     guard cwd.hasPrefix("file://") else { return cwd }
     let afterScheme = cwd.dropFirst("file://".count)

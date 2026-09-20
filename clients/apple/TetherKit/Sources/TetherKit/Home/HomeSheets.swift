@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Add-server form: destination, auth choice, and a vault key picker with a
-/// trust-on-first-use note about the host key that will be pinned.
 struct AddServerSheet: View {
   @Bindable var model: HomeModel
   var onDone: () -> Void
@@ -142,7 +140,6 @@ struct AddServerSheet: View {
   }
 }
 
-/// Generate a fresh ed25519 key, or paste an existing PEM + public key.
 struct KeyEntrySheet: View {
   enum Mode { case generate, paste }
 

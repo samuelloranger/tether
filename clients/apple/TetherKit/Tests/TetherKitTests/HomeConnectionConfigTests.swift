@@ -4,19 +4,8 @@ import XCTest
 
 @MainActor
 final class HomeConnectionConfigTests: XCTestCase {
-  private final class KV: SSHKeyValueStore {
-    var items: [String: Data] = [:]
-    func data(forKey key: String) -> Data? { items[key] }
-    func set(_ data: Data?, forKey key: String) { items[key] = data }
-  }
-  private final class Secrets: SSHSecretStore {
-    var s: [String: String] = [:]
-    func setSecret(_ value: String?, forKey key: String) { s[key] = value }
-    func secret(forKey key: String) -> String? { s[key] }
-  }
-
   private func model() -> HomeModel {
-    let kv = KV(); let sec = Secrets()
+    let kv = InMemoryKV(); let sec = InMemorySSHSecrets()
     return HomeModel(profileStore: SSHProfileStore(storage: kv), vault: SSHKeyVault(storage: kv, secrets: sec), secrets: sec)
   }
 

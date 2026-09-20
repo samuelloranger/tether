@@ -1,9 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
 
-/// The zmx session picker for one machine — the native equivalent of the `hop`
-/// shell alias. Lists persistent sessions, switches between them, or starts a new
-/// one. Switching redials fresh (see `SSHTerminalController.switchSession`).
 struct ZmxSessionDrawer: View {
   @Bindable var controller: SSHTerminalController
   var onDone: () -> Void

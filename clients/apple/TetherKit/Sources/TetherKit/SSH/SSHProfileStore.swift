@@ -1,7 +1,5 @@
 import Foundation
 
-/// Persists SSH host profiles as a JSON array, preserving insertion order.
-/// Adding an id that already exists updates it in place.
 final class SSHProfileStore {
   private let storage: SSHKeyValueStore
   private let key = "tether.ssh.profiles"

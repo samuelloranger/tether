@@ -2,9 +2,6 @@
 import SwiftUI
 import UIKit
 
-/// An SSH-backed terminal rendered through the shared surface. Chrome is minimal:
-/// a title with a Home button and a connection lamp; the grid and key bar are the
-/// same components the Noise terminal uses.
 public struct SSHTerminalView: View {
   @Bindable var controller: SSHTerminalController
   var onHome: () -> Void

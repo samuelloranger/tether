@@ -3,8 +3,6 @@ import SwiftUI
 import UIKit
 #endif
 
-/// A colored rendering of a key's drunken-bishop randomart — the same field the
-/// ASCII art uses, mapped to the heat ramp so each key looks distinct.
 struct RandomartGridView: View {
   let publicKey: String
 
@@ -67,7 +65,6 @@ struct MachineCardView: View {
             .overlay(Capsule().strokeBorder(TetherColors.border))
         }
         HStack(spacing: 6) {
-          // verbatim: a LocalizedStringKey interpolation would render the port as "2,222".
           Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
           Text(verbatim: "· \(authLabel)").foregroundStyle(TetherColors.textFaint)
         }

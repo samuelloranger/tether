@@ -1,15 +1,10 @@
 import Foundation
 
-/// The OpenSSH "drunken bishop" randomart, byte-compatible with
-/// `ssh-keygen -lv`. A 17×9 field the bishop walks two bits at a time; each cell
-/// renders as a glyph by visit count, with the start and end cells marked.
 enum SSHRandomart {
   private static let glyphs = Array(" .o+=*BOX@%&#/^SE") // index 15 = S, 16 = E
   private static let width = 17
   private static let height = 9
 
-  /// The raw visit-count field (0…14, with 15 = start, 16 = end), row-major
-  /// `height`×`width`. Drives both the ASCII art and the colored grid in the UI.
   static func field(digest: Data) -> [[Int]] {
     var field = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
     var x = width / 2

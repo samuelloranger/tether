@@ -12,12 +12,9 @@ enum LibSSH2OpsError: Error, Equatable {
   case execFailed(Int)
 }
 
-/// Concrete libssh2 implementation of the connect sequence's operations.
-///
-/// It owns the socket and session until `openPTYChannel` hands them to the pump;
-/// on any earlier failure the sequence calls `teardown`, which releases whatever
-/// was created. Not thread-confined itself — the sequence runs it on the
-/// connector's dedicated thread, matching where the pump will run.
+/// Concrete libssh2 implementation of the connect sequence. Owns the socket and
+/// session until `openPTYChannel` hands them to the pump; `teardown` releases
+/// whatever was created on an earlier failure.
 final class LibSSH2Ops: SSHConnectionOps {
   private let config: SSHConnectionConfig
   private var socket: Int32 = -1
@@ -39,10 +36,9 @@ final class LibSSH2Ops: SSHConnectionOps {
   }
 
   func hostKeyFingerprint() throws -> String {
-    guard let session, let raw = libssh2_hostkey_hash(session, LIBSSH2_HOSTKEY_HASH_SHA256) else {
+    guard let session, let raw = libssh2_hostkey_hash(session, LibSSH2Const.hostKeyHashSHA256) else {
       throw LibSSH2OpsError.hostKeyUnavailable
     }
-    // SHA-256 digest is 32 raw bytes, not NUL-terminated.
     let bytes = UnsafeRawPointer(raw).assumingMemoryBound(to: UInt8.self)
     return (0..<32).map { String(format: "%02x", bytes[$0]) }.joined(separator: ":")
   }
@@ -57,8 +53,8 @@ final class LibSSH2Ops: SSHConnectionOps {
       rc = LibSSH2Ops.authPublicKey(session: session, username: config.username, pem: pem, passphrase: passphrase)
     }
     if rc == 0 { return true }
-    if rc == LIBSSH2_ERROR_AUTHENTICATION_FAILED || rc == LIBSSH2_ERROR_PUBLICKEY_UNVERIFIED {
-      return false // rejected credential, try the next one
+    if rc == LibSSH2Const.authenticationFailed || rc == LibSSH2Const.publickeyUnverified {
+      return false
     }
     throw LibSSH2OpsError.authError(Int(rc))
   }
@@ -71,7 +67,7 @@ final class LibSSH2Ops: SSHConnectionOps {
       throw LibSSH2OpsError.ptyOpenFailed
     }
     let pump = SSHSessionPump(session: session, channel: channel, socket: socket)
-    transferred = true // pump now owns session/channel/socket
+    transferred = true
     return pump
   }
 
@@ -89,11 +85,11 @@ final class LibSSH2Ops: SSHConnectionOps {
         LibSSH2TransportProbe.read(into: $0, from: channel)
       }
       if count > 0 {
-        output.append(contentsOf: buffer.prefix(count).map(UInt8.init(bitPattern:)))
+        buffer.withUnsafeBytes { output.append($0.baseAddress!.assumingMemoryBound(to: UInt8.self), count: count) }
       } else if count == 0 {
-        break // EOF
-      } else if count == LIBSSH2_ERROR_EAGAIN {
-        continue // blocking session, but tolerate a spurious would-block
+        break
+      } else if count == LibSSH2Const.eagain {
+        continue
       } else {
         break
       }
@@ -114,8 +110,6 @@ final class LibSSH2Ops: SSHConnectionOps {
     }
   }
 
-  // MARK: - libssh2 helpers
-
   private static let initOnce: Void = { _ = libssh2_init(0) }()
   private static func initializeOnce() { _ = initOnce }
 
@@ -128,7 +122,7 @@ final class LibSSH2Ops: SSHConnectionOps {
           libssh2_userauth_publickey_frommemory(
             session,
             user, username.utf8.count,
-            nil, 0, // derive the public key from the private key
+            nil, 0,
             keyBuf.baseAddress?.assumingMemoryBound(to: CChar.self), priv.count,
             passPtr
           )
@@ -163,8 +157,3 @@ final class LibSSH2Ops: SSHConnectionOps {
     throw LibSSH2OpsError.socket("connect failed for \(host):\(port)")
   }
 }
-
-private let LIBSSH2_ERROR_EAGAIN: Int = -37
-private let LIBSSH2_HOSTKEY_HASH_SHA256: Int32 = 3
-private let LIBSSH2_ERROR_AUTHENTICATION_FAILED: Int32 = -18
-private let LIBSSH2_ERROR_PUBLICKEY_UNVERIFIED: Int32 = -19

@@ -1,10 +1,8 @@
 import Foundation
 
-/// Classifies raw `git diff` output for display. Kept Swift-side (no Rust) so it
-/// stands on its own once the Rust core is removed.
 public enum GitDiffLineKind: Equatable, Sendable {
-  case fileHeader // diff --git / index / --- / +++
-  case hunk // @@ ... @@
+  case fileHeader
+  case hunk
   case added
   case removed
   case context
@@ -16,6 +14,8 @@ public struct GitDiffLine: Equatable, Identifiable, Sendable {
   public let text: String
 }
 
+/// Classifies raw `git diff` output for display. Swift-side so it stands alone
+/// once the Rust core is removed.
 public enum GitDiffModel {
   public static func classify(_ diff: String) -> [GitDiffLine] {
     guard !diff.isEmpty else { return [] }
@@ -25,7 +25,9 @@ public enum GitDiffModel {
   }
 
   public static func stat(_ lines: [GitDiffLine]) -> (added: Int, removed: Int) {
-    (lines.filter { $0.kind == .added }.count, lines.filter { $0.kind == .removed }.count)
+    lines.reduce(into: (0, 0)) { counts, line in
+      if line.kind == .added { counts.0 += 1 } else if line.kind == .removed { counts.1 += 1 }
+    }
   }
 
   private static func kind(of line: String) -> GitDiffLineKind {

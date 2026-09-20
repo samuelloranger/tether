@@ -1,7 +1,5 @@
 import Foundation
 
-/// Backs the Home screen: the saved machines and the shared key vault. Wraps the
-/// pure stores and republishes their contents for SwiftUI.
 @MainActor
 @Observable
 public final class HomeModel {
@@ -9,7 +7,6 @@ public final class HomeModel {
   public private(set) var keys: [SSHKeyRecord] = []
   public var errorMessage: String?
 
-  /// TOFU host-key pins, shared with every connection this model opens.
   let hostKeyStore = UserDefaultsHostKeyStore()
 
   private let profileStore: SSHProfileStore
@@ -23,7 +20,6 @@ public final class HomeModel {
     reload()
   }
 
-  /// Production wiring: UserDefaults for metadata, Keychain for secrets.
   public static func live() -> HomeModel {
     let secrets = KeychainSecretStore()
     return HomeModel(
@@ -38,7 +34,6 @@ public final class HomeModel {
     keys = vault.list()
   }
 
-  // MARK: Keys
 
   public func generateKey(name: String) {
     do { _ = try vault.generateEd25519(name: name); reload() }
@@ -63,12 +58,10 @@ public final class HomeModel {
     keys.first { $0.id == id }?.name
   }
 
-  /// Names of the machines that authenticate with a given key.
   public func machinesUsing(keyId: String) -> [String] {
     profiles.filter { $0.auth == .key(keyId: keyId) }.map(\.name)
   }
 
-  // MARK: Machines
 
   public func addServer(
     name: String, host: String, port: Int, username: String,
@@ -80,7 +73,6 @@ public final class HomeModel {
     reload()
   }
 
-  /// The stored password for a password-auth host, if any.
   public func password(forHostId id: String) -> String? {
     secrets.secret(forKey: passwordKey(id))
   }
@@ -93,10 +85,7 @@ public final class HomeModel {
     reload()
   }
 
-  /// Resolves a profile into a connectable config, pulling the private key PEM
-  /// or the stored password out of the vault/secret store. `nil` when the
-  /// referenced secret is missing.
-  func connectionConfig(for profile: SSHHostProfile, cols: Int = 80, rows: Int = 24) -> SSHConnectionConfig? {
+  func connectionConfig(for profile: SSHHostProfile) -> SSHConnectionConfig? {
     let credentials: [SSHCredential]
     switch profile.auth {
     case .password:
@@ -107,12 +96,10 @@ public final class HomeModel {
       credentials = [.privateKey(pem: pem, passphrase: nil)]
     }
     return SSHConnectionConfig(
-      host: profile.host, port: profile.port, username: profile.username,
-      credentials: credentials, cols: cols, rows: rows
+      host: profile.host, port: profile.port, username: profile.username, credentials: credentials
     )
   }
 
-  // MARK: Last-connected memory (relaunch auto-connect)
 
   private let lastHostKey = "tether.ssh.lastHostId"
   public func rememberLastHost(_ id: String?) { UserDefaults.standard.set(id, forKey: lastHostKey) }
@@ -129,7 +116,6 @@ public final class HomeModel {
   }
 }
 
-/// In-memory secrets for previews/tests so a screenshot run needs no Keychain.
 final class InMemorySSHSecrets: SSHSecretStore {
   private var items: [String: String] = [:]
   func setSecret(_ value: String?, forKey key: String) { items[key] = value }
@@ -137,7 +123,6 @@ final class InMemorySSHSecrets: SSHSecretStore {
 }
 
 public extension HomeModel {
-  /// A populated model for the DEBUG Home preview harness.
   static func preview() -> HomeModel {
     let suite = "tether.home.preview"
     let defaults = UserDefaults(suiteName: suite)!
@@ -161,10 +146,6 @@ public extension HomeModel {
     return model
   }
 
-  /// DEBUG live proof: build a real machine from launch env (key + host) so the
-  /// full connect→zmx→render path can be driven on the simulator. Env:
-  /// TETHER_SSH_HOST/PORT/USER, TETHER_SSH_KEY_B64 (base64 private key),
-  /// TETHER_SSH_PUB (OpenSSH public line).
   static func liveDemoFromEnv() -> HomeModel {
     let env = ProcessInfo.processInfo.environment
     let suite = "tether.home.livedemo"

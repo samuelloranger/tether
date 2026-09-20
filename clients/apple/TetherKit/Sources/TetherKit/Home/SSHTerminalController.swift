@@ -1,9 +1,9 @@
 import Foundation
 import TetherFFIBindings
 
-/// Drives one SSH-backed terminal: connect via the proven `SSHConnector`, pump
-/// the PTY through a `TerminalPipeline` into the shared renderer, and attach to a
-/// zmx session so the shell survives disconnects.
+/// Drives one SSH-backed terminal: connect via `SSHConnector`, pump the PTY
+/// through a `TerminalPipeline` into the shared renderer, and attach to a zmx
+/// session so the shell survives disconnects.
 @MainActor
 @Observable
 public final class SSHTerminalController {
@@ -13,16 +13,16 @@ public final class SSHTerminalController {
     case failed(String)
   }
 
+  public static let defaultAttach = "default"
+
   public var snapshot: Data?
   public private(set) var status: Status = .connecting
   public private(set) var mouseMode: MouseMode = .off
   public private(set) var mouseSgr = true
   public let title: String
   public private(set) var sessionKey: String
-  /// zmx sessions on the host, for the session drawer.
   public private(set) var sessions: [ZmxSession] = []
   public private(set) var attach: String
-  /// Git diff of the current session's cwd, for the diff sheet.
   public private(set) var gitLines: [GitDiffLine] = []
   public private(set) var gitError: String?
   public private(set) var gitLoading = false
@@ -32,7 +32,7 @@ public final class SSHTerminalController {
   private let config: SSHConnectionConfig
   private let hostKeyStore: HostKeyStore
 
-  init(title: String, config: SSHConnectionConfig, hostKeyStore: HostKeyStore, attach: String = "default") {
+  init(title: String, config: SSHConnectionConfig, hostKeyStore: HostKeyStore, attach: String = defaultAttach) {
     self.title = title
     self.config = config
     self.hostKeyStore = hostKeyStore
@@ -58,25 +58,19 @@ public final class SSHTerminalController {
       let stream = try await SSHConnector.connect(config: config, store: hostKeyStore)
       await pipeline.connectSSH(transport: stream, key: sessionKey)
       status = .connected
-      // zmx attach is create-or-join, so the shell persists across redials.
       pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
     } catch {
-      status = .failed(Self.message(for: error))
+      status = .failed(Self.describe(error))
     }
   }
 
-  /// Fetches the host's zmx sessions for the drawer (short-lived exec).
   public func refreshSessions() async {
-    do {
-      let output = try await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls")
+    if let output = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") {
       sessions = ZmxSession.parse(output)
-    } catch {
-      // Non-fatal: the drawer just shows what it last had.
     }
   }
 
-  /// Switches which zmx session this terminal shows by redialing fresh — the
-  /// cleanest way to hand the PTY to a different attach target.
+  /// Switches zmx target by redialing fresh — hands the PTY to a new attach.
   public func switchSession(to name: String) async {
     guard name != attach else { return }
     await pipeline.disconnect()
@@ -85,7 +79,6 @@ public final class SSHTerminalController {
     await connect()
   }
 
-  /// Loads `git diff` for the current session's working directory over exec.
   public func loadGitDiff() async {
     gitLoading = true
     defer { gitLoading = false }
@@ -110,11 +103,9 @@ public final class SSHTerminalController {
       }
     } catch {
       gitLines = []
-      gitError = Self.message(for: error)
+      gitError = Self.describe(error)
     }
   }
-
-  private func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
   public func reconnectIfNeeded() async {
@@ -136,16 +127,7 @@ public final class SSHTerminalController {
     }
   }
 
-  private static func message(for error: Error) -> String {
-    switch error {
-    case let SSHConnectError.hostKeyMismatch(expected, got):
-      return "Host key changed — refused.\nExpected \(expected)\nGot \(got)"
-    case SSHConnectError.auth:
-      return "Authentication failed. Check the key or password."
-    case let SSHConnectError.transport(detail):
-      return "Could not connect: \(detail)"
-    default:
-      return "Could not connect: \(error)"
-    }
+  private static func describe(_ error: Error) -> String {
+    (error as? LocalizedError)?.errorDescription ?? "Could not connect: \(error)"
   }
 }

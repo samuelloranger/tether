@@ -2,21 +2,9 @@ import Foundation
 import XCTest
 @testable import TetherKit
 
-private final class MemoryKV: SSHKeyValueStore {
-  var items: [String: Data] = [:]
-  func data(forKey key: String) -> Data? { items[key] }
-  func set(_ data: Data?, forKey key: String) { items[key] = data }
-}
-
-private final class MemorySecrets: SSHSecretStore {
-  var secrets: [String: String] = [:]
-  func setSecret(_ value: String?, forKey key: String) { secrets[key] = value }
-  func secret(forKey key: String) -> String? { secrets[key] }
-}
-
 final class SSHKeyVaultTests: XCTestCase {
-  private func vault() -> (SSHKeyVault, MemoryKV, MemorySecrets) {
-    let kv = MemoryKV(); let sec = MemorySecrets()
+  private func vault() -> (SSHKeyVault, InMemoryKV, InMemorySSHSecrets) {
+    let kv = InMemoryKV(); let sec = InMemorySSHSecrets()
     return (SSHKeyVault(storage: kv, secrets: sec), kv, sec)
   }
 

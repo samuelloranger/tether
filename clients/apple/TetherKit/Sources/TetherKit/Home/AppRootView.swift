@@ -14,8 +14,7 @@ public struct AppRootView: View {
     autoOpenFirst = false
   }
 
-  /// DEBUG entry: a seeded model that auto-opens its first machine, for driving
-  /// the full connect path (network + host-key + auth + error UI) from a launch env.
+  /// DEBUG entry: a seeded model that auto-opens its first machine.
   public init(demoModel: HomeModel) {
     _model = State(initialValue: demoModel)
     autoOpenFirst = true
@@ -40,10 +39,10 @@ public struct AppRootView: View {
 
   private func open(_ profile: SSHHostProfile) {
     guard let config = model.connectionConfig(for: profile) else {
-      model.errorMessage = "No credential for \(profile.name) — check its key or password."
+      model.errorMessage = SSHConnectError.missingCredential(name: profile.name).errorDescription
       return
     }
-    let attach = ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] ?? "default"
+    let attach = ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] ?? SSHTerminalController.defaultAttach
     controller = SSHTerminalController(title: profile.name, config: config, hostKeyStore: model.hostKeyStore, attach: attach)
     model.rememberLastHost(profile.id)
   }

@@ -1,9 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
 
-/// Read-only `git diff` for the current session's working directory, fetched over
-/// SSH exec and colored client-side. Repoints the v5 git feature off the old
-/// Noise server onto plain exec.
 struct GitDiffView: View {
   @Bindable var controller: SSHTerminalController
   var onDone: () -> Void

@@ -5,8 +5,6 @@ public enum SSHKeyOrigin: String, Codable, Equatable, Sendable {
   case generated, imported, pasted
 }
 
-/// Public metadata for a vault key. The private half is never here — it lives in
-/// the secret store (Keychain), addressed by `id`.
 public struct SSHKeyRecord: Codable, Equatable, Identifiable, Sendable {
   public var id: String
   public var name: String
@@ -17,15 +15,11 @@ public struct SSHKeyRecord: Codable, Equatable, Identifiable, Sendable {
   public var createdAt: Date
 }
 
-/// Secret persistence seam. The app backs it with the Keychain; tests use an
-/// in-memory double.
 protocol SSHSecretStore: AnyObject {
   func setSecret(_ value: String?, forKey key: String)
   func secret(forKey key: String) -> String?
 }
 
-/// The key vault: public metadata as JSON, private PEM in the secret store.
-/// Shared across every host, so a key can back more than one profile.
 final class SSHKeyVault {
   private let storage: SSHKeyValueStore
   private let secrets: SSHSecretStore

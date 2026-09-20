@@ -1,9 +1,6 @@
 import Foundation
 import Security
 
-/// Keychain-backed secret store for SSH private-key PEM and host passwords.
-/// Items are device-only (no iCloud sync) and readable after first unlock, which
-/// a foreground-redial connect always satisfies.
 final class KeychainSecretStore: SSHSecretStore {
   private let service: String
 
