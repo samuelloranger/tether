@@ -23,19 +23,22 @@ struct GitDiffView: View {
           }
           .padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-          ScrollView([.vertical, .horizontal]) {
-            VStack(alignment: .leading, spacing: 0) {
+          ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 0) {
               ForEach(controller.gitLines) { line in
                 Text(line.text.isEmpty ? " " : line.text)
                   .font(.system(size: 11.5, design: .monospaced))
                   .foregroundStyle(color(line.kind))
-                  .padding(.horizontal, 12).padding(.vertical, 1)
+                  .textSelection(.enabled)
                   .frame(maxWidth: .infinity, alignment: .leading)
+                  .padding(.horizontal, 12).padding(.vertical, 1)
                   .background(background(line.kind))
               }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 6)
           }
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
       }
       .background(TetherColors.background)
