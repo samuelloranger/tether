@@ -8,7 +8,9 @@ enum SSHRandomart {
   private static let width = 17
   private static let height = 9
 
-  static func render(digest: Data, title: String, footer: String) -> String {
+  /// The raw visit-count field (0…14, with 15 = start, 16 = end), row-major
+  /// `height`×`width`. Drives both the ASCII art and the colored grid in the UI.
+  static func field(digest: Data) -> [[Int]] {
     var field = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
     var x = width / 2
     var y = height / 2
@@ -26,7 +28,11 @@ enum SSHRandomart {
     }
     field[height / 2][width / 2] = 15 // start
     field[y][x] = 16 // end
+    return field
+  }
 
+  static func render(digest: Data, title: String, footer: String) -> String {
+    let field = self.field(digest: digest)
     var lines = [border(title)]
     for row in field {
       lines.append("|" + String(row.map { glyphs[$0] }) + "|")

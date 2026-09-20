@@ -1,0 +1,229 @@
+import SwiftUI
+
+/// The v5 Home: machines and the shared key vault. Built on the Aurora tokens;
+/// see the approved mockup (glim tether-v5-home-aurora).
+public struct HomeView: View {
+  @Bindable var model: HomeModel
+  var onOpen: (SSHHostProfile) -> Void
+  var onClose: (() -> Void)?
+
+  @State private var tab: Tab
+  @State private var showAdd = false
+  @State private var keyEntry: KeyEntry?
+
+  public enum Tab: String { case machines, keys }
+
+  public init(
+    model: HomeModel,
+    initialTab: Tab = .machines,
+    onOpen: @escaping (SSHHostProfile) -> Void,
+    onClose: (() -> Void)? = nil
+  ) {
+    self.model = model
+    self.onOpen = onOpen
+    self.onClose = onClose
+    _tab = State(initialValue: initialTab)
+  }
+
+  public var body: some View {
+    ZStack(alignment: .top) {
+      TetherColors.background.ignoresSafeArea()
+      auroraGlow
+      VStack(spacing: 0) {
+        header
+        tabs
+        content
+      }
+    }
+    .sheet(isPresented: $showAdd) {
+      AddServerSheet(model: model) { showAdd = false }
+    }
+    .sheet(item: $keyEntry) { entry in
+      KeyEntrySheet(model: model, mode: entry.mode) { keyEntry = nil }
+    }
+  }
+
+  private var auroraGlow: some View {
+    RadialGradient(
+      colors: [TetherColors.accent.opacity(0.28), TetherColors.success.opacity(0.14), .clear],
+      center: .top, startRadius: 4, endRadius: 240
+    )
+    .frame(height: 220)
+    .blur(radius: 18)
+    .offset(y: -40)
+    .allowsHitTesting(false)
+    .ignoresSafeArea()
+  }
+
+  private var header: some View {
+    HStack(alignment: .bottom) {
+      VStack(alignment: .leading, spacing: 3) {
+        Text("Home").font(.system(size: 26, weight: .bold)).foregroundStyle(TetherColors.textPrimary)
+        Text(summary)
+          .font(.system(size: 11, design: .monospaced))
+          .foregroundStyle(TetherColors.textFaint)
+      }
+      Spacer()
+      if let onClose {
+        Button(action: onClose) {
+          Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
+        }
+        .foregroundStyle(TetherColors.textSecondary)
+        .padding(.trailing, 6)
+      }
+      Button { showAdd = true } label: {
+        Image(systemName: "plus").font(.system(size: 18, weight: .medium))
+          .frame(width: 32, height: 32)
+          .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
+          .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
+      }
+      .foregroundStyle(TetherColors.accent)
+      .accessibilityIdentifier("homeAddServer")
+    }
+    .padding(.horizontal, 18)
+    .padding(.top, 20)
+    .padding(.bottom, 8)
+  }
+
+  private var summary: String {
+    switch tab {
+    case .machines:
+      return model.profiles.isEmpty ? "no machines yet" : "\(model.profiles.count) machine\(model.profiles.count == 1 ? "" : "s")"
+    case .keys:
+      return "\(model.keys.count) key\(model.keys.count == 1 ? "" : "s") · Keychain"
+    }
+  }
+
+  private var tabs: some View {
+    HStack(spacing: 3) {
+      tabButton(.machines, "Machines")
+      tabButton(.keys, "Keys")
+    }
+    .padding(3)
+    .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(TetherColors.border))
+    .padding(.horizontal, 14)
+    .padding(.vertical, 8)
+  }
+
+  private func tabButton(_ value: Tab, _ label: String) -> some View {
+    let selected = tab == value
+    return Text(label)
+      .font(.system(size: 13, weight: .semibold))
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 8)
+      .foregroundStyle(selected ? TetherColors.textPrimary : TetherColors.textSecondary)
+      .background {
+        if selected {
+          RoundedRectangle(cornerRadius: 9).fill(TetherColors.surfaceRaised)
+        }
+      }
+      .contentShape(Rectangle())
+      .onTapGesture { tab = value }
+      .accessibilityIdentifier("homeTab_\(value.rawValue)")
+  }
+
+  @ViewBuilder
+  private var content: some View {
+    switch tab {
+    case .machines:
+      if model.profiles.isEmpty { emptyMachines } else { machineList }
+    case .keys:
+      keysTab
+    }
+  }
+
+  private var emptyMachines: some View {
+    VStack(spacing: 10) {
+      Spacer()
+      Image(systemName: "point.3.connected.trianglepath.dotted")
+        .font(.system(size: 44, weight: .light))
+        .foregroundStyle(TetherColors.accent)
+      Text("No machines tethered yet").font(.system(size: 19, weight: .semibold))
+        .foregroundStyle(TetherColors.textPrimary)
+      Text("Add a server to open a shell that stays alive between visits.")
+        .font(.system(size: 13)).foregroundStyle(TetherColors.textSecondary)
+        .multilineTextAlignment(.center).frame(maxWidth: 240)
+      Button { showAdd = true } label: {
+        Text("Add a server").font(.system(size: 14, weight: .semibold))
+          .padding(.horizontal, 20).padding(.vertical, 11)
+          .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 12))
+          .foregroundStyle(TetherColors.onAccent)
+      }
+      .padding(.top, 6)
+      Spacer()
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .padding(.horizontal, 26)
+  }
+
+  private var machineList: some View {
+    ScrollView {
+      LazyVStack(spacing: 10) {
+        ForEach(model.profiles) { profile in
+          MachineCardView(profile: profile, authLabel: model.authLabel(for: profile), onOpen: { onOpen(profile) })
+            .contextMenu {
+              Button(role: .destructive) { model.removeServer(id: profile.id) } label: {
+                Label("Remove", systemImage: "trash")
+              }
+            }
+        }
+      }
+      .padding(.horizontal, 12).padding(.vertical, 2)
+    }
+  }
+
+  private var keysTab: some View {
+    VStack(spacing: 0) {
+      ScrollView {
+        LazyVStack(spacing: 10) {
+          ForEach(model.keys) { key in
+            KeyCardView(record: key, usedBy: model.machinesUsing(keyId: key.id))
+              .contextMenu {
+                Button { UIPasteboard.general.string = key.publicKey } label: {
+                  Label("Copy public key", systemImage: "doc.on.doc")
+                }
+                Button(role: .destructive) { model.deleteKey(id: key.id) } label: {
+                  Label("Delete key", systemImage: "trash")
+                }
+              }
+          }
+          if model.keys.isEmpty {
+            Text("No keys yet. Generate one, or paste an existing key.")
+              .font(.system(size: 13)).foregroundStyle(TetherColors.textSecondary)
+              .multilineTextAlignment(.center).padding(.top, 40).frame(maxWidth: 240)
+          }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 2)
+      }
+      keyActions
+    }
+  }
+
+  private var keyActions: some View {
+    HStack(spacing: 9) {
+      keyActionButton("Generate", "plus", prime: true) { keyEntry = KeyEntry(mode: .generate) }
+      keyActionButton("Paste", "doc.on.clipboard", prime: false) { keyEntry = KeyEntry(mode: .paste) }
+    }
+    .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 14)
+  }
+
+  private func keyActionButton(_ label: String, _ icon: String, prime: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      VStack(spacing: 6) {
+        Image(systemName: icon).font(.system(size: 16, weight: .semibold))
+        Text(label).font(.system(size: 12.5, weight: .semibold))
+      }
+      .frame(maxWidth: .infinity).padding(.vertical, 12)
+      .background(prime ? TetherColors.accent : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(prime ? .clear : TetherColors.border))
+      .foregroundStyle(prime ? TetherColors.onAccent : TetherColors.textPrimary)
+    }
+    .accessibilityIdentifier("homeKey_\(label)")
+  }
+
+  private struct KeyEntry: Identifiable {
+    let id = UUID()
+    let mode: KeyEntrySheet.Mode
+  }
+}

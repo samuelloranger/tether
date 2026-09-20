@@ -39,6 +39,14 @@ enum SSHKeyEncoding {
     return "SHA256:" + b64
   }
 
+  /// The raw SHA-256 digest of the public-key wire blob — the input the
+  /// randomart walk consumes.
+  static func fingerprintDigest(openSSHPublicKey line: String) -> Data? {
+    let parts = line.split(separator: " ")
+    guard parts.count >= 2, let blob = Data(base64Encoded: String(parts[1])) else { return nil }
+    return Data(SHA256.hash(data: blob))
+  }
+
   private static func sshString(_ data: Data) -> Data {
     var out = Data()
     var length = UInt32(data.count).bigEndian

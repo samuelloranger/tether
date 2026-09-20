@@ -18,7 +18,15 @@ struct TetherIOSApp: App {
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      if AgentChatDemoRoot.launchState != nil {
+      if ProcessInfo.processInfo.environment["TETHER_HOME_PREVIEW"] != nil {
+        HomeView(
+          model: .preview(),
+          initialTab: ProcessInfo.processInfo.environment["TETHER_HOME_TAB"] == "keys" ? .keys : .machines,
+          onOpen: { _ in }
+        )
+        .tint(TetherColors.accent)
+        .preferredColorScheme(.dark)
+      } else if AgentChatDemoRoot.launchState != nil {
         AgentChatDemoRoot()
           .tint(TetherColors.accent)
       } else {

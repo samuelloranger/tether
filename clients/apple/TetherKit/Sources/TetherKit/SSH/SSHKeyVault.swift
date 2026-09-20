@@ -1,20 +1,20 @@
 import CryptoKit
 import Foundation
 
-enum SSHKeyOrigin: String, Codable, Equatable, Sendable {
+public enum SSHKeyOrigin: String, Codable, Equatable, Sendable {
   case generated, imported, pasted
 }
 
 /// Public metadata for a vault key. The private half is never here — it lives in
 /// the secret store (Keychain), addressed by `id`.
-struct SSHKeyRecord: Codable, Equatable, Identifiable, Sendable {
-  var id: String
-  var name: String
-  var algorithm: String
-  var publicKey: String
-  var fingerprint: String
-  var origin: SSHKeyOrigin
-  var createdAt: Date
+public struct SSHKeyRecord: Codable, Equatable, Identifiable, Sendable {
+  public var id: String
+  public var name: String
+  public var algorithm: String
+  public var publicKey: String
+  public var fingerprint: String
+  public var origin: SSHKeyOrigin
+  public var createdAt: Date
 }
 
 /// Secret persistence seam. The app backs it with the Keychain; tests use an
