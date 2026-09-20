@@ -201,6 +201,7 @@ public struct HomeView: View {
   private var keyActions: some View {
     HStack(spacing: 9) {
       keyActionButton("Generate", "plus", prime: true) { keyEntry = KeyEntry(mode: .generate) }
+      keyActionButton("Import", "square.and.arrow.down", prime: false) { keyEntry = KeyEntry(mode: .importFile) }
       keyActionButton("Paste", "doc.on.clipboard", prime: false) { keyEntry = KeyEntry(mode: .paste) }
     }
     .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 14)

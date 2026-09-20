@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AddServerSheet: View {
   @Bindable var model: HomeModel
@@ -141,7 +142,7 @@ struct AddServerSheet: View {
 }
 
 struct KeyEntrySheet: View {
-  enum Mode { case generate, paste }
+  enum Mode { case generate, paste, importFile }
 
   @Bindable var model: HomeModel
   let mode: Mode
@@ -150,6 +151,15 @@ struct KeyEntrySheet: View {
   @State private var name = ""
   @State private var pem = ""
   @State private var publicKey = ""
+  @State private var showImporter = false
+
+  private var title: String {
+    switch mode {
+    case .generate: return "Generate key"
+    case .paste: return "Paste key"
+    case .importFile: return "Import key"
+    }
+  }
 
   var body: some View {
     NavigationStack {
@@ -162,12 +172,21 @@ struct KeyEntrySheet: View {
               .padding(10).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 11))
               .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TetherColors.border))
           }
-          if mode == .paste {
-            labeled("Private key (PEM)") { editor($pem, "-----BEGIN PRIVATE KEY-----") }
-            labeled("Public key (OpenSSH)") { editor($publicKey, "ssh-ed25519 AAAA…") }
-          } else {
+          if mode == .generate {
             Text("A new ed25519 key is created in the Keychain. Only its public half is shown — paste that into the host's authorized_keys.")
               .font(.system(size: 12)).foregroundStyle(TetherColors.textSecondary)
+          } else {
+            if mode == .importFile {
+              Button { showImporter = true } label: {
+                Label("Load private key file…", systemImage: "folder")
+                  .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(TetherColors.accent)
+                  .frame(maxWidth: .infinity).padding(.vertical, 10)
+                  .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 11))
+                  .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TetherColors.border))
+              }
+            }
+            labeled("Private key (PEM)") { editor($pem, "-----BEGIN PRIVATE KEY-----") }
+            labeled("Public key (OpenSSH)") { editor($publicKey, "ssh-ed25519 AAAA…") }
           }
           Button(action: commit) {
             Text(mode == .generate ? "Generate key" : "Save key").font(.system(size: 14, weight: .semibold))
@@ -181,16 +200,20 @@ struct KeyEntrySheet: View {
         .padding(16)
       }
       .background(TetherColors.background)
-      .navigationTitle(mode == .generate ? "Generate key" : "Paste key")
+      .navigationTitle(title)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onDone) } }
+      .fileImporter(isPresented: $showImporter, allowedContentTypes: [.data, .text]) { result in
+        if case let .success(url) = result { loadPrivateKey(from: url) }
+      }
     }
   }
 
   private var canCommit: Bool {
     switch mode {
     case .generate: return !name.isEmpty
-    case .paste: return !name.isEmpty && pem.contains("PRIVATE KEY") && publicKey.hasPrefix("ssh-")
+    case .paste, .importFile:
+      return !name.isEmpty && pem.contains("PRIVATE KEY") && publicKey.hasPrefix("ssh-")
     }
   }
 
@@ -200,8 +223,18 @@ struct KeyEntrySheet: View {
       model.generateKey(name: name)
     case .paste:
       model.importKey(name: name, privatePEM: pem, publicKey: publicKey.trimmingCharacters(in: .whitespacesAndNewlines), origin: .pasted)
+    case .importFile:
+      model.importKey(name: name, privatePEM: pem, publicKey: publicKey.trimmingCharacters(in: .whitespacesAndNewlines), origin: .imported)
     }
     onDone()
+  }
+
+  private func loadPrivateKey(from url: URL) {
+    let scoped = url.startAccessingSecurityScopedResource()
+    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+    guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return }
+    pem = text
+    if name.isEmpty { name = url.deletingPathExtension().lastPathComponent }
   }
 
   private func labeled(_ label: String, @ViewBuilder _ control: () -> some View) -> some View {
