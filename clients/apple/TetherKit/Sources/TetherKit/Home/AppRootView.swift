@@ -8,16 +8,19 @@ public struct AppRootView: View {
   @State private var controller: SSHTerminalController?
   @State private var didAutoConnect = false
   private let autoOpenFirst: Bool
+  private let pushIdentityProvider: () -> PushRegistrar.PushIdentity?
 
-  public init() {
+  public init(pushIdentityProvider: @escaping () -> PushRegistrar.PushIdentity? = { nil }) {
     _model = State(initialValue: .live())
     autoOpenFirst = false
+    self.pushIdentityProvider = pushIdentityProvider
   }
 
   /// DEBUG entry: a seeded model that auto-opens its first machine.
   public init(demoModel: HomeModel) {
     _model = State(initialValue: demoModel)
     autoOpenFirst = true
+    pushIdentityProvider = { nil }
   }
 
   public var body: some View {
@@ -43,7 +46,10 @@ public struct AppRootView: View {
       return
     }
     let attach = ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] ?? SSHTerminalController.defaultAttach
-    controller = SSHTerminalController(title: profile.name, config: config, hostKeyStore: model.hostKeyStore, attach: attach)
+    controller = SSHTerminalController(
+      title: profile.name, config: config, hostKeyStore: model.hostKeyStore,
+      attach: attach, pushIdentity: pushIdentityProvider()
+    )
     model.rememberLastHost(profile.id)
   }
 

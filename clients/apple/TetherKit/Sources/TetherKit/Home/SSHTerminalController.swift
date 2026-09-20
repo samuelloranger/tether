@@ -28,15 +28,25 @@ public final class SSHTerminalController {
   public private(set) var gitLoading = false
 
   private static let zmx = "~/.local/bin/zmx"
+  private static let notify = "~/.local/bin/tether-notify"
   private let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
   private let config: SSHConnectionConfig
   private let hostKeyStore: HostKeyStore
+  private let pushIdentity: PushRegistrar.PushIdentity?
+  private var didRegisterPush = false
 
-  init(title: String, config: SSHConnectionConfig, hostKeyStore: HostKeyStore, attach: String = defaultAttach) {
+  init(
+    title: String,
+    config: SSHConnectionConfig,
+    hostKeyStore: HostKeyStore,
+    attach: String = defaultAttach,
+    pushIdentity: PushRegistrar.PushIdentity? = nil
+  ) {
     self.title = title
     self.config = config
     self.hostKeyStore = hostKeyStore
     self.attach = attach
+    self.pushIdentity = pushIdentity
     self.sessionKey = "ssh:\(config.host):\(config.port):\(attach)"
     observe()
   }
@@ -59,8 +69,20 @@ public final class SSHTerminalController {
       await pipeline.connectSSH(transport: stream, key: sessionKey)
       status = .connected
       pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
+      registerPushIfNeeded()
     } catch {
       status = .failed(Self.describe(error))
+    }
+  }
+
+  /// Best-effort: tell the host's tether-notify about this device once per
+  /// connection, so agent hooks can push to it. Never blocks or fails the shell.
+  private func registerPushIfNeeded() {
+    guard !didRegisterPush, let id = pushIdentity else { return }
+    didRegisterPush = true
+    let command = "\(Self.notify) register \(shellQuote(id.token)) \(shellQuote(id.secretKey)) \(shellQuote(id.label))"
+    Task { [config, hostKeyStore] in
+      _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: command)
     }
   }
 

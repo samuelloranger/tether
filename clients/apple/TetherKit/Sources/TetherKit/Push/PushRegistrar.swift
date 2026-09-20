@@ -52,6 +52,24 @@ public final class PushRegistrar {
     defaults.string(forKey: Self.tokenDefaultsKey)
   }
 
+  /// The device's push identity for the v5 SSH path: the app hands this to the
+  /// host's `tether-notify register` over SSH. `nil` until APNs has issued a token.
+  public struct PushIdentity: Sendable {
+    public let token: String
+    public let secretKey: String
+    public let label: String
+  }
+
+  public func pushIdentity() -> PushIdentity? {
+    guard let token = storedDeviceToken, let secret = try? loadOrCreateSecretKey() else { return nil }
+    #if canImport(UIKit)
+    let label = UIDevice.current.name
+    #else
+    let label = "iOS"
+    #endif
+    return PushIdentity(token: token, secretKey: secret, label: label)
+  }
+
   /// Ask for alert/sound/badge, then `registerForRemoteNotifications`. If a
   /// token is already persisted, also register with current hosts immediately
   /// so a newly-added host gets covered before the next APNs callback.

@@ -49,7 +49,7 @@ struct TetherIOSApp: App {
   // v5: SSH-first root. The Noise SessionStore/RootView remain in the repo but
   // are no longer rooted; they are removed in the final deletion phase.
   @ViewBuilder private var appRoot: some View {
-    AppRootView()
+    AppRootView(pushIdentityProvider: { appDelegate.pushRegistrar.pushIdentity() })
         .tint(TetherColors.accent)
         #if canImport(UIKit)
         .task {
