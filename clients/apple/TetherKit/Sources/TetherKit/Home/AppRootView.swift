@@ -43,7 +43,8 @@ public struct AppRootView: View {
       model.errorMessage = "No credential for \(profile.name) — check its key or password."
       return
     }
-    controller = SSHTerminalController(title: profile.name, config: config, hostKeyStore: model.hostKeyStore)
+    let attach = ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] ?? "default"
+    controller = SSHTerminalController(title: profile.name, config: config, hostKeyStore: model.hostKeyStore, attach: attach)
     model.rememberLastHost(profile.id)
   }
 

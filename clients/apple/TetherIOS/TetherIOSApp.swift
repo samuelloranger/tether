@@ -18,7 +18,11 @@ struct TetherIOSApp: App {
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {
+      if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
+        AppRootView(demoModel: .liveDemoFromEnv())
+          .tint(TetherColors.accent)
+          .preferredColorScheme(.dark)
+      } else if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {
         AppRootView(demoModel: .preview())
           .tint(TetherColors.accent)
           .preferredColorScheme(.dark)

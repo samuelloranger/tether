@@ -160,4 +160,35 @@ public extension HomeModel {
     model.addServer(name: "vps-paris", host: "203.0.113.9", port: 22, username: "root", auth: .password, password: "x")
     return model
   }
+
+  /// DEBUG live proof: build a real machine from launch env (key + host) so the
+  /// full connect→zmx→render path can be driven on the simulator. Env:
+  /// TETHER_SSH_HOST/PORT/USER, TETHER_SSH_KEY_B64 (base64 private key),
+  /// TETHER_SSH_PUB (OpenSSH public line).
+  static func liveDemoFromEnv() -> HomeModel {
+    let env = ProcessInfo.processInfo.environment
+    let suite = "tether.home.livedemo"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    let secrets = InMemorySSHSecrets()
+    let model = HomeModel(
+      profileStore: SSHProfileStore(storage: UserDefaultsSSHStore(defaults: defaults)),
+      vault: SSHKeyVault(storage: UserDefaultsSSHStore(defaults: defaults), secrets: secrets),
+      secrets: secrets
+    )
+    if let b64 = env["TETHER_SSH_KEY_B64"], let data = Data(base64Encoded: b64),
+       let pem = String(data: data, encoding: .utf8) {
+      model.importKey(name: "live", privatePEM: pem, publicKey: env["TETHER_SSH_PUB"] ?? "ssh-ed25519 live", origin: .imported)
+    }
+    if let keyId = model.keys.first?.id {
+      model.addServer(
+        name: env["TETHER_SSH_HOST"] ?? "homelab",
+        host: env["TETHER_SSH_HOST"] ?? "127.0.0.1",
+        port: Int(env["TETHER_SSH_PORT"] ?? "22") ?? 22,
+        username: env["TETHER_SSH_USER"] ?? "root",
+        auth: .key(keyId: keyId)
+      )
+    }
+    return model
+  }
 }
