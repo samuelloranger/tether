@@ -25,6 +25,29 @@ enum SSHConnector {
       thread.start()
     }
   }
+
+  /// Runs a one-off command on the host (e.g. `zmx ls`) over a short-lived
+  /// connection, off the cooperative pool, and returns its stdout.
+  static func exec(
+    config: SSHConnectionConfig,
+    store: HostKeyStore,
+    command: String
+  ) async throws -> String {
+    try await withCheckedThrowingContinuation { continuation in
+      let thread = Thread {
+        do {
+          let ops = LibSSH2Ops(config: config)
+          let output = try SSHConnectionSequence.runExec(config: config, ops: ops, store: store, command: command)
+          continuation.resume(returning: output)
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+      thread.name = "tether.ssh.exec"
+      thread.stackSize = 1024 * 1024
+      thread.start()
+    }
+  }
 }
 
 /// UserDefaults-backed host-key trust store. Fingerprints are not secret (they

@@ -12,6 +12,7 @@ public struct SSHTerminalView: View {
   @State private var input = ""
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
+  @State private var showSessions = false
   @Environment(\.scenePhase) private var scenePhase
 
   public init(controller: SSHTerminalController, onHome: @escaping () -> Void) {
@@ -57,9 +58,18 @@ public struct SSHTerminalView: View {
       .frame(height: 0)
     }
     .background(TetherColors.terminalBackground.ignoresSafeArea())
-    .task { await controller.connect() }
+    .task {
+      await controller.connect()
+      #if DEBUG
+      if ProcessInfo.processInfo.environment["TETHER_SSH_DRAWER"] != nil { showSessions = true }
+      #endif
+    }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active { Task { await controller.reconnectIfNeeded() } }
+    }
+    .sheet(isPresented: $showSessions) {
+      ZmxSessionDrawer(controller: controller) { showSessions = false }
+        .presentationDetents([.medium, .large])
     }
   }
 
@@ -74,6 +84,11 @@ public struct SSHTerminalView: View {
       Text(controller.title).font(.system(size: 15, weight: .semibold))
         .foregroundStyle(TetherColors.textPrimary)
       Spacer()
+      Button { showSessions = true } label: {
+        Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold))
+      }
+      .foregroundStyle(TetherColors.accent)
+      .accessibilityIdentifier("sshTerminalSessions")
     }
     .padding(.horizontal, 14).padding(.vertical, 10)
     .background(TetherColors.surface)

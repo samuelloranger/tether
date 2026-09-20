@@ -9,6 +9,7 @@ enum LibSSH2OpsError: Error, Equatable {
   case hostKeyUnavailable
   case authError(Int)
   case ptyOpenFailed
+  case execFailed(Int)
 }
 
 /// Concrete libssh2 implementation of the connect sequence's operations.
@@ -74,6 +75,32 @@ final class LibSSH2Ops: SSHConnectionOps {
     return pump
   }
 
+  func exec(_ command: String) throws -> String {
+    guard let session else { throw LibSSH2OpsError.sessionInit }
+    guard let channel = tether_libssh2_channel_open_session(session) else { throw LibSSH2OpsError.ptyOpenFailed }
+    defer { libssh2_channel_free(channel) }
+    let rc = command.withCString { tether_libssh2_channel_exec(channel, $0) }
+    guard rc == 0 else { throw LibSSH2OpsError.execFailed(Int(rc)) }
+
+    var output = Data()
+    var buffer = [CChar](repeating: 0, count: 16 * 1024)
+    while true {
+      let count = buffer.withUnsafeMutableBufferPointer {
+        LibSSH2TransportProbe.read(into: $0, from: channel)
+      }
+      if count > 0 {
+        output.append(contentsOf: buffer.prefix(count).map(UInt8.init(bitPattern:)))
+      } else if count == 0 {
+        break // EOF
+      } else if count == LIBSSH2_ERROR_EAGAIN {
+        continue // blocking session, but tolerate a spurious would-block
+      } else {
+        break
+      }
+    }
+    return String(decoding: output, as: UTF8.self)
+  }
+
   func teardown() {
     guard !transferred else { return }
     if let session {
@@ -137,6 +164,7 @@ final class LibSSH2Ops: SSHConnectionOps {
   }
 }
 
+private let LIBSSH2_ERROR_EAGAIN: Int = -37
 private let LIBSSH2_HOSTKEY_HASH_SHA256: Int32 = 3
 private let LIBSSH2_ERROR_AUTHENTICATION_FAILED: Int32 = -18
 private let LIBSSH2_ERROR_PUBLICKEY_UNVERIFIED: Int32 = -19

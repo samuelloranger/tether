@@ -34,6 +34,10 @@ int tether_libssh2_channel_shell(LIBSSH2_CHANNEL *channel) {
   return libssh2_channel_shell(channel);
 }
 
+int tether_libssh2_channel_exec(LIBSSH2_CHANNEL *channel, const char *command) {
+  return libssh2_channel_exec(channel, command);
+}
+
 ssize_t tether_libssh2_channel_read(
   LIBSSH2_CHANNEL *channel,
   char *buffer,

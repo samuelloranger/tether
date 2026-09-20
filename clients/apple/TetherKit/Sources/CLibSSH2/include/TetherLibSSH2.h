@@ -19,6 +19,7 @@ int tether_libssh2_channel_request_pty(
   int height
 );
 int tether_libssh2_channel_shell(LIBSSH2_CHANNEL *channel);
+int tether_libssh2_channel_exec(LIBSSH2_CHANNEL *channel, const char *command);
 ssize_t tether_libssh2_channel_read(
   LIBSSH2_CHANNEL *channel,
   char *buffer,

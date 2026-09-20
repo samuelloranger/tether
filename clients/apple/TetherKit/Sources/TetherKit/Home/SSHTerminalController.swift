@@ -18,12 +18,15 @@ public final class SSHTerminalController {
   public private(set) var mouseMode: MouseMode = .off
   public private(set) var mouseSgr = true
   public let title: String
-  public let sessionKey: String
+  public private(set) var sessionKey: String
+  /// zmx sessions on the host, for the session drawer.
+  public private(set) var sessions: [ZmxSession] = []
+  public private(set) var attach: String
 
+  private static let zmx = "~/.local/bin/zmx"
   private let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
   private let config: SSHConnectionConfig
   private let hostKeyStore: HostKeyStore
-  private let attach: String
 
   init(title: String, config: SSHConnectionConfig, hostKeyStore: HostKeyStore, attach: String = "default") {
     self.title = title
@@ -52,11 +55,33 @@ public final class SSHTerminalController {
       await pipeline.connectSSH(transport: stream, key: sessionKey)
       status = .connected
       // zmx attach is create-or-join, so the shell persists across redials.
-      pipeline.outbound.yield(.input("~/.local/bin/zmx attach \(attach)\n", key: sessionKey))
+      pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
     } catch {
       status = .failed(Self.message(for: error))
     }
   }
+
+  /// Fetches the host's zmx sessions for the drawer (short-lived exec).
+  public func refreshSessions() async {
+    do {
+      let output = try await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls")
+      sessions = ZmxSession.parse(output)
+    } catch {
+      // Non-fatal: the drawer just shows what it last had.
+    }
+  }
+
+  /// Switches which zmx session this terminal shows by redialing fresh — the
+  /// cleanest way to hand the PTY to a different attach target.
+  public func switchSession(to name: String) async {
+    guard name != attach else { return }
+    await pipeline.disconnect()
+    attach = name
+    sessionKey = "ssh:\(config.host):\(config.port):\(name)"
+    await connect()
+  }
+
+  private func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
   public func reconnectIfNeeded() async {

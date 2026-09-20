@@ -13,6 +13,8 @@ protocol SSHConnectionOps: AnyObject {
   func authenticate(_ credential: SSHCredential) throws -> Bool
   /// Opens an interactive PTY channel and wraps it as a byte stream.
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
+  /// Runs a one-off command over an exec channel and returns its stdout.
+  func exec(_ command: String) throws -> String
   /// Releases the channel, session, and socket. Must be safe to call after a
   /// partial connect and idempotent.
   func teardown()
@@ -69,6 +71,39 @@ enum SSHConnectionSequence {
       throw SSHConnectError.auth(error)
     } catch {
       ops.teardown()
+      throw SSHConnectError.transport("\(error)")
+    }
+  }
+
+  /// Same connect + host-key + auth gate as `run`, but executes a command and
+  /// returns its output instead of opening a PTY. Always tears down.
+  static func runExec(
+    config: SSHConnectionConfig,
+    ops: SSHConnectionOps,
+    store: HostKeyStore,
+    command: String
+  ) throws -> String {
+    do {
+      try ops.connectAndHandshake()
+    } catch {
+      ops.teardown()
+      throw SSHConnectError.transport("\(error)")
+    }
+    defer { ops.teardown() }
+    do {
+      let fingerprint = try ops.hostKeyFingerprint()
+      if case let .mismatch(expected, got) = HostKeyVerifier.verify(
+        fingerprint: fingerprint, host: config.host, port: config.port, store: store
+      ) {
+        throw SSHConnectError.hostKeyMismatch(expected: expected, got: got)
+      }
+      _ = try authenticateInOrder(config.credentials) { try ops.authenticate($0) }
+      return try ops.exec(command)
+    } catch let error as SSHConnectError {
+      throw error
+    } catch let error as SSHAuthError {
+      throw SSHConnectError.auth(error)
+    } catch {
       throw SSHConnectError.transport("\(error)")
     }
   }

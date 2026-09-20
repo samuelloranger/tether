@@ -40,6 +40,7 @@ private final class FakeOps: SSHConnectionOps {
     if let openError { throw openError }
     return NullByteStream()
   }
+  func exec(_ command: String) throws -> String { "" }
   func teardown() { calls.append(.teardown) }
 }
 
