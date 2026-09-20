@@ -22,6 +22,10 @@ public final class SSHTerminalController {
   /// zmx sessions on the host, for the session drawer.
   public private(set) var sessions: [ZmxSession] = []
   public private(set) var attach: String
+  /// Git diff of the current session's cwd, for the diff sheet.
+  public private(set) var gitLines: [GitDiffLine] = []
+  public private(set) var gitError: String?
+  public private(set) var gitLoading = false
 
   private static let zmx = "~/.local/bin/zmx"
   private let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
@@ -79,6 +83,35 @@ public final class SSHTerminalController {
     attach = name
     sessionKey = "ssh:\(config.host):\(config.port):\(name)"
     await connect()
+  }
+
+  /// Loads `git diff` for the current session's working directory over exec.
+  public func loadGitDiff() async {
+    gitLoading = true
+    defer { gitLoading = false }
+    gitError = nil
+    if sessions.isEmpty { await refreshSessions() }
+    guard let cwd = sessions.first(where: { $0.name == attach })?.displayCwd else {
+      gitLines = []
+      gitError = "No working directory for this session."
+      return
+    }
+    do {
+      let raw = try await SSHConnector.exec(
+        config: config, store: hostKeyStore,
+        command: "git -C \(shellQuote(cwd)) --no-pager diff 2>&1"
+      )
+      if raw.hasPrefix("fatal:") {
+        gitLines = []
+        gitError = raw.split(separator: "\n").first.map(String.init) ?? raw
+      } else {
+        gitLines = GitDiffModel.classify(raw)
+        gitError = gitLines.isEmpty ? "No uncommitted changes in \(cwd)." : nil
+      }
+    } catch {
+      gitLines = []
+      gitError = Self.message(for: error)
+    }
   }
 
   private func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }

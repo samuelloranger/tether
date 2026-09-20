@@ -13,6 +13,7 @@ public struct SSHTerminalView: View {
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
   @State private var showSessions = false
+  @State private var showGit = false
   @Environment(\.scenePhase) private var scenePhase
 
   public init(controller: SSHTerminalController, onHome: @escaping () -> Void) {
@@ -62,6 +63,7 @@ public struct SSHTerminalView: View {
       await controller.connect()
       #if DEBUG
       if ProcessInfo.processInfo.environment["TETHER_SSH_DRAWER"] != nil { showSessions = true }
+      if ProcessInfo.processInfo.environment["TETHER_SSH_GIT"] != nil { showGit = true }
       #endif
     }
     .onChange(of: scenePhase) { _, phase in
@@ -70,6 +72,9 @@ public struct SSHTerminalView: View {
     .sheet(isPresented: $showSessions) {
       ZmxSessionDrawer(controller: controller) { showSessions = false }
         .presentationDetents([.medium, .large])
+    }
+    .sheet(isPresented: $showGit) {
+      GitDiffView(controller: controller) { showGit = false }
     }
   }
 
@@ -84,6 +89,11 @@ public struct SSHTerminalView: View {
       Text(controller.title).font(.system(size: 15, weight: .semibold))
         .foregroundStyle(TetherColors.textPrimary)
       Spacer()
+      Button { showGit = true } label: {
+        Image(systemName: "arrow.triangle.branch").font(.system(size: 15, weight: .semibold))
+      }
+      .foregroundStyle(TetherColors.accent)
+      .accessibilityIdentifier("sshTerminalGit")
       Button { showSessions = true } label: {
         Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold))
       }
