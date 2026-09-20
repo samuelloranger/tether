@@ -5,6 +5,7 @@ import SwiftUI
 /// SSH terminal. A relaunch skips Home and redials the last machine directly.
 public struct AppRootView: View {
   @State private var model: HomeModel
+  @State private var preferences = AppPreferences()
   @State private var controller: SSHTerminalController?
   @State private var didAutoConnect = false
   private let autoOpenFirst: Bool
@@ -26,12 +27,13 @@ public struct AppRootView: View {
   public var body: some View {
     ZStack {
       if let controller {
-        SSHTerminalView(controller: controller, onHome: leaveTerminal)
+        SSHTerminalView(controller: controller, preferences: preferences, onHome: leaveTerminal)
           .transition(.move(edge: .trailing))
       } else {
         HomeView(model: model, onOpen: open)
       }
     }
+    .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .task {
       guard !didAutoConnect else { return }
       didAutoConnect = true

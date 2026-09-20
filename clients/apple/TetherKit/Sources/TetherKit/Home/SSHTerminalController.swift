@@ -95,10 +95,25 @@ public final class SSHTerminalController {
   /// Switches zmx target by redialing fresh — hands the PTY to a new attach.
   public func switchSession(to name: String) async {
     guard name != attach else { return }
+    await redial(to: name)
+  }
+
+  private func redial(to name: String) async {
     await pipeline.disconnect()
     attach = name
     sessionKey = "ssh:\(config.host):\(config.port):\(name)"
     await connect()
+  }
+
+  /// Kills a zmx session (`zmx kill --force`). If it was the current one, moves
+  /// to another live session, or a fresh default.
+  public func killSession(_ name: String) async {
+    _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) kill \(shellQuote(name)) --force")
+    await refreshSessions()
+    if name == attach {
+      let next = sessions.first(where: { $0.name != name })?.name ?? Self.defaultAttach
+      await redial(to: next)
+    }
   }
 
   public func loadGitDiff() async {
