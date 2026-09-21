@@ -156,7 +156,9 @@ public final class SSHTerminalController {
   /// reports the login dir, so read the shell pid's `/proc/<pid>/cwd`; falls
   /// back to the reported dir when `/proc` is unavailable.
   private func currentCwd() async -> String? {
-    if sessions.isEmpty { await refreshSessions() }
+    // Always refresh: a stale pid (after a redial) makes the /proc read fail and
+    // fall back to the login dir.
+    await refreshSessions()
     guard let session = sessions.first(where: { $0.name == attach }) else { return nil }
     if let live = try? await SSHConnector.exec(
       config: config, store: hostKeyStore, command: "readlink /proc/\(session.pid)/cwd 2>/dev/null"
