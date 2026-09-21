@@ -13,6 +13,13 @@ public final class SSHTerminalController {
     case failed(String)
   }
 
+  public enum TransferState: Equatable {
+    case idle
+    case sending(String)
+    case sent(String)
+    case failed(String)
+  }
+
   public static let defaultAttach = "default"
 
   public var snapshot: Data?
@@ -26,6 +33,7 @@ public final class SSHTerminalController {
   public private(set) var gitLines: [GitDiffLine] = []
   public private(set) var gitError: String?
   public private(set) var gitLoading = false
+  public private(set) var transfer: TransferState = .idle
 
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
@@ -49,7 +57,8 @@ public final class SSHTerminalController {
     self.hostKeyStore = hostKeyStore
     self.attach = attach
     self.pushIdentity = pushIdentity
-    self.sessionKey = "ssh:\(config.host):\(config.port):\(attach)"
+    // Stable across zmx switches — one continuous connection/grid.
+    self.sessionKey = "ssh:\(config.host):\(config.port)"
     observe()
   }
 
@@ -80,6 +89,7 @@ public final class SSHTerminalController {
         pipeline.outbound.yield(.serverResize(cols: lastCols, rows: lastRows))
         pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
         schedulePushRegister()
+        Task { await refreshSessions() }
         return
       } catch let error as SSHConnectError {
         if case .hostKeyMismatch = error { status = .failed(Self.describe(error)); return }
@@ -104,35 +114,59 @@ public final class SSHTerminalController {
     }
   }
 
+  /// Retries when empty: a just-attached session can miss the first `zmx ls`
+  /// (separate connection) before the daemon registers it.
   public func refreshSessions() async {
-    if let output = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") {
-      sessions = ZmxSession.parse(output)
+    for attempt in 0..<3 {
+      if let output = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") {
+        let parsed = ZmxSession.parse(output)
+        if !parsed.isEmpty || attempt == 2 { sessions = parsed; return }
+      }
+      try? await Task.sleep(nanoseconds: 400_000_000)
     }
   }
 
-  /// Switches zmx target by redialing fresh — hands the PTY to a new attach.
+  /// Switches over the live PTY: the attached shell carries `ZMX_SESSION`, so
+  /// `zmx attach <name>` switches in place instead of redialing. No-op if a
+  /// full-screen TUI holds the foreground.
   public func switchSession(to name: String) async {
     guard name != attach else { return }
-    await redial(to: name)
-  }
-
-  private func redial(to name: String) async {
-    await pipeline.disconnect()
     attach = name
-    sessionKey = "ssh:\(config.host):\(config.port):\(name)"
-    await connect()
-  }
-
-  /// Kills a zmx session (`zmx kill --force`). If it was the current one, moves
-  /// to another live session, or a fresh default.
-  public func killSession(_ name: String) async {
-    _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) kill \(shellQuote(name)) --force")
-    await refreshSessions()
-    if name == attach {
-      let next = sessions.first(where: { $0.name != name })?.name ?? Self.defaultAttach
-      await redial(to: next)
+    if case .connected = status {
+      pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(name))\n", key: sessionKey))
+      await refreshSessions()
+    } else {
+      await connect()
     }
   }
+
+  /// Switch away first when killing the current session — killing the one we're
+  /// attached to would drop our own PTY.
+  public func killSession(_ name: String) async {
+    if name == attach {
+      await refreshSessions()
+      let next = sessions.first(where: { $0.name != name })?.name ?? Self.defaultAttach
+      await switchSession(to: next)
+    }
+    _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) kill \(shellQuote(name)) --force")
+    await refreshSessions()
+  }
+
+  /// SCP-sends to the current session's cwd (home dir when cwd unknown).
+  public func sendFile(data: Data, filename: String) async {
+    if sessions.isEmpty { await refreshSessions() }
+    let dir = sessions.first(where: { $0.name == attach })?.displayCwd
+    let remote = dir?.hasPrefix("/") == true ? "\(dir!)/\(filename)" : filename
+    transfer = .sending(filename)
+    do {
+      try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
+      transfer = .sent(remote)
+    } catch {
+      transfer = .failed(Self.describe(error))
+    }
+  }
+
+  public func clearTransfer() { transfer = .idle }
 
   public func loadGitDiff() async {
     gitLoading = true

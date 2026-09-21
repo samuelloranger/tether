@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// The v5 terminal screen: header + slide-over session sidebar + terminal,
 /// matching the old layout but backed by SSH + zmx. Home is reached from the
@@ -19,6 +20,7 @@ public struct SSHTerminalView: View {
   @State private var newSessionName = ""
   @State private var selectionText: String?
   @State private var confirmKill = false
+  @State private var showFileImporter = false
   @Environment(\.scenePhase) private var scenePhase
 
   private static let drawerWidth: CGFloat = 280
@@ -41,11 +43,23 @@ public struct SSHTerminalView: View {
           .transition(.move(edge: .leading))
       }
     }
+    .overlay(alignment: .bottom) { transferBanner }
+    .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
+      guard case let .success(url) = result else { return }
+      let stop = url.startAccessingSecurityScopedResource()
+      let data = try? Data(contentsOf: url)
+      if stop { url.stopAccessingSecurityScopedResource() }
+      guard let data else { return }
+      Task { await controller.sendFile(data: data, filename: url.lastPathComponent) }
+    }
     .task {
       await controller.connect()
       #if DEBUG
       if ProcessInfo.processInfo.environment["TETHER_SSH_DRAWER"] != nil { drawerOpen = true }
       if ProcessInfo.processInfo.environment["TETHER_SSH_GIT"] != nil { showGit = true }
+      if let name = ProcessInfo.processInfo.environment["TETHER_SSH_SENDFILE"] {
+        await controller.sendFile(data: Data("tether upload test\n".utf8), filename: name)
+      }
       #endif
     }
     .onChange(of: scenePhase) { _, phase in
@@ -123,6 +137,7 @@ public struct SSHTerminalView: View {
       headerButton("gearshape", id: "sshTerminalSettings") { showSettings = true }
       Menu {
         Button { Task { await controller.switchSession(to: nextSessionName()) } } label: { Label("New session", systemImage: "plus") }
+        Button { showFileImporter = true } label: { Label("Send file…", systemImage: "square.and.arrow.up") }
         Button { if let t = selectionText, !t.isEmpty { UIPasteboard.general.string = t } } label: { Label("Copy selection", systemImage: "doc.on.doc") }
           .disabled(selectionText?.isEmpty ?? true)
         Divider()
@@ -183,34 +198,39 @@ public struct SSHTerminalView: View {
 
   private func sessionRow(_ session: ZmxSession) -> some View {
     let isCurrent = session.name == controller.attach
-    return Button {
-      Task { await controller.switchSession(to: session.name) }
-      withAnimation(.easeOut(duration: 0.2)) { drawerOpen = false }
-    } label: {
-      HStack(spacing: 10) {
-        Circle().fill(isCurrent ? TetherColors.success : TetherColors.textFaint).frame(width: 8, height: 8)
-        VStack(alignment: .leading, spacing: 2) {
-          Text(session.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(TetherColors.textPrimary)
-          Text(session.displayCwd).font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+    return HStack(spacing: 6) {
+      Button {
+        Task { await controller.switchSession(to: session.name) }
+        withAnimation(.easeOut(duration: 0.2)) { drawerOpen = false }
+      } label: {
+        HStack(spacing: 10) {
+          Circle().fill(isCurrent ? TetherColors.success : TetherColors.textFaint).frame(width: 8, height: 8)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(session.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(TetherColors.textPrimary)
+            Text(session.displayCwd).font(.system(size: 10, design: .monospaced))
+              .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+          }
+          Spacer(minLength: 4)
+          if session.clients > 0 {
+            Text("\(session.clients)").font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+              .foregroundStyle(TetherColors.success)
+          }
         }
-        Spacer(minLength: 4)
-        if session.clients > 0 {
-          Text("\(session.clients)").font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-            .foregroundStyle(TetherColors.success)
-        }
+        .contentShape(Rectangle())
       }
-      .padding(.horizontal, 12).padding(.vertical, 10)
-      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
-      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isCurrent ? TetherColors.accent.opacity(0.4) : TetherColors.border))
-    }
-    .buttonStyle(.plain)
-    .contextMenu {
-      Button(role: .destructive) { Task { await controller.killSession(session.name) } } label: {
-        Label("Kill", systemImage: "xmark.circle")
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("zmxSession_\(session.name)")
+      Button { Task { await controller.killSession(session.name) } } label: {
+        Image(systemName: "xmark.circle.fill").font(.system(size: 16))
+          .foregroundStyle(TetherColors.textFaint)
+          .frame(width: 32, height: 32).contentShape(Rectangle())
       }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("zmxKill_\(session.name)")
     }
-    .accessibilityIdentifier("zmxSession_\(session.name)")
+    .padding(.horizontal, 12).padding(.vertical, 10)
+    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isCurrent ? TetherColors.accent.opacity(0.4) : TetherColors.border))
   }
 
   private var newSessionRow: some View {
@@ -220,6 +240,7 @@ public struct SSHTerminalView: View {
         .font(.system(size: 12, design: .monospaced)).foregroundStyle(TetherColors.textPrimary)
         .padding(9).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+        .accessibilityIdentifier("sshNewSessionField")
       Button {
         let name = newSessionName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
@@ -232,6 +253,7 @@ public struct SSHTerminalView: View {
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
           .foregroundStyle(TetherColors.onAccent)
       }
+      .accessibilityIdentifier("sshNewSessionAdd")
     }
     .padding(.top, 4)
   }
@@ -259,6 +281,33 @@ public struct SSHTerminalView: View {
     case .connected: return TetherColors.success
     case .failed: return TetherColors.danger
     }
+  }
+
+  @ViewBuilder
+  private var transferBanner: some View {
+    switch controller.transfer {
+    case .idle:
+      EmptyView()
+    case let .sending(name):
+      transferPill { HStack(spacing: 8) { ProgressView().tint(TetherColors.accent); Text("Sending \(name)…") } }
+    case let .sent(path):
+      transferPill { Label("Sent to \(path)", systemImage: "checkmark.circle") }
+        .task { try? await Task.sleep(nanoseconds: 2_500_000_000); controller.clearTransfer() }
+    case let .failed(message):
+      transferPill { Label(message, systemImage: "exclamationmark.triangle") }
+        .onTapGesture { controller.clearTransfer() }
+    }
+  }
+
+  private func transferPill(@ViewBuilder _ content: () -> some View) -> some View {
+    content()
+      .font(.system(size: 12, design: .monospaced))
+      .foregroundStyle(TetherColors.textPrimary)
+      .padding(.horizontal, 14).padding(.vertical, 10)
+      .background(TetherColors.surface.opacity(0.95), in: Capsule())
+      .overlay(Capsule().strokeBorder(TetherColors.border))
+      .padding(.bottom, 24).padding(.horizontal, 16)
+      .shadow(radius: 8, y: 2)
   }
 
   @ViewBuilder

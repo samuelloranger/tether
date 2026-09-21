@@ -6,7 +6,14 @@ protocol SSHConnectionOps: AnyObject {
   func authenticate(_ credential: SSHCredential) throws -> Bool
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
   func exec(_ command: String) throws -> String
+  func scpSend(data: Data, remotePath: String, mode: Int32) throws
   func teardown()
+}
+
+extension SSHConnectionOps {
+  func scpSend(data: Data, remotePath: String, mode: Int32) throws {
+    throw SSHConnectError.transport("File transfer not supported")
+  }
 }
 
 struct SSHConnectionConfig: Equatable, Sendable {
@@ -63,6 +70,25 @@ enum SSHConnectionSequence {
     try gate(config: config, ops: ops, store: store)
     do {
       return try ops.exec(command)
+    } catch let error as SSHConnectError {
+      throw error
+    } catch {
+      throw SSHConnectError.transport("\(error)")
+    }
+  }
+
+  static func runScpSend(
+    config: SSHConnectionConfig,
+    ops: SSHConnectionOps,
+    store: HostKeyStore,
+    data: Data,
+    remotePath: String,
+    mode: Int32
+  ) throws {
+    defer { ops.teardown() }
+    try gate(config: config, ops: ops, store: store)
+    do {
+      try ops.scpSend(data: data, remotePath: remotePath, mode: mode)
     } catch let error as SSHConnectError {
       throw error
     } catch {

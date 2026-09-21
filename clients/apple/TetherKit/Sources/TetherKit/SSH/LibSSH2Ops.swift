@@ -10,6 +10,8 @@ enum LibSSH2OpsError: Error, Equatable {
   case authError(Int)
   case ptyOpenFailed
   case execFailed(Int)
+  case scpOpenFailed
+  case scpWriteFailed(Int)
 }
 
 /// Concrete libssh2 implementation of the connect sequence. Owns the socket and
@@ -95,6 +97,33 @@ final class LibSSH2Ops: SSHConnectionOps {
       }
     }
     return String(decoding: output, as: UTF8.self)
+  }
+
+  func scpSend(data: Data, remotePath: String, mode: Int32) throws {
+    guard let session else { throw LibSSH2OpsError.sessionInit }
+    guard let channel = remotePath.withCString({
+      tether_libssh2_scp_send(session, $0, mode, data.count)
+    }) else {
+      throw LibSSH2OpsError.scpOpenFailed
+    }
+    defer { libssh2_channel_free(channel) }
+    try data.withUnsafeBytes { raw in
+      guard let base = raw.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
+      var offset = 0
+      while offset < data.count {
+        let n = tether_libssh2_channel_write(channel, base.advanced(by: offset), data.count - offset)
+        if n > 0 {
+          offset += n
+        } else if n == LibSSH2Const.eagain {
+          continue
+        } else {
+          throw LibSSH2OpsError.scpWriteFailed(Int(n))
+        }
+      }
+    }
+    _ = libssh2_channel_send_eof(channel)
+    _ = libssh2_channel_wait_eof(channel)
+    _ = libssh2_channel_wait_closed(channel)
   }
 
   func teardown() {

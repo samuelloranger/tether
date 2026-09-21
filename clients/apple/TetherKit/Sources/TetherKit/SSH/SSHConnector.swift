@@ -16,6 +16,21 @@ enum SSHConnector {
     }
   }
 
+  static func scpSend(
+    config: SSHConnectionConfig,
+    store: HostKeyStore,
+    data: Data,
+    remotePath: String,
+    mode: Int32 = 0o644
+  ) async throws {
+    try await onThread(named: "tether.ssh.scp") {
+      try SSHConnectionSequence.runScpSend(
+        config: config, ops: LibSSH2Ops(config: config), store: store,
+        data: data, remotePath: remotePath, mode: mode
+      )
+    }
+  }
+
   private static func onThread<T: Sendable>(named name: String, _ body: @escaping @Sendable () throws -> T) async throws -> T {
     try await withCheckedThrowingContinuation { continuation in
       let thread = Thread {

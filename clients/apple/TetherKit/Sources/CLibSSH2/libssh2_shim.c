@@ -42,6 +42,15 @@ int tether_libssh2_channel_request_pty_size(LIBSSH2_CHANNEL *channel, int width,
   return libssh2_channel_request_pty_size_ex(channel, width, height, 0, 0);
 }
 
+LIBSSH2_CHANNEL *tether_libssh2_scp_send(
+  LIBSSH2_SESSION *session,
+  const char *path,
+  int mode,
+  size_t size
+) {
+  return libssh2_scp_send64(session, path, mode, (libssh2_int64_t)size, 0, 0);
+}
+
 ssize_t tether_libssh2_channel_read(
   LIBSSH2_CHANNEL *channel,
   char *buffer,
