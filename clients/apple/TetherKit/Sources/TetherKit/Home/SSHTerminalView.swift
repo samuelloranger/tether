@@ -21,6 +21,7 @@ public struct SSHTerminalView: View {
   @State private var selectionText: String?
   @State private var confirmKill = false
   @State private var showFileImporter = false
+  @State private var showHistory = false
   @Environment(\.scenePhase) private var scenePhase
 
   private static let drawerWidth: CGFloat = 280
@@ -67,6 +68,9 @@ public struct SSHTerminalView: View {
     }
     .sheet(isPresented: $showSettings) { TerminalSettingsSheet(preferences: preferences) { showSettings = false } }
     .sheet(isPresented: $showGit) { GitDiffView(controller: controller) { showGit = false } }
+    .sheet(isPresented: $showHistory) {
+      TerminalHistoryView(controller: controller, preferences: preferences) { showHistory = false }
+    }
     .confirmationDialog("Kill \(controller.attach)?", isPresented: $confirmKill, titleVisibility: .visible) {
       Button("Kill session", role: .destructive) { Task { await controller.killSession(controller.attach) } }
       Button("Cancel", role: .cancel) {}
@@ -140,6 +144,7 @@ public struct SSHTerminalView: View {
         Button { showFileImporter = true } label: { Label("Send file…", systemImage: "square.and.arrow.up") }
         Button { if let t = selectionText, !t.isEmpty { UIPasteboard.general.string = t } } label: { Label("Copy selection", systemImage: "doc.on.doc") }
           .disabled(selectionText?.isEmpty ?? true)
+        Button { showHistory = true } label: { Label("Terminal history", systemImage: "clock.arrow.circlepath") }
         Divider()
         Button(role: .destructive) { confirmKill = true } label: { Label("Kill \(controller.attach)", systemImage: "xmark.circle") }
       } label: {

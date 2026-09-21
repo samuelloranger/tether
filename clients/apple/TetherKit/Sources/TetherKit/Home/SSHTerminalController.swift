@@ -202,6 +202,9 @@ public final class SSHTerminalController {
     await connect()
   }
 
+  /// Full retained transcript as plain text (for the history screen).
+  public func historyText() async -> String { await pipeline.historyText() }
+
   public func sendInput(_ text: String) { pipeline.outbound.yield(.input(text, key: sessionKey)) }
   public func sendPaste(_ text: String) { pipeline.outbound.yield(.paste(text, key: sessionKey)) }
   public func updateGrid(cols: UInt16, rows: UInt16) {

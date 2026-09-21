@@ -248,6 +248,20 @@ actor TerminalPipeline {
     return true
   }
 
+  /// Full transcript of the retained output buffer as plain text. Replays the
+  /// raw byte stream into a throwaway emulator tall enough that the whole
+  /// history lands on one grid (snapshot only sees the visible rows), then
+  /// decodes it. The buffer is byte-capped, so a very long session shows the
+  /// recent tail.
+  func historyText() -> String {
+    guard let buffer = currentGrid?.buffer, !buffer.data.isEmpty else { return "" }
+    let newlines = buffer.data.reduce(into: 0) { if $1 == 0x0A { $0 += 1 } }
+    let tall = UInt16(min(20_000, max(Int(rows), newlines + Int(rows) + 2)))
+    let emulator = buffer.replay(cols: cols, rows: tall)
+    guard let decoded = try? GridSnapshotDecoder.decode(emulator.snapshot()) else { return "" }
+    return TerminalGridText.plainText(header: decoded.0, cells: decoded.1)
+  }
+
   private func applyOutput(_ bytes: Data) {
     outputBuffer.append(bytes)
     emulator?.feed(bytes: bytes)
