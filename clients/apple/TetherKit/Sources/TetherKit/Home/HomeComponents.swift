@@ -81,7 +81,7 @@ struct MachineCardView: View {
       .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 16))
       .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(TetherColors.border))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("homeMachine_\(profile.name)")
   }
 }
@@ -119,6 +119,7 @@ struct KeyCardView: View {
             .foregroundStyle(TetherColors.accent)
         }
         .padding(.top, 3)
+        .buttonStyle(TetherPressStyle())
       }
       Spacer(minLength: 0)
     }

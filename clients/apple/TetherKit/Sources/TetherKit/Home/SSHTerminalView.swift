@@ -23,6 +23,7 @@ public struct SSHTerminalView: View {
   @State private var showFileImporter = false
   @State private var showHistory = false
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private static let drawerWidth: CGFloat = 280
 
@@ -37,13 +38,14 @@ public struct SSHTerminalView: View {
       terminalStack
       if drawerOpen {
         Color.black.opacity(0.5).ignoresSafeArea()
-          .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { drawerOpen = false } }
+          .onTapGesture { withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = false } }
           .transition(.opacity)
         drawer
           .frame(width: Self.drawerWidth)
-          .transition(.move(edge: .leading))
+          .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       }
     }
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: drawerOpen)
     .overlay(alignment: .bottom) { transferBanner }
     .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
       guard case let .success(url) = result else { return }
@@ -126,7 +128,7 @@ public struct SSHTerminalView: View {
   private var header: some View {
     HStack(spacing: 4) {
       headerButton("line.3.horizontal", id: "sshTerminalDrawer") {
-        withAnimation(.easeOut(duration: 0.2)) { drawerOpen = true }
+        withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = true }
       }
       Circle().fill(lampColor).frame(width: 9, height: 9).padding(.leading, 4)
       VStack(alignment: .leading, spacing: 0) {
@@ -154,6 +156,7 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("sshTerminalOverflow")
     }
     .foregroundStyle(TetherColors.accent)
+    .animation(TetherMotion.ui(TetherMotion.arrive, reduceMotion: reduceMotion), value: controller.status)
     .padding(.horizontal, 10).padding(.vertical, 6)
     .background(TetherColors.surface)
   }
@@ -163,6 +166,7 @@ public struct SSHTerminalView: View {
       Image(systemName: icon).font(.system(size: 18, weight: .semibold))
         .frame(width: 40, height: 40).contentShape(Rectangle())
     }
+    .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier(id)
   }
 
@@ -185,7 +189,10 @@ public struct SSHTerminalView: View {
         .padding(.horizontal, 12)
       }
       Divider().overlay(TetherColors.border)
-      Button { drawerOpen = false; onHome() } label: {
+      Button {
+        withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = false }
+        onHome()
+      } label: {
         HStack(spacing: 10) {
           Image(systemName: "house").font(.system(size: 15, weight: .semibold))
           Text("Home · machines & keys").font(.system(size: 14, weight: .semibold))
@@ -194,6 +201,7 @@ public struct SSHTerminalView: View {
         .foregroundStyle(TetherColors.accent)
         .padding(.horizontal, 16).padding(.vertical, 16)
       }
+      .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("sshDrawerHome")
     }
     .frame(maxHeight: .infinity, alignment: .top)
@@ -206,7 +214,7 @@ public struct SSHTerminalView: View {
     return HStack(spacing: 6) {
       Button {
         Task { await controller.switchSession(to: session.name) }
-        withAnimation(.easeOut(duration: 0.2)) { drawerOpen = false }
+        withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = false }
       } label: {
         HStack(spacing: 10) {
           Circle().fill(isCurrent ? TetherColors.success : TetherColors.textFaint).frame(width: 8, height: 8)
@@ -223,14 +231,14 @@ public struct SSHTerminalView: View {
         }
         .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("zmxSession_\(session.name)")
       Button { Task { await controller.killSession(session.name) } } label: {
         Image(systemName: "xmark.circle.fill").font(.system(size: 16))
           .foregroundStyle(TetherColors.textFaint)
           .frame(width: 32, height: 32).contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("zmxKill_\(session.name)")
     }
     .padding(.horizontal, 12).padding(.vertical, 10)
@@ -251,13 +259,14 @@ public struct SSHTerminalView: View {
         guard !name.isEmpty else { return }
         newSessionName = ""
         Task { await controller.switchSession(to: name) }
-        withAnimation(.easeOut(duration: 0.2)) { drawerOpen = false }
+        withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = false }
       } label: {
         Image(systemName: "plus").font(.system(size: 14, weight: .semibold))
           .frame(width: 34, height: 34)
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
           .foregroundStyle(TetherColors.onAccent)
       }
+      .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("sshNewSessionAdd")
     }
     .padding(.top, 4)
@@ -313,6 +322,7 @@ public struct SSHTerminalView: View {
       .overlay(Capsule().strokeBorder(TetherColors.border))
       .padding(.bottom, 24).padding(.horizontal, 16)
       .shadow(radius: 8, y: 2)
+      .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
   }
 
   @ViewBuilder
@@ -324,6 +334,7 @@ public struct SSHTerminalView: View {
         Text("Connecting…").font(.system(size: 13, design: .monospaced)).foregroundStyle(TetherColors.textSecondary)
       }
       .padding(20).background(TetherColors.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+        .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
     case let .failed(message):
       VStack(spacing: 12) {
         Image(systemName: "exclamationmark.triangle").font(.system(size: 28)).foregroundStyle(TetherColors.danger)
@@ -333,9 +344,11 @@ public struct SSHTerminalView: View {
           .font(.system(size: 14, weight: .semibold)).foregroundStyle(TetherColors.onAccent)
           .padding(.horizontal, 20).padding(.vertical, 10)
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
+          .buttonStyle(TetherPressStyle())
       }
       .padding(24).frame(maxWidth: 300)
       .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
+      .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
     case .connected:
       EmptyView()
     }
