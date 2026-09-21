@@ -1,5 +1,11 @@
 import Foundation
 
+/// POSIX single-quote escaping for a shell argument (zmx/git/notify commands run
+/// over `ssh exec`).
+public func shellQuote(_ value: String) -> String {
+  "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+}
+
 public struct ZmxSession: Equatable, Identifiable, Sendable {
   public var name: String
   public var pid: Int
