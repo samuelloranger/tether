@@ -97,6 +97,12 @@ public final class SSHTerminalController {
     connectInFlight = true
     defer { connectInFlight = false }
     status = .connecting
+    // Release any live session before dialing. A redial-driven switch (alt-screen)
+    // gets here with the previous pump still running; dialing and authenticating a
+    // second connection alongside it made auth fail until a force-quit killed the
+    // old one. connectSSH also disconnects, but only after the new auth succeeds —
+    // too late. No-op on a cold connect or a post-drop reconnect (no live transport).
+    await pipeline.disconnect()
     await chooseInitialSessionIfNeeded()
     // The key is valid; libssh2 auth/transport occasionally fails transiently
     // (and the app opens a couple of connections at once), so retry a few times.
