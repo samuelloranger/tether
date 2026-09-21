@@ -86,3 +86,4 @@ apps/server/src/noise/nativeLib
 
 # Local design-critique artifacts (impeccable skill)
 .impeccable/
+.worktrees/
