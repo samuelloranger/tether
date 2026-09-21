@@ -1,25 +1,14 @@
 name: Release builds
 
 # scripts/release.sh pushes the tag vX.Y.Z, which starts this workflow. The
-# `draft` job opens a DRAFT release, the artifact jobs attach every desktop, iOS
-# and server artifact to it, and only when all of them succeed does
-# `publish` take it out of draft. A failed build therefore can never become the
-# public `releases/latest` that install.sh and `tether update` resolve stable
-# asset names from (how v2.0.0 shipped with every desktop bundle broken).
-# Manual runs are build-only: they upload workflow artifacts without touching a
-# release.
+# `draft` job opens a DRAFT release, `ios` attaches the build to it, and only
+# when it succeeds does `publish` take it out of draft. A failed build therefore
+# never becomes the public `releases/latest`. Manual runs are build-only: they
+# upload workflow artifacts without touching a release.
 #
 # Why a tag push and not a `release` event: GitHub does not run workflows for
-# draft releases at all — the `created`, `edited`, and `deleted` activity types
-# are suppressed for drafts, and only `published` fires, which is far too late to
-# gate on. So CI cannot be triggered BY a draft; it has to CREATE the draft. A
-# bare tag is safe to publish early because install.sh and `tether update` both
-# resolve the releases API, which never sees a tag that has no published release.
-#
-# Caches: tag runs can restore from the default branch only — not from sibling
-# tags. CI on main (cache-warm) writes bun/rust into that scope; release
-# jobs restore them. rust-cache uses shared-key (stable across job names) and
-# cache-on-failure so a flaky asset upload does not discard a finished compile.
+# draft releases, so CI cannot be triggered BY a draft; it has to CREATE the
+# draft.
 on:
   push:
     tags: ['v*.*.*']
@@ -29,11 +18,9 @@ on:
         description: Artifacts to build without publishing
         type: choice
         options:
-          - desktop
           - ios
           - testflight
-          - all
-        default: desktop
+        default: ios
 
 permissions:
   contents: write
@@ -45,9 +32,8 @@ env:
   GH_REPO: ${{ github.repository }}
 
 jobs:
-  # Opens the draft the artifact jobs upload into, and hands them its id. Runs on
-  # manual dispatch too (as a no-op) so that `needs: draft` never resolves to
-  # "skipped" — a skipped dependency would skip every job downstream of it.
+  # Opens the draft the ios job uploads into, and hands it its id. Runs on manual
+  # dispatch too (as a no-op) so `needs: draft` never resolves to "skipped".
   draft:
     runs-on: ubuntu-latest
     outputs:
@@ -66,167 +52,20 @@ jobs:
           fi
           echo "id=$(gh release view "$TAG" --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
 
-  # Builds apps/desktop — the native Tauri client (vite + xterm.js over
-  # tether-core). iOS ships from clients/apple; Android is decommissioned.
-  #
-  # apps/desktop deliberately keeps the OLD bundle identifier
-  # (cloud.samlo.tether). The identifier is what names the webview data
-  # directory, and the app's own host-profile migration reads the previous app's
-  # localStorage (tether_host_profiles) out of it — so a user updating in place
-  # keeps their hosts. It is also what NSIS uses for the install path and
-  # uninstall registry key, so a new identifier would install beside the old app
-  # on Windows instead of upgrading it.
-  #
-  desktop:
-    needs: draft
-    if: github.event_name == 'push' || inputs.scope == 'desktop' || inputs.scope == 'all'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            rust-target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin
-            cache-key: macos-aarch64
-          - os: macos-latest
-            rust-target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
-            cache-key: macos-x86_64
-          - os: windows-latest
-            args: ""
-            cache-key: windows-x64
-          # Native packages depend on the system webkit, so build them on the
-          # older LTS for the widest glibc range (works on 24.04, Debian 12,
-          # Fedora, etc.). They don't bundle an engine, so the runner's webkit
-          # version is irrelevant here.
-          - os: ubuntu-24.04
-            args: --bundles deb,rpm
-            cache-key: linux-deb-rpm
-          # The AppImage bundles its OWN webkit (via linuxdeploy). The 24.04
-          # engine (webkit2gtk 2.44) can't create an EGL display on some
-          # GPU/compositor combos (e.g. hybrid Intel+NVIDIA on Wayland) and
-          # renders a blank/gray window. 26.04 ships webkit2gtk 2.52, which
-          # fixes it. Cost: a higher glibc floor — but that only affects the
-          # AppImage; native-package users are unaffected.
-          - os: ubuntu-26.04
-            args: --bundles appimage
-            cache-key: linux-appimage
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: latest
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-install-${{ runner.os }}-
-
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
-        with:
-          toolchain: stable
-          targets: ${{ matrix.rust-target }}
-
-      # Cargo registry + target artifacts. shared-key (not key) so CI on main can
-      # warm the same entries tag releases restore — tag scopes can't read sibling
-      # tags, only the default branch. cache-on-failure: flaky release-asset uploads
-      # must not throw away a successful compile.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-          shared-key: tether-${{ matrix.cache-key }}
-          cache-on-failure: true
-
-      # webkit/gtk to build; `rpm` so the .rpm bundle is produced (AppImage
-      # tooling is fetched by tauri). The Linux build is split across two runners
-      # (see the matrix): 24.04 emits .deb/.rpm, 26.04 emits the .AppImage with a
-      # newer bundled webkit. Same deps on both.
-      - name: Linux Tauri deps
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev libssl-dev rpm
-
-      - name: Install workspace deps
-        run: bun install --frozen-lockfile
-
-      # On a tag push, upload bundles onto the draft opened by the `draft` job.
-      # Manual runs get an empty releaseId, so they build without touching it.
-      # Signing is opt-in via repo secrets (safe in a public repo — Actions
-      # secrets are encrypted and never exposed to fork PRs). When a secret is
-      # absent the step still builds, just unsigned:
-      #   - TAURI_SIGNING_PRIVATE_KEY(+ _PASSWORD): signs update artifacts and
-      #     emits latest.json — REQUIRED for the in-app auto-updater to work.
-      #   - APPLE_* : Developer ID signing + notarization (clears macOS Gatekeeper).
-      #   - Windows signing needs a separate approach (Azure Trusted Signing or a
-      #     pfx + certificateThumbprint in tauri.conf); left unsigned for now.
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        with:
-          projectPath: apps/desktop
-          args: ${{ matrix.args }}
-          tagName: ${{ github.event_name == 'push' && env.TAG || '' }}
-          releaseId: ${{ needs.draft.outputs.release_id }}
-          # Each leg uploads its own bundles and .sig files, whose names never
-          # collide. latest.json is the one asset they would all share, and
-          # tauri-action maintains it by read-modify-write (fetch, merge in this
-          # platform, delete, re-upload) — so with the legs in parallel they race
-          # on it. v2.8.11 hit both outcomes: a leg deleted the asset another was
-          # reading and failed the run *after* uploading its bundles, and a lost
-          # update can silently drop a platform, which breaks in-app updates for
-          # it with no failed job to notice. The `publish` job builds the
-          # manifest once instead, from the signed bundles on the release.
-          includeUpdaterJson: false
-
-      # tauri-action has no built-in workflow-artifact upload; on manual runs,
-      # upload the built bundles so they can be downloaded and tested. The
-      # bundle dir is target/release/bundle (no --target) or
-      # target/<triple>/release/bundle (macOS builds pass --target).
-      - name: Upload desktop bundles (manual runs)
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: desktop-${{ matrix.os }}-${{ strategy.job-index }}
-          path: |
-            apps/desktop/src-tauri/target/release/bundle/**
-            apps/desktop/src-tauri/target/*/release/bundle/**
-          if-no-files-found: error
-
-  # iOS = the native Swift client in clients/apple. It replaced the Expo iOS app
-  # at 3.0.0. Both have uploaded to the same App Store Connect record
-  # (6800525706, bundle id com.samuelloranger.tether-mobile), so build numbers
-  # must never repeat: github.run_number is monotonic per workflow and survives
-  # re-runs of the same tag, which a commit count or timestamp would not. The
-  # deleted beta workflow used 900000+run_number to stay clear of this counter;
-  # nothing else uploads now, so plain run_number is free again and cannot
-  # collide with those.
+  # iOS = the native Swift client in clients/apple, the only shipping product.
+  # It uploads to App Store Connect (6800525706, com.samuelloranger.tether-mobile),
+  # so build numbers must never repeat: github.run_number is monotonic per
+  # workflow and survives re-runs of the same tag.
   #
   # TetherKit links tether-ffi as a SwiftPM .binaryTarget, so xcodebuild uses
-  # whatever XCFramework is on disk. Nothing under crates/ reaches the app until
-  # build-xcframework.sh has run — a change that compiles and passes cargo test
-  # is otherwise simply absent from the build. It is assembled below, in this
-  # run, from this commit.
+  # whatever XCFramework is on disk. build-xcframework.sh assembles it below,
+  # in this run, from this commit.
   #
   # `publish` needs this job, so the TestFlight upload is continue-on-error: a
-  # rejected or flaky Apple upload must never hold back the GitHub release that
-  # install.sh resolves the server binaries from.
+  # rejected or flaky Apple upload must never hold back the GitHub release.
   ios:
     needs: draft
-    if: github.event_name == 'push' || inputs.scope == 'ios' || inputs.scope == 'testflight' || inputs.scope == 'all'
+    if: github.event_name == 'push' || inputs.scope == 'ios' || inputs.scope == 'testflight'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -279,19 +118,11 @@ jobs:
           printf '%s' "$KEY_B64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
           chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
 
-      # Why this exists: with CODE_SIGN_STYLE=Automatic and
-      # -allowProvisioningUpdates, Xcode looks for a distribution identity in the
-      # runner's keychain, finds none — the runner is ephemeral, so the private
-      # key never survives — and asks App Store Connect to CREATE one. Every run.
-      # Apple caps distribution certificates per account, so after a handful of
-      # builds signing fails outright and the only cure is revoking certificates
-      # by hand in the developer portal. That has already happened once here.
-      #
-      # A persisted identity fixes it at the root: import one certificate and one
-      # profile from secrets, sign manually, create nothing. The automatic path
-      # stays as a fallback so a release still cuts before the secrets are
-      # configured — but it is the path that burns certificates, so the log says
-      # so loudly.
+      # A persisted identity avoids minting a new distribution certificate every
+      # run (Apple caps them per account). Import one certificate and one profile
+      # from secrets, sign manually, create nothing. The automatic path stays as a
+      # fallback so a release still cuts before the secrets are configured — but it
+      # is the path that burns certificates, so the log says so loudly.
       #
       #   IOS_DIST_CERT_P12_BASE64   Apple Distribution cert + key, .p12, base64
       #   IOS_DIST_CERT_PASSWORD     the password used to export that .p12
@@ -299,9 +130,8 @@ jobs:
       #                              App Store profile for
       #                              com.samuelloranger.tether-mobile, base64
       #   IOS_NSE_PROVISIONING_PROFILE_BASE64
-      #                              App Store profile for
-      #                              com.samuelloranger.tether-mobile.TetherNotificationService,
-      #                              base64 (required once the NSE ships in the archive)
+      #                              App Store profile for the
+      #                              TetherNotificationService extension, base64
       - name: Detect signing mode
         id: signing
         env:
@@ -382,13 +212,9 @@ jobs:
           set -euo pipefail
           # Manual signing passes NO -allowProvisioningUpdates and no API key:
           # that flag is what lets Xcode create a certificate, so withholding it
-          # is the fix rather than an optimisation. Automatic keeps both, and
-          # keeps the cost that comes with them.
-          #
-          # Never pass PROVISIONING_PROFILE_SPECIFIER on the xcodebuild command
-          # line: that setting applies to EVERY target and would force the NSE
-          # to the app's profile. Each target expands its own user-defined
-          # variable instead (APP_… / NSE_…).
+          # is the fix. Never pass PROVISIONING_PROFILE_SPECIFIER on the command
+          # line: it applies to EVERY target and would force the NSE to the app's
+          # profile. Each target expands its own user-defined variable instead.
           if [ "$SIGN_MODE" = manual ]; then
             xcodebuild -project clients/apple/Tether.xcodeproj \
               -scheme TetherIOS \
@@ -427,8 +253,7 @@ jobs:
         run: |
           set -euo pipefail
           # The export has to agree with how the archive was signed, or it
-          # re-resolves the identity and can mint a certificate at THIS step
-          # instead — the same cap, one stage later.
+          # re-resolves the identity and can mint a certificate at THIS step.
           if [ "$SIGN_MODE" = manual ]; then
             NSE_PROFILE_ENTRY=""
             if [ -n "${NSE_PROVISIONING_PROFILE_SPECIFIER:-}" ]; then
@@ -480,8 +305,7 @@ jobs:
               -authenticationKeyIssuerID "$ISSUER_ID"
           fi
 
-      # if: always() — a failed archive still leaves the key on the runner, and
-      # the runner image is reused within a job even though it is discarded after.
+      # if: always() — a failed archive still leaves the key on the runner.
       - name: Remove the signing keychain
         if: always() && steps.signing.outputs.mode == 'manual'
         run: |
@@ -500,11 +324,8 @@ jobs:
             --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
 
       # continue-on-error: `publish` gates on this job, and a rejected upload
-      # (duplicate build number, Apple outage, ITMS review rule) must not strand
-      # the release in draft with every other artifact already attached.
-      # scope=testflight uploads on a manual run too, so the path can be proven
-      # without cutting a version; that consumes a build number, which is why
-      # plain scope=ios and scope=all do not.
+      # (duplicate build number, Apple outage, review rule) must not strand the
+      # release in draft. scope=testflight uploads on a manual run too.
       - name: Upload to TestFlight
         if: github.event_name == 'push' || inputs.scope == 'testflight'
         continue-on-error: true
@@ -524,164 +345,14 @@ jobs:
           name: tether-ios-${{ github.sha }}
           path: build/export/*.ipa
 
-  server:
-    needs: draft
-    if: github.event_name == 'push' || inputs.scope == 'all'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # One platform's cdylib toolchain failing must not cancel the others'
-      # assets — a partial release is recoverable, a cancelled matrix is not.
-      fail-fast: false
-      matrix:
-        include:
-          # Each asset builds on its own OS so the embedded Noise cdylib
-          # (crates/tether-noise-ffi, dlopen'd at boot) is produced by a native
-          # toolchain — the server binary is dead without a loadable cdylib for
-          # its exact target. Only linux-arm64 cross-compiles (no arm64 Linux
-          # runner); that ELF cross is well-trodden. bun `--compile --target`
-          # itself cross-emits fine from any host.
-          #
-          # x64 uses -baseline (no AVX2 requirement) so the single x64 asset runs
-          # on older CPUs too; arm64 has no such split.
-          - target: bun-linux-x64-baseline
-            asset: tether-linux-x64
-            os: ubuntu-latest
-            rust_target: x86_64-unknown-linux-gnu
-          - target: bun-linux-arm64
-            asset: tether-linux-arm64
-            os: ubuntu-latest
-            rust_target: aarch64-unknown-linux-gnu
-          - target: bun-darwin-arm64
-            asset: tether-darwin-arm64
-            os: macos-latest
-            rust_target: aarch64-apple-darwin
-          - target: bun-darwin-x64-baseline
-            asset: tether-darwin-x64
-            os: macos-latest
-            rust_target: x86_64-apple-darwin
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          targets: ${{ matrix.rust_target }}
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-install-${{ runner.os }}-
-      - name: Install workspace deps
-        run: bun install --frozen-lockfile
-      # The aarch64 cross needs the GNU cross linker; every other leg builds the
-      # cdylib with a native toolchain.
-      - name: Install aarch64 cross linker
-        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-      # Builds the release cdylib for this leg's target and stages it at
-      # apps/server/src/noise/nativeLib, which the next step embeds.
-      - name: Build the Noise FFI cdylib (${{ matrix.rust_target }})
-        working-directory: apps/server
-        shell: bash
-        run: bun run build:ffi
-        env:
-          FFI_PROFILE: release
-          FFI_TARGET: ${{ matrix.rust_target }}
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      # The asset name embeds the tag. macOS ships a .tar.gz wrapping a stable
-      # inner `tether`: a raw Mach-O can't survive a browser download — GitHub
-      # release assets drop the exec bit and the browser stamps
-      # com.apple.quarantine, so the adhoc-signed binary won't run. CLI
-      # `tar xzf` restores the exec bit and does NOT propagate quarantine.
-      # (Double-clicking the archive in Finder still quarantines; only Developer
-      # ID notarization clears that.) Linux ships the raw binary (chmod +x is
-      # enough there). install.sh and `tether update` mirror this branch.
-      - name: Compile ${{ matrix.asset }}
-        working-directory: apps/server
-        shell: bash
-        run: |
-          # The relay URL is stamped in here rather than configured per server:
-          # only the relay holding the APNs key for this app's signing identity
-          # can deliver to the released build. Override with the
-          # TETHER_PUSH_RELAY_URL repo variable to cut binaries for a fork with
-          # its own Apple team; TETHER_PUSH_RELAY_URL in the server's env still
-          # wins at runtime.
-          bun build --compile --minify \
-            --target=${{ matrix.target }} \
-            --define 'process.env.TETHER_VERSION="'"${TAG}"'"' \
-            --define 'process.env.TETHER_DEFAULT_PUSH_RELAY_URL="'"${RELAY_URL}"'"' \
-            --outfile tether \
-            src/main.ts
-          # Stable (un-versioned) name — makes
-          # github.com/.../releases/latest/download/<name> a one-click link, and
-          # is what `tether update` (v1.13.0+) resolves. The transitional
-          # versioned copy was dropped after v1.13.0 carried both names.
-          case "${{ matrix.asset }}" in
-            *darwin*)
-              out="${{ matrix.asset }}.tar.gz"
-              tar czf "$out" tether ;;
-            *)
-              out="${{ matrix.asset }}"
-              mv tether "$out" ;;
-          esac
-          echo "ASSET=$out" >> "$GITHUB_ENV"
-        env:
-          RELAY_URL: ${{ vars.TETHER_PUSH_RELAY_URL || 'https://tether-relay.samlo.cloud' }}
-      - name: Checksum ${{ matrix.asset }}
-        working-directory: apps/server
-        shell: bash
-        # macOS runners have `shasum`, not `sha256sum`; git-bash on Windows and
-        # Linux have `sha256sum`.
-        run: |
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$ASSET" > "$ASSET.sha256"
-          else
-            shasum -a 256 "$ASSET" > "$ASSET.sha256"
-          fi
-      - name: Attach to release
-        if: github.event_name == 'push'
-        working-directory: apps/server
-        shell: bash
-        run: gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Upload server workflow artifact
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ${{ matrix.asset }}-${{ github.sha }}
-          path: apps/server/${{ env.ASSET }}
-
-  # The gate. Every artifact job must succeed before the release stops being a
-  # draft — and publishing is also what creates the git tag (at the commit
-  # release.sh passed as --target). Until this runs, `releases/latest` still points
-  # at the previous good release, so install.sh and `tether update` keep working
-  # even if a build leg fails.
+  # The gate: the ios build must succeed before the release leaves draft.
+  # Publishing is also what makes the tag public; until then `releases/latest`
+  # still points at the previous good release.
   publish:
     if: github.event_name == 'push'
-    needs: [desktop, ios, server]
+    needs: [ios]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: latest
-
-      # The single writer of latest.json — see includeUpdaterJson in `desktop`.
-      # Runs before the release leaves draft, and refuses to emit a manifest
-      # that is missing a platform, so an incomplete updater manifest holds the
-      # release as a draft instead of stranding those users on the old version.
-      - name: Build the updater manifest
-        run: bun scripts/build-updater-manifest.ts "$TAG" latest.json
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Attach the updater manifest
-        run: gh release upload "$TAG" latest.json --clobber --repo "$GITHUB_REPOSITORY"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       - name: Publish the release
         run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
         env:

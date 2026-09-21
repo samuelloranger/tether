@@ -12,15 +12,26 @@ struct TetherIOSApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   #endif
   @Environment(\.scenePhase) private var scenePhase
-  @State private var store = SessionStore()
-  @State private var preferences = AppPreferences()
 
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      if AgentChatDemoRoot.launchState != nil {
-        AgentChatDemoRoot()
+      if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
+        AppRootView(demoModel: .liveDemoFromEnv())
           .tint(TetherColors.accent)
+          .preferredColorScheme(.dark)
+      } else if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {
+        AppRootView(demoModel: .preview())
+          .tint(TetherColors.accent)
+          .preferredColorScheme(.dark)
+      } else if ProcessInfo.processInfo.environment["TETHER_HOME_PREVIEW"] != nil {
+        HomeView(
+          model: .preview(),
+          initialTab: ProcessInfo.processInfo.environment["TETHER_HOME_TAB"] == "keys" ? .keys : .machines,
+          onOpen: { _ in }
+        )
+        .tint(TetherColors.accent)
+        .preferredColorScheme(.dark)
       } else {
         appRoot
       }
@@ -31,34 +42,11 @@ struct TetherIOSApp: App {
   }
 
   @ViewBuilder private var appRoot: some View {
-    RootView(store: store, preferences: preferences)
-        // Without this, the SwiftUI Forms (settings, pairing) render system blue
-        // while terminal surfaces use TetherColors.accent — two identities.
-        .tint(TetherColors.accent)
-        .onOpenURL { url in
-          store.handleDeepLink(url)
-        }
-        #if canImport(UIKit)
-        .onAppear {
-          appDelegate.attach(store: store)
-        }
-        #endif
-        .task {
-          await store.bootstrap()
-          #if canImport(UIKit)
-          appDelegate.pushRegistrar.start()
-          #endif
-        }
-        .onChange(of: scenePhase) { _, phase in
-          switch phase {
-          case .active:
-            store.handleAppLifecycle(.active)
-          case .inactive, .background:
-            store.handleAppLifecycle(.inactive)
-          @unknown default:
-            break
-          }
-        }
+    AppRootView(pushIdentityProvider: { appDelegate.pushRegistrar.pushIdentity() })
+      .tint(TetherColors.accent)
+      #if canImport(UIKit)
+      .task { appDelegate.pushRegistrar.start() }
+      #endif
   }
 }
 
@@ -73,21 +61,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
   ) -> Bool {
     UNUserNotificationCenter.current().delegate = tapRouter
     return true
-  }
-
-  @MainActor
-  func attach(store: SessionStore) {
-    tapRouter.onOpenURL = { [weak store] url in
-      store?.handleDeepLink(url)
-    }
-    tapRouter.isViewingSession = { [weak store] sessionId, identityName in
-      guard let store else { return false }
-      guard store.activeSessionId == sessionId else { return false }
-      guard let host = store.hosts.first(where: { $0.id == store.activeHostId }) else {
-        return false
-      }
-      return host.identityName == identityName
-    }
   }
 
   func application(

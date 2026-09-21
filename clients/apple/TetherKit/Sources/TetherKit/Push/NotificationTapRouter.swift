@@ -6,7 +6,7 @@ import UserNotifications
 /// (client-side mirror of the server's `focused` subscriber check).
 @MainActor
 public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDelegate {
-  /// Feeds a `tether://…` URL into `SessionStore.handleDeepLink`.
+  /// Invoked with a `tether://…` URL when a notification is tapped.
   public var onOpenURL: ((URL) -> Void)?
 
   /// Returns true when the user is currently viewing `sessionId` on the host

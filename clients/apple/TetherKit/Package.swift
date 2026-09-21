@@ -15,6 +15,25 @@ let package = Package(
       name: "TetherFFI",
       path: "Frameworks/TetherFFI.xcframework"
     ),
+    .binaryTarget(
+      name: "LibSSH2",
+      path: "Frameworks/SSH/ssh2.xcframework"
+    ),
+    .binaryTarget(
+      name: "OpenSSLCrypto",
+      path: "Frameworks/SSH/crypto.xcframework"
+    ),
+    .binaryTarget(
+      name: "OpenSSLSSL",
+      path: "Frameworks/SSH/ssl.xcframework"
+    ),
+    .target(
+      name: "CLibSSH2",
+      dependencies: ["LibSSH2", "OpenSSLCrypto", "OpenSSLSSL"],
+      path: "Sources/CLibSSH2",
+      publicHeadersPath: "include",
+      linkerSettings: [.linkedLibrary("z")]
+    ),
     .target(
       name: "TetherFFIBindings",
       dependencies: ["TetherFFI"],
@@ -22,7 +41,7 @@ let package = Package(
     ),
     .target(
       name: "TetherKit",
-      dependencies: ["TetherFFIBindings"],
+      dependencies: ["TetherFFIBindings", "CLibSSH2"],
       path: "Sources/TetherKit"
     ),
     .testTarget(

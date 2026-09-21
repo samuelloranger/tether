@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Motion tokens for the lit chrome. One principle: heat rises fast and cools slowly,
+/// Motion tokens. One principle: heat rises fast and cools slowly,
 /// so arriving and leaving read as different events. Durations stay short — this sits on a live PTY.
 public enum TetherMotion {
   /// Heat arriving: idle → working.
@@ -15,6 +15,11 @@ public enum TetherMotion {
   public static let feedback: Double = 0.09
   /// Something covering or uncovering the terminal.
   public static let overlay: Double = 0.28
+  /// A screen arrives from just inside its final size. Kept deliberately small:
+  /// the terminal must feel immediate, not theatrical.
+  public static let screenEntryScale: CGFloat = 0.965
+  /// Physical acknowledgement for tappable chrome.
+  public static let pressScale: CGFloat = 0.96
   /// Reduce Motion still gets a crossfade — Apple's own substitution for
   /// movement — just a short one, with nothing that travels.
   public static let crossfade: Double = 0.12
@@ -25,47 +30,30 @@ public enum TetherMotion {
     .timingCurve(0.16, 1, 0.3, 1, duration: duration)
   }
 
-  /// The animation the chrome uses to reach `state`. Resolved from the destination:
-  /// arriving at heat is fast, arriving at cold slow, whichever state you came from.
-  public static func heat(to state: LitState, reduceMotion: Bool) -> Animation {
-    if reduceMotion { return .easeOut(duration: crossfade) }
-    switch state {
-    case .working: return decelerate(ignite)
-    case .waiting: return decelerate(arrive)
-    case .done: return decelerate(arrive)
-    case .idle, .none: return .easeOut(duration: cool)
-    }
-  }
-
   /// A routine transition, collapsed to a plain crossfade under Reduce Motion.
   public static func ui(_ duration: Double, reduceMotion: Bool) -> Animation {
     reduceMotion ? .easeOut(duration: crossfade) : decelerate(duration)
   }
 
-  /// Fire the one authored swell only on entering `waiting` (never a re-report, never
-  /// under Reduce Motion). `settled` keeps launch quiet: a session already waiting at open isn't news.
-  public static func pulses(
-    from old: LitState,
-    to new: LitState,
-    settled: Bool,
-    reduceMotion: Bool
-  ) -> Bool {
-    settled && !reduceMotion && new == .waiting && old != .waiting
+  /// A layered screen change that gives Home and the terminal a sense of depth
+  /// without translating the entire view tree (which is fragile around UIKit).
+  public static func screenTransition(reduceMotion: Bool) -> AnyTransition {
+    reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: screenEntryScale))
   }
 
-  /// How fast a swell interrupted by the session moving on gets out of the way.
-  /// Short: the chrome underneath has already changed colour.
-  public static let pulseCancel: Double = 0.2
-
-  /// Swell up, then let go. Up is faster than down for the same reason ignite
-  /// is faster than cool.
-  public static let pulseRise: Double = 0.18
-  public static let pulseFall: Double = 0.55
 }
 
-extension LitBloom {
-  /// How much brighter the bloom goes at the swell's peak. The gradient is built at this
-  /// gain and sits at `restOpacity` otherwise — SwiftUI animates layer opacity, not gradient colours.
-  public static let pulseGain: Double = 1.6
-  public static var restOpacity: Double { 1 / pulseGain }
+/// Shared tactile response for cards and chrome. Terminal keys keep their
+/// specialised style, while ordinary controls gain the same physical language.
+public struct TetherPressStyle: ButtonStyle {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  public init() {}
+
+  public func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .scaleEffect(configuration.isPressed && !reduceMotion ? TetherMotion.pressScale : 1)
+      .opacity(configuration.isPressed ? 0.9 : 1)
+      .animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: configuration.isPressed)
+  }
 }

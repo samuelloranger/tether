@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Tether — Opening Agents</title>
+<style>
+  :root {
+    --bg:#08090c; --panel:#0e1014; --panel-2:#14171d; --line:#1e222b;
+    --ink:#e7ecf3; --muted:#8b95a5; --dim:#5b6472;
+    --working:#f2b134; --waiting:#f2555a; --done:#38d39f; --idle:#4b5563;
+    --accent:#6ea8fe; --cursor:#b79dff;
+    --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans: -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%;
+    background: radial-gradient(1200px 700px at 50% -10%, #12151d 0%, #08090c 55%, #060709 100%);
+    color:var(--ink); font-family:var(--sans); overflow:hidden; }
+  .stage { height:100%; display:grid; place-items:center; padding:22px; }
+
+  .phone { position:relative; width:min(390px,92vw); aspect-ratio:390/800; max-height:94vh;
+    border-radius:46px; background:linear-gradient(180deg,#0c0e12,#0a0b0f);
+    box-shadow:0 0 0 2px #1a1d24, 0 0 0 12px #05060880, 0 40px 90px -30px #000, 0 0 120px -40px #6ea8fe30;
+    padding:12px; overflow:hidden; }
+  .screen { position:relative; height:100%; border-radius:34px; background:var(--bg); overflow:hidden; }
+  .notch { position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    width:108px; height:30px; background:#000; border-radius:18px; z-index:60; }
+  .home { position:absolute; bottom:8px; left:50%; transform:translateX(-50%); width:120px; height:5px; border-radius:3px; background:#ffffff30; z-index:60; }
+
+  .statusbar { position:absolute; top:0; left:0; right:0; z-index:55;
+    display:flex; align-items:center; justify-content:space-between; padding:14px 22px 6px; font-size:13px; font-weight:600; }
+  .statusbar .right { display:flex; gap:6px; align-items:center; }
+  .bars { display:inline-flex; gap:2px; align-items:flex-end; height:11px; }
+  .bars i { width:3px; background:var(--ink); border-radius:1px; }
+  .bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:6px}.bars i:nth-child(3){height:8px}.bars i:nth-child(4){height:11px}
+  .batt { width:24px; height:12px; border:1.5px solid var(--ink); border-radius:3px; position:relative; }
+  .batt::after{content:"";position:absolute;right:-3px;top:3px;width:2px;height:6px;background:var(--ink);border-radius:1px;}
+  .batt i{position:absolute;inset:1.5px;width:70%;background:var(--done);border-radius:1px;}
+
+  /* two-pane horizontal track */
+  .track { position:absolute; inset:0; display:flex; width:200%; transition:transform .5s cubic-bezier(.3,.8,.3,1); }
+  .track.fleet { transform:translateX(-50%); }
+  .pane { width:50%; height:100%; position:relative; }
+  .body { position:absolute; top:44px; left:0; right:0; bottom:0; display:flex; flex-direction:column; }
+
+  /* ---- terminal pane ---- */
+  .tbar { display:flex; align-items:center; gap:10px; padding:6px 18px 10px; }
+  .tbar .host { display:flex; flex-direction:column; }
+  .tbar .host b { font-size:16px; font-weight:750; letter-spacing:-.3px; }
+  .tbar .host span { font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .tbar .spacer{flex:1}
+  /* the Agents entry pill */
+  .apill { position:relative; display:flex; align-items:center; gap:7px; padding:7px 12px 7px 10px;
+    background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line);
+    border-radius:999px; font-size:13px; font-weight:650; transition:transform .15s, box-shadow .3s; }
+  .apill.live { box-shadow:0 0 0 1px #f2b13440, 0 0 18px -6px var(--working); }
+  .apill.tap { transform:scale(.93); }
+  .apill .g { font-size:14px; color:var(--accent); }
+  .apill .badge { min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:#26303f; color:var(--ink);
+    font-family:var(--mono); font-size:11px; font-weight:700; display:grid; place-items:center; font-variant-numeric:tabular-nums; }
+  .apill .wdot { position:absolute; top:-2px; right:-2px; width:11px; height:11px; border-radius:50%;
+    background:var(--waiting); box-shadow:0 0 8px var(--waiting); border:2px solid var(--bg);
+    opacity:0; transform:scale(0); transition:opacity .3s, transform .3s; }
+  .apill.wait .wdot{ opacity:1; transform:scale(1); animation:blink 1s steps(2,jump-none) infinite; }
+
+  .term { flex:1; margin:0 12px 12px; border-radius:16px; border:1px solid var(--line);
+    background:linear-gradient(180deg,#0b0d11,#090a0e); padding:14px; overflow:hidden;
+    font-family:var(--mono); font-size:11.5px; line-height:1.65; color:#cfd6e0; }
+  .term .p { color:var(--done); } .term .u { color:var(--accent); } .term .d2{color:var(--dim)}
+  .term .k{color:var(--working)} .term .g{color:var(--done)}
+  .term .ln{opacity:0; transform:translateY(4px); animation:ln .3s forwards;}
+  @keyframes ln{to{opacity:1; transform:none}}
+  .cursor{display:inline-block; width:7px; height:14px; background:var(--ink); vertical-align:-2px; animation:cur 1s steps(2) infinite;}
+  @keyframes cur{50%{opacity:0}}
+  @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:.25}}
+
+  /* ---- fleet pane (compact) ---- */
+  .fhead { padding:4px 18px 2px; display:flex; align-items:flex-end; gap:10px; }
+  .fhead .bk { color:var(--accent); font-size:24px; width:20px; line-height:1; }
+  .fhead b { font-size:24px; font-weight:800; letter-spacing:-.5px; }
+  .fhead span { font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:5px; }
+  .fsummary { display:flex; gap:7px; padding:10px 16px 4px; }
+  .st { flex:1; background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line); border-radius:12px; padding:8px 10px; }
+  .st .n{font-size:18px; font-weight:750; letter-spacing:-.4px;} .st .l{font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim); margin-top:1px;}
+  .st.w .n{color:var(--working)} .st.b .n{color:var(--waiting)} .st.d .n{color:var(--done)}
+  .fattn { margin:8px 16px 2px; border:1px solid #5a2529; background:linear-gradient(180deg,#1c1215,#140e10);
+    border-radius:12px; padding:9px 11px; display:flex; align-items:center; gap:9px; box-shadow:0 0 0 1px #f2555a22; }
+  .fattn .dot{width:8px;height:8px;border-radius:50%;background:var(--waiting);box-shadow:0 0 8px var(--waiting);animation:blink 1s steps(2,jump-none) infinite;}
+  .fattn .t{font-size:12px;flex:1} .fattn .t b{font-weight:700} .fattn .go{font-family:var(--mono);font-size:10px;color:var(--waiting);font-weight:600}
+  .flist{padding:8px 14px; display:flex; flex-direction:column; gap:8px;}
+  .fc { background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line); border-radius:14px; padding:10px 12px; position:relative; }
+  .fc::before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:3px;border-radius:3px;background:var(--idle)}
+  .fc[data-s="working"]::before{background:var(--working)} .fc[data-s="waiting"]::before{background:var(--waiting);box-shadow:0 0 8px var(--waiting)} .fc[data-s="done"]::before{background:var(--done)}
+  .fc[data-s="waiting"]{border-color:#4a2528}
+  .fcrow{display:flex;align-items:center;gap:8px}
+  .fg{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-size:12px;background:#1b2130;color:var(--accent)}
+  .fn2{font-size:14px;font-weight:700;letter-spacing:-.2px}
+  .fhost{font-family:var(--mono);font-size:9.5px;color:var(--muted);background:#ffffff0a;border:1px solid var(--line);padding:2px 6px;border-radius:999px}
+  .fcrow .sp{flex:1}
+  .fmini{display:flex;align-items:center;margin-top:9px;gap:0}
+  .fmr{width:14px;height:14px;border-radius:5px;background:#26324a;border:1px solid #33456a}
+  .fml{height:2px;width:12px;background:var(--line)}
+  .fmk{display:flex;gap:6px;align-items:center}
+  .md{width:10px;height:10px;border-radius:50%;background:var(--idle)}
+  .md[data-s="working"]{background:var(--working);animation:mp 1.4s infinite}
+  .md[data-s="waiting"]{background:var(--waiting);box-shadow:0 0 7px var(--waiting);animation:blink 1s steps(2,jump-none) infinite}
+  .md[data-s="done"]{background:var(--done);box-shadow:0 0 5px var(--done)}
+  .md.ext{border:1.4px dashed var(--cursor);background:transparent}.md.ext[data-s="done"]{background:var(--cursor);border-style:solid}
+  @keyframes mp{0%{box-shadow:0 0 0 0 #f2b13488}70%{box-shadow:0 0 0 5px #f2b13400}100%{box-shadow:0 0 0 0 #f2b13400}}
+
+  /* push notification banner */
+  .push { position:absolute; top:52px; left:12px; right:12px; z-index:58;
+    background:rgba(30,34,43,.72); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid #ffffff18; border-radius:20px; padding:11px 13px; display:flex; align-items:center; gap:11px;
+    transform:translateY(-140%); transition:transform .5s cubic-bezier(.2,1.1,.3,1); box-shadow:0 16px 40px -14px #000; }
+  .push.show{transform:translateY(0)}
+  .push.tap{transform:translateY(-6px) scale(.98)}
+  .push .ic{width:34px;height:34px;border-radius:9px;background:#23324f;display:grid;place-items:center;font-size:16px;color:var(--accent)}
+  .push .body2{flex:1}
+  .push .row{display:flex;justify-content:space-between;align-items:center}
+  .push .app{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .push .time{font-size:11px;color:var(--dim)}
+  .push .title{font-size:13.5px;font-weight:650;margin-top:1px}
+  .push .msg{font-size:12.5px;color:var(--muted);margin-top:1px}
+
+  /* tap ripple */
+  .ripple{position:absolute;border-radius:50%;background:#ffffff30;transform:translate(-50%,-50%) scale(0);pointer-events:none;z-index:59;
+    width:60px;height:60px;animation:rip .5s ease-out forwards}
+  @keyframes rip{to{transform:translate(-50%,-50%) scale(1.6);opacity:0}}
+
+  .caption { position:absolute; bottom:22px; left:0; right:0; text-align:center; padding:0 22px; z-index:57;
+    font-size:12.5px; color:var(--muted); transition:opacity .3s; }
+  .caption b{color:var(--ink);font-weight:650}
+  .tag { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:11px; color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="phone">
+    <div class="notch"></div>
+    <div class="statusbar">
+      <span>9:41</span>
+      <div class="right"><div class="bars"><i></i><i></i><i></i><i></i></div><span style="font-size:11px">5G</span><div class="batt"><i></i></div></div>
+    </div>
+    <div class="screen">
+      <div class="track" id="track">
+
+        <!-- TERMINAL PANE -->
+        <div class="pane">
+          <div class="body">
+            <div class="tbar">
+              <div class="host"><b>tether</b><span>homelab</span></div>
+              <div class="spacer"></div>
+              <div class="apill" id="apill">
+                <span class="g">◆</span><span>Agents</span>
+                <span class="badge" id="abadge">0</span>
+                <span class="wdot"></span>
+              </div>
+            </div>
+            <div class="term" id="term"></div>
+          </div>
+        </div>
+
+        <!-- FLEET PANE -->
+        <div class="pane">
+          <div class="body">
+            <div class="fhead"><div class="bk">‹</div><b>Agents</b><span>4 projects · 2 hosts</span></div>
+            <div class="fsummary">
+              <div class="st w"><div class="n">7</div><div class="l">working</div></div>
+              <div class="st b"><div class="n">1</div><div class="l">waiting</div></div>
+              <div class="st d"><div class="n">3</div><div class="l">done</div></div>
+              <div class="st"><div class="n">11</div><div class="l">sessions</div></div>
+            </div>
+            <div class="fattn"><div class="dot"></div><div class="t"><b>vigie · review</b> is blocked</div><div class="go">Open ›</div></div>
+            <div class="flist">
+              <div class="fc" data-s="waiting">
+                <div class="fcrow"><div class="fg">◈</div><div class="fn2">vigie</div><div class="fhost">homelab</div><div class="sp"></div></div>
+                <div class="fmini"><div class="fmr"></div><div class="fml"></div><div class="fmk">
+                  <div class="md" data-s="working"></div><div class="md" data-s="working"></div><div class="md" data-s="waiting"></div></div></div>
+              </div>
+              <div class="fc" data-s="working">
+                <div class="fcrow"><div class="fg">⏚</div><div class="fn2">tether</div><div class="fhost">homelab</div><div class="sp"></div></div>
+                <div class="fmini"><div class="fmr"></div><div class="fml"></div><div class="fmk">
+                  <div class="md" data-s="working"></div><div class="md" data-s="working"></div><div class="md" data-s="done"></div>
+                  <div class="md" data-s="working"></div><div class="md ext" data-s="working"></div></div></div>
+              </div>
+              <div class="fc" data-s="working">
+                <div class="fcrow"><div class="fg">▤</div><div class="fn2">rawkoon</div><div class="fhost">laptop</div><div class="sp"></div></div>
+                <div class="fmini"><div class="fmr"></div><div class="fml"></div><div class="fmk">
+                  <div class="md" data-s="working"></div><div class="md" data-s="done"></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- push notification overlay -->
+      <div class="push" id="push">
+        <div class="ic">◆</div>
+        <div class="body2">
+          <div class="row"><span class="app">Tether</span><span class="time">now</span></div>
+          <div class="title">vigie · review is waiting</div>
+          <div class="msg">An agent is blocked and needs your input.</div>
+        </div>
+      </div>
+
+      <div class="caption" id="caption"></div>
+    </div>
+    <div class="home"></div>
+  </div>
+</div>
+<div class="tag">tether · opening agents — concept</div>
+
+<script>
+const track = document.getElementById("track");
+const apill = document.getElementById("apill");
+const abadge = document.getElementById("abadge");
+const push = document.getElementById("push");
+const cap = document.getElementById("caption");
+const term = document.getElementById("term");
+const screen = document.querySelector(".screen");
+
+function say(h){ cap.style.opacity=0; setTimeout(()=>{cap.innerHTML=h; cap.style.opacity=1;},200); }
+const wait = ms => new Promise(r=>setTimeout(r,ms));
+
+const LINES = [
+  '<span class="p">~/sites/tether</span> <span class="u">❯</span> claude',
+  '<span class="d2">╭─ Claude Code ─────────────╮</span>',
+  '<span class="d2">│</span> orchestrating a workflow  <span class="d2">│</span>',
+  '<span class="d2">╰───────────────────────────╯</span>',
+  '<span class="k">⚙</span> spawning subagents…',
+  '  <span class="g">✓</span> explorer  <span class="g">✓</span> tests  <span class="k">⚙</span> impl  <span class="k">⚙</span> review',
+];
+async function typeTerm(){
+  term.innerHTML = "";
+  for (const l of LINES){
+    const d = document.createElement("div"); d.className="ln"; d.innerHTML = l;
+    term.appendChild(d); await wait(360);
+  }
+  const c = document.createElement("div"); c.className="ln";
+  c.innerHTML = '<span class="u">❯</span> <span class="cursor"></span>';
+  term.appendChild(c);
+}
+function badge(n){ abadge.textContent = n; }
+function ripple(x,y){
+  const r=document.createElement("div"); r.className="ripple";
+  r.style.left=x+"px"; r.style.top=y+"px"; screen.appendChild(r);
+  setTimeout(()=>r.remove(),500);
+}
+function tapEl(el){
+  const b=el.getBoundingClientRect(), s=screen.getBoundingClientRect();
+  ripple(b.left-s.left+b.width/2, b.top-s.top+b.height/2);
+}
+
+async function run(){
+  track.classList.remove("fleet"); push.classList.remove("show"); badge(0);
+  apill.classList.remove("live","wait"); cap.style.opacity=0;
+  await wait(500);
+
+  say("You're in a terminal. Claude starts a workflow.");
+  await typeTerm();
+  await wait(400);
+
+  // badge climbs as agents spawn, pill lights up
+  say("The <b>Agents</b> pill wakes up — live count of running agents.");
+  apill.classList.add("live");
+  for (const n of [1,2,3,4,5,6,7]){ badge(n); await wait(260); }
+  await wait(900);
+
+  // one blocks -> red dot on the pill
+  say("One blocks — a red dot appears right on the pill.");
+  apill.classList.add("wait");
+  await wait(1900);
+
+  // tap the pill -> slide to fleet
+  say("Tap it — the <b>Fleet</b> opens.");
+  tapEl(apill); apill.classList.add("tap");
+  await wait(150); apill.classList.remove("tap");
+  await wait(250);
+  track.classList.add("fleet");
+  await wait(1800);
+
+  say("Every project, every host — sorted so <b>waiting floats to top</b>.");
+  await wait(2400);
+
+  // back out
+  say("Or — you never open the app at all.");
+  track.classList.remove("fleet");
+  await wait(1400);
+
+  // push notification path
+  say("A blocked agent <b>pushes</b> you. Tap the banner…");
+  push.classList.add("show");
+  await wait(2200);
+  tapEl(push); push.classList.add("tap");
+  await wait(160); push.classList.remove("tap");
+  await wait(150);
+  push.classList.remove("show");
+  track.classList.add("fleet");
+  await wait(400);
+  say("…and the deep link opens <b>straight to the blocked agent</b>.");
+  await wait(2600);
+
+  run();
+}
+run();
+</script>
+</body>
+</html>

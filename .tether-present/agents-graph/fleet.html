@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Tether — Fleet</title>
+<style>
+  :root {
+    --bg:#08090c; --panel:#0e1014; --panel-2:#14171d; --line:#1e222b;
+    --ink:#e7ecf3; --muted:#8b95a5; --dim:#5b6472;
+    --working:#f2b134; --waiting:#f2555a; --done:#38d39f; --idle:#4b5563;
+    --accent:#6ea8fe; --cursor:#b79dff;
+    --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans: -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%;
+    background: radial-gradient(1200px 700px at 50% -10%, #12151d 0%, #08090c 55%, #060709 100%);
+    color:var(--ink); font-family:var(--sans); overflow:hidden; }
+  .stage { height:100%; display:grid; place-items:center; padding:22px; }
+
+  .phone { position:relative; width:min(390px,92vw); aspect-ratio:390/800; max-height:94vh;
+    border-radius:46px; background:linear-gradient(180deg,#0c0e12,#0a0b0f);
+    box-shadow:0 0 0 2px #1a1d24, 0 0 0 12px #05060880, 0 40px 90px -30px #000, 0 0 120px -40px #6ea8fe30;
+    padding:12px; overflow:hidden; }
+  .screen { position:relative; height:100%; border-radius:34px; background:var(--bg); overflow:hidden;
+    display:flex; flex-direction:column; }
+  .notch { position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    width:108px; height:30px; background:#000; border-radius:18px; z-index:40; }
+
+  .statusbar { display:flex; align-items:center; justify-content:space-between;
+    padding:14px 22px 6px; font-size:13px; font-weight:600; }
+  .statusbar .right { display:flex; gap:6px; align-items:center; }
+  .bars { display:inline-flex; gap:2px; align-items:flex-end; height:11px; }
+  .bars i { width:3px; background:var(--ink); border-radius:1px; }
+  .bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:6px}.bars i:nth-child(3){height:8px}.bars i:nth-child(4){height:11px}
+  .batt { width:24px; height:12px; border:1.5px solid var(--ink); border-radius:3px; position:relative; }
+  .batt::after{content:"";position:absolute;right:-3px;top:3px;width:2px;height:6px;background:var(--ink);border-radius:1px;}
+  .batt i{position:absolute;inset:1.5px;width:70%;background:var(--done);border-radius:1px;}
+
+  .header { padding:8px 20px 6px; display:flex; align-items:flex-end; gap:12px; }
+  .htitle b { font-size:26px; font-weight:800; letter-spacing:-.5px; display:block; }
+  .htitle span { font-size:12px; color:var(--muted); font-family:var(--mono); }
+  .header .spacer{flex:1}
+  .seg { display:flex; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:2px; font-size:12px; }
+  .seg div { padding:5px 10px; border-radius:8px; color:var(--muted); font-weight:600; }
+  .seg div.on { background:#26303f; color:var(--ink); }
+
+  /* summary strip */
+  .summary { display:flex; gap:8px; padding:10px 18px 4px; }
+  .stat { flex:1; background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line);
+    border-radius:13px; padding:9px 11px; }
+  .stat .n { font-size:20px; font-weight:750; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+  .stat .l { font-family:var(--mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin-top:1px; }
+  .stat.w .n{color:var(--working)} .stat.b .n{color:var(--waiting)} .stat.d .n{color:var(--done)}
+
+  /* attention banner */
+  .attn { margin:8px 18px 2px; border:1px solid #5a2529; background:linear-gradient(180deg,#1c1215,#140e10);
+    border-radius:13px; padding:10px 12px; display:flex; align-items:center; gap:10px;
+    box-shadow:0 0 0 1px #f2555a22; overflow:hidden; transition:opacity .3s, transform .3s; }
+  .attn.hide { opacity:0; transform:translateY(-6px); pointer-events:none; height:0; padding:0; margin:0; border:0; }
+  .attn .dot { width:9px; height:9px; border-radius:50%; background:var(--waiting); box-shadow:0 0 10px var(--waiting);
+    animation:blink 1s steps(2,jump-none) infinite; flex:0 0 auto; }
+  .attn .txt { font-size:12.5px; color:var(--ink); flex:1; }
+  .attn .txt b{font-weight:700}
+  .attn .go { font-family:var(--mono); font-size:11px; color:var(--waiting); font-weight:600; }
+  @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:.25}}
+
+  /* project list */
+  .list { flex:1; overflow:hidden; padding:6px 14px 10px; display:flex; flex-direction:column; gap:9px; }
+  .card { background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line);
+    border-radius:16px; padding:11px 13px; position:relative; transition:border-color .3s, box-shadow .3s, transform .5s; }
+  .card::before { content:""; position:absolute; left:0; top:12px; bottom:12px; width:3px; border-radius:3px;
+    background:var(--idle); transition:background .3s; }
+  .card[data-s="working"]::before{background:var(--working)}
+  .card[data-s="waiting"]::before{background:var(--waiting); box-shadow:0 0 10px var(--waiting)}
+  .card[data-s="done"]::before{background:var(--done)}
+  .card[data-s="waiting"]{ border-color:#4a2528; box-shadow:0 0 0 1px #f2555a22; }
+  .crow { display:flex; align-items:center; gap:9px; }
+  .glyph { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; font-size:13px;
+    background:#1b2130; color:var(--accent); flex:0 0 auto; }
+  .pname { font-size:14.5px; font-weight:700; letter-spacing:-.2px; }
+  .host { font-family:var(--mono); font-size:10px; color:var(--muted); background:#ffffff0a; border:1px solid var(--line);
+    padding:2px 7px; border-radius:999px; }
+  .crow .spacer{flex:1}
+  .csum { font-family:var(--mono); font-size:10.5px; color:var(--muted); }
+  .csum b { font-weight:700; }
+  .csum .kw{color:var(--working)} .csum .kb{color:var(--waiting)} .csum .kd{color:var(--done)}
+
+  /* mini graph */
+  .mini { display:flex; align-items:center; gap:0; margin-top:10px; }
+  .mroot { width:15px; height:15px; border-radius:5px; background:#26324a; border:1px solid #33456a; flex:0 0 auto; }
+  .mline { height:2px; width:14px; background:var(--line); flex:0 0 auto; }
+  .mkids { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .mdot { width:11px; height:11px; border-radius:50%; background:var(--idle); position:relative; transition:background .3s, box-shadow .3s;
+    animation:pop .4s cubic-bezier(.2,1.3,.4,1); }
+  .mdot[data-s="working"]{ background:var(--working); box-shadow:0 0 0 0 var(--working); animation:mpulse 1.4s infinite; }
+  .mdot[data-s="waiting"]{ background:var(--waiting); box-shadow:0 0 8px var(--waiting); animation:blink 1s steps(2,jump-none) infinite; }
+  .mdot[data-s="done"]{ background:var(--done); box-shadow:0 0 6px var(--done); }
+  .mdot.ext{ border:1.5px dashed var(--cursor); background:transparent; }
+  .mdot.ext[data-s="working"]{ background:var(--cursor); box-shadow:0 0 8px var(--cursor); animation:none; border-style:solid; }
+  .mdot.ext[data-s="done"]{ background:var(--cursor); border-style:solid; }
+  .more { font-family:var(--mono); font-size:10px; color:var(--dim); margin-left:2px; }
+  @keyframes mpulse{0%{box-shadow:0 0 0 0 #f2b13488}70%{box-shadow:0 0 0 6px #f2b13400}100%{box-shadow:0 0 0 0 #f2b13400}}
+  @keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
+
+  .caption { text-align:center; padding:4px 20px 14px; min-height:30px; font-size:12.5px; color:var(--muted); transition:opacity .3s; }
+  .caption b{color:var(--ink); font-weight:650;}
+  .home { position:absolute; bottom:8px; left:50%; transform:translateX(-50%); width:120px; height:5px; border-radius:3px; background:#ffffff30; z-index:40; }
+  .tag { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:11px; color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="phone">
+    <div class="notch"></div>
+    <div class="screen">
+      <div class="statusbar">
+        <span>9:41</span>
+        <div class="right"><div class="bars"><i></i><i></i><i></i><i></i></div><span style="font-size:11px">5G</span><div class="batt"><i></i></div></div>
+      </div>
+
+      <div class="header">
+        <div class="htitle"><b>Agents</b><span id="sub">4 projects · 2 hosts</span></div>
+        <div class="spacer"></div>
+        <div class="seg"><div>Graph</div><div class="on">Fleet</div></div>
+      </div>
+
+      <div class="summary">
+        <div class="stat w"><div class="n" id="s-work">0</div><div class="l">working</div></div>
+        <div class="stat b"><div class="n" id="s-wait">0</div><div class="l">waiting</div></div>
+        <div class="stat d"><div class="n" id="s-done">0</div><div class="l">done</div></div>
+        <div class="stat"><div class="n" id="s-all">0</div><div class="l">sessions</div></div>
+      </div>
+
+      <div class="attn hide" id="attn">
+        <div class="dot"></div>
+        <div class="txt" id="attn-txt"></div>
+        <div class="go">Open ›</div>
+      </div>
+
+      <div class="list" id="list"></div>
+
+      <div class="caption" id="caption">Every agent, every project, one screen.</div>
+      <div class="home"></div>
+    </div>
+  </div>
+</div>
+<div class="tag">tether · fleet — concept</div>
+
+<script>
+// project fleet
+const PROJECTS = [
+  { id:"tether",   glyph:"⏚", host:"homelab", kids:[
+      {n:"explorer",s:"idle"},{n:"tests",s:"idle"},{n:"impl",s:"idle"},{n:"review",s:"idle"},{n:"cursor",s:"idle",ext:true} ] },
+  { id:"vigie",    glyph:"◈", host:"homelab", kids:[
+      {n:"scraper",s:"idle"},{n:"judge",s:"idle"},{n:"review",s:"idle"} ] },
+  { id:"rawkoon",  glyph:"▤", host:"laptop", kids:[
+      {n:"indexer",s:"idle"},{n:"api",s:"idle"} ] },
+  { id:"pricehawk",glyph:"◇", host:"laptop", kids:[
+      {n:"matcher",s:"idle"} ] },
+];
+
+const list = document.getElementById("list");
+const cardEls = {};
+const RANK = { waiting:3, working:2, done:1, idle:0 };
+function worst(p){ return p.kids.reduce((a,k)=>Math.max(a,RANK[k.s]),0); }
+function stateName(r){ return Object.keys(RANK).find(k=>RANK[k]===r) || "idle"; }
+
+function render(){
+  list.innerHTML = "";
+  for (const p of PROJECTS){
+    const s = stateName(worst(p));
+    const w = p.kids.filter(k=>k.s==="working").length;
+    const b = p.kids.filter(k=>k.s==="waiting").length;
+    const d = p.kids.filter(k=>k.s==="done").length;
+    const shown = p.kids.slice(0,5);
+    const extra = p.kids.length - shown.length;
+    const card = document.createElement("div");
+    card.className = "card"; card.dataset.s = s;
+    card.innerHTML = `
+      <div class="crow">
+        <div class="glyph">${p.glyph}</div>
+        <div class="pname">${p.id}</div>
+        <div class="host">${p.host}</div>
+        <div class="spacer"></div>
+        <div class="csum">
+          ${w?`<b class="kw">${w}</b> working`:""}${w&&(b||d)?" · ":""}${b?`<b class="kb">${b}</b> waiting`:""}${b&&d?" · ":""}${d?`<b class="kd">${d}</b> done`:""}${!w&&!b&&!d?"idle":""}
+        </div>
+      </div>
+      <div class="mini">
+        <div class="mroot"></div><div class="mline"></div>
+        <div class="mkids">
+          ${shown.map(k=>`<div class="mdot ${k.ext?"ext":""}" data-s="${k.s}" title="${k.n}"></div>`).join("")}
+          ${extra>0?`<span class="more">+${extra}</span>`:""}
+        </div>
+      </div>`;
+    list.appendChild(card);
+    cardEls[p.id] = card;
+  }
+  updateSummary();
+}
+function updateSummary(){
+  let w=0,b=0,d=0,all=0;
+  for(const p of PROJECTS) for(const k of p.kids){ all++;
+    if(k.s==="working")w++; else if(k.s==="waiting")b++; else if(k.s==="done")d++; }
+  document.getElementById("s-work").textContent=w;
+  document.getElementById("s-wait").textContent=b;
+  document.getElementById("s-done").textContent=d;
+  document.getElementById("s-all").textContent=all;
+}
+function set(pid, kidName, s){
+  const p = PROJECTS.find(x=>x.id===pid);
+  p.kids.find(k=>k.n===kidName).s = s;
+  render();
+}
+function setAll(pid, s){ PROJECTS.find(x=>x.id===pid).kids.forEach(k=>k.s=s); render(); }
+
+const attn = document.getElementById("attn");
+function showAttn(html){ document.getElementById("attn-txt").innerHTML = html; attn.classList.remove("hide"); }
+function hideAttn(){ attn.classList.add("hide"); }
+
+const cap = document.getElementById("caption");
+function say(h){ cap.style.opacity=0; setTimeout(()=>{cap.innerHTML=h; cap.style.opacity=1;},200); }
+const wait = ms => new Promise(r=>setTimeout(r,ms));
+
+async function run(){
+  PROJECTS.forEach(p=>p.kids.forEach(k=>k.s="idle")); hideAttn(); render();
+  say("Every agent, every project — <b>one screen</b>.");
+  await wait(1200);
+
+  say("Sessions spin up across <b>2 hosts</b>.");
+  set("tether","explorer","working"); await wait(300);
+  set("tether","tests","working"); set("vigie","scraper","working"); await wait(300);
+  set("tether","impl","working"); set("rawkoon","indexer","working"); await wait(300);
+  set("vigie","judge","working"); set("pricehawk","matcher","working"); await wait(300);
+  set("tether","review","working"); set("rawkoon","api","working"); set("vigie","review","working");
+  await wait(1100);
+
+  say("<b>tether/impl</b> delegates to Cursor — tracked inline.");
+  set("tether","cursor","working"); await wait(1600);
+
+  // vigie review blocks -> global attention banner
+  say("One agent blocks — the <b>attention banner</b> surfaces it.");
+  set("vigie","review","waiting");
+  showAttn("<b>vigie · review</b> is blocked, waiting on you");
+  await wait(2600);
+
+  // resolve
+  say("Answer it — banner clears.");
+  set("vigie","review","working"); hideAttn();
+  await wait(1500);
+
+  // things finish
+  say("Work completes, project by project.");
+  set("tether","cursor","done"); await wait(500);
+  set("tether","explorer","done"); set("tether","tests","done"); await wait(500);
+  setAll("pricehawk","done"); await wait(500);
+  set("rawkoon","indexer","done"); set("rawkoon","api","done"); await wait(500);
+  set("tether","impl","done"); set("tether","review","done"); await wait(500);
+  setAll("vigie","done");
+  await wait(1400);
+
+  say("Tap any project to open its <b>full graph</b>.");
+  await wait(2400);
+  run();
+}
+render(); run();
+</script>
+</body>
+</html>

@@ -101,9 +101,7 @@ test('fails on a completed run that is not success, and names the conclusion', a
 });
 
 test('a cancelled run is a failure, not a pass', async () => {
-  const { code, stderr } = await waitForCi([
-    { status: 'completed', conclusion: 'cancelled', url: 'https://ci/1' },
-  ]);
+  const { code, stderr } = await waitForCi([{ status: 'completed', conclusion: 'cancelled', url: 'https://ci/1' }]);
   expect(code).toBe(1);
   expect(stderr).toContain("'cancelled'");
 });

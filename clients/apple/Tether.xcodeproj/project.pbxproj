@@ -7,15 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		8679989CCAA1E8EAB619F9C0 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E2BD21FEFE1C90D383D51F36 /* Foundation.framework */; };
-		878551ED7EF0AF384C24C3E9 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770A0B8D95A5DF5DDB014F30 /* SmokeTests.swift */; };
 		B10000000000000000000001 /* TetherIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* TetherIOSApp.swift */; };
-		B10000000000000000000002 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* RootView.swift */; };
 		B10000000000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* Assets.xcassets */; };
 		B10000000000000000000004 /* TetherKit in Frameworks */ = {isa = PBXBuildFile; productRef = B10000000000000000000021 /* TetherKit */; };
 		B20000000000000000000001 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* NotificationService.swift */; };
 		B20000000000000000000002 /* TetherNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* TetherNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D09072E86E4D968092177DAA /* TetherUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21C61DCBD0F550E451A19A82 /* TetherUITestCase.swift */; };
 		EFF564D5D8B41FBAF8244512 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5B4A376FD549DC06F9AB21 /* SmokeTests.swift */; };
+		F83537240ECEC98A93F914B9 /* SSHV5FlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4E3DDB673C2CB890E5BC53 /* SSHV5FlowTests.swift */; };
 		FDB5B6F6BE935F8EC6CE5BEA /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E2BD21FEFE1C90D383D51F36 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
@@ -33,13 +32,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = B20000000000000000000040;
 			remoteInfo = TetherNotificationService;
-		};
-		E2AAE2E3BF45AADC7F95E12C /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = B10000000000000000000050 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = B10000000000000000000040;
-			remoteInfo = TetherIOS;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -59,13 +51,12 @@
 
 /* Begin PBXFileReference section */
 		0F5B4A376FD549DC06F9AB21 /* SmokeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
+		21C61DCBD0F550E451A19A82 /* TetherUITestCase.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TetherUITestCase.swift; sourceTree = "<group>"; };
 		290B17FBF0DEE90EFB9E920D /* TetherIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TetherIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		54745A1AEDC99F59E1A127C6 /* TetherIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TetherIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		770A0B8D95A5DF5DDB014F30 /* SmokeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SmokeTests.swift; path = TetherIOSUITests/SmokeTests.swift; sourceTree = "<group>"; };
 		77187FE47320817D4927721D /* TetherIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TetherIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000010 /* TetherIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TetherIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000011 /* TetherIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TetherIOSApp.swift; sourceTree = "<group>"; };
-		B10000000000000000000012 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B10000000000000000000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000000000000000000015 /* TetherIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TetherIOS.entitlements; sourceTree = "<group>"; };
@@ -75,6 +66,7 @@
 		B20000000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000000000000000000013 /* TetherNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TetherNotificationService.entitlements; sourceTree = "<group>"; };
 		E2BD21FEFE1C90D383D51F36 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		FE4E3DDB673C2CB890E5BC53 /* SSHV5FlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHV5FlowTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +100,8 @@
 			isa = PBXGroup;
 			children = (
 				0F5B4A376FD549DC06F9AB21 /* SmokeTests.swift */,
+				21C61DCBD0F550E451A19A82 /* TetherUITestCase.swift */,
+				FE4E3DDB673C2CB890E5BC53 /* SSHV5FlowTests.swift */,
 			);
 			name = TetherIOSUITests;
 			path = TetherIOSUITests;
@@ -136,7 +130,6 @@
 			isa = PBXGroup;
 			children = (
 				B10000000000000000000011 /* TetherIOSApp.swift */,
-				B10000000000000000000012 /* RootView.swift */,
 				B10000000000000000000013 /* Assets.xcassets */,
 				B10000000000000000000014 /* Info.plist */,
 				B10000000000000000000015 /* TetherIOS.entitlements */,
@@ -307,6 +300,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				EFF564D5D8B41FBAF8244512 /* SmokeTests.swift in Sources */,
+				D09072E86E4D968092177DAA /* TetherUITestCase.swift in Sources */,
+				F83537240ECEC98A93F914B9 /* SSHV5FlowTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -315,7 +310,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				B10000000000000000000001 /* TetherIOSApp.swift in Sources */,
-				B10000000000000000000002 /* RootView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -526,43 +520,6 @@
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		CD5D289F34C04DFB7ACBC8D8 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.samuelloranger.tether-mobile.uitests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = TetherIOS;
-			};
-			name = Debug;
-		};
-		FA455E65A00E67033AC09AEF /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.samuelloranger.tether-mobile.uitests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = TetherIOS;
-				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
