@@ -9,6 +9,10 @@ never see the plaintext; the iOS Notification Service Extension decrypts it.
 ## Build
 
     go build -o ~/.local/bin/tether-notify .
+    # or, from the repo root:  bash install.sh
+
+Wire it into agent hooks (Claude Code Notification + Stop) with
+`bash scripts/install-agent-hooks.sh [host-label]`.
 
 ## Use
 
