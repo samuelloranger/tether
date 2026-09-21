@@ -413,6 +413,10 @@ actor TerminalPipeline {
       // dropped the grow after keyboard-hide and left cursor-agent at the short
       // geometry. Always send when the channel is live.
       applyLocalResize(cols: newCols, rows: newRows)
+      if let transport = sshTransport {
+        await transport.resize(cols: newCols, rows: newRows)
+        return
+      }
       guard let channel = noiseChannel, let id = noiseSessionId else { return }
       try? await channel.sendResize(id: id, cols: newCols, rows: newRows)
     case let .agentStart(id, cwd, sinceSeq, resumeClaudeSessionId):

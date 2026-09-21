@@ -13,6 +13,7 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
 
   private let lock = NSLock()
   private var outbound: [Data] = []
+  private var pendingResize: (cols: Int32, rows: Int32)?
   private var stopped = false
 
   private let inbound: AsyncStream<Data>
@@ -46,6 +47,12 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
     lock.unlock()
   }
 
+  func resize(cols: UInt16, rows: UInt16) async {
+    lock.lock()
+    pendingResize = (Int32(cols), Int32(rows))
+    lock.unlock()
+  }
+
   func close() async {
     lock.lock()
     stopped = true
@@ -61,9 +68,14 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
       let done = stopped
       let pending = outbound
       outbound.removeAll(keepingCapacity: true)
+      let resize = pendingResize
+      pendingResize = nil
       lock.unlock()
       if done { break }
 
+      if let resize {
+        _ = tether_libssh2_channel_request_pty_size(channel, resize.cols, resize.rows)
+      }
       for chunk in pending where !drain(chunk) { return teardownAndFinish() }
 
       let count = buffer.withUnsafeMutableBufferPointer {

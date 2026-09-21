@@ -64,24 +64,36 @@ public final class SSHTerminalController {
 
   public func connect() async {
     status = .connecting
-    do {
-      let stream = try await SSHConnector.connect(config: config, store: hostKeyStore)
-      await pipeline.connectSSH(transport: stream, key: sessionKey)
-      status = .connected
-      pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
-      registerPushIfNeeded()
-    } catch {
-      status = .failed(Self.describe(error))
+    // The key is valid; libssh2 auth/transport occasionally fails transiently
+    // (and the app opens a couple of connections at once), so retry a few times.
+    // A host-key mismatch is never retried — that must fail loudly.
+    for attempt in 0..<3 {
+      do {
+        let stream = try await SSHConnector.connect(config: config, store: hostKeyStore)
+        await pipeline.connectSSH(transport: stream, key: sessionKey)
+        status = .connected
+        pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
+        schedulePushRegister()
+        return
+      } catch let error as SSHConnectError {
+        if case .hostKeyMismatch = error { status = .failed(Self.describe(error)); return }
+        if attempt == 2 { status = .failed(Self.describe(error)); return }
+      } catch {
+        if attempt == 2 { status = .failed(Self.describe(error)); return }
+      }
+      try? await Task.sleep(nanoseconds: 500_000_000)
     }
   }
 
   /// Best-effort: tell the host's tether-notify about this device once per
-  /// connection, so agent hooks can push to it. Never blocks or fails the shell.
-  private func registerPushIfNeeded() {
+  /// connection. Delayed so its extra SSH connection doesn't race the terminal
+  /// handshake. Never blocks or fails the shell.
+  private func schedulePushRegister() {
     guard !didRegisterPush, let id = pushIdentity else { return }
     didRegisterPush = true
     let command = "\(Self.notify) register \(shellQuote(id.token)) \(shellQuote(id.secretKey)) \(shellQuote(id.label))"
     Task { [config, hostKeyStore] in
+      try? await Task.sleep(nanoseconds: 2_000_000_000)
       _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: command)
     }
   }
