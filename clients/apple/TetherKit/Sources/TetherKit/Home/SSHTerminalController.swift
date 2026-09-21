@@ -152,17 +152,34 @@ public final class SSHTerminalController {
     await refreshSessions()
   }
 
-  /// SCP-sends to the current session's cwd (home dir when cwd unknown).
-  public func sendFile(data: Data, filename: String) async {
+  /// Live working directory of the current session's shell. `zmx ls` only
+  /// reports the login dir, so read the shell pid's `/proc/<pid>/cwd`; falls
+  /// back to the reported dir when `/proc` is unavailable.
+  private func currentCwd() async -> String? {
     if sessions.isEmpty { await refreshSessions() }
-    let dir = sessions.first(where: { $0.name == attach })?.displayCwd
-    let remote = dir?.hasPrefix("/") == true ? "\(dir!)/\(filename)" : filename
+    guard let session = sessions.first(where: { $0.name == attach }) else { return nil }
+    if let live = try? await SSHConnector.exec(
+      config: config, store: hostKeyStore, command: "readlink /proc/\(session.pid)/cwd 2>/dev/null"
+    ) {
+      let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.hasPrefix("/") { return trimmed }
+    }
+    return session.displayCwd.hasPrefix("/") ? session.displayCwd : nil
+  }
+
+  /// SCP-sends to the current session's live cwd. Returns the remote path.
+  @discardableResult
+  public func sendFile(data: Data, filename: String) async -> String? {
+    let dir = await currentCwd()
+    let remote = dir.map { "\($0)/\(filename)" } ?? filename
     transfer = .sending(filename)
     do {
       try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
       transfer = .sent(remote)
+      return remote
     } catch {
       transfer = .failed(Self.describe(error))
+      return nil
     }
   }
 
@@ -172,8 +189,7 @@ public final class SSHTerminalController {
     gitLoading = true
     defer { gitLoading = false }
     gitError = nil
-    if sessions.isEmpty { await refreshSessions() }
-    guard let cwd = sessions.first(where: { $0.name == attach })?.displayCwd else {
+    guard let cwd = await currentCwd() else {
       gitLines = []
       gitError = "No working directory for this session."
       return

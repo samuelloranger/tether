@@ -65,7 +65,9 @@ public struct SSHTerminalView: View {
         defer { photoItem = nil }
         guard let data = try? await item.loadTransferable(type: Data.self) else { return }
         let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-        await controller.sendFile(data: data, filename: "photo-\(Int(Date().timeIntervalSince1970)).\(ext)")
+        let remote = await controller.sendFile(data: data, filename: "photo-\(Int(Date().timeIntervalSince1970)).\(ext)")
+        // Drop the uploaded path at the shell prompt so it can be used directly.
+        if let remote { controller.sendInput(shellQuote(remote)) }
       }
     }
     .task {
