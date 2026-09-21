@@ -53,6 +53,9 @@ public final class SSHTerminalController {
   private var didRegisterPush = false
   private var connectInFlight = false
   private var didChooseInitialSession = false
+  /// True when a full-screen program (a CLI agent, vim, less) holds the screen.
+  /// Fed by the pipeline; gates how a session switch is delivered.
+  private var altScreen = false
   /// Set when the host had no sessions on first connect: skip the `zmx attach`
   /// so nothing is auto-created. Cleared the moment the user creates a session.
   private var pendingNoSession = false
@@ -169,9 +172,20 @@ public final class SSHTerminalController {
     }
   }
 
-  /// Switches over the live PTY: the attached shell carries `ZMX_SESSION`, so
-  /// `zmx attach <name>` switches in place instead of redialing. No-op if a
-  /// full-screen TUI holds the foreground.
+  public enum SwitchStrategy: Equatable { case typeInPlace, redial }
+
+  /// How to deliver a session switch. Typing `zmx attach <name>` only lands when
+  /// the outer shell prompt has the screen: a full-screen TUI (a CLI agent)
+  /// would capture the keystrokes and echo them literally, so redial a fresh PTY
+  /// and attach there instead — the same path a cold launch takes. When not
+  /// connected there is nothing to type into either.
+  nonisolated static func switchStrategy(connected: Bool, altScreen: Bool) -> SwitchStrategy {
+    (connected && !altScreen) ? .typeInPlace : .redial
+  }
+
+  /// The attached shell carries `ZMX_SESSION`, so at a shell prompt
+  /// `zmx attach <name>` switches in place without redialing. Inside a
+  /// full-screen program it can't, so redial instead.
   public func switchSession(to name: String) async {
     // Skip only when it's the same session we're already on. When there is no
     // session yet (empty-state host), attach even if the name equals `attach`.
@@ -179,10 +193,12 @@ public final class SSHTerminalController {
     attach = name
     pendingNoSession = false
     hasSession = true
-    if case .connected = status {
+    let connected = { if case .connected = status { return true } else { return false } }()
+    switch Self.switchStrategy(connected: connected, altScreen: altScreen) {
+    case .typeInPlace:
       pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(name))\n", key: sessionKey))
       await refreshSessions()
-    } else {
+    case .redial:
       await connect()
     }
   }
@@ -307,6 +323,8 @@ public final class SSHTerminalController {
     case let .mouseModes(mode, sgr):
       mouseMode = mode
       mouseSgr = sgr
+    case let .altScreen(active):
+      altScreen = active
     case .error:
       // The transport died under a live session. Without this the status stayed
       // `.connected` and every reconnect gate skipped, so the terminal was dead

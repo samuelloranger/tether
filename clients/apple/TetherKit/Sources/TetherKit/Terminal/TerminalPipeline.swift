@@ -8,6 +8,11 @@ import TetherFFIBindings
 /// and these are not.
 public enum TerminalPipelineEvent: Sendable {
   case mouseModes(mode: MouseMode, sgr: Bool)
+  /// The visible screen switched to/from the alt-screen — i.e. a full-screen
+  /// program (a CLI agent, vim, less) took or gave up the foreground. The
+  /// controller needs this to know whether typing a command at the "prompt"
+  /// would actually reach a shell.
+  case altScreen(Bool)
   case error(String)
 }
 
@@ -94,6 +99,7 @@ actor TerminalPipeline {
     emulatorKey = key
     lastRenderedGeneration = nil
     lastAltScreen = attached.grid.lastAltScreen
+    eventSink.yield(.altScreen(lastAltScreen))
     if attached.reused {
       publishSnapshot()
     } else {
@@ -315,9 +321,10 @@ actor TerminalPipeline {
     guard generation != lastRenderedGeneration else { return }
     lastRenderedGeneration = generation
     let packed = emulator.snapshot()
-    if let header = try? GridSnapshotDecoder.peekHeader(packed) {
+    if let header = try? GridSnapshotDecoder.peekHeader(packed), header.altScreen != lastAltScreen {
       lastAltScreen = header.altScreen
       currentGrid?.lastAltScreen = header.altScreen
+      eventSink.yield(.altScreen(header.altScreen))
     }
     if let emulatorKey {
       snapshotCache.remember(packed, for: emulatorKey)
