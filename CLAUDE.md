@@ -15,7 +15,7 @@ The one piece of Rust that stayed is the **VT emulator** (`crates/`), consumed b
 | Path | Stack | What it is |
 |---|---|---|
 | `clients/apple/` | Swift / SwiftUI | The iOS app. `TetherKit` package (SSH transport, terminal pipeline + renderer, Home / key vault, all UI), `TetherIOS` app target, `TetherNotificationService` (NSE — decrypts push), `Tether.xcodeproj`. |
-| `crates/` | Rust | `tether-core` / `tether-ffi` / `tether-proto` — the VT emulator (grid model) exposed to Swift via UniFFI. **Renderer only, no networking.** |
+| `crates/` | Rust | `tether-core` + `tether-ffi` — the VT emulator (grid model) exposed to Swift via UniFFI. **Renderer only, no networking.** |
 | `apps/tether-notify/` | Go | Host-side encrypted-push CLI. Registers a phone's APNs token + AES key (sent by the app over SSH) and posts ciphertext to the relay. |
 | `scripts/` | shell / ruby | `build-xcframework.sh` (Rust emulator → Swift bindings), `install.sh` (install `tether-notify`), `install-agent-hooks.sh` (wire agent push), `release.sh`. |
 | `.github/workflows/` | — | `ci.yml` (lint + host-tools + iOS build/test), `release.yml` (signed iOS archive → TestFlight). |

@@ -62,7 +62,7 @@ tether-notify notify --title "homelab · agent" --body "Waiting for input" \
 
 ```
 clients/apple/        native iOS app (TetherKit package + TetherIOS + NSE)
-crates/               Rust VT emulator (tether-core/ffi/proto), consumed as an XCFramework
+crates/               Rust VT emulator (tether-core + tether-ffi), consumed as an XCFramework
 apps/tether-notify/   Go host CLI for encrypted push
 scripts/              build-xcframework.sh, install.sh, install-agent-hooks.sh, release.sh
 ```
