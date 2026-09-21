@@ -1,0 +1,195 @@
+{
+  "capturedAt": "2026-09-02T15:21:05.794Z",
+  "endpoints": {
+    "GET /api/sessions/sess-tether/agents": {
+      "status": 200,
+      "body": [
+        {
+          "agentId": "orchestrator",
+          "sessionId": "sess-tether",
+          "parentId": null,
+          "name": "Orchestrator",
+          "kind": "orchestrator",
+          "state": "working",
+          "action": "coordinating 4 subagents",
+          "model": "opus",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-explorer",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "explorer",
+          "kind": "subagent",
+          "state": "done",
+          "action": "mapped auth surface",
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-tests",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "tests",
+          "kind": "subagent",
+          "state": "working",
+          "action": "writing auth.test.ts",
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-impl",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "implementer",
+          "kind": "subagent",
+          "state": "waiting",
+          "action": "blocked: confirm token TTL",
+          "model": "opus",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-review",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "reviewer",
+          "kind": "subagent",
+          "state": "working",
+          "action": "auditing diff",
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "c-cursor",
+          "sessionId": "sess-tether",
+          "parentId": "a-impl",
+          "name": "cursor-agent",
+          "kind": "cursor",
+          "state": "working",
+          "action": "codemod: token util",
+          "model": "gpt-5.3-codex",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        }
+      ]
+    },
+    "GET /api/agents": {
+      "status": 200,
+      "body": [
+        {
+          "agentId": "orchestrator",
+          "sessionId": "sess-tether",
+          "parentId": null,
+          "name": "Orchestrator",
+          "kind": "orchestrator",
+          "state": "working",
+          "action": "coordinating 4 subagents",
+          "model": "opus",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-explorer",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "explorer",
+          "kind": "subagent",
+          "state": "done",
+          "action": "mapped auth surface",
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-tests",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "tests",
+          "kind": "subagent",
+          "state": "working",
+          "action": "writing auth.test.ts",
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-impl",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "implementer",
+          "kind": "subagent",
+          "state": "waiting",
+          "action": "blocked: confirm token TTL",
+          "model": "opus",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "a-review",
+          "sessionId": "sess-tether",
+          "parentId": "orchestrator",
+          "name": "reviewer",
+          "kind": "subagent",
+          "state": "working",
+          "action": "auditing diff",
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "c-cursor",
+          "sessionId": "sess-tether",
+          "parentId": "a-impl",
+          "name": "cursor-agent",
+          "kind": "cursor",
+          "state": "working",
+          "action": "codemod: token util",
+          "model": "gpt-5.3-codex",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "orchestrator",
+          "sessionId": "sess-vigie",
+          "parentId": null,
+          "name": "Orchestrator",
+          "kind": "orchestrator",
+          "state": "working",
+          "action": "scraping run",
+          "model": "opus",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "v-scraper",
+          "sessionId": "sess-vigie",
+          "parentId": "orchestrator",
+          "name": "scraper",
+          "kind": "subagent",
+          "state": "working",
+          "action": "fetch listings",
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        },
+        {
+          "agentId": "v-judge",
+          "sessionId": "sess-vigie",
+          "parentId": "orchestrator",
+          "name": "judge",
+          "kind": "subagent",
+          "state": "idle",
+          "action": null,
+          "model": "sonnet",
+          "startedAt": 1788362465588,
+          "updatedAt": 1788362465588
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Horizontal tabs — proposed</title>
+<style>
+  :root {
+    --background: #08080e;
+    --surface: #12121d;
+    --surface-raised: #191926;
+    --input: #0b0b13;
+    --text: #edeef6;
+    --text-muted: #9797ac;
+    --text-faint: #61617a;
+    --border: #232333;
+    --accent: #7c8cf8;
+    --success: #6ee7a8;
+    --warning: #f2b34c;
+    --danger: #ff7050;
+    --lit: #f2b34c;
+    --b1: 13%; --b2: 6%; --b3: 2%; --rim: 55%;
+    --term-bg: #0b0b13;
+    --r-control: 8px;
+    --r-panel: 12px;
+    --r-screen: 12px;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --t-fast: 140ms;
+    --t-state: 200ms;
+    --sans: Inter, system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --host-devbox: #89b4fa;
+    --host-mac: #f5c2e7;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #050509; color: var(--text);
+    font-family: var(--sans); font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding: 22px 22px 28px;
+  }
+  .lede {
+    width: min(1080px, 100%);
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .lede h1 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+  .lede p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    max-width: 62ch;
+  }
+  .seg {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .seg button {
+    height: 32px;
+    padding: 0 14px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-weight: 550;
+    cursor: pointer;
+  }
+  .seg button.on {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent);
+  }
+
+  .window {
+    width: min(1080px, 100%);
+    height: min(640px, calc(100vh - 120px));
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--background);
+    box-shadow:
+      0 0 0 1px #1a1a24,
+      0 40px 80px -28px #000,
+      0 0 80px -40px color-mix(in srgb, var(--lit) 40%, transparent);
+  }
+  .titlebar {
+    height: 36px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 12px;
+    user-select: none;
+  }
+  .traffic { display: flex; gap: 6px; margin-right: 12px; }
+  .traffic i { width: 12px; height: 12px; border-radius: 50%; }
+  .traffic .c { background: #ff5f57; }
+  .traffic .m { background: #febc2e; }
+  .traffic .x { background: #28c840; }
+  .titlebar b { font-weight: 550; color: var(--text-faint); }
+
+  .shell {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    --heat: 260ms;
+    transition: --lit var(--heat) var(--ease-out);
+  }
+  .shell[data-lit="working"] { --lit: #f2b34c; --b1: 13%; --b2: 6%; --b3: 2%; --rim: 55%; }
+  .shell[data-lit="waiting"] { --lit: #ff7050; --b1: 9%; --b2: 4%; --b3: 1.5%; --rim: 46%; }
+  .shell[data-lit="idle"]    { --lit: #7c8cf8; --b1: 7%; --b2: 3%; --b3: 1%; --rim: 30%; }
+
+  .drawer {
+    width: 280px;
+    flex-shrink: 0;
+    display: none;
+    flex-direction: column;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+  .stage.sidebar .drawer { display: flex; }
+  .dhead {
+    height: 52px; display: flex; align-items: center; gap: 9px;
+    padding: 0 10px 0 16px; border-bottom: 1px solid var(--border);
+  }
+  .dhead .mark { width: 20px; height: 20px; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--lit) 45%, transparent)); }
+  .dhead b { flex: 1; font-size: 14px; font-weight: 650; letter-spacing: -0.015em; }
+  .dacts { display: flex; gap: 2px; color: var(--text-muted); }
+  .dacts span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; }
+  .dscroll { flex: 1; overflow: auto; padding: 8px 10px; }
+  .hsec { padding: 14px 6px 7px; display: flex; align-items: center; gap: 8px; }
+  .hdot { width: 8px; height: 8px; border-radius: 50%; }
+  .hname { font-size: 11px; font-weight: 650; color: var(--text-muted); }
+  .hcount { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+  .honline { margin-left: auto; font-size: 11px; color: var(--text-faint); }
+  .srow {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    height: 40px; padding: 0 12px; border-radius: 9px; color: var(--text-muted); cursor: pointer;
+  }
+  .srow::before {
+    content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
+    border-radius: 0 2px 2px 0; background: var(--lit); transform: scaleY(0); opacity: 0;
+  }
+  .srow.active {
+    color: var(--text);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--lit) 14%, var(--surface-raised)), color-mix(in srgb, var(--lit) 5%, var(--surface-raised)));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--lit) 30%, transparent), 0 6px 22px -8px color-mix(in srgb, var(--lit) 45%, transparent);
+  }
+  .srow.active::before { transform: scaleY(1); opacity: 1; }
+  .srow.wants { background: color-mix(in srgb, var(--danger) 7%, transparent); }
+  .srow .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srow.active .t { font-weight: 600; }
+  .newterm {
+    width: 100%; height: 30px; margin: 4px 0 8px;
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    border-radius: 8px; background: transparent; color: var(--text-faint);
+    font: inherit; font-size: 11.5px; cursor: default;
+  }
+
+  .main {
+    position: relative; flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+  }
+  .main::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(130% 80% at 55% -10%,
+      color-mix(in srgb, var(--lit) var(--b1), transparent) 0%,
+      color-mix(in srgb, var(--lit) var(--b2), transparent) 32%,
+      color-mix(in srgb, var(--lit) var(--b3), transparent) 55%,
+      transparent 78%);
+  }
+  .main > * { position: relative; z-index: 1; }
+
+  .tabbar {
+    display: none;
+    align-items: stretch;
+    height: 40px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 6px;
+    gap: 2px;
+  }
+  .stage.horizontal .tabbar { display: flex; }
+  .tabbar .icon {
+    width: 32px; height: 32px; margin: 4px 2px 0;
+    display: grid; place-items: center; border-radius: 7px;
+    color: var(--text-muted); cursor: default; flex-shrink: 0;
+  }
+  .tabbar .icon:hover { background: var(--surface-raised); color: var(--text); }
+  .tabs {
+    flex: 1; min-width: 0; display: flex; gap: 2px; overflow: hidden;
+    align-items: stretch; padding: 4px 0;
+  }
+  .tab {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    min-width: 0; max-width: 200px;
+    padding: 0 10px 0 12px;
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex: 1 1 140px;
+  }
+  .tab .host {
+    position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px;
+    border-radius: 0 2px 2px 0;
+  }
+  .tab.active {
+    color: var(--text);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--lit) 14%, var(--surface-raised)), color-mix(in srgb, var(--lit) 5%, var(--surface-raised)));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--lit) 30%, transparent);
+  }
+  .tab.wants:not(.active) { background: color-mix(in srgb, var(--danger) 7%, transparent); }
+  .tab .name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12.5px;
+  }
+  .tab.active .name { font-weight: 600; }
+  .tab .kill {
+    opacity: 0; width: 18px; height: 18px; border: 0; border-radius: 5px;
+    background: transparent; color: var(--text-muted); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 0; flex-shrink: 0;
+  }
+  .tab:hover .kill { opacity: 1; }
+  .tab .kill:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+  .plus {
+    width: 32px; height: 32px; margin: 4px 4px 0;
+    border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+    border-radius: 8px; background: transparent; color: var(--text-faint);
+    font-size: 16px; cursor: default; flex-shrink: 0;
+  }
+
+  .toolbar {
+    height: 52px; flex-shrink: 0; display: flex; align-items: center; gap: 12px;
+    padding: 0 14px; border-bottom: 1px solid var(--border);
+  }
+  .tlabel { font-size: 13.5px; font-weight: 600; letter-spacing: -0.015em; }
+  .stage.horizontal .tlabel { display: none; }
+  .chip {
+    padding: 3px 8px; border-radius: 6px;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    color: var(--lit); background: color-mix(in srgb, var(--lit) 12%, transparent);
+  }
+  .actions {
+    display: flex; margin-left: auto; flex-shrink: 0;
+    border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+    background: color-mix(in srgb, var(--surface-raised) 55%, transparent);
+  }
+  .actions span {
+    height: 30px; padding: 0 12px; display: grid; place-items: center;
+    font-size: 12px; color: var(--text-muted);
+    border-right: 1px solid var(--border);
+  }
+  .actions span:last-child { border-right: 0; }
+  .addr { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+  .more { width: 32px; height: 32px; display: grid; place-items: center; color: var(--text-muted); }
+
+  .term {
+    flex: 1; min-height: 0; margin: 10px 12px 12px;
+    border-radius: var(--r-screen);
+    background: var(--term-bg);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--lit) var(--rim), transparent),
+      inset 1px 1px 0 rgb(255 255 255 / 4%);
+    padding: 14px 16px;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: #cdd0e0;
+    overflow: hidden;
+  }
+  .term .dim { color: #61617a; }
+  .term .ok { color: var(--success); }
+  .term .ask { color: var(--danger); }
+  .cur { display: inline-block; width: 7px; height: 14px; background: var(--text); vertical-align: -2px; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; background: var(--text-faint); }
+  .dot.working { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 16%, transparent); }
+  .dot.waiting { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
+  .dot.idle { background: color-mix(in srgb, var(--text-faint) 70%, transparent); }
+
+  .notes {
+    width: min(1080px, 100%);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 720px) { .notes { grid-template-columns: 1fr; } }
+  .note {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .note .k {
+    font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px;
+  }
+  .note p { margin: 0; color: var(--text-muted); font-size: 12.5px; }
+  .setting {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--background);
+  }
+  .setting label { font-size: 12.5px; }
+  .setting select {
+    height: 28px; padding: 0 8px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface-raised); color: var(--text);
+    font: inherit;
+  }
+</style>
+</head>
+<body>
+<div class="stage horizontal">
+  <div class="lede">
+    <div>
+      <h1>Desktop horizontal tabs</h1>
+      <p>Appearance → Tab layout: Horizontal. Sessions live in a top strip. The left sidebar is gone. Click a tab; hover one to see kill.</p>
+    </div>
+    <div class="seg" role="tablist">
+      <button type="button" id="btn-side">Today (sidebar)</button>
+      <button type="button" class="on" id="btn-horiz">Proposed (horizontal)</button>
+    </div>
+  </div>
+
+  <div class="window">
+    <div class="titlebar">
+      <div class="traffic"><i class="c"></i><i class="m"></i><i class="x"></i></div>
+      <b>Tether</b>
+    </div>
+    <div class="shell" data-lit="working">
+      <aside class="drawer">
+        <header class="dhead">
+          <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M4.8 6.6 10.6 12l-5.8 5.4" stroke="#37de9f" stroke-width="3.4" stroke-linecap="round"/>
+            <rect x="14.6" y="4.9" width="5.6" height="14.2" rx="2.8" fill="#686dfe"/>
+          </svg>
+          <b>Tether</b>
+          <div class="dacts"><span title="Hosts">▣</span><span>⋯</span></div>
+        </header>
+        <div class="dscroll">
+          <div class="hsec">
+            <i class="hdot" style="background:var(--host-devbox)"></i>
+            <span class="hname">devbox</span>
+            <span class="hcount">2</span>
+            <span class="honline">online</span>
+          </div>
+          <div class="srow active" data-id="tether" data-lit="working">
+            <i class="dot working"></i><span class="t">tether</span>
+          </div>
+          <div class="srow" data-id="board" data-lit="idle">
+            <i class="dot idle"></i><span class="t">board</span>
+          </div>
+          <button class="newterm" type="button">New terminal</button>
+          <div class="hsec">
+            <i class="hdot" style="background:var(--host-mac)"></i>
+            <span class="hname">macbuild</span>
+            <span class="hcount">2</span>
+            <span class="honline">online</span>
+          </div>
+          <div class="srow wants" data-id="vigie" data-lit="waiting">
+            <i class="dot waiting"></i><span class="t">vigie</span>
+          </div>
+          <div class="srow" data-id="tether-mac" data-lit="idle">
+            <i class="dot idle"></i><span class="t">tether · macbuild</span>
+          </div>
+          <button class="newterm" type="button">New terminal</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="tabbar">
+          <div class="icon" title="Hosts">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="18" height="7" rx="2"/>
+              <rect x="3" y="14" width="18" height="7" rx="2"/>
+            </svg>
+          </div>
+          <div class="tabs">
+            <div class="tab active" data-id="tether" data-lit="working" data-addr="192.168.50.10:8085">
+              <i class="host" style="background:var(--host-devbox)"></i>
+              <i class="dot working"></i>
+              <span class="name">tether</span>
+              <button class="kill" type="button" title="Kill session">×</button>
+            </div>
+            <div class="tab" data-id="board" data-lit="idle" data-addr="192.168.50.10:8085">
+              <i class="host" style="background:var(--host-devbox)"></i>
+              <i class="dot idle"></i>
+              <span class="name">board</span>
+              <button class="kill" type="button" title="Kill session">×</button>
+            </div>
+            <div class="tab wants" data-id="vigie" data-lit="waiting" data-addr="192.168.50.125:8085">
+              <i class="host" style="background:var(--host-mac)"></i>
+              <i class="dot waiting"></i>
+              <span class="name">vigie</span>
+              <button class="kill" type="button" title="Kill session">×</button>
+            </div>
+            <div class="tab" data-id="tether-mac" data-lit="idle" data-addr="192.168.50.125:8085">
+              <i class="host" style="background:var(--host-mac)"></i>
+              <i class="dot idle"></i>
+              <span class="name">tether · macbuild</span>
+              <button class="kill" type="button" title="Kill session">×</button>
+            </div>
+          </div>
+          <button class="plus" type="button" title="New terminal on active host">+</button>
+        </div>
+
+        <header class="toolbar">
+          <span class="tlabel" id="tlabel">tether</span>
+          <span class="chip" id="chip">working</span>
+          <div class="actions">
+            <span>Git</span><span>Review</span><span>Workspace</span><span>Upload</span>
+          </div>
+          <span class="addr" id="addr">192.168.50.10:8085</span>
+          <span class="more">⋯</span>
+        </header>
+
+        <div class="term" id="term"></div>
+      </main>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <div class="k">Appearance</div>
+      <p>New persisted setting. Sidebar stays the default. Pin sidebar is hidden in this mode.</p>
+      <div class="setting">
+        <label for="layout">Tab layout</label>
+        <select id="layout">
+          <option>Sidebar</option>
+          <option selected>Horizontal</option>
+        </select>
+      </div>
+    </div>
+    <div class="note">
+      <div class="k">What moved</div>
+      <p>Hosts icon on the strip (left). + starts a session on the active host. Hover × kills (existing confirm). Rename stays on ⋯. Same label on two hosts gets · hostname. Unselected waiting still washes ember.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const terms = {
+    tether: { label: "tether", chip: "working",
+      html: `<span class="dim">sam@devbox ~/sites/tether</span>
+feat/agents-graph
+<span class="ok">●</span> working · 4 agents
+<span class="dim">$</span> bun --cwd apps/server run test
+ 482 pass <span class="cur"></span>` },
+    board: { label: "board", chip: "idle",
+      html: `<span class="dim">sam@devbox ~/sites/board</span>
+<span class="dim">$</span> <span class="cur"></span>` },
+    vigie: { label: "vigie", chip: "needs input",
+      html: `<span class="ask">Claude needs permission to edit src/judge.go</span>
+<span class="dim">❯</span> Allow this edit? <span class="cur"></span>` },
+    "tether-mac": { label: "tether · macbuild", chip: "idle",
+      html: `<span class="dim">sam@macbuild ~/build/tether</span>
+<span class="dim">$</span> <span class="cur"></span>` },
+  };
+
+  const stage = document.querySelector(".stage");
+  const shell = document.querySelector(".shell");
+  const chip = document.getElementById("chip");
+  const tlabel = document.getElementById("tlabel");
+  const addr = document.getElementById("addr");
+  const term = document.getElementById("term");
+  const layout = document.getElementById("layout");
+
+  function select(id, lit, address) {
+    document.querySelectorAll(".srow, .tab").forEach((el) => {
+      el.classList.toggle("active", el.dataset.id === id);
+    });
+    shell.dataset.lit = lit;
+    const t = terms[id];
+    chip.textContent = t.chip;
+    tlabel.textContent = t.label;
+    addr.textContent = address;
+    term.innerHTML = t.html;
+  }
+
+  document.querySelectorAll(".srow, .tab").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".kill")) return;
+      select(el.dataset.id, el.dataset.lit, el.dataset.addr || addr.textContent);
+    });
+  });
+
+  document.getElementById("btn-side").onclick = () => {
+    stage.classList.remove("horizontal");
+    stage.classList.add("sidebar");
+    document.getElementById("btn-side").classList.add("on");
+    document.getElementById("btn-horiz").classList.remove("on");
+    layout.value = "Sidebar";
+  };
+  document.getElementById("btn-horiz").onclick = () => {
+    stage.classList.add("horizontal");
+    stage.classList.remove("sidebar");
+    document.getElementById("btn-horiz").classList.add("on");
+    document.getElementById("btn-side").classList.remove("on");
+    layout.value = "Horizontal";
+  };
+  layout.onchange = () => {
+    if (layout.value === "Horizontal") document.getElementById("btn-horiz").click();
+    else document.getElementById("btn-side").click();
+  };
+
+  select("tether", "working", "192.168.50.10:8085");
+</script>
+</body>
+</html>
