@@ -117,6 +117,7 @@ public struct SSHTerminalView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TetherColors.terminalBackground)
         statusOverlay
+        emptyStateOverlay
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       TerminalInputBridge(
@@ -307,7 +308,7 @@ public struct SSHTerminalView: View {
 
   private var lampColor: Color {
     switch controller.status {
-    case .connecting: return TetherColors.warning
+    case .connecting, .disconnected: return TetherColors.warning
     case .connected: return TetherColors.success
     case .failed: return TetherColors.danger
     }
@@ -351,6 +352,15 @@ public struct SSHTerminalView: View {
       }
       .padding(20).background(TetherColors.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
         .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+    case .disconnected:
+      VStack(spacing: 10) {
+        ProgressView().tint(TetherColors.accent)
+        Text("Connection lost — reconnecting…")
+          .font(.system(size: 13, design: .monospaced)).foregroundStyle(TetherColors.textSecondary)
+          .multilineTextAlignment(.center)
+      }
+      .padding(20).background(TetherColors.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+      .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
     case let .failed(message):
       VStack(spacing: 12) {
         Image(systemName: "exclamationmark.triangle").font(.system(size: 28)).foregroundStyle(TetherColors.danger)
@@ -367,6 +377,34 @@ public struct SSHTerminalView: View {
       .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
     case .connected:
       EmptyView()
+    }
+  }
+
+  /// Shown over the terminal when connected to a host that has no zmx session:
+  /// nothing is auto-created, so the terminal stays gated until the user starts
+  /// one from the drawer.
+  @ViewBuilder
+  private var emptyStateOverlay: some View {
+    if case .connected = controller.status, !controller.hasSession {
+      VStack(spacing: 14) {
+        Image(systemName: "terminal").font(.system(size: 30)).foregroundStyle(TetherColors.textSecondary)
+        Text("No session on \(controller.title)")
+          .font(.system(size: 14, weight: .semibold)).foregroundStyle(TetherColors.textPrimary)
+          .multilineTextAlignment(.center)
+        Text("Nothing runs until you start one.")
+          .font(.system(size: 12, design: .monospaced)).foregroundStyle(TetherColors.textFaint)
+        Button("New session") {
+          withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = true }
+        }
+        .font(.system(size: 14, weight: .semibold)).foregroundStyle(TetherColors.onAccent)
+        .padding(.horizontal, 20).padding(.vertical, 10)
+        .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
+        .buttonStyle(TetherPressStyle())
+        .accessibilityIdentifier("sshEmptyStateNew")
+      }
+      .padding(24).frame(maxWidth: 300)
+      .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
+      .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
     }
   }
 }

@@ -10,6 +10,11 @@ public final class SSHTerminalController {
   public enum Status: Equatable {
     case connecting
     case connected
+    /// The transport dropped under a live session (iOS suspended the socket, a
+    /// GOAWAY, a network blip). Distinct from `.failed` so the UI shows a calm
+    /// "reconnecting" state, and so every reconnect gate (which only skips when
+    /// `.connected`) actually redials instead of trusting a stale `.connected`.
+    case disconnected
     case failed(String)
   }
 
@@ -30,6 +35,10 @@ public final class SSHTerminalController {
   public private(set) var sessionKey: String
   public private(set) var sessions: [ZmxSession] = []
   public private(set) var attach: String
+  /// False when we connected to a host that had no zmx sessions: the PTY is a
+  /// bare login shell and no session was auto-created. The UI shows an
+  /// empty-state prompt until the user creates one.
+  public private(set) var hasSession = true
   public private(set) var gitLines: [GitDiffLine] = []
   public private(set) var gitError: String?
   public private(set) var gitLoading = false
@@ -44,6 +53,9 @@ public final class SSHTerminalController {
   private var didRegisterPush = false
   private var connectInFlight = false
   private var didChooseInitialSession = false
+  /// Set when the host had no sessions on first connect: skip the `zmx attach`
+  /// so nothing is auto-created. Cleared the moment the user creates a session.
+  private var pendingNoSession = false
   private var lastCols: UInt16 = 80
   private var lastRows: UInt16 = 24
 
@@ -95,7 +107,14 @@ public final class SSHTerminalController {
         // switch, so it never re-reports — push the last known size now (SIGWINCH)
         // so the newly attached session reflows to the device.
         pipeline.outbound.yield(.serverResize(cols: lastCols, rows: lastRows))
-        pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
+        // Zero-session host: leave the bare login shell, don't auto-create.
+        // The UI shows an empty-state prompt until the user starts one.
+        if pendingNoSession {
+          hasSession = false
+        } else {
+          hasSession = true
+          pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
+        }
         schedulePushRegister()
         Task { await refreshSessions() }
         return
@@ -118,7 +137,10 @@ public final class SSHTerminalController {
     guard attach == Self.defaultAttach else { return }
     guard let out = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") else { return }
     let existing = ZmxSession.parse(out)
-    guard !existing.isEmpty, !existing.contains(where: { $0.name == Self.defaultAttach }) else { return }
+    // No sessions at all → don't create "default"; land on the empty state.
+    if existing.isEmpty { pendingNoSession = true; return }
+    // A host with a "default" already: attach it. Otherwise attach the newest.
+    guard !existing.contains(where: { $0.name == Self.defaultAttach }) else { return }
     attach = existing.max(by: { $0.created < $1.created })?.name ?? attach
   }
 
@@ -151,8 +173,12 @@ public final class SSHTerminalController {
   /// `zmx attach <name>` switches in place instead of redialing. No-op if a
   /// full-screen TUI holds the foreground.
   public func switchSession(to name: String) async {
-    guard name != attach else { return }
+    // Skip only when it's the same session we're already on. When there is no
+    // session yet (empty-state host), attach even if the name equals `attach`.
+    guard name != attach || !hasSession else { return }
     attach = name
+    pendingNoSession = false
+    hasSession = true
     if case .connected = status {
       pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(name))\n", key: sessionKey))
       await refreshSessions()
@@ -166,8 +192,13 @@ public final class SSHTerminalController {
   public func killSession(_ name: String) async {
     if name == attach {
       await refreshSessions()
-      let next = sessions.first(where: { $0.name != name })?.name ?? Self.defaultAttach
-      await switchSession(to: next)
+      if let next = sessions.first(where: { $0.name != name })?.name {
+        await switchSession(to: next)
+      } else {
+        // Killed the only session — drop to the empty state, don't recreate one.
+        hasSession = false
+        pendingNoSession = true
+      }
     }
     _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) kill \(shellQuote(name)) --force")
     await refreshSessions()
@@ -272,9 +303,36 @@ public final class SSHTerminalController {
   public func leave() async { await pipeline.disconnect() }
 
   private func apply(_ event: TerminalPipelineEvent) {
-    if case let .mouseModes(mode, sgr) = event {
+    switch event {
+    case let .mouseModes(mode, sgr):
       mouseMode = mode
       mouseSgr = sgr
+    case .error:
+      // The transport died under a live session. Without this the status stayed
+      // `.connected` and every reconnect gate skipped, so the terminal was dead
+      // until the app was killed. Flip off `.connected` and redial.
+      markDisconnectedAndReconnect()
+    }
+  }
+
+  /// Flip a dropped session off `.connected` and kick a foreground redial. A no-op
+  /// while a connect is already in flight, and never fires on an intentional
+  /// leave (the pipeline cancels its read task, which suppresses the error).
+  private func markDisconnectedAndReconnect() {
+    guard let next = Self.statusAfterTransportDrop(from: status) else { return }
+    status = next
+    Task { await self.connect() }
+  }
+
+  /// Pure transition for a mid-session transport drop. `nil` leaves the status
+  /// untouched — a reconnect is already underway (`.connecting`), so a late error
+  /// from the old transport must not disturb it. Any settled state (crucially
+  /// `.connected`, which used to be left stale) becomes `.disconnected` so the
+  /// reconnect gates fire.
+  nonisolated static func statusAfterTransportDrop(from current: Status) -> Status? {
+    switch current {
+    case .connecting: return nil
+    case .connected, .disconnected, .failed: return .disconnected
     }
   }
 
