@@ -5,12 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Dispatchable so a long-lived branch can ask for these checks before it is
-  # anywhere near a PR to main. cache-warm* stay gated on main by their own `if`.
   workflow_dispatch:
 
 jobs:
-  lint-test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -19,8 +17,6 @@ jobs:
         with:
           bun-version: latest
 
-      # Write bun's download cache into the default-branch scope so tag release
-      # jobs can restore it (tag→tag cache restore is forbidden by Actions).
       - uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
@@ -31,184 +27,13 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      - name: Lint (biome + tsc)
+      - name: Lint (biome)
         run: bun lint
 
-      # The server's noise suite dlopens crates/tether-noise-ffi's cdylib
-      # (apps/server/src/noise/ffi.ts resolves it at
-      # crates/tether-noise-ffi/target/debug/libtether_noise_ffi.<suffix>). It is
-      # built manually in local dev; without this step the 18 noise tests fail
-      # with ERR_DLOPEN_FAILED ("cannot open shared object file"). The later
-      # rust-toolchain step is a no-op after this one.
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-      - name: Build the Noise FFI cdylib (server noise tests dlopen it)
-        run: bun run build:ffi
-        working-directory: apps/server
-
-      # `bun run test` (not raw `bun test`) so the --parallel flag lives in one
-      # place: apps/server/package.json. No TETHER_DB_PATH here on purpose —
-      # test-preload.ts derives a per-process temp DB, and pinning every worker
-      # to one file makes parallel workers fight over the same SQLite database.
-      - name: Server tests
-        # A hung test used to stall this step until the 6h job ceiling and
-        # publish nothing. Bounded so it fails fast and the log is available.
-        #
-        # 3, not 10: this step measures ~6s green, and the runner still hangs
-        # here occasionally (runs 34405535702 and 34351661642 both burned the
-        # full 10 minutes and reported nothing). The hang is not understood yet
-        # — it is not platform-specific, so it outlived the Windows leg — and
-        # until it is, the cap is what decides what a recurrence costs. 30x
-        # margin over green is plenty.
-        timeout-minutes: 3
-        run: bun run test
-        working-directory: apps/server
-
-      # Release tooling. Small, but it builds the updater manifest that every
-      # desktop auto-update resolves, and a mistake there is only visible after
-      # a release has already published.
-      - name: Release script tests
-        timeout-minutes: 5
-        run: bun test scripts/
-
-      # apps/desktop is the client that ships to desktop users. Its suite ran in
-      # no pipeline at all until this step existed.
-      - name: Desktop tests (pure logic)
-        timeout-minutes: 10
-        run: bun run test
-        working-directory: apps/desktop
-
-      # tether-core is plain Rust with no Tauri dependency, so it tests on a
-      # bare runner — no system webkit/gtk packages needed.
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy, rustfmt
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            crates/tether-core/target
-            crates/tether-proto/target
-          key: cargo-core-${{ runner.os }}-${{ hashFiles('crates/tether-core/Cargo.toml', 'crates/tether-core/Cargo.lock', 'crates/tether-proto/Cargo.toml', 'crates/tether-proto/Cargo.lock') }}
-          restore-keys: |
-            cargo-core-${{ runner.os }}-
-
-      # The e2e suites under crates/tether-core/tests spawn the REAL compiled
-      # server, one per test on its own port and temp DB. They assert the binary
-      # exists rather than degrading to a mock, so without this step `cargo test`
-      # fails seven tests with "server binary missing" — which is exactly what it
-      # did here.
-      - name: Build the server binary (the core e2e suites spawn it)
-        run: bun run build:server
-
-      - name: Core tests (rust)
-        timeout-minutes: 15
-        run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
-        working-directory: crates/tether-core
-
-      - name: Proto crate tests (rust)
-        timeout-minutes: 10
-        run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
-        working-directory: crates/tether-proto
-
-      # Spawns the real Bun server over proto=2. Marked #[ignore] in-tree so
-      # plain `cargo test` stays hermetic; run explicitly here after bun install.
-      - name: Proto v2 conformance (rust ↔ bun)
-        timeout-minutes: 5
-        run: cargo test --test proto2_conformance -- --ignored --nocapture
-        working-directory: crates/tether-core
-
-      - name: Desktop web bundle
-        run: bun run build
-        working-directory: apps/desktop
-
-  # The desktop client's Rust half, on every OS it ships to.
-  #
-  # lint-test cannot host this: tauri needs the system webkit/gtk headers, and
-  # installing them for every other suite would tax runs that never touch Rust.
-  #
-  # All three platforms, not just Linux, because nothing else compiles this crate
-  # before a tag: cache-warm runs on main only, and the beta workflow that used
-  # to build it (whose desktop leg had in fact never once run) is gone. Without
-  # this the first time apps/desktop is compiled for macOS or Windows is while a
-  # release is being cut — which is how v2.0.0 shipped with every desktop bundle
-  # broken. No bundling here; that is release.yml's job.
-  desktop-build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: latest
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-install-${{ runner.os }}-
-
-      # The iOS targets are only meaningful on the macOS leg, and only the macOS
-      # SDK can build them — see the cross-compile step at the end of this job.
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy, rustfmt
-          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-ios,aarch64-apple-ios-sim' || '' }}
-
-      # Its own key, not release.yml's shared-key: a PR must not overwrite the
-      # cache tagged releases restore from.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-          shared-key: tether-desktop-ci-${{ matrix.os }}
-          cache-on-failure: true
-
-      - name: Linux Tauri deps
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev libssl-dev
-
-      - name: Install workspace deps
-        run: bun install --frozen-lockfile
-
-      # tauri::generate_context! reads frontendDist (apps/desktop/dist), so the
-      # web build has to come first — and it is `tsc --noEmit && vite build`,
-      # which is also the check that the bundle itself still builds.
-      - name: Build the desktop frontend
-        working-directory: apps/desktop
-        run: bun run build
-
-      - name: Desktop Rust (fmt, clippy, tests)
-        timeout-minutes: 30
-        working-directory: apps/desktop/src-tauri
-        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
-
-      # Carried over from the deleted beta workflow, which was the only thing
-      # checking that tether-core still cross-compiles to a real device target.
-      # It is shared with the Swift client, so a host-only dependency sneaking in
-      # here breaks iOS — and that is invisible from the desktop build alone.
-      # macOS-only: nothing else has the iOS SDK.
-      - name: tether-core cross-compiles for iOS
-        if: runner.os == 'macOS'
-        timeout-minutes: 25
-        working-directory: crates/tether-core
-        run: |
-          cargo build --target aarch64-apple-ios --release
-          cargo build --target aarch64-apple-ios-sim --release
-
-  # Nothing in CI ever compiled the Swift client, so an iOS-only change reached
-  # a release tag with no build behind it at all. This job is the compile check
-  # (board #874 also wants the TetherKit tests here; the simulator run is a
-  # follow-up). PROFILE=debug because the XCFramework only has to link, not be
-  # fast, and a release build of tether-ffi triples the job.
+  # The only shipping product: the native Swift client. This assembles the
+  # XCFramework from crates/ (the compile check for tether-ffi/core/proto), then
+  # builds TetherIOS for the simulator and runs the TetherKit tests. Signing is
+  # off — this proves the sources compile and render, nothing more.
   ios-build:
     runs-on: macos-15
     steps:
@@ -223,7 +48,6 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
-      # Its own key: a PR must not overwrite the cache release.yml restores from.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/tether-core
@@ -236,8 +60,6 @@ jobs:
           PROFILE: debug
         run: bash scripts/build-xcframework.sh
 
-      # Signing is off: this proves the sources compile, nothing more. A device
-      # build needs the certificates only release.yml has.
       - name: Build TetherIOS for the simulator
         timeout-minutes: 30
         run: |
@@ -250,10 +72,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
-      # v3.2.1 shipped a terminal that rendered nothing: every unit test passed
-      # because none of them looked at the OUTPUT. TerminalGridRendererTests
-      # rasterizes and counts pixels, and it is UIKit-only, so it needs a
-      # simulator rather than `swift test`.
       - name: TetherKit tests on the simulator
         timeout-minutes: 20
         run: |
@@ -263,79 +81,3 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
         working-directory: clients/apple/TetherKit
-
-  # Warm release caches on main only. Tag-triggered Release builds can restore
-  # from the default branch, but cannot see caches saved under other tags —
-  # so every release was a cold Rust compile until this job populates main.
-  #
-  # The Android sibling of this job is gone with the Android release leg.
-  cache-warm:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            rust-target: aarch64-apple-darwin
-            cargo-args: --target aarch64-apple-darwin
-            cache-key: macos-aarch64
-          - os: macos-latest
-            rust-target: x86_64-apple-darwin
-            cargo-args: --target x86_64-apple-darwin
-            cache-key: macos-x86_64
-          - os: windows-latest
-            cargo-args: ''
-            cache-key: windows-x64
-          - os: ubuntu-24.04
-            cargo-args: ''
-            cache-key: linux-deb-rpm
-          - os: ubuntu-26.04
-            cargo-args: ''
-            cache-key: linux-appimage
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: latest
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-install-${{ runner.os }}-
-
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
-        with:
-          toolchain: stable
-          targets: ${{ matrix.rust-target }}
-
-      # Must match release.yml shared-key exactly or tag restores miss.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-          shared-key: tether-${{ matrix.cache-key }}
-          cache-on-failure: true
-
-      - name: Linux Tauri deps
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev libssl-dev
-
-      - name: Install workspace deps
-        run: bun install --frozen-lockfile
-
-      # tauri::generate_context! requires frontendDist (apps/desktop/dist).
-      - name: Build web frontend for Tauri context
-        working-directory: apps/desktop
-        run: bun run build
-
-      # Release-profile compile fills the target dir rust-cache persists. No
-      # bundling — that stays in Release builds.
-      - name: Warm Rust release artifacts
-        working-directory: apps/desktop/src-tauri
-        run: cargo build --release ${{ matrix.cargo-args }}

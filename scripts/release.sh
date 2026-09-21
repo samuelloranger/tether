@@ -223,21 +223,11 @@ update_json() {
 }
 
 update_json "package.json" ".version = \$v"
-update_json "apps/server/package.json" ".version = \$v"
-# apps/desktop is the shipping desktop client (release.yml's `desktop` job). Its
-# version is what the updater compares against latest.json, so leaving it behind
-# makes every install think an update is permanently available: the manifest
-# advertises the new tag, the downloaded bundle reports the old one, and the
-# prompt returns on the next check forever.
-update_json "apps/desktop/package.json" ".version = \$v"
-update_json "apps/desktop/src-tauri/tauri.conf.json" ".version = \$v"
 
-# Update Cargo.toml / Xcode marketing version
+# Update the Xcode marketing version
 if [ "$DRY_RUN" = true ]; then
-  echo "[dry-run] Would update Cargo.toml / Xcode to version $TARGET_VERSION"
+  echo "[dry-run] Would update Xcode to version $TARGET_VERSION"
 else
-  sed -i -E '0,/^version = "[^"]*"/s//version = "'"$TARGET_VERSION"'"/' apps/desktop/src-tauri/Cargo.toml
-  echo "Updated apps/desktop/src-tauri/Cargo.toml"
   # The native iOS client is what release.yml's `ios` job archives, and its
   # marketing version lives in the Xcode project. CI overrides it on the command
   # line for the build it uploads, but a project committed at an older number is
@@ -247,25 +237,11 @@ else
   echo "Updated clients/apple/Tether.xcodeproj/project.pbxproj"
 fi
 
-# Regenerate Cargo.lock
-if [ "$DRY_RUN" = true ]; then
-  echo "[dry-run] Would run cargo check to update Cargo.lock"
-else
-  echo "Regenerating Cargo.lock..."
-  cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml > /dev/null 2>&1
-  echo "Updated apps/desktop/src-tauri/Cargo.lock"
-fi
-
 # The complete set of files a release is allowed to modify. Anything else showing
 # up dirty below means `bun format` reformatted real source, which must be its own
 # commit — not silently swept into (or, worse, dropped from) the release.
 VERSION_FILES=(
   package.json
-  apps/server/package.json
-  apps/desktop/package.json
-  apps/desktop/src-tauri/tauri.conf.json
-  apps/desktop/src-tauri/Cargo.toml
-  apps/desktop/src-tauri/Cargo.lock
   clients/apple/Tether.xcodeproj/project.pbxproj
 )
 
