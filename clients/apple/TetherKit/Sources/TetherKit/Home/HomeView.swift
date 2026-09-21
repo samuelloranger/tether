@@ -41,6 +41,14 @@ public struct HomeView: View {
     .sheet(item: $keyEntry) { entry in
       KeyEntrySheet(model: model, mode: entry.mode) { keyEntry = nil }
     }
+    .alert(
+      "Something went wrong",
+      isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
+    ) {
+      Button("OK", role: .cancel) { model.errorMessage = nil }
+    } message: {
+      Text(model.errorMessage ?? "")
+    }
   }
 
   private var auroraGlow: some View {

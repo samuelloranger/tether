@@ -217,20 +217,20 @@ public final class SSHTerminalController {
       gitError = "No working directory for this session."
       return
     }
-    let inside = (try? await SSHConnector.exec(
-      config: config, store: hostKeyStore,
-      command: "git -C \(shellQuote(cwd)) rev-parse --is-inside-work-tree 2>/dev/null"
-    ))?.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard inside == "true" else {
-      gitLines = []
-      gitError = "Not a git repository:\n\(cwd)"
-      return
-    }
+    // One exec, not two: gate on is-inside-work-tree and emit the diff in the
+    // same shell so a git open costs a single SSH handshake. The sentinel marks
+    // "not a repo" (an empty diff is a valid, distinct result).
+    let sentinel = "__TETHER_NOTREPO__"
+    let q = shellQuote(cwd)
+    let command = "if git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1; "
+      + "then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
     do {
-      let raw = try await SSHConnector.exec(
-        config: config, store: hostKeyStore,
-        command: "git -C \(shellQuote(cwd)) --no-pager diff 2>&1"
-      )
+      let raw = try await SSHConnector.exec(config: config, store: hostKeyStore, command: command)
+      if raw.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
+        gitLines = []
+        gitError = "Not a git repository:\n\(cwd)"
+        return
+      }
       gitLines = GitDiffModel.classify(raw)
       gitError = gitLines.isEmpty ? "No uncommitted changes in \(cwd)." : nil
     } catch {
