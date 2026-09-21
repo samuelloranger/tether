@@ -1,6 +1,6 @@
 {
   "name": "tether",
-  "version": "4.6.1",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "scripts": {
