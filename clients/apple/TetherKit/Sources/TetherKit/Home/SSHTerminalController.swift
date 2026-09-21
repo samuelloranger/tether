@@ -34,6 +34,8 @@ public final class SSHTerminalController {
   private let hostKeyStore: HostKeyStore
   private let pushIdentity: PushRegistrar.PushIdentity?
   private var didRegisterPush = false
+  private var lastCols: UInt16 = 80
+  private var lastRows: UInt16 = 24
 
   init(
     title: String,
@@ -72,6 +74,10 @@ public final class SSHTerminalController {
         let stream = try await SSHConnector.connect(config: config, store: hostKeyStore)
         await pipeline.connectSSH(transport: stream, key: sessionKey)
         status = .connected
+        // The fresh PTY is 80x24 and the surface bounds don't change on a session
+        // switch, so it never re-reports — push the last known size now (SIGWINCH)
+        // so the newly attached session reflows to the device.
+        pipeline.outbound.yield(.serverResize(cols: lastCols, rows: lastRows))
         pipeline.outbound.yield(.input("\(Self.zmx) attach \(shellQuote(attach))\n", key: sessionKey))
         schedulePushRegister()
         return
@@ -164,8 +170,14 @@ public final class SSHTerminalController {
 
   public func sendInput(_ text: String) { pipeline.outbound.yield(.input(text, key: sessionKey)) }
   public func sendPaste(_ text: String) { pipeline.outbound.yield(.paste(text, key: sessionKey)) }
-  public func updateGrid(cols: UInt16, rows: UInt16) { pipeline.outbound.yield(.localResize(cols: cols, rows: rows)) }
-  public func updateGridServer(cols: UInt16, rows: UInt16) { pipeline.outbound.yield(.serverResize(cols: cols, rows: rows)) }
+  public func updateGrid(cols: UInt16, rows: UInt16) {
+    lastCols = cols; lastRows = rows
+    pipeline.outbound.yield(.localResize(cols: cols, rows: rows))
+  }
+  public func updateGridServer(cols: UInt16, rows: UInt16) {
+    lastCols = cols; lastRows = rows
+    pipeline.outbound.yield(.serverResize(cols: cols, rows: rows))
+  }
   public func scroll(lines: Int32) { Task { await pipeline.scrollViewport(lines: lines) } }
   public func leave() async { await pipeline.disconnect() }
 
