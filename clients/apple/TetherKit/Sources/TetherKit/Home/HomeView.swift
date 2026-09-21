@@ -8,6 +8,7 @@ public struct HomeView: View {
   @State private var tab: Tab
   @State private var showAdd = false
   @State private var keyEntry: KeyEntry?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   public enum Tab: String { case machines, keys }
 
@@ -30,7 +31,8 @@ public struct HomeView: View {
       VStack(spacing: 0) {
         header
         tabs
-        content
+        ZStack { content.id(tab).transition(TetherMotion.screenTransition(reduceMotion: reduceMotion)) }
+          .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: tab)
       }
     }
     .sheet(isPresented: $showAdd) {
@@ -76,6 +78,7 @@ public struct HomeView: View {
           .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
       }
       .foregroundStyle(TetherColors.accent)
+      .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("homeAddServer")
     }
     .padding(.horizontal, 18)
@@ -106,18 +109,23 @@ public struct HomeView: View {
 
   private func tabButton(_ value: Tab, _ label: String) -> some View {
     let selected = tab == value
-    return Text(label)
-      .font(.system(size: 13, weight: .semibold))
-      .frame(maxWidth: .infinity)
-      .padding(.vertical, 8)
-      .foregroundStyle(selected ? TetherColors.textPrimary : TetherColors.textSecondary)
-      .background {
-        if selected {
-          RoundedRectangle(cornerRadius: 9).fill(TetherColors.surfaceRaised)
+    return Button {
+      withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { tab = value }
+    } label: {
+      Text(label)
+        .font(.system(size: 13, weight: .semibold))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .foregroundStyle(selected ? TetherColors.textPrimary : TetherColors.textSecondary)
+        .background {
+          if selected {
+            RoundedRectangle(cornerRadius: 9).fill(TetherColors.surfaceRaised)
+          }
         }
-      }
-      .contentShape(Rectangle())
-      .onTapGesture { tab = value }
+        .contentShape(Rectangle())
+    }
+      .buttonStyle(TetherPressStyle())
+      .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: selected)
       .accessibilityIdentifier("homeTab_\(value.rawValue)")
   }
 
@@ -149,6 +157,7 @@ public struct HomeView: View {
           .foregroundStyle(TetherColors.onAccent)
       }
       .padding(.top, 6)
+      .buttonStyle(TetherPressStyle())
       Spacer()
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -218,6 +227,7 @@ public struct HomeView: View {
       .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(prime ? .clear : TetherColors.border))
       .foregroundStyle(prime ? TetherColors.onAccent : TetherColors.textPrimary)
     }
+    .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("homeKey_\(label)")
   }
 

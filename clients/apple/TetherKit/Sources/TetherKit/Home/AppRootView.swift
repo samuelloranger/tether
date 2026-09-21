@@ -8,6 +8,7 @@ public struct AppRootView: View {
   @State private var preferences = AppPreferences()
   @State private var controller: SSHTerminalController?
   @State private var didAutoConnect = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   private let autoOpenFirst: Bool
   private let pushIdentityProvider: () -> PushRegistrar.PushIdentity?
 
@@ -28,12 +29,13 @@ public struct AppRootView: View {
     ZStack {
       if let controller {
         SSHTerminalView(controller: controller, preferences: preferences, onHome: leaveTerminal)
+          .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       } else {
         HomeView(model: model, onOpen: open)
+          .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       }
     }
-    .transition(.identity)
-    .animation(nil, value: controller == nil)
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller == nil)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .task {
       guard !didAutoConnect else { return }
