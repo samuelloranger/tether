@@ -28,11 +28,12 @@ public struct AppRootView: View {
     ZStack {
       if let controller {
         SSHTerminalView(controller: controller, preferences: preferences, onHome: leaveTerminal)
-          .transition(.move(edge: .trailing))
       } else {
         HomeView(model: model, onOpen: open)
       }
     }
+    .transition(.identity)
+    .animation(nil, value: controller == nil)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .task {
       guard !didAutoConnect else { return }

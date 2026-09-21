@@ -7,7 +7,7 @@ import UIKit
 /// bottom of the sidebar.
 public struct SSHTerminalView: View {
   @Bindable var controller: SSHTerminalController
-  @Bindable var preferences: AppPreferences
+  var preferences: AppPreferences
   var onHome: () -> Void
 
   @State private var input = ""
@@ -79,8 +79,11 @@ public struct SSHTerminalView: View {
           mouseSgr: controller.mouseSgr
         )
         .accessibilityIdentifier("sshTerminalSurface")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(TetherColors.terminalBackground)
         statusOverlay
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
       TerminalInputBridge(
         text: $input,
         accessory: AnyView(
@@ -92,32 +95,32 @@ public struct SSHTerminalView: View {
             onHideKeyboard: { focused = false }
           )
         ),
-        onSubmitBytes: { controller.sendInput($0) },
+        showsAccessory: !drawerOpen,
+        onSubmitBytes: submit,
         isFocused: $focused
       )
-      .frame(height: 0)
+      .frame(height: 1)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(TetherColors.terminalBackground.ignoresSafeArea())
   }
 
   private var header: some View {
-    HStack(spacing: 12) {
-      Button { withAnimation(.easeOut(duration: 0.2)) { drawerOpen = true } } label: {
-        Image(systemName: "line.3.horizontal").font(.system(size: 17, weight: .semibold))
+    HStack(spacing: 4) {
+      headerButton("line.3.horizontal", id: "sshTerminalDrawer") {
+        withAnimation(.easeOut(duration: 0.2)) { drawerOpen = true }
       }
-      .accessibilityIdentifier("sshTerminalDrawer")
-      Circle().fill(lampColor).frame(width: 9, height: 9)
+      Circle().fill(lampColor).frame(width: 9, height: 9).padding(.leading, 4)
       VStack(alignment: .leading, spacing: 0) {
         Text(controller.title).font(.system(size: 15, weight: .semibold))
           .foregroundStyle(TetherColors.textPrimary)
         Text(controller.attach).font(.system(size: 10, design: .monospaced))
           .foregroundStyle(TetherColors.textFaint)
       }
+      .padding(.leading, 6)
       Spacer()
-      Button { showGit = true } label: { Image(systemName: "arrow.triangle.branch").font(.system(size: 15, weight: .semibold)) }
-        .accessibilityIdentifier("sshTerminalGit")
-      Button { showSettings = true } label: { Image(systemName: "gearshape").font(.system(size: 15, weight: .semibold)) }
-        .accessibilityIdentifier("sshTerminalSettings")
+      headerButton("arrow.triangle.branch", id: "sshTerminalGit") { showGit = true }
+      headerButton("gearshape", id: "sshTerminalSettings") { showSettings = true }
       Menu {
         Button { Task { await controller.switchSession(to: nextSessionName()) } } label: { Label("New session", systemImage: "plus") }
         Button { if let t = selectionText, !t.isEmpty { UIPasteboard.general.string = t } } label: { Label("Copy selection", systemImage: "doc.on.doc") }
@@ -125,13 +128,22 @@ public struct SSHTerminalView: View {
         Divider()
         Button(role: .destructive) { confirmKill = true } label: { Label("Kill \(controller.attach)", systemImage: "xmark.circle") }
       } label: {
-        Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
+        Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold))
+          .frame(width: 40, height: 40).contentShape(Rectangle())
       }
       .accessibilityIdentifier("sshTerminalOverflow")
     }
     .foregroundStyle(TetherColors.accent)
-    .padding(.horizontal, 14).padding(.vertical, 10)
+    .padding(.horizontal, 10).padding(.vertical, 6)
     .background(TetherColors.surface)
+  }
+
+  private func headerButton(_ icon: String, id: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Image(systemName: icon).font(.system(size: 18, weight: .semibold))
+        .frame(width: 40, height: 40).contentShape(Rectangle())
+    }
+    .accessibilityIdentifier(id)
   }
 
   private var drawer: some View {
@@ -222,6 +234,16 @@ public struct SSHTerminalView: View {
       }
     }
     .padding(.top, 4)
+  }
+
+  /// Folds a latched Ctrl into typed input so the keyboard can produce Ctrl+C etc.
+  private func submit(_ text: String) {
+    if accessory.ctrlArmed, let folded = TerminalKeyMap.ctrlFolded(text) {
+      accessory.ctrlArmed = false
+      controller.sendInput(folded)
+      return
+    }
+    controller.sendInput(text)
   }
 
   private func nextSessionName() -> String {
