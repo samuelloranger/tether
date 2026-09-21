@@ -4,36 +4,37 @@
 
 ## Platform
 
-adaptive
+iOS
 
 ## Users
 
-Primary users are developers and operators who run shells on their own machines or LAN/VPN hosts and want those sessions available from a phone or desktop without babysitting SSH. Typical scene: evening or night use, phone or laptop beside other work, checking long-running jobs, answering prompts, hopping between hosts.
+Primary users are developers and operators who run shells on their own machines or LAN/VPN hosts and want those sessions on their phone without babysitting SSH. Typical scene: evening or night use, phone beside other work, checking long-running jobs, answering an agent's prompt, hopping between hosts.
 
 ## Product Purpose
 
-Tether is a persistent remote-shell console. A Bun/Hono server owns real PTY sessions; clients reconnect, replay missed output, and keep working. Success means the shell stays alive across disconnects and server restarts, and the client remains usable for real terminal work on mobile and desktop.
+Tether is a native iOS terminal for your own machines. It connects over SSH to `zmx` — a persistent session manager on the host — attaches a session, and renders the live shell. Success means the session stays alive across disconnects, backgrounding, and reboots (because zmx owns it on the host), and the phone remains usable for real terminal work.
 
 ## Positioning
 
-Sessions survive client disconnect and server restart via detached holder processes and SQLite-logged replay — not a fresh SSH each open. Around that core: multi-host profiles, git review/stage/commit, workspace files, uploads, and HTML presentations pushed from a coding agent to the client.
+Sessions survive because they live in `zmx` on the host, not in the app — reattaching is not a fresh shell. Tether is a pure SSH client: no server to run, no custom transport, nothing exposed but SSH. Around that core: multi-host profiles with an on-device key vault, host-key trust-on-first-use, git diff of the session's working directory, send file / photo, session switch / kill / history, and encrypted push when an agent needs you.
 
 ## Operating Context
 
-- Server binary/CLI on the host (`tether serve` / daemon); state in `~/.tether/`
-- Clients: native Swift on iOS and Tauri on Linux/Windows/macOS, both over one shared Rust core (`crates/tether-core`). Android is discontinued.
-- Transport is typically LAN or tunnel (Tailscale / WireGuard / SSH); API password-authed, not end-to-end encrypted by default
-- Terminal is the primary work surface; drawer sessions, utility key bar (mobile), git/file/presentation overlays are secondary
-- Themes today: Catppuccin flavors (latte / frappe / macchiato / mocha) for chrome + terminal
+- No server binary. The host runs `zmx` (the session manager the app attaches to) and, optionally for push, `tether-notify` (a small Go CLI). State the app cares about lives on the phone.
+- Client: native Swift / SwiftUI on iOS only. The terminal grid comes from a Rust VT emulator (`crates/`) linked as an XCFramework. Desktop / web / Android are not part of v5.
+- Transport is SSH (libssh2) over LAN or a tunnel. Auth is a key held in the iOS Keychain (in memory to libssh2) or a password; an unknown host key is pinned on first connect and a later change is refused. Push ciphertext is end-to-end; the relay and Apple never see plaintext.
+- Terminal is the primary work surface; the session drawer, utility key bar, and git / history / send overlays are secondary.
+- Themes: Default dark / light plus Catppuccin flavors for chrome + terminal.
 
 ## Capabilities and Constraints
 
-- Real PTY streaming over WebSocket with log replay (`sinceId`)
-- Multi-host drawer; per-host auth and health
-- Git diff/stage/commit, file tree/viewer, uploads, presentations
+- SSH PTY streamed into a Rust VT emulator grid (TUIs, box drawing, CJK / emoji)
+- zmx session list / switch / kill / history over `ssh exec`; live working-directory tracking
+- Multi-host profiles; on-device ed25519 key vault (generate / import / paste, randomart, fingerprint)
+- Git diff over exec, send file / photo over SCP, select-and-copy scrollback history
+- Foreground-redial reconnect; on first connect, attach an existing session rather than force a new one
 - Appearance: theme preference + terminal font
-- Native iOS + desktop share one Rust core; design language must work on phone (thumb, soft keyboard, utility bar) and desktop (sidebar, window chrome)
-- Open: whether chrome and terminal palettes stay coupled or split
+- iOS-only design language: must work under thumb, with the soft keyboard and utility bar, one-handed
 
 ## Brand Commitments
 
@@ -44,15 +45,15 @@ Sessions survive client disconnect and server restart via detached holder proces
 
 ## Evidence on Hand
 
-- Code and docs in this repo (`CLAUDE.md`, `apps/desktop`, `clients/apple`, `apps/server`, `docs/`)
-- Live UI: native iOS + Tauri desktop clients
+- Code and docs in this repo (`CLAUDE.md`, `clients/apple`, `crates/`, `apps/tether-notify`)
+- Live UI: the native iOS client (Home / key vault, terminal, session drawer, git diff, history)
 - No separate marketing site or brand kit in-repo (`icon.png` at repo root)
 - Do not fabricate customers, benchmarks, or usage stats
 
 ## Product Principles
 
 1. The PTY is the product — chrome serves it, never competes with it.
-2. Persistence and reconnect are the mechanism; UI should make “still running” obvious.
+2. Persistence lives in zmx on the host; the UI should make "still running" obvious on reattach.
 3. Multi-host and session state must stay scannable under thumb and under stress.
 4. Night / low-light use is the default scene; dark surfaces are not optional decoration.
 5. Familiar terminal affordances beat ornamental UI; distinction lives in precise details.
