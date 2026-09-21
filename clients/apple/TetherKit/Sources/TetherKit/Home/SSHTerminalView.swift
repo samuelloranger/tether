@@ -2,6 +2,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import PhotosUI
 
 /// The v5 terminal screen: header + slide-over session sidebar + terminal,
 /// matching the old layout but backed by SSH + zmx. Home is reached from the
@@ -22,6 +23,8 @@ public struct SSHTerminalView: View {
   @State private var confirmKill = false
   @State private var showFileImporter = false
   @State private var showHistory = false
+  @State private var showPhotoPicker = false
+  @State private var photoItem: PhotosPickerItem?
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -54,6 +57,16 @@ public struct SSHTerminalView: View {
       if stop { url.stopAccessingSecurityScopedResource() }
       guard let data else { return }
       Task { await controller.sendFile(data: data, filename: url.lastPathComponent) }
+    }
+    .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
+    .onChange(of: photoItem) { _, item in
+      guard let item else { return }
+      Task {
+        defer { photoItem = nil }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+        await controller.sendFile(data: data, filename: "photo-\(Int(Date().timeIntervalSince1970)).\(ext)")
+      }
     }
     .task {
       await controller.connect()
@@ -144,6 +157,7 @@ public struct SSHTerminalView: View {
       Menu {
         Button { Task { await controller.switchSession(to: nextSessionName()) } } label: { Label("New session", systemImage: "plus") }
         Button { showFileImporter = true } label: { Label("Send file…", systemImage: "square.and.arrow.up") }
+        Button { showPhotoPicker = true } label: { Label("Send photo…", systemImage: "photo") }
         Button { if let t = selectionText, !t.isEmpty { UIPasteboard.general.string = t } } label: { Label("Copy selection", systemImage: "doc.on.doc") }
           .disabled(selectionText?.isEmpty ?? true)
         Button { showHistory = true } label: { Label("Terminal history", systemImage: "clock.arrow.circlepath") }

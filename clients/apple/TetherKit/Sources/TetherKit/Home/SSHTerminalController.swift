@@ -178,18 +178,22 @@ public final class SSHTerminalController {
       gitError = "No working directory for this session."
       return
     }
+    let inside = (try? await SSHConnector.exec(
+      config: config, store: hostKeyStore,
+      command: "git -C \(shellQuote(cwd)) rev-parse --is-inside-work-tree 2>/dev/null"
+    ))?.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard inside == "true" else {
+      gitLines = []
+      gitError = "Not a git repository:\n\(cwd)"
+      return
+    }
     do {
       let raw = try await SSHConnector.exec(
         config: config, store: hostKeyStore,
         command: "git -C \(shellQuote(cwd)) --no-pager diff 2>&1"
       )
-      if raw.hasPrefix("fatal:") {
-        gitLines = []
-        gitError = raw.split(separator: "\n").first.map(String.init) ?? raw
-      } else {
-        gitLines = GitDiffModel.classify(raw)
-        gitError = gitLines.isEmpty ? "No uncommitted changes in \(cwd)." : nil
-      }
+      gitLines = GitDiffModel.classify(raw)
+      gitError = gitLines.isEmpty ? "No uncommitted changes in \(cwd)." : nil
     } catch {
       gitLines = []
       gitError = Self.describe(error)
@@ -202,8 +206,18 @@ public final class SSHTerminalController {
     await connect()
   }
 
-  /// Full retained transcript as plain text (for the history screen).
-  public func historyText() async -> String { await pipeline.historyText() }
+  /// Full session scrollback for the history screen. zmx runs a full-screen
+  /// (alt-screen) session, so the local byte buffer only holds the current
+  /// screen — `zmx history` is the real transcript. Falls back to the visible
+  /// screen if the exec fails.
+  public func historyText() async -> String {
+    if let out = try? await SSHConnector.exec(
+      config: config, store: hostKeyStore, command: "\(Self.zmx) history \(shellQuote(attach))"
+    ), !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return out
+    }
+    return await pipeline.historyText()
+  }
 
   public func sendInput(_ text: String) { pipeline.outbound.yield(.input(text, key: sessionKey)) }
   public func sendPaste(_ text: String) { pipeline.outbound.yield(.paste(text, key: sessionKey)) }
