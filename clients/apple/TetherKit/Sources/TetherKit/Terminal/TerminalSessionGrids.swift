@@ -3,9 +3,8 @@ import TetherFFIBindings
 
 /// One session's live VT grid and the bytes that built it.
 ///
-/// Switching sessions must not throw this away: the inactive tab has no live
-/// Noise socket, so switch-back replays only what `sinceId` missed onto this
-/// emulator. A server `{t:reset}` is the one case that wipes it.
+/// Switching sessions must not throw this away: each drawer session keeps its
+/// own emulator and byte buffer, so switching back shows its last grid at once.
 final class TerminalSessionGrid {
   var emulator: FfiTerminalEmulator
   let buffer: TerminalOutputBuffer

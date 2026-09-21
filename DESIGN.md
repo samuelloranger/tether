@@ -4,55 +4,50 @@
 
 ## World
 
-Instrument bezel chrome around a live PTY. Night is the default scene. Catppuccin themes remain optional full-surface palettes.
+Aurora chrome around a live PTY: a periwinkle glow over a near-black base, night as the default scene. Home opens on an aurora-glow hero; the terminal is quiet chrome around the grid. Catppuccin flavors remain optional full-surface palettes; the terminal well is Mocha.
 
 ## Color
 
-**Restrained.** Neutrals plus one accent.
+**Restrained.** Near-black neutrals plus one periwinkle accent, with a heat ramp reserved for session state. Tokens live in `TetherColors` (`clients/apple`); light values are darkened so state words stay legible on white.
 
 | Role | Default dark | Default light |
 |---|---|---|
-| Background | `#0B0C0F` | `#F4F5F7` |
-| Surface | `#12141A` | `#FFFFFF` |
-| Raised / selected | `#1A1D24` | `#ECEEF2` |
-| Border | `#2A2E38` | `#D5D7DE` |
-| Text | `#E8EAEF` | `#0A0A0B` |
-| Accent (armed / primary) | `#3DDC97` | `#0B7A4B` |
-| Info / host rail default | `#4D8DFF` | `#002FA7` |
+| Background | `#08080E` | `#F1F1F6` |
+| Surface | `#12121D` | `#FFFFFF` |
+| Raised / selected | `#191926` | `#E9E9F2` |
+| Border | `#232333` | `#DCDCE6` |
+| Text | `#EDEEF6` | `#14141B` |
+| Secondary text | `#9797AC` | `#5C5C6C` |
+| Accent (primary) | `#7C8CF8` | `#4353D0` |
 
-Catppuccin Latte / Frappé / Macchiato / Mocha keep their existing mauve-accent palettes from `appTheme.ts`.
+**Heat ramp** — what the active session is doing: `working` `#F2B34C`, `waiting` `#FF7050`, `done` `#6EE7A8`, cool/idle `#7C8CF8` (periwinkle, same as the accent). These drive the status lamp and state word.
 
-**Terminal well:** Default dark → Mocha; Default light → Latte. Catppuccin themes couple chrome and terminal as before.
+**Terminal well:** `#1E1E2E` — this is fixed, not appearance-dynamic. It must equal the emulator's cell background (`theme.background` in `crates/tether-core/src/terminal/alacritty.rs`) or a seam shows at the grid edge.
 
 **System:** OS light → Default light; otherwise Default dark.
 
 ## Typography
 
-Chrome: system sans (`Helvetica Neue` / platform UI). Mono only inside the terminal grid and code/diff surfaces. No Courier costume on session titles.
+Chrome: system sans (platform UI). Mono only inside the terminal grid and code/diff/history surfaces. No mono costume on session titles or headings.
 
 ## Geometry
 
-Tight radii (`SURFACE_RADIUS`: control 2, panel 4, hero 0). Hairline borders. Status as a tabular word with a left rule — not pill badges. Utility keys are a flat hairline row; armed Ctrl is solid accent fill only.
+Soft, consistent radii (cards and sheets ~12, controls ~9–11), hairline borders. Status reads as a tabular word beside a heat lamp, not a pill badge. The utility key bar is a flat row; an armed Ctrl is a solid accent fill.
 
 ## Surfaces
 
-- **Connect:** left-aligned wordmark, hairline rule, underline fields, no `>_` icon card.
-- **Session drawer:** 2px host color rail; flat rows; outlined New terminal.
-- **Title / mobile header:** status word (`online` / `connecting` / `offline` / `auth`).
+- **Home:** aurora-glow radial hero, segmented Machines / Keys tabs, rounded machine and key cards, empty state with a single primary action.
+- **Add server / key entry:** underlined-feel inset fields, a password | private-key segment, a TOFU note ("first connect pins this host's key").
+- **Terminal:** header with the machine + session and a heat status lamp, a left slide-over session drawer, git / history / send overlays that cover the grid.
 
 ## Motion
 
-Operate defaults: short state transitions only. No page-load choreography, no loops, no idle ambient movement.
+Operate defaults: short state transitions only. No page-load choreography, no loops, no idle ambient movement. Tokens live in `TetherMotion` (`clients/apple`).
 
-**Heat rises fast, cools slow.** The lit chrome's one motion idea: a session becoming live (`working` 260ms / `waiting` 340ms / `done` 300ms) arrives on a decelerating curve; a session going quiet (`idle` / stopped) lets go over 700ms. Equal durations would make two different events read as one. Tokens: `TetherMotion` (`clients/apple`); on desktop the same curve is one transition on `.app-shell`, made possible by registering `--lit` / `--b1..--rim` with `@property` so the tint is an interpolatable type rather than a string — every tinted surface crossfades from one declaration. `data-lit` carries the state being entered and picks the duration.
+**Heat rises fast, cools slow.** The one motion idea: a session becoming live arrives on a decelerating curve (`working` 260ms / `waiting` 340ms), and a session going quiet lets go over 700ms. Equal durations would make two different events read as one. The curve is a confident deceleration, never a spring — an overshoot on a status colour reads as a second state change.
 
-**One authored moment:** a single non-repeating swell of the bloom when a session enters `waiting`. It fires only on entry, never loops, and never under Reduce Motion.
+Supporting scale: 90ms touch feedback (`TetherPressStyle`: a 0.96 press scale on cards and chrome), 200ms routine state change, 280ms overlay in. A screen arrives from just inside its final size (0.965 scale + fade), never by translating the whole view tree — that is fragile around UIKit and reads as theatrical on a terminal.
 
-`done` gets colour but no swell. Finishing is worth a look, not an interruption —
-the swell is reserved for the one state that cannot proceed without you.
-
-Supporting scale: 90ms touch feedback, 200ms routine state change, 280ms overlay in / 200ms out (exit is faster than entrance). Colour changes crossfade; gradients crossfade by layer, since their colours do not interpolate.
-
-**Reduce Motion / Reduce animations is a first-class path**, not a fallback: every travel (drawer slide, key-bar slide, pill scale, D-pad spring, viewer push) collapses to a 120ms crossfade, and the waiting swell is suppressed. Feedback that is colour rather than movement — a lit key face — stays.
+**Reduce Motion is a first-class path**, not a fallback: every travel collapses to a 120ms crossfade (Apple's own substitution for movement), with nothing that translates.
 
 Never animated: the terminal grid, and any padding that changes its size. Walking the surface through intermediate heights makes it report grid sizes the PTY then has to honour.

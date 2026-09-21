@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Motion tokens for the lit chrome. One principle: heat rises fast and cools slowly,
+/// Motion tokens. One principle: heat rises fast and cools slowly,
 /// so arriving and leaving read as different events. Durations stay short — this sits on a live PTY.
 public enum TetherMotion {
   /// Heat arriving: idle → working.

@@ -6,14 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": [
-      "apps/**/*.ts",
-      "apps/**/*.tsx",
-      "*.json",
-      "!apps/**/dist",
-      "!apps/**/node_modules",
-      "!apps/server/src/proto/gen"
-    ]
+    "includes": ["scripts/**/*.ts", "*.json", "!**/node_modules"]
   },
   "formatter": {
     "enabled": true,

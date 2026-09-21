@@ -1,11 +1,8 @@
 {
-  "name": "tether-monorepo",
+  "name": "tether",
   "version": "4.6.1",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "apps/*"
-  ],
   "scripts": {
     "lint": "biome check",
     "format": "biome check --write"
