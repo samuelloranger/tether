@@ -31,12 +31,3 @@ final class NotificationTapRouterTests: XCTestCase {
     XCTAssertNil(NotificationTapRouter.link(from: [:]))
   }
 }
-
-final class LifecycleLogicChecksTests: XCTestCase {
-  func test_resume_and_activity_reference_checks_still_pass() {
-    // LifecycleLogicChecks encodes the same invariants as the suites above —
-    // keep it green so a future agent can call allPass() from one place.
-    XCTAssertTrue(ResumeLogicChecks.allPass())
-    XCTAssertTrue(SessionActivityChecks.allPass())
-  }
-}
