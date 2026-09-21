@@ -42,6 +42,8 @@ public final class SSHTerminalController {
   private let hostKeyStore: HostKeyStore
   private let pushIdentity: PushRegistrar.PushIdentity?
   private var didRegisterPush = false
+  private var connectInFlight = false
+  private var didChooseInitialSession = false
   private var lastCols: UInt16 = 80
   private var lastRows: UInt16 = 24
 
@@ -74,7 +76,13 @@ public final class SSHTerminalController {
   }
 
   public func connect() async {
+    // Serialize: the initial .task connect and a scenePhase .active reconnect can
+    // both fire before the first is `.connected`, otherwise double-attaching.
+    if connectInFlight { return }
+    connectInFlight = true
+    defer { connectInFlight = false }
     status = .connecting
+    await chooseInitialSessionIfNeeded()
     // The key is valid; libssh2 auth/transport occasionally fails transiently
     // (and the app opens a couple of connections at once), so retry a few times.
     // A host-key mismatch is never retried — that must fail loudly.
@@ -99,6 +107,19 @@ public final class SSHTerminalController {
       }
       try? await Task.sleep(nanoseconds: 500_000_000)
     }
+  }
+
+  /// On the first connect, attach to an existing session instead of forcing a
+  /// new "default": only create "default" when the host has no sessions at all.
+  /// An explicit target (a switch, or the launch-env attach) is left alone.
+  private func chooseInitialSessionIfNeeded() async {
+    guard !didChooseInitialSession else { return }
+    didChooseInitialSession = true
+    guard attach == Self.defaultAttach else { return }
+    guard let out = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") else { return }
+    let existing = ZmxSession.parse(out)
+    guard !existing.isEmpty, !existing.contains(where: { $0.name == Self.defaultAttach }) else { return }
+    attach = existing.max(by: { $0.created < $1.created })?.name ?? attach
   }
 
   /// Best-effort: tell the host's tether-notify about this device once per
