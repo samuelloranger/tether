@@ -187,17 +187,19 @@ private struct PullRequestDetailView: View {
     .task {
       refreshDescription(detail.body)
       await refreshDetail()
-      // Wait on the host, not on a phone timer: gh's own watch blocks until the
-      // run settles, then we refetch once. Re-arm only if it is still running,
-      // and stop if the watch dial failed rather than spinning on it.
+      // Prefer waiting on the host — gh's own watch blocks until the run
+      // settles — but always converge: refetch after every attempt, and if the
+      // watch did not genuinely wait (its dial failed, or it returned at once
+      // because gh and the rollup disagree), fall back to a timed poll rather
+      // than giving up and leaving the checks stuck "running".
       while !Task.isCancelled, GitRepositoryModel.isRunning(detail.checks) {
         let start = Date()
         let watched = await controller.awaitChecksSettled(pullRequest)
-        guard !Task.isCancelled, watched else { break }
-        // A watch that returns almost instantly (no checks yet, or gh and the
-        // rollup disagreeing) must not turn the re-arm into a hot dial loop.
-        if Date().timeIntervalSince(start) < 2 { try? await Task.sleep(for: .seconds(10)) }
         guard !Task.isCancelled else { break }
+        if !watched || Date().timeIntervalSince(start) < 2 {
+          try? await Task.sleep(for: .seconds(10))
+          guard !Task.isCancelled else { break }
+        }
         await refreshDetail()
       }
     }
