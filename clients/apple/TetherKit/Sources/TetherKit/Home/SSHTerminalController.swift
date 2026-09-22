@@ -8,9 +8,11 @@ import PhotosUI
 public struct PullRequestDetail: Equatable, Sendable {
   public let checks: [GitCheck]
   public let body: String
+  public let gate: GitMergeGate
+  public let methods: [GitMergeMethod]
   public let fetchedAt: Date
 
-  public static let empty = PullRequestDetail(checks: [], body: "", fetchedAt: .distantPast)
+  public static let empty = PullRequestDetail(checks: [], body: "", gate: .computing, methods: [], fetchedAt: .distantPast)
 }
 
 /// Drives one SSH-backed terminal: connect via `SSHConnector`, pump the PTY
@@ -451,9 +453,13 @@ public final class SSHTerminalController {
   /// Checks and description for one pull request, in a single round trip.
   public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async -> PullRequestDetail {
     guard let cwd = await currentCwd() else { return .empty }
-    let command = "cd \(shellQuote(cwd)) && gh pr view \(pullRequest.number) --json statusCheckRollup,body 2>/dev/null"
-    guard let raw = try? await control.exec(command),
-      let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+    let prView = "gh pr view \(pullRequest.number) --json statusCheckRollup,body,mergeable,mergeStateStatus,isDraft 2>/dev/null"
+    let repoView = "gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed 2>/dev/null"
+    let command = "cd \(shellQuote(cwd)) && { \(prView); printf '\\036'; \(repoView); }"
+    guard let raw = try? await control.exec(command) else { return .empty }
+    let payloads = raw.split(separator: "\u{1E}", maxSplits: 1, omittingEmptySubsequences: false)
+    guard let prPayload = payloads.first,
+      let object = try? JSONSerialization.jsonObject(with: Data(prPayload.utf8)) as? [String: Any]
     else { return .empty }
     let checks: [GitCheck]
     if let rollup = object["statusCheckRollup"],
@@ -462,7 +468,15 @@ public final class SSHTerminalController {
     } else {
       checks = []
     }
-    return PullRequestDetail(checks: checks, body: (object["body"] as? String) ?? "", fetchedAt: Date())
+    let methods = payloads.count == 2
+      ? GitRepositoryModel.allowedMergeMethods(from: String(payloads[1]))
+      : []
+    return PullRequestDetail(
+      checks: checks,
+      body: (object["body"] as? String) ?? "",
+      gate: GitRepositoryModel.mergeGate(from: String(prPayload)),
+      methods: methods,
+      fetchedAt: Date())
   }
 
   /// One commit's patch, kept apart from `gitLines` so opening a commit does
@@ -504,6 +518,13 @@ public final class SSHTerminalController {
     await runGitAction("Closing #\(pullRequest.number)…") { cwd in
       "cd \(shellQuote(cwd)) && gh pr close \(pullRequest.number)"
     }
+  }
+
+  public func mergePullRequest(_ pullRequest: GitPullRequest, method: GitMergeMethod) async {
+    await runGitAction("Merging #\(pullRequest.number)…") { cwd in
+      "cd \(shellQuote(cwd)) && gh pr merge \(pullRequest.number) \(method.flag)"
+    }
+    await loadGitWorkspace()
   }
 
   private func runGitAction(_ message: String, command: (String) -> String) async {
