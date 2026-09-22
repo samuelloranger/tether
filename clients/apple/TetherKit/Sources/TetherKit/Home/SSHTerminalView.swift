@@ -289,7 +289,7 @@ public struct SSHTerminalView: View {
 
   private func sessionRow(_ session: ZmxSession) -> some View {
     let isCurrent = session.name == controller.attach
-    let showsDetail = SessionRowLayout.showsDetail(for: dynamicTypeSize)
+    let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
     return HStack(spacing: 6) {
       Button {
         Task { await controller.switchSession(to: session.name) }
@@ -350,7 +350,7 @@ public struct SSHTerminalView: View {
 
   private func sessionAccessibilityLabel(_ session: ZmxSession, isCurrent: Bool) -> String {
     var parts = [session.name, isCurrent ? "attached" : "not attached"]
-    if SessionRowLayout.showsDetail(for: dynamicTypeSize) {
+    if DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
       parts.append(session.displayCwd)
       if session.clients > 0 { parts.append("\(session.clients) client\(session.clients == 1 ? "" : "s")") }
     }

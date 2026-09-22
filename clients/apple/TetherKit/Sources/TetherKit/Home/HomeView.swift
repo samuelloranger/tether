@@ -262,6 +262,7 @@ public struct HomeView: View {
       VStack(spacing: 6) {
         Image(systemName: icon).font(.body.weight(.semibold))
         Text(label).font(.caption.weight(.semibold))
+          .lineLimit(2).minimumScaleFactor(0.75).multilineTextAlignment(.center)
       }
       .frame(maxWidth: .infinity).padding(.vertical, 12)
       .background(prime ? TetherColors.accent : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))

@@ -50,8 +50,15 @@ struct MachineCardView: View {
   let authLabel: String
   var onOpen: () -> Void
 
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
   var body: some View {
-    Button(action: onOpen) {
+    // Two monospaced runs side by side wrap into each other at accessibility
+    // sizes, so they stack there instead.
+    let detailLayout: AnyLayout = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+      : AnyLayout(HStackLayout(spacing: 6))
+    return Button(action: onOpen) {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 10) {
           Circle().fill(TetherColors.heatCool).frame(width: 11, height: 11).opacity(0.6)
@@ -64,7 +71,7 @@ struct MachineCardView: View {
             .background(Color.white.opacity(0.04), in: Capsule())
             .overlay(Capsule().strokeBorder(TetherColors.border))
         }
-        HStack(spacing: 6) {
+        detailLayout {
           Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
           Text(verbatim: "· \(authLabel)").foregroundStyle(TetherColors.textFaint)
         }
@@ -92,11 +99,19 @@ struct KeyCardView: View {
   let record: SSHKeyRecord
   let usedBy: [String]
 
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
   var body: some View {
-    HStack(alignment: .top, spacing: 13) {
-      RandomartGridView(publicKey: record.publicKey).frame(width: 78).accessibilityHidden(true)
+    let titleLayout: AnyLayout = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+      : AnyLayout(HStackLayout(spacing: 7))
+    return HStack(alignment: .top, spacing: 13) {
+      // Decorative: at accessibility sizes the name and fingerprint need the width.
+      if DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
+        RandomartGridView(publicKey: record.publicKey).frame(width: 78).accessibilityHidden(true)
+      }
       VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 7) {
+        titleLayout {
           Text(record.name).font(.subheadline.weight(.semibold))
             .foregroundStyle(TetherColors.textPrimary)
           Text(record.origin.rawValue)
