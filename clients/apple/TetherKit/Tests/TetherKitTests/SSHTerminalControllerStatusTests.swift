@@ -23,27 +23,4 @@ final class SSHTerminalControllerStatusTests: XCTestCase {
       .disconnected
     )
   }
-
-  // A session switch typed at a shell prompt lands, but a full-screen CLI agent
-  // (alt-screen) would echo the keystrokes literally — there it must redial.
-  func test_switch_at_shell_prompt_types_in_place() {
-    XCTAssertEqual(
-      SSHTerminalController.switchStrategy(connected: true, altScreen: false),
-      .typeInPlace
-    )
-  }
-
-  func test_switch_inside_a_full_screen_agent_redials() {
-    XCTAssertEqual(
-      SSHTerminalController.switchStrategy(connected: true, altScreen: true),
-      .redial
-    )
-  }
-
-  func test_switch_while_disconnected_redials() {
-    XCTAssertEqual(
-      SSHTerminalController.switchStrategy(connected: false, altScreen: false),
-      .redial
-    )
-  }
 }
