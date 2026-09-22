@@ -87,20 +87,224 @@ private struct PullRequestDetailView: View {
   @Bindable var controller: SSHTerminalController
   let pullRequest: GitPullRequest
   var onShowChanges: () -> Void
+
+  @Environment(\.dismiss) private var dismiss
   @State private var confirmClose = false
+  @State private var showCopied = false
+  @State private var expandDescription = false
+
+  private static let pollSeconds: UInt64 = 10
+
   var body: some View {
-    ScrollView { VStack(alignment: .leading, spacing: 16) {
-      Text("#\(pullRequest.number) \(pullRequest.title)").font(.title3.weight(.bold))
-      Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
-      HStack(spacing: 8) { chip("\(pullRequest.changedFiles) files"); chip(pullRequest.isDraft ? "Draft" : "Open"); if let decision = pullRequest.reviewDecision { chip(decision.replacingOccurrences(of: "_", with: " ")) } }
-      section("Review") { action("Checkout branch", "arrow.down.to.line") { Task { await controller.checkoutPullRequest(pullRequest) } }; action("View changed files", "doc.text.magnifyingglass") { onShowChanges() }; action("Open in browser", "safari") { if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) } }; action("Copy link", "doc.on.doc") { UIPasteboard.general.string = pullRequest.url } }
-      section("Repository actions") { action("Update branch", "arrow.clockwise") { Task { await controller.updatePullRequest(pullRequest) } }; Button(role: .destructive) { confirmClose = true } label: { Label("Close pull request", systemImage: "xmark.circle") } }
-      Text("Merge remains browser-only. Closing a pull request requires confirmation.").font(.caption).foregroundStyle(TetherColors.textSecondary)
-    }.padding() }.background(TetherColors.background)
-    .confirmationDialog("Close pull request #\(pullRequest.number)?", isPresented: $confirmClose, titleVisibility: .visible) { Button("Close pull request", role: .destructive) { Task { await controller.closePullRequest(pullRequest) } } }
+    ScrollView {
+      VStack(alignment: .leading, spacing: 18) {
+        header
+        checks
+        actions
+        description
+      }
+      .padding()
+    }
+    .background(TetherColors.background)
+    .overlay(alignment: .bottom) { copiedPill }
+    .task {
+      await controller.loadPullRequestDetail(pullRequest)
+      // Keep refreshing only while something is still running.
+      while !Task.isCancelled, GitRepositoryModel.isRunning(controller.gitChecks) {
+        try? await Task.sleep(for: .seconds(Self.pollSeconds))
+        guard !Task.isCancelled else { return }
+        await controller.loadPullRequestDetail(pullRequest)
+      }
+    }
+    .confirmationDialog("Close pull request #\(pullRequest.number)?", isPresented: $confirmClose, titleVisibility: .visible) {
+      Button("Close pull request", role: .destructive) { Task { await controller.closePullRequest(pullRequest) } }
+      Button("Cancel", role: .cancel) {}
+    }
   }
-  private func chip(_ text: String) -> some View { Text(text).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary).padding(.horizontal, 8).padding(.vertical, 5).background(TetherColors.surface, in: Capsule()) }
-  private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View { VStack(alignment: .leading, spacing: 8) { Text(title).font(.caption.weight(.bold)).foregroundStyle(TetherColors.textSecondary); content() } }
-  private func action(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.bordered).tint(TetherColors.accent) }
+
+  private var header: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("#\(pullRequest.number) \(pullRequest.title)").font(.title3.weight(.bold))
+        .foregroundStyle(TetherColors.textPrimary)
+      Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced())
+        .foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.middle)
+      HStack(spacing: 6) {
+        chip(pullRequest.isDraft ? "Draft" : "Open", tint: pullRequest.isDraft ? TetherColors.textSecondary : TetherColors.success)
+        chip("\(pullRequest.changedFiles) files", tint: TetherColors.textSecondary)
+        if let decision = pullRequest.reviewDecision, !decision.isEmpty {
+          chip(decision.replacingOccurrences(of: "_", with: " ").lowercased(), tint: TetherColors.accent)
+        }
+      }
+    }
+  }
+
+  private var checks: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        Image(systemName: rollupIcon).foregroundStyle(rollupTint)
+        Text(GitRepositoryModel.checkHeadline(controller.gitChecks))
+          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        Spacer(minLength: 4)
+        Button {
+          Task { await controller.loadPullRequestDetail(pullRequest) }
+        } label: {
+          if controller.gitChecksLoading {
+            ProgressView().controlSize(.small).tint(TetherColors.accent)
+          } else {
+            Image(systemName: "arrow.clockwise")
+          }
+        }
+        .buttonStyle(.plain).foregroundStyle(TetherColors.accent)
+        .accessibilityLabel("Refresh checks")
+      }
+
+      ForEach(controller.gitChecks) { check in
+        Button {
+          if let url = URL(string: check.url), !check.url.isEmpty { UIApplication.shared.open(url) }
+        } label: {
+          HStack(spacing: 9) {
+            Image(systemName: icon(for: check.state)).foregroundStyle(tint(for: check.state))
+              .font(.caption)
+            Text(check.name).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+            Spacer(minLength: 0)
+            if !check.url.isEmpty {
+              Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(TetherColors.textFaint)
+            }
+          }
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+      }
+
+      if let updated = controller.gitChecksUpdatedAt {
+        Text("Updated \(updated, style: .relative) ago")
+          .font(.caption2).foregroundStyle(TetherColors.textFaint)
+      }
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
+    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TetherColors.border))
+  }
+
+  private var actions: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      sectionTitle("Review")
+      action("Checkout branch", "arrow.down.to.line") { Task { await controller.checkoutPullRequest(pullRequest) } }
+      action("View changed files", "doc.text.magnifyingglass") {
+        // The pull request's own diff, and back to the Changes tab to read it.
+        Task {
+          await controller.loadPullRequestDiff(pullRequest)
+          onShowChanges()
+          dismiss()
+        }
+      }
+      action("Open in browser", "safari") {
+        if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
+      }
+      action("Copy link", "doc.on.doc") {
+        UIPasteboard.general.string = pullRequest.url
+        UIAccessibility.post(notification: .announcement, argument: "Link copied")
+        withAnimation { showCopied = true }
+        Task {
+          try? await Task.sleep(for: .seconds(1.2))
+          withAnimation { showCopied = false }
+        }
+      }
+
+      sectionTitle("Repository actions").padding(.top, 6)
+      action("Update branch", "arrow.clockwise") { Task { await controller.updatePullRequest(pullRequest) } }
+      Button(role: .destructive) { confirmClose = true } label: {
+        Label("Close pull request", systemImage: "xmark.circle").frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .buttonStyle(.bordered)
+
+      Text("Merging stays in the browser.").font(.caption2).foregroundStyle(TetherColors.textFaint)
+    }
+  }
+
+  @ViewBuilder
+  private var description: some View {
+    if !controller.gitPullRequestBody.isEmpty {
+      VStack(alignment: .leading, spacing: 8) {
+        sectionTitle("Description")
+        Text(controller.gitPullRequestBody)
+          .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          .lineLimit(expandDescription ? nil : 8)
+          .textSelection(.enabled)
+        Button(expandDescription ? "Show less" : "Show more") {
+          withAnimation { expandDescription.toggle() }
+        }
+        .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+      }
+      .padding(14)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
+      .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TetherColors.border))
+    }
+  }
+
+  @ViewBuilder
+  private var copiedPill: some View {
+    if showCopied {
+      Label("Link copied", systemImage: "checkmark.circle.fill")
+        .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(TetherColors.surface, in: Capsule())
+        .overlay(Capsule().strokeBorder(TetherColors.accent.opacity(0.5)))
+        .padding(.bottom, 20)
+        .transition(.opacity)
+    }
+  }
+
+  private var rollupIcon: String {
+    guard !controller.gitChecks.isEmpty else { return "circle.dashed" }
+    if controller.gitChecks.contains(where: { $0.state == .failed }) { return "xmark.circle.fill" }
+    if GitRepositoryModel.isRunning(controller.gitChecks) { return "clock.fill" }
+    return "checkmark.circle.fill"
+  }
+
+  private var rollupTint: Color {
+    guard !controller.gitChecks.isEmpty else { return TetherColors.textFaint }
+    if controller.gitChecks.contains(where: { $0.state == .failed }) { return TetherColors.danger }
+    if GitRepositoryModel.isRunning(controller.gitChecks) { return TetherColors.warning }
+    return TetherColors.success
+  }
+
+  private func icon(for state: GitCheck.State) -> String {
+    switch state {
+    case .passed: "checkmark.circle.fill"
+    case .failed: "xmark.circle.fill"
+    case .running: "clock.fill"
+    case .skipped: "minus.circle"
+    }
+  }
+
+  private func tint(for state: GitCheck.State) -> Color {
+    switch state {
+    case .passed: TetherColors.success
+    case .failed: TetherColors.danger
+    case .running: TetherColors.warning
+    case .skipped: TetherColors.textFaint
+    }
+  }
+
+  private func chip(_ text: String, tint: Color) -> some View {
+    Text(text).font(.caption2.weight(.semibold).monospaced()).foregroundStyle(tint)
+      .padding(.horizontal, 8).padding(.vertical, 4)
+      .background(tint.opacity(0.12), in: Capsule())
+  }
+
+  private func sectionTitle(_ title: String) -> some View {
+    Text(title).font(.caption.weight(.bold)).foregroundStyle(TetherColors.textSecondary)
+  }
+
+  private func action(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .buttonStyle(.bordered).tint(TetherColors.accent)
+  }
 }
+
 #endif

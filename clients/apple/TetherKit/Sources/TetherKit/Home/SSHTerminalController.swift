@@ -53,6 +53,10 @@ public final class SSHTerminalController {
   public private(set) var gitPullRequests: [GitPullRequest] = []
   /// Why the list is empty, when the reason is not "none open".
   public private(set) var gitPullRequestNotice: String?
+  public private(set) var gitChecks: [GitCheck] = []
+  public private(set) var gitChecksUpdatedAt: Date?
+  public private(set) var gitChecksLoading = false
+  public private(set) var gitPullRequestBody = ""
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
@@ -347,6 +351,46 @@ public final class SSHTerminalController {
   }
 
   public func loadGitDiff() async { await loadGitWorkspace() }
+
+  /// Checks and description for one pull request, in a single round trip.
+  public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async {
+    gitChecksLoading = true
+    defer { gitChecksLoading = false }
+    guard let cwd = await currentCwd() else { return }
+    let command = "cd \(shellQuote(cwd)) && gh pr view \(pullRequest.number) --json statusCheckRollup,body 2>/dev/null"
+    guard let raw = try? await control.exec(command),
+      let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+    else {
+      gitChecksUpdatedAt = Date()
+      return
+    }
+    if let rollup = object["statusCheckRollup"],
+      let encoded = try? JSONSerialization.data(withJSONObject: rollup) {
+      gitChecks = GitRepositoryModel.checks(from: String(decoding: encoded, as: UTF8.self))
+    }
+    gitPullRequestBody = (object["body"] as? String) ?? ""
+    gitChecksUpdatedAt = Date()
+  }
+
+  /// The diff of the pull request itself, which is not the working tree's.
+  public func loadPullRequestDiff(_ pullRequest: GitPullRequest) async {
+    gitLoading = true
+    defer { gitLoading = false }
+    gitError = nil
+    guard let cwd = await currentCwd() else {
+      gitLines = []
+      gitError = "No working directory for this session."
+      return
+    }
+    let command = "cd \(shellQuote(cwd)) && gh pr diff \(pullRequest.number) 2>&1"
+    guard let raw = try? await control.exec(command) else {
+      gitLines = []
+      gitError = "Couldn't read the diff for #\(pullRequest.number)."
+      return
+    }
+    gitLines = GitDiffModel.classify(raw)
+    gitError = gitLines.isEmpty ? "#\(pullRequest.number) has no changes to show." : nil
+  }
 
   public func checkoutPullRequest(_ pullRequest: GitPullRequest) async {
     await runGitAction("Checking out #\(pullRequest.number)…") { cwd in

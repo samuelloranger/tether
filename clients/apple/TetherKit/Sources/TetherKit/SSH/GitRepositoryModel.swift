@@ -27,6 +27,16 @@ public struct GitPullRequest: Codable, Equatable, Identifiable, Sendable {
   }
 }
 
+public struct GitCheck: Equatable, Identifiable, Sendable {
+  public enum State: Equatable, Sendable { case passed, failed, running, skipped }
+
+  public let name: String
+  public let state: State
+  public let url: String
+
+  public var id: String { name }
+}
+
 /// Parses machine-readable output from the remote repository commands. Keeping
 /// this pure makes the SSH boundary small and gives UI code typed state only.
 public enum GitRepositoryModel {
@@ -66,5 +76,45 @@ public enum GitRepositoryModel {
     // gh puts its reason on the first line.
     let firstLine = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? trimmed
     return .failed(firstLine)
+  }
+
+  public static func checks(from output: String) -> [GitCheck] {
+    guard let raw = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]] else {
+      return []
+    }
+    return raw.compactMap { entry in
+      guard let name = (entry["name"] as? String) ?? (entry["context"] as? String), !name.isEmpty else {
+        return nil
+      }
+      let url = (entry["detailsUrl"] as? String) ?? (entry["targetUrl"] as? String) ?? ""
+      return GitCheck(name: name, state: state(of: entry), url: url)
+    }
+  }
+
+  private static func state(of entry: [String: Any]) -> GitCheck.State {
+    // A StatusContext carries only `state`; a CheckRun is running until its
+    // `status` completes, and only then does `conclusion` mean anything.
+    let verdict = ((entry["conclusion"] as? String) ?? (entry["state"] as? String) ?? "").uppercased()
+    if let status = entry["status"] as? String, status.uppercased() != "COMPLETED" { return .running }
+    if verdict.isEmpty { return .running }
+    switch verdict {
+    case "SUCCESS": return .passed
+    case "SKIPPED", "NEUTRAL": return .skipped
+    case "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED": return .running
+    default: return .failed
+    }
+  }
+
+  public static func isRunning(_ checks: [GitCheck]) -> Bool {
+    checks.contains { $0.state == .running }
+  }
+
+  public static func checkHeadline(_ checks: [GitCheck]) -> String {
+    guard !checks.isEmpty else { return "No checks" }
+    let failing = checks.filter { $0.state == .failed }.count
+    if failing > 0 { return "\(failing) failing" }
+    let running = checks.filter { $0.state == .running }.count
+    if running > 0 { return "\(running) of \(checks.count) running" }
+    return "\(checks.count) check\(checks.count == 1 ? "" : "s") passed"
   }
 }
