@@ -134,4 +134,68 @@ final class ControlConnectionTests: XCTestCase {
     XCTAssertEqual(ops.commands.count, 3)
     XCTAssertEqual(ops.maxConcurrentExecs, 1, "two commands must never be in flight on one session")
   }
+
+  func test_reset_cuts_a_hung_command_loose_and_the_next_command_dials_fresh() async throws {
+    let hung = FakeOps()
+    hung.execResult = { [unowned hung] in try hung.hang($0) }
+    let fresh = FakeOps()
+    var queue = [hung, fresh]
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { queue.removeFirst() }
+    let slow = Task { try await control.exec("git fetch") }
+    let hanging = await eventually { hung.isHanging }
+    XCTAssertTrue(hanging)
+
+    control.reset()
+
+    do {
+      _ = try await slow.value
+      XCTFail("a command on a cut socket must not report success")
+    } catch {}
+    let output = try await control.exec("zmx ls")
+    XCTAssertEqual(output, "ran: zmx ls")
+    XCTAssertEqual(hung.teardowns, 1)
+    XCTAssertEqual(fresh.handshakes, 1)
+  }
+
+  func test_reset_on_an_idle_session_makes_the_next_command_redial() async throws {
+    let first = FakeOps()
+    let second = FakeOps()
+    var queue = [first, second]
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { queue.removeFirst() }
+    _ = try await control.exec("zmx ls")
+
+    control.reset()
+    let output = try await control.exec("zmx ls")
+
+    XCTAssertEqual(first.interrupts, 1)
+    XCTAssertEqual(output, "ran: zmx ls")
+    XCTAssertEqual(second.handshakes, 1)
+  }
+
+  func test_close_does_not_wait_behind_a_hung_command() async throws {
+    let hung = FakeOps()
+    hung.execResult = { [unowned hung] in try hung.hang($0) }
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { hung }
+    let slow = Task { try? await control.exec("gh pr checks 1") }
+    let hanging = await eventually { hung.isHanging }
+    XCTAssertTrue(hanging)
+
+    let start = Date()
+    await control.close()
+
+    XCTAssertLessThan(Date().timeIntervalSince(start), 1)
+    _ = await slow.value
+    XCTAssertEqual(hung.teardowns, 1)
+  }
+
+  func test_reset_before_anything_is_open_is_harmless() async throws {
+    let ops = FakeOps()
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { ops }
+
+    control.reset()
+
+    let output = try await control.exec("zmx ls")
+    XCTAssertEqual(output, "ran: zmx ls")
+    XCTAssertEqual(ops.interrupts, 0)
+  }
 }

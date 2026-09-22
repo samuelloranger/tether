@@ -49,6 +49,25 @@ final class FakeOps: SSHConnectionOps, @unchecked Sendable {
   private let lock = NSLock()
   private var inFlight = 0
   private(set) var maxConcurrentExecs = 0
+  private let released = DispatchSemaphore(value: 0)
+  private var interruptCount = 0
+  private var hanging = false
+
+  var interrupts: Int { lock.lock(); defer { lock.unlock() }; return interruptCount }
+  var isHanging: Bool { lock.lock(); defer { lock.unlock() }; return hanging }
+
+  func interrupt() {
+    lock.lock(); interruptCount += 1; lock.unlock()
+    released.signal()
+  }
+
+  /// For `execResult`: blocks the way a read on a silently dead socket does,
+  /// until `interrupt()` shuts it.
+  func hang(_ command: String) throws -> String {
+    lock.lock(); hanging = true; lock.unlock()
+    released.wait()
+    throw SSHConnectError.transport("socket shut down")
+  }
 
   func connectAndHandshake() throws {
     onConnect()
@@ -75,6 +94,9 @@ final class FakeOps: SSHConnectionOps, @unchecked Sendable {
   }
 
   func exec(_ command: String) throws -> String {
+    // A session whose socket was cut fails every later command, as a real one does.
+    lock.lock(); let cut = interruptCount > 0; lock.unlock()
+    if cut { throw SSHConnectError.transport("socket shut down") }
     lock.lock(); inFlight += 1; maxConcurrentExecs = max(maxConcurrentExecs, inFlight); lock.unlock()
     defer { lock.lock(); inFlight -= 1; lock.unlock() }
     let result = try execResult(command)
@@ -86,4 +108,14 @@ final class FakeOps: SSHConnectionOps, @unchecked Sendable {
     calls.append(.teardown)
     teardowns += 1
   }
+}
+
+/// Polls `condition` until it holds or `timeout` passes.
+func eventually(timeout: TimeInterval = 2, _ condition: @escaping () -> Bool) async -> Bool {
+  let end = Date().addingTimeInterval(timeout)
+  while Date() < end {
+    if condition() { return true }
+    try? await Task.sleep(nanoseconds: 10_000_000)
+  }
+  return condition()
 }
