@@ -75,7 +75,7 @@ final class SSHConnectionSequenceTests: XCTestCase {
     let ops = FakeOps()
     ops.accepts = { _ in false }
     XCTAssertThrowsError(try SSHConnectionSequence.run(config: config([key, pw]), ops: ops, store: MemoryHostKeyStore())) { error in
-      XCTAssertEqual(error as? SSHConnectError, .auth(.allFailed))
+      XCTAssertEqual(error as? SSHConnectError, .auth(.allFailed(detail: nil)))
     }
     XCTAssertEqual(ops.calls, [.connect, .fingerprint, .auth(key), .auth(pw), .teardown])
   }

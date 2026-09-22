@@ -7,10 +7,14 @@ protocol SSHConnectionOps: AnyObject {
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
   func exec(_ command: String) throws -> String
   func scpSend(data: Data, remotePath: String, mode: Int32) throws
+  /// Why the last authentication attempt failed, in the transport's words.
+  var lastAuthDetail: String? { get }
   func teardown()
 }
 
 extension SSHConnectionOps {
+  var lastAuthDetail: String? { nil }
+
   func scpSend(data: Data, remotePath: String, mode: Int32) throws {
     throw SSHConnectError.transport("File transfer not supported")
   }
@@ -35,8 +39,11 @@ enum SSHConnectError: Error, Equatable, LocalizedError {
     switch self {
     case let .hostKeyMismatch(expected, got):
       return "Host key changed — refused.\nExpected \(expected)\nGot \(got)"
-    case .auth:
-      return "Authentication failed. Check the key or password."
+    case let .auth(error):
+      guard case let .allFailed(detail) = error, let detail, !detail.isEmpty else {
+        return "Authentication failed. Check the key or password."
+      }
+      return "Authentication failed. Check the key or password.\n\(detail)"
     case let .transport(detail):
       return "Could not connect: \(detail)"
     case let .missingCredential(name):
@@ -133,7 +140,9 @@ enum SSHConnectionSequence {
       ops.teardown()
       throw error
     } catch let error as SSHAuthError {
+      let detail = ops.lastAuthDetail
       ops.teardown()
+      if case .allFailed = error { throw SSHConnectError.auth(.allFailed(detail: detail)) }
       throw SSHConnectError.auth(error)
     } catch {
       ops.teardown()
