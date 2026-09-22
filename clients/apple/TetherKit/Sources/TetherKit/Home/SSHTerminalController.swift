@@ -48,7 +48,11 @@ public final class SSHTerminalController {
   /// empty-state prompt until the user creates one.
   public private(set) var hasSession = true
   public private(set) var gitLines: [GitDiffLine] = []
+  public private(set) var gitBranch = ""
+  public private(set) var gitCommits: [GitCommit] = []
+  public private(set) var gitPullRequests: [GitPullRequest] = []
   public private(set) var gitError: String?
+  public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
   public private(set) var transfer: TransferState = .idle
   /// Last normalized network path. `nil` until the observer reports one.
@@ -272,7 +276,7 @@ public final class SSHTerminalController {
 
   public func clearTransfer() { transfer = .idle }
 
-  public func loadGitDiff() async {
+  public func loadGitWorkspace() async {
     gitLoading = true
     defer { gitLoading = false }
     gitError = nil
@@ -281,27 +285,72 @@ public final class SSHTerminalController {
       gitError = "No working directory for this session."
       return
     }
-    // One exec, not two: gate on is-inside-work-tree and emit the diff in the
-    // same shell, so a git open is a single round trip on the control
-    // connection. The sentinel marks "not a repo" (an empty diff is a valid,
-    // distinct result).
+    // The sentinel marks "not a repo" (an empty diff is a valid, distinct
+    // result). All four run on the control connection, which serializes them —
+    // four round trips on one live session, where each used to be its own dial,
+    // handshake and authentication.
     let sentinel = "__TETHER_NOTREPO__"
     let q = shellQuote(cwd)
-    let command = "if git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1; "
-      + "then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
+    let repositoryGuard = "git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1"
+    let diffCommand = "if \(repositoryGuard); then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
+    let branchCommand = "if \(repositoryGuard); then git -C \(q) branch --show-current; fi"
+    let commitsCommand = "if \(repositoryGuard); then git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'; fi"
+    let pullRequestsCommand = "if \(repositoryGuard) && command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>/dev/null) || printf '[]'; else printf '[]'; fi"
     do {
-      let raw = try await control.exec(command)
-      if raw.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
+      async let raw = control.exec(diffCommand)
+      async let branch = control.exec(branchCommand)
+      async let commits = control.exec(commitsCommand)
+      async let pullRequests = control.exec(pullRequestsCommand)
+      let (diff, branchOutput, commitsOutput, pullRequestsOutput) = try await (raw, branch, commits, pullRequests)
+      if diff.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
         gitLines = []
+        gitBranch = ""
+        gitCommits = []
+        gitPullRequests = []
         gitError = "Not a git repository:\n\(cwd)"
         return
       }
-      gitLines = GitDiffModel.classify(raw)
-      gitError = gitLines.isEmpty ? "No uncommitted changes in \(cwd)." : nil
+      gitLines = GitDiffModel.classify(diff)
+      gitBranch = GitRepositoryModel.branch(from: branchOutput)
+      gitCommits = GitRepositoryModel.commits(from: commitsOutput)
+      gitPullRequests = (try? GitRepositoryModel.pullRequests(from: pullRequestsOutput)) ?? []
     } catch {
       gitLines = []
       gitError = Self.describe(error)
     }
+  }
+
+  public func loadGitDiff() async { await loadGitWorkspace() }
+
+  public func checkoutPullRequest(_ pullRequest: GitPullRequest) async {
+    await runGitAction("Checking out #\(pullRequest.number)…") { cwd in
+      let q = shellQuote(cwd)
+      let branch = shellQuote("tether/pr/\(pullRequest.number)")
+      return "git -C \(q) fetch origin pull/\(pullRequest.number)/head:\(branch) && git -C \(q) switch \(branch)"
+    }
+  }
+
+  public func updatePullRequest(_ pullRequest: GitPullRequest) async {
+    await runGitAction("Updating #\(pullRequest.number)…") { cwd in
+      let branch = shellQuote("tether/pr/\(pullRequest.number)")
+      return "git -C \(shellQuote(cwd)) fetch origin pull/\(pullRequest.number)/head:\(branch)"
+    }
+  }
+
+  public func closePullRequest(_ pullRequest: GitPullRequest) async {
+    await runGitAction("Closing #\(pullRequest.number)…") { cwd in
+      "cd \(shellQuote(cwd)) && gh pr close \(pullRequest.number)"
+    }
+  }
+
+  private func runGitAction(_ message: String, command: (String) -> String) async {
+    gitActionMessage = message
+    guard let cwd = await currentCwd() else { gitActionMessage = "No working directory for this session."; return }
+    do {
+      _ = try await control.exec(command(cwd))
+      gitActionMessage = nil
+      await loadGitWorkspace()
+    } catch { gitActionMessage = Self.describe(error) }
   }
 
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
