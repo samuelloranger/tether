@@ -10,6 +10,7 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   private let session: OpaquePointer
   private let channel: OpaquePointer
   private let socket: Int32
+  private let socketGuard: SocketGuard
 
   private let lock = NSLock()
   private var outbound: [Data] = []
@@ -22,10 +23,11 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
 
   private static let readTimeoutMs = 30
 
-  init(session: OpaquePointer, channel: OpaquePointer, socket: Int32) {
+  init(session: OpaquePointer, channel: OpaquePointer, socket: Int32, socketGuard: SocketGuard) {
     self.session = session
     self.channel = channel
     self.socket = socket
+    self.socketGuard = socketGuard
     var continuation: AsyncStream<Data>.Continuation!
     self.inbound = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
     self.sink = continuation
@@ -117,7 +119,7 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
     libssh2_channel_free(channel)
     tether_libssh2_session_disconnect(session, "tether closing")
     libssh2_session_free(session)
-    Darwin.close(socket)
+    socketGuard.close()
     sink.finish()
   }
 }

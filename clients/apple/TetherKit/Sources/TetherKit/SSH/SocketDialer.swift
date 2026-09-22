@@ -7,7 +7,8 @@ enum SocketDialer {
   static func open(
     host: String,
     port: Int,
-    connectTimeout: Int32 = SSHTimeouts.connectSeconds
+    connectTimeout: Int32 = SSHTimeouts.connectSeconds,
+    socketGuard: SocketGuard? = nil
   ) throws -> Int32 {
     var hints = addrinfo(
       ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
@@ -24,11 +25,12 @@ enum SocketDialer {
     while let current = node {
       let fd = Darwin.socket(current.pointee.ai_family, current.pointee.ai_socktype, current.pointee.ai_protocol)
       if fd >= 0 {
+        socketGuard?.adopt(fd)
         tune(fd, connectTimeout: connectTimeout)
         if Darwin.connect(fd, current.pointee.ai_addr, current.pointee.ai_addrlen) == 0 {
           return fd
         }
-        Darwin.close(fd)
+        if let socketGuard { socketGuard.close() } else { Darwin.close(fd) }
       }
       node = current.pointee.ai_next
     }

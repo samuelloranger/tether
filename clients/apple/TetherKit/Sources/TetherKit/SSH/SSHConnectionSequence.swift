@@ -13,10 +13,14 @@ protocol SSHConnectionOps: AnyObject {
   func scpSend(data: Data, remotePath: String, mode: Int32) throws
   var lastAuthDetail: String? { get }
   func teardown()
+  /// Cuts the socket from any thread, so a call blocked on a dead path returns.
+  func interrupt()
 }
 
 extension SSHConnectionOps {
   var lastAuthDetail: String? { nil }
+
+  func interrupt() {}
 
   func scpSend(data: Data, remotePath: String, mode: Int32) throws {
     throw SSHConnectError.transport("File transfer not supported")
@@ -41,6 +45,7 @@ enum SSHConnectError: Error, Equatable, LocalizedError {
   case auth(SSHAuthError)
   case transport(String)
   case missingCredential(name: String)
+  case commandTimedOut
 
   var errorDescription: String? {
     switch self {
@@ -55,6 +60,8 @@ enum SSHConnectError: Error, Equatable, LocalizedError {
       return "Could not connect: \(detail)"
     case let .missingCredential(name):
       return "No credential for \(name) — check its key or password."
+    case .commandTimedOut:
+      return "The host stopped answering."
     }
   }
 }
