@@ -51,6 +51,13 @@ enum SSHConnectError: Error, Equatable, LocalizedError {
   }
 }
 
+extension SSHConnectError {
+  var isTransient: Bool {
+    if case .transport = self { return true }
+    return false
+  }
+}
+
 enum SSHConnectionSequence {
   static func run(
     config: SSHConnectionConfig,
@@ -92,13 +99,19 @@ enum SSHConnectionSequence {
     mode: Int32
   ) throws {
     defer { ops.teardown() }
-    try gate(config: config, ops: ops, store: store)
-    do {
-      try ops.scpSend(data: data, remotePath: remotePath, mode: mode)
-    } catch let error as SSHConnectError {
-      throw error
-    } catch {
-      throw SSHConnectError.transport("\(error)")
+    for attempt in 0...1 {
+      do {
+        try gate(config: config, ops: ops, store: store)
+        try ops.scpSend(data: data, remotePath: remotePath, mode: mode)
+        return
+      } catch let error as SSHConnectError {
+        guard attempt == 0, error.isTransient else { throw error }
+        ops.teardown()
+      } catch {
+        let transportError = SSHConnectError.transport("\(error)")
+        guard attempt == 0, transportError.isTransient else { throw transportError }
+        ops.teardown()
+      }
     }
   }
 
@@ -114,9 +127,21 @@ enum SSHConnectionSequence {
 
   /// Signing the publickey challenge on two sessions at once intermittently
   /// fails: the server accepts the key offer and the client cannot sign it
-  /// ("Callback returned error", libssh2 -19). Only handshake and auth are
-  /// serialized; the PTY stream, exec channels and uploads stay concurrent.
-  private static let handshakeLock = NSLock()
+  /// ("Callback returned error", libssh2 -19). Only the signing is serialized,
+  /// and only per host — holding a lock across the TCP connect let one
+  /// unreachable host stall dials to every other one for its whole timeout.
+  private static let authLocksGuard = NSLock()
+  private static var authLocks: [String: NSLock] = [:]
+
+  private static func authLock(host: String, port: Int) -> NSLock {
+    let key = "\(host):\(port)"
+    authLocksGuard.lock()
+    defer { authLocksGuard.unlock() }
+    if let existing = authLocks[key] { return existing }
+    let lock = NSLock()
+    authLocks[key] = lock
+    return lock
+  }
 
   /// Shared connect → host-key gate → auth. Trust-on-first-use pins an unknown
   /// key and refuses a changed one. Tears the session down on any failure and
@@ -126,8 +151,6 @@ enum SSHConnectionSequence {
     ops: SSHConnectionOps,
     store: HostKeyStore
   ) throws {
-    handshakeLock.lock()
-    defer { handshakeLock.unlock() }
     do {
       try ops.connectAndHandshake()
     } catch {
@@ -141,6 +164,9 @@ enum SSHConnectionSequence {
       ) {
         throw SSHConnectError.hostKeyMismatch(expected: expected, got: got)
       }
+      let lock = authLock(host: config.host, port: config.port)
+      lock.lock()
+      defer { lock.unlock() }
       _ = try authenticateInOrder(config.credentials) { try ops.authenticate($0) }
     } catch let error as SSHConnectError {
       ops.teardown()
