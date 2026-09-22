@@ -41,6 +41,13 @@ public enum TetherMotion {
     reduceMotion ? .easeOut(duration: crossfade) : .snappy(duration: 0.3, extraBounce: 0.04)
   }
 
+  /// A side panel arrives from its own edge. Without this it is *inserted*, and
+  /// SwiftUI's default insertion is a fade — so opening from the button faded
+  /// while dragging slid, two different answers to the same action.
+  public static func drawerTransition(reduceMotion: Bool) -> AnyTransition {
+    reduceMotion ? .opacity : .move(edge: .leading)
+  }
+
   /// A routine transition, collapsed to a plain crossfade under Reduce Motion.
   public static func ui(_ duration: Double, reduceMotion: Bool) -> Animation {
     reduceMotion ? .easeOut(duration: crossfade) : decelerate(duration)

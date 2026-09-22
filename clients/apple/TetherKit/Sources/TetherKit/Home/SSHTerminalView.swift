@@ -51,11 +51,15 @@ public struct SSHTerminalView: View {
       if drawerProgress > 0 {
         Color.black.opacity(0.5 * min(drawerProgress, 1)).ignoresSafeArea()
           .onTapGesture { setDrawer(open: false) }
+          .transition(.opacity)
         drawer
           // Past fully open the panel stretches rather than tearing away from
           // the edge, so the pull still reads as the finger being heard.
           .frame(width: panelWidth * max(1, drawerProgress))
           .offset(x: -panelWidth * (1 - min(drawerProgress, 1)))
+          // A drag mounts the panel outside an animation, so it appears exactly
+          // under the finger; the button mounts it inside one, and it slides.
+          .transition(TetherMotion.drawerTransition(reduceMotion: reduceMotion))
       }
     }
     .overlay(alignment: .bottom) {
