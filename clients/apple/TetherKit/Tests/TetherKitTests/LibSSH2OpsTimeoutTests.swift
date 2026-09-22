@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import TetherKit
 
@@ -38,5 +39,24 @@ final class LibSSH2OpsTimeoutTests: XCTestCase {
     ops.interrupt()
 
     wait(for: [failed], timeout: 3)
+  }
+
+  /// Against a real sshd: keepalives must not start until the session is up.
+  /// A keepalive is a global request, and OpenSSH's strict key exchange drops
+  /// a connection that sends one mid-exchange (libssh2 -8). Needs no login,
+  /// only a listening sshd; skips where there is none.
+  func test_a_real_sshd_completes_the_handshake() throws {
+    let port = 22
+    do {
+      Darwin.close(try SocketDialer.open(host: "127.0.0.1", port: port, connectTimeout: 2))
+    } catch {
+      throw XCTSkip("No sshd on 127.0.0.1:\(port)")
+    }
+    let config = SSHConnectionConfig(host: "127.0.0.1", port: port, username: "nobody", credentials: [])
+    let ops = LibSSH2Ops(config: config)
+    defer { ops.teardown() }
+
+    XCTAssertNoThrow(try ops.connectAndHandshake())
+    XCTAssertFalse(try ops.hostKeyFingerprint().isEmpty)
   }
 }
