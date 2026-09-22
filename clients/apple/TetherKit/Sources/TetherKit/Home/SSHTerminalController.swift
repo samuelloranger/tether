@@ -422,6 +422,9 @@ public final class SSHTerminalController {
   private func markDisconnectedAndReconnect() {
     guard let next = Self.statusAfterTransportDrop(from: status) else { return }
     status = next
+    // A drop caused by the network dying must not spin on a dead path: the
+    // observer redials the moment a usable one comes back.
+    guard Self.shouldRedialOnForeground(status: next, dialing: connectInFlight, reachability: reachability) else { return }
     Task { await self.connect() }
   }
 
