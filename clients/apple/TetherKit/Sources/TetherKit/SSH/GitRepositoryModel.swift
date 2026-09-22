@@ -109,12 +109,22 @@ public enum GitRepositoryModel {
     checks.contains { $0.state == .running }
   }
 
+  public static func rollup(_ checks: [GitCheck]) -> GitCheck.State? {
+    if checks.isEmpty { return nil }
+    if checks.contains(where: { $0.state == .failed }) { return .failed }
+    if checks.contains(where: { $0.state == .running }) { return .running }
+    return .passed
+  }
+
   public static func checkHeadline(_ checks: [GitCheck]) -> String {
-    guard !checks.isEmpty else { return "No checks" }
-    let failing = checks.filter { $0.state == .failed }.count
-    if failing > 0 { return "\(failing) failing" }
-    let running = checks.filter { $0.state == .running }.count
-    if running > 0 { return "\(running) of \(checks.count) running" }
-    return "\(checks.count) check\(checks.count == 1 ? "" : "s") passed"
+    switch rollup(checks) {
+    case nil: return "No checks"
+    case .failed:
+      return "\(checks.filter { $0.state == .failed }.count) failing"
+    case .running:
+      return "\(checks.filter { $0.state == .running }.count) of \(checks.count) running"
+    case .passed, .skipped:
+      return "\(checks.count) check\(checks.count == 1 ? "" : "s") passed"
+    }
   }
 }

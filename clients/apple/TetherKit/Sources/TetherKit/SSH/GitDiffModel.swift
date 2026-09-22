@@ -48,7 +48,8 @@ public enum GitDiffModel {
     if line.hasPrefix("diff ") || line.hasPrefix("index ")
       || line.hasPrefix("--- ") || line.hasPrefix("+++ ")
       || line.hasPrefix("new file") || line.hasPrefix("deleted file")
-      || line.hasPrefix("rename ") || line.hasPrefix("similarity ") {
+      || line.hasPrefix("rename ") || line.hasPrefix("similarity ")
+      || line.hasPrefix("old mode ") || line.hasPrefix("new mode ") {
       return .fileHeader
     }
     if line.hasPrefix("@@") { return .hunk }

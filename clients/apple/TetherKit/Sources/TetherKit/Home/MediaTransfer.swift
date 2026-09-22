@@ -14,7 +14,7 @@ public enum MediaTransfer {
 
   public static func filename(preferredExtension: String?, isVideo: Bool, timestamp: Int) -> String {
     let fallback = isVideo ? "mov" : "jpg"
-    let ext = preferredExtension?.isEmpty == false ? preferredExtension! : fallback
+    let ext = preferredExtension.flatMap { $0.isEmpty ? nil : $0 } ?? fallback
     return "\(isVideo ? "video" : "photo")-\(timestamp).\(ext)"
   }
 

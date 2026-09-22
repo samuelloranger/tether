@@ -111,4 +111,14 @@ final class GitRepositoryModelTests: XCTestCase {
       GitRepositoryModel.checkHeadline([GitCheck(name: "a", state: .running, url: ""), GitCheck(name: "b", state: .passed, url: "")]),
       "1 of 2 running")
   }
+
+  func test_the_rollup_is_the_worst_state_any_check_is_in() {
+    let passed = GitCheck(name: "build", state: .passed, url: "")
+    let running = GitCheck(name: "test", state: .running, url: "")
+    let failed = GitCheck(name: "lint", state: .failed, url: "")
+    XCTAssertEqual(GitRepositoryModel.rollup([passed, running, failed]), .failed)
+    XCTAssertEqual(GitRepositoryModel.rollup([passed, running]), .running)
+    XCTAssertEqual(GitRepositoryModel.rollup([passed]), .passed)
+    XCTAssertNil(GitRepositoryModel.rollup([]))
+  }
 }

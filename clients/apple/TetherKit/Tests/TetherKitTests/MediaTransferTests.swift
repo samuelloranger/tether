@@ -19,6 +19,11 @@ final class MediaTransferTests: XCTestCase {
     XCTAssertEqual(MediaTransfer.filename(preferredExtension: nil, isVideo: true, timestamp: 7), "video-7.mov")
   }
 
+  func test_an_empty_extension_falls_back_per_kind() {
+    XCTAssertEqual(MediaTransfer.filename(preferredExtension: "", isVideo: false, timestamp: 7), "photo-7.jpg")
+    XCTAssertEqual(MediaTransfer.filename(preferredExtension: "", isVideo: true, timestamp: 7), "video-7.mov")
+  }
+
   func test_movies_are_recognised_by_conformance_not_by_a_list_of_extensions() {
     XCTAssertTrue(MediaTransfer.isVideo(contentTypes: [.quickTimeMovie]))
     XCTAssertTrue(MediaTransfer.isVideo(contentTypes: [.mpeg4Movie, .movie]))
