@@ -28,11 +28,6 @@ public enum TetherMotion {
   /// Short drags are touch noise, not a request to open terminal chrome.
   public static let drawerActivationDistance: CGFloat = 44
 
-  /// Accepts only a deliberate rightward drag begun at the leading edge.
-  public static func shouldOpenDrawer(startX: CGFloat, translationX: CGFloat) -> Bool {
-    startX <= drawerEdgeWidth && translationX >= drawerActivationDistance
-  }
-
   /// Confident deceleration. Not a spring: springs overshoot, and an overshoot
   /// on a status colour reads as a second state change.
   public static func decelerate(_ duration: Double) -> Animation {
