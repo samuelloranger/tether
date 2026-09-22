@@ -81,6 +81,9 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
       if let resize { loop.enqueueResize(cols: resize.cols, rows: resize.rows) }
       if case .ended = loop.pass(stopped: done) { break }
     }
+    // A half-sent packet would swallow the channel close teardown sends, then
+    // each wait out its timeout; a shut socket makes those sends fail at once.
+    if loop.pending != nil { socketGuard.shutdown() }
     teardownAndFinish()
   }
 

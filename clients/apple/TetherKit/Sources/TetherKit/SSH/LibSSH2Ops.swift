@@ -127,7 +127,6 @@ final class LibSSH2Ops: SSHConnectionOps, @unchecked Sendable {
     guard rc == 0 else { throw LibSSH2OpsError.execFailed(Int(rc)) }
     try ExecReader.run(
       read: { LibSSH2TransportProbe.read(into: $0, from: channel) },
-      isEOF: { libssh2_channel_eof(channel) == 1 },
       now: { ProcessInfo.processInfo.systemUptime },
       deadline: deadline,
       onChunk: onChunk)
@@ -148,7 +147,8 @@ final class LibSSH2Ops: SSHConnectionOps, @unchecked Sendable {
         let n = tether_libssh2_channel_write(channel, base.advanced(by: offset), data.count - offset)
         if n > 0 {
           offset += n
-        } else if n == LibSSH2Const.eagain {
+        } else if n == LibSSH2Const.eagain || n == LibSSH2Const.timeout {
+          // A slow uplink, not a dead one: the kernel's retransmit drop ends that.
           continue
         } else {
           throw LibSSH2OpsError.scpWriteFailed(Int(n))

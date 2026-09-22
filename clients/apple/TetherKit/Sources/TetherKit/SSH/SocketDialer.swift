@@ -25,9 +25,17 @@ enum SocketDialer {
     while let current = node {
       let fd = Darwin.socket(current.pointee.ai_family, current.pointee.ai_socktype, current.pointee.ai_protocol)
       if fd >= 0 {
-        socketGuard?.adopt(fd)
+        if let socketGuard, !socketGuard.adopt(fd) {
+          Darwin.close(fd)
+          throw LibSSH2OpsError.socket("dial cancelled")
+        }
         tune(fd, connectTimeout: connectTimeout)
         if Darwin.connect(fd, current.pointee.ai_addr, current.pointee.ai_addrlen) == 0 {
+          // A cut during connect() does not abort it; honour it now.
+          if socketGuard?.isCut == true {
+            socketGuard?.close()
+            throw LibSSH2OpsError.socket("dial cancelled")
+          }
           return fd
         }
         if let socketGuard { socketGuard.close() } else { Darwin.close(fd) }

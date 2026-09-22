@@ -9,10 +9,18 @@ final class SocketGuard: @unchecked Sendable {
   private var fd: Int32 = -1
   private var cut = false
 
-  func adopt(_ descriptor: Int32) {
+  var isCut: Bool {
     lock.lock(); defer { lock.unlock() }
+    return cut
+  }
+
+  /// False once cut: shutdown() does nothing to a socket that has not
+  /// connected, so a dial must not carry on with it.
+  func adopt(_ descriptor: Int32) -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    guard !cut else { return false }
     fd = descriptor
-    if cut { _ = Darwin.shutdown(descriptor, SHUT_RDWR) }
+    return true
   }
 
   func shutdown() {

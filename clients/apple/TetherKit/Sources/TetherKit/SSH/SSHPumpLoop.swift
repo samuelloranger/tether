@@ -47,6 +47,8 @@ final class SSHPumpLoop {
 
   private(set) var pending: Pending?
   private var outbound = Data()
+  /// Bytes of `outbound` already written.
+  private var sent = 0
   private var queuedResize: (cols: Int32, rows: Int32)?
   private var buffer = [UInt8](repeating: 0, count: 32 * 1024)
   private let io: SSHPumpIO
@@ -72,8 +74,8 @@ final class SSHPumpLoop {
       }
     }
 
-    if !outbound.isEmpty {
-      let length = min(outbound.count, Self.maxWrite)
+    if outbound.count > sent {
+      let length = min(outbound.count - sent, Self.maxWrite)
       let rc = write(length: length)
       if rc > 0 {
         progressed = true
@@ -135,8 +137,18 @@ final class SSHPumpLoop {
   }
 
   private func write(length: Int) -> Int {
-    let rc = outbound.withUnsafeBytes { io.write(UnsafeRawBufferPointer(rebasing: $0.prefix(length))) }
-    if rc > 0 { outbound.removeFirst(rc) }
+    let rc = outbound.withUnsafeBytes { io.write(UnsafeRawBufferPointer(rebasing: $0[sent..<sent + length])) }
+    guard rc > 0 else { return rc }
+    sent += rc
+    // Dropping sent bytes on every partial write re-copied the rest of a large
+    // paste each time; drop them once everything went, or in 1 MB steps.
+    if sent == outbound.count {
+      outbound.removeAll(keepingCapacity: true)
+      sent = 0
+    } else if sent >= 1 << 20 {
+      outbound.removeFirst(sent)
+      sent = 0
+    }
     return rc
   }
 

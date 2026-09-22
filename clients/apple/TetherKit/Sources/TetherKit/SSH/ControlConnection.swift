@@ -17,6 +17,8 @@ final class ControlConnection: @unchecked Sendable {
   /// this is only ever used to call `interrupt()`.
   private let liveLock = NSLock()
   private var live: SSHConnectionOps?
+  /// Bumped by every reset, so a command can tell it was cut on purpose.
+  private var resets = 0
 
   init(
     config: SSHConnectionConfig,
@@ -39,10 +41,13 @@ final class ControlConnection: @unchecked Sendable {
   func exec(_ command: String) async throws -> String {
     try await onQueue { [self] in
       let reused = ops != nil
+      let resetsBefore = resetCount()
       do {
         return try run(command)
       } catch let error as SSHConnectError {
-        guard reused, error.isTransient else { throw error }
+        // A command cut by reset() is given up on, never re-run: it may have
+        // side effects (a merge, a kill) that already happened on the host.
+        guard reused, error.isTransient, resetCount() == resetsBefore else { throw error }
         return try run(command)
       }
     }
@@ -53,9 +58,15 @@ final class ControlConnection: @unchecked Sendable {
   /// fresh. Safe when nothing is open.
   func reset() {
     liveLock.lock()
+    resets += 1
     let current = live
     liveLock.unlock()
     current?.interrupt()
+  }
+
+  private func resetCount() -> Int {
+    liveLock.lock(); defer { liveLock.unlock() }
+    return resets
   }
 
   func close() async {
