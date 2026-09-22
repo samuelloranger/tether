@@ -7,6 +7,12 @@ public struct GitCommit: Equatable, Identifiable, Sendable {
   public let timestamp: Int
 }
 
+public enum PRState: String, Codable, Equatable, Sendable {
+  case open = "OPEN"
+  case merged = "MERGED"
+  case closed = "CLOSED"
+}
+
 public struct GitPullRequest: Codable, Equatable, Identifiable, Sendable {
   public let number: Int
   public let title: String
@@ -17,13 +23,17 @@ public struct GitPullRequest: Codable, Equatable, Identifiable, Sendable {
   public let isDraft: Bool
   public let changedFiles: Int
   public let reviewDecision: String?
+  /// Absent from detail JSON and older list output; missing reads as open.
+  public let rawState: String?
 
   public var id: Int { number }
+  public var state: PRState { PRState(rawValue: (rawState ?? "").uppercased()) ?? .open }
 
   enum CodingKeys: String, CodingKey {
     case number, title, url, updatedAt, isDraft, changedFiles, reviewDecision
     case head = "headRefName"
     case base = "baseRefName"
+    case rawState = "state"
   }
 }
 
@@ -115,7 +125,11 @@ public enum GitRepositoryModel {
   public static func pullRequestResult(from output: String) -> PullRequestResult {
     let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed == ghMissingSentinel { return .toolMissing }
-    if let pulls = try? pullRequests(from: trimmed) { return .list(pulls) }
+    // The list fetches every state so merged ones show; closed-without-merge
+    // is noise the screen does not ask for.
+    if let pulls = try? pullRequests(from: trimmed) {
+      return .list(pulls.filter { $0.state != .closed })
+    }
     // gh puts its reason on the first line.
     let firstLine = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? trimmed
     return .failed(firstLine)

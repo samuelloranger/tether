@@ -10,9 +10,12 @@ public struct PullRequestDetail: Equatable, Sendable {
   public let body: String
   public let gate: GitMergeGate
   public let methods: [GitMergeMethod]
+  public let state: PRState
   public let fetchedAt: Date
 
-  public static let empty = PullRequestDetail(checks: [], body: "", gate: .computing, methods: [], fetchedAt: .distantPast)
+  public var isMerged: Bool { state == .merged }
+
+  public static let empty = PullRequestDetail(checks: [], body: "", gate: .computing, methods: [], state: .open, fetchedAt: .distantPast)
 }
 
 /// Drives one SSH-backed terminal: connect via `SSHConnector`, pump the PTY
@@ -369,7 +372,7 @@ public final class SSHTerminalController {
       // Keep gh's stderr: swallowing it into an empty list made the screen blame
       // a missing CLI for a repository with nothing open.
       let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
-      pullRequestsCommand = "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); else printf '%s' \(ghMissing); fi"
+      pullRequestsCommand = "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state all --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision,state 2>&1); else printf '%s' \(ghMissing); fi"
     case .changes:
       diffCommand = "git -C \(q) --no-pager diff 2>&1"
       commitsCommand = "printf ''"
@@ -458,7 +461,7 @@ public final class SSHTerminalController {
   /// Checks and description for one pull request, in a single round trip.
   public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async -> PullRequestDetail {
     guard let cwd = await currentCwd() else { return .empty }
-    let prView = "gh pr view \(pullRequest.number) --json statusCheckRollup,body,mergeable,mergeStateStatus,isDraft 2>/dev/null"
+    let prView = "gh pr view \(pullRequest.number) --json statusCheckRollup,body,mergeable,mergeStateStatus,isDraft,state 2>/dev/null"
     let repoView = "gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed 2>/dev/null"
     let command = "cd \(shellQuote(cwd)) && { \(prView); printf '\\036'; \(repoView); }"
     guard let raw = try? await control.exec(command) else { return .empty }
@@ -476,11 +479,13 @@ public final class SSHTerminalController {
     let methods = payloads.count == 2
       ? GitRepositoryModel.allowedMergeMethods(from: String(payloads[1]))
       : []
+    let state = PRState(rawValue: (object["state"] as? String ?? "").uppercased()) ?? .open
     return PullRequestDetail(
       checks: checks,
       body: (object["body"] as? String) ?? "",
       gate: GitRepositoryModel.mergeGate(from: String(prPayload)),
       methods: methods,
+      state: state,
       fetchedAt: Date())
   }
 
