@@ -94,16 +94,12 @@ public struct SSHTerminalView: View {
       guard let data else { return }
       Task { await controller.sendFile(data: data, filename: url.lastPathComponent) }
     }
-    .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
+    .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .any(of: [.images, .videos]))
     .onChange(of: photoItem) { _, item in
       guard let item else { return }
       Task {
         defer { photoItem = nil }
-        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-        let remote = await controller.sendFile(data: data, filename: "photo-\(Int(Date().timeIntervalSince1970)).\(ext)")
-        // Drop the uploaded path at the shell prompt so it can be used directly.
-        if let remote { controller.sendInput(shellQuote(remote)) }
+        await send(item)
       }
     }
     .task {
@@ -220,7 +216,7 @@ public struct SSHTerminalView: View {
       Menu {
         Button { Task { await controller.switchSession(to: nextSessionName()) } } label: { Label("New session", systemImage: "plus") }
         Button { showFileImporter = true } label: { Label("Send file…", systemImage: "square.and.arrow.up") }
-        Button { showPhotoPicker = true } label: { Label("Send photo…", systemImage: "photo") }
+        Button { showPhotoPicker = true } label: { Label("Send photo or video…", systemImage: "photo") }
         Button(action: copySelection) { Label("Copy selection", systemImage: "doc.on.doc") }
           .disabled(selectionText?.isEmpty ?? true)
         Button { showHistory = true } label: { Label("Terminal history", systemImage: "clock.arrow.circlepath") }
@@ -384,6 +380,45 @@ public struct SSHTerminalView: View {
       .accessibilityLabel("Start session")
     }
     .padding(.top, 4)
+  }
+
+  /// A still arrives as bytes; a clip arrives as a file, which is what lets its
+  /// size be checked before the phone tries to hold it in memory for `scp`.
+  private func send(_ item: PhotosPickerItem) async {
+    let isVideo = MediaTransfer.isVideo(contentTypes: item.supportedContentTypes)
+    let name = MediaTransfer.filename(
+      preferredExtension: item.supportedContentTypes.first?.preferredFilenameExtension,
+      isVideo: isVideo,
+      timestamp: Int(Date().timeIntervalSince1970))
+
+    let data: Data
+    if isVideo {
+      guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else {
+        controller.reportTransferFailure("Couldn't read that video from the library.")
+        return
+      }
+      defer { try? FileManager.default.removeItem(at: movie.url) }
+      let size = (try? movie.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+      if let reason = MediaTransfer.rejectionReason(byteCount: size) {
+        controller.reportTransferFailure(reason)
+        return
+      }
+      guard let bytes = try? Data(contentsOf: movie.url) else {
+        controller.reportTransferFailure("Couldn't read that video from the library.")
+        return
+      }
+      data = bytes
+    } else {
+      guard let bytes = try? await item.loadTransferable(type: Data.self) else {
+        controller.reportTransferFailure("Couldn't read that photo from the library.")
+        return
+      }
+      data = bytes
+    }
+
+    let remote = await controller.sendFile(data: data, filename: name)
+    // Drop the uploaded path at the shell prompt so it can be used directly.
+    if let remote { controller.sendInput(shellQuote(remote)) }
   }
 
   private func startNewSession() {

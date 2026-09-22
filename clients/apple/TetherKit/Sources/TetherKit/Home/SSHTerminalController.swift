@@ -286,6 +286,10 @@ public final class SSHTerminalController {
 
   public func clearTransfer() { transfer = .idle }
 
+  /// A transfer that failed before any SSH work — the library would not give us
+  /// the file, or it is too big to hold. Same banner as a failed upload.
+  public func reportTransferFailure(_ message: String) { transfer = .failed(message) }
+
   /// Whether a failed transfer deserves a second dial. Everything transient
   /// does; a changed host key and a missing credential are answers, not noise,
   /// and repeating them only delays telling the user.
