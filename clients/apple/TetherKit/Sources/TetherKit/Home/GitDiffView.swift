@@ -159,6 +159,7 @@ private struct PullRequestDetailView: View {
   @State private var loadingDetail = false
   @State private var confirmClose = false
   @State private var confirmMerge = false
+  @State private var merging = false
   @State private var showCopied = false
   @State private var diffFiles: [DiffFile] = []
   @State private var blocks: [MarkdownBlock] = []
@@ -281,17 +282,27 @@ private struct PullRequestDetailView: View {
   @ViewBuilder
   private var mergeCard: some View {
     if detail.isMerged {
-      HStack(spacing: 8) {
-        Image(systemName: "checkmark.seal.fill").foregroundStyle(TetherColors.success)
-        Text("Merged").font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-        Spacer(minLength: 0)
-      }
-      .padding(14)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .tetherCard()
+      mergeStatusCard(icon: "checkmark.seal.fill", tint: TetherColors.success, text: "Merged")
+    } else if merging {
+      mergeStatusCard(spinner: true, text: "Merging…")
     } else {
       gatedMergeCard
     }
+  }
+
+  private func mergeStatusCard(icon: String = "", tint: Color = TetherColors.accent, spinner: Bool = false, text: String) -> some View {
+    HStack(spacing: 8) {
+      if spinner {
+        ProgressView().controlSize(.small).tint(TetherColors.accent)
+      } else {
+        Image(systemName: icon).foregroundStyle(tint)
+      }
+      Text(text).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+      Spacer(minLength: 0)
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .tetherCard()
   }
 
   private var gatedMergeCard: some View {
@@ -347,8 +358,12 @@ private struct PullRequestDetailView: View {
       ForEach(methods) { method in
         Button(method.label) {
           Task {
-            await controller.mergePullRequest(pullRequest, method: method)
-            await refreshDetail()
+            merging = true
+            let merged = await controller.mergePullRequest(pullRequest, method: method)
+            merging = false
+            // The merge call already told us it succeeded; flip in place rather
+            // than race GitHub's state propagation on a re-fetch.
+            if merged { detail = detail.markedMerged() } else { await refreshDetail() }
           }
         }
       }
