@@ -121,7 +121,7 @@ private struct PullRequestDetailView: View {
       .padding()
     }
     .background(TetherColors.background)
-    .overlay(alignment: .bottom) { copiedPill }
+    .copyConfirmation(isPresented: $showCopied)
     .sheet(isPresented: $showDiff) {
       PatchSheet(title: "#\(pullRequest.number)", subtitle: pullRequest.title, files: diffFiles)
     }
@@ -201,8 +201,7 @@ private struct PullRequestDetailView: View {
     }
     .padding(14)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
-    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TetherColors.border))
+    .tetherCard()
   }
 
   private var actions: some View {
@@ -232,13 +231,7 @@ private struct PullRequestDetailView: View {
           if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
         }
         chipAction("Copy link", "doc.on.doc") {
-          UIPasteboard.general.string = pullRequest.url
-          UIAccessibility.post(notification: .announcement, argument: "Link copied")
-          withAnimation { showCopied = true }
-          Task {
-            try? await Task.sleep(for: .seconds(1.2))
-            withAnimation { showCopied = false }
-          }
+          acknowledgeCopy(pullRequest.url, announce: "Link copied", into: $showCopied)
         }
       }
 
@@ -283,36 +276,17 @@ private struct PullRequestDetailView: View {
       }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
-      .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TetherColors.border))
+      .tetherCard()
     }
   }
 
-  @ViewBuilder
-  private var copiedPill: some View {
-    if showCopied {
-      Label("Link copied", systemImage: "checkmark.circle.fill")
-        .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(TetherColors.surface, in: Capsule())
-        .overlay(Capsule().strokeBorder(TetherColors.accent.opacity(0.5)))
-        .padding(.bottom, 20)
-        .transition(.opacity)
-    }
-  }
 
   private var rollupIcon: String {
-    guard !controller.gitChecks.isEmpty else { return "circle.dashed" }
-    if controller.gitChecks.contains(where: { $0.state == .failed }) { return "xmark.circle.fill" }
-    if GitRepositoryModel.isRunning(controller.gitChecks) { return "clock.fill" }
-    return "checkmark.circle.fill"
+    GitRepositoryModel.rollup(controller.gitChecks).map(icon(for:)) ?? "circle.dashed"
   }
 
   private var rollupTint: Color {
-    guard !controller.gitChecks.isEmpty else { return TetherColors.textFaint }
-    if controller.gitChecks.contains(where: { $0.state == .failed }) { return TetherColors.danger }
-    if GitRepositoryModel.isRunning(controller.gitChecks) { return TetherColors.warning }
-    return TetherColors.success
+    GitRepositoryModel.rollup(controller.gitChecks).map(tint(for:)) ?? TetherColors.textFaint
   }
 
   private func icon(for state: GitCheck.State) -> String {
@@ -400,12 +374,7 @@ private struct PatchSheet: View {
 
   @Environment(\.dismiss) private var dismiss
 
-  private var stat: (added: Int, removed: Int) {
-    files.reduce(into: (0, 0)) { total, file in
-      total.0 += file.added
-      total.1 += file.removed
-    }
-  }
+  private var stat: (added: Int, removed: Int) { DiffFile.stat(files) }
 
   var body: some View {
     NavigationStack {

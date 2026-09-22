@@ -55,9 +55,8 @@ struct MachineCardView: View {
   var body: some View {
     // Two monospaced runs side by side wrap into each other at accessibility
     // sizes, so they stack there instead.
-    let detailLayout: AnyLayout = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
-      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-      : AnyLayout(HStackLayout(spacing: 6))
+    let detailLayout = DynamicTypeLayout.detailLayout(
+      for: dynamicTypeSize, stackedSpacing: 2, inlineSpacing: 6)
     return Button(action: onOpen) {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 10) {
@@ -85,8 +84,7 @@ struct MachineCardView: View {
         .foregroundStyle(TetherColors.accent)
       }
       .padding(.horizontal, 14).padding(.vertical, 13)
-      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 16))
-      .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(TetherColors.border))
+      .tetherCard()
     }
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("homeMachine_\(profile.name)")
@@ -102,9 +100,8 @@ struct KeyCardView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   var body: some View {
-    let titleLayout: AnyLayout = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
-      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-      : AnyLayout(HStackLayout(spacing: 7))
+    let titleLayout = DynamicTypeLayout.detailLayout(
+      for: dynamicTypeSize, stackedSpacing: 4, inlineSpacing: 7)
     return HStack(alignment: .top, spacing: 13) {
       // Decorative: at accessibility sizes the name and fingerprint need the width.
       if DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
@@ -141,8 +138,7 @@ struct KeyCardView: View {
       Spacer(minLength: 0)
     }
     .padding(.horizontal, 14).padding(.vertical, 13)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 16))
-    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(TetherColors.border))
+    .tetherCard()
     .accessibilityIdentifier("homeKeyCard_\(record.name)")
   }
 
@@ -155,5 +151,87 @@ struct KeyCardView: View {
   private func shortDate(_ date: Date) -> String {
     let f = DateFormatter(); f.dateFormat = "MMM d"
     return "created " + f.string(from: date)
+  }
+}
+
+/// The card chrome every list and detail surface shares. One radius, defined
+/// once: the background and the border were repeated at each site, so the two
+/// halves of the same card could silently disagree.
+extension View {
+  func tetherCard(cornerRadius: CGFloat = 16) -> some View {
+    background(TetherColors.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
+      .overlay(RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(TetherColors.border))
+  }
+
+  /// The floating capsule used for transient outcomes at the bottom of a screen.
+  func tetherPill(border: Color = TetherColors.border) -> some View {
+    foregroundStyle(TetherColors.textPrimary)
+      .padding(.horizontal, 14).padding(.vertical, 10)
+      .background(TetherColors.surface.opacity(0.95), in: Capsule())
+      .overlay(Capsule().strokeBorder(border))
+      .shadow(radius: 8, y: 2)
+  }
+
+  func copyConfirmation(isPresented: Binding<Bool>) -> some View {
+    modifier(CopyConfirmation(isPresented: isPresented))
+  }
+
+  /// A destructive confirmation driven by the item it acts on, so the item
+  /// cannot be nil by the time the button runs.
+  func destructiveConfirmation<Item>(
+    _ item: Binding<Item?>,
+    title: @escaping (Item) -> String,
+    actionLabel: String,
+    message: String,
+    perform: @escaping (Item) -> Void
+  ) -> some View {
+    confirmationDialog(
+      item.wrappedValue.map(title) ?? "",
+      isPresented: Binding(get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } }),
+      titleVisibility: .visible
+    ) {
+      Button(actionLabel, role: .destructive) {
+        if let value = item.wrappedValue { perform(value) }
+        item.wrappedValue = nil
+      }
+      Button("Cancel", role: .cancel) { item.wrappedValue = nil }
+    } message: {
+      Text(message)
+    }
+  }
+}
+
+/// "Copied" told three ways at once: the pill, the haptic, and the VoiceOver
+/// announcement — the pill is gone in about a second and leaves nothing behind,
+/// so it is the one outcome VoiceOver has to be told about directly.
+private struct CopyConfirmation: ViewModifier {
+  @Binding var isPresented: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func body(content: Content) -> some View {
+    content
+      .overlay(alignment: .bottom) {
+        if isPresented {
+          Label("Copied", systemImage: "checkmark.circle.fill")
+            .font(.caption.weight(.semibold))
+            .tetherPill(border: TetherColors.accent.opacity(0.5))
+            .padding(.bottom, 24)
+            .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+        }
+      }
+      // Only the arrival is worth a haptic; the timed dismissal is not.
+      .sensoryFeedback(trigger: isPresented) { _, shown in shown ? .success : nil }
+  }
+}
+
+@MainActor
+func acknowledgeCopy(_ text: String, announce: String = "Copied", into isPresented: Binding<Bool>) {
+  UIPasteboard.general.string = text
+  UIAccessibility.post(notification: .announcement, argument: announce)
+  withAnimation { isPresented.wrappedValue = true }
+  Task {
+    try? await Task.sleep(for: .seconds(1.2))
+    guard !Task.isCancelled else { return }
+    withAnimation { isPresented.wrappedValue = false }
   }
 }

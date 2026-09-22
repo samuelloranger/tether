@@ -12,4 +12,17 @@ public enum DynamicTypeLayout {
   public static func stacksVertically(for size: DynamicTypeSize) -> Bool {
     size.isAccessibilitySize
   }
+
+  /// The layout that follows `stacksVertically`, so a card cannot disagree with
+  /// the predicate it is supposed to obey.
+  public static func detailLayout(
+    for size: DynamicTypeSize,
+    alignment: HorizontalAlignment = .leading,
+    stackedSpacing: CGFloat,
+    inlineSpacing: CGFloat
+  ) -> AnyLayout {
+    stacksVertically(for: size)
+      ? AnyLayout(VStackLayout(alignment: alignment, spacing: stackedSpacing))
+      : AnyLayout(HStackLayout(spacing: inlineSpacing))
+  }
 }

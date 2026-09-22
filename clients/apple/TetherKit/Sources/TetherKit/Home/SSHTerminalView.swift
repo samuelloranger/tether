@@ -29,7 +29,6 @@ public struct SSHTerminalView: View {
   @State private var showHistory = false
   @State private var showPhotoPicker = false
   @State private var photoItem: PhotosPickerItem?
-  @State private var copyFeedback = 0
   @State private var showCopyConfirmation = false
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -65,9 +64,7 @@ public struct SSHTerminalView: View {
     .overlay(alignment: .bottom) {
       transferBanner.animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.transfer)
     }
-    .overlay(alignment: .bottom) {
-      copyConfirmation.animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: showCopyConfirmation)
-    }
+    .copyConfirmation(isPresented: $showCopyConfirmation)
     .overlay { drawerGestures }
     .sensoryFeedback(trigger: controller.status) {
       switch controller.status {
@@ -85,7 +82,6 @@ public struct SSHTerminalView: View {
       }
     }
     .sensoryFeedback(.selection, trigger: controller.attach)
-    .sensoryFeedback(.success, trigger: copyFeedback)
     .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
       guard case let .success(url) = result else { return }
       let stop = url.startAccessingSecurityScopedResource()
@@ -121,20 +117,12 @@ public struct SSHTerminalView: View {
     .sheet(isPresented: $showHistory) {
       TerminalHistoryView(controller: controller, preferences: preferences) { showHistory = false }
     }
-    .confirmationDialog(
-      "Kill \(pendingKill ?? controller.attach)?",
-      isPresented: Binding(get: { pendingKill != nil }, set: { if !$0 { pendingKill = nil } }),
-      titleVisibility: .visible
-    ) {
-      Button("Kill session", role: .destructive) {
-        guard let name = pendingKill else { return }
-        pendingKill = nil
-        Task { await controller.killSession(name) }
-      }
-      Button("Cancel", role: .cancel) { pendingKill = nil }
-    } message: {
-      Text("Everything running in this session stops.")
-    }
+    .destructiveConfirmation(
+      $pendingKill,
+      title: { "Kill \($0)?" },
+      actionLabel: "Kill session",
+      message: "Everything running in this session stops."
+    ) { name in Task { await controller.killSession(name) } }
   }
 
   private var terminalStack: some View {
@@ -504,35 +492,7 @@ public struct SSHTerminalView: View {
 
   private func copySelection() {
     guard let text = selectionText, !text.isEmpty else { return }
-    UIPasteboard.general.string = text
-    acknowledgeCopy()
-  }
-
-  private func acknowledgeCopy() {
-    copyFeedback += 1
-    showCopyConfirmation = true
-    // The pill is gone in about a second and leaves nothing behind, so it is
-    // the one outcome VoiceOver has to be told about directly.
-    UIAccessibility.post(notification: .announcement, argument: "Copied")
-    Task {
-      try? await Task.sleep(for: .seconds(1.2))
-      guard !Task.isCancelled else { return }
-      showCopyConfirmation = false
-    }
-  }
-
-  @ViewBuilder
-  private var copyConfirmation: some View {
-    if showCopyConfirmation {
-      Label("Copied", systemImage: "checkmark.circle.fill")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(TetherColors.textPrimary)
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(TetherColors.surface.opacity(0.96), in: Capsule())
-        .overlay(Capsule().strokeBorder(TetherColors.accent.opacity(0.5)))
-        .padding(.bottom, 24)
-        .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
-    }
+    acknowledgeCopy(text, into: $showCopyConfirmation)
   }
 
   @ViewBuilder
