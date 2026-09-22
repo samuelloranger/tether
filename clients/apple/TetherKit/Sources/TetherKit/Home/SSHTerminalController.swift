@@ -1,5 +1,9 @@
 import Foundation
 import TetherFFIBindings
+#if canImport(UIKit)
+import SwiftUI
+import PhotosUI
+#endif
 
 public struct PullRequestDetail: Equatable, Sendable {
   public let checks: [GitCheck]
@@ -36,9 +40,20 @@ public final class SSHTerminalController {
   /// What the terminal overlay says while there is no live session. Text plus
   /// an icon — connection state is never carried by colour alone.
   public struct ConnectionCopy: Equatable {
+    /// A spinner means "wait"; a symbol means "look". Retry is offered for an
+    /// error and nothing else, so the affordance cannot disagree with the art.
+    public enum Indicator: Equatable {
+      case spinner
+      case warning(symbol: String)
+      case error(symbol: String)
+
+      public var offersRetry: Bool { if case .error = self { return true } else { return false } }
+    }
+
     public var message: String
-    public var icon: String
-    public var showsRetry: Bool
+    public var indicator: Indicator
+    /// The header lamp's one word for the same state.
+    public var shortLabel: String
   }
 
   /// Why a dial is being asked for. Everything automatic passes through the
@@ -309,8 +324,20 @@ public final class SSHTerminalController {
 
   public func clearTransfer() { transfer = .idle }
 
+  #if canImport(UIKit)
+  public func sendPickedMedia(_ item: PhotosPickerItem, isVideo: Bool) async {
+    switch await MediaTransfer.load(item, isVideo: isVideo) {
+    case let .ready(name, data):
+      let remote = await sendFile(data: data, filename: name)
+      if let remote { sendInput(shellQuote(remote)) }
+    case let .failed(message):
+      reportTransferFailure(message)
+    }
+  }
+  #endif
+
   /// A transfer that failed before any SSH work reuses the upload banner.
-  public func reportTransferFailure(_ message: String) { transfer = .failed(message) }
+  private func reportTransferFailure(_ message: String) { transfer = .failed(message) }
 
   public func loadGitWorkspace(payload: GitWorkspacePayload = .all) async {
     gitLoading = true
@@ -550,17 +577,26 @@ public final class SSHTerminalController {
     case .connected:
       return nil
     case .connecting:
-      return ConnectionCopy(message: "Connecting…", icon: "antenna.radiowaves.left.and.right", showsRetry: false)
+      return ConnectionCopy(message: "Connecting…", indicator: .spinner, shortLabel: "connecting")
     case let .failed(message):
-      return ConnectionCopy(message: message, icon: "exclamationmark.triangle", showsRetry: true)
+      return ConnectionCopy(
+        message: message, indicator: .error(symbol: "exclamationmark.triangle"), shortLabel: "error")
     case .disconnected:
+      // A dropped session on a dead path is waiting for the network, not for
+      // the host — saying "reconnecting" there would be a lie the user cannot
+      // act on.
       switch reachability?.availability {
       case .offline:
-        return ConnectionCopy(message: "Waiting for a network connection", icon: "wifi.slash", showsRetry: false)
+        return ConnectionCopy(
+          message: "Waiting for a network connection",
+          indicator: .warning(symbol: "wifi.slash"), shortLabel: "no network")
       case .requiresConnection:
-        return ConnectionCopy(message: "Network needs a connection", icon: "exclamationmark.triangle", showsRetry: false)
+        return ConnectionCopy(
+          message: "Network needs a connection",
+          indicator: .warning(symbol: "exclamationmark.triangle"), shortLabel: "no network")
       case .usable, nil:
-        return ConnectionCopy(message: "Connection lost — reconnecting…", icon: "arrow.clockwise", showsRetry: false)
+        return ConnectionCopy(
+          message: "Connection lost — reconnecting…", indicator: .spinner, shortLabel: "reconnecting")
       }
     }
   }
