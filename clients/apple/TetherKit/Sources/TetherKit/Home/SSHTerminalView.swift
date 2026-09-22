@@ -25,6 +25,8 @@ public struct SSHTerminalView: View {
   @State private var showHistory = false
   @State private var showPhotoPicker = false
   @State private var photoItem: PhotosPickerItem?
+  @State private var copyFeedback = 0
+  @State private var showCopyConfirmation = false
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -49,7 +51,30 @@ public struct SSHTerminalView: View {
       }
     }
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: drawerOpen)
-    .overlay(alignment: .bottom) { transferBanner }
+    .overlay(alignment: .bottom) {
+      transferBanner.animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.transfer)
+    }
+    .overlay(alignment: .bottom) {
+      copyConfirmation.animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: showCopyConfirmation)
+    }
+    .overlay(alignment: .leading) { drawerEdgeGesture }
+    .sensoryFeedback(trigger: controller.status) {
+      switch controller.status {
+      case .connected: .success
+      case .disconnected: .warning
+      case .failed: .error
+      case .connecting: nil
+      }
+    }
+    .sensoryFeedback(trigger: controller.transfer) {
+      switch controller.transfer {
+      case .sent: .success
+      case .failed: .error
+      case .idle, .sending: nil
+      }
+    }
+    .sensoryFeedback(.selection, trigger: controller.attach)
+    .sensoryFeedback(.success, trigger: copyFeedback)
     .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
       guard case let .success(url) = result else { return }
       let stop = url.startAccessingSecurityScopedResource()
@@ -147,11 +172,18 @@ public struct SSHTerminalView: View {
         withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = true }
       }
       Circle().fill(lampColor).frame(width: 9, height: 9).padding(.leading, 4)
+        .shadow(color: lampColor.opacity(0.55), radius: 4)
+        .scaleEffect(controller.status == .connected ? 1 : 1.12)
       VStack(alignment: .leading, spacing: 0) {
         Text(controller.title).font(.system(size: 15, weight: .semibold))
           .foregroundStyle(TetherColors.textPrimary)
-        Text(controller.attach).font(.system(size: 10, design: .monospaced))
-          .foregroundStyle(TetherColors.textFaint)
+        HStack(spacing: 4) {
+          Text(controller.attach)
+          Text("·")
+          Text(statusLabel).foregroundStyle(lampColor)
+        }
+        .font(.system(size: 10, design: .monospaced))
+        .foregroundStyle(TetherColors.textFaint)
       }
       .padding(.leading, 6)
       Spacer()
@@ -161,7 +193,7 @@ public struct SSHTerminalView: View {
         Button { Task { await controller.switchSession(to: nextSessionName()) } } label: { Label("New session", systemImage: "plus") }
         Button { showFileImporter = true } label: { Label("Send file…", systemImage: "square.and.arrow.up") }
         Button { showPhotoPicker = true } label: { Label("Send photo…", systemImage: "photo") }
-        Button { if let t = selectionText, !t.isEmpty { UIPasteboard.general.string = t } } label: { Label("Copy selection", systemImage: "doc.on.doc") }
+        Button(action: copySelection) { Label("Copy selection", systemImage: "doc.on.doc") }
           .disabled(selectionText?.isEmpty ?? true)
         Button { showHistory = true } label: { Label("Terminal history", systemImage: "clock.arrow.circlepath") }
         Divider()
@@ -261,6 +293,7 @@ public struct SSHTerminalView: View {
     .padding(.horizontal, 12).padding(.vertical, 10)
     .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isCurrent ? TetherColors.accent.opacity(0.4) : TetherColors.border))
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: isCurrent)
   }
 
   private var newSessionRow: some View {
@@ -311,6 +344,66 @@ public struct SSHTerminalView: View {
     case .connecting, .disconnected: return TetherColors.warning
     case .connected: return TetherColors.success
     case .failed: return TetherColors.danger
+    }
+  }
+
+  private var statusLabel: String {
+    switch controller.status {
+    case .connecting: "connecting"
+    case .connected: "live"
+    case .disconnected: "reconnecting"
+    case .failed: "offline"
+    }
+  }
+
+  @ViewBuilder
+  private var drawerEdgeGesture: some View {
+    if !drawerOpen {
+      Color.clear
+        .frame(width: TetherMotion.drawerEdgeWidth)
+        .contentShape(Rectangle())
+        .gesture(
+          DragGesture(minimumDistance: 12)
+            .onEnded { value in
+              guard TetherMotion.shouldOpenDrawer(
+                startX: value.startLocation.x, translationX: value.translation.width
+              ) else { return }
+              withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) {
+                drawerOpen = true
+              }
+            }
+        )
+        .accessibilityHidden(true)
+    }
+  }
+
+  private func copySelection() {
+    guard let text = selectionText, !text.isEmpty else { return }
+    UIPasteboard.general.string = text
+    acknowledgeCopy()
+  }
+
+  private func acknowledgeCopy() {
+    copyFeedback += 1
+    showCopyConfirmation = true
+    Task {
+      try? await Task.sleep(for: .seconds(1.2))
+      guard !Task.isCancelled else { return }
+      showCopyConfirmation = false
+    }
+  }
+
+  @ViewBuilder
+  private var copyConfirmation: some View {
+    if showCopyConfirmation {
+      Label("Copied", systemImage: "checkmark.circle.fill")
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(TetherColors.textPrimary)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(TetherColors.surface.opacity(0.96), in: Capsule())
+        .overlay(Capsule().strokeBorder(TetherColors.accent.opacity(0.5)))
+        .padding(.bottom, 24)
+        .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
     }
   }
 
