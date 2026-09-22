@@ -37,7 +37,7 @@ final class GitRepositoryModelTests: XCTestCase {
     """
 
     XCTAssertEqual(try GitRepositoryModel.pullRequests(from: json), [
-      GitPullRequest(number: 196, title: "Native interactions", head: "feat/native", base: "main", url: "https://example.test/pr/196", updatedAt: "2026-09-22T01:00:00Z", isDraft: false, changedFiles: 12, reviewDecision: "REVIEW_REQUIRED")
+      GitPullRequest(number: 196, title: "Native interactions", head: "feat/native", base: "main", url: "https://example.test/pr/196", updatedAt: "2026-09-22T01:00:00Z", isDraft: false, changedFiles: 12, reviewDecision: "REVIEW_REQUIRED", rawState: nil)
     ])
   }
 
@@ -228,5 +228,32 @@ final class GitRepositoryModelTests: XCTestCase {
     XCTAssertEqual(GitRepositoryModel.rollup([passed, running]), .running)
     XCTAssertEqual(GitRepositoryModel.rollup([passed]), .passed)
     XCTAssertNil(GitRepositoryModel.rollup([]))
+  }
+
+  func test_a_pull_request_without_a_state_field_is_treated_as_open() {
+    // The list adds `state` now, but detail JSON and older callers may not.
+    let json = """
+    [{"number":1,"title":"t","headRefName":"h","baseRefName":"main","url":"u","updatedAt":"d","isDraft":false,"changedFiles":1,"reviewDecision":null}]
+    """
+    XCTAssertEqual(try GitRepositoryModel.pullRequests(from: json).first?.state, .open)
+  }
+
+  func test_pull_request_state_is_read_from_the_json() throws {
+    let json = """
+    [{"number":1,"title":"a","headRefName":"h","baseRefName":"main","url":"u","updatedAt":"d","isDraft":false,"changedFiles":1,"reviewDecision":null,"state":"OPEN"},
+     {"number":2,"title":"b","headRefName":"h","baseRefName":"main","url":"u","updatedAt":"d","isDraft":false,"changedFiles":1,"reviewDecision":null,"state":"MERGED"},
+     {"number":3,"title":"c","headRefName":"h","baseRefName":"main","url":"u","updatedAt":"d","isDraft":false,"changedFiles":1,"reviewDecision":null,"state":"CLOSED"}]
+    """
+    XCTAssertEqual(try GitRepositoryModel.pullRequests(from: json).map(\.state), [.open, .merged, .closed])
+  }
+
+  func test_the_list_keeps_open_and_merged_and_drops_closed_without_a_merge() {
+    let json = """
+    [{"number":1,"title":"a","headRefName":"h","baseRefName":"m","url":"u","updatedAt":"d","isDraft":false,"changedFiles":1,"reviewDecision":null,"state":"OPEN"},
+     {"number":2,"title":"b","headRefName":"h","baseRefName":"m","url":"u","updatedAt":"d","isDraft":false,"changedFiles":1,"reviewDecision":null,"state":"MERGED"},
+     {"number":3,"title":"c","headRefName":"h","baseRefName":"m","url":"u","updatedAt":"d","isDraft":false,"changedFiles":1,"reviewDecision":null,"state":"CLOSED"}]
+    """
+    guard case let .list(pulls) = GitRepositoryModel.pullRequestResult(from: json) else { return XCTFail("expected a list") }
+    XCTAssertEqual(pulls.map(\.number), [1, 2])
   }
 }

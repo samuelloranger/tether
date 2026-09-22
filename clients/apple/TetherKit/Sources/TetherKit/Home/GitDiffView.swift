@@ -19,7 +19,7 @@ struct GitDiffView: View {
           Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
           Spacer()
           VStack(alignment: .trailing, spacing: 1) {
-            Text("\(controller.gitPullRequests.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+            Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
             // Without this a refresh that changed nothing looks like a refresh
             // that did nothing.
             if let updated = controller.gitUpdatedAt {
@@ -100,7 +100,14 @@ struct GitDiffView: View {
       } else {
         ForEach(controller.gitPullRequests) { pullRequest in
         NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest) } label: {
-          VStack(alignment: .leading, spacing: 5) { Text("#\(pullRequest.number) \(pullRequest.title)").lineLimit(2); Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary) }
+          VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+              Text("#\(pullRequest.number) \(pullRequest.title)").lineLimit(2)
+              Spacer(minLength: 4)
+              prStateBadge(pullRequest.state)
+            }
+            Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+          }
         }.listRowBackground(TetherColors.surface)
         }
       }
@@ -108,6 +115,26 @@ struct GitDiffView: View {
     .scrollContentBackground(.hidden)
     .background(TetherColors.background)
     .refreshable { await refreshVisiblePayload() }
+  }
+
+  @ViewBuilder
+  private func prStateBadge(_ state: PRState) -> some View {
+    switch state {
+    case .open:
+      badgeLabel("Open", tint: TetherColors.success)
+    case .merged:
+      badgeLabel("Merged", tint: TetherColors.accent)
+    case .closed:
+      badgeLabel("Closed", tint: TetherColors.textFaint)
+    }
+  }
+
+  private func badgeLabel(_ text: String, tint: Color) -> some View {
+    Text(text.uppercased())
+      .font(.caption2.weight(.bold))
+      .foregroundStyle(tint)
+      .padding(.horizontal, 7).padding(.vertical, 3)
+      .background(tint.opacity(0.15), in: Capsule())
   }
 
   private var workspacePayload: SSHTerminalController.GitWorkspacePayload {
@@ -139,7 +166,6 @@ private struct PullRequestDetailView: View {
   @State private var loadingDiff = false
   @State private var showDiff = false
 
-  private static let pollSeconds: UInt64 = 10
 
   var body: some View {
     ScrollView {
@@ -160,11 +186,17 @@ private struct PullRequestDetailView: View {
     .task {
       refreshDescription(detail.body)
       await refreshDetail()
-      // Keep refreshing only while something is still running.
-      while !Task.isCancelled,
-        GitRepositoryModel.isRunning(detail.checks) || detail.gate == .computing {
-        try? await Task.sleep(for: .seconds(Self.pollSeconds))
-        guard !Task.isCancelled else { return }
+      // Wait on the host, not on a phone timer: gh's own watch blocks until the
+      // run settles, then we refetch once. Re-arm only if it is still running,
+      // and stop if the watch dial failed rather than spinning on it.
+      while !Task.isCancelled, GitRepositoryModel.isRunning(detail.checks) {
+        let start = Date()
+        let watched = await controller.awaitChecksSettled(pullRequest)
+        guard !Task.isCancelled, watched else { break }
+        // A watch that returns almost instantly (no checks yet, or gh and the
+        // rollup disagreeing) must not turn the re-arm into a hot dial loop.
+        if Date().timeIntervalSince(start) < 2 { try? await Task.sleep(for: .seconds(10)) }
+        guard !Task.isCancelled else { break }
         await refreshDetail()
       }
     }
@@ -246,7 +278,23 @@ private struct PullRequestDetailView: View {
 
   /// The gate and the button are one card, so the reason sits with the control
   /// it explains rather than as a caption somewhere below it.
+  @ViewBuilder
   private var mergeCard: some View {
+    if detail.isMerged {
+      HStack(spacing: 8) {
+        Image(systemName: "checkmark.seal.fill").foregroundStyle(TetherColors.success)
+        Text("Merged").font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        Spacer(minLength: 0)
+      }
+      .padding(14)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .tetherCard()
+    } else {
+      gatedMergeCard
+    }
+  }
+
+  private var gatedMergeCard: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
         if detail.gate == .computing {
@@ -297,7 +345,12 @@ private struct PullRequestDetailView: View {
     .tetherCard()
     .confirmationDialog("Merge #\(pullRequest.number)?", isPresented: $confirmMerge, titleVisibility: .visible) {
       ForEach(methods) { method in
-        Button(method.label) { Task { await controller.mergePullRequest(pullRequest, method: method) } }
+        Button(method.label) {
+          Task {
+            await controller.mergePullRequest(pullRequest, method: method)
+            await refreshDetail()
+          }
+        }
       }
       Button("Cancel", role: .cancel) {}
     } message: {
