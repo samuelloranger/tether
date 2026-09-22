@@ -57,6 +57,7 @@ public final class SSHTerminalController {
   public private(set) var gitChecksUpdatedAt: Date?
   public private(set) var gitChecksLoading = false
   public private(set) var gitPullRequestBody = ""
+  public private(set) var gitUpdatedAt: Date?
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
@@ -330,6 +331,7 @@ public final class SSHTerminalController {
         gitError = "Not a git repository:\n\(cwd)"
         return
       }
+      gitUpdatedAt = Date()
       gitLines = GitDiffModel.classify(diff)
       gitBranch = GitRepositoryModel.branch(from: branchOutput)
       gitCommits = GitRepositoryModel.commits(from: commitsOutput)
@@ -370,6 +372,15 @@ public final class SSHTerminalController {
     }
     gitPullRequestBody = (object["body"] as? String) ?? ""
     gitChecksUpdatedAt = Date()
+  }
+
+  /// One commit's patch, kept apart from `gitLines` so opening a commit does
+  /// not replace the working-tree diff behind it.
+  public func commitDiff(_ commit: GitCommit) async -> [GitDiffLine] {
+    guard let cwd = await currentCwd() else { return [] }
+    let command = "git -C \(shellQuote(cwd)) --no-pager show \(shellQuote(commit.id)) --patch --stat --format=%b 2>&1"
+    guard let raw = try? await control.exec(command) else { return [] }
+    return GitDiffModel.classify(raw)
   }
 
   /// The diff of the pull request itself, which is not the working tree's.

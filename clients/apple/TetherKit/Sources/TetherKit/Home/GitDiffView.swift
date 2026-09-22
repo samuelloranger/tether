@@ -17,7 +17,14 @@ struct GitDiffView: View {
           Image(systemName: "arrow.triangle.branch").foregroundStyle(TetherColors.accent)
           Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
           Spacer()
-          Text("\(controller.gitPullRequests.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+          VStack(alignment: .trailing, spacing: 1) {
+            Text("\(controller.gitPullRequests.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+            // Without this a refresh that changed nothing looks like a refresh
+            // that did nothing.
+            if let updated = controller.gitUpdatedAt {
+              Text("updated \(updated, style: .relative) ago").font(.caption2).foregroundStyle(TetherColors.textFaint)
+            }
+          }
         }.padding(.horizontal, 16).padding(.vertical, 12).background(TetherColors.surface)
         Picker("Git section", selection: $tab) { ForEach(Tab.allCases) { Text($0.rawValue).tag($0) } }
           .pickerStyle(.segmented).padding(12)
@@ -31,7 +38,17 @@ struct GitDiffView: View {
       .toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("Done", action: onDone) }
         ToolbarItem(placement: .principal) { if tab == .changes && !controller.gitLines.isEmpty { Text("+\(stat.added)  −\(stat.removed)").font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.success) } }
-        ToolbarItem(placement: .primaryAction) { Button { Task { await controller.loadGitWorkspace() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Refresh Git workspace") }
+        ToolbarItem(placement: .primaryAction) {
+          Button { Task { await controller.loadGitWorkspace() } } label: {
+            if controller.gitLoading {
+              ProgressView().controlSize(.small).tint(TetherColors.accent)
+            } else {
+              Image(systemName: "arrow.clockwise")
+            }
+          }
+          .disabled(controller.gitLoading)
+          .accessibilityLabel("Refresh Git workspace")
+        }
       }
       .overlay(alignment: .bottom) { if let message = controller.gitActionMessage { Text(message).font(.caption.monospaced()).padding(12).background(TetherColors.surface, in: Capsule()).padding(.bottom, 12) } }
       .task { while !Task.isCancelled { await controller.loadGitWorkspace(); try? await Task.sleep(nanoseconds: 15_000_000_000) } }
@@ -47,15 +64,18 @@ struct GitDiffView: View {
       ContentUnavailableView("No uncommitted changes", systemImage: "checkmark.circle", description: Text("The current working directory is clean.")).foregroundStyle(TetherColors.textSecondary)
     } else {
       ScrollView { LazyVStack(alignment: .leading, spacing: 0) { ForEach(controller.gitLines) { line in
-        Text(line.text.isEmpty ? " " : line.text).font(.caption.monospaced()).foregroundStyle(color(line.kind)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 1).background(background(line.kind))
+        Text(line.text.isEmpty ? " " : line.text).font(.caption.monospaced()).foregroundStyle(GitDiffPalette.color(line.kind)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 1).background(GitDiffPalette.background(line.kind))
       }}.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6) }
     }
   }
 
   private var commits: some View {
     List(controller.gitCommits) { commit in
-      NavigationLink { VStack(alignment: .leading, spacing: 12) { Text(commit.subject).font(.headline); Text(commit.id).font(.caption.monospaced()).foregroundStyle(TetherColors.accent); Text("\(commit.author) · \(Date(timeIntervalSince1970: TimeInterval(commit.timestamp)).formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(TetherColors.textSecondary) }.padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(TetherColors.background) } label: {
-        VStack(alignment: .leading, spacing: 4) { Text(commit.subject).lineLimit(2); Text("\(commit.id) · \(commit.author)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary) }
+      NavigationLink { CommitDetailView(controller: controller, commit: commit) } label: {
+        VStack(alignment: .leading, spacing: 4) {
+          Text(commit.subject).lineLimit(2)
+          Text("\(commit.id) · \(commit.author)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+        }
       }.listRowBackground(TetherColors.surface)
     }.scrollContentBackground(.hidden).background(TetherColors.background)
   }
@@ -79,8 +99,6 @@ struct GitDiffView: View {
   }
 
   private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await controller.loadGitWorkspace() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
-  private func color(_ kind: GitDiffLineKind) -> Color { switch kind { case .added: TetherColors.success; case .removed: TetherColors.danger; case .hunk: TetherColors.accent; case .fileHeader: TetherColors.textSecondary; case .context: TetherColors.textPrimary } }
-  private func background(_ kind: GitDiffLineKind) -> Color { switch kind { case .added: TetherColors.success.opacity(0.08); case .removed: TetherColors.danger.opacity(0.08); case .hunk: TetherColors.accent.opacity(0.06); default: .clear } }
 }
 
 private struct PullRequestDetailView: View {
@@ -307,4 +325,75 @@ private struct PullRequestDetailView: View {
   }
 }
 
+
+private struct CommitDetailView: View {
+  @Bindable var controller: SSHTerminalController
+  let commit: GitCommit
+
+  @State private var lines: [GitDiffLine] = []
+  @State private var loading = true
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 6) {
+          Text(commit.subject).font(.headline).foregroundStyle(TetherColors.textPrimary)
+          Text(commit.id).font(.caption.monospaced()).foregroundStyle(TetherColors.accent)
+          Text("\(commit.author) · \(Date(timeIntervalSince1970: TimeInterval(commit.timestamp)).formatted(date: .abbreviated, time: .shortened))")
+            .font(.caption).foregroundStyle(TetherColors.textSecondary)
+        }
+        .padding(.horizontal, 12)
+
+        if loading {
+          ProgressView().tint(TetherColors.accent).frame(maxWidth: .infinity).padding(.top, 24)
+        } else if lines.isEmpty {
+          ContentUnavailableView("No diff for this commit", systemImage: "doc.text",
+            description: Text("It may be a merge commit, or the repository is no longer at this path."))
+            .foregroundStyle(TetherColors.textSecondary)
+        } else {
+          LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(lines) { line in
+              Text(line.text.isEmpty ? " " : line.text)
+                .font(.caption.monospaced())
+                .foregroundStyle(GitDiffPalette.color(line.kind))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12).padding(.vertical, 1)
+                .background(GitDiffPalette.background(line.kind))
+            }
+          }
+        }
+      }
+      .padding(.vertical, 10)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .background(TetherColors.background)
+    .task {
+      lines = await controller.commitDiff(commit)
+      loading = false
+    }
+  }
+}
+
+/// Shared so the commit screen and the changes tab colour a patch identically.
+enum GitDiffPalette {
+  static func color(_ kind: GitDiffLineKind) -> Color {
+    switch kind {
+    case .added: TetherColors.success
+    case .removed: TetherColors.danger
+    case .hunk: TetherColors.accent
+    case .fileHeader: TetherColors.textSecondary
+    case .context: TetherColors.textPrimary
+    }
+  }
+
+  static func background(_ kind: GitDiffLineKind) -> Color {
+    switch kind {
+    case .added: TetherColors.success.opacity(0.08)
+    case .removed: TetherColors.danger.opacity(0.08)
+    case .hunk: TetherColors.accent.opacity(0.06)
+    default: .clear
+    }
+  }
+}
 #endif
