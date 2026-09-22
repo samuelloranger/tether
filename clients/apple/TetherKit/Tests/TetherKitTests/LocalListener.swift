@@ -9,7 +9,7 @@ final class LocalListener {
   let port: Int
 
   init() throws {
-    fd = socket(AF_INET, SOCK_STREAM, 0)
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
     var addr = sockaddr_in()
     addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     addr.sin_family = sa_family_t(AF_INET)
@@ -20,12 +20,16 @@ final class LocalListener {
         bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
       }
     }
-    guard bound == 0, listen(fd, 8) == 0 else { throw POSIXError(.EADDRINUSE) }
+    guard bound == 0, listen(fd, 8) == 0 else {
+      Darwin.close(fd)
+      throw POSIXError(.EADDRINUSE)
+    }
     var out = sockaddr_in()
     var len = socklen_t(MemoryLayout<sockaddr_in>.size)
     _ = withUnsafeMutablePointer(to: &out) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
     }
+    self.fd = fd
     port = Int(UInt16(bigEndian: out.sin_port))
   }
 
