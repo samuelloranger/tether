@@ -16,6 +16,8 @@ public struct SSHTerminalView: View {
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
   @State private var drawerOpen = false
+  /// Live horizontal drag on the drawer, `nil` when no finger is on it.
+  @State private var dragTranslation: CGFloat?
   @State private var showSettings = false
   @State private var showGit = false
   @State private var newSessionName = ""
@@ -46,17 +48,18 @@ public struct SSHTerminalView: View {
   public var body: some View {
     ZStack(alignment: .leading) {
       terminalStack
-      if drawerOpen {
-        Color.black.opacity(0.5).ignoresSafeArea()
-          .onTapGesture { withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = false } }
-          .transition(.opacity)
+      if drawerProgress > 0 {
+        Color.black.opacity(0.5 * min(drawerProgress, 1)).ignoresSafeArea()
+          .onTapGesture { setDrawer(open: false) }
+          .gesture(drawerDrag(isOpen: true))
         drawer
-          .frame(width: min(drawerWidth, 360))
-          .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
-          .gesture(drawerCloseDrag)
+          // Past fully open the panel stretches rather than tearing away from
+          // the edge, so the pull still reads as the finger being heard.
+          .frame(width: panelWidth * max(1, drawerProgress))
+          .offset(x: -panelWidth * (1 - min(drawerProgress, 1)))
+          .gesture(drawerDrag(isOpen: true))
       }
     }
-    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: drawerOpen)
     .overlay(alignment: .bottom) {
       transferBanner.animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.transfer)
     }
@@ -430,36 +433,59 @@ public struct SSHTerminalView: View {
   /// path stay the primary way in — this is a shortcut, not the only route.
   @ViewBuilder
   private var drawerEdgeGesture: some View {
-    if !drawerOpen {
+    if drawerProgress == 0 {
       Color.clear
         .frame(width: DrawerDragDecision.edgeWidth)
         .contentShape(Rectangle())
-        .gesture(
-          DragGesture(minimumDistance: 12)
-            .onEnded { value in
-              guard DrawerDragDecision.decide(
-                isOpen: false, startX: value.startLocation.x, translation: value.translation
-              ) == .open else { return }
-              setDrawer(open: true)
-            }
-        )
+        .gesture(drawerDrag(isOpen: false))
         .accessibilityHidden(true)
     }
   }
 
-  /// Local to the drawer panel — it never sees a touch that began on the grid.
-  private var drawerCloseDrag: some Gesture {
-    DragGesture(minimumDistance: 12)
+  private var panelWidth: CGFloat { min(drawerWidth, 360) }
+
+  /// Where the panel sits right now: the live drag if there is one, otherwise
+  /// the settled state.
+  private var drawerProgress: Double {
+    guard let dragTranslation else { return drawerOpen ? 1 : 0 }
+    return DrawerDragDecision.progress(isOpen: drawerOpen, translationX: dragTranslation, width: panelWidth)
+  }
+
+  /// One continuous gesture for both directions. `onChanged` moves the panel
+  /// with the finger; the release settles it where the flick was headed, using
+  /// UIKit's own velocity projection rather than the distance travelled.
+  private func drawerDrag(isOpen: Bool) -> some Gesture {
+    DragGesture(minimumDistance: 8)
+      .onChanged { value in
+        if dragTranslation == nil {
+          // Adopt the drag only once it is clearly horizontal, and — when
+          // closed — only from the edge strip: a vertical swipe there is the
+          // terminal's to scroll.
+          guard abs(value.translation.width) > abs(value.translation.height) else { return }
+          guard isOpen || value.startLocation.x <= DrawerDragDecision.edgeWidth else { return }
+        }
+        dragTranslation = value.translation.width
+      }
       .onEnded { value in
-        guard DrawerDragDecision.decide(
-          isOpen: true, startX: value.startLocation.x, translation: value.translation
-        ) == .close else { return }
-        setDrawer(open: false)
+        guard dragTranslation != nil else { return }
+        let open = DrawerDragDecision.settlesOpen(
+          isOpen: isOpen,
+          translationX: value.translation.width,
+          predictedEndX: value.predictedEndTranslation.width,
+          width: panelWidth
+        )
+        withAnimation(TetherMotion.drawerSettle(reduceMotion: reduceMotion)) {
+          dragTranslation = nil
+          drawerOpen = open
+        }
       }
   }
 
   private func setDrawer(open: Bool) {
-    withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = open }
+    withAnimation(TetherMotion.drawerSettle(reduceMotion: reduceMotion)) {
+      dragTranslation = nil
+      drawerOpen = open
+    }
   }
 
   private func copySelection() {

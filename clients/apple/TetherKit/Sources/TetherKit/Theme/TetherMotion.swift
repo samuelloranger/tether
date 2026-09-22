@@ -34,6 +34,13 @@ public enum TetherMotion {
     .timingCurve(0.16, 1, 0.3, 1, duration: duration)
   }
 
+  /// Settling a panel the finger was just holding. A spring, unlike the rest of
+  /// the chrome: here an overshoot reads as momentum continuing, not as a second
+  /// state change. Duration is short enough that a flick feels answered.
+  public static func drawerSettle(reduceMotion: Bool) -> Animation {
+    reduceMotion ? .easeOut(duration: crossfade) : .snappy(duration: 0.3, extraBounce: 0.04)
+  }
+
   /// A routine transition, collapsed to a plain crossfade under Reduce Motion.
   public static func ui(_ duration: Double, reduceMotion: Bool) -> Animation {
     reduceMotion ? .easeOut(duration: crossfade) : decelerate(duration)
