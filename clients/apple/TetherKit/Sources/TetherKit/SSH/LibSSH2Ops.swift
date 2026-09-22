@@ -29,7 +29,7 @@ final class LibSSH2Ops: SSHConnectionOps {
 
   func connectAndHandshake() throws {
     LibSSH2Ops.initializeOnce()
-    socket = try LibSSH2Ops.openSocket(host: config.host, port: config.port)
+    socket = try SocketDialer.open(host: config.host, port: config.port)
     guard let session = tether_libssh2_session_init() else { throw LibSSH2OpsError.sessionInit }
     self.session = session
     libssh2_session_set_blocking(session, 1)
@@ -199,31 +199,5 @@ final class LibSSH2Ops: SSHConnectionOps {
         }
       }
     }
-  }
-
-  private static func openSocket(host: String, port: Int) throws -> Int32 {
-    var hints = addrinfo(
-      ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
-      ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil
-    )
-    var result: UnsafeMutablePointer<addrinfo>?
-    let status = getaddrinfo(host, String(port), &hints, &result)
-    guard status == 0, let list = result else {
-      throw LibSSH2OpsError.socket("resolve failed for \(host):\(port)")
-    }
-    defer { freeaddrinfo(list) }
-
-    var node: UnsafeMutablePointer<addrinfo>? = list
-    while let current = node {
-      let fd = Darwin.socket(current.pointee.ai_family, current.pointee.ai_socktype, current.pointee.ai_protocol)
-      if fd >= 0 {
-        if Darwin.connect(fd, current.pointee.ai_addr, current.pointee.ai_addrlen) == 0 {
-          return fd
-        }
-        Darwin.close(fd)
-      }
-      node = current.pointee.ai_next
-    }
-    throw LibSSH2OpsError.socket("connect failed for \(host):\(port)")
   }
 }
