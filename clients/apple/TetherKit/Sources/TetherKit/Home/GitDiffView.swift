@@ -128,6 +128,7 @@ private struct PullRequestDetailView: View {
   @State private var detail = PullRequestDetail.empty
   @State private var loadingDetail = false
   @State private var confirmClose = false
+  @State private var confirmMerge = false
   @State private var showCopied = false
   @State private var diffFiles: [DiffFile] = []
   @State private var blocks: [MarkdownBlock] = []
@@ -142,7 +143,8 @@ private struct PullRequestDetailView: View {
       VStack(alignment: .leading, spacing: 18) {
         header
         checks
-        actions
+        mergeCard
+        reviewChanges
         description
       }
       .padding()
@@ -156,7 +158,8 @@ private struct PullRequestDetailView: View {
       refreshDescription(detail.body)
       await refreshDetail()
       // Keep refreshing only while something is still running.
-      while !Task.isCancelled, GitRepositoryModel.isRunning(detail.checks) {
+      while !Task.isCancelled,
+        GitRepositoryModel.isRunning(detail.checks) || detail.gate == .computing {
         try? await Task.sleep(for: .seconds(Self.pollSeconds))
         guard !Task.isCancelled else { return }
         await refreshDetail()
@@ -164,6 +167,15 @@ private struct PullRequestDetailView: View {
     }
     .onChange(of: detail.body) { _, body in
       refreshDescription(body)
+    }
+    .toolbar { ToolbarItem(placement: .topBarTrailing) { overflowMenu } }
+    .confirmationDialog("Merge #\(pullRequest.number)?", isPresented: $confirmMerge, titleVisibility: .visible) {
+      ForEach(methods) { method in
+        Button(method.label) { Task { await controller.mergePullRequest(pullRequest, method: method) } }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("\(pullRequest.head) → \(pullRequest.base)")
     }
     .confirmationDialog("Close pull request #\(pullRequest.number)?", isPresented: $confirmClose, titleVisibility: .visible) {
       Button("Close pull request", role: .destructive) { Task { await controller.closePullRequest(pullRequest) } }
@@ -235,68 +247,139 @@ private struct PullRequestDetailView: View {
     .tetherCard()
   }
 
-  private var actions: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Button {
-        Task { await controller.checkoutPullRequest(pullRequest) }
-      } label: {
-        Label("Checkout branch", systemImage: "arrow.down.to.line")
-          .font(.subheadline.weight(.semibold))
-          .padding(.horizontal, 16).padding(.vertical, 11)
-      }
-      .background(TetherColors.accent, in: Capsule())
-      .foregroundStyle(TetherColors.onAccent)
-      .buttonStyle(TetherPressStyle())
-
+  /// The gate and the button are one card, so the reason sits with the control
+  /// it explains rather than as a caption somewhere below it.
+  private var mergeCard: some View {
+    VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
-        chipAction("Files", "doc.text.magnifyingglass", loading: loadingDiff) {
-          guard !loadingDiff else { return }
-          loadingDiff = true
-          Task {
-            diffFiles = DiffFile.group(await controller.pullRequestDiff(pullRequest))
-            loadingDiff = false
-            showDiff = true
-          }
+        if detail.gate == .computing {
+          ProgressView().controlSize(.small).tint(TetherColors.accent)
+        } else {
+          Image(systemName: gateIcon).foregroundStyle(gateTint)
         }
-        chipAction("Browser", "safari") {
-          if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
-        }
-        chipAction("Copy link", "doc.on.doc") {
-          acknowledgeCopy(pullRequest.url, announce: "Link copied", into: $showCopied)
-        }
-      }
-
-      HStack(spacing: 14) {
-        Button("Update branch") { Task { await controller.updatePullRequest(pullRequest) } }
-          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
-        Button("Close pull request") { confirmClose = true }
-          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.danger)
+        Text(detail.gate.reason)
+          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
         Spacer(minLength: 0)
       }
-      .padding(.top, 2)
 
-      Text("Merging stays in the browser.").font(.caption2).foregroundStyle(TetherColors.textFaint)
+      Button { confirmMerge = true } label: {
+        Text(defaultMethod?.label ?? "Merge pull request")
+          .font(.subheadline.weight(.semibold))
+          .frame(maxWidth: .infinity).padding(.vertical, 12)
+      }
+      .background(canMerge ? TetherColors.accent : TetherColors.surface, in: Capsule())
+      .foregroundStyle(canMerge ? TetherColors.onAccent : TetherColors.textFaint)
+      .overlay(Capsule().strokeBorder(canMerge ? .clear : TetherColors.border))
+      .buttonStyle(TetherPressStyle())
+      .disabled(!canMerge)
+      .accessibilityIdentifier("pullRequestMerge")
+      .accessibilityHint(canMerge ? "Merges this pull request" : detail.gate.reason)
+
+      // Only being out of date has a fix this app can perform; a draft, a
+      // conflict and a missing review are all resolved outside it.
+      if detail.gate == .behind {
+        HStack(spacing: 10) {
+          Text("Update the branch to merge.")
+            .font(.caption).foregroundStyle(TetherColors.textSecondary)
+          Spacer(minLength: 0)
+          Button("Update") { Task { await controller.updatePullRequest(pullRequest) } }
+            .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+        }
+      }
+
+      if canMerge, methods.isEmpty {
+        Text("This repository allows no merge method.")
+          .font(.caption).foregroundStyle(TetherColors.textSecondary)
+      }
     }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .tetherCard()
   }
 
-  private func chipAction(_ title: String, _ icon: String, loading: Bool = false, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      VStack(spacing: 5) {
-        if loading {
-          ProgressView().controlSize(.small).tint(TetherColors.accent).frame(height: 18)
+  private var reviewChanges: some View {
+    Button(action: openDiff) {
+      HStack(spacing: 10) {
+        if loadingDiff {
+          ProgressView().controlSize(.small).tint(TetherColors.accent)
         } else {
-          Image(systemName: icon).font(.subheadline).frame(height: 18)
+          Image(systemName: "doc.text.magnifyingglass")
         }
-        Text(title).font(.caption2)
+        Text("Review changes").font(.subheadline.weight(.semibold))
+        Spacer(minLength: 0)
+        Image(systemName: "chevron.right").font(.caption).foregroundStyle(TetherColors.textFaint)
       }
-      .frame(maxWidth: .infinity)
-      .padding(.vertical, 11)
-      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 11))
-      .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TetherColors.border))
+      .padding(.horizontal, 14).padding(.vertical, 13)
+      .contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
     .foregroundStyle(TetherColors.accent)
+    .tetherCard()
   }
+
+  private var overflowMenu: some View {
+    Menu {
+      Button { openDiff() } label: { Label("Review changes", systemImage: "doc.text.magnifyingglass") }
+      Button { Task { await controller.checkoutPullRequest(pullRequest) } } label: {
+        Label("Checkout branch", systemImage: "arrow.down.to.line")
+      }
+      Button { Task { await controller.updatePullRequest(pullRequest) } } label: {
+        Label("Update branch", systemImage: "arrow.triangle.merge")
+      }
+      Divider()
+      Button {
+        if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
+      } label: { Label("Open in GitHub", systemImage: "safari") }
+      Button {
+        acknowledgeCopy(pullRequest.url, announce: "Link copied", into: $showCopied)
+      } label: { Label("Copy link", systemImage: "doc.on.doc") }
+      Divider()
+      Button(role: .destructive) { confirmClose = true } label: {
+        Label("Close pull request", systemImage: "xmark.circle")
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
+    }
+    .accessibilityLabel("Pull request actions")
+    .accessibilityIdentifier("pullRequestActions")
+  }
+
+  private var methods: [GitMergeMethod] { detail.methods }
+  private var canMerge: Bool { detail.gate.canMerge && !methods.isEmpty }
+  /// Squash is the common answer; otherwise whatever the repository allows.
+  private var defaultMethod: GitMergeMethod? {
+    methods.contains(.squash) ? .squash : methods.first
+  }
+
+  private var gateIcon: String {
+    switch detail.gate {
+    case .ready: "checkmark.circle.fill"
+    case .conflicted: "exclamationmark.octagon"
+    case .draft: "pencil.circle"
+    case .behind, .blocked: "exclamationmark.triangle"
+    case .computing: "clock"
+    }
+  }
+
+  private var gateTint: Color {
+    switch detail.gate {
+    case .ready: TetherColors.success
+    case .conflicted: TetherColors.danger
+    case .behind, .blocked, .draft: TetherColors.warning
+    case .computing: TetherColors.textFaint
+    }
+  }
+
+  private func openDiff() {
+    guard !loadingDiff else { return }
+    loadingDiff = true
+    Task {
+      diffFiles = DiffFile.group(await controller.pullRequestDiff(pullRequest))
+      loadingDiff = false
+      showDiff = true
+    }
+  }
+
 
   @ViewBuilder
   private var description: some View {
