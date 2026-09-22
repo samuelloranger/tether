@@ -31,15 +31,28 @@ public enum DrawerDragDecision: Equatable {
     return 1 + (raw - 1) * overshootResistance
   }
 
-  /// Where the drag was headed when the finger lifted. `predictedEndX` is
-  /// UIKit's own velocity projection (`predictedEndTranslation`), so a short
-  /// fast flick settles open while the same distance dragged slowly does not.
+  /// How far the pan would coast at its release speed. A quarter second is what
+  /// a flick reads as: long enough that a fast short swipe carries the panel
+  /// home, short enough that a slow drag is decided by where it actually is.
+  private static let coastSeconds: CGFloat = 0.25
+
+  /// Where the drag was headed when the finger lifted. `velocityX` is the pan
+  /// recognizer's own points-per-second reading, so a short fast flick settles
+  /// open while the same distance dragged slowly does not.
   public static func settlesOpen(
-    isOpen: Bool, translationX: CGFloat, predictedEndX: CGFloat, width: CGFloat
+    isOpen: Bool, translationX: CGFloat, velocityX: CGFloat, width: CGFloat
   ) -> Bool {
     guard width > 0 else { return isOpen }
-    let projected = progress(isOpen: isOpen, translationX: predictedEndX, width: width)
+    let projected = progress(
+      isOpen: isOpen, translationX: translationX + velocityX * coastSeconds, width: width)
     return projected >= 0.5
+  }
+
+  /// A pan only belongs to the drawer when it is going sideways. The terminal
+  /// scrolls vertically and the drawer's own list scrolls vertically, so a pan
+  /// that is mostly up or down is theirs.
+  public static func panBelongsToDrawer(velocity: CGSize) -> Bool {
+    abs(velocity.width) > abs(velocity.height)
   }
 
   public static func decide(isOpen: Bool, startX: CGFloat, translation: CGSize) -> DrawerDragDecision {

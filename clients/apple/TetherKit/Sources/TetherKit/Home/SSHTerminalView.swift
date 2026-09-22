@@ -51,13 +51,11 @@ public struct SSHTerminalView: View {
       if drawerProgress > 0 {
         Color.black.opacity(0.5 * min(drawerProgress, 1)).ignoresSafeArea()
           .onTapGesture { setDrawer(open: false) }
-          .gesture(drawerDrag(isOpen: true))
         drawer
           // Past fully open the panel stretches rather than tearing away from
           // the edge, so the pull still reads as the finger being heard.
           .frame(width: panelWidth * max(1, drawerProgress))
           .offset(x: -panelWidth * (1 - min(drawerProgress, 1)))
-          .gesture(drawerDrag(isOpen: true))
       }
     }
     .overlay(alignment: .bottom) {
@@ -66,7 +64,7 @@ public struct SSHTerminalView: View {
     .overlay(alignment: .bottom) {
       copyConfirmation.animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: showCopyConfirmation)
     }
-    .overlay(alignment: .leading) { drawerEdgeGesture }
+    .overlay { drawerGestures }
     .sensoryFeedback(trigger: controller.status) {
       switch controller.status {
       case .connected: .success
@@ -428,18 +426,29 @@ public struct SSHTerminalView: View {
     }
   }
 
-  /// A narrow leading strip, never the terminal itself: selection, scrolling and
-  /// mouse mode keep the rest of the surface. The header button and VoiceOver
-  /// path stay the primary way in — this is a shortcut, not the only route.
-  @ViewBuilder
-  private var drawerEdgeGesture: some View {
-    if drawerProgress == 0 {
-      Color.clear
-        .frame(width: DrawerDragDecision.edgeWidth)
-        .contentShape(Rectangle())
-        .gesture(drawerDrag(isOpen: false))
-        .accessibilityHidden(true)
-    }
+  /// The drag lives in UIKit — see `DrawerGestureHost` for why. This view takes
+  /// no touches of its own; the terminal keeps every one the drawer does not
+  /// claim, and the header button stays the primary, assistive-tech route in.
+  private var drawerGestures: some View {
+    DrawerGestureHost(
+      isOpen: { drawerOpen },
+      panelWidth: { panelWidth },
+      onBegan: { dragTranslation = 0 },
+      onChanged: { dragTranslation = $0 },
+      onEnded: { translation, velocity in
+        let open = DrawerDragDecision.settlesOpen(
+          isOpen: drawerOpen, translationX: translation, velocityX: velocity, width: panelWidth)
+        withAnimation(TetherMotion.drawerSettle(reduceMotion: reduceMotion)) {
+          dragTranslation = nil
+          drawerOpen = open
+        }
+      },
+      onCancelled: {
+        withAnimation(TetherMotion.drawerSettle(reduceMotion: reduceMotion)) { dragTranslation = nil }
+      }
+    )
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
   }
 
   private var panelWidth: CGFloat { min(drawerWidth, 360) }
@@ -449,36 +458,6 @@ public struct SSHTerminalView: View {
   private var drawerProgress: Double {
     guard let dragTranslation else { return drawerOpen ? 1 : 0 }
     return DrawerDragDecision.progress(isOpen: drawerOpen, translationX: dragTranslation, width: panelWidth)
-  }
-
-  /// One continuous gesture for both directions. `onChanged` moves the panel
-  /// with the finger; the release settles it where the flick was headed, using
-  /// UIKit's own velocity projection rather than the distance travelled.
-  private func drawerDrag(isOpen: Bool) -> some Gesture {
-    DragGesture(minimumDistance: 8)
-      .onChanged { value in
-        if dragTranslation == nil {
-          // Adopt the drag only once it is clearly horizontal, and — when
-          // closed — only from the edge strip: a vertical swipe there is the
-          // terminal's to scroll.
-          guard abs(value.translation.width) > abs(value.translation.height) else { return }
-          guard isOpen || value.startLocation.x <= DrawerDragDecision.edgeWidth else { return }
-        }
-        dragTranslation = value.translation.width
-      }
-      .onEnded { value in
-        guard dragTranslation != nil else { return }
-        let open = DrawerDragDecision.settlesOpen(
-          isOpen: isOpen,
-          translationX: value.translation.width,
-          predictedEndX: value.predictedEndTranslation.width,
-          width: panelWidth
-        )
-        withAnimation(TetherMotion.drawerSettle(reduceMotion: reduceMotion)) {
-          dragTranslation = nil
-          drawerOpen = open
-        }
-      }
   }
 
   private func setDrawer(open: Bool) {
