@@ -15,6 +15,12 @@ public struct PullRequestDetail: Equatable, Sendable {
 
   public var isMerged: Bool { state == .merged }
 
+  /// After a successful merge we know the outcome without waiting for GitHub's
+  /// state to propagate to the next fetch.
+  public func markedMerged() -> PullRequestDetail {
+    PullRequestDetail(checks: checks, body: body, gate: gate, methods: [], state: .merged, fetchedAt: fetchedAt)
+  }
+
   public static let empty = PullRequestDetail(checks: [], body: "", gate: .computing, methods: [], state: .open, fetchedAt: .distantPast)
 }
 
@@ -543,21 +549,23 @@ public final class SSHTerminalController {
     }
   }
 
-  public func mergePullRequest(_ pullRequest: GitPullRequest, method: GitMergeMethod) async {
+  @discardableResult
+  public func mergePullRequest(_ pullRequest: GitPullRequest, method: GitMergeMethod) async -> Bool {
     await runGitAction("Merging #\(pullRequest.number)…") { cwd in
       "cd \(shellQuote(cwd)) && gh pr merge \(pullRequest.number) \(method.flag)"
     }
-    await loadGitWorkspace()
   }
 
-  private func runGitAction(_ message: String, command: (String) -> String) async {
+  @discardableResult
+  private func runGitAction(_ message: String, command: (String) -> String) async -> Bool {
     gitActionMessage = message
-    guard let cwd = await currentCwd() else { gitActionMessage = "No working directory for this session."; return }
+    guard let cwd = await currentCwd() else { gitActionMessage = "No working directory for this session."; return false }
     do {
       _ = try await control.exec(command(cwd))
       gitActionMessage = nil
       await loadGitWorkspace()
-    } catch { gitActionMessage = Self.describe(error) }
+      return true
+    } catch { gitActionMessage = Self.describe(error); return false }
   }
 
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
