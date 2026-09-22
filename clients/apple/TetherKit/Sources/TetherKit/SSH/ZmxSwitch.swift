@@ -17,8 +17,9 @@ enum ZmxSwitch {
 
   /// The zmx client discards whatever arrives in the same read as the detach
   /// key, so the attach command is a separate write once the client is gone.
-  /// Measured against a host: same write, the attach is lost every time; a few
-  /// milliseconds apart, it lands every time. This is the margin over that.
+  /// Measured against a host: carried in the same write the attach is lost
+  /// every time; a few milliseconds later it lands every time. This is the
+  /// margin over that.
   static let settleNanoseconds: UInt64 = 250_000_000
 
   /// Typing `zmx attach <name>` only switches when a shell is reading the PTY.
