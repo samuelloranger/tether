@@ -212,12 +212,11 @@ public final class SSHTerminalController {
     pendingNoSession = false
     hasSession = true
     let connected = { if case .connected = status { return true } else { return false } }()
-    let strategy = ZmxSwitch.strategy(connected: connected, attached: wasAttached)
-    guard strategy != .redial else {
+    guard case let .type(typing) = ZmxSwitch.strategy(connected: connected, attached: wasAttached) else {
       await connect()
       return
     }
-    for (index, write) in ZmxSwitch.writes(strategy: strategy, zmx: Self.zmx, name: name).enumerated() {
+    for (index, write) in ZmxSwitch.writes(typing: typing, zmx: Self.zmx, name: name).enumerated() {
       // Separate writes: the detach key's own read must not carry the command.
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
       pipeline.outbound.yield(.input(write, key: sessionKey))
@@ -351,8 +350,6 @@ public final class SSHTerminalController {
       gitError = Self.describe(error)
     }
   }
-
-  public func loadGitDiff() async { await loadGitWorkspace() }
 
   /// Checks and description for one pull request, in a single round trip.
   public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async {

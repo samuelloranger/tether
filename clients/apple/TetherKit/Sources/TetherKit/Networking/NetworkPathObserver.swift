@@ -6,8 +6,6 @@ import Network
 /// terminal controller's single recovery gate.
 @MainActor
 public final class NetworkPathObserver {
-  public private(set) var reachability: NetworkReachability?
-
   private let queue = DispatchQueue(label: "cloud.samlo.tether.network-path")
   /// Recreated on each start: a cancelled `NWPathMonitor` cannot be restarted, and
   /// a screen can be left and re-entered.
@@ -37,7 +35,6 @@ public final class NetworkPathObserver {
   }
 
   private func deliver(_ value: NetworkReachability) {
-    reachability = value
     onChange?(value)
   }
 }

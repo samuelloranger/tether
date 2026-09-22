@@ -6,9 +6,9 @@ import XCTest
 /// connected or dialing. Repeats are inert — the observer re-reports the same
 /// path on every interface change.
 final class ConnectionRecoveryTests: XCTestCase {
-  private let usable = NetworkReachability(availability: .usable, usesWiFi: true, usesCellular: false, isExpensive: false, isConstrained: false)
-  private let offline = NetworkReachability(availability: .offline, usesWiFi: false, usesCellular: false, isExpensive: false, isConstrained: false)
-  private let needsConnection = NetworkReachability(availability: .requiresConnection, usesWiFi: true, usesCellular: false, isExpensive: false, isConstrained: false)
+  private let usable = NetworkReachability(availability: .usable)
+  private let offline = NetworkReachability(availability: .offline)
+  private let needsConnection = NetworkReachability(availability: .requiresConnection)
 
   func test_offline_path_never_requests_a_redial() {
     XCTAssertFalse(SSHTerminalController.shouldRedial(previous: usable, next: offline, status: .disconnected, dialing: false))

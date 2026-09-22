@@ -3,7 +3,14 @@ import Foundation
 /// How a live SSH terminal moves from one zmx session to another: which bytes
 /// go to the PTY, in what order, and how far apart.
 enum ZmxSwitch {
-  enum Strategy: Equatable { case detachThenAttach, attachInPlace, redial }
+  /// Typing only reaches a session that is already attached; a redial has no
+  /// PTY to type into, so it is not one of these.
+  enum Typing: Equatable { case detachThenAttach, attachInPlace }
+
+  enum Strategy: Equatable {
+    case type(Typing)
+    case redial
+  }
 
   /// zmx's client-detach key. The zmx *client* consumes it, so the program
   /// inside the session — a CLI agent mid-task — never sees it and keeps
@@ -31,7 +38,7 @@ enum ZmxSwitch {
   /// is nothing to type into at all.
   static func strategy(connected: Bool, attached: Bool) -> Strategy {
     guard connected else { return .redial }
-    return attached ? .detachThenAttach : .attachInPlace
+    return .type(attached ? .detachThenAttach : .attachInPlace)
   }
 
   static func attachCommand(zmx: String, name: String) -> String {
@@ -40,10 +47,8 @@ enum ZmxSwitch {
 
   /// The PTY writes the switch performs, in order. More than one element means
   /// they must reach the host as separate writes, `settleNanoseconds` apart.
-  static func writes(strategy: Strategy, zmx: String, name: String) -> [String] {
-    switch strategy {
-    case .redial:
-      return []
+  static func writes(typing: Typing, zmx: String, name: String) -> [String] {
+    switch typing {
     case .attachInPlace:
       return [attachCommand(zmx: zmx, name: name)]
     case .detachThenAttach:

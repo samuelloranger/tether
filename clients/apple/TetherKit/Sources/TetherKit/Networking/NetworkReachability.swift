@@ -14,59 +14,33 @@ public struct NetworkReachability: Equatable, Sendable {
   }
 
   public var availability: Availability
-  public var usesWiFi: Bool
-  public var usesCellular: Bool
-  public var isExpensive: Bool
-  public var isConstrained: Bool
 
-  public init(
-    availability: Availability,
-    usesWiFi: Bool = false,
-    usesCellular: Bool = false,
-    isExpensive: Bool = false,
-    isConstrained: Bool = false
-  ) {
+  public init(availability: Availability) {
     self.availability = availability
-    self.usesWiFi = usesWiFi
-    self.usesCellular = usesCellular
-    self.isExpensive = isExpensive
-    self.isConstrained = isConstrained
   }
 
   public var isUsable: Bool { availability == .usable }
 
   public static func classify(
     status: NWPath.Status,
-    interfaces: [NWInterface.InterfaceType],
-    isExpensive: Bool,
-    isConstrained: Bool
+    interfaces: [NWInterface.InterfaceType]
   ) -> NetworkReachability {
     let availability: Availability
     switch status {
-    case .satisfied: availability = .usable
+    case .satisfied where !interfaces.isEmpty: availability = .usable
+    case .satisfied: availability = .offline
     case .requiresConnection: availability = .requiresConnection
     case .unsatisfied: availability = .offline
     @unknown default: availability = .offline
     }
-    // Interface facts only mean something on a path that can carry traffic;
-    // a down path still reports the interfaces it would have used.
-    let routable = availability == .usable
-    return NetworkReachability(
-      availability: availability,
-      usesWiFi: routable && interfaces.contains(.wifi),
-      usesCellular: routable && interfaces.contains(.cellular),
-      isExpensive: routable && isExpensive,
-      isConstrained: routable && isConstrained
-    )
+    return NetworkReachability(availability: availability)
   }
 
   public static func classify(_ path: NWPath) -> NetworkReachability {
     let known: [NWInterface.InterfaceType] = [.wifi, .cellular, .wiredEthernet, .loopback, .other]
     return classify(
       status: path.status,
-      interfaces: known.filter(path.usesInterfaceType),
-      isExpensive: path.isExpensive,
-      isConstrained: path.isConstrained
+      interfaces: known.filter(path.usesInterfaceType)
     )
   }
 }
