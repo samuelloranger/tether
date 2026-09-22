@@ -113,6 +113,33 @@ final class LibSSH2Ops: SSHConnectionOps {
     return String(decoding: output, as: UTF8.self)
   }
 
+  func execStream(_ command: String, onChunk: (String) -> Bool) throws {
+    guard let session else { throw LibSSH2OpsError.sessionInit }
+    guard let channel = tether_libssh2_channel_open_session(session) else { throw LibSSH2OpsError.ptyOpenFailed }
+    defer { libssh2_channel_free(channel) }
+    let rc = command.withCString { tether_libssh2_channel_exec(channel, $0) }
+    guard rc == 0 else { throw LibSSH2OpsError.execFailed(Int(rc)) }
+
+    var buffer = [CChar](repeating: 0, count: 16 * 1024)
+    while true {
+      let count = buffer.withUnsafeMutableBufferPointer {
+        LibSSH2TransportProbe.read(into: $0, from: channel)
+      }
+      if count > 0 {
+        let chunk = buffer.withUnsafeBytes {
+          String(decoding: UnsafeRawBufferPointer(start: $0.baseAddress, count: count), as: UTF8.self)
+        }
+        if !onChunk(chunk) { break }
+      } else if count == 0 {
+        break
+      } else if count == LibSSH2Const.eagain {
+        continue
+      } else {
+        break
+      }
+    }
+  }
+
   func scpSend(data: Data, remotePath: String, mode: Int32) throws {
     guard let session else { throw LibSSH2OpsError.sessionInit }
     guard let channel = remotePath.withCString({
