@@ -63,9 +63,7 @@ struct GitDiffView: View {
     if controller.gitLines.isEmpty {
       ContentUnavailableView("No uncommitted changes", systemImage: "checkmark.circle", description: Text("The current working directory is clean.")).foregroundStyle(TetherColors.textSecondary)
     } else {
-      ScrollView { LazyVStack(alignment: .leading, spacing: 0) { ForEach(controller.gitLines) { line in
-        Text(line.text.isEmpty ? " " : line.text).font(.caption.monospaced()).foregroundStyle(GitDiffPalette.color(line.kind)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 1).background(GitDiffPalette.background(line.kind))
-      }}.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6) }
+      ScrollView { DiffReviewView(files: DiffFile.group(controller.gitLines)).padding(.vertical, 6) }
     }
   }
 
@@ -206,39 +204,66 @@ private struct PullRequestDetailView: View {
   }
 
   private var actions: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      sectionTitle("Review")
-      action("Checkout branch", "arrow.down.to.line") { Task { await controller.checkoutPullRequest(pullRequest) } }
-      action("View changed files", "doc.text.magnifyingglass") {
-        // The pull request's own diff, and back to the Changes tab to read it.
-        Task {
-          await controller.loadPullRequestDiff(pullRequest)
-          onShowChanges()
-          dismiss()
+    VStack(alignment: .leading, spacing: 10) {
+      Button {
+        Task { await controller.checkoutPullRequest(pullRequest) }
+      } label: {
+        Label("Checkout branch", systemImage: "arrow.down.to.line")
+          .font(.subheadline.weight(.semibold))
+          .padding(.horizontal, 16).padding(.vertical, 11)
+      }
+      .background(TetherColors.accent, in: Capsule())
+      .foregroundStyle(TetherColors.onAccent)
+      .buttonStyle(TetherPressStyle())
+
+      HStack(spacing: 8) {
+        chipAction("Files", "doc.text.magnifyingglass") {
+          Task {
+            await controller.loadPullRequestDiff(pullRequest)
+            onShowChanges()
+            dismiss()
+          }
         }
-      }
-      action("Open in browser", "safari") {
-        if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
-      }
-      action("Copy link", "doc.on.doc") {
-        UIPasteboard.general.string = pullRequest.url
-        UIAccessibility.post(notification: .announcement, argument: "Link copied")
-        withAnimation { showCopied = true }
-        Task {
-          try? await Task.sleep(for: .seconds(1.2))
-          withAnimation { showCopied = false }
+        chipAction("Browser", "safari") {
+          if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
+        }
+        chipAction("Copy link", "doc.on.doc") {
+          UIPasteboard.general.string = pullRequest.url
+          UIAccessibility.post(notification: .announcement, argument: "Link copied")
+          withAnimation { showCopied = true }
+          Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation { showCopied = false }
+          }
         }
       }
 
-      sectionTitle("Repository actions").padding(.top, 6)
-      action("Update branch", "arrow.clockwise") { Task { await controller.updatePullRequest(pullRequest) } }
-      Button(role: .destructive) { confirmClose = true } label: {
-        Label("Close pull request", systemImage: "xmark.circle").frame(maxWidth: .infinity, alignment: .leading)
+      HStack(spacing: 14) {
+        Button("Update branch") { Task { await controller.updatePullRequest(pullRequest) } }
+          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+        Button("Close pull request") { confirmClose = true }
+          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.danger)
+        Spacer(minLength: 0)
       }
-      .buttonStyle(.bordered)
+      .padding(.top, 2)
 
       Text("Merging stays in the browser.").font(.caption2).foregroundStyle(TetherColors.textFaint)
     }
+  }
+
+  private func chipAction(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      VStack(spacing: 5) {
+        Image(systemName: icon).font(.subheadline)
+        Text(title).font(.caption2)
+      }
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 11)
+      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 11))
+      .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TetherColors.border))
+    }
+    .buttonStyle(TetherPressStyle())
+    .foregroundStyle(TetherColors.accent)
   }
 
   @ViewBuilder
@@ -246,10 +271,9 @@ private struct PullRequestDetailView: View {
     if !controller.gitPullRequestBody.isEmpty {
       VStack(alignment: .leading, spacing: 8) {
         sectionTitle("Description")
-        Text(controller.gitPullRequestBody)
-          .font(.footnote).foregroundStyle(TetherColors.textSecondary)
-          .lineLimit(expandDescription ? nil : 8)
-          .textSelection(.enabled)
+        MarkdownBodyView(markdown: controller.gitPullRequestBody)
+          .frame(maxHeight: expandDescription ? nil : 220, alignment: .top)
+          .clipped()
         Button(expandDescription ? "Show less" : "Show more") {
           withAnimation { expandDescription.toggle() }
         }
@@ -317,12 +341,6 @@ private struct PullRequestDetailView: View {
     Text(title).font(.caption.weight(.bold)).foregroundStyle(TetherColors.textSecondary)
   }
 
-  private func action(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
-    }
-    .buttonStyle(.bordered).tint(TetherColors.accent)
-  }
 }
 
 
@@ -351,17 +369,7 @@ private struct CommitDetailView: View {
             description: Text("It may be a merge commit, or the repository is no longer at this path."))
             .foregroundStyle(TetherColors.textSecondary)
         } else {
-          LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(lines) { line in
-              Text(line.text.isEmpty ? " " : line.text)
-                .font(.caption.monospaced())
-                .foregroundStyle(GitDiffPalette.color(line.kind))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12).padding(.vertical, 1)
-                .background(GitDiffPalette.background(line.kind))
-            }
-          }
+          DiffReviewView(files: DiffFile.group(lines))
         }
       }
       .padding(.vertical, 10)
@@ -375,25 +383,4 @@ private struct CommitDetailView: View {
   }
 }
 
-/// Shared so the commit screen and the changes tab colour a patch identically.
-enum GitDiffPalette {
-  static func color(_ kind: GitDiffLineKind) -> Color {
-    switch kind {
-    case .added: TetherColors.success
-    case .removed: TetherColors.danger
-    case .hunk: TetherColors.accent
-    case .fileHeader: TetherColors.textSecondary
-    case .context: TetherColors.textPrimary
-    }
-  }
-
-  static func background(_ kind: GitDiffLineKind) -> Color {
-    switch kind {
-    case .added: TetherColors.success.opacity(0.08)
-    case .removed: TetherColors.danger.opacity(0.08)
-    case .hunk: TetherColors.accent.opacity(0.06)
-    default: .clear
-    }
-  }
-}
 #endif
