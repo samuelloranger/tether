@@ -114,9 +114,10 @@ struct DrawerGestureHost: UIViewRepresentable {
       guard DrawerDragDecision.panBelongsToDrawer(
         velocity: CGSize(width: velocity.x, height: velocity.y)
       ) else { return false }
-      // Only from over the panel: a sideways pan on the dimmed terminal is not
-      // a drag of something the finger is holding.
-      return pan.location(in: pan.view).x <= host.panelWidth()
+      // Anywhere on screen, panel or dimmed terminal: while the drawer is open
+      // the whole screen belongs to it, which is how a sideways flick closes a
+      // system drawer no matter where the thumb lands.
+      return true
     }
 
     /// The panel's list still scrolls: a vertical pan fails this recognizer's
