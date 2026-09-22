@@ -96,6 +96,17 @@ enum SSHConnectionSequence {
     }
   }
 
+  /// Connect and authenticate, leaving the session open for repeated use. The
+  /// control connection runs many commands over one session, so unlike
+  /// `runExec` this never tears it down on success.
+  static func authenticate(
+    config: SSHConnectionConfig,
+    ops: SSHConnectionOps,
+    store: HostKeyStore
+  ) throws {
+    try gate(config: config, ops: ops, store: store)
+  }
+
   /// Shared connect → host-key gate → auth. Trust-on-first-use pins an unknown
   /// key and refuses a changed one. Tears the session down on any failure and
   /// leaves it authenticated on success.

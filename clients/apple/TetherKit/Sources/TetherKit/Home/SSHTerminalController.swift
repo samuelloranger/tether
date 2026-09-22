@@ -55,6 +55,10 @@ public final class SSHTerminalController {
   public private(set) var reachability: NetworkReachability?
 
   private let pathObserver = NetworkPathObserver()
+  /// App commands (session list, kill, scrollback, git) ride one long-lived
+  /// connection instead of dialing per command. Lazily opened on first use,
+  /// which is always after the terminal is connected.
+  private let control: ControlConnection
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
   private let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
@@ -82,6 +86,7 @@ public final class SSHTerminalController {
     self.hostKeyStore = hostKeyStore
     self.attach = attach
     self.pushIdentity = pushIdentity
+    self.control = ControlConnection(config: config, store: hostKeyStore)
     // Stable across zmx switches — one continuous connection/grid.
     self.sessionKey = "ssh:\(config.host):\(config.port)"
     observe()
@@ -152,6 +157,9 @@ public final class SSHTerminalController {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
+    // Deliberately its own dial, not the control connection: this runs *before*
+    // the terminal's handshake, and an extra connection racing that handshake is
+    // exactly what used to make auth fail.
     guard let out = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") else { return }
     let existing = ZmxSession.parse(out)
     // No sessions at all → don't create "default"; land on the empty state.
@@ -168,9 +176,9 @@ public final class SSHTerminalController {
     guard !didRegisterPush, let id = pushIdentity else { return }
     didRegisterPush = true
     let command = "\(Self.notify) register \(shellQuote(id.token)) \(shellQuote(id.secretKey)) \(shellQuote(id.label))"
-    Task { [config, hostKeyStore] in
+    Task {
       try? await Task.sleep(nanoseconds: 2_000_000_000)
-      _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: command)
+      _ = try? await control.exec(command)
     }
   }
 
@@ -178,7 +186,7 @@ public final class SSHTerminalController {
   /// (separate connection) before the daemon registers it.
   public func refreshSessions() async {
     for attempt in 0..<3 {
-      if let output = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") {
+      if let output = try? await control.exec("\(Self.zmx) ls") {
         let parsed = ZmxSession.parse(output)
         if !parsed.isEmpty || attempt == 2 { sessions = parsed; return }
       }
@@ -224,7 +232,7 @@ public final class SSHTerminalController {
         pendingNoSession = true
       }
     }
-    _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) kill \(shellQuote(name)) --force")
+    _ = try? await control.exec("\(Self.zmx) kill \(shellQuote(name)) --force")
     await refreshSessions()
   }
 
@@ -236,9 +244,7 @@ public final class SSHTerminalController {
     // fall back to the login dir.
     await refreshSessions()
     guard let session = sessions.first(where: { $0.name == attach }) else { return nil }
-    if let live = try? await SSHConnector.exec(
-      config: config, store: hostKeyStore, command: "readlink /proc/\(session.pid)/cwd 2>/dev/null"
-    ) {
+    if let live = try? await control.exec("readlink /proc/\(session.pid)/cwd 2>/dev/null") {
       let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmed.hasPrefix("/") { return trimmed }
     }
@@ -252,6 +258,9 @@ public final class SSHTerminalController {
     let remote = dir.map { "\($0)/\(filename)" } ?? filename
     transfer = .sending(filename)
     do {
+      // A transfer gets its own connection: commands are serialized on the
+      // control connection, and a large upload would hold the session list,
+      // a kill and the git screen behind it.
       try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
       transfer = .sent(remote)
       return remote
@@ -273,14 +282,15 @@ public final class SSHTerminalController {
       return
     }
     // One exec, not two: gate on is-inside-work-tree and emit the diff in the
-    // same shell so a git open costs a single SSH handshake. The sentinel marks
-    // "not a repo" (an empty diff is a valid, distinct result).
+    // same shell, so a git open is a single round trip on the control
+    // connection. The sentinel marks "not a repo" (an empty diff is a valid,
+    // distinct result).
     let sentinel = "__TETHER_NOTREPO__"
     let q = shellQuote(cwd)
     let command = "if git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1; "
       + "then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
     do {
-      let raw = try await SSHConnector.exec(config: config, store: hostKeyStore, command: command)
+      let raw = try await control.exec(command)
       if raw.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
         gitLines = []
         gitError = "Not a git repository:\n\(cwd)"
@@ -368,9 +378,8 @@ public final class SSHTerminalController {
   /// screen — `zmx history` is the real transcript. Falls back to the visible
   /// screen if the exec fails.
   public func historyText() async -> String {
-    if let out = try? await SSHConnector.exec(
-      config: config, store: hostKeyStore, command: "\(Self.zmx) history \(shellQuote(attach))"
-    ), !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    if let out = try? await control.exec("\(Self.zmx) history \(shellQuote(attach))"),
+      !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return out
     }
     return await pipeline.historyText()
@@ -389,6 +398,7 @@ public final class SSHTerminalController {
   public func scroll(lines: Int32) { Task { await pipeline.scrollViewport(lines: lines) } }
   public func leave() async {
     stopNetworkWatch()
+    await control.close()
     await pipeline.disconnect()
   }
 
