@@ -94,6 +94,9 @@ public final class SSHTerminalController {
   public private(set) var gitPullRequests: [GitPullRequest] = []
   /// Why the list is empty, when the reason is not "none open".
   public private(set) var gitPullRequestNotice: String?
+  /// False until a load that actually fetched pull requests completes, so an
+  /// empty list before the first fetch reads as loading, not "none open".
+  public private(set) var gitPullRequestsLoaded = false
   public private(set) var gitUpdatedAt: Date?
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
@@ -424,6 +427,7 @@ public final class SSHTerminalController {
           gitPullRequests = []
           gitPullRequestNotice = reason
         }
+        gitPullRequestsLoaded = true
       case .changes:
         let lines = GitDiffModel.classify(diff)
         gitLines = lines
@@ -442,6 +446,7 @@ public final class SSHTerminalController {
           gitPullRequests = []
           gitPullRequestNotice = reason
         }
+        gitPullRequestsLoaded = true
       }
     } catch {
       gitLines = []

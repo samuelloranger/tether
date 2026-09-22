@@ -87,7 +87,10 @@ struct GitDiffView: View {
   private var pullRequests: some View {
     List {
       if controller.gitPullRequests.isEmpty {
-        if let notice = controller.gitPullRequestNotice {
+        if !controller.gitPullRequestsLoaded {
+          HStack { Spacer(); ProgressView().tint(TetherColors.accent); Spacer() }
+            .padding(.vertical, 40).listRowBackground(Color.clear)
+        } else if let notice = controller.gitPullRequestNotice {
           ContentUnavailableView("Couldn't load pull requests", systemImage: "exclamationmark.triangle", description: Text(notice))
             .foregroundStyle(TetherColors.textSecondary)
         } else {
