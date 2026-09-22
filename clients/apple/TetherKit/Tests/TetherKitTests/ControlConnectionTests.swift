@@ -2,10 +2,8 @@ import Foundation
 import XCTest
 @testable import TetherKit
 
-/// The control connection exists so an app action costs one round trip instead
-/// of a fresh dial, handshake and authentication. These prove the session is
-/// actually reused, that a dropped one recovers by itself, and that a changed
-/// host key still stops everything.
+/// The session is reused across commands, a dropped one recovers by itself, and
+/// a changed host key still stops everything.
 final class ControlConnectionTests: XCTestCase {
   private func makeConfig() -> SSHConnectionConfig {
     SSHConnectionConfig(
@@ -32,7 +30,6 @@ final class ControlConnectionTests: XCTestCase {
     _ = try await control.exec("zmx history default")
     _ = try await control.exec("git -C /tmp diff")
 
-    // The whole point: three commands, one handshake.
     XCTAssertEqual(ops.handshakes, 1)
     XCTAssertEqual(ops.auths, 1)
     XCTAssertEqual(ops.commands, ["zmx ls", "zmx history default", "git -C /tmp diff"])
@@ -45,8 +42,7 @@ final class ControlConnectionTests: XCTestCase {
     let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { queue.removeFirst() }
 
     _ = try await control.exec("zmx ls")
-    // What actually happens in the field: the connection sat idle and the host
-    // — or a NAT in between — reaped it. The next command is how we find out.
+    // The connection sat idle and was reaped; the next command finds out.
     dead.failNextExec = true
 
     let output = try await control.exec("zmx ls")
@@ -74,9 +70,8 @@ final class ControlConnectionTests: XCTestCase {
     }
   }
 
-  /// The retry is for a session that went stale underneath us. One that fails
-  /// the moment it opens is a real error, and dialling again would only make
-  /// every genuine failure cost twice as long.
+  /// Dialling again on a cold failure would double how long every genuine
+  /// failure takes.
   func test_a_command_that_fails_on_a_brand_new_session_is_not_retried() async {
     let ops = FakeControlOps()
     ops.failNextExec = true
@@ -91,8 +86,6 @@ final class ControlConnectionTests: XCTestCase {
     }
   }
 
-  // A changed host key is the one failure that must never be retried, here as
-  // much as on the terminal's own connection.
   func test_a_host_key_mismatch_fails_loudly_and_is_never_redialed() async {
     let store = InMemoryHostKeys()
     store.pin("aa:aa:aa", host: "example.internal", port: 22)
@@ -131,8 +124,7 @@ final class ControlConnectionTests: XCTestCase {
     let ops = FakeControlOps()
     let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { ops }
 
-    // The git screen fires several of these together; libssh2 tolerates that
-    // only because they are queued, never concurrent.
+    // The git screen fires several of these together.
     async let a = control.exec("git diff")
     async let b = control.exec("git branch")
     async let c = control.exec("git log")

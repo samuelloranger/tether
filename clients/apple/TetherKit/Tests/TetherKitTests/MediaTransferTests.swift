@@ -2,9 +2,8 @@ import UniformTypeIdentifiers
 import XCTest
 @testable import TetherKit
 
-/// Naming and size rules for something picked out of the photo library. A
-/// transfer is held in memory on its way to `scp`, so a video has to be turned
-/// away by size *before* it is loaded, not after.
+/// A transfer is held in memory on its way to `scp`, so a video is turned away
+/// by size before it is loaded.
 final class MediaTransferTests: XCTestCase {
   func test_a_still_is_named_as_a_photo_and_a_clip_as_a_video() {
     XCTAssertEqual(
@@ -35,7 +34,6 @@ final class MediaTransferTests: XCTestCase {
   func test_an_oversized_transfer_is_refused_with_both_numbers() {
     let reason = MediaTransfer.rejectionReason(byteCount: MediaTransfer.byteLimit + 1)
     XCTAssertNotNil(reason)
-    // The user needs to know how big it was and what would fit.
     XCTAssertTrue(reason!.contains("200 MB"), "missing the limit: \(reason!)")
   }
 }

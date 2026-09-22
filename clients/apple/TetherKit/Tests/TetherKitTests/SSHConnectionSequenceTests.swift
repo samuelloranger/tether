@@ -90,9 +90,6 @@ final class SSHConnectionSequenceTests: XCTestCase {
     XCTAssertEqual(ops.calls, [.connect, .teardown])
   }
 
-  /// A transfer dials its own connection, and that dial can lose a race it has
-  /// no part in — the app is suspended mid-handshake, the radio changes. One
-  /// retry turns those into a sent file instead of "authentication failed".
   func test_a_transfer_retries_a_transport_failure_once() {
     XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.transport("socket closed")))
     XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.auth(.allFailed(detail: "Unable to sign"))))
@@ -107,12 +104,8 @@ final class SSHConnectionSequenceTests: XCTestCase {
     XCTAssertFalse(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.missingCredential(name: "homelab")))
   }
 
-  /// libssh2 signs the publickey challenge with the key held in memory, and
-  /// doing that on two sessions at once intermittently fails: the server
-  /// accepts the key offer and the client then cannot sign it
-  /// ("Callback returned error", libssh2 -19). The host log shows those as an
-  /// abort between the offer and the signature, seconds apart from successes.
-  /// Handshake and auth are therefore mutually exclusive across the app.
+  /// Two sessions signing at once intermittently fails with libssh2 -19, so
+  /// handshake and auth are mutually exclusive across the app.
   func test_two_connections_never_authenticate_at_the_same_time() {
     let tracker = ConcurrencyTracker()
     let store = InMemoryHostKeyStore()
@@ -155,8 +148,7 @@ private final class SlowAuthOps: SSHConnectionOps, @unchecked Sendable {
   func hostKeyFingerprint() throws -> String { "aa:bb" }
 
   func authenticate(_ credential: SSHCredential) throws -> Bool {
-    // Wide enough that overlapping callers would be caught. The tracked window
-    // is handshake → authenticated, which is the part that must not overlap.
+    // Wide enough that overlapping callers would be caught.
     Thread.sleep(forTimeInterval: 0.02)
     tracker.leave()
     return true

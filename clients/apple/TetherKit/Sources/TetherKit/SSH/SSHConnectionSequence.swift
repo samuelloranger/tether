@@ -7,7 +7,6 @@ protocol SSHConnectionOps: AnyObject {
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
   func exec(_ command: String) throws -> String
   func scpSend(data: Data, remotePath: String, mode: Int32) throws
-  /// Why the last authentication attempt failed, in the transport's words.
   var lastAuthDetail: String? { get }
   func teardown()
 }
@@ -103,9 +102,8 @@ enum SSHConnectionSequence {
     }
   }
 
-  /// Connect and authenticate, leaving the session open for repeated use. The
-  /// control connection runs many commands over one session, so unlike
-  /// `runExec` this never tears it down on success.
+  /// Connect and authenticate, leaving the session open for repeated use —
+  /// unlike `runExec`, which tears it down.
   static func authenticate(
     config: SSHConnectionConfig,
     ops: SSHConnectionOps,
@@ -114,16 +112,10 @@ enum SSHConnectionSequence {
     try gate(config: config, ops: ops, store: store)
   }
 
-  /// libssh2 signs the publickey challenge with the key held in memory, and
-  /// signing on two sessions at once intermittently fails: the server accepts
-  /// the key offer and the client then cannot sign it ("Callback returned
-  /// error", libssh2 -19). On a host log that reads as a client abort between
-  /// the offer and the signature, seconds away from successes with the same
-  /// key. The terminal, the control connection and a transfer all dial
-  /// independently, so they can collide; this is the only place they meet.
-  ///
-  /// Only the handshake and authentication are serialized. Everything after —
-  /// the PTY stream, exec channels, an upload — stays concurrent.
+  /// Signing the publickey challenge on two sessions at once intermittently
+  /// fails: the server accepts the key offer and the client cannot sign it
+  /// ("Callback returned error", libssh2 -19). Only handshake and auth are
+  /// serialized; the PTY stream, exec channels and uploads stay concurrent.
   private static let handshakeLock = NSLock()
 
   /// Shared connect → host-key gate → auth. Trust-on-first-use pins an unknown

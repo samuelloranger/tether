@@ -382,8 +382,8 @@ public struct SSHTerminalView: View {
     .padding(.top, 4)
   }
 
-  /// A still arrives as bytes; a clip arrives as a file, which is what lets its
-  /// size be checked before the phone tries to hold it in memory for `scp`.
+  /// A clip arrives as a file so its size can be checked before the phone holds
+  /// it in memory for `scp`.
   private func send(_ item: PhotosPickerItem) async {
     let isVideo = MediaTransfer.isVideo(contentTypes: item.supportedContentTypes)
     let name = MediaTransfer.filename(

@@ -50,9 +50,7 @@ final class SSHAuthOrderTests: XCTestCase {
     XCTAssertEqual(tried, [keyA]) // stopped at the transport failure
   }
 
-  /// "Authentication failed. Check the key or password." is a dead end when the
-  /// server accepted the key and the *client* could not sign with it — the two
-  /// need different fixes, so libssh2's own reason has to survive.
+  /// A rejected key and a client that could not sign need different fixes.
   func test_the_reason_from_the_transport_reaches_the_message() {
     let described = SSHConnectError.auth(.allFailed(detail: "Callback returned error")).errorDescription ?? ""
     XCTAssertTrue(described.contains("Callback returned error"), "lost the detail: \(described)")

@@ -58,8 +58,6 @@ final class LibSSH2Ops: SSHConnectionOps {
       lastAuthDetail = nil
       return true
     }
-    // The server rejecting a key and libssh2 failing to sign with it both land
-    // here, and the server's log shows only the first. Keep what libssh2 says.
     lastAuthDetail = LibSSH2Ops.lastError(session: session, rc: rc)
     if rc == LibSSH2Const.authenticationFailed || rc == LibSSH2Const.publickeyUnverified {
       return false

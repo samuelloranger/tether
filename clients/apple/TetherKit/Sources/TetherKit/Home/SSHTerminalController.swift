@@ -51,20 +51,16 @@ public final class SSHTerminalController {
   public private(set) var gitBranch = ""
   public private(set) var gitCommits: [GitCommit] = []
   public private(set) var gitPullRequests: [GitPullRequest] = []
-  /// Why the pull-request list is empty, when it is empty for a reason other
-  /// than the repository having none open.
+  /// Why the list is empty, when the reason is not "none open".
   public private(set) var gitPullRequestNotice: String?
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
   public private(set) var transfer: TransferState = .idle
-  /// Last normalized network path. `nil` until the observer reports one.
   public private(set) var reachability: NetworkReachability?
 
   private let pathObserver = NetworkPathObserver()
-  /// App commands (session list, kill, scrollback, git) ride one long-lived
-  /// connection instead of dialing per command. Lazily opened on first use,
-  /// which is always after the terminal is connected.
+  /// Opened lazily on first use, which is always after the terminal connects.
   private let control: ControlConnection
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
@@ -164,9 +160,7 @@ public final class SSHTerminalController {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
-    // Deliberately its own dial, not the control connection: this runs *before*
-    // the terminal's handshake, and an extra connection racing that handshake is
-    // exactly what used to make auth fail.
+    // Its own dial: this runs before the terminal's handshake.
     guard let out = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") else { return }
     let existing = ZmxSession.parse(out)
     // No sessions at all → don't create "default"; land on the empty state.
@@ -265,12 +259,8 @@ public final class SSHTerminalController {
     let remote = dir.map { "\($0)/\(filename)" } ?? filename
     transfer = .sending(filename)
     do {
-      // A transfer gets its own connection: commands are serialized on the
-      // control connection, and a large upload would hold the session list,
-      // a kill and the git screen behind it. That dial can also lose a race it
-      // has no part in — the app suspended mid-handshake, the radio changing —
-      // so a transport failure is worth one more try before it is the user's
-      // problem.
+      // Its own connection: commands are serialized on the control one, and a
+      // large upload would hold the session list and the git screen behind it.
       do {
         try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
       } catch where Self.shouldRetryTransfer(after: error) {
@@ -286,13 +276,11 @@ public final class SSHTerminalController {
 
   public func clearTransfer() { transfer = .idle }
 
-  /// A transfer that failed before any SSH work — the library would not give us
-  /// the file, or it is too big to hold. Same banner as a failed upload.
+  /// A transfer that failed before any SSH work reuses the upload banner.
   public func reportTransferFailure(_ message: String) { transfer = .failed(message) }
 
-  /// Whether a failed transfer deserves a second dial. Everything transient
-  /// does; a changed host key and a missing credential are answers, not noise,
-  /// and repeating them only delays telling the user.
+  /// A changed host key and a missing credential are answers, not noise:
+  /// repeating them only delays telling the user.
   nonisolated static func shouldRetryTransfer(after error: Error) -> Bool {
     switch error as? SSHConnectError {
     case .hostKeyMismatch, .missingCredential: return false
@@ -309,19 +297,16 @@ public final class SSHTerminalController {
       gitError = "No working directory for this session."
       return
     }
-    // The sentinel marks "not a repo" (an empty diff is a valid, distinct
-    // result). All four run on the control connection, which serializes them —
-    // four round trips on one live session, where each used to be its own dial,
-    // handshake and authentication.
+    // The sentinel marks "not a repo" — an empty diff is a valid, distinct
+    // result.
     let sentinel = "__TETHER_NOTREPO__"
     let q = shellQuote(cwd)
     let repositoryGuard = "git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1"
     let diffCommand = "if \(repositoryGuard); then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
     let branchCommand = "if \(repositoryGuard); then git -C \(q) branch --show-current; fi"
     let commitsCommand = "if \(repositoryGuard); then git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'; fi"
-    // Keep gh's own stderr: "no open pull requests" and "gh cannot answer" are
-    // different answers, and swallowing the second into an empty list is what
-    // made the screen blame a missing CLI for an empty repository.
+    // Keep gh's stderr: swallowing it into an empty list made the screen blame
+    // a missing CLI for a repository with nothing open.
     let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
     let pullRequestsCommand = "if \(repositoryGuard); then "
       + "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); "

@@ -7,9 +7,8 @@ enum SSHCredential: Equatable, Sendable {
 
 enum SSHAuthError: Error, Equatable {
   case noCredentials
-  /// `detail` is libssh2's own last error. A server that rejects the key and a
-  /// client that cannot sign with it both land here, and they need different
-  /// fixes, so the transport's reason has to survive the trip to the UI.
+  /// A server rejecting the key and a client failing to sign both land here and
+  /// need different fixes, so `detail` carries libssh2's own reason.
   case allFailed(detail: String?)
 }
 

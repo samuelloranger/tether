@@ -21,9 +21,6 @@ final class GitRepositoryModelTests: XCTestCase {
     ])
   }
 
-  // An empty list and a failed query used to look identical: the command
-  // swallowed every error into `[]`, so the screen blamed a missing GitHub CLI
-  // whenever a repository simply had no open pull requests.
   func test_an_empty_list_means_there_are_no_pull_requests() {
     XCTAssertEqual(GitRepositoryModel.pullRequestResult(from: "[]"), .list([]))
     XCTAssertEqual(GitRepositoryModel.pullRequestResult(from: "  []\n"), .list([]))
