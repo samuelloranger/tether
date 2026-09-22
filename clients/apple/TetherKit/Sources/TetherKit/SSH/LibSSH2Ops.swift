@@ -44,7 +44,6 @@ final class LibSSH2Ops: SSHConnectionOps, @unchecked Sendable {
     self.session = session
     libssh2_session_set_blocking(session, 1)
     libssh2_session_set_timeout(session, operationTimeoutMs)
-    libssh2_keepalive_config(session, 1, SSHTimeouts.keepaliveSeconds)
     let rc = Int(libssh2_session_handshake(session, socket))
     guard rc == 0 else { throw LibSSH2OpsError.handshake(rc) }
   }
@@ -70,6 +69,9 @@ final class LibSSH2Ops: SSHConnectionOps, @unchecked Sendable {
     }
     if rc == 0 {
       lastAuthDetail = nil
+      // Only now: a keepalive is a global request, and OpenSSH's strict key
+      // exchange drops a connection that sends one before the session is up.
+      libssh2_keepalive_config(session, 1, SSHTimeouts.keepaliveSeconds)
       return true
     }
     lastAuthDetail = LibSSH2Ops.lastError(session: session, rc: rc)
