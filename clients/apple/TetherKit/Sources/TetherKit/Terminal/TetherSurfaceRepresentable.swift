@@ -76,12 +76,17 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     if context.coordinator.sessionKey != sessionKey {
       context.coordinator.sessionKey = sessionKey
       if !sessionKey.isEmpty {
+        context.coordinator.pushedSnapshot = nil
         uiView.prepareForSessionChange()
       }
     }
     if let snapshot {
-      uiView.updateSnapshot(snapshot)
+      if context.coordinator.pushedSnapshot != snapshot {
+        context.coordinator.pushedSnapshot = snapshot
+        uiView.updateSnapshot(snapshot)
+      }
     } else {
+      context.coordinator.pushedSnapshot = nil
       uiView.clearSnapshot()
     }
   }
@@ -114,6 +119,10 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public final class Coordinator {
     var parent: TetherSurfaceRepresentable
     var sessionKey: String = ""
+    /// The last grid actually pushed. Any state write on the owning view
+    /// re-runs updateUIView, and re-pushing an unchanged grid costs a full
+    /// decode and rasterization.
+    var pushedSnapshot: Data?
 
     init(parent: TetherSurfaceRepresentable) {
       self.parent = parent
