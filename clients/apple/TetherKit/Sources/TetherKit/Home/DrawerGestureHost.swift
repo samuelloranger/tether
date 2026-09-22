@@ -139,7 +139,12 @@ struct DrawerGestureHost: UIViewRepresentable {
       _ recognizer: UIGestureRecognizer,
       shouldBeRequiredToFailBy other: UIGestureRecognizer
     ) -> Bool {
-      recognizer === edgePan || recognizer === closePan
+      // The edge pan knows at touch-down whether the finger is at the edge, so
+      // making others wait for it costs them nothing. The close pan only earns
+      // that priority while the drawer is open — otherwise it would sit in
+      // Possible for the length of every terminal touch and hold them up.
+      if recognizer === edgePan { return true }
+      return recognizer === closePan && host.isOpen()
     }
   }
 }
