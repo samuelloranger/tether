@@ -141,6 +141,10 @@ public final class SSHTerminalController {
   private let pushIdentity: PushRegistrar.PushIdentity?
   private var didRegisterPush = false
   private var connectInFlight = false
+  typealias Dialer = @Sendable (SSHConnectionConfig, HostKeyStore) async throws -> any TerminalByteStream
+  private let dial: Dialer
+  /// Set by `leave()`. A dial still in flight must not adopt its stream after it.
+  private var left = false
   private var didChooseInitialSession = false
   /// Set when the host had no sessions on first connect: skip the `zmx attach`
   /// so nothing is auto-created. Cleared the moment the user creates a session.
@@ -153,14 +157,17 @@ public final class SSHTerminalController {
     config: SSHConnectionConfig,
     hostKeyStore: HostKeyStore,
     attach: String = defaultAttach,
-    pushIdentity: PushRegistrar.PushIdentity? = nil
+    pushIdentity: PushRegistrar.PushIdentity? = nil,
+    dial: @escaping Dialer = { try await SSHConnector.connect(config: $0, store: $1) },
+    control: ControlConnection? = nil
   ) {
     self.title = title
     self.config = config
     self.hostKeyStore = hostKeyStore
     self.attach = attach
     self.pushIdentity = pushIdentity
-    self.control = ControlConnection(config: config, store: hostKeyStore)
+    self.dial = dial
+    self.control = control ?? ControlConnection(config: config, store: hostKeyStore)
     // Stable across zmx switches — one continuous connection/grid.
     self.sessionKey = "ssh:\(config.host):\(config.port)"
     observe()
@@ -178,6 +185,7 @@ public final class SSHTerminalController {
   }
 
   public func connect(trigger: ConnectTrigger = .initial) async {
+    guard !left else { return }
     if !trigger.bypassesRecoveryGate,
       !Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) {
       return
@@ -194,13 +202,21 @@ public final class SSHTerminalController {
     // old one. connectSSH also disconnects, but only after the new auth succeeds —
     // too late. No-op on a cold connect or a post-drop reconnect (no live transport).
     await pipeline.disconnect()
+    // A redial means the path under us changed; the control session rode the
+    // same one and may be blocked on it.
+    if trigger != .initial { control.reset() }
     await chooseInitialSessionIfNeeded()
     // The key is valid; libssh2 auth/transport occasionally fails transiently
     // (and the app opens a couple of connections at once), so retry a few times.
     // A host-key mismatch is never retried — that must fail loudly.
     for attempt in 0..<3 {
+      guard !left else { return }
       do {
-        let stream = try await SSHConnector.connect(config: config, store: hostKeyStore)
+        let stream = try await dial(config, hostKeyStore)
+        guard !left else {
+          await stream.close()
+          return
+        }
         await pipeline.connectSSH(transport: stream, key: sessionKey)
         status = .connected
         // The fresh PTY is 80x24 and the surface bounds don't change on a session
@@ -714,9 +730,11 @@ public final class SSHTerminalController {
   }
   public func scroll(lines: Int32) { Task { await pipeline.scrollViewport(lines: lines) } }
   public func leave() async {
+    left = true
     stopNetworkWatch()
-    await control.close()
+    // Terminal first: the control queue may be held by a command on a dead path.
     await pipeline.disconnect()
+    await control.close()
   }
 
   private func apply(_ event: TerminalPipelineEvent) {
