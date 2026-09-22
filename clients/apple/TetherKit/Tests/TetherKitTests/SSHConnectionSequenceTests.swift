@@ -89,4 +89,21 @@ final class SSHConnectionSequenceTests: XCTestCase {
     }
     XCTAssertEqual(ops.calls, [.connect, .teardown])
   }
+
+  /// A transfer dials its own connection, and that dial can lose a race it has
+  /// no part in — the app is suspended mid-handshake, the radio changes. One
+  /// retry turns those into a sent file instead of "authentication failed".
+  func test_a_transfer_retries_a_transport_failure_once() {
+    XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.transport("socket closed")))
+    XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.auth(.allFailed(detail: "Unable to sign"))))
+  }
+
+  func test_a_transfer_never_retries_a_changed_host_key() {
+    XCTAssertFalse(SSHTerminalController.shouldRetryTransfer(
+      after: SSHConnectError.hostKeyMismatch(expected: "aa", got: "bb")))
+  }
+
+  func test_a_transfer_does_not_retry_a_missing_credential() {
+    XCTAssertFalse(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.missingCredential(name: "homelab")))
+  }
 }

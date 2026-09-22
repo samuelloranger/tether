@@ -267,8 +267,15 @@ public final class SSHTerminalController {
     do {
       // A transfer gets its own connection: commands are serialized on the
       // control connection, and a large upload would hold the session list,
-      // a kill and the git screen behind it.
-      try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
+      // a kill and the git screen behind it. That dial can also lose a race it
+      // has no part in — the app suspended mid-handshake, the radio changing —
+      // so a transport failure is worth one more try before it is the user's
+      // problem.
+      do {
+        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
+      } catch where Self.shouldRetryTransfer(after: error) {
+        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
+      }
       transfer = .sent(remote)
       return remote
     } catch {
@@ -278,6 +285,16 @@ public final class SSHTerminalController {
   }
 
   public func clearTransfer() { transfer = .idle }
+
+  /// Whether a failed transfer deserves a second dial. Everything transient
+  /// does; a changed host key and a missing credential are answers, not noise,
+  /// and repeating them only delays telling the user.
+  nonisolated static func shouldRetryTransfer(after error: Error) -> Bool {
+    switch error as? SSHConnectError {
+    case .hostKeyMismatch, .missingCredential: return false
+    default: return true
+    }
+  }
 
   public func loadGitWorkspace() async {
     gitLoading = true
