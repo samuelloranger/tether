@@ -40,7 +40,13 @@ struct AddServerSheet: View {
           }
           .disabled(!canSave)
           .accessibilityIdentifier("addServerSave")
+          .accessibilityHint(saveBlocker ?? "")
           .padding(.top, 4)
+          if let saveBlocker {
+            Text(saveBlocker).font(.caption).foregroundStyle(TetherColors.textFaint)
+              .frame(maxWidth: .infinity, alignment: .center)
+              .accessibilityHidden(true)
+          }
         }
         .padding(16)
       }
@@ -52,9 +58,13 @@ struct AddServerSheet: View {
     }
   }
 
-  private var canSave: Bool {
-    !name.isEmpty && !host.isEmpty && !username.isEmpty && (usesPassword ? !password.isEmpty : keyId != nil)
+  private var saveBlocker: String? {
+    FormReadiness.serverBlocker(
+      name: name, host: host, username: username,
+      usesPassword: usesPassword, password: password, hasKey: keyId != nil)
   }
+
+  private var canSave: Bool { saveBlocker == nil }
 
   private func save() {
     let auth: SSHAuthMethod = usesPassword ? .password : .key(keyId: keyId ?? "")
@@ -196,6 +206,12 @@ struct KeyEntrySheet: View {
           }
           .disabled(!canCommit)
           .accessibilityIdentifier("keyEntryCommit")
+          .accessibilityHint(commitBlocker ?? "")
+          if let commitBlocker {
+            Text(commitBlocker).font(.caption).foregroundStyle(TetherColors.textFaint)
+              .frame(maxWidth: .infinity, alignment: .center)
+              .accessibilityHidden(true)
+          }
         }
         .padding(16)
       }
@@ -210,11 +226,11 @@ struct KeyEntrySheet: View {
   }
 
   private var canCommit: Bool {
-    switch mode {
-    case .generate: return !name.isEmpty
-    case .paste, .importFile:
-      return !name.isEmpty && pem.contains("PRIVATE KEY") && publicKey.hasPrefix("ssh-")
-    }
+    commitBlocker == nil
+  }
+
+  private var commitBlocker: String? {
+    FormReadiness.keyBlocker(name: name, needsMaterial: mode != .generate, pem: pem, publicKey: publicKey)
   }
 
   private func commit() {

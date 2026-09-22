@@ -42,14 +42,20 @@ final class FormReadinessTests: XCTestCase {
     XCTAssertNil(FormReadiness.keyBlocker(name: "phone", needsMaterial: false, pem: "", publicKey: ""))
   }
 
-  func test_an_imported_key_needs_both_halves() {
+  func test_an_imported_key_needs_both_halves_in_the_right_shape() {
+    let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----"
     XCTAssertEqual(
       FormReadiness.keyBlocker(name: "laptop", needsMaterial: true, pem: "", publicKey: "ssh-ed25519 AAAA"),
       "Paste the private key to save it")
+    // A public key pasted into the private field is the common slip, and it is
+    // the private-key message that must come back.
     XCTAssertEqual(
-      FormReadiness.keyBlocker(name: "laptop", needsMaterial: true, pem: "-----BEGIN", publicKey: ""),
+      FormReadiness.keyBlocker(name: "laptop", needsMaterial: true, pem: "ssh-ed25519 AAAA", publicKey: "ssh-ed25519 AAAA"),
+      "Paste the private key to save it")
+    XCTAssertEqual(
+      FormReadiness.keyBlocker(name: "laptop", needsMaterial: true, pem: pem, publicKey: "not a key"),
       "Paste the public key to save it")
     XCTAssertNil(
-      FormReadiness.keyBlocker(name: "laptop", needsMaterial: true, pem: "-----BEGIN", publicKey: "ssh-ed25519 AAAA"))
+      FormReadiness.keyBlocker(name: "laptop", needsMaterial: true, pem: pem, publicKey: " ssh-ed25519 AAAA "))
   }
 }
