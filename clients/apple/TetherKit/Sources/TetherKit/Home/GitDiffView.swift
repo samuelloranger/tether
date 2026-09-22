@@ -104,7 +104,6 @@ private struct PullRequestDetailView: View {
   let pullRequest: GitPullRequest
   @State private var confirmClose = false
   @State private var showCopied = false
-  @State private var expandDescription = false
   @State private var diffFiles: [DiffFile] = []
   @State private var loadingDiff = false
   @State private var showDiff = false
@@ -281,12 +280,6 @@ private struct PullRequestDetailView: View {
       VStack(alignment: .leading, spacing: 8) {
         sectionTitle("Description")
         MarkdownBodyView(markdown: controller.gitPullRequestBody)
-          .frame(maxHeight: expandDescription ? nil : 220, alignment: .top)
-          .clipped()
-        Button(expandDescription ? "Show less" : "Show more") {
-          withAnimation { expandDescription.toggle() }
-        }
-        .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
       }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
