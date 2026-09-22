@@ -18,14 +18,7 @@ struct GitDiffView: View {
           Image(systemName: "arrow.triangle.branch").foregroundStyle(TetherColors.accent)
           Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
           Spacer()
-          VStack(alignment: .trailing, spacing: 1) {
-            Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
-            // Without this a refresh that changed nothing looks like a refresh
-            // that did nothing.
-            if let updated = controller.gitUpdatedAt {
-              Text("updated \(updated, style: .relative) ago").font(.caption2).foregroundStyle(TetherColors.textFaint)
-            }
-          }
+          Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         }.padding(.horizontal, 16).padding(.vertical, 12).background(TetherColors.surface)
         Picker("Git section", selection: $tab) { ForEach(Tab.allCases) { Text($0.rawValue).tag($0) } }
           .pickerStyle(.segmented).padding(12)
