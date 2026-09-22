@@ -471,6 +471,9 @@ public struct SSHTerminalView: View {
   private func acknowledgeCopy() {
     copyFeedback += 1
     showCopyConfirmation = true
+    // The pill is gone in about a second and leaves nothing behind, so it is
+    // the one outcome VoiceOver has to be told about directly.
+    UIAccessibility.post(notification: .announcement, argument: "Copied")
     Task {
       try? await Task.sleep(for: .seconds(1.2))
       guard !Task.isCancelled else { return }

@@ -13,10 +13,16 @@ struct GitDiffView: View {
         if controller.gitLoading && controller.gitLines.isEmpty {
           ProgressView().tint(TetherColors.accent).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = controller.gitError, controller.gitLines.isEmpty {
-          VStack(spacing: 8) {
-            Image(systemName: "checkmark.circle").font(.system(size: 26)).foregroundStyle(TetherColors.textFaint)
-            Text(error).font(.system(size: 13, design: .monospaced))
+          VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle").font(.largeTitle).foregroundStyle(TetherColors.textFaint)
+            Text(error).font(.system(.footnote, design: .monospaced))
               .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
+            Button("Reload") { Task { await controller.loadGitDiff() } }
+              .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+              .padding(.horizontal, 20).padding(.vertical, 10)
+              .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
+              .buttonStyle(TetherPressStyle())
+              .accessibilityIdentifier("gitDiffReload")
           }
           .padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -24,7 +30,7 @@ struct GitDiffView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
               ForEach(controller.gitLines) { line in
                 Text(line.text.isEmpty ? " " : line.text)
-                  .font(.system(size: 11.5, design: .monospaced))
+                  .font(.system(.caption, design: .monospaced))
                   .foregroundStyle(color(line.kind))
                   .textSelection(.enabled)
                   .frame(maxWidth: .infinity, alignment: .leading)
@@ -49,7 +55,9 @@ struct GitDiffView: View {
               Text("+\(stat.added)").foregroundStyle(TetherColors.success)
               Text("−\(stat.removed)").foregroundStyle(TetherColors.danger)
             }
-            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .font(.caption.weight(.semibold).monospaced())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(stat.added) added, \(stat.removed) removed")
           }
         }
       }

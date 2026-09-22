@@ -38,45 +38,7 @@
             ReferencedContainer = "container:Tether.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "B10000000000000000000040"
-            BuildableName = "TetherIOS.app"
-            BlueprintName = "TetherIOS"
-            ReferencedContainer = "container:Tether.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "B10000000000000000000040"
-            BuildableName = "TetherIOS.app"
-            BlueprintName = "TetherIOS"
-            ReferencedContainer = "container:Tether.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
       <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "119F830BF241D84BA93FC74A"
-               BuildableName = "TetherIOSUITests.xctest"
-               BlueprintName = "TetherIOSUITests"
-               ReferencedContainer = "container:Tether.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C345458316EF8138A55E9390"
-               BuildableName = "TetherIOSUITests.xctest"
-               BlueprintName = "TetherIOSUITests"
-               ReferencedContainer = "container:Tether.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
          <TestableReference
             skipped = "NO">
             <BuildableReference

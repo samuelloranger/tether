@@ -8,7 +8,12 @@ public struct HomeView: View {
   @State private var tab: Tab
   @State private var showAdd = false
   @State private var keyEntry: KeyEntry?
+  /// Removing a machine or a key is unrecoverable, so both route through a
+  /// confirmation instead of firing straight off a context menu.
+  @State private var pendingServerRemoval: SSHHostProfile?
+  @State private var pendingKeyDeletion: SSHKeyRecord?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @ScaledMetric(relativeTo: .title3) private var addButtonSize: CGFloat = 32
 
   public enum Tab: String { case machines, keys }
 
@@ -49,6 +54,32 @@ public struct HomeView: View {
     } message: {
       Text(model.errorMessage ?? "")
     }
+    .confirmationDialog(
+      "Remove \(pendingServerRemoval?.name ?? "")?",
+      isPresented: Binding(get: { pendingServerRemoval != nil }, set: { if !$0 { pendingServerRemoval = nil } }),
+      titleVisibility: .visible
+    ) {
+      Button("Remove machine", role: .destructive) {
+        if let id = pendingServerRemoval?.id { model.removeServer(id: id) }
+        pendingServerRemoval = nil
+      }
+      Button("Cancel", role: .cancel) { pendingServerRemoval = nil }
+    } message: {
+      Text("Its sessions keep running on the host — only this phone forgets it.")
+    }
+    .confirmationDialog(
+      "Delete key \(pendingKeyDeletion?.name ?? "")?",
+      isPresented: Binding(get: { pendingKeyDeletion != nil }, set: { if !$0 { pendingKeyDeletion = nil } }),
+      titleVisibility: .visible
+    ) {
+      Button("Delete key", role: .destructive) {
+        if let id = pendingKeyDeletion?.id { model.deleteKey(id: id) }
+        pendingKeyDeletion = nil
+      }
+      Button("Cancel", role: .cancel) { pendingKeyDeletion = nil }
+    } message: {
+      Text("The private key leaves the Keychain and cannot be recovered.")
+    }
   }
 
   private var auroraGlow: some View {
@@ -66,28 +97,30 @@ public struct HomeView: View {
   private var header: some View {
     HStack(alignment: .bottom) {
       VStack(alignment: .leading, spacing: 3) {
-        Text("Home").font(.system(size: 26, weight: .bold)).foregroundStyle(TetherColors.textPrimary)
+        Text("Home").font(.largeTitle.weight(.bold)).foregroundStyle(TetherColors.textPrimary)
         Text(summary)
-          .font(.system(size: 11, design: .monospaced))
+          .font(.caption2.monospaced())
           .foregroundStyle(TetherColors.textFaint)
       }
       Spacer()
       if let onClose {
         Button(action: onClose) {
-          Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
+          Image(systemName: "xmark").font(.footnote.weight(.semibold))
         }
         .foregroundStyle(TetherColors.textSecondary)
         .padding(.trailing, 6)
+        .accessibilityLabel("Close home")
       }
       Button { showAdd = true } label: {
-        Image(systemName: "plus").font(.system(size: 18, weight: .medium))
-          .frame(width: 32, height: 32)
+        Image(systemName: "plus").font(.title3.weight(.medium))
+          .frame(width: addButtonSize, height: addButtonSize)
           .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
           .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
       }
       .foregroundStyle(TetherColors.accent)
       .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("homeAddServer")
+      .accessibilityLabel("Add a machine")
     }
     .padding(.horizontal, 18)
     .padding(.top, 20)
@@ -121,7 +154,7 @@ public struct HomeView: View {
       withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { tab = value }
     } label: {
       Text(label)
-        .font(.system(size: 13, weight: .semibold))
+        .font(.footnote.weight(.semibold))
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .foregroundStyle(selected ? TetherColors.textPrimary : TetherColors.textSecondary)
@@ -151,15 +184,15 @@ public struct HomeView: View {
     VStack(spacing: 10) {
       Spacer()
       Image(systemName: "point.3.connected.trianglepath.dotted")
-        .font(.system(size: 44, weight: .light))
+        .font(.system(.largeTitle, design: .default, weight: .light))
         .foregroundStyle(TetherColors.accent)
-      Text("No machines tethered yet").font(.system(size: 19, weight: .semibold))
+      Text("No machines tethered yet").font(.title3.weight(.semibold))
         .foregroundStyle(TetherColors.textPrimary)
       Text("Add a server to open a shell that stays alive between visits.")
-        .font(.system(size: 13)).foregroundStyle(TetherColors.textSecondary)
+        .font(.footnote).foregroundStyle(TetherColors.textSecondary)
         .multilineTextAlignment(.center).frame(maxWidth: 240)
       Button { showAdd = true } label: {
-        Text("Add a server").font(.system(size: 14, weight: .semibold))
+        Text("Add a server").font(.subheadline.weight(.semibold))
           .padding(.horizontal, 20).padding(.vertical, 11)
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 12))
           .foregroundStyle(TetherColors.onAccent)
@@ -178,7 +211,7 @@ public struct HomeView: View {
         ForEach(model.profiles) { profile in
           MachineCardView(profile: profile, authLabel: model.authLabel(for: profile), onOpen: { onOpen(profile) })
             .contextMenu {
-              Button(role: .destructive) { model.removeServer(id: profile.id) } label: {
+              Button(role: .destructive) { pendingServerRemoval = profile } label: {
                 Label("Remove", systemImage: "trash")
               }
             }
@@ -198,14 +231,14 @@ public struct HomeView: View {
                 Button { UIPasteboard.general.string = key.publicKey } label: {
                   Label("Copy public key", systemImage: "doc.on.doc")
                 }
-                Button(role: .destructive) { model.deleteKey(id: key.id) } label: {
+                Button(role: .destructive) { pendingKeyDeletion = key } label: {
                   Label("Delete key", systemImage: "trash")
                 }
               }
           }
           if model.keys.isEmpty {
             Text("No keys yet. Generate one, or paste an existing key.")
-              .font(.system(size: 13)).foregroundStyle(TetherColors.textSecondary)
+              .font(.footnote).foregroundStyle(TetherColors.textSecondary)
               .multilineTextAlignment(.center).padding(.top, 40).frame(maxWidth: 240)
           }
         }
@@ -227,8 +260,8 @@ public struct HomeView: View {
   private func keyActionButton(_ label: String, _ icon: String, prime: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       VStack(spacing: 6) {
-        Image(systemName: icon).font(.system(size: 16, weight: .semibold))
-        Text(label).font(.system(size: 12.5, weight: .semibold))
+        Image(systemName: icon).font(.body.weight(.semibold))
+        Text(label).font(.caption.weight(.semibold))
       }
       .frame(maxWidth: .infinity).padding(.vertical, 12)
       .background(prime ? TetherColors.accent : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
