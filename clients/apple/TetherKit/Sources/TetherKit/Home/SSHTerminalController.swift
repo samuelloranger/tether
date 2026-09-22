@@ -383,24 +383,13 @@ public final class SSHTerminalController {
     return GitDiffModel.classify(raw)
   }
 
-  /// The diff of the pull request itself, which is not the working tree's.
-  public func loadPullRequestDiff(_ pullRequest: GitPullRequest) async {
-    gitLoading = true
-    defer { gitLoading = false }
-    gitError = nil
-    guard let cwd = await currentCwd() else {
-      gitLines = []
-      gitError = "No working directory for this session."
-      return
-    }
+  /// The pull request's own patch, returned rather than stored: the working
+  /// tree's diff lives in `gitLines`, and the refresh loop would overwrite this.
+  public func pullRequestDiff(_ pullRequest: GitPullRequest) async -> [GitDiffLine] {
+    guard let cwd = await currentCwd() else { return [] }
     let command = "cd \(shellQuote(cwd)) && gh pr diff \(pullRequest.number) 2>&1"
-    guard let raw = try? await control.exec(command) else {
-      gitLines = []
-      gitError = "Couldn't read the diff for #\(pullRequest.number)."
-      return
-    }
-    gitLines = GitDiffModel.classify(raw)
-    gitError = gitLines.isEmpty ? "#\(pullRequest.number) has no changes to show." : nil
+    guard let raw = try? await control.exec(command) else { return [] }
+    return GitDiffModel.classify(raw)
   }
 
   public func checkoutPullRequest(_ pullRequest: GitPullRequest) async {

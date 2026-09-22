@@ -89,7 +89,7 @@ struct GitDiffView: View {
       }
     } else {
       List(controller.gitPullRequests) { pullRequest in
-        NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest, onShowChanges: { tab = .changes }) } label: {
+        NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest) } label: {
           VStack(alignment: .leading, spacing: 5) { Text("#\(pullRequest.number) \(pullRequest.title)").lineLimit(2); Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary) }
         }.listRowBackground(TetherColors.surface)
       }.scrollContentBackground(.hidden).background(TetherColors.background)
@@ -102,12 +102,12 @@ struct GitDiffView: View {
 private struct PullRequestDetailView: View {
   @Bindable var controller: SSHTerminalController
   let pullRequest: GitPullRequest
-  var onShowChanges: () -> Void
-
-  @Environment(\.dismiss) private var dismiss
   @State private var confirmClose = false
   @State private var showCopied = false
   @State private var expandDescription = false
+  @State private var diffFiles: [DiffFile] = []
+  @State private var loadingDiff = false
+  @State private var showDiff = false
 
   private static let pollSeconds: UInt64 = 10
 
@@ -123,6 +123,9 @@ private struct PullRequestDetailView: View {
     }
     .background(TetherColors.background)
     .overlay(alignment: .bottom) { copiedPill }
+    .sheet(isPresented: $showDiff) {
+      PatchSheet(title: "#\(pullRequest.number)", subtitle: pullRequest.title, files: diffFiles)
+    }
     .task {
       await controller.loadPullRequestDetail(pullRequest)
       // Keep refreshing only while something is still running.
@@ -217,11 +220,13 @@ private struct PullRequestDetailView: View {
       .buttonStyle(TetherPressStyle())
 
       HStack(spacing: 8) {
-        chipAction("Files", "doc.text.magnifyingglass") {
+        chipAction("Files", "doc.text.magnifyingglass", loading: loadingDiff) {
+          guard !loadingDiff else { return }
+          loadingDiff = true
           Task {
-            await controller.loadPullRequestDiff(pullRequest)
-            onShowChanges()
-            dismiss()
+            diffFiles = DiffFile.group(await controller.pullRequestDiff(pullRequest))
+            loadingDiff = false
+            showDiff = true
           }
         }
         chipAction("Browser", "safari") {
@@ -251,10 +256,14 @@ private struct PullRequestDetailView: View {
     }
   }
 
-  private func chipAction(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+  private func chipAction(_ title: String, _ icon: String, loading: Bool = false, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       VStack(spacing: 5) {
-        Image(systemName: icon).font(.subheadline)
+        if loading {
+          ProgressView().controlSize(.small).tint(TetherColors.accent).frame(height: 18)
+        } else {
+          Image(systemName: icon).font(.subheadline).frame(height: 18)
+        }
         Text(title).font(.caption2)
       }
       .frame(maxWidth: .infinity)
@@ -379,6 +388,49 @@ private struct CommitDetailView: View {
     .task {
       lines = await controller.commitDiff(commit)
       loading = false
+    }
+  }
+}
+
+/// A patch shown over whatever opened it, so closing it returns you there.
+private struct PatchSheet: View {
+  let title: String
+  let subtitle: String
+  let files: [DiffFile]
+
+  @Environment(\.dismiss) private var dismiss
+
+  private var stat: (added: Int, removed: Int) {
+    files.reduce(into: (0, 0)) { total, file in
+      total.0 += file.added
+      total.1 += file.removed
+    }
+  }
+
+  var body: some View {
+    NavigationStack {
+      Group {
+        if files.isEmpty {
+          ContentUnavailableView("No changes to show", systemImage: "doc.text",
+            description: Text("This pull request has no diff against its base."))
+            .foregroundStyle(TetherColors.textSecondary)
+        } else {
+          ScrollView { DiffReviewView(files: files).padding(.vertical, 6) }
+        }
+      }
+      .background(TetherColors.background)
+      .navigationTitle(title)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+        ToolbarItem(placement: .principal) {
+          VStack(spacing: 1) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            Text("+\(stat.added)  −\(stat.removed)").font(.caption2.monospaced())
+              .foregroundStyle(TetherColors.textSecondary)
+          }
+        }
+      }
     }
   }
 }
