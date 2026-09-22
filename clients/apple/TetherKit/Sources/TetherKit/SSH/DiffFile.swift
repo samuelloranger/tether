@@ -47,9 +47,7 @@ public struct DiffFile: Equatable, Identifiable, Sendable {
         path = newPath(from: text)
         continue
       }
-      if text.hasPrefix("index ") || text.hasPrefix("--- ") || text.hasPrefix("+++ ")
-        || text.hasPrefix("new file") || text.hasPrefix("deleted file")
-        || text.hasPrefix("similarity ") || text.hasPrefix("rename ") {
+      if line.kind == .fileHeader {
         continue
       }
 
@@ -78,6 +76,13 @@ public struct DiffFile: Equatable, Identifiable, Sendable {
     }
     flush()
     return files.filter { !$0.rows.isEmpty }
+  }
+
+  public static func stat(_ files: [DiffFile]) -> (added: Int, removed: Int) {
+    files.reduce(into: (0, 0)) { total, file in
+      total.0 += file.added
+      total.1 += file.removed
+    }
   }
 
   private static func newPath(from header: String) -> String {

@@ -85,4 +85,27 @@ final class DiffFileTests: XCTestCase {
   func test_empty_input_has_no_files() {
     XCTAssertEqual(DiffFile.group([]).count, 0)
   }
+
+  func test_a_header_git_adds_later_is_skipped_because_it_is_classified_not_matched() {
+    // `mode 100644` is a real git header the prefix list never knew about.
+    let lines = GitDiffModel.classify("""
+    diff --git a/x b/x
+    old mode 100644
+    new mode 100755
+    @@ -1 +1 @@
+    -a
+    +b
+    """)
+    let files = DiffFile.group(lines)
+    XCTAssertEqual(files.count, 1)
+    XCTAssertEqual(files[0].rows.filter { $0.kind == .removed }.map(\.text), ["a"])
+    XCTAssertFalse(files[0].rows.contains { $0.text == "old mode 100644" })
+  }
+
+  func test_totals_come_from_one_place() {
+    let lines = GitDiffModel.classify("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n+c")
+    let files = DiffFile.group(lines)
+    XCTAssertEqual(DiffFile.stat(files).added, 2)
+    XCTAssertEqual(DiffFile.stat(files).removed, 1)
+  }
 }

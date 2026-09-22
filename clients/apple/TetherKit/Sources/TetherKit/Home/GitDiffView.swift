@@ -7,8 +7,9 @@ struct GitDiffView: View {
   enum Tab: String, CaseIterable, Identifiable { case changes = "Changes", commits = "Commits", pullRequests = "Pull Requests"; var id: Self { self } }
   @Bindable var controller: SSHTerminalController
   var onDone: () -> Void
+  @Environment(\.scenePhase) private var scenePhase
   @State private var tab: Tab = .changes
-  private var stat: (added: Int, removed: Int) { GitDiffModel.stat(controller.gitLines) }
+  private var stat: (added: Int, removed: Int) { DiffFile.stat(controller.gitFiles) }
 
   var body: some View {
     NavigationStack {
@@ -37,9 +38,9 @@ struct GitDiffView: View {
       .background(TetherColors.background).navigationTitle("Git").navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("Done", action: onDone) }
-        ToolbarItem(placement: .principal) { if tab == .changes && !controller.gitLines.isEmpty { Text("+\(stat.added)  −\(stat.removed)").font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.success) } }
+        ToolbarItem(placement: .principal) { if tab == .changes && !controller.gitFiles.isEmpty { Text("+\(stat.added)  −\(stat.removed)").font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.success) } }
         ToolbarItem(placement: .primaryAction) {
-          Button { Task { await controller.loadGitWorkspace() } } label: {
+          Button { Task { await refreshVisiblePayload() } } label: {
             if controller.gitLoading {
               ProgressView().controlSize(.small).tint(TetherColors.accent)
             } else {
@@ -51,7 +52,12 @@ struct GitDiffView: View {
         }
       }
       .overlay(alignment: .bottom) { if let message = controller.gitActionMessage { Text(message).font(.caption.monospaced()).padding(12).background(TetherColors.surface, in: Capsule()).padding(.bottom, 12) } }
-      .task { while !Task.isCancelled { await controller.loadGitWorkspace(); try? await Task.sleep(nanoseconds: 15_000_000_000) } }
+      .task(id: "\(tab.rawValue)-\(scenePhase == .active)") {
+        while !Task.isCancelled, scenePhase == .active {
+          await refreshVisiblePayload()
+          try? await Task.sleep(nanoseconds: tab == .pullRequests ? 60_000_000_000 : 15_000_000_000)
+        }
+      }
     }
   }
 
@@ -60,10 +66,10 @@ struct GitDiffView: View {
   }
 
   @ViewBuilder private var changes: some View {
-    if controller.gitLines.isEmpty {
+    if controller.gitFiles.isEmpty {
       ContentUnavailableView("No uncommitted changes", systemImage: "checkmark.circle", description: Text("The current working directory is clean.")).foregroundStyle(TetherColors.textSecondary)
     } else {
-      ScrollView { DiffReviewView(files: DiffFile.group(controller.gitLines)).padding(.vertical, 6) }
+      ScrollView { DiffReviewView(files: controller.gitFiles).padding(.vertical, 6) }
     }
   }
 
@@ -78,33 +84,58 @@ struct GitDiffView: View {
     }.scrollContentBackground(.hidden).background(TetherColors.background)
   }
 
-  @ViewBuilder private var pullRequests: some View {
-    if controller.gitPullRequests.isEmpty {
-      if let notice = controller.gitPullRequestNotice {
-        ContentUnavailableView("Couldn't load pull requests", systemImage: "exclamationmark.triangle", description: Text(notice))
-          .foregroundStyle(TetherColors.textSecondary)
+  private var pullRequests: some View {
+    List {
+      if controller.gitPullRequests.isEmpty {
+        if !controller.gitPullRequestsLoaded {
+          HStack { Spacer(); ProgressView().tint(TetherColors.accent); Spacer() }
+            .padding(.vertical, 40).listRowBackground(Color.clear)
+        } else if let notice = controller.gitPullRequestNotice {
+          ContentUnavailableView("Couldn't load pull requests", systemImage: "exclamationmark.triangle", description: Text(notice))
+            .foregroundStyle(TetherColors.textSecondary)
+        } else {
+          ContentUnavailableView("No open pull requests", systemImage: "arrow.triangle.pull", description: Text("This repository has none open right now."))
+            .foregroundStyle(TetherColors.textSecondary)
+        }
       } else {
-        ContentUnavailableView("No open pull requests", systemImage: "arrow.triangle.pull", description: Text("This repository has none open right now."))
-          .foregroundStyle(TetherColors.textSecondary)
-      }
-    } else {
-      List(controller.gitPullRequests) { pullRequest in
+        ForEach(controller.gitPullRequests) { pullRequest in
         NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest) } label: {
           VStack(alignment: .leading, spacing: 5) { Text("#\(pullRequest.number) \(pullRequest.title)").lineLimit(2); Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary) }
         }.listRowBackground(TetherColors.surface)
-      }.scrollContentBackground(.hidden).background(TetherColors.background)
+        }
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(TetherColors.background)
+    .refreshable { await refreshVisiblePayload() }
+  }
+
+  private var workspacePayload: SSHTerminalController.GitWorkspacePayload {
+    switch tab {
+    case .changes: .changes
+    case .commits: .commits
+    case .pullRequests: .pullRequests
     }
   }
 
-  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await controller.loadGitWorkspace() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
+  private func refreshVisiblePayload() async {
+    await controller.loadGitWorkspace(payload: workspacePayload)
+  }
+
+  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await refreshVisiblePayload() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
 }
 
 private struct PullRequestDetailView: View {
   @Bindable var controller: SSHTerminalController
   let pullRequest: GitPullRequest
+  @State private var detail = PullRequestDetail.empty
+  @State private var loadingDetail = false
   @State private var confirmClose = false
+  @State private var confirmMerge = false
   @State private var showCopied = false
   @State private var diffFiles: [DiffFile] = []
+  @State private var blocks: [MarkdownBlock] = []
+  @State private var inlineBlocks: [[AttributedString]] = []
   @State private var loadingDiff = false
   @State private var showDiff = false
 
@@ -115,25 +146,34 @@ private struct PullRequestDetailView: View {
       VStack(alignment: .leading, spacing: 18) {
         header
         checks
-        actions
+        mergeCard
+        reviewChanges
         description
       }
       .padding()
     }
     .background(TetherColors.background)
-    .overlay(alignment: .bottom) { copiedPill }
+    .copyConfirmation(isPresented: $showCopied)
     .sheet(isPresented: $showDiff) {
       PatchSheet(title: "#\(pullRequest.number)", subtitle: pullRequest.title, files: diffFiles)
     }
     .task {
-      await controller.loadPullRequestDetail(pullRequest)
+      refreshDescription(detail.body)
+      await refreshDetail()
       // Keep refreshing only while something is still running.
-      while !Task.isCancelled, GitRepositoryModel.isRunning(controller.gitChecks) {
+      while !Task.isCancelled,
+        GitRepositoryModel.isRunning(detail.checks) || detail.gate == .computing {
         try? await Task.sleep(for: .seconds(Self.pollSeconds))
         guard !Task.isCancelled else { return }
-        await controller.loadPullRequestDetail(pullRequest)
+        await refreshDetail()
       }
     }
+    .onChange(of: detail.body) { _, body in
+      refreshDescription(body)
+    }
+    .toolbar { ToolbarItem(placement: .topBarTrailing) { overflowMenu } }
+    // The close dialog lives on its own host: two confirmationDialogs on one
+    // view collapse to a single presentation, and the second silently wins.
     .confirmationDialog("Close pull request #\(pullRequest.number)?", isPresented: $confirmClose, titleVisibility: .visible) {
       Button("Close pull request", role: .destructive) { Task { await controller.closePullRequest(pullRequest) } }
       Button("Cancel", role: .cancel) {}
@@ -160,13 +200,13 @@ private struct PullRequestDetailView: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 8) {
         Image(systemName: rollupIcon).foregroundStyle(rollupTint)
-        Text(GitRepositoryModel.checkHeadline(controller.gitChecks))
+        Text(GitRepositoryModel.checkHeadline(detail.checks))
           .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
         Spacer(minLength: 4)
         Button {
-          Task { await controller.loadPullRequestDetail(pullRequest) }
+          Task { await refreshDetail() }
         } label: {
-          if controller.gitChecksLoading {
+          if loadingDetail {
             ProgressView().controlSize(.small).tint(TetherColors.accent)
           } else {
             Image(systemName: "arrow.clockwise")
@@ -176,7 +216,7 @@ private struct PullRequestDetailView: View {
         .accessibilityLabel("Refresh checks")
       }
 
-      ForEach(controller.gitChecks) { check in
+      ForEach(detail.checks) { check in
         Button {
           if let url = URL(string: check.url), !check.url.isEmpty { UIApplication.shared.open(url) }
         } label: {
@@ -194,125 +234,186 @@ private struct PullRequestDetailView: View {
         .buttonStyle(.plain)
       }
 
-      if let updated = controller.gitChecksUpdatedAt {
-        Text("Updated \(updated, style: .relative) ago")
+      if detail.fetchedAt != .distantPast {
+        Text("Updated \(detail.fetchedAt, style: .relative) ago")
           .font(.caption2).foregroundStyle(TetherColors.textFaint)
       }
     }
     .padding(14)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
-    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TetherColors.border))
+    .tetherCard()
   }
 
-  private var actions: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Button {
-        Task { await controller.checkoutPullRequest(pullRequest) }
-      } label: {
-        Label("Checkout branch", systemImage: "arrow.down.to.line")
-          .font(.subheadline.weight(.semibold))
-          .padding(.horizontal, 16).padding(.vertical, 11)
-      }
-      .background(TetherColors.accent, in: Capsule())
-      .foregroundStyle(TetherColors.onAccent)
-      .buttonStyle(TetherPressStyle())
-
+  /// The gate and the button are one card, so the reason sits with the control
+  /// it explains rather than as a caption somewhere below it.
+  private var mergeCard: some View {
+    VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
-        chipAction("Files", "doc.text.magnifyingglass", loading: loadingDiff) {
-          guard !loadingDiff else { return }
-          loadingDiff = true
-          Task {
-            diffFiles = DiffFile.group(await controller.pullRequestDiff(pullRequest))
-            loadingDiff = false
-            showDiff = true
-          }
+        if detail.gate == .computing {
+          ProgressView().controlSize(.small).tint(TetherColors.accent)
+        } else {
+          Image(systemName: gateIcon).foregroundStyle(gateTint)
         }
-        chipAction("Browser", "safari") {
-          if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
-        }
-        chipAction("Copy link", "doc.on.doc") {
-          UIPasteboard.general.string = pullRequest.url
-          UIAccessibility.post(notification: .announcement, argument: "Link copied")
-          withAnimation { showCopied = true }
-          Task {
-            try? await Task.sleep(for: .seconds(1.2))
-            withAnimation { showCopied = false }
-          }
-        }
-      }
-
-      HStack(spacing: 14) {
-        Button("Update branch") { Task { await controller.updatePullRequest(pullRequest) } }
-          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
-        Button("Close pull request") { confirmClose = true }
-          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.danger)
+        Text(detail.gate.reason)
+          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
         Spacer(minLength: 0)
       }
-      .padding(.top, 2)
 
-      Text("Merging stays in the browser.").font(.caption2).foregroundStyle(TetherColors.textFaint)
+      Button { confirmMerge = true } label: {
+        Text(defaultMethod?.label ?? "Merge pull request")
+          .font(.subheadline.weight(.semibold))
+          .frame(maxWidth: .infinity).padding(.vertical, 12)
+          // A Text only hit-tests its glyphs; without this the padded capsule
+          // around the label is dead to taps.
+          .contentShape(Capsule())
+      }
+      .background(canMerge ? TetherColors.accent : TetherColors.surface, in: Capsule())
+      .foregroundStyle(canMerge ? TetherColors.onAccent : TetherColors.textFaint)
+      .overlay(Capsule().strokeBorder(canMerge ? .clear : TetherColors.border))
+      .buttonStyle(TetherPressStyle())
+      .disabled(!canMerge)
+      .accessibilityIdentifier("pullRequestMerge")
+      .accessibilityHint(canMerge ? "Merges this pull request" : detail.gate.reason)
+
+      // Only being out of date has a fix this app can perform; a draft, a
+      // conflict and a missing review are all resolved outside it.
+      if detail.gate == .behind {
+        HStack(spacing: 10) {
+          Text("Update the branch to merge.")
+            .font(.caption).foregroundStyle(TetherColors.textSecondary)
+          Spacer(minLength: 0)
+          Button("Update") { Task { await controller.updatePullRequest(pullRequest) } }
+            .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+        }
+      }
+
+      if canMerge, methods.isEmpty {
+        Text("This repository allows no merge method.")
+          .font(.caption).foregroundStyle(TetherColors.textSecondary)
+      }
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .tetherCard()
+    .confirmationDialog("Merge #\(pullRequest.number)?", isPresented: $confirmMerge, titleVisibility: .visible) {
+      ForEach(methods) { method in
+        Button(method.label) { Task { await controller.mergePullRequest(pullRequest, method: method) } }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("\(pullRequest.head) → \(pullRequest.base)")
     }
   }
 
-  private func chipAction(_ title: String, _ icon: String, loading: Bool = false, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      VStack(spacing: 5) {
-        if loading {
-          ProgressView().controlSize(.small).tint(TetherColors.accent).frame(height: 18)
-        } else {
-          Image(systemName: icon).font(.subheadline).frame(height: 18)
+  private var reviewChanges: some View {
+    Button(action: openDiff) {
+      HStack(spacing: 10) {
+        // Fixed leading slot: the spinner is narrower than the icon, so without
+        // it the label jumps sideways when a diff starts loading.
+        Group {
+          if loadingDiff {
+            ProgressView().controlSize(.small).tint(TetherColors.accent)
+          } else {
+            Image(systemName: "doc.text.magnifyingglass")
+          }
         }
-        Text(title).font(.caption2)
+        .frame(width: 22)
+        Text("Review changes").font(.subheadline.weight(.semibold))
+        Spacer(minLength: 0)
+        Image(systemName: "chevron.right").font(.caption).foregroundStyle(TetherColors.textFaint)
       }
-      .frame(maxWidth: .infinity)
-      .padding(.vertical, 11)
-      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 11))
-      .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TetherColors.border))
+      .padding(.horizontal, 14).padding(.vertical, 13)
+      .contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
     .foregroundStyle(TetherColors.accent)
+    .tetherCard()
   }
+
+  private var overflowMenu: some View {
+    Menu {
+      Button { openDiff() } label: { Label("Review changes", systemImage: "doc.text.magnifyingglass") }
+      Button { Task { await controller.checkoutPullRequest(pullRequest) } } label: {
+        Label("Checkout branch", systemImage: "arrow.down.to.line")
+      }
+      Button { Task { await controller.updatePullRequest(pullRequest) } } label: {
+        Label("Update branch", systemImage: "arrow.triangle.merge")
+      }
+      Divider()
+      Button {
+        if let url = URL(string: pullRequest.url) { UIApplication.shared.open(url) }
+      } label: { Label("Open in GitHub", systemImage: "safari") }
+      Button {
+        acknowledgeCopy(pullRequest.url, announce: "Link copied", into: $showCopied)
+      } label: { Label("Copy link", systemImage: "doc.on.doc") }
+      Divider()
+      Button(role: .destructive) { confirmClose = true } label: {
+        Label("Close pull request", systemImage: "xmark.circle")
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
+    }
+    .accessibilityLabel("Pull request actions")
+    .accessibilityIdentifier("pullRequestActions")
+  }
+
+  private var methods: [GitMergeMethod] { detail.methods }
+  private var canMerge: Bool { detail.gate.canMerge && !methods.isEmpty }
+  /// Squash is the common answer; otherwise whatever the repository allows.
+  private var defaultMethod: GitMergeMethod? {
+    methods.contains(.squash) ? .squash : methods.first
+  }
+
+  private var gateIcon: String {
+    switch detail.gate {
+    case .ready: "checkmark.circle.fill"
+    case .conflicted: "exclamationmark.octagon"
+    case .draft: "pencil.circle"
+    case .behind, .blocked: "exclamationmark.triangle"
+    case .computing: "clock"
+    }
+  }
+
+  private var gateTint: Color {
+    switch detail.gate {
+    case .ready: TetherColors.success
+    case .conflicted: TetherColors.danger
+    case .behind, .blocked, .draft: TetherColors.warning
+    case .computing: TetherColors.textFaint
+    }
+  }
+
+  private func openDiff() {
+    guard !loadingDiff else { return }
+    loadingDiff = true
+    Task {
+      diffFiles = DiffFile.group(await controller.pullRequestDiff(pullRequest))
+      loadingDiff = false
+      showDiff = true
+    }
+  }
+
 
   @ViewBuilder
   private var description: some View {
-    if !controller.gitPullRequestBody.isEmpty {
+    if !blocks.isEmpty {
       VStack(alignment: .leading, spacing: 8) {
         sectionTitle("Description")
-        MarkdownBodyView(markdown: controller.gitPullRequestBody)
+        MarkdownBodyView(blocks: blocks, inlineBlocks: inlineBlocks)
       }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
-      .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TetherColors.border))
+      .tetherCard()
     }
   }
 
-  @ViewBuilder
-  private var copiedPill: some View {
-    if showCopied {
-      Label("Link copied", systemImage: "checkmark.circle.fill")
-        .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(TetherColors.surface, in: Capsule())
-        .overlay(Capsule().strokeBorder(TetherColors.accent.opacity(0.5)))
-        .padding(.bottom, 20)
-        .transition(.opacity)
-    }
-  }
 
   private var rollupIcon: String {
-    guard !controller.gitChecks.isEmpty else { return "circle.dashed" }
-    if controller.gitChecks.contains(where: { $0.state == .failed }) { return "xmark.circle.fill" }
-    if GitRepositoryModel.isRunning(controller.gitChecks) { return "clock.fill" }
-    return "checkmark.circle.fill"
+    GitRepositoryModel.rollup(detail.checks).map(icon(for:)) ?? "circle.dashed"
   }
 
   private var rollupTint: Color {
-    guard !controller.gitChecks.isEmpty else { return TetherColors.textFaint }
-    if controller.gitChecks.contains(where: { $0.state == .failed }) { return TetherColors.danger }
-    if GitRepositoryModel.isRunning(controller.gitChecks) { return TetherColors.warning }
-    return TetherColors.success
+    GitRepositoryModel.rollup(detail.checks).map(tint(for:)) ?? TetherColors.textFaint
   }
 
   private func icon(for state: GitCheck.State) -> String {
@@ -343,6 +444,21 @@ private struct PullRequestDetailView: View {
     Text(title).font(.caption.weight(.bold)).foregroundStyle(TetherColors.textSecondary)
   }
 
+  private func refreshDetail() async {
+    guard !loadingDetail else { return }
+    loadingDetail = true
+    defer { loadingDetail = false }
+    let fetched = await controller.loadPullRequestDetail(pullRequest)
+    guard !Task.isCancelled, fetched.fetchedAt != .distantPast else { return }
+    detail = fetched
+  }
+
+  private func refreshDescription(_ body: String) {
+    let parsed = MarkdownDocument.parse(body)
+    blocks = parsed
+    inlineBlocks = MarkdownBodyView.renderedInline(for: parsed)
+  }
+
 }
 
 
@@ -351,6 +467,8 @@ private struct CommitDetailView: View {
   let commit: GitCommit
 
   @State private var lines: [GitDiffLine] = []
+  @State private var files: [DiffFile] = []
+  @State private var message = ""
   @State private var loading = true
 
   var body: some View {
@@ -361,6 +479,10 @@ private struct CommitDetailView: View {
           Text(commit.id).font(.caption.monospaced()).foregroundStyle(TetherColors.accent)
           Text("\(commit.author) · \(Date(timeIntervalSince1970: TimeInterval(commit.timestamp)).formatted(date: .abbreviated, time: .shortened))")
             .font(.caption).foregroundStyle(TetherColors.textSecondary)
+          if !message.isEmpty {
+            Text(message).font(.callout).foregroundStyle(TetherColors.textSecondary)
+              .textSelection(.enabled).padding(.top, 4)
+          }
         }
         .padding(.horizontal, 12)
 
@@ -371,7 +493,7 @@ private struct CommitDetailView: View {
             description: Text("It may be a merge commit, or the repository is no longer at this path."))
             .foregroundStyle(TetherColors.textSecondary)
         } else {
-          DiffReviewView(files: DiffFile.group(lines))
+          DiffReviewView(files: files)
         }
       }
       .padding(.vertical, 10)
@@ -379,7 +501,10 @@ private struct CommitDetailView: View {
     }
     .background(TetherColors.background)
     .task {
-      lines = await controller.commitDiff(commit)
+      let shown = await controller.commitDiff(commit)
+      message = shown.body
+      lines = shown.lines
+      files = DiffFile.group(shown.lines)
       loading = false
     }
   }
@@ -393,12 +518,7 @@ private struct PatchSheet: View {
 
   @Environment(\.dismiss) private var dismiss
 
-  private var stat: (added: Int, removed: Int) {
-    files.reduce(into: (0, 0)) { total, file in
-      total.0 += file.added
-      total.1 += file.removed
-    }
-  }
+  private var stat: (added: Int, removed: Int) { DiffFile.stat(files) }
 
   var body: some View {
     NavigationStack {

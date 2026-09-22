@@ -1,10 +1,22 @@
 import UniformTypeIdentifiers
 import XCTest
+#if canImport(PhotosUI)
+import SwiftUI
+import PhotosUI
+#endif
 @testable import TetherKit
 
 /// A transfer is held in memory on its way to `scp`, so a video is turned away
 /// by size before it is loaded.
 final class MediaTransferTests: XCTestCase {
+#if canImport(PhotosUI)
+  func test_a_clip_that_cannot_be_read_explains_itself_once() async {
+    let result = await MediaTransfer.load(PhotosPickerItem(itemIdentifier: ""), isVideo: true)
+    guard case .failed(let message) = result else { return XCTFail("expected a failure message") }
+    XCTAssertEqual(message, "Couldn't read that video from the library.")
+  }
+#endif
+
   func test_a_still_is_named_as_a_photo_and_a_clip_as_a_video() {
     XCTAssertEqual(
       MediaTransfer.filename(preferredExtension: "heic", isVideo: false, timestamp: 1_790_044_951),
@@ -17,6 +29,11 @@ final class MediaTransferTests: XCTestCase {
   func test_a_missing_extension_falls_back_per_kind() {
     XCTAssertEqual(MediaTransfer.filename(preferredExtension: nil, isVideo: false, timestamp: 7), "photo-7.jpg")
     XCTAssertEqual(MediaTransfer.filename(preferredExtension: nil, isVideo: true, timestamp: 7), "video-7.mov")
+  }
+
+  func test_an_empty_extension_falls_back_per_kind() {
+    XCTAssertEqual(MediaTransfer.filename(preferredExtension: "", isVideo: false, timestamp: 7), "photo-7.jpg")
+    XCTAssertEqual(MediaTransfer.filename(preferredExtension: "", isVideo: true, timestamp: 7), "video-7.mov")
   }
 
   func test_movies_are_recognised_by_conformance_not_by_a_list_of_extensions() {

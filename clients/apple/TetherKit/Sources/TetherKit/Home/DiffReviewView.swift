@@ -105,35 +105,28 @@ private struct DiffRowView: View {
     }
   }
 
-  private var tint: Color {
-    switch row.kind {
-    case .added: TetherColors.success.opacity(0.10)
-    case .removed: TetherColors.danger.opacity(0.10)
-    default: .clear
-    }
-  }
+  private var tint: Color { edge.opacity(0.10) }
 }
 
-/// Renders a pull-request body's markdown. Inline emphasis and links come from
-/// `AttributedString`; the block structure is parsed first.
 struct MarkdownBodyView: View {
-  let markdown: String
+  let blocks: [MarkdownBlock]
+  let inlineBlocks: [[AttributedString]]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      ForEach(Array(MarkdownDocument.parse(markdown).enumerated()), id: \.offset) { _, block in
+      ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
         switch block {
-        case let .heading(level, text):
-          Text(inline(text))
+        case let .heading(level, _):
+          Text(inlineBlocks[index][0])
             .font(level == 1 ? .headline : level == 2 ? .subheadline.weight(.semibold) : .footnote.weight(.semibold))
             .foregroundStyle(TetherColors.textPrimary)
             .padding(.top, 2)
-        case let .paragraph(text):
-          Text(inline(text)).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        case .paragraph:
+          Text(inlineBlocks[index][0]).font(.footnote).foregroundStyle(TetherColors.textSecondary)
         case let .bullets(items):
-          listRows(items.map { ("•", $0) })
+          listRows(items.map { _ in "•" }, inline: inlineBlocks[index])
         case let .numbered(items):
-          listRows(items.enumerated().map { ("\($0.offset + 1).", $0.element) })
+          listRows(items.enumerated().map { "\($0.offset + 1)." }, inline: inlineBlocks[index])
         case let .code(lines):
           ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 1) {
@@ -145,10 +138,10 @@ struct MarkdownBodyView: View {
             .padding(10)
           }
           .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
-        case let .quote(text):
+        case .quote:
           HStack(spacing: 8) {
             Rectangle().fill(TetherColors.border).frame(width: 2)
-            Text(inline(text)).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
+            Text(inlineBlocks[index][0]).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
           }
         case .rule:
           Rectangle().fill(TetherColors.border).frame(height: 0.5).padding(.vertical, 2)
@@ -157,18 +150,31 @@ struct MarkdownBodyView: View {
     }
   }
 
-  private func listRows(_ items: [(String, String)]) -> some View {
+  private func listRows(_ markers: [String], inline: [AttributedString]) -> some View {
     VStack(alignment: .leading, spacing: 5) {
-      ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+      ForEach(Array(markers.enumerated()), id: \.offset) { index, marker in
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-          Text(item.0).font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
-          Text(inline(item.1)).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          Text(marker).font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
+          Text(inline[index]).font(.footnote).foregroundStyle(TetherColors.textSecondary)
         }
       }
     }
   }
 
-  private func inline(_ text: String) -> AttributedString {
+  static func renderedInline(for blocks: [MarkdownBlock]) -> [[AttributedString]] {
+    blocks.map { block in
+      switch block {
+      case let .heading(_, text), let .paragraph(text), let .quote(text):
+        [inline(text)]
+      case let .bullets(items), let .numbered(items):
+        items.map { inline($0) }
+      case .code, .rule:
+        []
+      }
+    }
+  }
+
+  private static func inline(_ text: String) -> AttributedString {
     (try? AttributedString(markdown: text)) ?? AttributedString(text)
   }
 }

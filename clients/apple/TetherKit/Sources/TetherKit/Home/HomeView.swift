@@ -54,32 +54,18 @@ public struct HomeView: View {
     } message: {
       Text(model.errorMessage ?? "")
     }
-    .confirmationDialog(
-      "Remove \(pendingServerRemoval?.name ?? "")?",
-      isPresented: Binding(get: { pendingServerRemoval != nil }, set: { if !$0 { pendingServerRemoval = nil } }),
-      titleVisibility: .visible
-    ) {
-      Button("Remove machine", role: .destructive) {
-        if let id = pendingServerRemoval?.id { model.removeServer(id: id) }
-        pendingServerRemoval = nil
-      }
-      Button("Cancel", role: .cancel) { pendingServerRemoval = nil }
-    } message: {
-      Text("Its sessions keep running on the host — only this phone forgets it.")
-    }
-    .confirmationDialog(
-      "Delete key \(pendingKeyDeletion?.name ?? "")?",
-      isPresented: Binding(get: { pendingKeyDeletion != nil }, set: { if !$0 { pendingKeyDeletion = nil } }),
-      titleVisibility: .visible
-    ) {
-      Button("Delete key", role: .destructive) {
-        if let id = pendingKeyDeletion?.id { model.deleteKey(id: id) }
-        pendingKeyDeletion = nil
-      }
-      Button("Cancel", role: .cancel) { pendingKeyDeletion = nil }
-    } message: {
-      Text("The private key leaves the Keychain and cannot be recovered.")
-    }
+    .destructiveConfirmation(
+      $pendingServerRemoval,
+      title: { "Remove \($0.name)?" },
+      actionLabel: "Remove machine",
+      message: "Its sessions keep running on the host — only this phone forgets it."
+    ) { model.removeServer(id: $0.id) }
+    .destructiveConfirmation(
+      $pendingKeyDeletion,
+      title: { "Delete key \($0.name)?" },
+      actionLabel: "Delete key",
+      message: "The private key leaves the Keychain and cannot be recovered."
+    ) { model.deleteKey(id: $0.id) }
   }
 
   private var auroraGlow: some View {

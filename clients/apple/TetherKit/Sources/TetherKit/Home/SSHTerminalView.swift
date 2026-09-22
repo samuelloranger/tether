@@ -29,7 +29,6 @@ public struct SSHTerminalView: View {
   @State private var showHistory = false
   @State private var showPhotoPicker = false
   @State private var photoItem: PhotosPickerItem?
-  @State private var copyFeedback = 0
   @State private var showCopyConfirmation = false
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -65,9 +64,7 @@ public struct SSHTerminalView: View {
     .overlay(alignment: .bottom) {
       transferBanner.animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.transfer)
     }
-    .overlay(alignment: .bottom) {
-      copyConfirmation.animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: showCopyConfirmation)
-    }
+    .copyConfirmation(isPresented: $showCopyConfirmation)
     .overlay { drawerGestures }
     .sensoryFeedback(trigger: controller.status) {
       switch controller.status {
@@ -85,7 +82,6 @@ public struct SSHTerminalView: View {
       }
     }
     .sensoryFeedback(.selection, trigger: controller.attach)
-    .sensoryFeedback(.success, trigger: copyFeedback)
     .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
       guard case let .success(url) = result else { return }
       let stop = url.startAccessingSecurityScopedResource()
@@ -121,20 +117,12 @@ public struct SSHTerminalView: View {
     .sheet(isPresented: $showHistory) {
       TerminalHistoryView(controller: controller, preferences: preferences) { showHistory = false }
     }
-    .confirmationDialog(
-      "Kill \(pendingKill ?? controller.attach)?",
-      isPresented: Binding(get: { pendingKill != nil }, set: { if !$0 { pendingKill = nil } }),
-      titleVisibility: .visible
-    ) {
-      Button("Kill session", role: .destructive) {
-        guard let name = pendingKill else { return }
-        pendingKill = nil
-        Task { await controller.killSession(name) }
-      }
-      Button("Cancel", role: .cancel) { pendingKill = nil }
-    } message: {
-      Text("Everything running in this session stops.")
-    }
+    .destructiveConfirmation(
+      $pendingKill,
+      title: { "Kill \($0)?" },
+      actionLabel: "Kill session",
+      message: "Everything running in this session stops."
+    ) { name in Task { await controller.killSession(name) } }
   }
 
   private var terminalStack: some View {
@@ -285,7 +273,6 @@ public struct SSHTerminalView: View {
     .background(TetherColors.background.ignoresSafeArea())
     .accessibilityIdentifier("sshSessionDrawer")
     .accessibilityAction(.escape) { setDrawer(open: false) }
-    .task { await controller.refreshSessions() }
   }
 
   private func sessionRow(_ session: ZmxSession) -> some View {
@@ -378,43 +365,9 @@ public struct SSHTerminalView: View {
     .padding(.top, 4)
   }
 
-  /// A clip arrives as a file so its size can be checked before the phone holds
-  /// it in memory for `scp`.
   private func send(_ item: PhotosPickerItem) async {
     let isVideo = MediaTransfer.isVideo(contentTypes: item.supportedContentTypes)
-    let name = MediaTransfer.filename(
-      preferredExtension: item.supportedContentTypes.first?.preferredFilenameExtension,
-      isVideo: isVideo,
-      timestamp: Int(Date().timeIntervalSince1970))
-
-    let data: Data
-    if isVideo {
-      guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else {
-        controller.reportTransferFailure("Couldn't read that video from the library.")
-        return
-      }
-      defer { try? FileManager.default.removeItem(at: movie.url) }
-      let size = (try? movie.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-      if let reason = MediaTransfer.rejectionReason(byteCount: size) {
-        controller.reportTransferFailure(reason)
-        return
-      }
-      guard let bytes = try? Data(contentsOf: movie.url) else {
-        controller.reportTransferFailure("Couldn't read that video from the library.")
-        return
-      }
-      data = bytes
-    } else {
-      guard let bytes = try? await item.loadTransferable(type: Data.self) else {
-        controller.reportTransferFailure("Couldn't read that photo from the library.")
-        return
-      }
-      data = bytes
-    }
-
-    let remote = await controller.sendFile(data: data, filename: name)
-    // Drop the uploaded path at the shell prompt so it can be used directly.
-    if let remote { controller.sendInput(shellQuote(remote)) }
+    await controller.sendPickedMedia(item, isVideo: isVideo)
   }
 
   private func startNewSession() {
@@ -451,14 +404,9 @@ public struct SSHTerminalView: View {
   }
 
   private var statusLabel: String {
-    switch controller.status {
-    case .connecting: "connecting"
-    case .connected: "live"
-    // A dropped session on a dead path is waiting for the network, not for the
-    // host — saying "reconnecting" there would be a lie the user can't act on.
-    case .disconnected: (controller.reachability?.isUsable ?? true) ? "reconnecting" : "no network"
-    case .failed: "error"
-    }
+    SSHTerminalController.connectionCopy(
+      status: controller.status, reachability: controller.reachability
+    )?.shortLabel ?? "live"
   }
 
   /// The drag lives in UIKit — see `DrawerGestureHost` for why. This view takes
@@ -473,10 +421,12 @@ public struct SSHTerminalView: View {
       onEnded: { translation, velocity in
         let open = DrawerDragDecision.settlesOpen(
           isOpen: drawerOpen, translationX: translation, velocityX: velocity, width: panelWidth)
+        let wasOpen = drawerOpen
         withAnimation(TetherMotion.drawerSettle(reduceMotion: reduceMotion)) {
           dragTranslation = nil
           drawerOpen = open
         }
+        if open, !wasOpen { Task { await controller.refreshSessions() } }
       },
       onCancelled: {
         withAnimation(TetherMotion.drawerSettle(reduceMotion: reduceMotion)) { dragTranslation = nil }
@@ -500,39 +450,12 @@ public struct SSHTerminalView: View {
       dragTranslation = nil
       drawerOpen = open
     }
+    if open { Task { await controller.refreshSessions() } }
   }
 
   private func copySelection() {
     guard let text = selectionText, !text.isEmpty else { return }
-    UIPasteboard.general.string = text
-    acknowledgeCopy()
-  }
-
-  private func acknowledgeCopy() {
-    copyFeedback += 1
-    showCopyConfirmation = true
-    // The pill is gone in about a second and leaves nothing behind, so it is
-    // the one outcome VoiceOver has to be told about directly.
-    UIAccessibility.post(notification: .announcement, argument: "Copied")
-    Task {
-      try? await Task.sleep(for: .seconds(1.2))
-      guard !Task.isCancelled else { return }
-      showCopyConfirmation = false
-    }
-  }
-
-  @ViewBuilder
-  private var copyConfirmation: some View {
-    if showCopyConfirmation {
-      Label("Copied", systemImage: "checkmark.circle.fill")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(TetherColors.textPrimary)
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(TetherColors.surface.opacity(0.96), in: Capsule())
-        .overlay(Capsule().strokeBorder(TetherColors.accent.opacity(0.5)))
-        .padding(.bottom, 24)
-        .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
-    }
+    acknowledgeCopy(text, into: $showCopyConfirmation)
   }
 
   @ViewBuilder
@@ -572,17 +495,18 @@ public struct SSHTerminalView: View {
       status: controller.status, reachability: controller.reachability
     ) {
       VStack(spacing: 12) {
-        if copy.showsRetry {
-          Image(systemName: copy.icon).font(.largeTitle).foregroundStyle(TetherColors.danger)
-        } else if controller.reachability?.isUsable ?? true {
+        switch copy.indicator {
+        case .spinner:
           ProgressView().tint(TetherColors.accent)
-        } else {
-          Image(systemName: copy.icon).font(.largeTitle).foregroundStyle(TetherColors.warning)
+        case let .warning(symbol):
+          Image(systemName: symbol).font(.largeTitle).foregroundStyle(TetherColors.warning)
+        case let .error(symbol):
+          Image(systemName: symbol).font(.largeTitle).foregroundStyle(TetherColors.danger)
         }
         Text(copy.message).font(.footnote.monospaced())
           .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
-        if copy.showsRetry {
-          Button("Retry") { Task { await controller.connect() } }
+        if copy.indicator.offersRetry {
+          Button("Retry") { Task { await controller.connect(trigger: .manual) } }
             .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
             .padding(.horizontal, 20).padding(.vertical, 10)
             .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))

@@ -1,5 +1,19 @@
 import Foundation
 import TetherFFIBindings
+#if canImport(UIKit)
+import SwiftUI
+import PhotosUI
+#endif
+
+public struct PullRequestDetail: Equatable, Sendable {
+  public let checks: [GitCheck]
+  public let body: String
+  public let gate: GitMergeGate
+  public let methods: [GitMergeMethod]
+  public let fetchedAt: Date
+
+  public static let empty = PullRequestDetail(checks: [], body: "", gate: .computing, methods: [], fetchedAt: .distantPast)
+}
 
 /// Drives one SSH-backed terminal: connect via `SSHConnector`, pump the PTY
 /// through a `TerminalPipeline` into the shared renderer, and attach to a zmx
@@ -7,6 +21,13 @@ import TetherFFIBindings
 @MainActor
 @Observable
 public final class SSHTerminalController {
+  public enum GitWorkspacePayload: Sendable, Equatable {
+    case all
+    case changes
+    case commits
+    case pullRequests
+  }
+
   public enum Status: Equatable {
     case connecting
     case connected
@@ -21,9 +42,28 @@ public final class SSHTerminalController {
   /// What the terminal overlay says while there is no live session. Text plus
   /// an icon — connection state is never carried by colour alone.
   public struct ConnectionCopy: Equatable {
+    /// A spinner means "wait"; a symbol means "look". Retry is offered for an
+    /// error and nothing else, so the affordance cannot disagree with the art.
+    public enum Indicator: Equatable {
+      case spinner
+      case warning(symbol: String)
+      case error(symbol: String)
+
+      public var offersRetry: Bool { if case .error = self { return true } else { return false } }
+    }
+
     public var message: String
-    public var icon: String
-    public var showsRetry: Bool
+    public var indicator: Indicator
+    /// The header lamp's one word for the same state.
+    public var shortLabel: String
+  }
+
+  /// Why a dial is being asked for. Everything automatic passes through the
+  /// recovery gate; a person tapping Retry is answering it, so it does not.
+  public enum ConnectTrigger: Equatable {
+    case initial, foreground, networkPath, manual
+
+    var bypassesRecoveryGate: Bool { self == .manual || self == .initial }
   }
 
   public enum TransferState: Equatable {
@@ -48,15 +88,15 @@ public final class SSHTerminalController {
   /// empty-state prompt until the user creates one.
   public private(set) var hasSession = true
   public private(set) var gitLines: [GitDiffLine] = []
+  public private(set) var gitFiles: [DiffFile] = []
   public private(set) var gitBranch = ""
   public private(set) var gitCommits: [GitCommit] = []
   public private(set) var gitPullRequests: [GitPullRequest] = []
   /// Why the list is empty, when the reason is not "none open".
   public private(set) var gitPullRequestNotice: String?
-  public private(set) var gitChecks: [GitCheck] = []
-  public private(set) var gitChecksUpdatedAt: Date?
-  public private(set) var gitChecksLoading = false
-  public private(set) var gitPullRequestBody = ""
+  /// False until a load that actually fetched pull requests completes, so an
+  /// empty list before the first fetch reads as loading, not "none open".
+  public private(set) var gitPullRequestsLoaded = false
   public private(set) var gitUpdatedAt: Date?
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
@@ -111,7 +151,11 @@ public final class SSHTerminalController {
     }
   }
 
-  public func connect() async {
+  public func connect(trigger: ConnectTrigger = .initial) async {
+    if !trigger.bypassesRecoveryGate,
+      !Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) {
+      return
+    }
     // Serialize: the initial .task connect and a scenePhase .active reconnect can
     // both fire before the first is `.connected`, otherwise double-attaching.
     if connectInFlight { return }
@@ -165,8 +209,7 @@ public final class SSHTerminalController {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
-    // Its own dial: this runs before the terminal's handshake.
-    guard let out = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") else { return }
+    guard let out = try? await control.exec("\(Self.zmx) ls") else { return }
     let existing = ZmxSession.parse(out)
     // No sessions at all → don't create "default"; land on the empty state.
     if existing.isEmpty { pendingNoSession = true; return }
@@ -212,12 +255,11 @@ public final class SSHTerminalController {
     pendingNoSession = false
     hasSession = true
     let connected = { if case .connected = status { return true } else { return false } }()
-    let strategy = ZmxSwitch.strategy(connected: connected, attached: wasAttached)
-    guard strategy != .redial else {
+    guard case let .type(typing) = ZmxSwitch.strategy(connected: connected, attached: wasAttached) else {
       await connect()
       return
     }
-    for (index, write) in ZmxSwitch.writes(strategy: strategy, zmx: Self.zmx, name: name).enumerated() {
+    for (index, write) in ZmxSwitch.writes(typing: typing, zmx: Self.zmx, name: name).enumerated() {
       // Separate writes: the detach key's own read must not carry the command.
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
       pipeline.outbound.yield(.input(write, key: sessionKey))
@@ -246,15 +288,25 @@ public final class SSHTerminalController {
   /// reports the login dir, so read the shell pid's `/proc/<pid>/cwd`; falls
   /// back to the reported dir when `/proc` is unavailable.
   private func currentCwd() async -> String? {
-    // Always refresh: a stale pid (after a redial) makes the /proc read fail and
-    // fall back to the login dir.
-    await refreshSessions()
-    guard let session = sessions.first(where: { $0.name == attach }) else { return nil }
+    var session = sessions.first(where: { $0.name == attach })
+    if session == nil {
+      await refreshSessions()
+      session = sessions.first(where: { $0.name == attach })
+    }
+    guard let session else { return nil }
     if let live = try? await control.exec("readlink /proc/\(session.pid)/cwd 2>/dev/null") {
       let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmed.hasPrefix("/") { return trimmed }
     }
-    return session.displayCwd.hasPrefix("/") ? session.displayCwd : nil
+    await refreshSessions()
+    guard let refreshed = sessions.first(where: { $0.name == attach }) else {
+      return session.displayCwd.hasPrefix("/") ? session.displayCwd : nil
+    }
+    if let live = try? await control.exec("readlink /proc/\(refreshed.pid)/cwd 2>/dev/null") {
+      let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.hasPrefix("/") { return trimmed }
+    }
+    return refreshed.displayCwd.hasPrefix("/") ? refreshed.displayCwd : nil
   }
 
   /// SCP-sends to the current session's live cwd. Returns the remote path.
@@ -266,11 +318,7 @@ public final class SSHTerminalController {
     do {
       // Its own connection: commands are serialized on the control one, and a
       // large upload would hold the session list and the git screen behind it.
-      do {
-        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
-      } catch where Self.shouldRetryTransfer(after: error) {
-        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
-      }
+      try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
       transfer = .sent(remote)
       return remote
     } catch {
@@ -281,24 +329,28 @@ public final class SSHTerminalController {
 
   public func clearTransfer() { transfer = .idle }
 
-  /// A transfer that failed before any SSH work reuses the upload banner.
-  public func reportTransferFailure(_ message: String) { transfer = .failed(message) }
-
-  /// A changed host key and a missing credential are answers, not noise:
-  /// repeating them only delays telling the user.
-  nonisolated static func shouldRetryTransfer(after error: Error) -> Bool {
-    switch error as? SSHConnectError {
-    case .hostKeyMismatch, .missingCredential: return false
-    default: return true
+  #if canImport(UIKit)
+  public func sendPickedMedia(_ item: PhotosPickerItem, isVideo: Bool) async {
+    switch await MediaTransfer.load(item, isVideo: isVideo) {
+    case let .ready(name, data):
+      let remote = await sendFile(data: data, filename: name)
+      if let remote { sendInput(shellQuote(remote)) }
+    case let .failed(message):
+      reportTransferFailure(message)
     }
   }
+  #endif
 
-  public func loadGitWorkspace() async {
+  /// A transfer that failed before any SSH work reuses the upload banner.
+  private func reportTransferFailure(_ message: String) { transfer = .failed(message) }
+
+  public func loadGitWorkspace(payload: GitWorkspacePayload = .all) async {
     gitLoading = true
     defer { gitLoading = false }
     gitError = nil
     guard let cwd = await currentCwd() else {
       gitLines = []
+      gitFiles = []
       gitError = "No working directory for this session."
       return
     }
@@ -307,23 +359,48 @@ public final class SSHTerminalController {
     let sentinel = "__TETHER_NOTREPO__"
     let q = shellQuote(cwd)
     let repositoryGuard = "git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1"
-    let diffCommand = "if \(repositoryGuard); then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
-    let branchCommand = "if \(repositoryGuard); then git -C \(q) branch --show-current; fi"
-    let commitsCommand = "if \(repositoryGuard); then git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'; fi"
-    // Keep gh's stderr: swallowing it into an empty list made the screen blame
-    // a missing CLI for a repository with nothing open.
-    let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
-    let pullRequestsCommand = "if \(repositoryGuard); then "
-      + "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); "
-      + "else printf '%s' \(ghMissing); fi; else printf '[]'; fi"
+    let diffCommand: String
+    let commitsCommand: String
+    let pullRequestsCommand: String
+    switch payload {
+    case .all, .pullRequests:
+      diffCommand = payload == .all ? "git -C \(q) --no-pager diff 2>&1" : "printf ''"
+      commitsCommand = payload == .all ? "git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'" : "printf ''"
+      // Keep gh's stderr: swallowing it into an empty list made the screen blame
+      // a missing CLI for a repository with nothing open.
+      let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
+      pullRequestsCommand = "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); else printf '%s' \(ghMissing); fi"
+    case .changes:
+      diffCommand = "git -C \(q) --no-pager diff 2>&1"
+      commitsCommand = "printf ''"
+      pullRequestsCommand = "printf ''"
+    case .commits:
+      diffCommand = "printf ''"
+      commitsCommand = "git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'"
+      pullRequestsCommand = "printf ''"
+    }
+    let command = "if \(repositoryGuard); then "
+      + "\(diffCommand); printf '\\035'; "
+      + "git -C \(q) branch --show-current; printf '\\035'; "
+      + "\(commitsCommand); printf '\\035'; "
+      + "\(pullRequestsCommand); "
+      + "else printf '%s\\035\\035\\035[]' \(shellQuote(sentinel)); fi"
     do {
-      async let raw = control.exec(diffCommand)
-      async let branch = control.exec(branchCommand)
-      async let commits = control.exec(commitsCommand)
-      async let pullRequests = control.exec(pullRequestsCommand)
-      let (diff, branchOutput, commitsOutput, pullRequestsOutput) = try await (raw, branch, commits, pullRequests)
+      let output = try await control.exec(command)
+      guard let sections = GitRepositoryModel.workspaceSections(output) else {
+        gitLines = []
+        gitFiles = []
+        gitBranch = ""
+        gitCommits = []
+        gitPullRequests = []
+        gitPullRequestNotice = nil
+        gitError = "Could not read the git workspace."
+        return
+      }
+      let diff = sections.diff
       if diff.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
         gitLines = []
+        gitFiles = []
         gitBranch = ""
         gitCommits = []
         gitPullRequests = []
@@ -332,55 +409,90 @@ public final class SSHTerminalController {
         return
       }
       gitUpdatedAt = Date()
-      gitLines = GitDiffModel.classify(diff)
-      gitBranch = GitRepositoryModel.branch(from: branchOutput)
-      gitCommits = GitRepositoryModel.commits(from: commitsOutput)
-      switch GitRepositoryModel.pullRequestResult(from: pullRequestsOutput) {
-      case let .list(pulls):
-        gitPullRequests = pulls
-        gitPullRequestNotice = nil
-      case .toolMissing:
-        gitPullRequests = []
-        gitPullRequestNotice = "GitHub CLI isn't installed on this host."
-      case let .failed(reason):
-        gitPullRequests = []
-        gitPullRequestNotice = reason
+      gitBranch = GitRepositoryModel.branch(from: sections.branch)
+      switch payload {
+      case .all:
+        let lines = GitDiffModel.classify(diff)
+        gitLines = lines
+        gitFiles = DiffFile.group(lines)
+        gitCommits = GitRepositoryModel.commits(from: sections.commits)
+        switch GitRepositoryModel.pullRequestResult(from: sections.pullRequests) {
+        case let .list(pulls):
+          gitPullRequests = pulls
+          gitPullRequestNotice = nil
+        case .toolMissing:
+          gitPullRequests = []
+          gitPullRequestNotice = "GitHub CLI isn't installed on this host."
+        case let .failed(reason):
+          gitPullRequests = []
+          gitPullRequestNotice = reason
+        }
+        gitPullRequestsLoaded = true
+      case .changes:
+        let lines = GitDiffModel.classify(diff)
+        gitLines = lines
+        gitFiles = DiffFile.group(lines)
+      case .commits:
+        gitCommits = GitRepositoryModel.commits(from: sections.commits)
+      case .pullRequests:
+        switch GitRepositoryModel.pullRequestResult(from: sections.pullRequests) {
+        case let .list(pulls):
+          gitPullRequests = pulls
+          gitPullRequestNotice = nil
+        case .toolMissing:
+          gitPullRequests = []
+          gitPullRequestNotice = "GitHub CLI isn't installed on this host."
+        case let .failed(reason):
+          gitPullRequests = []
+          gitPullRequestNotice = reason
+        }
+        gitPullRequestsLoaded = true
       }
     } catch {
       gitLines = []
+      gitFiles = []
       gitError = Self.describe(error)
     }
   }
 
-  public func loadGitDiff() async { await loadGitWorkspace() }
-
   /// Checks and description for one pull request, in a single round trip.
-  public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async {
-    gitChecksLoading = true
-    defer { gitChecksLoading = false }
-    guard let cwd = await currentCwd() else { return }
-    let command = "cd \(shellQuote(cwd)) && gh pr view \(pullRequest.number) --json statusCheckRollup,body 2>/dev/null"
-    guard let raw = try? await control.exec(command),
-      let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
-    else {
-      gitChecksUpdatedAt = Date()
-      return
-    }
+  public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async -> PullRequestDetail {
+    guard let cwd = await currentCwd() else { return .empty }
+    let prView = "gh pr view \(pullRequest.number) --json statusCheckRollup,body,mergeable,mergeStateStatus,isDraft 2>/dev/null"
+    let repoView = "gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed 2>/dev/null"
+    let command = "cd \(shellQuote(cwd)) && { \(prView); printf '\\036'; \(repoView); }"
+    guard let raw = try? await control.exec(command) else { return .empty }
+    let payloads = raw.split(separator: "\u{1E}", maxSplits: 1, omittingEmptySubsequences: false)
+    guard let prPayload = payloads.first,
+      let object = try? JSONSerialization.jsonObject(with: Data(prPayload.utf8)) as? [String: Any]
+    else { return .empty }
+    let checks: [GitCheck]
     if let rollup = object["statusCheckRollup"],
       let encoded = try? JSONSerialization.data(withJSONObject: rollup) {
-      gitChecks = GitRepositoryModel.checks(from: String(decoding: encoded, as: UTF8.self))
+      checks = GitRepositoryModel.checks(from: String(decoding: encoded, as: UTF8.self))
+    } else {
+      checks = []
     }
-    gitPullRequestBody = (object["body"] as? String) ?? ""
-    gitChecksUpdatedAt = Date()
+    let methods = payloads.count == 2
+      ? GitRepositoryModel.allowedMergeMethods(from: String(payloads[1]))
+      : []
+    return PullRequestDetail(
+      checks: checks,
+      body: (object["body"] as? String) ?? "",
+      gate: GitRepositoryModel.mergeGate(from: String(prPayload)),
+      methods: methods,
+      fetchedAt: Date())
   }
 
   /// One commit's patch, kept apart from `gitLines` so opening a commit does
   /// not replace the working-tree diff behind it.
-  public func commitDiff(_ commit: GitCommit) async -> [GitDiffLine] {
-    guard let cwd = await currentCwd() else { return [] }
-    let command = "git -C \(shellQuote(cwd)) --no-pager show \(shellQuote(commit.id)) --patch --stat --format=%b 2>&1"
-    guard let raw = try? await control.exec(command) else { return [] }
-    return GitDiffModel.classify(raw)
+  public func commitDiff(_ commit: GitCommit) async -> (body: String, lines: [GitDiffLine]) {
+    guard let cwd = await currentCwd() else { return ("", []) }
+    // %x1e ends the message: git's own `---` separator reads as a removed line.
+    let command = "git -C \(shellQuote(cwd)) --no-pager show \(shellQuote(commit.id)) --patch --format=%b%x1e 2>&1"
+    guard let raw = try? await control.exec(command) else { return ("", []) }
+    let shown = GitDiffModel.commitShow(raw)
+    return (shown.body, GitDiffModel.classify(shown.patch))
   }
 
   /// The pull request's own patch, returned rather than stored: the working
@@ -413,6 +525,13 @@ public final class SSHTerminalController {
     }
   }
 
+  public func mergePullRequest(_ pullRequest: GitPullRequest, method: GitMergeMethod) async {
+    await runGitAction("Merging #\(pullRequest.number)…") { cwd in
+      "cd \(shellQuote(cwd)) && gh pr merge \(pullRequest.number) \(method.flag)"
+    }
+    await loadGitWorkspace()
+  }
+
   private func runGitAction(_ message: String, command: (String) -> String) async {
     gitActionMessage = message
     guard let cwd = await currentCwd() else { gitActionMessage = "No working directory for this session."; return }
@@ -426,8 +545,7 @@ public final class SSHTerminalController {
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
   /// Shares the gate with the path observer so the two triggers can't race.
   public func reconnectIfNeeded() async {
-    guard Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) else { return }
-    await connect()
+    await connect(trigger: .foreground)
   }
 
   /// Watch the network path for this screen. Redials only when a path *becomes*
@@ -441,16 +559,24 @@ public final class SSHTerminalController {
   private func pathChanged(_ value: NetworkReachability) {
     let previous = reachability
     reachability = value
-    guard Self.shouldRedial(previous: previous, next: value, status: status, dialing: connectInFlight) else { return }
-    Task { await connect() }
+    guard Self.pathBecameUsable(previous: previous, next: value) else { return }
+    Task { await connect(trigger: .networkPath) }
   }
 
   /// The one network-driven recovery decision. Only an edge into a usable path
   /// counts: the monitor re-reports the same path on every interface change.
+  /// A path that just became usable. The recovery gate inside `connect` cannot
+  /// see this edge, because it is only handed the current reading.
+  nonisolated static func pathBecameUsable(
+    previous: NetworkReachability?, next: NetworkReachability
+  ) -> Bool {
+    next.isUsable && previous?.isUsable != true
+  }
+
   nonisolated static func shouldRedial(
     previous: NetworkReachability?, next: NetworkReachability, status: Status, dialing: Bool
   ) -> Bool {
-    guard next.isUsable, previous?.isUsable != true else { return false }
+    guard pathBecameUsable(previous: previous, next: next) else { return false }
     return shouldRedialOnForeground(status: status, dialing: dialing, reachability: next)
   }
 
@@ -477,17 +603,26 @@ public final class SSHTerminalController {
     case .connected:
       return nil
     case .connecting:
-      return ConnectionCopy(message: "Connecting…", icon: "antenna.radiowaves.left.and.right", showsRetry: false)
+      return ConnectionCopy(message: "Connecting…", indicator: .spinner, shortLabel: "connecting")
     case let .failed(message):
-      return ConnectionCopy(message: message, icon: "exclamationmark.triangle", showsRetry: true)
+      return ConnectionCopy(
+        message: message, indicator: .error(symbol: "exclamationmark.triangle"), shortLabel: "error")
     case .disconnected:
+      // A dropped session on a dead path is waiting for the network, not for
+      // the host — saying "reconnecting" there would be a lie the user cannot
+      // act on.
       switch reachability?.availability {
       case .offline:
-        return ConnectionCopy(message: "Waiting for a network connection", icon: "wifi.slash", showsRetry: false)
+        return ConnectionCopy(
+          message: "Waiting for a network connection",
+          indicator: .warning(symbol: "wifi.slash"), shortLabel: "no network")
       case .requiresConnection:
-        return ConnectionCopy(message: "Network needs a connection", icon: "exclamationmark.triangle", showsRetry: false)
+        return ConnectionCopy(
+          message: "Network needs a connection",
+          indicator: .warning(symbol: "exclamationmark.triangle"), shortLabel: "no network")
       case .usable, nil:
-        return ConnectionCopy(message: "Connection lost — reconnecting…", icon: "arrow.clockwise", showsRetry: false)
+        return ConnectionCopy(
+          message: "Connection lost — reconnecting…", indicator: .spinner, shortLabel: "reconnecting")
       }
     }
   }
@@ -546,8 +681,7 @@ public final class SSHTerminalController {
     status = next
     // A drop caused by the network dying must not spin on a dead path: the
     // observer redials the moment a usable one comes back.
-    guard Self.shouldRedialOnForeground(status: next, dialing: connectInFlight, reachability: reachability) else { return }
-    Task { await self.connect() }
+    Task { await self.connect(trigger: .foreground) }
   }
 
   /// Pure transition for a mid-session transport drop. `nil` leaves the status

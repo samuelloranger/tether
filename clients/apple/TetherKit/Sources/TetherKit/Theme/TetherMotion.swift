@@ -23,11 +23,6 @@ public enum TetherMotion {
   /// Reduce Motion still gets a crossfade — Apple's own substitution for
   /// movement — just a short one, with nothing that travels.
   public static let crossfade: Double = 0.12
-  /// A narrow, intentional affordance that leaves terminal gestures untouched.
-  public static let drawerEdgeWidth: CGFloat = 24
-  /// Short drags are touch noise, not a request to open terminal chrome.
-  public static let drawerActivationDistance: CGFloat = 44
-
   /// Confident deceleration. Not a spring: springs overshoot, and an overshoot
   /// on a status colour reads as a second state change.
   public static func decelerate(_ duration: Double) -> Animation {

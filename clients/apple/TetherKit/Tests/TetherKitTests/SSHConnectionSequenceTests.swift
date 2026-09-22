@@ -2,48 +2,6 @@ import Foundation
 import XCTest
 @testable import TetherKit
 
-private struct NullByteStream: TerminalByteStream {
-  func read() async throws -> Data? { nil }
-  func write(_ bytes: Data) async throws {}
-  func close() async {}
-}
-
-private final class MemoryHostKeyStore: HostKeyStore {
-  var pins: [String: String] = [:]
-  func pinnedFingerprint(host: String, port: Int) -> String? { pins["\(host):\(port)"] }
-  func pin(_ fingerprint: String, host: String, port: Int) { pins["\(host):\(port)"] = fingerprint }
-}
-
-/// Records the call sequence and lets each step be scripted.
-private final class FakeOps: SSHConnectionOps {
-  enum Step: Equatable { case connect, fingerprint, auth(SSHCredential), openPTY, teardown }
-  var calls: [Step] = []
-  var fingerprint = "FP:NEW"
-  var accepts: (SSHCredential) -> Bool = { _ in true }
-  var connectError: Error?
-  var openError: Error?
-
-  func connectAndHandshake() throws {
-    calls.append(.connect)
-    if let connectError { throw connectError }
-  }
-  func hostKeyFingerprint() throws -> String {
-    calls.append(.fingerprint)
-    return fingerprint
-  }
-  func authenticate(_ credential: SSHCredential) throws -> Bool {
-    calls.append(.auth(credential))
-    return accepts(credential)
-  }
-  func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream {
-    calls.append(.openPTY)
-    if let openError { throw openError }
-    return NullByteStream()
-  }
-  func exec(_ command: String) throws -> String { "" }
-  func teardown() { calls.append(.teardown) }
-}
-
 final class SSHConnectionSequenceTests: XCTestCase {
   private let pw = SSHCredential.password("pw")
   private let key = SSHCredential.privateKey(pem: "A", passphrase: nil)
@@ -54,7 +12,7 @@ final class SSHConnectionSequenceTests: XCTestCase {
 
   func test_happy_path_pins_new_key_authenticates_and_opens_the_pty() throws {
     let ops = FakeOps()
-    let store = MemoryHostKeyStore()
+    let store = InMemoryHostKeyStore()
     _ = try SSHConnectionSequence.run(config: config([pw]), ops: ops, store: store)
     XCTAssertEqual(ops.calls, [.connect, .fingerprint, .auth(pw), .openPTY])
     XCTAssertEqual(store.pinnedFingerprint(host: "h", port: 22), "FP:NEW")
@@ -63,7 +21,7 @@ final class SSHConnectionSequenceTests: XCTestCase {
   func test_host_key_mismatch_aborts_before_auth_and_tears_down() {
     let ops = FakeOps()
     ops.fingerprint = "FP:EVIL"
-    let store = MemoryHostKeyStore()
+    let store = InMemoryHostKeyStore()
     store.pin("FP:GOOD", host: "h", port: 22)
     XCTAssertThrowsError(try SSHConnectionSequence.run(config: config([pw]), ops: ops, store: store)) { error in
       XCTAssertEqual(error as? SSHConnectError, .hostKeyMismatch(expected: "FP:GOOD", got: "FP:EVIL"))
@@ -74,7 +32,7 @@ final class SSHConnectionSequenceTests: XCTestCase {
   func test_all_credentials_rejected_reports_auth_failure_and_tears_down() {
     let ops = FakeOps()
     ops.accepts = { _ in false }
-    XCTAssertThrowsError(try SSHConnectionSequence.run(config: config([key, pw]), ops: ops, store: MemoryHostKeyStore())) { error in
+    XCTAssertThrowsError(try SSHConnectionSequence.run(config: config([key, pw]), ops: ops, store: InMemoryHostKeyStore())) { error in
       XCTAssertEqual(error as? SSHConnectError, .auth(.allFailed(detail: nil)))
     }
     XCTAssertEqual(ops.calls, [.connect, .fingerprint, .auth(key), .auth(pw), .teardown])
@@ -84,24 +42,20 @@ final class SSHConnectionSequenceTests: XCTestCase {
     struct Boom: Error {}
     let ops = FakeOps()
     ops.connectError = Boom()
-    XCTAssertThrowsError(try SSHConnectionSequence.run(config: config([pw]), ops: ops, store: MemoryHostKeyStore())) { error in
+    XCTAssertThrowsError(try SSHConnectionSequence.run(config: config([pw]), ops: ops, store: InMemoryHostKeyStore())) { error in
       guard case .transport = (error as? SSHConnectError) else { return XCTFail("expected .transport, got \(error)") }
     }
     XCTAssertEqual(ops.calls, [.connect, .teardown])
   }
 
-  func test_a_transfer_retries_a_transport_failure_once() {
-    XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.transport("socket closed")))
-    XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.auth(.allFailed(detail: "Unable to sign"))))
+  func test_an_answer_the_host_already_gave_is_not_asked_twice() {
+    XCTAssertFalse(SSHConnectError.hostKeyMismatch(expected: "a", got: "b").isTransient)
+    XCTAssertFalse(SSHConnectError.auth(.allFailed(detail: nil)).isTransient)
+    XCTAssertFalse(SSHConnectError.missingCredential(name: "host").isTransient)
   }
 
-  func test_a_transfer_never_retries_a_changed_host_key() {
-    XCTAssertFalse(SSHTerminalController.shouldRetryTransfer(
-      after: SSHConnectError.hostKeyMismatch(expected: "aa", got: "bb")))
-  }
-
-  func test_a_transfer_does_not_retry_a_missing_credential() {
-    XCTAssertFalse(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.missingCredential(name: "homelab")))
+  func test_a_connection_that_went_away_is_worth_one_more_try() {
+    XCTAssertTrue(SSHConnectError.transport("socket closed").isTransient)
   }
 
   /// Two sessions signing at once intermittently fails with libssh2 -19, so
@@ -115,7 +69,15 @@ final class SSHConnectionSequenceTests: XCTestCase {
     let group = DispatchGroup()
     for _ in 0..<8 {
       DispatchQueue.global().async(group: group) {
-        let ops = SlowAuthOps(tracker: tracker)
+        let ops = FakeOps()
+        // The tracked window is the credential signing itself: that is the
+        // libssh2 race the lock exists for, and the only thing serialized.
+        ops.accepts = { _ in
+          tracker.enter()
+          Thread.sleep(forTimeInterval: 0.02)
+          tracker.leave()
+          return true
+        }
         try? SSHConnectionSequence.authenticate(config: config, ops: ops, store: store)
       }
     }
@@ -138,38 +100,28 @@ private final class ConcurrencyTracker: @unchecked Sendable {
   func leave() {
     lock.lock(); inFlight -= 1; completed += 1; lock.unlock()
   }
-}
 
-private final class SlowAuthOps: SSHConnectionOps, @unchecked Sendable {
-  private let tracker: ConcurrencyTracker
-  init(tracker: ConcurrencyTracker) { self.tracker = tracker }
-
-  func connectAndHandshake() throws { tracker.enter() }
-  func hostKeyFingerprint() throws -> String { "aa:bb" }
-
-  func authenticate(_ credential: SSHCredential) throws -> Bool {
-    // Wide enough that overlapping callers would be caught.
-    Thread.sleep(forTimeInterval: 0.02)
-    tracker.leave()
-    return true
-  }
-
-  func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream {
-    throw SSHConnectError.transport("not used")
-  }
-
-  func exec(_ command: String) throws -> String { "" }
-  func teardown() {}
-}
-
-private final class InMemoryHostKeyStore: HostKeyStore, @unchecked Sendable {
-  private let lock = NSLock()
-  private var pinned: [String: String] = [:]
-  func pinnedFingerprint(host: String, port: Int) -> String? {
-    lock.lock(); defer { lock.unlock() }
-    return pinned["\(host):\(port)"]
-  }
-  func pin(_ fingerprint: String, host: String, port: Int) {
-    lock.lock(); pinned["\(host):\(port)"] = fingerprint; lock.unlock()
+  func test_a_slow_handshake_does_not_block_a_dial_to_another_host() {
+    // The lock used to span connectAndHandshake and was process-wide, so one
+    // unreachable host stalled every other dial for its whole timeout.
+    let store = InMemoryHostKeyStore()
+    let slow = SSHConnectionSequence.self
+    let tracker = ConcurrencyTracker()
+    let group = DispatchGroup()
+    for index in 0..<2 {
+      let config = SSHConnectionConfig(
+        host: "host\(index).internal", port: 22, username: "sam", credentials: [.password("pw")])
+      DispatchQueue.global().async(group: group) {
+        let ops = FakeOps()
+        ops.onConnect = {
+          tracker.enter()
+          Thread.sleep(forTimeInterval: 0.05)
+          tracker.leave()
+        }
+        try? slow.authenticate(config: config, ops: ops, store: store)
+      }
+    }
+    XCTAssertEqual(group.wait(timeout: .now() + 10), .success)
+    XCTAssertEqual(tracker.peak, 2, "handshakes to different hosts should overlap")
   }
 }

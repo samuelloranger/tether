@@ -38,11 +38,7 @@ final class ControlConnection: @unchecked Sendable {
       do {
         return try run(command)
       } catch let error as SSHConnectError {
-        if case .hostKeyMismatch = error { throw error }
-        guard reused else { throw error }
-        return try run(command)
-      } catch {
-        guard reused else { throw error }
+        guard reused, error.isTransient else { throw error }
         return try run(command)
       }
     }
@@ -61,9 +57,12 @@ final class ControlConnection: @unchecked Sendable {
     let session = try openIfNeeded()
     do {
       return try session.exec(command)
-    } catch {
+    } catch let error as SSHConnectError {
       teardown()
       throw error
+    } catch {
+      teardown()
+      throw SSHConnectError.transport("\(error)")
     }
   }
 
