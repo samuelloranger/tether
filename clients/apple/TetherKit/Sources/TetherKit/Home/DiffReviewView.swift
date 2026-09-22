@@ -105,13 +105,7 @@ private struct DiffRowView: View {
     }
   }
 
-  private var tint: Color {
-    switch row.kind {
-    case .added: TetherColors.success.opacity(0.10)
-    case .removed: TetherColors.danger.opacity(0.10)
-    default: .clear
-    }
-  }
+  private var tint: Color { edge.opacity(0.10) }
 }
 
 struct MarkdownBodyView: View {

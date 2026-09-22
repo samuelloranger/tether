@@ -109,7 +109,6 @@ struct DrawerGestureHost: UIViewRepresentable {
       guard DrawerDragDecision.panBelongsToDrawer(
         velocity: CGSize(width: velocity.x, height: velocity.y)
       ) else { return false }
-      // Anywhere on screen: while open, the whole screen belongs to the drawer.
       return true
     }
 
