@@ -166,7 +166,6 @@ private struct PullRequestDetailView: View {
   @State private var loadingDiff = false
   @State private var showDiff = false
 
-  private static let pollSeconds: UInt64 = 10
 
   var body: some View {
     ScrollView {
@@ -187,11 +186,17 @@ private struct PullRequestDetailView: View {
     .task {
       refreshDescription(detail.body)
       await refreshDetail()
-      // Keep refreshing only while something is still running.
-      while !Task.isCancelled,
-        GitRepositoryModel.isRunning(detail.checks) || detail.gate == .computing {
-        try? await Task.sleep(for: .seconds(Self.pollSeconds))
-        guard !Task.isCancelled else { return }
+      // Wait on the host, not on a phone timer: gh's own watch blocks until the
+      // run settles, then we refetch once. Re-arm only if it is still running,
+      // and stop if the watch dial failed rather than spinning on it.
+      while !Task.isCancelled, GitRepositoryModel.isRunning(detail.checks) {
+        let start = Date()
+        let watched = await controller.awaitChecksSettled(pullRequest)
+        guard !Task.isCancelled, watched else { break }
+        // A watch that returns almost instantly (no checks yet, or gh and the
+        // rollup disagreeing) must not turn the re-arm into a hot dial loop.
+        if Date().timeIntervalSince(start) < 2 { try? await Task.sleep(for: .seconds(10)) }
+        guard !Task.isCancelled else { break }
         await refreshDetail()
       }
     }

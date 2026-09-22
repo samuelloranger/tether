@@ -458,6 +458,19 @@ public final class SSHTerminalController {
     }
   }
 
+  /// Blocks — on the host, not the phone — until this pull request's checks
+  /// finish, so the detail screen waits in one `await` instead of a timer that
+  /// wakes the radio every few seconds. `gh pr checks --watch` exits when the
+  /// run settles; its own dial keeps the minutes-long block off the serial
+  /// control connection. Returns false when the dial itself failed, so the
+  /// caller can stop rather than spin. Never throws on a failed check — the
+  /// exec reads to EOF and ignores gh's exit code.
+  public func awaitChecksSettled(_ pullRequest: GitPullRequest) async -> Bool {
+    guard let cwd = await currentCwd() else { return false }
+    let command = "cd \(shellQuote(cwd)) && gh pr checks \(pullRequest.number) --watch --interval 15 2>&1"
+    return (try? await SSHConnector.exec(config: config, store: hostKeyStore, command: command)) != nil
+  }
+
   /// Checks and description for one pull request, in a single round trip.
   public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async -> PullRequestDetail {
     guard let cwd = await currentCwd() else { return .empty }
