@@ -39,6 +39,28 @@ final class ConnectionRecoveryTests: XCTestCase {
     XCTAssertFalse(SSHTerminalController.shouldRedial(previous: offline, next: usable, status: .disconnected, dialing: true))
   }
 
+  // The foreground redial is the safety net for a socket iOS killed while
+  // suspended. It shares the gate so it can't race a path-driven redial.
+  func test_foreground_redial_skips_a_live_session() {
+    XCTAssertFalse(SSHTerminalController.shouldRedialOnForeground(status: .connected, dialing: false, reachability: usable))
+  }
+
+  func test_foreground_redial_skips_an_in_flight_dial() {
+    XCTAssertFalse(SSHTerminalController.shouldRedialOnForeground(status: .disconnected, dialing: true, reachability: usable))
+  }
+
+  func test_foreground_redial_waits_while_offline() {
+    XCTAssertFalse(SSHTerminalController.shouldRedialOnForeground(status: .disconnected, dialing: false, reachability: offline))
+  }
+
+  func test_foreground_redial_runs_before_any_path_has_been_observed() {
+    XCTAssertTrue(SSHTerminalController.shouldRedialOnForeground(status: .disconnected, dialing: false, reachability: nil))
+  }
+
+  func test_foreground_redial_retries_a_failed_connection_on_a_usable_path() {
+    XCTAssertTrue(SSHTerminalController.shouldRedialOnForeground(status: .failed("timed out"), dialing: false, reachability: usable))
+  }
+
   // Copy must describe the real blocker. "Waiting for a network connection" on a
   // host-key mismatch would be a lie the user can't act on.
   func test_offline_copy_says_the_network_is_missing_not_the_host() {
