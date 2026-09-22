@@ -119,3 +119,74 @@ func eventually(timeout: TimeInterval = 2, _ condition: @escaping () -> Bool) as
   }
   return condition()
 }
+
+/// A terminal stream a test holds open or ends, recording whether it was closed.
+final class ScriptedByteStream: TerminalByteStream, @unchecked Sendable {
+  private let lock = NSLock()
+  private var isClosed = false
+  private var waiter: CheckedContinuation<Data?, Never>?
+
+  var closed: Bool { lock.lock(); defer { lock.unlock() }; return isClosed }
+
+  func read() async throws -> Data? {
+    await withCheckedContinuation { continuation in
+      lock.lock()
+      if isClosed { lock.unlock(); continuation.resume(returning: nil); return }
+      waiter = continuation
+      lock.unlock()
+    }
+  }
+
+  func write(_ bytes: Data) async throws {}
+
+  func close() async {
+    lock.lock()
+    isClosed = true
+    let pending = waiter
+    waiter = nil
+    lock.unlock()
+    pending?.resume(returning: nil)
+  }
+}
+
+/// Hands out scripted streams to `SSHTerminalController`'s dialer, optionally
+/// holding each dial until the test opens the gate.
+final class DialScript: @unchecked Sendable {
+  private let lock = NSLock()
+  private var streams: [ScriptedByteStream]
+  private var gateOpen: Bool
+  private var gateWaiters: [CheckedContinuation<Void, Never>] = []
+  private var dialCount = 0
+  private var entered = false
+
+  init(_ streams: [ScriptedByteStream], held: Bool = false) {
+    self.streams = streams
+    self.gateOpen = !held
+  }
+
+  var dials: Int { lock.lock(); defer { lock.unlock() }; return dialCount }
+  var hasEntered: Bool { lock.lock(); defer { lock.unlock() }; return entered }
+
+  func open() {
+    lock.lock()
+    gateOpen = true
+    let waiting = gateWaiters
+    gateWaiters = []
+    lock.unlock()
+    waiting.forEach { $0.resume() }
+  }
+
+  func dial(_ config: SSHConnectionConfig, _ store: HostKeyStore) async throws -> any TerminalByteStream {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      lock.lock()
+      entered = true
+      if gateOpen { lock.unlock(); continuation.resume(); return }
+      gateWaiters.append(continuation)
+      lock.unlock()
+    }
+    lock.lock()
+    defer { lock.unlock() }
+    dialCount += 1
+    return streams.isEmpty ? ScriptedByteStream() : streams.removeFirst()
+  }
+}
