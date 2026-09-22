@@ -635,11 +635,28 @@ public final class SSHTerminalController {
 
   public func stopNetworkWatch() { pathObserver.stop() }
 
-  private func pathChanged(_ value: NetworkReachability) {
+  func pathChanged(_ value: NetworkReachability) {
     let previous = reachability
     reachability = value
+    if status == .connected, Self.pathInvalidatesConnection(previous: previous, next: value) {
+      markDisconnectedAndReconnect()
+      return
+    }
     guard Self.pathBecameUsable(previous: previous, next: value) else { return }
     Task { await connect(trigger: .networkPath) }
+  }
+
+  /// The path under a live connection went away. Its socket is bound to an
+  /// address that no longer routes, and the kernel only says so after its
+  /// retransmit timeout; the monitor knows now. A new preferred interface with
+  /// the old one still up leaves the connection alone.
+  nonisolated static func pathInvalidatesConnection(
+    previous: NetworkReachability?, next: NetworkReachability
+  ) -> Bool {
+    guard let previous, previous.isUsable else { return false }
+    guard next.isUsable else { return true }
+    guard let used = previous.primary else { return false }
+    return !next.interfaces.contains(used)
   }
 
   /// The one network-driven recovery decision. Only an edge into a usable path

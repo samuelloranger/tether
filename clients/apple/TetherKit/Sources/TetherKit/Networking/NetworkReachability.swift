@@ -14,12 +14,16 @@ public struct NetworkReachability: Equatable, Sendable {
   }
 
   public var availability: Availability
+  /// Usable interfaces, most preferred first; empty unless usable.
+  public var interfaces: [NWInterface.InterfaceType]
 
-  public init(availability: Availability) {
+  public init(availability: Availability, interfaces: [NWInterface.InterfaceType] = []) {
     self.availability = availability
+    self.interfaces = interfaces
   }
 
   public var isUsable: Bool { availability == .usable }
+  public var primary: NWInterface.InterfaceType? { interfaces.first }
 
   public static func classify(
     status: NWPath.Status,
@@ -33,14 +37,10 @@ public struct NetworkReachability: Equatable, Sendable {
     case .unsatisfied: availability = .offline
     @unknown default: availability = .offline
     }
-    return NetworkReachability(availability: availability)
+    return NetworkReachability(availability: availability, interfaces: availability == .usable ? interfaces : [])
   }
 
   public static func classify(_ path: NWPath) -> NetworkReachability {
-    let known: [NWInterface.InterfaceType] = [.wifi, .cellular, .wiredEthernet, .loopback, .other]
-    return classify(
-      status: path.status,
-      interfaces: known.filter(path.usesInterfaceType)
-    )
+    classify(status: path.status, interfaces: path.availableInterfaces.map(\.type))
   }
 }
