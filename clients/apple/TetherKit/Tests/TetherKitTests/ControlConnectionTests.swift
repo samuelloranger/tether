@@ -12,8 +12,8 @@ final class ControlConnectionTests: XCTestCase {
   }
 
   func test_the_first_command_authenticates_and_runs() async throws {
-    let ops = FakeControlOps()
-    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { ops }
+    let ops = FakeOps()
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { ops }
 
     let output = try await control.exec("zmx ls")
 
@@ -23,8 +23,8 @@ final class ControlConnectionTests: XCTestCase {
   }
 
   func test_later_commands_reuse_the_open_session() async throws {
-    let ops = FakeControlOps()
-    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { ops }
+    let ops = FakeOps()
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { ops }
 
     _ = try await control.exec("zmx ls")
     _ = try await control.exec("zmx history default")
@@ -36,14 +36,14 @@ final class ControlConnectionTests: XCTestCase {
   }
 
   func test_a_dropped_session_is_redialed_once_and_the_command_still_lands() async throws {
-    let dead = FakeControlOps()
-    let fresh = FakeControlOps()
+    let dead = FakeOps()
+    let fresh = FakeOps()
     var queue = [dead, fresh]
-    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { queue.removeFirst() }
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { queue.removeFirst() }
 
     _ = try await control.exec("zmx ls")
     // The connection sat idle and was reaped; the next command finds out.
-    dead.failNextExec = true
+    dead.execResult = { _ in throw SSHConnectError.transport("channel closed") }
 
     let output = try await control.exec("zmx ls")
 
@@ -53,14 +53,14 @@ final class ControlConnectionTests: XCTestCase {
   }
 
   func test_a_failure_on_the_fresh_session_too_is_reported() async throws {
-    let first = FakeControlOps()
-    let second = FakeControlOps()
-    second.failNextExec = true
+    let first = FakeOps()
+    let second = FakeOps()
+    second.execResult = { _ in throw SSHConnectError.transport("channel closed") }
     var queue = [first, second]
-    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { queue.removeFirst() }
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { queue.removeFirst() }
 
     _ = try await control.exec("zmx ls")
-    first.failNextExec = true
+    first.execResult = { _ in throw SSHConnectError.transport("channel closed") }
 
     do {
       _ = try await control.exec("zmx ls")
@@ -73,10 +73,10 @@ final class ControlConnectionTests: XCTestCase {
   /// Dialling again on a cold failure would double how long every genuine
   /// failure takes.
   func test_a_command_that_fails_on_a_brand_new_session_is_not_retried() async {
-    let ops = FakeControlOps()
-    ops.failNextExec = true
+    let ops = FakeOps()
+    ops.execResult = { _ in throw SSHConnectError.transport("channel closed") }
     var made = 0
-    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { made += 1; return ops }
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { made += 1; return ops }
 
     do {
       _ = try await control.exec("zmx ls")
@@ -87,9 +87,9 @@ final class ControlConnectionTests: XCTestCase {
   }
 
   func test_a_host_key_mismatch_fails_loudly_and_is_never_redialed() async {
-    let store = InMemoryHostKeys()
+    let store = InMemoryHostKeyStore()
     store.pin("aa:aa:aa", host: "example.internal", port: 22)
-    let ops = FakeControlOps()
+    let ops = FakeOps()
     ops.fingerprint = "bb:bb:bb"
     var made = 0
     let control = ControlConnection(config: makeConfig(), store: store) { made += 1; return ops }
@@ -107,10 +107,10 @@ final class ControlConnectionTests: XCTestCase {
   }
 
   func test_closing_ends_the_session_and_the_next_command_opens_a_new_one() async throws {
-    let first = FakeControlOps()
-    let second = FakeControlOps()
+    let first = FakeOps()
+    let second = FakeOps()
     var queue = [first, second]
-    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { queue.removeFirst() }
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { queue.removeFirst() }
 
     _ = try await control.exec("zmx ls")
     await control.close()
@@ -121,8 +121,8 @@ final class ControlConnectionTests: XCTestCase {
   }
 
   func test_commands_issued_at_once_are_serialized_onto_the_one_session() async throws {
-    let ops = FakeControlOps()
-    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { ops }
+    let ops = FakeOps()
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) { ops }
 
     // The git screen fires several of these together.
     async let a = control.exec("git diff")
@@ -134,45 +134,4 @@ final class ControlConnectionTests: XCTestCase {
     XCTAssertEqual(ops.commands.count, 3)
     XCTAssertEqual(ops.maxConcurrentExecs, 1, "two commands must never be in flight on one session")
   }
-}
-
-// MARK: - doubles
-
-private final class FakeControlOps: SSHConnectionOps, @unchecked Sendable {
-  var handshakes = 0
-  var auths = 0
-  var teardowns = 0
-  var commands: [String] = []
-  var fingerprint = "aa:aa:aa"
-  var failNextExec = false
-  private(set) var maxConcurrentExecs = 0
-  private var inFlight = 0
-  private let lock = NSLock()
-
-  func connectAndHandshake() throws { handshakes += 1 }
-  func hostKeyFingerprint() throws -> String { fingerprint }
-  func authenticate(_ credential: SSHCredential) throws -> Bool { auths += 1; return true }
-
-  func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream {
-    throw SSHConnectError.transport("the control connection never opens a PTY")
-  }
-
-  func exec(_ command: String) throws -> String {
-    lock.lock(); inFlight += 1; maxConcurrentExecs = max(maxConcurrentExecs, inFlight); lock.unlock()
-    defer { lock.lock(); inFlight -= 1; lock.unlock() }
-    if failNextExec {
-      failNextExec = false
-      throw SSHConnectError.transport("channel closed")
-    }
-    commands.append(command)
-    return "ran: \(command)"
-  }
-
-  func teardown() { teardowns += 1 }
-}
-
-private final class InMemoryHostKeys: HostKeyStore, @unchecked Sendable {
-  private var pinned: [String: String] = [:]
-  func pinnedFingerprint(host: String, port: Int) -> String? { pinned["\(host):\(port)"] }
-  func pin(_ fingerprint: String, host: String, port: Int) { pinned["\(host):\(port)"] = fingerprint }
 }
