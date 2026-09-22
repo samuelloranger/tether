@@ -54,4 +54,13 @@ final class SocketDialerTests: XCTestCase {
     XCTAssertThrowsError(try SocketDialer.open(host: "192.0.2.1", port: 22, connectTimeout: 1))
     XCTAssertLessThan(Date().timeIntervalSince(start), 4)
   }
+
+  func test_a_dial_whose_guard_was_already_cut_does_not_connect() throws {
+    let listener = try LocalListener()
+    defer { listener.close() }
+    let socketGuard = SocketGuard()
+    socketGuard.shutdown()
+
+    XCTAssertThrowsError(try SocketDialer.open(host: "127.0.0.1", port: listener.port, socketGuard: socketGuard))
+  }
 }

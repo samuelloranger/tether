@@ -15,7 +15,7 @@ final class SocketGuardTests: XCTestCase {
     let (mine, peer) = pair()
     defer { close(peer) }
     let socketGuard = SocketGuard()
-    socketGuard.adopt(mine)
+    _ = socketGuard.adopt(mine)
     let returned = expectation(description: "blocked read returned")
     Thread {
       var byte: UInt8 = 0
@@ -34,7 +34,7 @@ final class SocketGuardTests: XCTestCase {
     let (mine, peer) = pair()
     close(peer)
     let socketGuard = SocketGuard()
-    socketGuard.adopt(mine)
+    _ = socketGuard.adopt(mine)
     socketGuard.close()
 
     let (reused, reusedPeer) = pair()
@@ -45,16 +45,15 @@ final class SocketGuardTests: XCTestCase {
     XCTAssertEqual(write(reused, &byte, 1), 1, "a stale shutdown must not reach the new socket")
   }
 
-  func test_a_socket_adopted_after_shutdown_is_cut_at_once() {
-    let (mine, peer) = pair()
-    defer { close(peer) }
+  /// shutdown() does nothing to a socket that is not connected yet, so a cut
+  /// that lands before the dial must stop the dial from adopting a socket at all.
+  func test_a_guard_cut_before_the_dial_refuses_the_socket() {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    defer { close(fd) }
     let socketGuard = SocketGuard()
     socketGuard.shutdown()
 
-    socketGuard.adopt(mine)
-
-    var byte: UInt8 = 0
-    XCTAssertEqual(read(mine, &byte, 1), 0, "a cancelled dial must not go on to use its socket")
-    socketGuard.close()
+    XCTAssertFalse(socketGuard.adopt(fd))
+    XCTAssertTrue(socketGuard.isCut)
   }
 }

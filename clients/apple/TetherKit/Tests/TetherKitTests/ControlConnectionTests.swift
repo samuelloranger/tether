@@ -198,4 +198,30 @@ final class ControlConnectionTests: XCTestCase {
     XCTAssertEqual(output, "ran: zmx ls")
     XCTAssertEqual(ops.interrupts, 0)
   }
+
+  /// A reset is a decision to give up on what is running. Re-running it on a
+  /// fresh connection could merge a pull request or kill a session twice.
+  func test_a_command_cut_by_reset_is_not_run_again() async throws {
+    let first = FakeOps()
+    let second = FakeOps()
+    var made = 0
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeyStore()) {
+      made += 1
+      return made == 1 ? first : second
+    }
+    _ = try await control.exec("zmx ls")
+    first.execResult = { [unowned first] in try first.hang($0) }
+    let merge = Task { try await control.exec("gh pr merge 7 --squash") }
+    let hanging = await eventually { first.isHanging }
+    XCTAssertTrue(hanging)
+
+    control.reset()
+
+    do {
+      _ = try await merge.value
+      XCTFail("a cut command must fail, not be retried")
+    } catch {}
+    XCTAssertEqual(made, 1, "no fresh connection may be dialed to re-run it")
+    XCTAssertEqual(second.commands, [])
+  }
 }

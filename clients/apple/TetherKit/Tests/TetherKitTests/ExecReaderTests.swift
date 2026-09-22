@@ -7,7 +7,7 @@ final class ExecReaderTests: XCTestCase {
   private enum Step { case bytes(String), rc(Int) }
 
   private func run(
-    _ steps: [Step], eofAfter: Bool = true, clock: [TimeInterval]? = nil, deadline: TimeInterval? = nil
+    _ steps: [Step], clock: [TimeInterval]? = nil, deadline: TimeInterval? = nil
   ) throws -> String {
     var steps = steps
     var ticks = clock ?? []
@@ -24,7 +24,6 @@ final class ExecReaderTests: XCTestCase {
           return rc
         }
       },
-      isEOF: { steps.isEmpty && eofAfter },
       now: { ticks.isEmpty ? 0 : ticks.removeFirst() },
       deadline: deadline,
       onChunk: { output += String(decoding: $0, as: UTF8.self); return true })
@@ -41,15 +40,24 @@ final class ExecReaderTests: XCTestCase {
     }
   }
 
-  func test_zero_bytes_before_end_of_file_keeps_reading() throws {
-    XCTAssertEqual(try run([.rc(0), .bytes("late")]), "late")
+  /// A blocking read returns 0 only once the channel hit EOF or was closed; a
+  /// close without EOF must end the read, not spin on it.
+  func test_zero_bytes_ends_the_read() throws {
+    XCTAssertEqual(try run([.bytes("done"), .rc(0), .bytes("never")]), "done")
   }
 
   func test_a_command_quiet_past_its_deadline_times_out() {
     let quiet = [Step](repeating: .rc(LibSSH2Const.timeout), count: 5)
-    XCTAssertThrowsError(try run(quiet, eofAfter: false, clock: [0, 30, 60, 91, 120, 150], deadline: 90)) { error in
+    XCTAssertThrowsError(try run(quiet, clock: [0, 30, 60, 91, 120, 150], deadline: 90)) { error in
       XCTAssertEqual(error as? SSHConnectError, .commandTimedOut)
     }
+  }
+
+  /// The deadline is for a command that went silent, not a slow one still talking.
+  func test_output_keeps_a_long_command_inside_its_deadline() throws {
+    let steps: [Step] = [.bytes("a"), .rc(LibSSH2Const.timeout), .bytes("b"), .rc(LibSSH2Const.timeout), .bytes("c")]
+    // start 0; then one tick per loop turn: 80, 160, 240, 320, 400.
+    XCTAssertEqual(try run(steps, clock: [0, 80, 160, 240, 320, 400, 480], deadline: 90), "abc")
   }
 
   func test_without_a_deadline_a_quiet_stream_just_keeps_waiting() throws {
@@ -61,7 +69,6 @@ final class ExecReaderTests: XCTestCase {
     var chunks = 0
     try ExecReader.run(
       read: { buffer in buffer[0] = 65; return 1 },
-      isEOF: { false },
       now: { 0 },
       deadline: nil,
       onChunk: { _ in chunks += 1; return chunks < 3 })
