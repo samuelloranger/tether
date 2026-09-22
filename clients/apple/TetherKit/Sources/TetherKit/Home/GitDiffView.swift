@@ -208,6 +208,15 @@ private struct PullRequestDetailView: View {
     }
   }
 
+  // Reflects the live detail state, not the row we opened from: a merged pull
+  // request must not still read "Open".
+  private var stateChip: (text: String, tint: Color) {
+    if detail.isMerged { return ("Merged", TetherColors.accent) }
+    if detail.state == .closed { return ("Closed", TetherColors.textFaint) }
+    if pullRequest.isDraft { return ("Draft", TetherColors.textSecondary) }
+    return ("Open", TetherColors.success)
+  }
+
   private var header: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("#\(pullRequest.number) \(pullRequest.title)").font(.title3.weight(.bold))
@@ -215,7 +224,7 @@ private struct PullRequestDetailView: View {
       Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced())
         .foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.middle)
       HStack(spacing: 6) {
-        chip(pullRequest.isDraft ? "Draft" : "Open", tint: pullRequest.isDraft ? TetherColors.textSecondary : TetherColors.success)
+        chip(stateChip.text, tint: stateChip.tint)
         chip("\(pullRequest.changedFiles) files", tint: TetherColors.textSecondary)
         if let decision = pullRequest.reviewDecision, !decision.isEmpty {
           chip(decision.replacingOccurrences(of: "_", with: " ").lowercased(), tint: TetherColors.accent)
