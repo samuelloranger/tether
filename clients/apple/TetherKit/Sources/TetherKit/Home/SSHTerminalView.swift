@@ -311,10 +311,6 @@ public struct SSHTerminalView: View {
             }
           }
           Spacer(minLength: 4)
-          if showsDetail, session.clients > 0 {
-            Text("\(session.clients)").font(.caption2.weight(.semibold).monospaced())
-              .foregroundStyle(TetherColors.success)
-          }
         }
         .contentShape(Rectangle())
       }
