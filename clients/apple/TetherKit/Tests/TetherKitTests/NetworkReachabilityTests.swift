@@ -25,4 +25,14 @@ final class NetworkReachabilityTests: XCTestCase {
     let value = NetworkReachability.classify(status: .unsatisfied, interfaces: [.wifi, .cellular])
     XCTAssertEqual(value.availability, .offline)
   }
+
+  func test_usable_interfaces_keep_the_path_preference_order() {
+    let value = NetworkReachability.classify(status: .satisfied, interfaces: [.cellular, .wifi])
+    XCTAssertEqual(value.interfaces, [.cellular, .wifi])
+    XCTAssertEqual(value.primary, .cellular)
+  }
+
+  func test_an_offline_path_carries_no_interfaces() {
+    XCTAssertEqual(NetworkReachability.classify(status: .unsatisfied, interfaces: [.wifi]).interfaces, [])
+  }
 }

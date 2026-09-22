@@ -72,4 +72,46 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     await leaving.value
     _ = await history.value
   }
+
+  func test_switching_off_the_interface_in_use_redials_at_once() async {
+    let first = ScriptedByteStream()
+    let second = ScriptedByteStream()
+    let script = DialScript([first, second])
+    let controller = makeController(script, FakeOps())
+    await controller.connect()
+    controller.pathChanged(NetworkReachability(availability: .usable, interfaces: [.wifi]))
+
+    controller.pathChanged(NetworkReachability(availability: .usable, interfaces: [.cellular]))
+
+    let redialed = await eventually { script.dials == 2 && controller.status == .connected }
+    XCTAssertTrue(redialed, "the old socket is bound to an address that no longer routes")
+    let oldClosed = await eventually { first.closed }
+    XCTAssertTrue(oldClosed)
+    await controller.leave()
+  }
+
+  func test_going_offline_says_so_at_once_and_redials_when_the_path_returns() async {
+    let first = ScriptedByteStream()
+    let second = ScriptedByteStream()
+    let script = DialScript([first, second])
+    let controller = makeController(script, FakeOps())
+    await controller.connect()
+    let wifi = NetworkReachability(availability: .usable, interfaces: [.wifi])
+    controller.pathChanged(wifi)
+
+    controller.pathChanged(NetworkReachability(availability: .offline))
+
+    XCTAssertEqual(controller.status, .disconnected, "no more 'live' on a dead path")
+    XCTAssertEqual(
+      SSHTerminalController.connectionCopy(status: controller.status, reachability: controller.reachability)?.message,
+      "Waiting for a network connection")
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    XCTAssertEqual(script.dials, 1, "no dial into an offline path")
+
+    controller.pathChanged(wifi)
+
+    let back = await eventually { script.dials == 2 && controller.status == .connected }
+    XCTAssertTrue(back)
+    await controller.leave()
+  }
 }
