@@ -125,6 +125,8 @@ struct GitDiffView: View {
 private struct PullRequestDetailView: View {
   @Bindable var controller: SSHTerminalController
   let pullRequest: GitPullRequest
+  @State private var detail = PullRequestDetail.empty
+  @State private var loadingDetail = false
   @State private var confirmClose = false
   @State private var showCopied = false
   @State private var diffFiles: [DiffFile] = []
@@ -151,16 +153,16 @@ private struct PullRequestDetailView: View {
       PatchSheet(title: "#\(pullRequest.number)", subtitle: pullRequest.title, files: diffFiles)
     }
     .task {
-      refreshDescription(controller.gitPullRequestBody)
-      await controller.loadPullRequestDetail(pullRequest)
+      refreshDescription(detail.body)
+      await refreshDetail()
       // Keep refreshing only while something is still running.
-      while !Task.isCancelled, GitRepositoryModel.isRunning(controller.gitChecks) {
+      while !Task.isCancelled, GitRepositoryModel.isRunning(detail.checks) {
         try? await Task.sleep(for: .seconds(Self.pollSeconds))
         guard !Task.isCancelled else { return }
-        await controller.loadPullRequestDetail(pullRequest)
+        await refreshDetail()
       }
     }
-    .onChange(of: controller.gitPullRequestBody) { _, body in
+    .onChange(of: detail.body) { _, body in
       refreshDescription(body)
     }
     .confirmationDialog("Close pull request #\(pullRequest.number)?", isPresented: $confirmClose, titleVisibility: .visible) {
@@ -189,13 +191,13 @@ private struct PullRequestDetailView: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 8) {
         Image(systemName: rollupIcon).foregroundStyle(rollupTint)
-        Text(GitRepositoryModel.checkHeadline(controller.gitChecks))
+        Text(GitRepositoryModel.checkHeadline(detail.checks))
           .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
         Spacer(minLength: 4)
         Button {
-          Task { await controller.loadPullRequestDetail(pullRequest) }
+          Task { await refreshDetail() }
         } label: {
-          if controller.gitChecksLoading {
+          if loadingDetail {
             ProgressView().controlSize(.small).tint(TetherColors.accent)
           } else {
             Image(systemName: "arrow.clockwise")
@@ -205,7 +207,7 @@ private struct PullRequestDetailView: View {
         .accessibilityLabel("Refresh checks")
       }
 
-      ForEach(controller.gitChecks) { check in
+      ForEach(detail.checks) { check in
         Button {
           if let url = URL(string: check.url), !check.url.isEmpty { UIApplication.shared.open(url) }
         } label: {
@@ -223,8 +225,8 @@ private struct PullRequestDetailView: View {
         .buttonStyle(.plain)
       }
 
-      if let updated = controller.gitChecksUpdatedAt {
-        Text("Updated \(updated, style: .relative) ago")
+      if detail.fetchedAt != .distantPast {
+        Text("Updated \(detail.fetchedAt, style: .relative) ago")
           .font(.caption2).foregroundStyle(TetherColors.textFaint)
       }
     }
@@ -311,11 +313,11 @@ private struct PullRequestDetailView: View {
 
 
   private var rollupIcon: String {
-    GitRepositoryModel.rollup(controller.gitChecks).map(icon(for:)) ?? "circle.dashed"
+    GitRepositoryModel.rollup(detail.checks).map(icon(for:)) ?? "circle.dashed"
   }
 
   private var rollupTint: Color {
-    GitRepositoryModel.rollup(controller.gitChecks).map(tint(for:)) ?? TetherColors.textFaint
+    GitRepositoryModel.rollup(detail.checks).map(tint(for:)) ?? TetherColors.textFaint
   }
 
   private func icon(for state: GitCheck.State) -> String {
@@ -344,6 +346,15 @@ private struct PullRequestDetailView: View {
 
   private func sectionTitle(_ title: String) -> some View {
     Text(title).font(.caption.weight(.bold)).foregroundStyle(TetherColors.textSecondary)
+  }
+
+  private func refreshDetail() async {
+    guard !loadingDetail else { return }
+    loadingDetail = true
+    defer { loadingDetail = false }
+    let fetched = await controller.loadPullRequestDetail(pullRequest)
+    guard !Task.isCancelled, fetched.fetchedAt != .distantPast else { return }
+    detail = fetched
   }
 
   private func refreshDescription(_ body: String) {

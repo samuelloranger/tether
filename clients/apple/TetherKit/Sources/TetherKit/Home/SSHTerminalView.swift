@@ -542,7 +542,7 @@ public struct SSHTerminalView: View {
         Text(copy.message).font(.footnote.monospaced())
           .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
         if copy.showsRetry {
-          Button("Retry") { Task { await controller.connect() } }
+          Button("Retry") { Task { await controller.connect(trigger: .manual) } }
             .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
             .padding(.horizontal, 20).padding(.vertical, 10)
             .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))

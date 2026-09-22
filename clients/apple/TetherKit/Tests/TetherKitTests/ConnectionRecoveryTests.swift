@@ -102,4 +102,20 @@ final class ConnectionRecoveryTests: XCTestCase {
   func test_a_connected_session_has_no_status_copy() {
     XCTAssertNil(SSHTerminalController.connectionCopy(status: .connected, reachability: usable))
   }
+
+  func test_a_manual_retry_dials_even_when_the_automatic_gate_would_refuse() {
+    // The Retry button is the person answering the gate, so it does not ask it.
+    XCTAssertTrue(SSHTerminalController.ConnectTrigger.manual.bypassesRecoveryGate)
+    XCTAssertTrue(SSHTerminalController.ConnectTrigger.initial.bypassesRecoveryGate)
+    XCTAssertFalse(SSHTerminalController.ConnectTrigger.foreground.bypassesRecoveryGate)
+    XCTAssertFalse(SSHTerminalController.ConnectTrigger.networkPath.bypassesRecoveryGate)
+  }
+
+  func test_only_the_edge_onto_a_usable_path_asks_for_a_redial() {
+    XCTAssertTrue(SSHTerminalController.pathBecameUsable(previous: offline, next: usable))
+    XCTAssertTrue(SSHTerminalController.pathBecameUsable(previous: nil, next: usable))
+    // The observer re-reports the same path on every interface change.
+    XCTAssertFalse(SSHTerminalController.pathBecameUsable(previous: usable, next: usable))
+    XCTAssertFalse(SSHTerminalController.pathBecameUsable(previous: usable, next: offline))
+  }
 }

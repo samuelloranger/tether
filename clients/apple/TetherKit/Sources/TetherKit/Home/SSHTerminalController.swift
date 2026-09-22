@@ -1,6 +1,14 @@
 import Foundation
 import TetherFFIBindings
 
+public struct PullRequestDetail: Equatable, Sendable {
+  public let checks: [GitCheck]
+  public let body: String
+  public let fetchedAt: Date
+
+  public static let empty = PullRequestDetail(checks: [], body: "", fetchedAt: .distantPast)
+}
+
 /// Drives one SSH-backed terminal: connect via `SSHConnector`, pump the PTY
 /// through a `TerminalPipeline` into the shared renderer, and attach to a zmx
 /// session so the shell survives disconnects.
@@ -33,6 +41,14 @@ public final class SSHTerminalController {
     public var showsRetry: Bool
   }
 
+  /// Why a dial is being asked for. Everything automatic passes through the
+  /// recovery gate; a person tapping Retry is answering it, so it does not.
+  public enum ConnectTrigger: Equatable {
+    case initial, foreground, networkPath, manual
+
+    var bypassesRecoveryGate: Bool { self == .manual || self == .initial }
+  }
+
   public enum TransferState: Equatable {
     case idle
     case sending(String)
@@ -61,10 +77,6 @@ public final class SSHTerminalController {
   public private(set) var gitPullRequests: [GitPullRequest] = []
   /// Why the list is empty, when the reason is not "none open".
   public private(set) var gitPullRequestNotice: String?
-  public private(set) var gitChecks: [GitCheck] = []
-  public private(set) var gitChecksUpdatedAt: Date?
-  public private(set) var gitChecksLoading = false
-  public private(set) var gitPullRequestBody = ""
   public private(set) var gitUpdatedAt: Date?
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
@@ -119,7 +131,11 @@ public final class SSHTerminalController {
     }
   }
 
-  public func connect() async {
+  public func connect(trigger: ConnectTrigger = .initial) async {
+    if !trigger.bypassesRecoveryGate,
+      !Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) {
+      return
+    }
     // Serialize: the initial .task connect and a scenePhase .active reconnect can
     // both fire before the first is `.connected`, otherwise double-attaching.
     if connectInFlight { return }
@@ -282,11 +298,7 @@ public final class SSHTerminalController {
     do {
       // Its own connection: commands are serialized on the control one, and a
       // large upload would hold the session list and the git screen behind it.
-      do {
-        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
-      } catch where Self.shouldRetryTransfer(after: error) {
-        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
-      }
+      try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
       transfer = .sent(remote)
       return remote
     } catch {
@@ -299,15 +311,6 @@ public final class SSHTerminalController {
 
   /// A transfer that failed before any SSH work reuses the upload banner.
   public func reportTransferFailure(_ message: String) { transfer = .failed(message) }
-
-  /// A changed host key and a missing credential are answers, not noise:
-  /// repeating them only delays telling the user.
-  nonisolated static func shouldRetryTransfer(after error: Error) -> Bool {
-    switch error as? SSHConnectError {
-    case .hostKeyMismatch, .missingCredential: return false
-    default: return true
-    }
-  }
 
   public func loadGitWorkspace(payload: GitWorkspacePayload = .all) async {
     gitLoading = true
@@ -419,23 +422,20 @@ public final class SSHTerminalController {
   }
 
   /// Checks and description for one pull request, in a single round trip.
-  public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async {
-    gitChecksLoading = true
-    defer { gitChecksLoading = false }
-    guard let cwd = await currentCwd() else { return }
+  public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async -> PullRequestDetail {
+    guard let cwd = await currentCwd() else { return .empty }
     let command = "cd \(shellQuote(cwd)) && gh pr view \(pullRequest.number) --json statusCheckRollup,body 2>/dev/null"
     guard let raw = try? await control.exec(command),
       let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
-    else {
-      gitChecksUpdatedAt = Date()
-      return
-    }
+    else { return .empty }
+    let checks: [GitCheck]
     if let rollup = object["statusCheckRollup"],
       let encoded = try? JSONSerialization.data(withJSONObject: rollup) {
-      gitChecks = GitRepositoryModel.checks(from: String(decoding: encoded, as: UTF8.self))
+      checks = GitRepositoryModel.checks(from: String(decoding: encoded, as: UTF8.self))
+    } else {
+      checks = []
     }
-    gitPullRequestBody = (object["body"] as? String) ?? ""
-    gitChecksUpdatedAt = Date()
+    return PullRequestDetail(checks: checks, body: (object["body"] as? String) ?? "", fetchedAt: Date())
   }
 
   /// One commit's patch, kept apart from `gitLines` so opening a commit does
@@ -492,8 +492,7 @@ public final class SSHTerminalController {
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
   /// Shares the gate with the path observer so the two triggers can't race.
   public func reconnectIfNeeded() async {
-    guard Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) else { return }
-    await connect()
+    await connect(trigger: .foreground)
   }
 
   /// Watch the network path for this screen. Redials only when a path *becomes*
@@ -507,16 +506,24 @@ public final class SSHTerminalController {
   private func pathChanged(_ value: NetworkReachability) {
     let previous = reachability
     reachability = value
-    guard Self.shouldRedial(previous: previous, next: value, status: status, dialing: connectInFlight) else { return }
-    Task { await connect() }
+    guard Self.pathBecameUsable(previous: previous, next: value) else { return }
+    Task { await connect(trigger: .networkPath) }
   }
 
   /// The one network-driven recovery decision. Only an edge into a usable path
   /// counts: the monitor re-reports the same path on every interface change.
+  /// A path that just became usable. The recovery gate inside `connect` cannot
+  /// see this edge, because it is only handed the current reading.
+  nonisolated static func pathBecameUsable(
+    previous: NetworkReachability?, next: NetworkReachability
+  ) -> Bool {
+    next.isUsable && previous?.isUsable != true
+  }
+
   nonisolated static func shouldRedial(
     previous: NetworkReachability?, next: NetworkReachability, status: Status, dialing: Bool
   ) -> Bool {
-    guard next.isUsable, previous?.isUsable != true else { return false }
+    guard pathBecameUsable(previous: previous, next: next) else { return false }
     return shouldRedialOnForeground(status: status, dialing: dialing, reachability: next)
   }
 
@@ -612,8 +619,7 @@ public final class SSHTerminalController {
     status = next
     // A drop caused by the network dying must not spin on a dead path: the
     // observer redials the moment a usable one comes back.
-    guard Self.shouldRedialOnForeground(status: next, dialing: connectInFlight, reachability: reachability) else { return }
-    Task { await self.connect() }
+    Task { await self.connect(trigger: .foreground) }
   }
 
   /// Pure transition for a mid-session transport drop. `nil` leaves the status
