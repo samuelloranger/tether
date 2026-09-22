@@ -37,30 +37,43 @@ final class DrawerTrackingTests: XCTestCase {
     XCTAssertEqual(DrawerDragDecision.progress(isOpen: false, translationX: 50, width: 0), 0, accuracy: 0.0001)
   }
 
-  // Release: where the drag was going matters more than where it stopped —
-  // that is what makes a short flick open the drawer.
+  // Release: UIKit hands us a velocity in points per second, and where the
+  // drag was going decides — that is what makes a short flick open the drawer.
   func test_a_flick_opens_even_though_the_finger_barely_moved() {
     XCTAssertTrue(DrawerDragDecision.settlesOpen(
-      isOpen: false, translationX: 40, predictedEndX: 320, width: width))
+      isOpen: false, translationX: 40, velocityX: 1400, width: width))
   }
 
   func test_a_slow_drag_past_the_middle_opens() {
     XCTAssertTrue(DrawerDragDecision.settlesOpen(
-      isOpen: false, translationX: 150, predictedEndX: 152, width: width))
+      isOpen: false, translationX: 150, velocityX: 30, width: width))
   }
 
   func test_a_slow_drag_short_of_the_middle_falls_back_closed() {
     XCTAssertFalse(DrawerDragDecision.settlesOpen(
-      isOpen: false, translationX: 90, predictedEndX: 92, width: width))
+      isOpen: false, translationX: 90, velocityX: 20, width: width))
   }
 
   func test_a_flick_back_closes_an_open_drawer_from_almost_fully_open() {
     XCTAssertFalse(DrawerDragDecision.settlesOpen(
-      isOpen: true, translationX: -30, predictedEndX: -260, width: width))
+      isOpen: true, translationX: -20, velocityX: -1500, width: width))
   }
 
   func test_releasing_an_open_drawer_where_it_started_leaves_it_open() {
     XCTAssertTrue(DrawerDragDecision.settlesOpen(
-      isOpen: true, translationX: -12, predictedEndX: -14, width: width))
+      isOpen: true, translationX: -12, velocityX: -40, width: width))
+  }
+
+  func test_a_flick_the_wrong_way_does_not_open_a_closed_drawer() {
+    XCTAssertFalse(DrawerDragDecision.settlesOpen(
+      isOpen: false, translationX: 120, velocityX: -1800, width: width))
+  }
+
+  // A pan that never moved horizontally is the terminal's, not the drawer's:
+  // the close gesture only begins on a horizontally dominant pan.
+  func test_only_a_horizontally_dominant_pan_belongs_to_the_drawer() {
+    XCTAssertTrue(DrawerDragDecision.panBelongsToDrawer(velocity: CGSize(width: -600, height: 120)))
+    XCTAssertFalse(DrawerDragDecision.panBelongsToDrawer(velocity: CGSize(width: -120, height: 900)))
+    XCTAssertFalse(DrawerDragDecision.panBelongsToDrawer(velocity: .zero))
   }
 }
