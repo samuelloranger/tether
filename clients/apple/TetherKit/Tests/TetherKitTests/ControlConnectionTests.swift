@@ -40,10 +40,14 @@ final class ControlConnectionTests: XCTestCase {
 
   func test_a_dropped_session_is_redialed_once_and_the_command_still_lands() async throws {
     let dead = FakeControlOps()
-    dead.failNextExec = true
     let fresh = FakeControlOps()
     var queue = [dead, fresh]
     let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { queue.removeFirst() }
+
+    _ = try await control.exec("zmx ls")
+    // What actually happens in the field: the connection sat idle and the host
+    // — or a NAT in between — reaped it. The next command is how we find out.
+    dead.failNextExec = true
 
     let output = try await control.exec("zmx ls")
 
@@ -52,19 +56,38 @@ final class ControlConnectionTests: XCTestCase {
     XCTAssertEqual(fresh.handshakes, 1)
   }
 
-  func test_a_failure_on_the_fresh_session_too_is_reported() async {
+  func test_a_failure_on_the_fresh_session_too_is_reported() async throws {
     let first = FakeControlOps()
-    first.failNextExec = true
     let second = FakeControlOps()
     second.failNextExec = true
     var queue = [first, second]
     let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { queue.removeFirst() }
+
+    _ = try await control.exec("zmx ls")
+    first.failNextExec = true
 
     do {
       _ = try await control.exec("zmx ls")
       XCTFail("expected the second failure to surface")
     } catch {
       XCTAssertTrue(queue.isEmpty, "it must retry exactly once, not loop")
+    }
+  }
+
+  /// The retry is for a session that went stale underneath us. One that fails
+  /// the moment it opens is a real error, and dialling again would only make
+  /// every genuine failure cost twice as long.
+  func test_a_command_that_fails_on_a_brand_new_session_is_not_retried() async {
+    let ops = FakeControlOps()
+    ops.failNextExec = true
+    var made = 0
+    let control = ControlConnection(config: makeConfig(), store: InMemoryHostKeys()) { made += 1; return ops }
+
+    do {
+      _ = try await control.exec("zmx ls")
+      XCTFail("expected the failure to surface")
+    } catch {
+      XCTAssertEqual(made, 1, "a cold session must not be redialed")
     }
   }
 
