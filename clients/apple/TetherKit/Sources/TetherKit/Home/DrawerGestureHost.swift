@@ -127,6 +127,20 @@ struct DrawerGestureHost: UIViewRepresentable {
     ) -> Bool {
       false
     }
+
+    /// The terminal surface runs its own pan for scrolling, selection and mouse
+    /// mode, and it begins the moment a finger moves — so it used to win every
+    /// race and the edge swipe did nothing over the grid. Ours goes first: a
+    /// pan underneath waits for it, and the instant it fails (a touch that did
+    /// not start at the edge, or one that went vertical) the terminal proceeds
+    /// with the touch untouched. This is what UIKit does for its own
+    /// interactive pop gesture over a scroll view.
+    func gestureRecognizer(
+      _ recognizer: UIGestureRecognizer,
+      shouldBeRequiredToFailBy other: UIGestureRecognizer
+    ) -> Bool {
+      recognizer === edgePan || recognizer === closePan
+    }
   }
 }
 #endif
