@@ -20,4 +20,37 @@ final class GitRepositoryModelTests: XCTestCase {
       GitPullRequest(number: 196, title: "Native interactions", head: "feat/native", base: "main", url: "https://example.test/pr/196", updatedAt: "2026-09-22T01:00:00Z", isDraft: false, changedFiles: 12, reviewDecision: "REVIEW_REQUIRED")
     ])
   }
+
+  // An empty list and a failed query used to look identical: the command
+  // swallowed every error into `[]`, so the screen blamed a missing GitHub CLI
+  // whenever a repository simply had no open pull requests.
+  func test_an_empty_list_means_there_are_no_pull_requests() {
+    XCTAssertEqual(GitRepositoryModel.pullRequestResult(from: "[]"), .list([]))
+    XCTAssertEqual(GitRepositoryModel.pullRequestResult(from: "  []\n"), .list([]))
+  }
+
+  func test_a_missing_github_cli_is_reported_as_such() {
+    XCTAssertEqual(
+      GitRepositoryModel.pullRequestResult(from: GitRepositoryModel.ghMissingSentinel),
+      .toolMissing)
+  }
+
+  func test_anything_else_is_carried_back_as_the_reason_it_failed() {
+    XCTAssertEqual(
+      GitRepositoryModel.pullRequestResult(from: "gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable.\n"),
+      .failed("gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable."))
+    XCTAssertEqual(
+      GitRepositoryModel.pullRequestResult(from: "failed to run git: fatal: not a git repository\nsecond line\n"),
+      .failed("failed to run git: fatal: not a git repository"))
+  }
+
+  func test_a_populated_list_still_parses() {
+    let json = """
+    [{"number":7,"title":"Fix","headRefName":"fix/a","baseRefName":"main","url":"https://example.test/pr/7","updatedAt":"2026-09-22T01:00:00Z","isDraft":true,"changedFiles":1,"reviewDecision":null}]
+    """
+    guard case let .list(pulls) = GitRepositoryModel.pullRequestResult(from: json) else {
+      return XCTFail("expected a parsed list")
+    }
+    XCTAssertEqual(pulls.map(\.number), [7])
+  }
 }
