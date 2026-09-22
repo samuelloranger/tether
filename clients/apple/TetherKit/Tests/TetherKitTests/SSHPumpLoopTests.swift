@@ -16,6 +16,9 @@ private final class FakePumpIO: SSHPumpIO {
   var keepalives: [Result] = []
   var eof = false
   var roomForSmallPacket = true
+  /// When set, each write accepts at most this many bytes.
+  var writeLimit: Int?
+  private(set) var written = Data()
   private var lastHalfSent = false
 
   func read(into buffer: UnsafeMutableRawBufferPointer) -> Int {
@@ -28,7 +31,8 @@ private final class FakePumpIO: SSHPumpIO {
 
   func write(_ bytes: UnsafeRawBufferPointer) -> Int {
     log.append("write(\(bytes.count))")
-    let result = writes.isEmpty ? Result(rc: bytes.count) : writes.removeFirst()
+    let result = writes.isEmpty ? Result(rc: min(bytes.count, writeLimit ?? bytes.count)) : writes.removeFirst()
+    if result.rc > 0 { written.append(contentsOf: bytes.prefix(result.rc)) }
     lastHalfSent = result.halfSent
     return result.rc
   }
@@ -103,6 +107,20 @@ final class SSHPumpLoopTests: XCTestCase {
     _ = freshPass()
 
     XCTAssertEqual(io.log.first, "write(3)")
+  }
+
+  func test_a_large_paste_arrives_whole_and_in_order_through_partial_writes() {
+    let paste = Data((0..<3_000_000).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+    io.writeLimit = 7_001
+    loop.enqueue(paste.prefix(1_000_000))
+
+    for pass in 0..<1_000 {
+      if pass == 10 { loop.enqueue(paste.dropFirst(1_000_000)) }
+      _ = loop.pass(stopped: false)
+      if io.written.count == paste.count { break }
+    }
+
+    XCTAssertEqual(io.written, paste)
   }
 
   // MARK: the half-sent packet rule
