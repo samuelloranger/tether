@@ -305,11 +305,16 @@ private struct PullRequestDetailView: View {
   private var reviewChanges: some View {
     Button(action: openDiff) {
       HStack(spacing: 10) {
-        if loadingDiff {
-          ProgressView().controlSize(.small).tint(TetherColors.accent)
-        } else {
-          Image(systemName: "doc.text.magnifyingglass")
+        // Fixed leading slot: the spinner is narrower than the icon, so without
+        // it the label jumps sideways when a diff starts loading.
+        Group {
+          if loadingDiff {
+            ProgressView().controlSize(.small).tint(TetherColors.accent)
+          } else {
+            Image(systemName: "doc.text.magnifyingglass")
+          }
         }
+        .frame(width: 22)
         Text("Review changes").font(.subheadline.weight(.semibold))
         Spacer(minLength: 0)
         Image(systemName: "chevron.right").font(.caption).foregroundStyle(TetherColors.textFaint)
