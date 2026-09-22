@@ -45,4 +45,28 @@ public enum GitRepositoryModel {
   public static func pullRequests(from output: String) throws -> [GitPullRequest] {
     try JSONDecoder().decode([GitPullRequest].self, from: Data(output.utf8))
   }
+
+  /// What came back from the pull-request query. "None open" and "could not
+  /// ask" are different answers and the screen says different things about
+  /// them — collapsing both into an empty list is what made it blame a missing
+  /// GitHub CLI for every repository that simply had nothing open.
+  public enum PullRequestResult: Equatable {
+    case list([GitPullRequest])
+    case toolMissing
+    case failed(String)
+  }
+
+  /// Emitted by the host command when `gh` is not installed, so that case is
+  /// distinguishable from gh running and refusing.
+  public static let ghMissingSentinel = "__TETHER_NO_GH__"
+
+  public static func pullRequestResult(from output: String) -> PullRequestResult {
+    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed == ghMissingSentinel { return .toolMissing }
+    if let pulls = try? pullRequests(from: trimmed) { return .list(pulls) }
+    // gh puts its reason on the first line; the rest is usually a hint we would
+    // only truncate badly.
+    let firstLine = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? trimmed
+    return .failed(firstLine)
+  }
 }

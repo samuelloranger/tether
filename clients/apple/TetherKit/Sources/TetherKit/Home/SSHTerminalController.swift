@@ -51,6 +51,9 @@ public final class SSHTerminalController {
   public private(set) var gitBranch = ""
   public private(set) var gitCommits: [GitCommit] = []
   public private(set) var gitPullRequests: [GitPullRequest] = []
+  /// Why the pull-request list is empty, when it is empty for a reason other
+  /// than the repository having none open.
+  public private(set) var gitPullRequestNotice: String?
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
@@ -295,7 +298,13 @@ public final class SSHTerminalController {
     let diffCommand = "if \(repositoryGuard); then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
     let branchCommand = "if \(repositoryGuard); then git -C \(q) branch --show-current; fi"
     let commitsCommand = "if \(repositoryGuard); then git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'; fi"
-    let pullRequestsCommand = "if \(repositoryGuard) && command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>/dev/null) || printf '[]'; else printf '[]'; fi"
+    // Keep gh's own stderr: "no open pull requests" and "gh cannot answer" are
+    // different answers, and swallowing the second into an empty list is what
+    // made the screen blame a missing CLI for an empty repository.
+    let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
+    let pullRequestsCommand = "if \(repositoryGuard); then "
+      + "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); "
+      + "else printf '%s' \(ghMissing); fi; else printf '[]'; fi"
     do {
       async let raw = control.exec(diffCommand)
       async let branch = control.exec(branchCommand)
@@ -307,13 +316,24 @@ public final class SSHTerminalController {
         gitBranch = ""
         gitCommits = []
         gitPullRequests = []
+        gitPullRequestNotice = nil
         gitError = "Not a git repository:\n\(cwd)"
         return
       }
       gitLines = GitDiffModel.classify(diff)
       gitBranch = GitRepositoryModel.branch(from: branchOutput)
       gitCommits = GitRepositoryModel.commits(from: commitsOutput)
-      gitPullRequests = (try? GitRepositoryModel.pullRequests(from: pullRequestsOutput)) ?? []
+      switch GitRepositoryModel.pullRequestResult(from: pullRequestsOutput) {
+      case let .list(pulls):
+        gitPullRequests = pulls
+        gitPullRequestNotice = nil
+      case .toolMissing:
+        gitPullRequests = []
+        gitPullRequestNotice = "GitHub CLI isn't installed on this host."
+      case let .failed(reason):
+        gitPullRequests = []
+        gitPullRequestNotice = reason
+      }
     } catch {
       gitLines = []
       gitError = Self.describe(error)

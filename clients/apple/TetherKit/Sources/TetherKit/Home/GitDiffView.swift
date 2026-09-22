@@ -62,7 +62,13 @@ struct GitDiffView: View {
 
   @ViewBuilder private var pullRequests: some View {
     if controller.gitPullRequests.isEmpty {
-      ContentUnavailableView("No open pull requests", systemImage: "arrow.triangle.pull", description: Text("Install and authenticate GitHub CLI on the host to load pull requests.")).foregroundStyle(TetherColors.textSecondary)
+      if let notice = controller.gitPullRequestNotice {
+        ContentUnavailableView("Couldn't load pull requests", systemImage: "exclamationmark.triangle", description: Text(notice))
+          .foregroundStyle(TetherColors.textSecondary)
+      } else {
+        ContentUnavailableView("No open pull requests", systemImage: "arrow.triangle.pull", description: Text("This repository has none open right now."))
+          .foregroundStyle(TetherColors.textSecondary)
+      }
     } else {
       List(controller.gitPullRequests) { pullRequest in
         NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest, onShowChanges: { tab = .changes }) } label: {
