@@ -114,6 +114,18 @@ enum SSHConnectionSequence {
     try gate(config: config, ops: ops, store: store)
   }
 
+  /// libssh2 signs the publickey challenge with the key held in memory, and
+  /// signing on two sessions at once intermittently fails: the server accepts
+  /// the key offer and the client then cannot sign it ("Callback returned
+  /// error", libssh2 -19). On a host log that reads as a client abort between
+  /// the offer and the signature, seconds away from successes with the same
+  /// key. The terminal, the control connection and a transfer all dial
+  /// independently, so they can collide; this is the only place they meet.
+  ///
+  /// Only the handshake and authentication are serialized. Everything after —
+  /// the PTY stream, exec channels, an upload — stays concurrent.
+  private static let handshakeLock = NSLock()
+
   /// Shared connect → host-key gate → auth. Trust-on-first-use pins an unknown
   /// key and refuses a changed one. Tears the session down on any failure and
   /// leaves it authenticated on success.
@@ -122,6 +134,8 @@ enum SSHConnectionSequence {
     ops: SSHConnectionOps,
     store: HostKeyStore
   ) throws {
+    handshakeLock.lock()
+    defer { handshakeLock.unlock() }
     do {
       try ops.connectAndHandshake()
     } catch {
