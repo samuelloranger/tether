@@ -13,6 +13,10 @@ final class ControlConnection: @unchecked Sendable {
   /// A libssh2 session tolerates several callers only because they queue here.
   private let queue: DispatchQueue
   private var ops: SSHConnectionOps?
+  /// The session a `reset()` from another thread may cut. The queue owns `ops`;
+  /// this is only ever used to call `interrupt()`.
+  private let liveLock = NSLock()
+  private var live: SSHConnectionOps?
 
   init(
     config: SSHConnectionConfig,
@@ -44,7 +48,18 @@ final class ControlConnection: @unchecked Sendable {
     }
   }
 
+  /// Cuts the current session's socket from any thread: a command blocked on a
+  /// dead path fails now instead of when TCP gives up, and the next one dials
+  /// fresh. Safe when nothing is open.
+  func reset() {
+    liveLock.lock()
+    let current = live
+    liveLock.unlock()
+    current?.interrupt()
+  }
+
   func close() async {
+    reset()
     try? await onQueue { [self] in
       teardown()
       return ""
@@ -69,7 +84,13 @@ final class ControlConnection: @unchecked Sendable {
   private func openIfNeeded() throws -> SSHConnectionOps {
     if let ops { return ops }
     let fresh = makeOps()
-    try SSHConnectionSequence.authenticate(config: config, ops: fresh, store: store)
+    setLive(fresh)
+    do {
+      try SSHConnectionSequence.authenticate(config: config, ops: fresh, store: store)
+    } catch {
+      setLive(nil)
+      throw error
+    }
     ops = fresh
     return fresh
   }
@@ -77,6 +98,13 @@ final class ControlConnection: @unchecked Sendable {
   private func teardown() {
     ops?.teardown()
     ops = nil
+    setLive(nil)
+  }
+
+  private func setLive(_ ops: SSHConnectionOps?) {
+    liveLock.lock()
+    live = ops
+    liveLock.unlock()
   }
 
   private func onQueue(_ body: @escaping () throws -> String) async throws -> String {
