@@ -132,6 +132,94 @@ final class GitRepositoryModelTests: XCTestCase {
       "1 of 2 running")
   }
 
+  // MARK: - merge gates
+
+  private func gate(_ status: String, mergeable: String = "MERGEABLE", isDraft: Bool = false) -> GitMergeGate {
+    GitRepositoryModel.mergeGate(
+      from: """
+      {"mergeable":"\(mergeable)","mergeStateStatus":"\(status)","isDraft":\(isDraft)}
+      """)
+  }
+
+  func test_github_says_the_pull_request_can_merge() {
+    XCTAssertEqual(gate("CLEAN"), .ready)
+    // A non-required check may be red and the merge still allowed.
+    XCTAssertEqual(gate("UNSTABLE"), .ready)
+    XCTAssertEqual(gate("HAS_HOOKS"), .ready)
+    XCTAssertTrue(gate("CLEAN").canMerge)
+  }
+
+  func test_each_refusal_keeps_the_reason_github_gave() {
+    XCTAssertEqual(gate("BLOCKED"), .blocked)
+    XCTAssertEqual(gate("BEHIND"), .behind)
+    XCTAssertEqual(gate("DIRTY"), .conflicted)
+    XCTAssertEqual(gate("DRAFT"), .draft)
+    for status in ["BLOCKED", "BEHIND", "DIRTY", "DRAFT"] {
+      XCTAssertFalse(gate(status).canMerge, status)
+    }
+  }
+
+  func test_a_conflict_outranks_the_blocked_github_reports_alongside_it() {
+    // GitHub reports a conflicted pull request as BLOCKED once branch
+    // protection is on; "resolve the conflicts" is the useful half.
+    XCTAssertEqual(gate("BLOCKED", mergeable: "CONFLICTING"), .conflicted)
+  }
+
+  func test_a_draft_outranks_every_other_refusal() {
+    XCTAssertEqual(gate("BLOCKED", isDraft: true), .draft)
+    XCTAssertEqual(gate("BEHIND", isDraft: true), .draft)
+  }
+
+  func test_github_has_not_finished_working_out_mergeability() {
+    XCTAssertEqual(gate("UNKNOWN"), .computing)
+    XCTAssertEqual(gate("CLEAN", mergeable: "UNKNOWN"), .computing)
+    XCTAssertFalse(gate("UNKNOWN").canMerge)
+    // Nothing to read back to the user while GitHub is still deciding.
+    XCTAssertEqual(GitRepositoryModel.mergeGate(from: "not json"), .computing)
+  }
+
+  func test_every_refusal_explains_itself() {
+    for gate: GitMergeGate in [.blocked, .behind, .conflicted, .draft, .computing] {
+      XCTAssertFalse(gate.reason.isEmpty, "\(gate)")
+    }
+    XCTAssertEqual(GitMergeGate.ready.reason, "Ready to merge")
+  }
+
+  // MARK: - merge methods
+
+  func test_only_the_methods_the_repository_allows_are_offered() {
+    let json = """
+    {"mergeCommitAllowed":false,"squashMergeAllowed":true,"rebaseMergeAllowed":true}
+    """
+    XCTAssertEqual(GitRepositoryModel.allowedMergeMethods(from: json), [.squash, .rebase])
+  }
+
+  func test_a_repository_that_allows_everything_lists_them_in_a_stable_order() {
+    let json = """
+    {"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true}
+    """
+    XCTAssertEqual(GitRepositoryModel.allowedMergeMethods(from: json), [.merge, .squash, .rebase])
+  }
+
+  func test_unreadable_repository_settings_offer_no_method_rather_than_a_wrong_one() {
+    XCTAssertEqual(GitRepositoryModel.allowedMergeMethods(from: "gh: not found"), [])
+    XCTAssertEqual(
+      GitRepositoryModel.allowedMergeMethods(
+        from: """
+        {"mergeCommitAllowed":false,"squashMergeAllowed":false,"rebaseMergeAllowed":false}
+        """),
+      [])
+  }
+
+  func test_each_method_carries_the_flag_gh_expects_and_a_label_naming_what_happens() {
+    XCTAssertEqual(GitMergeMethod.merge.flag, "--merge")
+    XCTAssertEqual(GitMergeMethod.squash.flag, "--squash")
+    XCTAssertEqual(GitMergeMethod.rebase.flag, "--rebase")
+    XCTAssertEqual(GitMergeMethod.squash.label, "Squash and merge")
+  }
+
+  // MARK: - check rollup
+
   func test_the_rollup_is_the_worst_state_any_check_is_in() {
     let passed = GitCheck(name: "build", state: .passed, url: "")
     let running = GitCheck(name: "test", state: .running, url: "")

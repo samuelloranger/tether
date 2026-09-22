@@ -37,6 +37,38 @@ public struct GitCheck: Equatable, Identifiable, Sendable {
   public var id: String { name }
 }
 
+public enum GitMergeGate: Equatable, Sendable {
+  case ready, blocked, behind, conflicted, draft, computing
+
+  public var canMerge: Bool { self == .ready }
+
+  public var reason: String {
+    switch self {
+    case .ready: return "Ready to merge"
+    case .blocked: return "A required review or check is missing"
+    case .behind: return "Out of date with the base branch"
+    case .conflicted: return "Conflicts with the base branch"
+    case .draft: return "Still a draft"
+    case .computing: return "Checking mergeability…"
+    }
+  }
+}
+
+public enum GitMergeMethod: String, Equatable, Sendable, Identifiable {
+  case merge, squash, rebase
+
+  public var id: String { rawValue }
+  public var flag: String { "--\(rawValue)" }
+
+  public var label: String {
+    switch self {
+    case .merge: return "Create a merge commit"
+    case .squash: return "Squash and merge"
+    case .rebase: return "Rebase and merge"
+    }
+  }
+}
+
 /// Parses machine-readable output from the remote repository commands. Keeping
 /// this pure makes the SSH boundary small and gives UI code typed state only.
 public enum GitRepositoryModel {
@@ -137,5 +169,30 @@ public enum GitRepositoryModel {
     case .passed, .skipped:
       return "\(checks.count) check\(checks.count == 1 ? "" : "s") passed"
     }
+  }
+
+  public static func mergeGate(from output: String) -> GitMergeGate {
+    guard let object = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any]
+    else { return .computing }
+    let mergeable = (object["mergeable"] as? String ?? "").uppercased()
+    let status = (object["mergeStateStatus"] as? String ?? "").uppercased()
+    let isDraft = object["isDraft"] as? Bool ?? false
+
+    // GitHub folds drafts and conflicts into BLOCKED under branch protection.
+    if isDraft || status == "DRAFT" { return .draft }
+    if mergeable == "CONFLICTING" || status == "DIRTY" { return .conflicted }
+    if mergeable == "UNKNOWN" || status == "UNKNOWN" || status.isEmpty { return .computing }
+    if status == "BEHIND" { return .behind }
+    if status == "BLOCKED" { return .blocked }
+    return .ready
+  }
+
+  public static func allowedMergeMethods(from output: String) -> [GitMergeMethod] {
+    guard let object = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any]
+    else { return [] }
+    let keys: [(String, GitMergeMethod)] = [
+      ("mergeCommitAllowed", .merge), ("squashMergeAllowed", .squash), ("rebaseMergeAllowed", .rebase),
+    ]
+    return keys.compactMap { key, method in (object[key] as? Bool) == true ? method : nil }
   }
 }
