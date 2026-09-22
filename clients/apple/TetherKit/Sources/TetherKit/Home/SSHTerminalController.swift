@@ -106,7 +106,6 @@ public final class SSHTerminalController {
   /// False until a load that actually fetched pull requests completes, so an
   /// empty list before the first fetch reads as loading, not "none open".
   public private(set) var gitPullRequestsLoaded = false
-  public private(set) var gitUpdatedAt: Date?
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
@@ -417,7 +416,6 @@ public final class SSHTerminalController {
         gitError = "Not a git repository:\n\(cwd)"
         return
       }
-      gitUpdatedAt = Date()
       gitBranch = GitRepositoryModel.branch(from: sections.branch)
       switch payload {
       case .all:

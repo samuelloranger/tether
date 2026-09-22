@@ -18,14 +18,7 @@ struct GitDiffView: View {
           Image(systemName: "arrow.triangle.branch").foregroundStyle(TetherColors.accent)
           Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
           Spacer()
-          VStack(alignment: .trailing, spacing: 1) {
-            Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
-            // Without this a refresh that changed nothing looks like a refresh
-            // that did nothing.
-            if let updated = controller.gitUpdatedAt {
-              Text("updated \(updated, style: .relative) ago").font(.caption2).foregroundStyle(TetherColors.textFaint)
-            }
-          }
+          Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         }.padding(.horizontal, 16).padding(.vertical, 12).background(TetherColors.surface)
         Picker("Git section", selection: $tab) { ForEach(Tab.allCases) { Text($0.rawValue).tag($0) } }
           .pickerStyle(.segmented).padding(12)
@@ -215,6 +208,15 @@ private struct PullRequestDetailView: View {
     }
   }
 
+  // Reflects the live detail state, not the row we opened from: a merged pull
+  // request must not still read "Open".
+  private var stateChip: (text: String, tint: Color) {
+    if detail.isMerged { return ("Merged", TetherColors.accent) }
+    if detail.state == .closed { return ("Closed", TetherColors.textFaint) }
+    if pullRequest.isDraft { return ("Draft", TetherColors.textSecondary) }
+    return ("Open", TetherColors.success)
+  }
+
   private var header: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("#\(pullRequest.number) \(pullRequest.title)").font(.title3.weight(.bold))
@@ -222,7 +224,7 @@ private struct PullRequestDetailView: View {
       Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced())
         .foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.middle)
       HStack(spacing: 6) {
-        chip(pullRequest.isDraft ? "Draft" : "Open", tint: pullRequest.isDraft ? TetherColors.textSecondary : TetherColors.success)
+        chip(stateChip.text, tint: stateChip.tint)
         chip("\(pullRequest.changedFiles) files", tint: TetherColors.textSecondary)
         if let decision = pullRequest.reviewDecision, !decision.isEmpty {
           chip(decision.replacingOccurrences(of: "_", with: " ").lowercased(), tint: TetherColors.accent)
