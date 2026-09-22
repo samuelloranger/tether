@@ -210,13 +210,16 @@ private struct PullRequestDetailView: View {
     }
   }
 
-  // Reflects the live detail state, not the row we opened from: a merged pull
-  // request must not still read "Open".
+  // Use the fetched detail once it lands, but fall back to the state the list
+  // row already carries so a merged pull request never flashes "Open" while its
+  // detail loads.
   private var stateChip: (text: String, tint: Color) {
-    if detail.isMerged { return ("Merged", TetherColors.accent) }
-    if detail.state == .closed { return ("Closed", TetherColors.textFaint) }
-    if pullRequest.isDraft { return ("Draft", TetherColors.textSecondary) }
-    return ("Open", TetherColors.success)
+    let state = detail.fetchedAt == .distantPast ? pullRequest.state : detail.state
+    switch state {
+    case .merged: return ("Merged", TetherColors.accent)
+    case .closed: return ("Closed", TetherColors.textFaint)
+    case .open: return pullRequest.isDraft ? ("Draft", TetherColors.textSecondary) : ("Open", TetherColors.success)
+    }
   }
 
   private var header: some View {
