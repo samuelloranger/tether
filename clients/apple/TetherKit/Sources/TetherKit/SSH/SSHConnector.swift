@@ -18,15 +18,34 @@ enum SSHConnector {
 
   /// Streams a long-running command's output. `onChunk` is called on the worker
   /// thread as bytes arrive and returns false to stop and tear the channel down.
+  /// Cancelling the calling task shuts the socket, so a quiet command stops too.
   static func execStream(
     config: SSHConnectionConfig,
     store: HostKeyStore,
     command: String,
     onChunk: @escaping @Sendable (String) -> Bool
   ) async throws {
-    try await onThread(named: "tether.ssh.execStream") {
-      try SSHConnectionSequence.runExecStream(
-        config: config, ops: LibSSH2Ops(config: config), store: store, command: command, onChunk: onChunk)
+    try await execStream(config: config, store: store, command: command, ops: LibSSH2Ops(config: config), onChunk: onChunk)
+  }
+
+  static func execStream(
+    config: SSHConnectionConfig,
+    store: HostKeyStore,
+    command: String,
+    ops: any SSHConnectionOps & Sendable,
+    onChunk: @escaping @Sendable (String) -> Bool
+  ) async throws {
+    let cancelled = LockedBox(false)
+    try await withTaskCancellationHandler {
+      try await onThread(named: "tether.ssh.execStream") {
+        if cancelled.value { throw CancellationError() }
+        try SSHConnectionSequence.runExecStream(
+          config: config, ops: ops, store: store, command: command
+        ) { chunk in !cancelled.value && onChunk(chunk) }
+      }
+    } onCancel: {
+      cancelled.value = true
+      ops.interrupt()
     }
   }
 

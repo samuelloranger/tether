@@ -141,4 +141,35 @@ final class ConnectionRecoveryTests: XCTestCase {
     XCTAssertEqual(SSHTerminalController.connectionCopy(status: .disconnected, reachability: offline)?.shortLabel, "no network")
     XCTAssertEqual(SSHTerminalController.connectionCopy(status: .failed("x"), reachability: usable)?.shortLabel, "error")
   }
+
+  // A live connection's socket dies with the path under it, but the kernel only
+  // says so after its retransmit timeout. The path monitor knows at once.
+  private let wifi = NetworkReachability(availability: .usable, interfaces: [.wifi])
+  private let cellular = NetworkReachability(availability: .usable, interfaces: [.cellular])
+  private let wifiOverCellular = NetworkReachability(availability: .usable, interfaces: [.wifi, .cellular])
+
+  func test_the_first_path_reading_never_invalidates_a_connection() {
+    XCTAssertFalse(SSHTerminalController.pathInvalidatesConnection(previous: nil, next: offline))
+  }
+
+  func test_the_same_path_reported_again_is_harmless() {
+    XCTAssertFalse(SSHTerminalController.pathInvalidatesConnection(previous: wifi, next: wifi))
+  }
+
+  func test_losing_the_network_invalidates_a_connection() {
+    XCTAssertTrue(SSHTerminalController.pathInvalidatesConnection(previous: wifi, next: offline))
+    XCTAssertTrue(SSHTerminalController.pathInvalidatesConnection(previous: wifi, next: needsConnection))
+  }
+
+  func test_losing_the_interface_the_connection_used_invalidates_it() {
+    XCTAssertTrue(SSHTerminalController.pathInvalidatesConnection(previous: wifi, next: cellular))
+  }
+
+  func test_a_better_interface_appearing_leaves_a_working_connection_alone() {
+    XCTAssertFalse(SSHTerminalController.pathInvalidatesConnection(previous: cellular, next: wifiOverCellular))
+  }
+
+  func test_a_path_coming_back_is_the_redial_path_not_an_invalidation() {
+    XCTAssertFalse(SSHTerminalController.pathInvalidatesConnection(previous: offline, next: wifi))
+  }
 }

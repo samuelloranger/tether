@@ -17,10 +17,28 @@ final class TerminalOutputBufferTests: XCTestCase {
     XCTAssertTrue(buffer.data.isEmpty)
   }
 
-  func testOverBudgetKeepsTheNewestSuffix() {
-    let buffer = TerminalOutputBuffer(byteBudget: 4)
-    buffer.append(Data("abcdef".utf8))
-    XCTAssertEqual(buffer.data, Data("cdef".utf8))
+  func testOverBudgetKeepsTheNewestTwoThirds() {
+    let buffer = TerminalOutputBuffer(byteBudget: 6)
+    buffer.append(Data("abcdefg".utf8))
+    XCTAssertEqual(buffer.data, Data("defg".utf8))
+  }
+
+  func testAfterATrimTheNextAppendsDoNotTrimAgain() {
+    let buffer = TerminalOutputBuffer(byteBudget: 6)
+    buffer.append(Data("abcdefg".utf8))
+    buffer.append(Data("h".utf8))
+    buffer.append(Data("i".utf8))
+    XCTAssertEqual(buffer.data, Data("defghi".utf8), "at budget, not over it: no copy")
+    buffer.append(Data("j".utf8))
+    XCTAssertEqual(buffer.data, Data("ghij".utf8))
+  }
+
+  func testTheBufferNeverHoldsMoreThanItsBudget() {
+    let buffer = TerminalOutputBuffer(byteBudget: 6)
+    for _ in 0..<50 {
+      buffer.append(Data("xyz".utf8))
+      XCTAssertLessThanOrEqual(buffer.data.count, 6)
+    }
   }
 }
 

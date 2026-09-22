@@ -13,6 +13,12 @@ final class ControlConnection: @unchecked Sendable {
   /// A libssh2 session tolerates several callers only because they queue here.
   private let queue: DispatchQueue
   private var ops: SSHConnectionOps?
+  /// The session a `reset()` from another thread may cut. The queue owns `ops`;
+  /// this is only ever used to call `interrupt()`.
+  private let liveLock = NSLock()
+  private var live: SSHConnectionOps?
+  /// Bumped by every reset, so a command can tell it was cut on purpose.
+  private var resets = 0
 
   init(
     config: SSHConnectionConfig,
@@ -35,16 +41,36 @@ final class ControlConnection: @unchecked Sendable {
   func exec(_ command: String) async throws -> String {
     try await onQueue { [self] in
       let reused = ops != nil
+      let resetsBefore = resetCount()
       do {
         return try run(command)
       } catch let error as SSHConnectError {
-        guard reused, error.isTransient else { throw error }
+        // A command cut by reset() is given up on, never re-run: it may have
+        // side effects (a merge, a kill) that already happened on the host.
+        guard reused, error.isTransient, resetCount() == resetsBefore else { throw error }
         return try run(command)
       }
     }
   }
 
+  /// Cuts the current session's socket from any thread: a command blocked on a
+  /// dead path fails now instead of when TCP gives up, and the next one dials
+  /// fresh. Safe when nothing is open.
+  func reset() {
+    liveLock.lock()
+    resets += 1
+    let current = live
+    liveLock.unlock()
+    current?.interrupt()
+  }
+
+  private func resetCount() -> Int {
+    liveLock.lock(); defer { liveLock.unlock() }
+    return resets
+  }
+
   func close() async {
+    reset()
     try? await onQueue { [self] in
       teardown()
       return ""
@@ -69,7 +95,13 @@ final class ControlConnection: @unchecked Sendable {
   private func openIfNeeded() throws -> SSHConnectionOps {
     if let ops { return ops }
     let fresh = makeOps()
-    try SSHConnectionSequence.authenticate(config: config, ops: fresh, store: store)
+    setLive(fresh)
+    do {
+      try SSHConnectionSequence.authenticate(config: config, ops: fresh, store: store)
+    } catch {
+      setLive(nil)
+      throw error
+    }
     ops = fresh
     return fresh
   }
@@ -77,6 +109,13 @@ final class ControlConnection: @unchecked Sendable {
   private func teardown() {
     ops?.teardown()
     ops = nil
+    setLive(nil)
+  }
+
+  private func setLive(_ ops: SSHConnectionOps?) {
+    liveLock.lock()
+    live = ops
+    liveLock.unlock()
   }
 
   private func onQueue(_ body: @escaping () throws -> String) async throws -> String {

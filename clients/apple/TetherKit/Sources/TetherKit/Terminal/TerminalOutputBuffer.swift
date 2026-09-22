@@ -14,8 +14,10 @@ final class TerminalOutputBuffer {
   func append(_ bytes: Data) {
     guard !bytes.isEmpty else { return }
     data.append(bytes)
+    // Trimming to exactly the budget re-copied the whole buffer on every read
+    // once it was full; dropping to two thirds copies once per third of a budget.
     if data.count > byteBudget {
-      data = Data(data.suffix(byteBudget))
+      data = Data(data.suffix(byteBudget * 2 / 3))
     }
   }
 
