@@ -75,7 +75,7 @@ final class SSHConnectionSequenceTests: XCTestCase {
     let ops = FakeOps()
     ops.accepts = { _ in false }
     XCTAssertThrowsError(try SSHConnectionSequence.run(config: config([key, pw]), ops: ops, store: MemoryHostKeyStore())) { error in
-      XCTAssertEqual(error as? SSHConnectError, .auth(.allFailed))
+      XCTAssertEqual(error as? SSHConnectError, .auth(.allFailed(detail: nil)))
     }
     XCTAssertEqual(ops.calls, [.connect, .fingerprint, .auth(key), .auth(pw), .teardown])
   }
@@ -88,5 +88,88 @@ final class SSHConnectionSequenceTests: XCTestCase {
       guard case .transport = (error as? SSHConnectError) else { return XCTFail("expected .transport, got \(error)") }
     }
     XCTAssertEqual(ops.calls, [.connect, .teardown])
+  }
+
+  func test_a_transfer_retries_a_transport_failure_once() {
+    XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.transport("socket closed")))
+    XCTAssertTrue(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.auth(.allFailed(detail: "Unable to sign"))))
+  }
+
+  func test_a_transfer_never_retries_a_changed_host_key() {
+    XCTAssertFalse(SSHTerminalController.shouldRetryTransfer(
+      after: SSHConnectError.hostKeyMismatch(expected: "aa", got: "bb")))
+  }
+
+  func test_a_transfer_does_not_retry_a_missing_credential() {
+    XCTAssertFalse(SSHTerminalController.shouldRetryTransfer(after: SSHConnectError.missingCredential(name: "homelab")))
+  }
+
+  /// Two sessions signing at once intermittently fails with libssh2 -19, so
+  /// handshake and auth are mutually exclusive across the app.
+  func test_two_connections_never_authenticate_at_the_same_time() {
+    let tracker = ConcurrencyTracker()
+    let store = InMemoryHostKeyStore()
+    let config = SSHConnectionConfig(
+      host: "example.internal", port: 22, username: "sam", credentials: [.password("pw")])
+
+    let group = DispatchGroup()
+    for _ in 0..<8 {
+      DispatchQueue.global().async(group: group) {
+        let ops = SlowAuthOps(tracker: tracker)
+        try? SSHConnectionSequence.authenticate(config: config, ops: ops, store: store)
+      }
+    }
+    XCTAssertEqual(group.wait(timeout: .now() + 10), .success, "the gate deadlocked")
+    XCTAssertEqual(tracker.peak, 1, "two sessions authenticated at once")
+    XCTAssertEqual(tracker.completed, 8, "every caller should still get through")
+  }
+}
+
+private final class ConcurrencyTracker: @unchecked Sendable {
+  private let lock = NSLock()
+  private var inFlight = 0
+  private(set) var peak = 0
+  private(set) var completed = 0
+
+  func enter() {
+    lock.lock(); inFlight += 1; peak = max(peak, inFlight); lock.unlock()
+  }
+
+  func leave() {
+    lock.lock(); inFlight -= 1; completed += 1; lock.unlock()
+  }
+}
+
+private final class SlowAuthOps: SSHConnectionOps, @unchecked Sendable {
+  private let tracker: ConcurrencyTracker
+  init(tracker: ConcurrencyTracker) { self.tracker = tracker }
+
+  func connectAndHandshake() throws { tracker.enter() }
+  func hostKeyFingerprint() throws -> String { "aa:bb" }
+
+  func authenticate(_ credential: SSHCredential) throws -> Bool {
+    // Wide enough that overlapping callers would be caught.
+    Thread.sleep(forTimeInterval: 0.02)
+    tracker.leave()
+    return true
+  }
+
+  func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream {
+    throw SSHConnectError.transport("not used")
+  }
+
+  func exec(_ command: String) throws -> String { "" }
+  func teardown() {}
+}
+
+private final class InMemoryHostKeyStore: HostKeyStore, @unchecked Sendable {
+  private let lock = NSLock()
+  private var pinned: [String: String] = [:]
+  func pinnedFingerprint(host: String, port: Int) -> String? {
+    lock.lock(); defer { lock.unlock() }
+    return pinned["\(host):\(port)"]
+  }
+  func pin(_ fingerprint: String, host: String, port: Int) {
+    lock.lock(); pinned["\(host):\(port)"] = fingerprint; lock.unlock()
   }
 }

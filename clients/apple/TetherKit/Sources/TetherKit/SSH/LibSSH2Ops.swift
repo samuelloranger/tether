@@ -54,11 +54,25 @@ final class LibSSH2Ops: SSHConnectionOps {
     case let .privateKey(pem, passphrase):
       rc = LibSSH2Ops.authPublicKey(session: session, username: config.username, pem: pem, passphrase: passphrase)
     }
-    if rc == 0 { return true }
+    if rc == 0 {
+      lastAuthDetail = nil
+      return true
+    }
+    lastAuthDetail = LibSSH2Ops.lastError(session: session, rc: rc)
     if rc == LibSSH2Const.authenticationFailed || rc == LibSSH2Const.publickeyUnverified {
       return false
     }
     throw LibSSH2OpsError.authError(Int(rc))
+  }
+
+  private(set) var lastAuthDetail: String?
+
+  private static func lastError(session: OpaquePointer, rc: Int32) -> String {
+    var message: UnsafeMutablePointer<CChar>?
+    var length: Int32 = 0
+    _ = libssh2_session_last_error(session, &message, &length, 0)
+    guard let message, length > 0 else { return "libssh2 error \(rc)" }
+    return "\(String(cString: message)) (libssh2 \(rc))"
   }
 
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream {

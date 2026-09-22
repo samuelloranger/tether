@@ -7,7 +7,9 @@ enum SSHCredential: Equatable, Sendable {
 
 enum SSHAuthError: Error, Equatable {
   case noCredentials
-  case allFailed
+  /// A server rejecting the key and a client failing to sign both land here and
+  /// need different fixes, so `detail` carries libssh2's own reason.
+  case allFailed(detail: String?)
 }
 
 func authenticateInOrder(
@@ -18,5 +20,5 @@ func authenticateInOrder(
   for credential in credentials where try attempt(credential) {
     return credential
   }
-  throw SSHAuthError.allFailed
+  throw SSHAuthError.allFailed(detail: nil)
 }

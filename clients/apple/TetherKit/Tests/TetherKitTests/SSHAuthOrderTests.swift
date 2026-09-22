@@ -28,7 +28,7 @@ final class SSHAuthOrderTests: XCTestCase {
 
   func test_throws_allFailed_when_every_credential_is_rejected() {
     XCTAssertThrowsError(try authenticateInOrder([keyA, keyB]) { _ in false }) { error in
-      XCTAssertEqual(error as? SSHAuthError, .allFailed)
+      XCTAssertEqual(error as? SSHAuthError, .allFailed(detail: nil))
     }
   }
 
@@ -48,5 +48,16 @@ final class SSHAuthOrderTests: XCTestCase {
       XCTAssertTrue(error is Boom)
     }
     XCTAssertEqual(tried, [keyA]) // stopped at the transport failure
+  }
+
+  /// A rejected key and a client that could not sign need different fixes.
+  func test_the_reason_from_the_transport_reaches_the_message() {
+    let described = SSHConnectError.auth(.allFailed(detail: "Callback returned error")).errorDescription ?? ""
+    XCTAssertTrue(described.contains("Callback returned error"), "lost the detail: \(described)")
+  }
+
+  func test_without_a_reason_the_message_stays_the_plain_one() {
+    let described = SSHConnectError.auth(.allFailed(detail: nil)).errorDescription ?? ""
+    XCTAssertEqual(described, "Authentication failed. Check the key or password.")
   }
 }

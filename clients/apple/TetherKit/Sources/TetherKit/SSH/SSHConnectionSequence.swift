@@ -7,10 +7,13 @@ protocol SSHConnectionOps: AnyObject {
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
   func exec(_ command: String) throws -> String
   func scpSend(data: Data, remotePath: String, mode: Int32) throws
+  var lastAuthDetail: String? { get }
   func teardown()
 }
 
 extension SSHConnectionOps {
+  var lastAuthDetail: String? { nil }
+
   func scpSend(data: Data, remotePath: String, mode: Int32) throws {
     throw SSHConnectError.transport("File transfer not supported")
   }
@@ -35,8 +38,11 @@ enum SSHConnectError: Error, Equatable, LocalizedError {
     switch self {
     case let .hostKeyMismatch(expected, got):
       return "Host key changed — refused.\nExpected \(expected)\nGot \(got)"
-    case .auth:
-      return "Authentication failed. Check the key or password."
+    case let .auth(error):
+      guard case let .allFailed(detail) = error, let detail, !detail.isEmpty else {
+        return "Authentication failed. Check the key or password."
+      }
+      return "Authentication failed. Check the key or password.\n\(detail)"
     case let .transport(detail):
       return "Could not connect: \(detail)"
     case let .missingCredential(name):
@@ -96,6 +102,22 @@ enum SSHConnectionSequence {
     }
   }
 
+  /// Connect and authenticate, leaving the session open for repeated use —
+  /// unlike `runExec`, which tears it down.
+  static func authenticate(
+    config: SSHConnectionConfig,
+    ops: SSHConnectionOps,
+    store: HostKeyStore
+  ) throws {
+    try gate(config: config, ops: ops, store: store)
+  }
+
+  /// Signing the publickey challenge on two sessions at once intermittently
+  /// fails: the server accepts the key offer and the client cannot sign it
+  /// ("Callback returned error", libssh2 -19). Only handshake and auth are
+  /// serialized; the PTY stream, exec channels and uploads stay concurrent.
+  private static let handshakeLock = NSLock()
+
   /// Shared connect → host-key gate → auth. Trust-on-first-use pins an unknown
   /// key and refuses a changed one. Tears the session down on any failure and
   /// leaves it authenticated on success.
@@ -104,6 +126,8 @@ enum SSHConnectionSequence {
     ops: SSHConnectionOps,
     store: HostKeyStore
   ) throws {
+    handshakeLock.lock()
+    defer { handshakeLock.unlock() }
     do {
       try ops.connectAndHandshake()
     } catch {
@@ -122,7 +146,9 @@ enum SSHConnectionSequence {
       ops.teardown()
       throw error
     } catch let error as SSHAuthError {
+      let detail = ops.lastAuthDetail
       ops.teardown()
+      if case .allFailed = error { throw SSHConnectError.auth(.allFailed(detail: detail)) }
       throw SSHConnectError.auth(error)
     } catch {
       ops.teardown()

@@ -48,13 +48,25 @@ public final class SSHTerminalController {
   /// empty-state prompt until the user creates one.
   public private(set) var hasSession = true
   public private(set) var gitLines: [GitDiffLine] = []
+  public private(set) var gitBranch = ""
+  public private(set) var gitCommits: [GitCommit] = []
+  public private(set) var gitPullRequests: [GitPullRequest] = []
+  /// Why the list is empty, when the reason is not "none open".
+  public private(set) var gitPullRequestNotice: String?
+  public private(set) var gitChecks: [GitCheck] = []
+  public private(set) var gitChecksUpdatedAt: Date?
+  public private(set) var gitChecksLoading = false
+  public private(set) var gitPullRequestBody = ""
+  public private(set) var gitUpdatedAt: Date?
   public private(set) var gitError: String?
+  public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
   public private(set) var transfer: TransferState = .idle
-  /// Last normalized network path. `nil` until the observer reports one.
   public private(set) var reachability: NetworkReachability?
 
   private let pathObserver = NetworkPathObserver()
+  /// Opened lazily on first use, which is always after the terminal connects.
+  private let control: ControlConnection
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
   private let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
@@ -82,6 +94,7 @@ public final class SSHTerminalController {
     self.hostKeyStore = hostKeyStore
     self.attach = attach
     self.pushIdentity = pushIdentity
+    self.control = ControlConnection(config: config, store: hostKeyStore)
     // Stable across zmx switches — one continuous connection/grid.
     self.sessionKey = "ssh:\(config.host):\(config.port)"
     observe()
@@ -152,6 +165,7 @@ public final class SSHTerminalController {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
+    // Its own dial: this runs before the terminal's handshake.
     guard let out = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") else { return }
     let existing = ZmxSession.parse(out)
     // No sessions at all → don't create "default"; land on the empty state.
@@ -168,9 +182,9 @@ public final class SSHTerminalController {
     guard !didRegisterPush, let id = pushIdentity else { return }
     didRegisterPush = true
     let command = "\(Self.notify) register \(shellQuote(id.token)) \(shellQuote(id.secretKey)) \(shellQuote(id.label))"
-    Task { [config, hostKeyStore] in
+    Task {
       try? await Task.sleep(nanoseconds: 2_000_000_000)
-      _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: command)
+      _ = try? await control.exec(command)
     }
   }
 
@@ -178,7 +192,7 @@ public final class SSHTerminalController {
   /// (separate connection) before the daemon registers it.
   public func refreshSessions() async {
     for attempt in 0..<3 {
-      if let output = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") {
+      if let output = try? await control.exec("\(Self.zmx) ls") {
         let parsed = ZmxSession.parse(output)
         if !parsed.isEmpty || attempt == 2 { sessions = parsed; return }
       }
@@ -224,7 +238,7 @@ public final class SSHTerminalController {
         pendingNoSession = true
       }
     }
-    _ = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) kill \(shellQuote(name)) --force")
+    _ = try? await control.exec("\(Self.zmx) kill \(shellQuote(name)) --force")
     await refreshSessions()
   }
 
@@ -236,9 +250,7 @@ public final class SSHTerminalController {
     // fall back to the login dir.
     await refreshSessions()
     guard let session = sessions.first(where: { $0.name == attach }) else { return nil }
-    if let live = try? await SSHConnector.exec(
-      config: config, store: hostKeyStore, command: "readlink /proc/\(session.pid)/cwd 2>/dev/null"
-    ) {
+    if let live = try? await control.exec("readlink /proc/\(session.pid)/cwd 2>/dev/null") {
       let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmed.hasPrefix("/") { return trimmed }
     }
@@ -252,7 +264,13 @@ public final class SSHTerminalController {
     let remote = dir.map { "\($0)/\(filename)" } ?? filename
     transfer = .sending(filename)
     do {
-      try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
+      // Its own connection: commands are serialized on the control one, and a
+      // large upload would hold the session list and the git screen behind it.
+      do {
+        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
+      } catch where Self.shouldRetryTransfer(after: error) {
+        try await SSHConnector.scpSend(config: config, store: hostKeyStore, data: data, remotePath: remote)
+      }
       transfer = .sent(remote)
       return remote
     } catch {
@@ -263,7 +281,19 @@ public final class SSHTerminalController {
 
   public func clearTransfer() { transfer = .idle }
 
-  public func loadGitDiff() async {
+  /// A transfer that failed before any SSH work reuses the upload banner.
+  public func reportTransferFailure(_ message: String) { transfer = .failed(message) }
+
+  /// A changed host key and a missing credential are answers, not noise:
+  /// repeating them only delays telling the user.
+  nonisolated static func shouldRetryTransfer(after error: Error) -> Bool {
+    switch error as? SSHConnectError {
+    case .hostKeyMismatch, .missingCredential: return false
+    default: return true
+    }
+  }
+
+  public func loadGitWorkspace() async {
     gitLoading = true
     defer { gitLoading = false }
     gitError = nil
@@ -272,26 +302,125 @@ public final class SSHTerminalController {
       gitError = "No working directory for this session."
       return
     }
-    // One exec, not two: gate on is-inside-work-tree and emit the diff in the
-    // same shell so a git open costs a single SSH handshake. The sentinel marks
-    // "not a repo" (an empty diff is a valid, distinct result).
+    // The sentinel marks "not a repo" — an empty diff is a valid, distinct
+    // result.
     let sentinel = "__TETHER_NOTREPO__"
     let q = shellQuote(cwd)
-    let command = "if git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1; "
-      + "then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
+    let repositoryGuard = "git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1"
+    let diffCommand = "if \(repositoryGuard); then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
+    let branchCommand = "if \(repositoryGuard); then git -C \(q) branch --show-current; fi"
+    let commitsCommand = "if \(repositoryGuard); then git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'; fi"
+    // Keep gh's stderr: swallowing it into an empty list made the screen blame
+    // a missing CLI for a repository with nothing open.
+    let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
+    let pullRequestsCommand = "if \(repositoryGuard); then "
+      + "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); "
+      + "else printf '%s' \(ghMissing); fi; else printf '[]'; fi"
     do {
-      let raw = try await SSHConnector.exec(config: config, store: hostKeyStore, command: command)
-      if raw.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
+      async let raw = control.exec(diffCommand)
+      async let branch = control.exec(branchCommand)
+      async let commits = control.exec(commitsCommand)
+      async let pullRequests = control.exec(pullRequestsCommand)
+      let (diff, branchOutput, commitsOutput, pullRequestsOutput) = try await (raw, branch, commits, pullRequests)
+      if diff.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
         gitLines = []
+        gitBranch = ""
+        gitCommits = []
+        gitPullRequests = []
+        gitPullRequestNotice = nil
         gitError = "Not a git repository:\n\(cwd)"
         return
       }
-      gitLines = GitDiffModel.classify(raw)
-      gitError = gitLines.isEmpty ? "No uncommitted changes in \(cwd)." : nil
+      gitUpdatedAt = Date()
+      gitLines = GitDiffModel.classify(diff)
+      gitBranch = GitRepositoryModel.branch(from: branchOutput)
+      gitCommits = GitRepositoryModel.commits(from: commitsOutput)
+      switch GitRepositoryModel.pullRequestResult(from: pullRequestsOutput) {
+      case let .list(pulls):
+        gitPullRequests = pulls
+        gitPullRequestNotice = nil
+      case .toolMissing:
+        gitPullRequests = []
+        gitPullRequestNotice = "GitHub CLI isn't installed on this host."
+      case let .failed(reason):
+        gitPullRequests = []
+        gitPullRequestNotice = reason
+      }
     } catch {
       gitLines = []
       gitError = Self.describe(error)
     }
+  }
+
+  public func loadGitDiff() async { await loadGitWorkspace() }
+
+  /// Checks and description for one pull request, in a single round trip.
+  public func loadPullRequestDetail(_ pullRequest: GitPullRequest) async {
+    gitChecksLoading = true
+    defer { gitChecksLoading = false }
+    guard let cwd = await currentCwd() else { return }
+    let command = "cd \(shellQuote(cwd)) && gh pr view \(pullRequest.number) --json statusCheckRollup,body 2>/dev/null"
+    guard let raw = try? await control.exec(command),
+      let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+    else {
+      gitChecksUpdatedAt = Date()
+      return
+    }
+    if let rollup = object["statusCheckRollup"],
+      let encoded = try? JSONSerialization.data(withJSONObject: rollup) {
+      gitChecks = GitRepositoryModel.checks(from: String(decoding: encoded, as: UTF8.self))
+    }
+    gitPullRequestBody = (object["body"] as? String) ?? ""
+    gitChecksUpdatedAt = Date()
+  }
+
+  /// One commit's patch, kept apart from `gitLines` so opening a commit does
+  /// not replace the working-tree diff behind it.
+  public func commitDiff(_ commit: GitCommit) async -> [GitDiffLine] {
+    guard let cwd = await currentCwd() else { return [] }
+    let command = "git -C \(shellQuote(cwd)) --no-pager show \(shellQuote(commit.id)) --patch --stat --format=%b 2>&1"
+    guard let raw = try? await control.exec(command) else { return [] }
+    return GitDiffModel.classify(raw)
+  }
+
+  /// The pull request's own patch, returned rather than stored: the working
+  /// tree's diff lives in `gitLines`, and the refresh loop would overwrite this.
+  public func pullRequestDiff(_ pullRequest: GitPullRequest) async -> [GitDiffLine] {
+    guard let cwd = await currentCwd() else { return [] }
+    let command = "cd \(shellQuote(cwd)) && gh pr diff \(pullRequest.number) 2>&1"
+    guard let raw = try? await control.exec(command) else { return [] }
+    return GitDiffModel.classify(raw)
+  }
+
+  public func checkoutPullRequest(_ pullRequest: GitPullRequest) async {
+    await runGitAction("Checking out #\(pullRequest.number)…") { cwd in
+      let q = shellQuote(cwd)
+      let branch = shellQuote("tether/pr/\(pullRequest.number)")
+      return "git -C \(q) fetch origin pull/\(pullRequest.number)/head:\(branch) && git -C \(q) switch \(branch)"
+    }
+  }
+
+  public func updatePullRequest(_ pullRequest: GitPullRequest) async {
+    await runGitAction("Updating #\(pullRequest.number)…") { cwd in
+      let branch = shellQuote("tether/pr/\(pullRequest.number)")
+      return "git -C \(shellQuote(cwd)) fetch origin pull/\(pullRequest.number)/head:\(branch)"
+    }
+  }
+
+  public func closePullRequest(_ pullRequest: GitPullRequest) async {
+    await runGitAction("Closing #\(pullRequest.number)…") { cwd in
+      "cd \(shellQuote(cwd)) && gh pr close \(pullRequest.number)"
+    }
+  }
+
+  private func runGitAction(_ message: String, command: (String) -> String) async {
+    gitActionMessage = message
+    guard let cwd = await currentCwd() else { gitActionMessage = "No working directory for this session."; return }
+    do {
+      _ = try await control.exec(command(cwd))
+      gitActionMessage = nil
+      await loadGitWorkspace()
+    } catch { gitActionMessage = Self.describe(error) }
   }
 
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
@@ -368,9 +497,8 @@ public final class SSHTerminalController {
   /// screen — `zmx history` is the real transcript. Falls back to the visible
   /// screen if the exec fails.
   public func historyText() async -> String {
-    if let out = try? await SSHConnector.exec(
-      config: config, store: hostKeyStore, command: "\(Self.zmx) history \(shellQuote(attach))"
-    ), !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    if let out = try? await control.exec("\(Self.zmx) history \(shellQuote(attach))"),
+      !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return out
     }
     return await pipeline.historyText()
@@ -389,6 +517,7 @@ public final class SSHTerminalController {
   public func scroll(lines: Int32) { Task { await pipeline.scrollViewport(lines: lines) } }
   public func leave() async {
     stopNetworkWatch()
+    await control.close()
     await pipeline.disconnect()
   }
 
