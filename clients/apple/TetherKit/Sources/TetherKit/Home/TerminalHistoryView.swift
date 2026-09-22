@@ -11,25 +11,43 @@ struct TerminalHistoryView: View {
   var onClose: () -> Void
 
   @State private var text: String?
+  @State private var copyFeedback = 0
+  @State private var showCopyConfirmation = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     NavigationStack {
       Group {
-        if let text {
+        if let text, !text.isEmpty {
           SelectableTextView(
             text: text,
             fontName: preferences.terminalFont.postScriptName,
             fontSize: preferences.terminalFontSize
           )
           .ignoresSafeArea(edges: .bottom)
+        } else if text != nil {
+          VStack(spacing: 10) {
+            Image(systemName: "clock.arrow.circlepath").font(.largeTitle)
+              .foregroundStyle(TetherColors.textFaint)
+            Text("Nothing in this session's scrollback yet.")
+              .font(.system(.footnote, design: .monospaced))
+              .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
+            Button("Reload") { Task { text = await controller.historyText() } }
+              .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.accent)
+              .accessibilityIdentifier("historyReload")
+          }
+          .padding(24)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(TetherColors.terminalBackground)
         } else {
           VStack(spacing: 10) {
             ProgressView().tint(TetherColors.accent)
-            Text("Loading history…").font(.system(size: 13, design: .monospaced))
+            Text("Loading history…").font(.system(.footnote, design: .monospaced))
               .foregroundStyle(TetherColors.textSecondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .background(TetherColors.terminalBackground)
+          .accessibilityLabel("Loading history")
         }
       }
       .navigationTitle("History")
@@ -38,7 +56,9 @@ struct TerminalHistoryView: View {
         ToolbarItem(placement: .cancellationAction) { Button("Done") { onClose() } }
         ToolbarItem(placement: .primaryAction) {
           Button {
-            if let text, !text.isEmpty { UIPasteboard.general.string = text }
+            guard let text, !text.isEmpty else { return }
+            UIPasteboard.general.string = text
+            acknowledgeCopy()
           } label: {
             Image(systemName: "doc.on.doc")
           }
@@ -47,7 +67,38 @@ struct TerminalHistoryView: View {
         }
       }
     }
+    .overlay(alignment: .bottom) {
+      copyConfirmation.animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: showCopyConfirmation)
+    }
+    .sensoryFeedback(.success, trigger: copyFeedback)
     .task { text = await controller.historyText() }
+  }
+
+  private func acknowledgeCopy() {
+    copyFeedback += 1
+    showCopyConfirmation = true
+    // The pill is gone in about a second and leaves nothing behind, so it is
+    // the one outcome VoiceOver has to be told about directly.
+    UIAccessibility.post(notification: .announcement, argument: "Copied")
+    Task {
+      try? await Task.sleep(for: .seconds(1.2))
+      guard !Task.isCancelled else { return }
+      showCopyConfirmation = false
+    }
+  }
+
+  @ViewBuilder
+  private var copyConfirmation: some View {
+    if showCopyConfirmation {
+      Label("Copied", systemImage: "checkmark.circle.fill")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(TetherColors.textPrimary)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(TetherColors.surface.opacity(0.96), in: Capsule())
+        .overlay(Capsule().strokeBorder(TetherColors.accent.opacity(0.5)))
+        .padding(.bottom, 24)
+        .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+    }
   }
 }
 

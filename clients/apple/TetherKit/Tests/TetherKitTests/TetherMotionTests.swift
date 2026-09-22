@@ -17,4 +17,5 @@ final class TetherMotionTests: XCTestCase {
     XCTAssertGreaterThan(TetherMotion.pressScale, 0.9)
   }
 
+
 }

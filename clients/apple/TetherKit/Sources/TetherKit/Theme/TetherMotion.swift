@@ -23,11 +23,29 @@ public enum TetherMotion {
   /// Reduce Motion still gets a crossfade — Apple's own substitution for
   /// movement — just a short one, with nothing that travels.
   public static let crossfade: Double = 0.12
+  /// A narrow, intentional affordance that leaves terminal gestures untouched.
+  public static let drawerEdgeWidth: CGFloat = 24
+  /// Short drags are touch noise, not a request to open terminal chrome.
+  public static let drawerActivationDistance: CGFloat = 44
 
   /// Confident deceleration. Not a spring: springs overshoot, and an overshoot
   /// on a status colour reads as a second state change.
   public static func decelerate(_ duration: Double) -> Animation {
     .timingCurve(0.16, 1, 0.3, 1, duration: duration)
+  }
+
+  /// Settling a panel the finger was just holding. A spring, unlike the rest of
+  /// the chrome: here an overshoot reads as momentum continuing, not as a second
+  /// state change. Duration is short enough that a flick feels answered.
+  public static func drawerSettle(reduceMotion: Bool) -> Animation {
+    reduceMotion ? .easeOut(duration: crossfade) : .snappy(duration: 0.3, extraBounce: 0.04)
+  }
+
+  /// A side panel arrives from its own edge. Without this it is *inserted*, and
+  /// SwiftUI's default insertion is a fade — so opening from the button faded
+  /// while dragging slid, two different answers to the same action.
+  public static func drawerTransition(reduceMotion: Bool) -> AnyTransition {
+    reduceMotion ? .opacity : .move(edge: .leading)
   }
 
   /// A routine transition, collapsed to a plain crossfade under Reduce Motion.

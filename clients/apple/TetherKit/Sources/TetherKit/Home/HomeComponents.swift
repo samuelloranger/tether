@@ -50,30 +50,37 @@ struct MachineCardView: View {
   let authLabel: String
   var onOpen: () -> Void
 
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
   var body: some View {
-    Button(action: onOpen) {
+    // Two monospaced runs side by side wrap into each other at accessibility
+    // sizes, so they stack there instead.
+    let detailLayout: AnyLayout = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+      : AnyLayout(HStackLayout(spacing: 6))
+    return Button(action: onOpen) {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 10) {
           Circle().fill(TetherColors.heatCool).frame(width: 11, height: 11).opacity(0.6)
-          Text(profile.name).font(.system(size: 16, weight: .semibold))
+          Text(profile.name).font(.headline)
             .foregroundStyle(TetherColors.textPrimary)
           Spacer()
-          Text("saved").font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+          Text("saved").font(.caption2.weight(.semibold).monospaced())
             .padding(.horizontal, 8).padding(.vertical, 3)
             .foregroundStyle(TetherColors.textFaint)
             .background(Color.white.opacity(0.04), in: Capsule())
             .overlay(Capsule().strokeBorder(TetherColors.border))
         }
-        HStack(spacing: 6) {
+        detailLayout {
           Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
           Text(verbatim: "· \(authLabel)").foregroundStyle(TetherColors.textFaint)
         }
-        .font(.system(size: 11.5, design: .monospaced))
+        .font(.caption.monospaced())
         .foregroundStyle(TetherColors.textSecondary)
         HStack(spacing: 4) {
           Spacer()
-          Text("Open").font(.system(size: 12, weight: .semibold))
-          Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+          Text("Open").font(.caption.weight(.semibold))
+          Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
         }
         .foregroundStyle(TetherColors.accent)
       }
@@ -83,6 +90,8 @@ struct MachineCardView: View {
     }
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("homeMachine_\(profile.name)")
+    .accessibilityLabel("\(profile.name), \(profile.username) at \(profile.host) port \(profile.port), \(authLabel)")
+    .accessibilityHint("Opens a terminal on this machine")
   }
 }
 
@@ -90,32 +99,40 @@ struct KeyCardView: View {
   let record: SSHKeyRecord
   let usedBy: [String]
 
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
   var body: some View {
-    HStack(alignment: .top, spacing: 13) {
-      RandomartGridView(publicKey: record.publicKey).frame(width: 78)
+    let titleLayout: AnyLayout = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+      : AnyLayout(HStackLayout(spacing: 7))
+    return HStack(alignment: .top, spacing: 13) {
+      // Decorative: at accessibility sizes the name and fingerprint need the width.
+      if DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
+        RandomartGridView(publicKey: record.publicKey).frame(width: 78).accessibilityHidden(true)
+      }
       VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 7) {
-          Text(record.name).font(.system(size: 15, weight: .semibold))
+        titleLayout {
+          Text(record.name).font(.subheadline.weight(.semibold))
             .foregroundStyle(TetherColors.textPrimary)
           Text(record.origin.rawValue)
-            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .font(.caption2.weight(.bold).monospaced())
             .padding(.horizontal, 6).padding(.vertical, 2)
             .foregroundStyle(TetherColors.accent)
             .background(TetherColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
         }
         Text("\(record.algorithm) · \(shortDate(record.createdAt))")
-          .font(.system(size: 10, design: .monospaced)).foregroundStyle(TetherColors.textFaint)
+          .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
         Text(shortFingerprint)
-          .font(.system(size: 10.5, design: .monospaced)).foregroundStyle(TetherColors.textSecondary)
+          .font(.caption2.monospaced()).foregroundStyle(TetherColors.textSecondary)
           .lineLimit(1).truncationMode(.middle)
         Text(usedBy.isEmpty ? "not used yet" : "used by \(usedBy.joined(separator: ", "))")
-          .font(.system(size: 10, design: .monospaced)).foregroundStyle(TetherColors.textFaint)
+          .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
         Button {
           #if canImport(UIKit)
           UIPasteboard.general.string = record.publicKey
           #endif
         } label: {
-          Text("Copy public key").font(.system(size: 11.5, weight: .semibold))
+          Text("Copy public key").font(.caption.weight(.semibold))
             .foregroundStyle(TetherColors.accent)
         }
         .padding(.top, 3)

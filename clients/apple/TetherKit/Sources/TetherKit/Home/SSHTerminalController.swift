@@ -18,6 +18,14 @@ public final class SSHTerminalController {
     case failed(String)
   }
 
+  /// What the terminal overlay says while there is no live session. Text plus
+  /// an icon — connection state is never carried by colour alone.
+  public struct ConnectionCopy: Equatable {
+    public var message: String
+    public var icon: String
+    public var showsRetry: Bool
+  }
+
   public enum TransferState: Equatable {
     case idle
     case sending(String)
@@ -43,7 +51,10 @@ public final class SSHTerminalController {
   public private(set) var gitError: String?
   public private(set) var gitLoading = false
   public private(set) var transfer: TransferState = .idle
+  /// Last normalized network path. `nil` until the observer reports one.
+  public private(set) var reachability: NetworkReachability?
 
+  private let pathObserver = NetworkPathObserver()
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
   private let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
@@ -284,9 +295,72 @@ public final class SSHTerminalController {
   }
 
   /// Foreground-redial: never reuse a socket iOS may have killed while suspended.
+  /// Shares the gate with the path observer so the two triggers can't race.
   public func reconnectIfNeeded() async {
-    if case .connected = status { return }
+    guard Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) else { return }
     await connect()
+  }
+
+  /// Watch the network path for this screen. Redials only when a path *becomes*
+  /// usable — a usable path is a route, never proof the host answered.
+  public func startNetworkWatch() {
+    pathObserver.start { [weak self] value in self?.pathChanged(value) }
+  }
+
+  public func stopNetworkWatch() { pathObserver.stop() }
+
+  private func pathChanged(_ value: NetworkReachability) {
+    let previous = reachability
+    reachability = value
+    guard Self.shouldRedial(previous: previous, next: value, status: status, dialing: connectInFlight) else { return }
+    Task { await connect() }
+  }
+
+  /// The one network-driven recovery decision. Only an edge into a usable path
+  /// counts: the monitor re-reports the same path on every interface change.
+  nonisolated static func shouldRedial(
+    previous: NetworkReachability?, next: NetworkReachability, status: Status, dialing: Bool
+  ) -> Bool {
+    guard next.isUsable, previous?.isUsable != true else { return false }
+    return shouldRedialOnForeground(status: status, dialing: dialing, reachability: next)
+  }
+
+  /// Shared tail of both triggers: never disturb a live or in-flight connection,
+  /// and never dial into a path that cannot carry the connection.
+  nonisolated static func shouldRedialOnForeground(
+    status: Status, dialing: Bool, reachability: NetworkReachability?
+  ) -> Bool {
+    if dialing { return false }
+    switch status {
+    case .connected, .connecting: return false
+    case .disconnected, .failed: break
+    }
+    switch reachability?.availability {
+    case .offline, .requiresConnection: return false
+    case .usable, nil: return true
+    }
+  }
+
+  /// Overlay copy for a terminal without a live session. A real SSH or host-key
+  /// failure always outranks network copy — that is what the user must act on.
+  nonisolated static func connectionCopy(status: Status, reachability: NetworkReachability?) -> ConnectionCopy? {
+    switch status {
+    case .connected:
+      return nil
+    case .connecting:
+      return ConnectionCopy(message: "Connecting…", icon: "antenna.radiowaves.left.and.right", showsRetry: false)
+    case let .failed(message):
+      return ConnectionCopy(message: message, icon: "exclamationmark.triangle", showsRetry: true)
+    case .disconnected:
+      switch reachability?.availability {
+      case .offline:
+        return ConnectionCopy(message: "Waiting for a network connection", icon: "wifi.slash", showsRetry: false)
+      case .requiresConnection:
+        return ConnectionCopy(message: "Network needs a connection", icon: "exclamationmark.triangle", showsRetry: false)
+      case .usable, nil:
+        return ConnectionCopy(message: "Connection lost — reconnecting…", icon: "arrow.clockwise", showsRetry: false)
+      }
+    }
   }
 
   /// Full session scrollback for the history screen. zmx runs a full-screen
@@ -313,7 +387,10 @@ public final class SSHTerminalController {
     pipeline.outbound.yield(.serverResize(cols: cols, rows: rows))
   }
   public func scroll(lines: Int32) { Task { await pipeline.scrollViewport(lines: lines) } }
-  public func leave() async { await pipeline.disconnect() }
+  public func leave() async {
+    stopNetworkWatch()
+    await pipeline.disconnect()
+  }
 
   private func apply(_ event: TerminalPipelineEvent) {
     switch event {
@@ -338,6 +415,9 @@ public final class SSHTerminalController {
   private func markDisconnectedAndReconnect() {
     guard let next = Self.statusAfterTransportDrop(from: status) else { return }
     status = next
+    // A drop caused by the network dying must not spin on a dead path: the
+    // observer redials the moment a usable one comes back.
+    guard Self.shouldRedialOnForeground(status: next, dialing: connectInFlight, reachability: reachability) else { return }
     Task { await self.connect() }
   }
 
