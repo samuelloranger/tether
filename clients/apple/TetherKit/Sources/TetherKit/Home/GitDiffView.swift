@@ -169,14 +169,8 @@ private struct PullRequestDetailView: View {
       refreshDescription(body)
     }
     .toolbar { ToolbarItem(placement: .topBarTrailing) { overflowMenu } }
-    .confirmationDialog("Merge #\(pullRequest.number)?", isPresented: $confirmMerge, titleVisibility: .visible) {
-      ForEach(methods) { method in
-        Button(method.label) { Task { await controller.mergePullRequest(pullRequest, method: method) } }
-      }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("\(pullRequest.head) → \(pullRequest.base)")
-    }
+    // The close dialog lives on its own host: two confirmationDialogs on one
+    // view collapse to a single presentation, and the second silently wins.
     .confirmationDialog("Close pull request #\(pullRequest.number)?", isPresented: $confirmClose, titleVisibility: .visible) {
       Button("Close pull request", role: .destructive) { Task { await controller.closePullRequest(pullRequest) } }
       Button("Cancel", role: .cancel) {}
@@ -295,6 +289,14 @@ private struct PullRequestDetailView: View {
     .padding(14)
     .frame(maxWidth: .infinity, alignment: .leading)
     .tetherCard()
+    .confirmationDialog("Merge #\(pullRequest.number)?", isPresented: $confirmMerge, titleVisibility: .visible) {
+      ForEach(methods) { method in
+        Button(method.label) { Task { await controller.mergePullRequest(pullRequest, method: method) } }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("\(pullRequest.head) → \(pullRequest.base)")
+    }
   }
 
   private var reviewChanges: some View {
