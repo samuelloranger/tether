@@ -7,6 +7,13 @@ import TetherFFIBindings
 @MainActor
 @Observable
 public final class SSHTerminalController {
+  public enum GitWorkspacePayload: Sendable, Equatable {
+    case all
+    case changes
+    case commits
+    case pullRequests
+  }
+
   public enum Status: Equatable {
     case connecting
     case connected
@@ -48,6 +55,7 @@ public final class SSHTerminalController {
   /// empty-state prompt until the user creates one.
   public private(set) var hasSession = true
   public private(set) var gitLines: [GitDiffLine] = []
+  public private(set) var gitFiles: [DiffFile] = []
   public private(set) var gitBranch = ""
   public private(set) var gitCommits: [GitCommit] = []
   public private(set) var gitPullRequests: [GitPullRequest] = []
@@ -165,8 +173,7 @@ public final class SSHTerminalController {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
-    // Its own dial: this runs before the terminal's handshake.
-    guard let out = try? await SSHConnector.exec(config: config, store: hostKeyStore, command: "\(Self.zmx) ls") else { return }
+    guard let out = try? await control.exec("\(Self.zmx) ls") else { return }
     let existing = ZmxSession.parse(out)
     // No sessions at all → don't create "default"; land on the empty state.
     if existing.isEmpty { pendingNoSession = true; return }
@@ -245,15 +252,25 @@ public final class SSHTerminalController {
   /// reports the login dir, so read the shell pid's `/proc/<pid>/cwd`; falls
   /// back to the reported dir when `/proc` is unavailable.
   private func currentCwd() async -> String? {
-    // Always refresh: a stale pid (after a redial) makes the /proc read fail and
-    // fall back to the login dir.
-    await refreshSessions()
-    guard let session = sessions.first(where: { $0.name == attach }) else { return nil }
+    var session = sessions.first(where: { $0.name == attach })
+    if session == nil {
+      await refreshSessions()
+      session = sessions.first(where: { $0.name == attach })
+    }
+    guard let session else { return nil }
     if let live = try? await control.exec("readlink /proc/\(session.pid)/cwd 2>/dev/null") {
       let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmed.hasPrefix("/") { return trimmed }
     }
-    return session.displayCwd.hasPrefix("/") ? session.displayCwd : nil
+    await refreshSessions()
+    guard let refreshed = sessions.first(where: { $0.name == attach }) else {
+      return session.displayCwd.hasPrefix("/") ? session.displayCwd : nil
+    }
+    if let live = try? await control.exec("readlink /proc/\(refreshed.pid)/cwd 2>/dev/null") {
+      let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.hasPrefix("/") { return trimmed }
+    }
+    return refreshed.displayCwd.hasPrefix("/") ? refreshed.displayCwd : nil
   }
 
   /// SCP-sends to the current session's live cwd. Returns the remote path.
@@ -292,12 +309,13 @@ public final class SSHTerminalController {
     }
   }
 
-  public func loadGitWorkspace() async {
+  public func loadGitWorkspace(payload: GitWorkspacePayload = .all) async {
     gitLoading = true
     defer { gitLoading = false }
     gitError = nil
     guard let cwd = await currentCwd() else {
       gitLines = []
+      gitFiles = []
       gitError = "No working directory for this session."
       return
     }
@@ -306,23 +324,48 @@ public final class SSHTerminalController {
     let sentinel = "__TETHER_NOTREPO__"
     let q = shellQuote(cwd)
     let repositoryGuard = "git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1"
-    let diffCommand = "if \(repositoryGuard); then git -C \(q) --no-pager diff 2>&1; else printf '%s' \(shellQuote(sentinel)); fi"
-    let branchCommand = "if \(repositoryGuard); then git -C \(q) branch --show-current; fi"
-    let commitsCommand = "if \(repositoryGuard); then git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'; fi"
-    // Keep gh's stderr: swallowing it into an empty list made the screen blame
-    // a missing CLI for a repository with nothing open.
-    let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
-    let pullRequestsCommand = "if \(repositoryGuard); then "
-      + "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); "
-      + "else printf '%s' \(ghMissing); fi; else printf '[]'; fi"
+    let diffCommand: String
+    let commitsCommand: String
+    let pullRequestsCommand: String
+    switch payload {
+    case .all, .pullRequests:
+      diffCommand = payload == .all ? "git -C \(q) --no-pager diff 2>&1" : "printf ''"
+      commitsCommand = payload == .all ? "git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'" : "printf ''"
+      // Keep gh's stderr: swallowing it into an empty list made the screen blame
+      // a missing CLI for a repository with nothing open.
+      let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
+      pullRequestsCommand = "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision 2>&1); else printf '%s' \(ghMissing); fi"
+    case .changes:
+      diffCommand = "git -C \(q) --no-pager diff 2>&1"
+      commitsCommand = "printf ''"
+      pullRequestsCommand = "printf ''"
+    case .commits:
+      diffCommand = "printf ''"
+      commitsCommand = "git -C \(q) --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e'"
+      pullRequestsCommand = "printf ''"
+    }
+    let command = "if \(repositoryGuard); then "
+      + "\(diffCommand); printf '\\035'; "
+      + "git -C \(q) branch --show-current; printf '\\035'; "
+      + "\(commitsCommand); printf '\\035'; "
+      + "\(pullRequestsCommand); "
+      + "else printf '%s\\035\\035\\035[]' \(shellQuote(sentinel)); fi"
     do {
-      async let raw = control.exec(diffCommand)
-      async let branch = control.exec(branchCommand)
-      async let commits = control.exec(commitsCommand)
-      async let pullRequests = control.exec(pullRequestsCommand)
-      let (diff, branchOutput, commitsOutput, pullRequestsOutput) = try await (raw, branch, commits, pullRequests)
+      let output = try await control.exec(command)
+      guard let sections = GitRepositoryModel.workspaceSections(output) else {
+        gitLines = []
+        gitFiles = []
+        gitBranch = ""
+        gitCommits = []
+        gitPullRequests = []
+        gitPullRequestNotice = nil
+        gitError = "Could not read the git workspace."
+        return
+      }
+      let diff = sections.diff
       if diff.trimmingCharacters(in: .whitespacesAndNewlines) == sentinel {
         gitLines = []
+        gitFiles = []
         gitBranch = ""
         gitCommits = []
         gitPullRequests = []
@@ -331,22 +374,46 @@ public final class SSHTerminalController {
         return
       }
       gitUpdatedAt = Date()
-      gitLines = GitDiffModel.classify(diff)
-      gitBranch = GitRepositoryModel.branch(from: branchOutput)
-      gitCommits = GitRepositoryModel.commits(from: commitsOutput)
-      switch GitRepositoryModel.pullRequestResult(from: pullRequestsOutput) {
-      case let .list(pulls):
-        gitPullRequests = pulls
-        gitPullRequestNotice = nil
-      case .toolMissing:
-        gitPullRequests = []
-        gitPullRequestNotice = "GitHub CLI isn't installed on this host."
-      case let .failed(reason):
-        gitPullRequests = []
-        gitPullRequestNotice = reason
+      gitBranch = GitRepositoryModel.branch(from: sections.branch)
+      switch payload {
+      case .all:
+        let lines = GitDiffModel.classify(diff)
+        gitLines = lines
+        gitFiles = DiffFile.group(lines)
+        gitCommits = GitRepositoryModel.commits(from: sections.commits)
+        switch GitRepositoryModel.pullRequestResult(from: sections.pullRequests) {
+        case let .list(pulls):
+          gitPullRequests = pulls
+          gitPullRequestNotice = nil
+        case .toolMissing:
+          gitPullRequests = []
+          gitPullRequestNotice = "GitHub CLI isn't installed on this host."
+        case let .failed(reason):
+          gitPullRequests = []
+          gitPullRequestNotice = reason
+        }
+      case .changes:
+        let lines = GitDiffModel.classify(diff)
+        gitLines = lines
+        gitFiles = DiffFile.group(lines)
+      case .commits:
+        gitCommits = GitRepositoryModel.commits(from: sections.commits)
+      case .pullRequests:
+        switch GitRepositoryModel.pullRequestResult(from: sections.pullRequests) {
+        case let .list(pulls):
+          gitPullRequests = pulls
+          gitPullRequestNotice = nil
+        case .toolMissing:
+          gitPullRequests = []
+          gitPullRequestNotice = "GitHub CLI isn't installed on this host."
+        case let .failed(reason):
+          gitPullRequests = []
+          gitPullRequestNotice = reason
+        }
       }
     } catch {
       gitLines = []
+      gitFiles = []
       gitError = Self.describe(error)
     }
   }

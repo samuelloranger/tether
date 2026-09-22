@@ -7,8 +7,9 @@ struct GitDiffView: View {
   enum Tab: String, CaseIterable, Identifiable { case changes = "Changes", commits = "Commits", pullRequests = "Pull Requests"; var id: Self { self } }
   @Bindable var controller: SSHTerminalController
   var onDone: () -> Void
+  @Environment(\.scenePhase) private var scenePhase
   @State private var tab: Tab = .changes
-  private var stat: (added: Int, removed: Int) { GitDiffModel.stat(controller.gitLines) }
+  private var stat: (added: Int, removed: Int) { DiffFile.stat(controller.gitFiles) }
 
   var body: some View {
     NavigationStack {
@@ -37,9 +38,9 @@ struct GitDiffView: View {
       .background(TetherColors.background).navigationTitle("Git").navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("Done", action: onDone) }
-        ToolbarItem(placement: .principal) { if tab == .changes && !controller.gitLines.isEmpty { Text("+\(stat.added)  −\(stat.removed)").font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.success) } }
+        ToolbarItem(placement: .principal) { if tab == .changes && !controller.gitFiles.isEmpty { Text("+\(stat.added)  −\(stat.removed)").font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.success) } }
         ToolbarItem(placement: .primaryAction) {
-          Button { Task { await controller.loadGitWorkspace() } } label: {
+          Button { Task { await refreshVisiblePayload() } } label: {
             if controller.gitLoading {
               ProgressView().controlSize(.small).tint(TetherColors.accent)
             } else {
@@ -51,7 +52,12 @@ struct GitDiffView: View {
         }
       }
       .overlay(alignment: .bottom) { if let message = controller.gitActionMessage { Text(message).font(.caption.monospaced()).padding(12).background(TetherColors.surface, in: Capsule()).padding(.bottom, 12) } }
-      .task { while !Task.isCancelled { await controller.loadGitWorkspace(); try? await Task.sleep(nanoseconds: 15_000_000_000) } }
+      .task(id: "\(tab.rawValue)-\(scenePhase == .active)") {
+        while !Task.isCancelled, scenePhase == .active {
+          await refreshVisiblePayload()
+          try? await Task.sleep(nanoseconds: tab == .pullRequests ? 60_000_000_000 : 15_000_000_000)
+        }
+      }
     }
   }
 
@@ -60,10 +66,10 @@ struct GitDiffView: View {
   }
 
   @ViewBuilder private var changes: some View {
-    if controller.gitLines.isEmpty {
+    if controller.gitFiles.isEmpty {
       ContentUnavailableView("No uncommitted changes", systemImage: "checkmark.circle", description: Text("The current working directory is clean.")).foregroundStyle(TetherColors.textSecondary)
     } else {
-      ScrollView { DiffReviewView(files: DiffFile.group(controller.gitLines)).padding(.vertical, 6) }
+      ScrollView { DiffReviewView(files: controller.gitFiles).padding(.vertical, 6) }
     }
   }
 
@@ -78,25 +84,42 @@ struct GitDiffView: View {
     }.scrollContentBackground(.hidden).background(TetherColors.background)
   }
 
-  @ViewBuilder private var pullRequests: some View {
-    if controller.gitPullRequests.isEmpty {
-      if let notice = controller.gitPullRequestNotice {
-        ContentUnavailableView("Couldn't load pull requests", systemImage: "exclamationmark.triangle", description: Text(notice))
-          .foregroundStyle(TetherColors.textSecondary)
+  private var pullRequests: some View {
+    List {
+      if controller.gitPullRequests.isEmpty {
+        if let notice = controller.gitPullRequestNotice {
+          ContentUnavailableView("Couldn't load pull requests", systemImage: "exclamationmark.triangle", description: Text(notice))
+            .foregroundStyle(TetherColors.textSecondary)
+        } else {
+          ContentUnavailableView("No open pull requests", systemImage: "arrow.triangle.pull", description: Text("This repository has none open right now."))
+            .foregroundStyle(TetherColors.textSecondary)
+        }
       } else {
-        ContentUnavailableView("No open pull requests", systemImage: "arrow.triangle.pull", description: Text("This repository has none open right now."))
-          .foregroundStyle(TetherColors.textSecondary)
-      }
-    } else {
-      List(controller.gitPullRequests) { pullRequest in
+        ForEach(controller.gitPullRequests) { pullRequest in
         NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest) } label: {
           VStack(alignment: .leading, spacing: 5) { Text("#\(pullRequest.number) \(pullRequest.title)").lineLimit(2); Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary) }
         }.listRowBackground(TetherColors.surface)
-      }.scrollContentBackground(.hidden).background(TetherColors.background)
+        }
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(TetherColors.background)
+    .refreshable { await refreshVisiblePayload() }
+  }
+
+  private var workspacePayload: SSHTerminalController.GitWorkspacePayload {
+    switch tab {
+    case .changes: .changes
+    case .commits: .commits
+    case .pullRequests: .pullRequests
     }
   }
 
-  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await controller.loadGitWorkspace() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
+  private func refreshVisiblePayload() async {
+    await controller.loadGitWorkspace(payload: workspacePayload)
+  }
+
+  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await refreshVisiblePayload() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
 }
 
 private struct PullRequestDetailView: View {
@@ -105,6 +128,8 @@ private struct PullRequestDetailView: View {
   @State private var confirmClose = false
   @State private var showCopied = false
   @State private var diffFiles: [DiffFile] = []
+  @State private var blocks: [MarkdownBlock] = []
+  @State private var inlineBlocks: [[AttributedString]] = []
   @State private var loadingDiff = false
   @State private var showDiff = false
 
@@ -126,6 +151,7 @@ private struct PullRequestDetailView: View {
       PatchSheet(title: "#\(pullRequest.number)", subtitle: pullRequest.title, files: diffFiles)
     }
     .task {
+      refreshDescription(controller.gitPullRequestBody)
       await controller.loadPullRequestDetail(pullRequest)
       // Keep refreshing only while something is still running.
       while !Task.isCancelled, GitRepositoryModel.isRunning(controller.gitChecks) {
@@ -133,6 +159,9 @@ private struct PullRequestDetailView: View {
         guard !Task.isCancelled else { return }
         await controller.loadPullRequestDetail(pullRequest)
       }
+    }
+    .onChange(of: controller.gitPullRequestBody) { _, body in
+      refreshDescription(body)
     }
     .confirmationDialog("Close pull request #\(pullRequest.number)?", isPresented: $confirmClose, titleVisibility: .visible) {
       Button("Close pull request", role: .destructive) { Task { await controller.closePullRequest(pullRequest) } }
@@ -269,10 +298,10 @@ private struct PullRequestDetailView: View {
 
   @ViewBuilder
   private var description: some View {
-    if !controller.gitPullRequestBody.isEmpty {
+    if !blocks.isEmpty {
       VStack(alignment: .leading, spacing: 8) {
         sectionTitle("Description")
-        MarkdownBodyView(markdown: controller.gitPullRequestBody)
+        MarkdownBodyView(blocks: blocks, inlineBlocks: inlineBlocks)
       }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -317,6 +346,12 @@ private struct PullRequestDetailView: View {
     Text(title).font(.caption.weight(.bold)).foregroundStyle(TetherColors.textSecondary)
   }
 
+  private func refreshDescription(_ body: String) {
+    let parsed = MarkdownDocument.parse(body)
+    blocks = parsed
+    inlineBlocks = MarkdownBodyView.renderedInline(for: parsed)
+  }
+
 }
 
 
@@ -325,6 +360,7 @@ private struct CommitDetailView: View {
   let commit: GitCommit
 
   @State private var lines: [GitDiffLine] = []
+  @State private var files: [DiffFile] = []
   @State private var message = ""
   @State private var loading = true
 
@@ -350,7 +386,7 @@ private struct CommitDetailView: View {
             description: Text("It may be a merge commit, or the repository is no longer at this path."))
             .foregroundStyle(TetherColors.textSecondary)
         } else {
-          DiffReviewView(files: DiffFile.group(lines))
+          DiffReviewView(files: files)
         }
       }
       .padding(.vertical, 10)
@@ -361,6 +397,7 @@ private struct CommitDetailView: View {
       let shown = await controller.commitDiff(commit)
       message = shown.body
       lines = shown.lines
+      files = DiffFile.group(shown.lines)
       loading = false
     }
   }
