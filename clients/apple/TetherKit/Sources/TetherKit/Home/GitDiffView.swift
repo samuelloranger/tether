@@ -260,6 +260,9 @@ private struct PullRequestDetailView: View {
         Text(defaultMethod?.label ?? "Merge pull request")
           .font(.subheadline.weight(.semibold))
           .frame(maxWidth: .infinity).padding(.vertical, 12)
+          // A Text only hit-tests its glyphs; without this the padded capsule
+          // around the label is dead to taps.
+          .contentShape(Capsule())
       }
       .background(canMerge ? TetherColors.accent : TetherColors.surface, in: Capsule())
       .foregroundStyle(canMerge ? TetherColors.onAccent : TetherColors.textFaint)
