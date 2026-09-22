@@ -63,12 +63,13 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     let hanging = await eventually { ops.isHanging }
     XCTAssertTrue(hanging)
 
-    let start = Date()
-    await controller.leave()
+    let leaving = Task { await controller.leave() }
+    let closed = await eventually(timeout: 1) { stream.closed }
 
-    XCTAssertLessThan(Date().timeIntervalSince(start), 1)
-    let closed = await eventually { stream.closed }
     XCTAssertTrue(closed, "the terminal must not outlive the screen behind a stuck command")
+    // Unsticks a regressed build so it fails here instead of hanging the suite.
+    ops.interrupt()
+    await leaving.value
     _ = await history.value
   }
 }
