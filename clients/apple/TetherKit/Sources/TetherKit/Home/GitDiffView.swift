@@ -351,6 +351,7 @@ private struct CommitDetailView: View {
   let commit: GitCommit
 
   @State private var lines: [GitDiffLine] = []
+  @State private var message = ""
   @State private var loading = true
 
   var body: some View {
@@ -361,6 +362,10 @@ private struct CommitDetailView: View {
           Text(commit.id).font(.caption.monospaced()).foregroundStyle(TetherColors.accent)
           Text("\(commit.author) · \(Date(timeIntervalSince1970: TimeInterval(commit.timestamp)).formatted(date: .abbreviated, time: .shortened))")
             .font(.caption).foregroundStyle(TetherColors.textSecondary)
+          if !message.isEmpty {
+            Text(message).font(.callout).foregroundStyle(TetherColors.textSecondary)
+              .textSelection(.enabled).padding(.top, 4)
+          }
         }
         .padding(.horizontal, 12)
 
@@ -379,7 +384,9 @@ private struct CommitDetailView: View {
     }
     .background(TetherColors.background)
     .task {
-      lines = await controller.commitDiff(commit)
+      let shown = await controller.commitDiff(commit)
+      message = shown.body
+      lines = shown.lines
       loading = false
     }
   }

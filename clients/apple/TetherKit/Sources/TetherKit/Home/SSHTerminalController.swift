@@ -376,11 +376,13 @@ public final class SSHTerminalController {
 
   /// One commit's patch, kept apart from `gitLines` so opening a commit does
   /// not replace the working-tree diff behind it.
-  public func commitDiff(_ commit: GitCommit) async -> [GitDiffLine] {
-    guard let cwd = await currentCwd() else { return [] }
-    let command = "git -C \(shellQuote(cwd)) --no-pager show \(shellQuote(commit.id)) --patch --stat --format=%b 2>&1"
-    guard let raw = try? await control.exec(command) else { return [] }
-    return GitDiffModel.classify(raw)
+  public func commitDiff(_ commit: GitCommit) async -> (body: String, lines: [GitDiffLine]) {
+    guard let cwd = await currentCwd() else { return ("", []) }
+    // %x1e ends the message: git's own `---` separator reads as a removed line.
+    let command = "git -C \(shellQuote(cwd)) --no-pager show \(shellQuote(commit.id)) --patch --format=%b%x1e 2>&1"
+    guard let raw = try? await control.exec(command) else { return ("", []) }
+    let shown = GitDiffModel.commitShow(raw)
+    return (shown.body, GitDiffModel.classify(shown.patch))
   }
 
   /// The pull request's own patch, returned rather than stored: the working
