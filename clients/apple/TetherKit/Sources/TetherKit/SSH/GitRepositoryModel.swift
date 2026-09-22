@@ -40,6 +40,17 @@ public struct GitCheck: Equatable, Identifiable, Sendable {
 /// Parses machine-readable output from the remote repository commands. Keeping
 /// this pure makes the SSH boundary small and gives UI code typed state only.
 public enum GitRepositoryModel {
+  /// Splits the one workspace command's output. The outer separator is 0x1d,
+  /// not 0x1e: the commit format already ends every record with 0x1e, so an
+  /// outer 0x1e would be ambiguous against the commits payload itself.
+  public static func workspaceSections(
+    _ output: String
+  ) -> (diff: String, branch: String, commits: String, pullRequests: String)? {
+    let parts = output.components(separatedBy: "\u{1D}")
+    guard parts.count == 4 else { return nil }
+    return (parts[0], parts[1], parts[2], parts[3])
+  }
+
   public static func branch(from output: String) -> String {
     output.trimmingCharacters(in: .whitespacesAndNewlines)
   }

@@ -11,6 +11,26 @@ final class GitRepositoryModelTests: XCTestCase {
     ])
   }
 
+  func test_one_command_carries_all_four_workspace_sections() {
+    let output = "PATCH\u{1D}feat/x\n\u{1D}abc\u{1F}s\u{1F}a\u{1F}1\u{1E}\u{1D}[]"
+    let sections = GitRepositoryModel.workspaceSections(output)
+    XCTAssertEqual(sections?.diff, "PATCH")
+    XCTAssertEqual(sections?.branch, "feat/x\n")
+    XCTAssertEqual(sections?.commits, "abc\u{1F}s\u{1F}a\u{1F}1\u{1E}")
+    XCTAssertEqual(sections?.pullRequests, "[]")
+    XCTAssertNil(GitRepositoryModel.workspaceSections("only\u{1D}two"))
+  }
+
+  func test_a_record_separator_inside_a_section_does_not_split_it() {
+    // The commit format ends every record with 0x1e, and a patch may contain
+    // one: neither may be mistaken for the boundary between sections.
+    let commits = "a\u{1F}s\u{1F}n\u{1F}1\u{1E}b\u{1F}t\u{1F}n\u{1F}2\u{1E}"
+    let sections = GitRepositoryModel.workspaceSections("+a\u{1E}b\u{1D}main\n\u{1D}\(commits)\u{1D}[]")
+    XCTAssertEqual(sections?.diff, "+a\u{1E}b")
+    XCTAssertEqual(sections?.commits, commits)
+    XCTAssertEqual(GitRepositoryModel.commits(from: sections?.commits ?? "").count, 2)
+  }
+
   func test_parses_open_pull_requests_from_gh_json() throws {
     let json = """
     [{"number":196,"title":"Native interactions","headRefName":"feat/native","baseRefName":"main","url":"https://example.test/pr/196","updatedAt":"2026-09-22T01:00:00Z","isDraft":false,"changedFiles":12,"reviewDecision":"REVIEW_REQUIRED"}]
