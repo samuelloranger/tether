@@ -5,6 +5,19 @@ import SwiftUI
 import PhotosUI
 #endif
 
+/// A reference cell so a `@Sendable` streaming callback can carry its parse
+/// buffer across chunks. The stream calls back serially on one worker thread;
+/// the lock only satisfies `Sendable`.
+final class LockedBox<Value>: @unchecked Sendable {
+  private let lock = NSLock()
+  private var stored: Value
+  init(_ value: Value) { stored = value }
+  var value: Value {
+    get { lock.lock(); defer { lock.unlock() }; return stored }
+    set { lock.lock(); defer { lock.unlock() }; stored = newValue }
+  }
+}
+
 public struct PullRequestDetail: Equatable, Sendable {
   public let checks: [GitCheck]
   public let body: String
@@ -14,6 +27,11 @@ public struct PullRequestDetail: Equatable, Sendable {
   public let fetchedAt: Date
 
   public var isMerged: Bool { state == .merged }
+
+  /// A live check snapshot from the watch stream, leaving the rest as fetched.
+  public func withChecks(_ checks: [GitCheck]) -> PullRequestDetail {
+    PullRequestDetail(checks: checks, body: body, gate: gate, methods: methods, state: state, fetchedAt: fetchedAt)
+  }
 
   /// After a successful merge we know the outcome without waiting for GitHub's
   /// state to propagate to the next fetch.
@@ -462,17 +480,38 @@ public final class SSHTerminalController {
     }
   }
 
-  /// Blocks — on the host, not the phone — until this pull request's checks
-  /// finish, so the detail screen waits in one `await` instead of a timer that
-  /// wakes the radio every few seconds. `gh pr checks --watch` exits when the
-  /// run settles; its own dial keeps the minutes-long block off the serial
-  /// control connection. Returns false when the dial itself failed, so the
-  /// caller can stop rather than spin. Never throws on a failed check — the
-  /// exec reads to EOF and ignores gh's exit code.
-  public func awaitChecksSettled(_ pullRequest: GitPullRequest) async -> Bool {
+  /// Streams a pull request's checks as `gh pr checks --watch` reprints them —
+  /// on the host, not a phone timer — so the detail screen updates each step as
+  /// it flips rather than only when the whole run settles. Its own dial keeps
+  /// the long-lived read off the serial control connection. Each reprinted
+  /// snapshot is parsed and handed to `onSnapshot` on the main actor. Returns
+  /// false when the dial failed, so the caller can fall back rather than assume
+  /// the checks are done.
+  public func streamChecks(
+    _ pullRequest: GitPullRequest,
+    onSnapshot: @escaping @MainActor ([GitCheck]) -> Void
+  ) async -> Bool {
     guard let cwd = await currentCwd() else { return false }
     let command = "cd \(shellQuote(cwd)) && gh pr checks \(pullRequest.number) --watch --interval 15 2>&1"
-    return (try? await SSHConnector.exec(config: config, store: hostKeyStore, command: command)) != nil
+    // The stream arrives in chunks that do not respect snapshot boundaries, so
+    // accumulate and emit each block only once the next header proves it whole.
+    let buffer = LockedBox("")
+    let deliver: @Sendable (String) -> Bool = { chunk in
+      let combined = buffer.value + chunk
+      let (blocks, remainder) = GitRepositoryModel.watchSnapshots(splitting: combined)
+      buffer.value = remainder
+      for block in blocks {
+        let checks = GitRepositoryModel.watchChecks(fromBlock: block)
+        if !checks.isEmpty { Task { @MainActor in onSnapshot(checks) } }
+      }
+      return true
+    }
+    do {
+      try await SSHConnector.execStream(config: config, store: hostKeyStore, command: command, onChunk: deliver)
+      return true
+    } catch {
+      return false
+    }
   }
 
   /// Checks and description for one pull request, in a single round trip.

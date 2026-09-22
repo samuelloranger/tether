@@ -256,4 +256,45 @@ final class GitRepositoryModelTests: XCTestCase {
     guard case let .list(pulls) = GitRepositoryModel.pullRequestResult(from: json) else { return XCTFail("expected a list") }
     XCTAssertEqual(pulls.map(\.number), [1, 2])
   }
+
+  func test_watch_block_parses_each_check_row_into_its_state() {
+    let block = """
+    Refreshing checks status every 15 seconds. Press Ctrl+C to quit.
+
+    ios-build\tpending\t0\thttps://x/1\t
+    host-tools\tpass\t19s\thttps://x/2\t
+    lint\tfail\t12s\thttps://x/3\t
+    docs\tskipping\t0\thttps://x/4\t
+    """
+    let checks = GitRepositoryModel.watchChecks(fromBlock: block)
+    XCTAssertEqual(checks.map(\.name), ["ios-build", "host-tools", "lint", "docs"])
+    XCTAssertEqual(checks.map(\.state), [.running, .passed, .failed, .skipped])
+    XCTAssertEqual(checks[0].url, "https://x/1")
+  }
+
+  func test_watch_block_ignores_the_header_and_blank_lines_and_bad_rows() {
+    let block = "Refreshing checks status every 20 seconds. Press Ctrl+C to quit.\n\nonly-two\tpass\n"
+    // A row without the expected columns is skipped, not force-parsed.
+    XCTAssertEqual(GitRepositoryModel.watchChecks(fromBlock: block), [])
+  }
+
+  func test_a_watch_stream_yields_each_completed_snapshot_and_keeps_the_partial_tail() {
+    let header = "Refreshing checks status every 15 seconds. Press Ctrl+C to quit."
+    // Two full snapshots, then a partial third still arriving.
+    let buffer = """
+    \(header)
+
+    a\tpending\t0\tu\t
+    \(header)
+
+    a\tpass\t9s\tu\t
+    \(header)
+
+    a\tpa
+    """
+    let (blocks, remainder) = GitRepositoryModel.watchSnapshots(splitting: buffer)
+    XCTAssertEqual(blocks.count, 2)
+    XCTAssertEqual(GitRepositoryModel.watchChecks(fromBlock: blocks[1]).first?.state, .passed)
+    XCTAssertTrue(remainder.contains("a\tpa"))
+  }
 }

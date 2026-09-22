@@ -166,6 +166,45 @@ public enum GitRepositoryModel {
     checks.contains { $0.state == .running }
   }
 
+  /// `gh pr checks --watch` reprints the whole table every interval, each block
+  /// led by this line. Splitting on it turns the growing stream into snapshots.
+  private static let watchHeaderPrefix = "Refreshing checks status"
+
+  /// The completed snapshots in an accumulating watch buffer, plus the trailing
+  /// partial block still arriving. A block is complete once the next header has
+  /// begun, so the last segment is always held back as the remainder.
+  public static func watchSnapshots(splitting buffer: String) -> (blocks: [String], remainder: String) {
+    let segments = buffer.components(separatedBy: watchHeaderPrefix)
+    // The first segment is whatever preceded the first header (usually empty);
+    // it is never a snapshot. The last is the still-arriving block.
+    guard segments.count >= 2 else { return ([], buffer) }
+    let blocks = segments[1..<(segments.count - 1)].map { watchHeaderPrefix + $0 }
+    let remainder = watchHeaderPrefix + segments[segments.count - 1]
+    return (blocks, remainder)
+  }
+
+  /// Parses one reprinted block into checks. Rows are tab-separated
+  /// `name\tbucket\telapsed\turl`; the header and blank lines are skipped, and a
+  /// row missing its columns is dropped rather than guessed at.
+  public static func watchChecks(fromBlock block: String) -> [GitCheck] {
+    block.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+      let raw = String(line)
+      if raw.hasPrefix(watchHeaderPrefix) { return nil }
+      let fields = raw.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+      guard fields.count >= 4, !fields[0].isEmpty else { return nil }
+      return GitCheck(name: fields[0], state: watchState(fields[1]), url: fields[3])
+    }
+  }
+
+  private static func watchState(_ bucket: String) -> GitCheck.State {
+    switch bucket.lowercased() {
+    case "pass": return .passed
+    case "fail", "cancel", "canceled": return .failed
+    case "skipping", "skipped": return .skipped
+    default: return .running
+    }
+  }
+
   public static func rollup(_ checks: [GitCheck]) -> GitCheck.State? {
     if checks.isEmpty { return nil }
     if checks.contains(where: { $0.state == .failed }) { return .failed }

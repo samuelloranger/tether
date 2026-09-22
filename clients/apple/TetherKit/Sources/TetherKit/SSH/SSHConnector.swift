@@ -16,6 +16,20 @@ enum SSHConnector {
     }
   }
 
+  /// Streams a long-running command's output. `onChunk` is called on the worker
+  /// thread as bytes arrive and returns false to stop and tear the channel down.
+  static func execStream(
+    config: SSHConnectionConfig,
+    store: HostKeyStore,
+    command: String,
+    onChunk: @escaping @Sendable (String) -> Bool
+  ) async throws {
+    try await onThread(named: "tether.ssh.execStream") {
+      try SSHConnectionSequence.runExecStream(
+        config: config, ops: LibSSH2Ops(config: config), store: store, command: command, onChunk: onChunk)
+    }
+  }
+
   static func scpSend(
     config: SSHConnectionConfig,
     store: HostKeyStore,

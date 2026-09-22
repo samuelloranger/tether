@@ -6,6 +6,10 @@ protocol SSHConnectionOps: AnyObject {
   func authenticate(_ credential: SSHCredential) throws -> Bool
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
   func exec(_ command: String) throws -> String
+  /// Runs `command` and hands back output as it arrives. `onChunk` returns false
+  /// to stop reading and tear the channel down. Default: fall back to a single
+  /// buffered `exec`, delivered as one chunk.
+  func execStream(_ command: String, onChunk: (String) -> Bool) throws
   func scpSend(data: Data, remotePath: String, mode: Int32) throws
   var lastAuthDetail: String? { get }
   func teardown()
@@ -16,6 +20,10 @@ extension SSHConnectionOps {
 
   func scpSend(data: Data, remotePath: String, mode: Int32) throws {
     throw SSHConnectError.transport("File transfer not supported")
+  }
+
+  func execStream(_ command: String, onChunk: (String) -> Bool) throws {
+    _ = onChunk(try exec(command))
   }
 }
 
@@ -83,6 +91,24 @@ enum SSHConnectionSequence {
     try gate(config: config, ops: ops, store: store)
     do {
       return try ops.exec(command)
+    } catch let error as SSHConnectError {
+      throw error
+    } catch {
+      throw SSHConnectError.transport("\(error)")
+    }
+  }
+
+  static func runExecStream(
+    config: SSHConnectionConfig,
+    ops: SSHConnectionOps,
+    store: HostKeyStore,
+    command: String,
+    onChunk: (String) -> Bool
+  ) throws {
+    defer { ops.teardown() }
+    try gate(config: config, ops: ops, store: store)
+    do {
+      try ops.execStream(command, onChunk: onChunk)
     } catch let error as SSHConnectError {
       throw error
     } catch {
