@@ -4,9 +4,8 @@ import SwiftUI
 import PhotosUI
 #endif
 
-/// A reference cell so a `@Sendable` streaming callback can carry its parse
-/// buffer across chunks. The stream calls back serially on one worker thread;
-/// the lock only satisfies `Sendable`.
+/// Lets a `@Sendable` stream callback carry its parse buffer across chunks. Calls arrive
+/// serially; the lock only satisfies `Sendable`.
 final class LockedBox<Value>: @unchecked Sendable {
   private let lock = NSLock()
   private var stored: Value
@@ -41,9 +40,7 @@ public struct PullRequestDetail: Equatable, Sendable {
   public static let empty = PullRequestDetail(checks: [], body: "", gate: .computing, methods: [], state: .open, fetchedAt: .distantPast)
 }
 
-/// Drives one SSH-backed terminal: connect via `SSHConnector`, pump the PTY
-/// through a `TerminalPipeline` into the shared renderer, and attach to a zmx
-/// session so the shell survives disconnects.
+/// Drives one SSH-backed terminal attached to a zmx session, so the shell survives disconnects.
 @MainActor
 @Observable
 public final class SSHTerminalController {
@@ -57,10 +54,8 @@ public final class SSHTerminalController {
   public enum Status: Equatable {
     case connecting
     case connected
-    /// The transport dropped under a live session (iOS suspended the socket, a
-    /// GOAWAY, a network blip). Distinct from `.failed` so the UI shows a calm
-    /// "reconnecting" state, and so every reconnect gate (which only skips when
-    /// `.connected`) actually redials instead of trusting a stale `.connected`.
+    /// The transport dropped under a live session. Distinct from `.failed` so reconnect gates,
+    /// which only skip on `.connected`, actually redial.
     case disconnected
     case failed(String)
   }
@@ -109,9 +104,7 @@ public final class SSHTerminalController {
   public private(set) var sessionKey: String
   public private(set) var sessions: [ZmxSession] = []
   public private(set) var attach: String
-  /// False when we connected to a host that had no zmx sessions: the PTY is a
-  /// bare login shell and no session was auto-created. The UI shows an
-  /// empty-state prompt until the user creates one.
+  /// False on a host with no zmx sessions: the PTY is a bare login shell until one is created.
   public private(set) var hasSession = true
   public private(set) var gitLines: [GitDiffLine] = []
   public private(set) var gitFiles: [DiffFile] = []
@@ -195,18 +188,14 @@ public final class SSHTerminalController {
     connectInFlight = true
     defer { connectInFlight = false }
     status = .connecting
-    // Release any live session before dialing. A redial-driven switch (alt-screen)
-    // gets here with the previous pump still running; dialing and authenticating a
-    // second connection alongside it made auth fail until a force-quit killed the
-    // old one. connectSSH also disconnects, but only after the new auth succeeds —
-    // too late. No-op on a cold connect or a post-drop reconnect (no live transport).
+    // Release the live session first: authenticating a second connection alongside it fails,
+    // and connectSSH only disconnects after the new auth succeeds.
     await pipeline.disconnect()
     // A redial means the path under us changed; the control session rode the
     // same one and may be blocked on it.
     if trigger != .initial { control.reset() }
     await chooseInitialSessionIfNeeded()
-    // The key is valid; libssh2 auth/transport occasionally fails transiently
-    // (and the app opens a couple of connections at once), so retry a few times.
+    // libssh2 auth/transport fails transiently with several connections opening at once.
     // A host-key mismatch is never retried — that must fail loudly.
     for attempt in 0..<3 {
       guard !left else { return }
@@ -218,12 +207,9 @@ public final class SSHTerminalController {
         }
         await pipeline.connectSSH(transport: stream, key: sessionKey)
         status = .connected
-        // The fresh PTY is 80x24 and the surface bounds don't change on a session
-        // switch, so it never re-reports — push the last known size now (SIGWINCH)
-        // so the newly attached session reflows to the device.
+        // A fresh PTY is 80x24 and the view never re-reports on a switch; push the last size.
         pipeline.outbound.yield(.serverResize(cols: lastCols, rows: lastRows))
         // Zero-session host: leave the bare login shell, don't auto-create.
-        // The UI shows an empty-state prompt until the user starts one.
         if pendingNoSession {
           hasSession = false
         } else {
@@ -243,25 +229,21 @@ public final class SSHTerminalController {
     }
   }
 
-  /// On the first connect, attach to an existing session instead of forcing a
-  /// new "default": only create "default" when the host has no sessions at all.
-  /// An explicit target (a switch, or the launch-env attach) is left alone.
+  /// First connect only: attach "default" or else the newest session; create nothing on an
+  /// empty host. An explicit target (a switch, the launch-env attach) is left alone.
   private func chooseInitialSessionIfNeeded() async {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
     guard let out = try? await control.exec("\(Self.zmx) ls") else { return }
     let existing = ZmxSession.parse(out)
-    // No sessions at all → don't create "default"; land on the empty state.
     if existing.isEmpty { pendingNoSession = true; return }
-    // A host with a "default" already: attach it. Otherwise attach the newest.
     guard !existing.contains(where: { $0.name == Self.defaultAttach }) else { return }
     attach = existing.max(by: { $0.created < $1.created })?.name ?? attach
   }
 
-  /// Best-effort: tell the host's tether-notify about this device once per
-  /// connection. Delayed so its extra SSH connection doesn't race the terminal
-  /// handshake. Never blocks or fails the shell.
+  /// Best-effort, once per connection. Delayed so its extra SSH connection doesn't race the
+  /// terminal handshake.
   private func schedulePushRegister() {
     guard !didRegisterPush, let id = pushIdentity else { return }
     didRegisterPush = true
@@ -284,9 +266,8 @@ public final class SSHTerminalController {
     }
   }
 
-  /// Detaches whatever zmx client holds the PTY and attaches the new session on
-  /// the shell underneath, so the program running in the session we leave — a
-  /// CLI agent mid-task — is never typed into and keeps running on the host.
+  /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
+  /// program in the session we leave is never typed into and keeps running.
   public func switchSession(to name: String) async {
     // Skip only when it's the same session we're already on. When there is no
     // session yet (empty-state host), attach even if the name equals `attach`.
@@ -325,9 +306,7 @@ public final class SSHTerminalController {
     await refreshSessions()
   }
 
-  /// Live working directory of the current session's shell. `zmx ls` only
-  /// reports the login dir, so read the shell pid's `/proc/<pid>/cwd`; falls
-  /// back to the reported dir when `/proc` is unavailable.
+  /// `zmx ls` only reports the login dir, so read the shell's `/proc/<pid>/cwd`.
   private func currentCwd() async -> String? {
     var session = sessions.first(where: { $0.name == attach })
     if session == nil {
@@ -395,8 +374,7 @@ public final class SSHTerminalController {
       gitError = "No working directory for this session."
       return
     }
-    // The sentinel marks "not a repo" — an empty diff is a valid, distinct
-    // result.
+    // The sentinel marks "not a repo" — an empty diff is a valid, distinct result.
     let sentinel = "__TETHER_NOTREPO__"
     let q = shellQuote(cwd)
     let repositoryGuard = "git -C \(q) rev-parse --is-inside-work-tree >/dev/null 2>&1"
@@ -495,13 +473,8 @@ public final class SSHTerminalController {
     }
   }
 
-  /// Streams a pull request's checks as `gh pr checks --watch` reprints them —
-  /// on the host, not a phone timer — so the detail screen updates each step as
-  /// it flips rather than only when the whole run settles. Its own dial keeps
-  /// the long-lived read off the serial control connection. Each reprinted
-  /// snapshot is parsed and handed to `onSnapshot` on the main actor. Returns
-  /// false when the dial failed, so the caller can fall back rather than assume
-  /// the checks are done.
+  /// Its own dial keeps the long-lived watch off the serial control connection. False when the
+  /// dial failed, so the caller falls back rather than assume the checks are done.
   public func streamChecks(
     _ pullRequest: GitPullRequest,
     onSnapshot: @escaping @MainActor ([GitCheck]) -> Void
@@ -645,10 +618,8 @@ public final class SSHTerminalController {
     Task { await connect(trigger: .networkPath) }
   }
 
-  /// The path under a live connection went away. Its socket is bound to an
-  /// address that no longer routes, and the kernel only says so after its
-  /// retransmit timeout; the monitor knows now. A new preferred interface with
-  /// the old one still up leaves the connection alone.
+  /// The kernel only notices a dead route after its retransmit timeout; the monitor knows now.
+  /// A new preferred interface with the old one still up leaves the connection alone.
   nonisolated static func pathInvalidatesConnection(
     previous: NetworkReachability?, next: NetworkReachability
   ) -> Bool {
@@ -658,10 +629,8 @@ public final class SSHTerminalController {
     return !next.interfaces.contains(used)
   }
 
-  /// The one network-driven recovery decision. Only an edge into a usable path
-  /// counts: the monitor re-reports the same path on every interface change.
-  /// A path that just became usable. The recovery gate inside `connect` cannot
-  /// see this edge, because it is only handed the current reading.
+  /// Only an edge counts: the monitor re-reports the same path on every interface change, and
+  /// the gate inside `connect` only sees the current reading.
   nonisolated static func pathBecameUsable(
     previous: NetworkReachability?, next: NetworkReachability
   ) -> Bool {
@@ -703,9 +672,7 @@ public final class SSHTerminalController {
       return ConnectionCopy(
         message: message, indicator: .error(symbol: "exclamationmark.triangle"), shortLabel: "error")
     case .disconnected:
-      // A dropped session on a dead path is waiting for the network, not for
-      // the host — saying "reconnecting" there would be a lie the user cannot
-      // act on.
+      // On a dead path the session is waiting for the network, not the host.
       switch reachability?.availability {
       case .offline:
         return ConnectionCopy(
@@ -722,10 +689,8 @@ public final class SSHTerminalController {
     }
   }
 
-  /// Full session scrollback for the history screen. zmx runs a full-screen
-  /// (alt-screen) session, so the local byte buffer only holds the current
-  /// screen — `zmx history` is the real transcript. Falls back to the visible
-  /// screen if the exec fails.
+  /// zmx runs an alt-screen session, so the local buffer only holds the current screen;
+  /// `zmx history` is the real transcript.
   public func historyText() async -> String {
     if let out = try? await control.exec("\(Self.zmx) history \(shellQuote(attach))"),
       !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -763,16 +728,12 @@ public final class SSHTerminalController {
       // CLI agent holds the keyboard without ever taking the alt-screen.
       break
     case .error:
-      // The transport died under a live session. Without this the status stayed
-      // `.connected` and every reconnect gate skipped, so the terminal was dead
-      // until the app was killed. Flip off `.connected` and redial.
       markDisconnectedAndReconnect()
     }
   }
 
-  /// Flip a dropped session off `.connected` and kick a foreground redial. A no-op
-  /// while a connect is already in flight, and never fires on an intentional
-  /// leave (the pipeline cancels its read task, which suppresses the error).
+  /// Never fires on an intentional leave: the pipeline cancels its read task, which suppresses
+  /// the error.
   private func markDisconnectedAndReconnect() {
     guard let next = Self.statusAfterTransportDrop(from: status) else { return }
     status = next
@@ -781,11 +742,7 @@ public final class SSHTerminalController {
     Task { await self.connect(trigger: .foreground) }
   }
 
-  /// Pure transition for a mid-session transport drop. `nil` leaves the status
-  /// untouched — a reconnect is already underway (`.connecting`), so a late error
-  /// from the old transport must not disturb it. Any settled state (crucially
-  /// `.connected`, which used to be left stale) becomes `.disconnected` so the
-  /// reconnect gates fire.
+  /// `nil` while a reconnect is underway, so a late error from the old transport can't disturb it.
   nonisolated static func statusAfterTransportDrop(from current: Status) -> Status? {
     switch current {
     case .connecting: return nil

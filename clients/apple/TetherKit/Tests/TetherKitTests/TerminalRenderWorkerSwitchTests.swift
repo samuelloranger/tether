@@ -5,9 +5,8 @@ import XCTest
 
 @testable import TetherKit
 
-/// Session switch yields `nil` then a new session's first grid. Both sessions
-/// start at generation 1. Without `reset()`, the worker treats that frame as a
-/// duplicate and the surface stays on the previous session — or blank.
+/// Both sessions start at generation 1, so without `reset()` the new session's first frame
+/// looks like a duplicate and the surface stays on the previous session.
 final class TerminalRenderWorkerSwitchTests: XCTestCase {
   func testWithoutResetANewSessionWithTheSameGenerationIsDropped() {
     let worker = TerminalRenderWorker()
@@ -35,9 +34,6 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
     )
   }
 
-  /// Switching sessions must not `clearSnapshot` (that is the blank flash).
-  /// Forgetting only the generation lets the cached grid of the next session
-  /// paint even when both sessions start at generation 1.
   func testAfterForgettingGenerationTheNewSessionsFirstFramePaints() {
     let worker = TerminalRenderWorker()
     let m = metrics(cols: 4, rows: 2)
@@ -51,9 +47,7 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
     )
   }
 
-  /// Same generation but changed geometry (a font-size bump) must still repaint.
-  /// The generation shortcut is gated on `metrics == lastMetrics`; if that guard
-  /// regresses, a pinch-zoom with no new PTY output would freeze at the old size.
+  /// If the `metrics == lastMetrics` guard regresses, a pinch-zoom with no new output freezes.
   func testMetricsChangeAtSameGenerationStillRepaints() {
     let worker = TerminalRenderWorker()
     let first = worker.render(
@@ -69,8 +63,6 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
     )
   }
 
-  /// `rerender` re-rasterizes the held frame for a font/bounds/scale change with
-  /// no new output behind it. With nothing rendered yet there is nothing to hold.
   func testRerenderWithoutAPriorFrameReturnsNil() {
     let worker = TerminalRenderWorker()
     XCTAssertNil(worker.rerender(metrics: metrics(cols: 4, rows: 2)))

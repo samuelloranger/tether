@@ -3,7 +3,6 @@ import CoreGraphics
 import Foundation
 import UIKit
 
-/// Everything the main thread needs after a frame is rendered.
 struct TerminalRenderOutput {
   var header: GridSnapshot.Header
   var cells: [GridSnapshot.Cell]
@@ -12,12 +11,8 @@ struct TerminalRenderOutput {
   var image: CGImage?
 }
 
-/// Owns link detection and rasterization for one surface.
-///
-/// Both used to run on the main actor inside the render path: a regex sweep
-/// over every row and the CoreText draw. Only the finished image needs to reach
-/// the main thread, so all of it lives here and is touched exclusively from the
-/// surface's serial render queue.
+/// Link detection and rasterization for one surface, off the main thread.
+/// Touch only from the surface's serial render queue.
 final class TerminalRenderWorker {
   private let renderer = TerminalGridRenderer()
   private var lastGeneration: UInt64?
@@ -37,11 +32,8 @@ final class TerminalRenderWorker {
     lastLinkSpans = []
   }
 
-  /// Drop the generation gate without clearing the last image. A session switch
-  /// that shows a cached grid must not `clearSnapshot` (that is the blank flash)
-  /// but two sessions both starting at generation 1 would otherwise collide.
-  /// Also forces the renderer's next frame to fully repaint: its dirty-row
-  /// diff is otherwise still comparing against the PREVIOUS session's cells.
+  /// Keeps the last image but lets a new session's generation 1 through, and forces a full
+  /// repaint since the dirty-row diff would otherwise compare against the previous session.
   func forgetGeneration() {
     lastGeneration = nil
     renderer.forceFullRepaintOnNextFrame()

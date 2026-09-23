@@ -119,9 +119,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public final class Coordinator {
     var parent: TetherSurfaceRepresentable
     var sessionKey: String = ""
-    /// The last grid actually pushed. Any state write on the owning view
-    /// re-runs updateUIView, and re-pushing an unchanged grid costs a full
-    /// rasterization.
+    /// Any state write on the owning view re-runs updateUIView; re-pushing an unchanged grid
+    /// costs a full rasterization.
     var pushedSnapshot: TerminalFrame?
 
     init(parent: TetherSurfaceRepresentable) {

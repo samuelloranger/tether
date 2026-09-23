@@ -73,9 +73,7 @@ final class TerminalResizeStrategyTests: XCTestCase {
   }
 
   func testPrimaryScreenGrowRebuildsToAvoidReflowDuplication() {
-    // A row grow on the primary screen can make the reflow duplicate a
-    // content row into the newly exposed rows (the agent-TUI line-doubling bug).
-    // Rebuild from the buffer at the new size instead.
+    // A primary-screen row grow can make the reflow duplicate a content row into the new rows.
     XCTAssertTrue(
       TerminalResizeStrategy.shouldRebuildFromBuffer(
         altScreen: false, oldCols: 20, oldRows: 8, newCols: 20, newRows: 12

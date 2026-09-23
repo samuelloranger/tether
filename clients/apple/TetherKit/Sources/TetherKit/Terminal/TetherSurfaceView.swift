@@ -4,13 +4,8 @@ import CoreText
 import SwiftUI
 import UIKit
 
-/// CoreText terminal surface.
-///
-/// The view itself no longer draws. A display link pulls the newest snapshot
-/// once per vsync, a serial queue decodes and rasterizes it into a retained
-/// bitmap, and the main thread only assigns the resulting image to a layer.
-/// Cursor and selection live on their own layers so neither one re-runs any
-/// text drawing.
+/// CoreText terminal surface: a serial queue rasterizes the newest snapshot once per vsync.
+/// Cursor and selection live on their own layers so neither re-runs text drawing.
 public final class TetherSurfaceView: UIView {
   public var fontSize: CGFloat = 14 {
     didSet { invalidateMetrics() }
@@ -20,22 +15,18 @@ public final class TetherSurfaceView: UIView {
     didSet { invalidateMetrics() }
   }
 
-  /// Reports the grid size the current bounds can display, on EVERY change —
-  /// including the intermediate frames of a keyboard animation. Drives the
-  /// LOCAL emulator, which must track the view or a shrink leaves blank rows.
+  /// Fires on every grid change, keyboard-animation frames included, for the local emulator:
+  /// it must track the view or a shrink leaves blank rows.
   public var onGridSizeChange: ((UInt16, UInt16) -> Void)?
 
-  /// Reports the grid size once the bounds SETTLE (keyboard animation done).
-  /// Drives the server PTY resize — debounced so an inline TUI is not made to
-  /// rewrap + redraw at every transient size, which bakes duplicate footers
-  /// into scrollback.
+  /// Fires once the bounds settle, for the PTY: a resize per transient size makes an inline TUI
+  /// rewrap each time and bake duplicate footers into scrollback.
   public var onGridSizeSettled: ((UInt16, UInt16) -> Void)?
 
   /// Engine scroll delta: positive = into history. Built from pan pixels via
   /// `TouchScrollModel` (finger-down → history).
   public var onScrollLines: ((Int32) -> Void)?
 
-  /// Fired when the user taps a cell (after hit-testing links / clearing selection).
   public var onTapCell: ((Int, Int) -> Void)?
 
   /// Double-tap word select — column/row in the visible grid.
@@ -66,13 +57,6 @@ public final class TetherSurfaceView: UIView {
   private var localGrid: (cols: UInt16, rows: UInt16)?
   /// Size the server PTY was last told — updated only when the bounds settle.
   private var serverGrid: (cols: UInt16, rows: UInt16)?
-  /// Debounces the SERVER resize to the settled bounds. A keyboard animation
-  /// drives layoutSubviews once per frame through very short intermediate
-  /// heights; sending each to the PTY made an inline TUI (Claude Code) rewrap
-  /// and redraw its footer at every transient width, and with no alt screen
-  /// each wrong-width copy was baked into scrollback for good. The local
-  /// emulator still follows every frame (see `onGridSizeChange`) so the render
-  /// never shows blank rows.
   private var gridSettleWork: DispatchWorkItem?
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
@@ -104,10 +88,8 @@ public final class TetherSurfaceView: UIView {
   private var pendingSnapshot: TerminalFrame?
   private var needsRepaint = false
   private var isRendering = false
-  /// Bumped whenever the surface's contents stop being the ones a render was
-  /// started for. A render already in flight completes anyway — the queue has
-  /// no cancellation — and its `commit` would otherwise repopulate the layers
-  /// with the session that was just cleared.
+  /// Bumped when the contents a render started for are dropped: an in-flight render can't be
+  /// cancelled, and its `commit` would otherwise repopulate a just-cleared session.
   private var frameEpoch: UInt64 = 0
 
   public override init(frame: CGRect) {
@@ -217,9 +199,8 @@ public final class TetherSurfaceView: UIView {
     }
   }
 
-  /// A session switch that has a cached grid to show. Clears the generation
-  /// gate so the next frame paints, but leaves the current image up until it
-  /// does — `clearSnapshot` is the blank flash.
+  /// Session switch with a cached grid: keeps the current image up until the next frame paints,
+  /// where `clearSnapshot` would flash blank.
   public func prepareForSessionChange() {
     frameEpoch &+= 1
     isRendering = false
@@ -396,14 +377,8 @@ public final class TetherSurfaceView: UIView {
     )
   }
 
-  /// Vertical offset that anchors the grid to the BOTTOM of the view.
-  ///
-  /// The grid is a whole number of rows, so it is almost never exactly the view's
-  /// height, and a resize round-trip can leave the emulator a few rows short of
-  /// what fits. Drawing from the top put that slack between the last line and the
-  /// key bar, where it reads as a gap in the content. A terminal's newest output
-  /// is at the bottom, so anchoring there moves the slack up against the title
-  /// bar, where it is indistinguishable from empty scrollback.
+  /// Bottom-anchored so the leftover height sits under the title bar like empty scrollback,
+  /// not as a gap between the newest line and the key bar.
   private var gridOriginY: CGFloat {
     guard let header else { return 0 }
     let cols = Int(header.cols)
@@ -442,15 +417,8 @@ public final class TetherSurfaceView: UIView {
       onGridSizeChange?(size.cols, size.rows)
     }
 
-    // Re-measure once the bounds SETTLE (keyboard animation done) and re-assert
-    // BOTH grids from the final size. The immediate path above tracks the view
-    // through the animation's intermediate heights; if the view lands on a size
-    // equal to one of those transients the guard suppresses a fresh report, so
-    // the local emulator — and the bottom-anchored render that reads it — can
-    // stay at a height the view no longer has, clipping the newest rows under
-    // the key bar or leaving slack above it. The server PTY (SIGWINCH) is
-    // debounced here too so an inline TUI is not made to rewrap at every
-    // transient width. If the settled size already matches, nothing is sent.
+    // Re-assert the local grid too: the dedupe guard above can leave it at a transient
+    // keyboard-animation height, clipping the newest rows under the key bar.
     gridSettleWork?.cancel()
     let work = DispatchWorkItem { [weak self] in
       guard let self, let settled = self.currentGridSize() else { return }
@@ -480,9 +448,7 @@ public final class TetherSurfaceView: UIView {
     )
   }
 
-  /// Left edge of the grid, mirroring `gridOriginY` on the horizontal axis: a
-  /// symmetric inset with the sub-column leftover split evenly, so text has a
-  /// gutter on both sides instead of running to the right edge.
+  /// Sub-column leftover split evenly so text has a gutter on both sides.
   private var gridOriginX: CGFloat {
     guard let header, cellWidth > 0 else { return 0 }
     return TerminalGridInset.originX(
@@ -549,28 +515,17 @@ public final class TetherSurfaceView: UIView {
     }
   }
 
-  /// Tracks the finger through the part of a drag that has not yet become a
-  /// whole row.
-  ///
-  /// Scrolling only ever moved in cell-height steps, and each step waited for
-  /// the emulator to send a new grid — so the content visibly lagged the touch.
-  /// The leftover pixels are exactly the distance the grid does not know about
-  /// yet, so shifting the content layer by them costs nothing (it is a
-  /// compositor transform, not a redraw) and makes the drag track 1:1.
+  /// Shifts the content by the sub-row pan remainder (a compositor transform, not a redraw)
+  /// so the drag tracks the finger 1:1 instead of waiting for whole-row grids.
   private func applyScrollOffset() {
     withoutAnimations {
-      // `scrollRemainder` carries the sign of `lastPanY - point.y`, so a finger
-      // moving DOWN produces a negative remainder while the content it drags
-      // has to move DOWN — hence the negation.
+      // Negated: `scrollRemainder` has the sign of `lastPanY - point.y`, opposite to the drag.
       contentLayer.setAffineTransform(CGAffineTransform(translationX: 0, y: -scrollRemainder))
     }
   }
 
-  /// A one-finger drag in a mouse-mode TUI scrolls it with WHEEL events only.
-  /// It used to also send a button press + drag-motion + release, which the
-  /// program (Claude Code) read as a click-drag and answered by selecting text
-  /// — so every scroll attempt highlighted instead. On a touch screen one
-  /// finger means scroll; a discrete tap still sends a real click.
+  /// Wheel events only: a press + drag-motion + release reads as a click-drag, so the TUI
+  /// selects text instead of scrolling.
   private func handleMousePan(_ gesture: UIPanGestureRecognizer, point: CGPoint) {
     guard let header else { return }
     let cell = MouseSeq.cellFromPoint(
@@ -632,9 +587,7 @@ public final class TetherSurfaceView: UIView {
     let point = gesture.location(in: self)
     guard let cell = cellAt(point) else { return }
 
-    // Every tap raises the keyboard. In a mouse-mode TUI the click used to
-    // return before this, so once the keyboard was hidden a tap sent a click
-    // but never brought the keyboard back — leaving no way to type again.
+    // Before the mouse-mode return, or a tap in a mouse-mode TUI never re-raises the keyboard.
     onTapCell?(cell.col, cell.row)
 
     if mouseMode != .off {

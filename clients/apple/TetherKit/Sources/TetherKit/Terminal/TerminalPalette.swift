@@ -1,9 +1,6 @@
 import SwiftTerm
 
-/// Theme and color resolution for `TerminalEngine`.
-///
-/// `background` must equal `TetherColors.terminalBackground` or a seam shows
-/// around the grid.
+/// `background` must equal `TetherColors.terminalBackground` or a seam shows around the grid.
 enum TerminalPalette {
   static let foreground: UInt32 = 0xFFCC_CCCC
   static let background: UInt32 = 0xFF1E_1E2E

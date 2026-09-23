@@ -1,10 +1,6 @@
 import Foundation
 import SwiftTerm
 
-/// PTY bytes in, `TerminalFrame` out. SwiftTerm parses; this owns what SwiftTerm
-/// keeps private (cursor visibility, scrollback position) and maps cells into
-/// the renderer's model.
-///
 /// Every entry point takes SwiftTerm's `terminalLock`: its synchronized-output
 /// watchdog mutates the terminal from its own queue.
 final class TerminalEngine {
@@ -19,9 +15,8 @@ final class TerminalEngine {
   private var needsRefresh = false
   /// Lines above the live bottom the view is scrolled back; 0 = live.
   private var scrollOffset = 0
-  /// `buffer.yDisp` at the live bottom. SwiftTerm keeps yDisp following output
-  /// only while it sits at the bottom, so it is put back here before every
-  /// feed and resize.
+  /// `buffer.yDisp` at the live bottom. SwiftTerm's yDisp follows output only while there,
+  /// so it is restored before every feed and resize.
   private var liveTop = 0
 
   init(cols: UInt16, rows: UInt16, scrollback: Int = 10_000) {

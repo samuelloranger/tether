@@ -1,27 +1,15 @@
 import Foundation
 
-/// Everything the pipeline tells the store that is not a grid.
-///
-/// Kept separate from the snapshot stream on purpose: snapshots are allowed to
-/// be dropped when the main actor falls behind (only the newest one matters),
-/// and these are not.
+/// Non-grid pipeline output. Unlike snapshots (newest-wins), these are never dropped.
 public enum TerminalPipelineEvent: Sendable {
   case mouseModes(mode: MouseMode, sgr: Bool)
-  /// The visible screen switched to/from the alt-screen — i.e. a full-screen
-  /// program (a CLI agent, vim, less) took or gave up the foreground. The
-  /// controller needs this to know whether typing a command at the "prompt"
-  /// would actually reach a shell.
+  /// A full-screen program took or left the screen: a typed command may not reach a shell.
   case altScreen(Bool)
   case error(String)
 }
 
-/// A frame the UI wants on the wire, in the order the UI produced it.
-///
-/// These go through a stream rather than through `await pipeline.send…`: a
-/// `Task { await … }` per keystroke has NO defined enqueue order, so fast
-/// typing could reach the socket out of order. `AsyncStream.Continuation.yield`
-/// is FIFO and callable without awaiting, which is exactly what a key handler
-/// needs.
+/// Streamed rather than awaited: a `Task { await … }` per keystroke has no defined order,
+/// while `Continuation.yield` is FIFO and needs no await.
 enum OutboundFrame: Sendable {
   /// `key` is the session the text was typed INTO, so a frame queued just
   /// before a session switch is not delivered to the session that replaced it.
@@ -36,10 +24,7 @@ enum OutboundFrame: Sendable {
   case serverResize(cols: UInt16, rows: UInt16)
 }
 
-/// Owns the terminal byte stream and the VT emulator, off the main actor.
-///
-/// The read path runs on the actor's own executor; the main actor only receives
-/// the newest grid, so a chatty program never saturates the run loop.
+/// The main actor only receives the newest grid, so a chatty program never saturates it.
 actor TerminalPipeline {
   /// Newest-wins: if the main actor is busy, intermediate grids are dropped
   /// rather than queued. `nil` means "clear the surface".
@@ -66,9 +51,7 @@ actor TerminalPipeline {
   private var lastMouseMode: MouseMode = .off
   private var lastMouseSgr = true
   private var lastAltScreen = false
-  /// When false, output is still fed to the emulator, but grid snapshots are not
-  /// produced — a background (non-visible) session stays current without paying
-  /// to rasterize.
+  /// False for a background session: output still feeds the emulator, but nothing is rasterized.
   private var rendering = true
   /// One source of truth for the grid size: the channel, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
@@ -86,9 +69,7 @@ actor TerminalPipeline {
 
   // MARK: - Connection
 
-  /// Pumps an authenticated SSH PTY into the emulator and snapshot stream.
-  /// Connection/authentication belongs to the caller; this boundary is just raw
-  /// terminal bytes, so it is also testable without a host.
+  /// Connection and auth belong to the caller: this takes raw PTY bytes, so it tests hostless.
   func connectSSH(transport: any TerminalByteStream, key: String) async {
     disconnect()
     startOutboundPumpIfNeeded()
@@ -113,9 +94,8 @@ actor TerminalPipeline {
   private func readLoopSSH(key: String, transport: any TerminalByteStream) async {
     do {
       while !Task.isCancelled, let bytes = try await transport.read() {
-        // A replaced connection shares the host key, and its closed stream still
-        // hands out buffered chunks: cancellation is the only thing that tells
-        // them apart from the live connection's output.
+        // A replaced connection's closed stream still yields buffered chunks under the same
+        // key; only cancellation tells them apart from the live connection's output.
         guard !Task.isCancelled else { break }
         guard key == emulatorKey else { continue }
         applyOutput(bytes)
@@ -223,9 +203,6 @@ actor TerminalPipeline {
     return key == emulatorKey
   }
 
-  /// Resizes the LOCAL emulator and records the new grid size. Returns whether
-  /// the size actually changed, so the caller only puts a resize frame on the
-  /// wire when it did.
   @discardableResult
   private func applyLocalResize(cols newCols: UInt16, rows newRows: UInt16) -> Bool {
     let oldCols = cols
@@ -254,11 +231,8 @@ actor TerminalPipeline {
     return true
   }
 
-  /// Full transcript of the retained output buffer as plain text. Replays the
-  /// raw byte stream into a throwaway emulator tall enough that the whole
-  /// history lands on one grid (snapshot only sees the visible rows), then
-  /// decodes it. The buffer is byte-capped, so a very long session shows the
-  /// recent tail.
+  /// Replays into an emulator tall enough to hold the whole history, since a frame only covers
+  /// the visible rows. The buffer is byte-capped, so a long session yields only its tail.
   func historyText() -> String {
     guard let buffer = currentGrid?.buffer, !buffer.data.isEmpty else { return "" }
     let newlines = buffer.data.reduce(into: 0) { if $1 == 0x0A { $0 += 1 } }
@@ -279,15 +253,11 @@ actor TerminalPipeline {
     publishSnapshot()
   }
 
-  /// Toggle grid rasterization. A background (non-visible) session sets this
-  /// false: output keeps feeding the emulator, but no snapshot is produced until
-  /// it becomes visible again.
   func setRendering(_ on: Bool) {
     rendering = on
     if on {
-      // Force a fresh frame even when the grid is unchanged since it last
-      // rendered, so a session switched back into view is not stuck on the
-      // previous tab's frame until the next byte of output arrives.
+      // Force a frame even if unchanged, or a session switched back into view keeps
+      // showing the previous tab's grid until its next output.
       lastRenderedGeneration = nil
       publishSnapshot()
     }

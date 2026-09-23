@@ -3,9 +3,6 @@ import XCTest
 
 @testable import TetherKit
 
-/// Switching sessions used to `yield(nil)`, which clears the surface. A cached
-/// last grid for the session being attached to is what stops that blank flash
-/// until server replay lands.
 final class TerminalSnapshotCacheTests: XCTestCase {
   func testUnknownKeyHasNothingToShow() {
     let cache = TerminalSnapshotCache()

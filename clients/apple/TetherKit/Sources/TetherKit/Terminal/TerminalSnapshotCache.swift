@@ -1,9 +1,7 @@
 import Foundation
 
-/// Last grid shown for each host-qualified session.
-///
-/// Used on a first attach this launch when the live emulator has not been
-/// built yet. Switch-back reuses `TerminalSessionGrids` instead of this.
+/// For a first attach this launch, before the live emulator exists; switch-back
+/// reuses `TerminalSessionGrids` instead.
 final class TerminalSnapshotCache {
   private var grids: [String: TerminalFrame] = [:]
 
