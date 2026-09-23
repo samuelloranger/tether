@@ -26,8 +26,10 @@ struct TerminalKeyStyle: ButtonStyle {
     var body: some View {
       label()
         .font(.callout.weight(.medium))
-        .padding(.horizontal, 10)
-        .frame(minWidth: TerminalAccessoryBar.keySize, minHeight: TerminalAccessoryBar.keySize)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .padding(.horizontal, 4)
+        .frame(width: TerminalAccessoryBar.keyWidth, height: TerminalAccessoryBar.keySize)
         .foregroundStyle(armed ? TetherColors.onAccent : TetherColors.textPrimary)
         .background(armed ? TetherColors.accent : TetherColors.surfaceRaised)
         // Tinted from the foreground rather than white, so the press reads the

@@ -14,6 +14,7 @@ public struct HomeView: View {
   @State private var pendingKeyDeletion: SSHKeyRecord?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @ScaledMetric(relativeTo: .title3) private var addButtonSize: CGFloat = 32
+  @ScaledMetric(relativeTo: .body) private var keyActionIconSize: CGFloat = 22
 
   public enum Tab: String { case machines, keys }
 
@@ -240,17 +241,20 @@ public struct HomeView: View {
       keyActionButton("Import", "square.and.arrow.down", prime: false) { keyEntry = KeyEntry(mode: .importFile) }
       keyActionButton("Paste", "doc.on.clipboard", prime: false) { keyEntry = KeyEntry(mode: .paste) }
     }
+    .fixedSize(horizontal: false, vertical: true)
     .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 14)
   }
 
   private func keyActionButton(_ label: String, _ icon: String, prime: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       VStack(spacing: 6) {
+        // SF Symbols differ in height; a fixed icon box keeps the three buttons level.
         Image(systemName: icon).font(.body.weight(.semibold))
+          .frame(height: keyActionIconSize)
         Text(label).font(.caption.weight(.semibold))
           .lineLimit(2).minimumScaleFactor(0.75).multilineTextAlignment(.center)
       }
-      .frame(maxWidth: .infinity).padding(.vertical, 12)
+      .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 12)
       .background(prime ? TetherColors.accent : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
       .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(prime ? .clear : TetherColors.border))
       .foregroundStyle(prime ? TetherColors.onAccent : TetherColors.textPrimary)
