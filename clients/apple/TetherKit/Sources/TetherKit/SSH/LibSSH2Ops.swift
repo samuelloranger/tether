@@ -15,9 +15,8 @@ enum LibSSH2OpsError: Error, Equatable {
   case readFailed(Int)
 }
 
-/// Concrete libssh2 implementation of the connect sequence. Owns the socket and
-/// session until `openPTYChannel` hands them to the pump; `teardown` releases
-/// whatever was created on an earlier failure.
+/// Owns the socket and session until `openPTYChannel` hands them to the pump; `teardown`
+/// releases whatever an earlier failure left created.
 final class LibSSH2Ops: SSHConnectionOps, @unchecked Sendable {
   private let config: SSHConnectionConfig
   private let operationTimeoutMs: Int

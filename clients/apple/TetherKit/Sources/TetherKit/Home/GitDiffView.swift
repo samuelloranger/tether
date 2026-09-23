@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -175,16 +174,13 @@ private struct PullRequestDetailView: View {
     .background(TetherColors.background)
     .copyConfirmation(isPresented: $showCopied)
     .sheet(isPresented: $showDiff) {
-      PatchSheet(title: "#\(pullRequest.number)", subtitle: pullRequest.title, files: diffFiles)
+      PatchSheet(title: "#\(pullRequest.number)", files: diffFiles)
     }
     .task {
       refreshDescription(detail.body)
       await refreshDetail()
-      // Stream each check as gh reprints it, on the host — the rows flip step by
-      // step, no phone timer. When the stream ends (run settled, or its dial
-      // failed) refetch once for mergeability and state, then fall back to a
-      // timed poll only if checks somehow still read running, so we always
-      // converge instead of leaving them stuck.
+      // Checks stream as gh reprints them; once the stream ends, refetch once, and poll
+      // only if checks still read running, so the rows always converge.
       while !Task.isCancelled, GitRepositoryModel.isRunning(detail.checks) {
         let start = Date()
         let streamed = await controller.streamChecks(pullRequest) { snapshot in
@@ -210,9 +206,8 @@ private struct PullRequestDetailView: View {
     }
   }
 
-  // Use the fetched detail once it lands, but fall back to the state the list
-  // row already carries so a merged pull request never flashes "Open" while its
-  // detail loads.
+  // Falls back to the list row's state so a merged pull request never flashes "Open"
+  // while its detail loads.
   private var stateChip: (text: String, tint: Color) {
     let state = detail.fetchedAt == .distantPast ? pullRequest.state : detail.state
     switch state {
@@ -590,7 +585,6 @@ private struct CommitDetailView: View {
 /// A patch shown over whatever opened it, so closing it returns you there.
 private struct PatchSheet: View {
   let title: String
-  let subtitle: String
   let files: [DiffFile]
 
   @Environment(\.dismiss) private var dismiss
@@ -625,4 +619,3 @@ private struct PatchSheet: View {
   }
 }
 
-#endif

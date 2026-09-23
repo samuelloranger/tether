@@ -1,9 +1,7 @@
-#if canImport(UIKit)
 import SwiftUI
 
-/// A patch, read as code rather than as git output: one band per file, a line
-/// rail down the side, and the change carried by a coloured edge instead of a
-/// leading `+`/`-` — on a phone that character costs a column of code.
+/// A patch read as code: one band per file, a line rail, and a coloured edge instead of a
+/// leading `+`/`-`, which costs a column of code on a phone.
 struct DiffReviewView: View {
   let files: [DiffFile]
   @State private var collapsed: Set<String> = []
@@ -178,4 +176,3 @@ struct MarkdownBodyView: View {
     (try? AttributedString(markdown: text)) ?? AttributedString(text)
   }
 }
-#endif

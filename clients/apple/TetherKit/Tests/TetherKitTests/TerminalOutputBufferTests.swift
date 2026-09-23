@@ -10,13 +10,6 @@ final class TerminalOutputBufferTests: XCTestCase {
     XCTAssertEqual(buffer.data, Data("abcd".utf8))
   }
 
-  func testResetClearsTheBytes() {
-    let buffer = TerminalOutputBuffer()
-    buffer.append(Data("ab".utf8))
-    buffer.reset()
-    XCTAssertTrue(buffer.data.isEmpty)
-  }
-
   func testOverBudgetKeepsTheNewestTwoThirds() {
     let buffer = TerminalOutputBuffer(byteBudget: 6)
     buffer.append(Data("abcdefg".utf8))
@@ -56,7 +49,7 @@ final class TerminalResizeStrategyTests: XCTestCase {
     )
   }
 
-  func testPrimaryScreenShrinkAndColumnChangeKeepAlacrittyReflow() {
+  func testPrimaryScreenShrinkAndColumnChangeKeepTheEmulatorReflow() {
     // Shrink: reflow is clean, and rebuilding would drop scrollback past the
     // buffer budget for nothing.
     XCTAssertFalse(
@@ -64,7 +57,7 @@ final class TerminalResizeStrategyTests: XCTestCase {
         altScreen: false, oldCols: 20, oldRows: 12, newCols: 20, newRows: 8
       )
     )
-    // Column-only change: alacritty's column reflow is correct here.
+    // Column-only change: the emulator's column reflow is correct here.
     XCTAssertFalse(
       TerminalResizeStrategy.shouldRebuildFromBuffer(
         altScreen: false, oldCols: 80, oldRows: 24, newCols: 100, newRows: 24
@@ -73,9 +66,7 @@ final class TerminalResizeStrategyTests: XCTestCase {
   }
 
   func testPrimaryScreenGrowRebuildsToAvoidReflowDuplication() {
-    // A row grow on the primary screen makes alacritty's reflow duplicate a
-    // content row into the newly exposed rows (the agent-TUI line-doubling bug).
-    // Rebuild from the buffer at the new size instead.
+    // A primary-screen row grow can make the reflow duplicate a content row into the new rows.
     XCTAssertTrue(
       TerminalResizeStrategy.shouldRebuildFromBuffer(
         altScreen: false, oldCols: 20, oldRows: 8, newCols: 20, newRows: 12
@@ -89,5 +80,15 @@ final class TerminalResizeStrategyTests: XCTestCase {
         altScreen: true, oldCols: 20, oldRows: 8, newCols: 20, newRows: 8
       )
     )
+  }
+}
+
+final class TerminalOutputBufferReplayTests: XCTestCase {
+  func testReplayRebuildsTheGridWithoutAnsweringOldQueries() {
+    let buffer = TerminalOutputBuffer()
+    buffer.append(Data("hi\u{1B}[6n".utf8))
+    let engine = buffer.replay(cols: 20, rows: 5)
+    XCTAssertEqual(rowText(engine.frame(), 0), "hi")
+    XCTAssertTrue(engine.takeReplies().isEmpty, "replayed history must not re-answer queries")
   }
 }

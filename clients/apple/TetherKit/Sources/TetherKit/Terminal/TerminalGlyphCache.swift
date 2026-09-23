@@ -1,22 +1,9 @@
-#if canImport(UIKit)
 import CoreGraphics
 import CoreText
 import UIKit
 
-/// Codepoint → `CGGlyph`, so the render loop never builds an `NSAttributedString`.
-///
-/// Shaping one attributed string per cell was the single most expensive thing
-/// the surface did: three allocations, a `CTLine`, and a bounds measurement for
-/// every visible character on every frame. A terminal grid is monospaced and
-/// unshaped by definition, so the mapping is a pure function of the codepoint
-/// and can be memoized for the lifetime of the font.
-///
-/// The font travels with the glyph. `CTFontGetGlyphsForCharacters` does not
-/// cascade, so a monospace face that has no CJK, emoji or box-drawing coverage
-/// reports a miss — and a cache that returned only a glyph id would have made
-/// the renderer drop those cells, which the `CTLine` path it replaced drew
-/// through Core Text's own fallback. A miss is resolved once with
-/// `CTFontCreateForString` and then cached like any hit.
+/// Codepoint → `CGGlyph` + font. `CTFontGetGlyphsForCharacters` does not cascade, so a
+/// miss is resolved once via `CTFontCreateForString` and cached with its fallback font.
 final class TerminalGlyphCache {
   struct Resolved {
     var glyph: CGGlyph
@@ -71,4 +58,3 @@ final class TerminalGlyphCache {
     return first
   }
 }
-#endif

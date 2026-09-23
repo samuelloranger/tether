@@ -1,11 +1,7 @@
 import Foundation
 
-/// The read loop behind one-shot and streaming exec. libssh2 reports a timeout
-/// when a command is merely quiet, so that keeps waiting, until it has been
-/// silent for `deadline` when there is one. A blocking read returns 0 only at
-/// EOF or close (and `libssh2_channel_eof` misses a close), so 0 ends the read.
-/// Any other error is a dead transport and throws: returning the partial
-/// output would pass it off as the command's answer.
+/// libssh2 times out on a merely quiet command, so a timeout keeps waiting; 0 means EOF or close
+/// (`libssh2_channel_eof` misses a close). Other errors throw rather than pass off partial output.
 enum ExecReader {
   static func run(
     read: (UnsafeMutableBufferPointer<CChar>) -> Int,

@@ -1,17 +1,11 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
-/// The drawer's gestures, as UIKit recognizers on the window.
-///
-/// SwiftUI's `DragGesture` has no cancelled state: when another recognizer
-/// claimed the touch mid-drag, `onEnded` never ran and the panel stayed
-/// stranded a few points open. `UIScreenEdgePanGestureRecognizer` is what the
-/// system uses for an edge drawer, and it reports cancellation.
+/// UIKit recognizers, not `DragGesture`: SwiftUI has no cancelled state, so a touch
+/// claimed mid-drag never ran `onEnded` and stranded the panel partly open.
 struct DrawerGestureHost: UIViewRepresentable {
   /// Read when a gesture starts, not when this view is built.
   var isOpen: () -> Bool
-  var panelWidth: () -> CGFloat
   var onBegan: () -> Void
   var onChanged: (CGFloat) -> Void
   var onEnded: (CGFloat, CGFloat) -> Void
@@ -119,8 +113,7 @@ struct DrawerGestureHost: UIViewRepresentable {
       false
     }
 
-    /// The terminal's own pan begins the moment a finger moves and used to win
-    /// every race, so the edge swipe did nothing over the grid. Ours goes first;
+    /// The terminal's pan begins the moment a finger moves, so ours must go first;
     /// the instant it fails the terminal gets the touch untouched.
     func gestureRecognizer(
       _ recognizer: UIGestureRecognizer,
@@ -133,4 +126,3 @@ struct DrawerGestureHost: UIViewRepresentable {
     }
   }
 }
-#endif

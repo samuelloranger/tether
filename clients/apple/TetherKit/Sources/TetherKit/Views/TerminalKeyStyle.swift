@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 
 /// The utility bar's key. Lit face + brief press so the one row whose job is to
@@ -46,4 +45,3 @@ struct TerminalKeyStyle: ButtonStyle {
     }
   }
 }
-#endif

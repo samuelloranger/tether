@@ -3,26 +3,15 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-/**
- * The gate that stops a release publishing over a red CI run.
- *
- * v3.0.0 is why this exists: the tag commit's CI and release.yml were triggered
- * by the same push, CI failed a server test, and release.yml — which depends on
- * nothing — built and published every artifact anyway. The check release.sh had
- * at the time ran before the version bump existed, so it graded the parent
- * commit, not the one that got tagged.
- *
- * These tests run the real helper block out of release.sh against a fake `gh`
- * that answers with canned API payloads, so the jq expression is exercised too —
- * an in-progress run reports `conclusion: ""`, and mis-parsing that is how a
- * wait loop decides a running build has already failed.
- */
+// The gate that stops a release publishing over a red CI run: runs release.sh's real CI helpers
+// against a fake `gh`, so the jq that reads an in-progress run's empty conclusion is exercised too.
 const SCRIPT = readFileSync('scripts/release.sh', 'utf8');
 
 /** The `ci_run_for` + `wait_for_ci` block, lifted verbatim. */
 function helpers(): string {
   const start = SCRIPT.indexOf('CI_WAIT_SECONDS=');
-  const end = SCRIPT.indexOf('# Require CI to be green');
+  const waitFn = SCRIPT.indexOf('wait_for_ci() {');
+  const end = waitFn < 0 ? -1 : SCRIPT.indexOf('\n}\n', waitFn) + 3;
   if (start < 0 || end <= start) {
     throw new Error('release.sh no longer has the CI wait helpers where this test expects them');
   }
@@ -106,10 +95,7 @@ test('a cancelled run is a failure, not a pass', async () => {
   expect(stderr).toContain("'cancelled'");
 });
 
-/**
- * An in-progress run reports an EMPTY conclusion. Treating empty as "not
- * success" and returning would fail every release the moment CI started.
- */
+// An in-progress run reports an EMPTY conclusion; treating it as a failure fails every release.
 test('an in-progress run is neither a pass nor a failure', async () => {
   const { code, stdout } = await waitForCi([inProgress, inProgress, green]);
   expect(code).toBe(0);
@@ -127,11 +113,7 @@ test('gives up when no run ever appears', async () => {
   expect(stderr).toContain('no run found');
 });
 
-/**
- * CI triggers on pushes to main and on pull requests. A release cut from any
- * other branch produces no run at all, and spending the full hour to find that
- * out — then failing with a timeout — hides the actual problem.
- */
+// A branch that is neither main nor a PR never gets a CI run: fail fast instead of a 1 h timeout.
 test('says so quickly when the branch produces no run at all', async () => {
   const { code, stderr } = await waitForCi([null, null], { CI_APPEAR_SECONDS: '0' });
   expect(code).toBe(1);
@@ -139,11 +121,8 @@ test('says so quickly when the branch produces no run at all', async () => {
   expect(stderr).toContain('pull requests');
 });
 
-/**
- * Order is the whole point: the wait has to sit between pushing the version bump
- * and pushing the tag. Before the push there is no run to grade; after the tag,
- * release.yml is already building and the gate is decoration.
- */
+// The wait must sit between pushing the bump and pushing the tag: after the tag, release.yml is
+// already building.
 test('release.sh waits for the release commit between the branch push and the tag', () => {
   const push = SCRIPT.indexOf('git push origin "$BRANCH"');
   const wait = SCRIPT.indexOf('wait_for_ci "$RELEASE_SHA"');

@@ -2,9 +2,8 @@ import Foundation
 
 /// Flattens a decoded grid snapshot into plain text for the clipboard.
 enum TerminalGridText {
-  /// One line per row, trailing blank rows dropped. `codepoint == 0` is an
-  /// unwritten cell or the spacer after a wide glyph, so it is skipped — real
-  /// spaces are U+0020. A row's trailing spaces are trimmed.
+  /// `codepoint == 0` is an unwritten cell or a wide glyph's spacer, so it is skipped;
+  /// real spaces are U+0020.
   static func plainText(header: GridSnapshot.Header, cells: [GridSnapshot.Cell]) -> String {
     let cols = Int(header.cols)
     let rows = Int(header.rows)

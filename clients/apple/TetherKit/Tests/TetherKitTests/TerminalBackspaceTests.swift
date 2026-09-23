@@ -1,20 +1,14 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 import XCTest
 
 @testable import TetherKit
 
-/// What the hidden input view actually puts on the wire for a delete key.
-///
-/// v3.2.1 sent two DELs per press: `deleteBackward()` emitted one and then
-/// `super.deleteBackward()` re-entered the delegate, which emitted another. The
-/// suppression flag between them assumed that re-entry was synchronous. Nothing
-/// in the unit tests could see it, because nothing counted the bytes.
+/// What the hidden input view actually puts on the wire for a delete key: bytes are
+/// counted because `super.deleteBackward()` re-enters the delegate and can emit twice.
 final class TerminalBackspaceTests: XCTestCase {
-  /// Kept for the length of each test: `UITextView.delegate` is weak, and the
-  /// window is what lets the view become first responder so `deleteBackward()`
-  /// takes the same path it does on a device.
+  /// Held per test: `UITextView.delegate` is weak, and only a windowed view can become
+  /// first responder, so `deleteBackward()` takes the on-device path.
   private var window: UIWindow?
 
   override func tearDown() {
@@ -56,10 +50,8 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertEqual(sent, ["\u{7F}"])
   }
 
-  /// The shipped bug. UIKit reports one press through several callbacks, and
-  /// `shouldChangeTextIn` is documented to fire twice for a single press with
-  /// some keyboards. Only ONE character actually leaves the document, so only
-  /// one DEL may leave the app.
+  /// `shouldChangeTextIn` can fire twice for one press with some keyboards; only one
+  /// character leaves the document, so only one DEL may leave the app.
   func testDuplicateCallbacksForOnePressSendOneDel() {
     var sent: [String] = []
     let (view, coordinator) = makeView { sent.append($0) }
@@ -116,12 +108,8 @@ final class TerminalBackspaceTests: XCTestCase {
   func testTheFlushHappensOnItsOwnRunloopTurn() {
     var sent: [String] = []
     let delivered = expectation(description: "DEL reaches the wire without a manual flush")
-    // Fulfill on the ACTUAL delivery rather than after a guessed number of
-    // runloop turns: under a loaded CI sim the main queue is starved (the
-    // haptic subsystem alone floods it), and counting `DispatchQueue.main.async`
-    // hops raced the 2s wait. Keying off the sink makes the test pass the
-    // instant the self-scheduled flush fires and time out only on a real
-    // regression — the generous ceiling is never reached on success.
+    // Fulfill on actual delivery, not a counted number of main-queue hops: a loaded
+    // CI sim starves the main queue (haptics flood it) and hop counting raced the wait.
     delivered.assertForOverFulfill = false
     let (view, coordinator) = makeView {
       sent.append($0)
@@ -187,4 +175,3 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertEqual(TerminalKeyMap.specialKeyBytes(keyCode: .keyboardEscape, mod: 1), "\u{1B}")
   }
 }
-#endif

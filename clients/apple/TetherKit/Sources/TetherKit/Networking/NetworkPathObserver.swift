@@ -1,9 +1,8 @@
 import Foundation
 import Network
 
-/// Owns one `NWPathMonitor` and reports normalized path changes on the main
-/// actor. It decides nothing: whether a change is worth a redial is the
-/// terminal controller's single recovery gate.
+/// Reports normalized `NWPathMonitor` changes on the main actor. It decides nothing:
+/// whether a change is worth a redial is the terminal controller's call.
 @MainActor
 public final class NetworkPathObserver {
   private let queue = DispatchQueue(label: "cloud.samlo.tether.network-path")

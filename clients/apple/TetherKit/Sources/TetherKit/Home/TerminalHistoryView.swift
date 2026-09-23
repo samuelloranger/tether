@@ -1,10 +1,7 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
-/// Full session transcript on its own screen: read-only, selectable text so you
-/// can drag-select and copy exactly what you want. Opens scrolled to the bottom
-/// (the newest output).
+/// Full session transcript as read-only selectable text, opened scrolled to the newest output.
 struct TerminalHistoryView: View {
   let controller: SSHTerminalController
   var preferences: AppPreferences
@@ -12,7 +9,6 @@ struct TerminalHistoryView: View {
 
   @State private var text: String?
   @State private var showCopyConfirmation = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     NavigationStack {
@@ -112,4 +108,3 @@ private struct SelectableTextView: UIViewRepresentable {
     var didScrollToBottom = false
   }
 }
-#endif

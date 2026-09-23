@@ -2,14 +2,8 @@ import Foundation
 import XCTest
 @testable import TetherKit
 
-/// Live end-to-end proof of the real connector against a real host. Skipped
-/// unless the environment supplies a target and credential, so it never runs in
-/// CI. Exercises the shipping API — `SSHConnector.connect` → `TerminalByteStream`
-/// — not throwaway probe code.
-///
-/// Required env: TETHER_SSH_HOST, TETHER_SSH_USER, and one of TETHER_SSH_PASSWORD
-/// or TETHER_SSH_KEY_PEM. Optional: TETHER_SSH_PORT (default 22),
-/// TETHER_SSH_ATTACH (zmx session name; when set, the connector attaches to it).
+/// Skipped unless TETHER_SSH_HOST, TETHER_SSH_USER and TETHER_SSH_PASSWORD or _KEY_PEM are set.
+/// Optional: TETHER_SSH_PORT, TETHER_SSH_ATTACH (zmx session to attach).
 final class SSHLiveConnectTests: XCTestCase {
   func test_live_connector_reaches_a_shell_and_runs_a_command() async throws {
     let stream = try await connectLive()
@@ -19,10 +13,8 @@ final class SSHLiveConnectTests: XCTestCase {
     await stream.close()
   }
 
-  /// Idle-shell keystroke round trip. Each probe waits first so the pump is
-  /// asleep when the input arrives: the case a read timeout used to delay.
-  /// The typed line's own echo carries the marker, so this times keys → host →
-  /// screen, which is what a person feels.
+  /// Each probe sleeps first so the pump is idle when input arrives; the line's own echo carries
+  /// the marker, so this times keys → host → screen.
   func test_live_idle_keystroke_round_trip_is_not_held_by_the_pump() async throws {
     let stream = try await connectLive()
     let ready = "TETHER_READY_\(Int.random(in: 1000...9999))"

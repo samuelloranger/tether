@@ -1,16 +1,5 @@
-import Foundation
-
-/// Packed terminal grid buffer (TGRD) — must match `crates/tether-ffi/src/grid_snapshot.rs`.
+/// Terminal grid value types shared by the engine and the renderer.
 public enum GridSnapshot {
-  public static let magic: UInt32 = 0x5447_5244 // "TGRD"
-  public static let version: UInt16 = 1
-  public static let headerSize = 24
-  public static let cellStride = 16
-
-  public static let flagCursorVisible: UInt16 = 1 << 0
-  /// Bit 1 of the TGRD flags word. Trailing empty rows are slack, not content.
-  public static let flagAltScreen: UInt16 = 1 << 1
-
   public static let attrBold: UInt32 = 1 << 0
   public static let attrItalic: UInt32 = 1 << 1
   public static let attrUnderline: UInt32 = 1 << 2
@@ -34,15 +23,15 @@ public enum GridSnapshot {
     public var background: UInt32
     public var attrs: UInt32
   }
+}
 
-  public enum DecodeError: Error, Equatable {
-    case tooShort
-    case badMagic
-    case badVersion(UInt16)
-    case sizeMismatch(length: Int, cols: UInt16, rows: UInt16)
-  }
+/// The visible grid handed to the renderer.
+public struct TerminalFrame: Sendable, Equatable {
+  public var header: GridSnapshot.Header
+  public var cells: [GridSnapshot.Cell]
 
-  public static func bufferSize(cols: UInt16, rows: UInt16) -> Int {
-    headerSize + Int(cols) * Int(rows) * cellStride
+  public init(header: GridSnapshot.Header, cells: [GridSnapshot.Cell]) {
+    self.header = header
+    self.cells = cells
   }
 }

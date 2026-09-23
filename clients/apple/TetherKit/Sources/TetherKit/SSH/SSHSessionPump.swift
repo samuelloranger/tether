@@ -2,11 +2,8 @@ import CLibSSH2
 import Darwin
 import Foundation
 
-/// Drives one authenticated libssh2 session on a dedicated thread (sessions are
-/// not thread-safe), non-blocking: poll() on the socket and a wake pipe, so
-/// input goes out the moment it is queued and an idle session sleeps until its
-/// next keepalive. Owns the channel, session, and socket and frees all three
-/// when the loop exits.
+/// One libssh2 session on a dedicated thread (sessions are not thread-safe), polling
+/// the socket and a wake pipe so queued input goes out at once and idle sessions sleep.
 final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   private let session: OpaquePointer
   private let channel: OpaquePointer

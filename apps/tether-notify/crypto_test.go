@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -71,4 +73,34 @@ func TestOmitsEmptyLink(t *testing.T) {
 	if got.Link != "" {
 		t.Fatalf("link should be empty, got %q", got.Link)
 	}
+}
+
+func generateSecretKeyBase64() string {
+	b := make([]byte, keyBytes)
+	_, _ = rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+func decryptPushContent(keyBase64, payload string) (PushContent, error) {
+	var content PushContent
+	key, err := base64.StdEncoding.DecodeString(keyBase64)
+	if err != nil {
+		return content, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return content, err
+	}
+	if len(raw) < nonceBytes+tagBytes {
+		return content, errors.New("payload too short")
+	}
+	gcm, err := newGCM(key)
+	if err != nil {
+		return content, err
+	}
+	plaintext, err := gcm.Open(nil, raw[:nonceBytes], raw[nonceBytes:], nil)
+	if err != nil {
+		return content, err
+	}
+	return content, json.Unmarshal(plaintext, &content)
 }

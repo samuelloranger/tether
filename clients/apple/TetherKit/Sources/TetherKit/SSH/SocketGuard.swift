@@ -1,9 +1,8 @@
 import Darwin
 import Foundation
 
-/// The only way another thread may touch a libssh2 socket: `shutdown()` makes
-/// any call blocked on it return. The lock keeps that from racing the owner's
-/// `close()`, after which the number may belong to a different connection.
+/// `shutdown()` is the only cross-thread touch; the lock stops it racing the owner's `close()`,
+/// after which the fd number may belong to a different connection.
 final class SocketGuard: @unchecked Sendable {
   private let lock = NSLock()
   private var fd: Int32 = -1

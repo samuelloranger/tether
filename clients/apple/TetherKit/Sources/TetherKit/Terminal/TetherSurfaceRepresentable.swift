@@ -1,9 +1,8 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
 public struct TetherSurfaceRepresentable: UIViewRepresentable {
-  @Binding public var snapshot: Data?
+  @Binding public var snapshot: TerminalFrame?
   public var sessionKey: String
   public var fontName: String
   public var fontSize: CGFloat
@@ -19,7 +18,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var mouseSgr: Bool
 
   public init(
-    snapshot: Binding<Data?>,
+    snapshot: Binding<TerminalFrame?>,
     sessionKey: String = "",
     fontName: String,
     fontSize: CGFloat,
@@ -119,14 +118,12 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public final class Coordinator {
     var parent: TetherSurfaceRepresentable
     var sessionKey: String = ""
-    /// The last grid actually pushed. Any state write on the owning view
-    /// re-runs updateUIView, and re-pushing an unchanged grid costs a full
-    /// decode and rasterization.
-    var pushedSnapshot: Data?
+    /// Any state write on the owning view re-runs updateUIView; re-pushing an unchanged grid
+    /// costs a full rasterization.
+    var pushedSnapshot: TerminalFrame?
 
     init(parent: TetherSurfaceRepresentable) {
       self.parent = parent
     }
   }
 }
-#endif

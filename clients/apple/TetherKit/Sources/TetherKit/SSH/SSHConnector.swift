@@ -1,8 +1,6 @@
 import Foundation
 
-/// Establishes SSH work off the cooperative thread pool. The connect handshake
-/// and one-off exec both block, so they run on a dedicated thread and resume the
-/// caller with the result. A returned pump owns its own thread thereafter.
+/// Connect and exec block, so each runs on a dedicated thread, off the cooperative pool.
 enum SSHConnector {
   static func connect(config: SSHConnectionConfig, store: HostKeyStore) async throws -> any TerminalByteStream {
     try await onThread(named: "tether.ssh.connect") {
@@ -10,15 +8,8 @@ enum SSHConnector {
     }
   }
 
-  static func exec(config: SSHConnectionConfig, store: HostKeyStore, command: String) async throws -> String {
-    try await onThread(named: "tether.ssh.exec") {
-      try SSHConnectionSequence.runExec(config: config, ops: LibSSH2Ops(config: config), store: store, command: command)
-    }
-  }
-
-  /// Streams a long-running command's output. `onChunk` is called on the worker
-  /// thread as bytes arrive and returns false to stop and tear the channel down.
-  /// Cancelling the calling task shuts the socket, so a quiet command stops too.
+  /// `onChunk` runs on the worker thread. Cancelling the task shuts the socket, so a quiet
+  /// command stops too.
   static func execStream(
     config: SSHConnectionConfig,
     store: HostKeyStore,

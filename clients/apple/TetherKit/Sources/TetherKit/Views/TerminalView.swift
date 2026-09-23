@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -43,9 +42,6 @@ public struct TerminalAccessoryBar: View {
   /// taller than its neighbours reads as a different kind of thing.
   static let keySize: CGFloat = 40
   static let barVerticalPadding: CGFloat = 8
-  /// How far above the bottom edge UIKit docks the bar. Not the 34pt indicator
-  /// inset — UIKit uses a smaller gap, and the terminal reserves the difference.
-  static let dockedGap: CGFloat = 15
   /// First-frame fallback before GeometryReader reports the real docked height.
   /// Derived from key + padding so it cannot drift from the row's layout again.
   public static let barHeight: CGFloat = keySize + barVerticalPadding * 2
@@ -174,7 +170,6 @@ public struct TerminalAccessoryBar: View {
 
 /// Bridges the system keyboard to PTY input with an accessory toolbar.
 public struct TerminalInputBridge: UIViewRepresentable {
-  @Binding public var text: String
   public var accessory: AnyView
   /// Gate the ACCESSORY, never the bridge's existence: a `.focused()` view that
   /// appears and disappears makes SwiftUI and UIKit focus machinery loop at 100% CPU.
@@ -183,13 +178,11 @@ public struct TerminalInputBridge: UIViewRepresentable {
   public var isFocused: Binding<Bool>
 
   public init(
-    text: Binding<String>,
     accessory: AnyView,
     showsAccessory: Bool = true,
     onSubmitBytes: @escaping (String) -> Void,
     isFocused: Binding<Bool>
   ) {
-    _text = text
     self.accessory = accessory
     self.showsAccessory = showsAccessory
     self.onSubmitBytes = onSubmitBytes
@@ -236,7 +229,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
       uiView.reloadInputViews()
     }
     // The document is invisible filler that keeps the delete key repeating (see
-    // `refillFiller`); syncing the binding here would wipe it on every update.
+    // `refillFiller`); syncing a text binding here would wipe it on every update.
     uiView.refillFiller()
     if isFocused.wrappedValue, !uiView.isFirstResponder {
       uiView.becomeFirstResponder()
@@ -245,12 +238,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
     }
   }
 
-  // SwiftUI does not resign a first responder whose host view it removes, and
-  // this view's inputAccessoryView (the key bar) lives in the keyboard window
-  // above the app. So when the terminal is swapped out — e.g. switching to an
-  // agent-chat tab — a lingering responder keeps the bar docked over whatever
-  // replaced it and routes keystrokes to both surfaces (doubled input). Resign
-  // on teardown so the bar and the responder go with the terminal.
+  // SwiftUI doesn't resign a removed host view's first responder, and the key bar lives in
+  // the keyboard window: a lingering responder keeps the bar docked and doubles input.
   public static func dismantleUIView(_ uiView: TerminalInputTextView, coordinator: Coordinator) {
     uiView.resignFirstResponder()
   }
@@ -501,4 +490,3 @@ public final class TerminalInputTextView: UITextView {
     inputAssistantItem.trailingBarButtonGroups = []
   }
 }
-#endif

@@ -57,10 +57,6 @@ jobs:
   # so build numbers must never repeat: github.run_number is monotonic per
   # workflow and survives re-runs of the same tag.
   #
-  # TetherKit links tether-ffi as a SwiftPM .binaryTarget, so xcodebuild uses
-  # whatever XCFramework is on disk. build-xcframework.sh assembles it below,
-  # in this run, from this commit.
-  #
   # `publish` needs this job, so the TestFlight upload is continue-on-error: a
   # rejected or flaky Apple upload must never hold back the GitHub release.
   ios:
@@ -73,21 +69,6 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
-
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch @ 2026-07
-        with:
-          toolchain: stable
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/tether-core
-          shared-key: tether-ios
-          cache-on-failure: true
-
-      - name: Build tether-ffi and assemble the XCFramework
-        timeout-minutes: 30
-        run: bash scripts/build-xcframework.sh
 
       # Marketing version comes from the tag; a manual run has no tag, so it
       # falls back to the repo version rather than whatever is committed in the
@@ -218,8 +199,9 @@ jobs:
           if [ "$SIGN_MODE" = manual ]; then
             xcodebuild -project clients/apple/Tether.xcodeproj \
               -scheme TetherIOS \
-              -configuration Release -sdk iphoneos \
+              -configuration Release -destination 'generic/platform=iOS' \
               -archivePath build/TetherIOS.xcarchive archive \
+              -skipPackagePluginValidation \
               DEVELOPMENT_TEAM="$TEAM_ID" \
               CODE_SIGN_STYLE=Manual \
               CODE_SIGN_IDENTITY="Apple Distribution" \
@@ -230,8 +212,9 @@ jobs:
           else
             xcodebuild -project clients/apple/Tether.xcodeproj \
               -scheme TetherIOS \
-              -configuration Release -sdk iphoneos \
+              -configuration Release -destination 'generic/platform=iOS' \
               -archivePath build/TetherIOS.xcarchive archive \
+              -skipPackagePluginValidation \
               -allowProvisioningUpdates \
               -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
               -authenticationKeyID "$KEY_ID" \

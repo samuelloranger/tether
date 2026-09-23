@@ -2,9 +2,8 @@ import SwiftUI
 import XCTest
 @testable import TetherKit
 
-/// At accessibility text sizes a session row keeps what identifies the session —
-/// its name and its state — and drops the two details that would push those off
-/// screen. Nothing caps Dynamic Type to keep the row dense.
+/// At accessibility sizes a session row keeps its name and state and drops the details that
+/// would push them off screen; nothing caps Dynamic Type.
 final class DynamicTypeLayoutTests: XCTestCase {
   func test_ordinary_text_sizes_keep_the_working_directory_and_client_count() {
     XCTAssertTrue(DynamicTypeLayout.showsDetail(for: .large))

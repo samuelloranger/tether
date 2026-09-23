@@ -1,11 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Horizontal breathing room around the grid, so text is not flush against the
-/// screen edges. The grid used to draw from x=0 with the sub-column leftover
-/// dumped entirely on the right, which read as "too much on the left, content
-/// jammed against the right". A fixed inset on each side, with the leftover
-/// split evenly, keeps the two margins equal.
+/// Fixed inset on each side plus the sub-column leftover split evenly, so both margins match.
 enum TerminalGridInset {
   static let horizontal: CGFloat = 8
 
@@ -17,8 +13,6 @@ enum TerminalGridInset {
     return max(1, Int(available / cellWidth))
   }
 
-  /// Left edge of the grid: the inset plus half the sub-column leftover, so the
-  /// margins on the two sides are equal.
   static func originX(viewWidth: CGFloat, cellWidth: CGFloat, cols: Int) -> CGFloat {
     let available = viewWidth - horizontal * 2
     let leftover = max(0, available - CGFloat(cols) * cellWidth)
@@ -28,10 +22,8 @@ enum TerminalGridInset {
 
 /// How many rows of a snapshot should consume the bottom of the view.
 enum TerminalGridLayout {
-  /// On the primary screen every row is the grid (a new shell's prompt sits at
-  /// the top with empty rows beneath). On the alt-screen, trailing empty rows
-  /// are an unpainted grow — Claude Code / Codex / Cursor after a session
-  /// switch or keyboard-hide — and must not occupy the bottom of the surface.
+  /// On the alt-screen, trailing empty rows are an unpainted grow (after a session switch or
+  /// keyboard-hide) and must not occupy the bottom; on the primary screen every row counts.
   static func paintedRows(
     cells: [GridSnapshot.Cell],
     cols: Int,
@@ -53,10 +45,8 @@ enum TerminalGridLayout {
 
 /// Whether a local PTY/emulator resize should push a new grid to the surface.
 enum TerminalResizePublish {
-  /// Growing rows on an alt-screen TUI adds empty cells under the paint. Showing
-  /// that snapshot is the "pushed up, gap at the bottom" bug. Wait for the
-  /// program to redraw. Shrinking, or a column change that reflows, must publish
-  /// or the grid is clipped / stale.
+  /// A row grow only adds empty cells under the paint, which shows as a gap at the bottom;
+  /// wait for the program to redraw. Shrinks and column reflows must publish or the grid is stale.
   static func shouldPublishAfterResize(
     oldCols: UInt16,
     oldRows: UInt16,
@@ -68,15 +58,8 @@ enum TerminalResizePublish {
   }
 }
 
-/// When a `resize()` reflow leaves the grid wrong, re-feeding the buffered bytes
-/// at the new size rebuilds it correctly.
-///
-/// - Alt-screen: any size change clamps CUP rows and needs a rebuild.
-/// - Primary screen: a row GROW makes alacritty's reflow duplicate a content row
-///   into the newly exposed rows. Agent TUIs redraw with cursor-home rather than
-///   a full clear, so the stale copy sticks and scrolls into scrollback — the
-///   line-doubling bug. Shrink and column-only changes reflow cleanly, so they
-///   keep the cheap path (and their scrollback beyond the buffer budget).
+/// Alt-screen resizes clamp CUP rows; a primary-screen row grow can duplicate a row that a
+/// cursor-home redraw never clears. Both need re-feeding the buffered bytes at the new size.
 enum TerminalResizeStrategy {
   static func shouldRebuildFromBuffer(
     altScreen: Bool,

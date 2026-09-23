@@ -1,19 +1,8 @@
-#if canImport(UIKit)
 import QuartzCore
 import UIKit
 
-/// Vsync-aligned frame pacing for the terminal surface.
-///
-/// Output used to drive the redraw directly: every WebSocket frame that changed
-/// the grid decoded a snapshot and invalidated the view. A chatty program does
-/// that dozens of times between two vsyncs, so most of the work was thrown away
-/// and what survived arrived at an uneven cadence — which is exactly what reads
-/// as "not 60fps". Pulling at the display's own rate coalesces the burst into
-/// one frame and makes the cadence even.
-///
-/// The link pauses itself after a few idle ticks so an inactive terminal costs
-/// nothing, and unpauses the moment new bytes land.
-/// `NSObject` because `CADisplayLink` takes an `@objc` selector target.
+/// Pulling at the display's rate coalesces an output burst into one evenly paced frame;
+/// the link pauses after a few idle ticks so an inactive terminal costs nothing.
 final class TerminalFrameScheduler: NSObject {
   /// Returns whether the tick had anything to do.
   private let onFrame: () -> Bool
@@ -64,4 +53,3 @@ final class TerminalFrameScheduler: NSObject {
     }
   }
 }
-#endif

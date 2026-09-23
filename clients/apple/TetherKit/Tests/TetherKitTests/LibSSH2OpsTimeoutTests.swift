@@ -41,10 +41,8 @@ final class LibSSH2OpsTimeoutTests: XCTestCase {
     wait(for: [failed], timeout: 3)
   }
 
-  /// Against a real sshd: keepalives must not start until the session is up.
-  /// A keepalive is a global request, and OpenSSH's strict key exchange drops
-  /// a connection that sends one mid-exchange (libssh2 -8). Needs no login,
-  /// only a listening sshd; skips where there is none.
+  /// Keepalives must not start before the session is up: OpenSSH's strict KEX drops a
+  /// global request mid-exchange (libssh2 -8). Needs only a listening sshd; else skips.
   func test_a_real_sshd_completes_the_handshake() throws {
     let port = 22
     do {

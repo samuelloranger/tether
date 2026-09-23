@@ -1,24 +1,14 @@
 import Foundation
-import TetherFFIBindings
 
-/// One session's live VT grid and the bytes that built it.
-///
-/// Switching sessions must not throw this away: each drawer session keeps its
-/// own emulator and byte buffer, so switching back shows its last grid at once.
+/// Kept across session switches so switching back shows the session's last grid at once.
 final class TerminalSessionGrid {
-  var emulator: FfiTerminalEmulator
+  var emulator: TerminalEngine
   let buffer: TerminalOutputBuffer
   var lastAltScreen = false
 
   init(cols: UInt16, rows: UInt16) {
-    emulator = FfiTerminalEmulator(cols: cols, rows: rows)
+    emulator = TerminalEngine(cols: cols, rows: rows)
     buffer = TerminalOutputBuffer()
-  }
-
-  func reset(cols: UInt16, rows: UInt16) {
-    buffer.reset()
-    emulator = FfiTerminalEmulator(cols: cols, rows: rows)
-    lastAltScreen = false
   }
 }
 
@@ -32,9 +22,5 @@ final class TerminalSessionGrids {
     let grid = TerminalSessionGrid(cols: cols, rows: rows)
     grids[key] = grid
     return (grid, false)
-  }
-
-  func forget(_ key: String) {
-    grids.removeValue(forKey: key)
   }
 }

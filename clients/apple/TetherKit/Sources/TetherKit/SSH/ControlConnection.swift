@@ -1,11 +1,7 @@
 import Foundation
 
-/// One long-lived SSH connection for the app's own commands, so each costs a
-/// round trip instead of a fresh dial.
-///
-/// A second connection rather than a second channel on the terminal's: libssh2
-/// reads the socket inside its channel calls, so a control channel beside the
-/// live PTY can stall terminal output.
+/// A second connection, not a second channel on the terminal's: libssh2 reads the socket
+/// inside its channel calls, so a control channel beside the live PTY can stall output.
 final class ControlConnection: @unchecked Sendable {
   private let config: SSHConnectionConfig
   private let store: HostKeyStore
@@ -35,9 +31,8 @@ final class ControlConnection: @unchecked Sendable {
     self.init(config: config, store: store) { LibSSH2Ops(config: config) }
   }
 
-  /// A command that fails on an already-open session is retried once: an idle
-  /// connection can be reaped by the host or a NAT, and the first failure is
-  /// how we find out.
+  /// Retried once on an already-open session: an idle connection can be reaped by the host
+  /// or a NAT, and the first failure is how we find out.
   func exec(_ command: String) async throws -> String {
     try await onQueue { [self] in
       let reused = ops != nil
@@ -53,9 +48,8 @@ final class ControlConnection: @unchecked Sendable {
     }
   }
 
-  /// Cuts the current session's socket from any thread: a command blocked on a
-  /// dead path fails now instead of when TCP gives up, and the next one dials
-  /// fresh. Safe when nothing is open.
+  /// Cuts the socket from any thread, so a command blocked on a dead path fails now instead
+  /// of when TCP gives up.
   func reset() {
     liveLock.lock()
     resets += 1

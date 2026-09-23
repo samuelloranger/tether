@@ -21,14 +21,14 @@ Sessions survive because they live in `zmx` on the host, not in the app — reat
 ## Operating Context
 
 - No server binary. The host runs `zmx` (the session manager the app attaches to) and, optionally for push, `tether-notify` (a small Go CLI). State the app cares about lives on the phone.
-- Client: native Swift / SwiftUI on iOS only. The terminal grid comes from a Rust VT emulator (`crates/`) linked as an XCFramework. Desktop / web / Android are not part of v5.
+- Client: native Swift / SwiftUI on iOS only. The terminal grid comes from SwiftTerm's headless VT engine; Tether renders it. Desktop / web / Android are not part of v5.
 - Transport is SSH (libssh2) over LAN or a tunnel. Auth is a key held in the iOS Keychain (in memory to libssh2) or a password; an unknown host key is pinned on first connect and a later change is refused. Push ciphertext is end-to-end; the relay and Apple never see plaintext.
 - Terminal is the primary work surface; the session drawer, utility key bar, and git / history / send overlays are secondary.
 - Themes: Default dark / light plus Catppuccin flavors for chrome + terminal.
 
 ## Capabilities and Constraints
 
-- SSH PTY streamed into a Rust VT emulator grid (TUIs, box drawing, CJK / emoji)
+- SSH PTY streamed into a VT emulator grid (TUIs, box drawing, CJK / emoji)
 - zmx session list / switch / kill / history over `ssh exec`; live working-directory tracking
 - Multi-host profiles; on-device ed25519 key vault (generate / import / paste, randomart, fingerprint)
 - Git diff over exec, send file / photo over SCP, select-and-copy scrollback history
@@ -45,7 +45,7 @@ Sessions survive because they live in `zmx` on the host, not in the app — reat
 
 ## Evidence on Hand
 
-- Code and docs in this repo (`CLAUDE.md`, `clients/apple`, `crates/`, `apps/tether-notify`)
+- Code and docs in this repo (`CLAUDE.md`, `clients/apple`, `apps/tether-notify`)
 - Live UI: the native iOS client (Home / key vault, terminal, session drawer, git diff, history)
 - No separate marketing site or brand kit in-repo (`icon.png` at repo root)
 - Do not fabricate customers, benchmarks, or usage stats

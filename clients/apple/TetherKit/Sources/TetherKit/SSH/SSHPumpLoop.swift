@@ -1,8 +1,7 @@
 import Foundation
 
-/// The libssh2 calls the pump makes, one method each, so the loop's ordering
-/// rules can be tested without a host. Returns are libssh2's: a byte count, 0,
-/// or a negative error code.
+/// The libssh2 calls the pump makes, so the loop's ordering rules test without a host.
+/// Returns are libssh2's: a byte count, 0, or a negative error code.
 protocol SSHPumpIO: AnyObject {
   func read(into buffer: UnsafeMutableRawBufferPointer) -> Int
   func write(_ bytes: UnsafeRawBufferPointer) -> Int
@@ -17,12 +16,8 @@ protocol SSHPumpIO: AnyObject {
   func wait(readable: Bool, writable: Bool, timeoutMs: Int)
 }
 
-/// One non-blocking pass at a time over an SSH PTY channel.
-///
-/// libssh2 keeps one half-sent outgoing packet. The next send of any kind
-/// flushes it and then reports success for its own packet without sending it,
-/// so once a call leaves one behind, only that call may run until it finishes.
-/// A read counts: it can send a window adjust.
+/// libssh2's next send after a half-sent packet flushes it and reports success without
+/// sending its own, so only the blocked call may run until it finishes (reads send too).
 final class SSHPumpLoop {
   enum Outcome: Equatable {
     case running

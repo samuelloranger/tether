@@ -1,9 +1,8 @@
 import Foundation
 import UniformTypeIdentifiers
 
-/// Rules for sending something picked out of the photo library. `scpSend` holds
-/// the whole payload in memory, so a video is measured on disk and turned away
-/// before it is read.
+/// `scpSend` holds the whole payload in memory, so a video is measured on disk and turned
+/// away before it is read.
 public enum MediaTransfer {
   /// What came back from the library: bytes ready to send, or the sentence to
   /// show. A plain message, not an Error — nothing rethrows it.
@@ -34,7 +33,6 @@ public enum MediaTransfer {
   }
 }
 
-#if canImport(UIKit)
 import CoreTransferable
 import SwiftUI
 import PhotosUI
@@ -86,4 +84,3 @@ struct PickedMovie: Transferable {
     }
   }
 }
-#endif

@@ -22,7 +22,7 @@ Aurora chrome around a live PTY: a periwinkle glow over a near-black base, night
 
 **Heat ramp** — what the active session is doing: `working` `#F2B34C`, `waiting` `#FF7050`, `done` `#6EE7A8`, cool/idle `#7C8CF8` (periwinkle, same as the accent). These drive the status lamp and state word.
 
-**Terminal well:** `#1E1E2E` — this is fixed, not appearance-dynamic. It must equal the emulator's cell background (`theme.background` in `crates/tether-core/src/terminal/alacritty.rs`) or a seam shows at the grid edge.
+**Terminal well:** `#1E1E2E` — this is fixed, not appearance-dynamic. It must equal the emulator's cell background (`TerminalPalette.background`) or a seam shows at the grid edge.
 
 **System:** OS light → Default light; otherwise Default dark.
 

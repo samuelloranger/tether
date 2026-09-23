@@ -4,9 +4,8 @@ import XCTest
 final class ZmxSwitchTests: XCTestCase {
   private let zmx = "~/.local/bin/zmx"
 
-  // The old strategy keyed off the alt-screen, which a CLI agent never takes:
-  // switches were typed into the agent instead of switching. With a client
-  // attached the answer no longer depends on what runs inside the session.
+  // A CLI agent never takes the alt-screen, so with a client attached the strategy must not
+  // depend on what runs inside the session.
   func test_switching_with_a_session_attached_detaches_first() {
     XCTAssertEqual(
       ZmxSwitch.strategy(connected: true, attached: true),

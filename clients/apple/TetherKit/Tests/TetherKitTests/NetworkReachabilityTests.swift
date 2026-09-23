@@ -2,9 +2,7 @@ import Network
 import XCTest
 @testable import TetherKit
 
-/// The reachability value only normalizes what `NWPath` reports. It must never
-/// be read as "the SSH host answered" — a satisfied path says the radio has a
-/// route, nothing about the host, the port, or authentication.
+/// A satisfied path only means the radio has a route — never that the SSH host answered.
 final class NetworkReachabilityTests: XCTestCase {
   func test_unsatisfied_path_is_offline() {
     let value = NetworkReachability.classify(status: .unsatisfied, interfaces: [])

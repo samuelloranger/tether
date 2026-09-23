@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 struct RandomartGridView: View {
   let publicKey: String
@@ -125,9 +123,7 @@ struct KeyCardView: View {
         Text(usedBy.isEmpty ? "not used yet" : "used by \(usedBy.joined(separator: ", "))")
           .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
         Button {
-          #if canImport(UIKit)
           UIPasteboard.general.string = record.publicKey
-          #endif
         } label: {
           Text("Copy public key").font(.caption.weight(.semibold))
             .foregroundStyle(TetherColors.accent)
@@ -154,9 +150,7 @@ struct KeyCardView: View {
   }
 }
 
-/// The card chrome every list and detail surface shares. One radius, defined
-/// once: the background and the border were repeated at each site, so the two
-/// halves of the same card could silently disagree.
+/// One radius for background and border, so the two halves of a card can never disagree.
 extension View {
   func tetherCard(cornerRadius: CGFloat = 16) -> some View {
     background(TetherColors.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
@@ -201,9 +195,7 @@ extension View {
   }
 }
 
-/// "Copied" told three ways at once: the pill, the haptic, and the VoiceOver
-/// announcement — the pill is gone in about a second and leaves nothing behind,
-/// so it is the one outcome VoiceOver has to be told about directly.
+/// The pill is gone in about a second, so VoiceOver has to be told about the copy directly.
 private struct CopyConfirmation: ViewModifier {
   @Binding var isPresented: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion

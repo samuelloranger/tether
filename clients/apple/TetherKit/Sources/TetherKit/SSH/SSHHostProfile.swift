@@ -12,8 +12,6 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
   public var port: Int
   public var username: String
   public var auth: SSHAuthMethod
-  public var color: String?
-  public var createdAt: Date
 
   public init(
     id: String = UUID().uuidString,
@@ -21,9 +19,7 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
     host: String,
     port: Int = 22,
     username: String,
-    auth: SSHAuthMethod,
-    color: String? = nil,
-    createdAt: Date = Date()
+    auth: SSHAuthMethod
   ) {
     self.id = id
     self.name = name
@@ -31,7 +27,5 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
     self.port = port
     self.username = username
     self.auth = auth
-    self.color = color
-    self.createdAt = createdAt
   }
 }

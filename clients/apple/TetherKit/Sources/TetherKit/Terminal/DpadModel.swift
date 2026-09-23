@@ -1,8 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Pure D-pad geometry and direction lock — port of `apps/mobile/src/dpadModel.ts`.
-/// No SwiftUI; keep behaviour testable without a host view.
+/// Pure D-pad geometry and direction lock, testable without a host view.
 
 public enum DPadDirection: String, Sendable, CaseIterable {
   /// Up — CSI `A`
@@ -22,24 +21,14 @@ public enum DPadDirection: String, Sendable, CaseIterable {
     case .D: "\u{1B}[D"
     }
   }
-
-  public var accessibilityLabel: String {
-    switch self {
-    case .A: "Up"
-    case .B: "Down"
-    case .C: "Right"
-    case .D: "Left"
-    }
-  }
 }
 
 public enum DPadModel {
-  /// iOS HIG floor — matches `MIN_TOUCH_TARGET` on mobile.
+  /// iOS HIG minimum touch target.
   public static let buttonSize: CGFloat = 44
   public static let threshold: CGFloat = 8
-  /// Wait this long, then lock to the axis of the accumulated translation.
-  /// UIScrollView's directional lock does the same: a short delay so the first
-  /// noisy pixels do not pick vertical when the drag is horizontal (and vice versa).
+  /// Like UIScrollView's directional lock: a short delay so the first noisy pixels do not
+  /// pick the wrong axis.
   public static let sampleMs: Int = 100
   public static let repeatDelayMs: Int = 350
   public static let repeatMs: Int = 60
@@ -47,13 +36,8 @@ public enum DPadModel {
 
   private static let thumbLimit: CGFloat = 11
 
-  /// Direction is locked for the whole gesture once picked — a diagonal drag
-  /// must not flip between axes mid-hold. Re-resolving only happens once the
-  /// finger returns inside the center threshold.
-  ///
-  /// `sampled` is false until `sampleMs` of finger movement have been measured
-  /// (or the finger lifts). Until then this returns nil so the first 8 px of a
-  /// thumb plant cannot steal the axis.
+  /// Locked for the whole gesture so a diagonal drag can't flip axes; returns nil until
+  /// `sampled`, so the first pixels of a thumb plant cannot steal the axis.
   public static func resolveDirection(
     dx: CGFloat,
     dy: CGFloat,
@@ -70,20 +54,6 @@ public enum DPadModel {
       return dx >= 0 ? .C : .D
     }
     return dy >= 0 ? .B : .A
-  }
-
-  /// Touch location inside the puck as an offset from its center.
-  ///
-  /// `size` is passed in rather than read from `buttonSize`: the bar renders the
-  /// pad at the same height as its text keys, and a center computed from a
-  /// different size biases every drag by the difference.
-  public static func grantOffset(
-    locationX: CGFloat,
-    locationY: CGFloat,
-    size: CGFloat = buttonSize
-  ) -> CGPoint {
-    let center = size / 2
-    return CGPoint(x: locationX - center, y: locationY - center)
   }
 
   /// Icon rides the locked cardinal only — never free-slides diagonally.

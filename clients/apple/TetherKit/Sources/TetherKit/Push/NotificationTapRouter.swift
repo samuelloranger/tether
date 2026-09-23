@@ -1,9 +1,8 @@
 import Foundation
 import UserNotifications
 
-/// Routes notification taps into the existing `DeepLinkCoordinator` path and
-/// suppresses foreground banners for the session the user is already viewing
-/// (client-side mirror of the server's `focused` subscriber check).
+/// Routes notification taps into `DeepLinkCoordinator` and suppresses foreground
+/// banners for the session the user is already viewing.
 @MainActor
 public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDelegate {
   /// Invoked with a `tether://…` URL when a notification is tapped.
@@ -45,13 +44,8 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
     onOpenURL?(url)
   }
 
-  /// Prefer `link` (written by the NSE after decrypt, or by cleartext pushes).
   /// Only `tether://` URLs are accepted — the payload is server-influenced.
-  ///
-  /// `nonisolated` because it is a pure parser: it reads a dictionary and
-  /// returns a string. The class is `@MainActor` for the delegate callbacks,
-  /// and inheriting that here made the one piece of logic worth testing
-  /// callable only from the main actor.
+  /// `nonisolated` so this pure parser stays testable off the main actor.
   public nonisolated static func link(from userInfo: [AnyHashable: Any]) -> String? {
     if let link = userInfo["link"] as? String, link.hasPrefix("tether://") {
       return link

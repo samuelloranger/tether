@@ -1,5 +1,4 @@
 import Foundation
-import TetherFFIBindings
 
 /// Bytes fed into the current emulator, so a later size change can rebuild the
 /// grid from scratch instead of `resize()`-ing a clamped alt-screen paint.
@@ -21,15 +20,12 @@ final class TerminalOutputBuffer {
     }
   }
 
-  func reset() {
-    data.removeAll(keepingCapacity: true)
-  }
-
-  func replay(cols: UInt16, rows: UInt16) -> FfiTerminalEmulator {
-    let emulator = FfiTerminalEmulator(cols: cols, rows: rows)
+  func replay(cols: UInt16, rows: UInt16) -> TerminalEngine {
+    let engine = TerminalEngine(cols: cols, rows: rows)
     if !data.isEmpty {
-      emulator.feed(bytes: data)
+      engine.feed(data)
+      engine.discardReplies()
     }
-    return emulator
+    return engine
   }
 }

@@ -1,43 +1,12 @@
 import XCTest
 @testable import TetherKit
 
-/// The single recovery gate: a network path becoming usable is the only network
-/// event that may request a redial, and only from a state that is not already
-/// connected or dialing. Repeats are inert — the observer re-reports the same
-/// path on every interface change.
+/// A redial is only requested from a state that is not already connected or dialing,
+/// and only on the edge onto a usable path.
 final class ConnectionRecoveryTests: XCTestCase {
   private let usable = NetworkReachability(availability: .usable)
   private let offline = NetworkReachability(availability: .offline)
   private let needsConnection = NetworkReachability(availability: .requiresConnection)
-
-  func test_offline_path_never_requests_a_redial() {
-    XCTAssertFalse(SSHTerminalController.shouldRedial(previous: usable, next: offline, status: .disconnected, dialing: false))
-  }
-
-  func test_requires_connection_path_never_requests_a_redial() {
-    XCTAssertFalse(SSHTerminalController.shouldRedial(previous: offline, next: needsConnection, status: .disconnected, dialing: false))
-  }
-
-  func test_path_becoming_usable_while_disconnected_requests_a_redial() {
-    XCTAssertTrue(SSHTerminalController.shouldRedial(previous: offline, next: usable, status: .disconnected, dialing: false))
-  }
-
-  func test_first_usable_path_with_no_previous_value_requests_a_redial_when_failed() {
-    XCTAssertTrue(SSHTerminalController.shouldRedial(previous: nil, next: usable, status: .failed("no route to host"), dialing: false))
-  }
-
-  func test_repeated_usable_updates_are_idempotent() {
-    XCTAssertFalse(SSHTerminalController.shouldRedial(previous: usable, next: usable, status: .disconnected, dialing: false))
-  }
-
-  func test_a_usable_path_does_not_disturb_a_live_session() {
-    XCTAssertFalse(SSHTerminalController.shouldRedial(previous: offline, next: usable, status: .connected, dialing: false))
-  }
-
-  func test_a_usable_path_does_not_race_an_in_flight_dial() {
-    XCTAssertFalse(SSHTerminalController.shouldRedial(previous: offline, next: usable, status: .connecting, dialing: true))
-    XCTAssertFalse(SSHTerminalController.shouldRedial(previous: offline, next: usable, status: .disconnected, dialing: true))
-  }
 
   // The foreground redial is the safety net for a socket iOS killed while
   // suspended. It shares the gate so it can't race a path-driven redial.
@@ -117,6 +86,7 @@ final class ConnectionRecoveryTests: XCTestCase {
     // The observer re-reports the same path on every interface change.
     XCTAssertFalse(SSHTerminalController.pathBecameUsable(previous: usable, next: usable))
     XCTAssertFalse(SSHTerminalController.pathBecameUsable(previous: usable, next: offline))
+    XCTAssertFalse(SSHTerminalController.pathBecameUsable(previous: offline, next: needsConnection))
   }
 
   func test_retry_is_offered_only_where_the_art_says_something_went_wrong() {
