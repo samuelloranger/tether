@@ -107,6 +107,12 @@ public struct SSHTerminalView: View {
       }
       #endif
     }
+    .task(id: scenePhase == .active && controller.status == .connected) {
+      while !Task.isCancelled, scenePhase == .active, controller.status == .connected {
+        await controller.refreshAgentStatus()
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+      }
+    }
     .onChange(of: scenePhase) { _, phase in
       switch phase {
       case .active:
@@ -134,6 +140,19 @@ public struct SSHTerminalView: View {
   private var terminalStack: some View {
     VStack(spacing: 0) {
       header
+      if let alert = controller.agentAlert {
+        AgentAlertBanner(
+          alert: alert,
+          onOpen: { Task { await controller.switchSession(to: alert.session) } },
+          onDismiss: { controller.dismissAgentAlert() }
+        )
+        .transition(.opacity)
+        .task(id: "\(alert.session)-\(alert.since.timeIntervalSince1970)") {
+          guard let lifetime = alert.bannerLifetime else { return }
+          try? await Task.sleep(nanoseconds: UInt64(lifetime * 1_000_000_000))
+          controller.expireAgentAlert(alert)
+        }
+      }
       ZStack {
         TetherSurfaceRepresentable(
           snapshot: $controller.snapshot,
@@ -175,12 +194,20 @@ public struct SSHTerminalView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(TetherColors.terminalBackground.ignoresSafeArea())
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: controller.agentAlert?.id)
   }
 
   private var header: some View {
     HStack(spacing: 4) {
-      headerButton("line.3.horizontal", id: "sshTerminalDrawer", label: "Open session list") {
+      headerButton("line.3.horizontal", id: "sshTerminalDrawer",
+                   label: controller.othersWaiting ? "Open session list, a session needs you" : "Open session list") {
         setDrawer(open: true)
+      }
+      .overlay(alignment: .topTrailing) {
+        if controller.othersWaiting {
+          Circle().fill(TetherColors.warning).frame(width: 8, height: 8).offset(x: -8, y: 8)
+            .accessibilityHidden(true)
+        }
       }
       Circle().fill(lampColor).frame(width: lampSize, height: lampSize).padding(.leading, 4)
         .shadow(color: lampColor.opacity(0.55), radius: 4)
@@ -303,6 +330,11 @@ public struct SSHTerminalView: View {
             }
           }
           Spacer(minLength: 4)
+          if let agent = controller.agentStatuses[session.name] {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+              AgentStatusTag(status: agent, now: context.date)
+            }
+          }
         }
         .contentShape(Rectangle())
       }
@@ -339,6 +371,9 @@ public struct SSHTerminalView: View {
 
   private func sessionAccessibilityLabel(_ session: ZmxSession, isCurrent: Bool) -> String {
     var parts = [session.name, isCurrent ? "attached" : "not attached"]
+    if let agent = controller.agentStatuses[session.name] {
+      parts.append("agent \(AgentStatusTag.label(for: agent, now: Date()))")
+    }
     if DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
       parts.append(session.displayCwd)
       if session.clients > 0 { parts.append("\(session.clients) client\(session.clients == 1 ? "" : "s")") }
