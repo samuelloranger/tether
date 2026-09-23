@@ -10,11 +10,16 @@ public struct AppRootView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   private let autoOpenFirst: Bool
   private let pushIdentityProvider: () -> PushRegistrar.PushIdentity?
+  private let notificationRouter: NotificationTapRouter?
 
-  public init(pushIdentityProvider: @escaping () -> PushRegistrar.PushIdentity? = { nil }) {
+  public init(
+    pushIdentityProvider: @escaping () -> PushRegistrar.PushIdentity? = { nil },
+    notificationRouter: NotificationTapRouter? = nil
+  ) {
     _model = State(initialValue: .live())
     autoOpenFirst = false
     self.pushIdentityProvider = pushIdentityProvider
+    self.notificationRouter = notificationRouter
   }
 
   /// DEBUG entry: a seeded model that auto-opens its first machine.
@@ -22,6 +27,7 @@ public struct AppRootView: View {
     _model = State(initialValue: demoModel)
     autoOpenFirst = true
     pushIdentityProvider = { nil }
+    notificationRouter = nil
   }
 
   public var body: some View {
@@ -55,9 +61,14 @@ public struct AppRootView: View {
       attach: attach, pushIdentity: pushIdentityProvider()
     )
     model.rememberLastHost(profile.id)
+    let opened = controller
+    notificationRouter?.coversForegroundPush = { [weak opened] link in
+      await opened?.coversPush(link) ?? false
+    }
   }
 
   private func leaveTerminal() {
+    notificationRouter?.coversForegroundPush = nil
     let leaving = controller
     controller = nil
     model.reload()

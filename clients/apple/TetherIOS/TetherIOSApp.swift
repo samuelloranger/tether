@@ -41,7 +41,10 @@ struct TetherIOSApp: App {
   }
 
   @ViewBuilder private var appRoot: some View {
-    AppRootView(pushIdentityProvider: { appDelegate.pushRegistrar.pushIdentity() })
+    AppRootView(
+      pushIdentityProvider: { appDelegate.pushRegistrar.pushIdentity() },
+      notificationRouter: appDelegate.tapRouter
+    )
       .tint(TetherColors.accent)
       #if canImport(UIKit)
       .task { appDelegate.pushRegistrar.start() }

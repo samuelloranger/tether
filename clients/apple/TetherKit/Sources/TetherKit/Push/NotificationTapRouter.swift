@@ -1,16 +1,15 @@
 import Foundation
 import UserNotifications
 
-/// Routes notification taps into `DeepLinkCoordinator` and suppresses foreground
-/// banners for the session the user is already viewing.
+/// Routes notification taps into `DeepLinkCoordinator` and hands foreground pushes
+/// about the open host to its in-app banner.
 @MainActor
 public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDelegate {
   /// Invoked with a `tether://…` URL when a notification is tapped.
   public var onOpenURL: ((URL) -> Void)?
 
-  /// Returns true when the user is currently viewing `sessionId` on the host
-  /// whose `identityName` matches — used by `willPresent` to hide the banner.
-  public var isViewingSession: ((_ sessionId: String, _ identityName: String) -> Bool)?
+  /// Set while a terminal is open: true when that terminal shows this push in-app.
+  public var coversForegroundPush: (@MainActor (SessionDeepLink) async -> Bool)?
 
   public override init() {
     super.init()
@@ -21,14 +20,17 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    if let link = Self.link(from: notification.request.content.userInfo),
-       let deep = DeepLinkCoordinator.parse(link),
-       isViewingSession?(deep.sessionId, deep.identityName) == true
-    {
-      completionHandler([])
-      return
-    }
-    completionHandler([.banner, .sound, .badge])
+    let userInfo = notification.request.content.userInfo
+    Task { @MainActor in completionHandler(await presentationOptions(for: userInfo)) }
+  }
+
+  func presentationOptions(for userInfo: [AnyHashable: Any]) async -> UNNotificationPresentationOptions {
+    let shown: UNNotificationPresentationOptions = [.banner, .sound, .badge]
+    guard let covers = coversForegroundPush,
+          let link = Self.link(from: userInfo),
+          let deep = DeepLinkCoordinator.parse(link)
+    else { return shown }
+    return await covers(deep) ? [] : shown
   }
 
   public func userNotificationCenter(
