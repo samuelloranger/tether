@@ -161,22 +161,23 @@ final class TerminalEngine {
   private func buildCells() -> [GridSnapshot.Cell] {
     let dims = terminal.getDims()
     var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell, count: dims.cols * dims.rows)
+    let palette = TerminalPalette.table(of: terminal)
     for row in 0..<dims.rows {
       guard let line = terminal.getLine(row: row) else { continue }
       for col in 0..<min(dims.cols, line.count) {
-        cells[row * dims.cols + col] = cell(line[col])
+        cells[row * dims.cols + col] = Self.cell(line[col], palette: palette)
       }
     }
     return cells
   }
 
-  private func cell(_ data: CharData) -> GridSnapshot.Cell {
+  private static func cell(_ data: CharData, palette: [UInt32]) -> GridSnapshot.Cell {
     let attribute = data.attribute
     return GridSnapshot.Cell(
-      codepoint: Self.codepoint(data),
-      foreground: TerminalPalette.resolve(attribute.fg, isForeground: true, terminal: terminal),
-      background: TerminalPalette.resolve(attribute.bg, isForeground: false, terminal: terminal),
-      attrs: Self.attrs(attribute.style))
+      codepoint: codepoint(data),
+      foreground: TerminalPalette.resolve(attribute.fg, isForeground: true, palette: palette),
+      background: TerminalPalette.resolve(attribute.bg, isForeground: false, palette: palette),
+      attrs: attrs(attribute.style))
   }
 
   /// One codepoint per cell: combining marks NFC-compose into their base;
@@ -184,10 +185,15 @@ final class TerminalEngine {
   private static func codepoint(_ data: CharData) -> UInt32 {
     // Width 0 is the tail of a wide glyph.
     guard data.width != 0 else { return 0x20 }
-    let character = data.getCharacter()
-    guard character != "\u{0}" else { return 0x20 }
-    let composed = String(character).precomposedStringWithCanonicalMapping
-    return composed.unicodeScalars.first?.value ?? 0x20
+    // getText, not getCharacter: the latter runs grapheme segmentation per cell.
+    let text = data.getText()
+    var scalars = text.unicodeScalars.makeIterator()
+    guard let first = scalars.next() else { return 0x20 }
+    // Nearly every cell is one scalar; normalization is the expensive path.
+    if scalars.next() == nil {
+      return first.value == 0 ? 0x20 : first.value
+    }
+    return text.precomposedStringWithCanonicalMapping.unicodeScalars.first?.value ?? 0x20
   }
 
   private static func attrs(_ style: CharacterStyle) -> UInt32 {

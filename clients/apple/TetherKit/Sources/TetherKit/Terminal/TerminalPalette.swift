@@ -24,16 +24,25 @@ enum TerminalPalette {
     terminal.backgroundColor = color(background)
   }
 
+  /// The live 256-entry palette, read once per frame. From `paletteColor`, not
+  /// `ansi`: programs can repaint entries with OSC 4.
+  static func table(of terminal: Terminal) -> [UInt32] {
+    (0..<256).map { index in
+      guard let entry = terminal.paletteColor(index: index) else { return foreground }
+      return pack(UInt8(entry.red >> 8), UInt8(entry.green >> 8), UInt8(entry.blue >> 8))
+    }
+  }
+
   static func resolve(_ value: Attribute.Color, isForeground: Bool, terminal: Terminal) -> UInt32 {
+    resolve(value, isForeground: isForeground, palette: table(of: terminal))
+  }
+
+  static func resolve(_ value: Attribute.Color, isForeground: Bool, palette: [UInt32]) -> UInt32 {
     switch value {
     case let .trueColor(red, green, blue):
       return pack(red, green, blue)
     case let .ansi256(code):
-      // paletteColor, not our table: programs can repaint entries with OSC 4.
-      guard let entry = terminal.paletteColor(index: Int(code)) else {
-        return isForeground ? foreground : background
-      }
-      return pack(UInt8(entry.red >> 8), UInt8(entry.green >> 8), UInt8(entry.blue >> 8))
+      return palette[Int(code)]
     case .defaultColor:
       return isForeground ? foreground : background
     case .defaultInvertedColor:
