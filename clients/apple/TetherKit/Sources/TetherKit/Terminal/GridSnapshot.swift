@@ -46,3 +46,14 @@ public enum GridSnapshot {
     headerSize + Int(cols) * Int(rows) * cellStride
   }
 }
+
+/// The visible grid handed to the renderer.
+public struct TerminalFrame: Sendable, Equatable {
+  public var header: GridSnapshot.Header
+  public var cells: [GridSnapshot.Cell]
+
+  public init(header: GridSnapshot.Header, cells: [GridSnapshot.Cell]) {
+    self.header = header
+    self.cells = cells
+  }
+}
