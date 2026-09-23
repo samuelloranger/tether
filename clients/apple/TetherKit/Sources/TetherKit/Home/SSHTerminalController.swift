@@ -119,12 +119,27 @@ public final class SSHTerminalController {
   public private(set) var gitLoading = false
   public private(set) var transfer: TransferState = .idle
   public private(set) var reachability: NetworkReachability?
+  public private(set) var agentStatuses: [String: AgentStatus] = [:]
+  public private(set) var agentAlert: AgentStatus?
+  /// `nil` until the first read on this connection — that read is a baseline, not news.
+  private var agentStatusBaseline: [String: AgentStatus]?
+  private var agentStatusAvailable = true
+  private var lastAgentStatusRead: Date?
+  private var knownHostLabels: Set<String> = []
+  var clock: () -> Date = Date.init
+  public nonisolated static let backgroundGrace: TimeInterval = 15
+  /// Set while backgrounded past the grace period: nothing but a return to the
+  /// foreground (or a person tapping Retry) may redial.
+  public private(set) var isSuspended = false
 
   private let pathObserver = NetworkPathObserver()
   /// Opened lazily on first use, which is always after the terminal connects.
   private let control: ControlConnection
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
+  static let agentStatusCommand =
+    "if [ -x \(notify) ]; then \(notify) status 2>/dev/null; else echo __tether_notify_missing; fi"
+  private static let agentStatusStaleAfter: TimeInterval = 30
   private let pipeline = TerminalPipeline()
   private let config: SSHConnectionConfig
   private let hostKeyStore: HostKeyStore
@@ -176,6 +191,7 @@ public final class SSHTerminalController {
 
   public func connect(trigger: ConnectTrigger = .initial) async {
     guard !left else { return }
+    if isSuspended, trigger != .manual { return }
     if !trigger.bypassesRecoveryGate,
       !Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) {
       return
@@ -199,12 +215,19 @@ public final class SSHTerminalController {
       guard !left else { return }
       do {
         let stream = try await dial(config, hostKeyStore)
-        guard !left else {
+        guard !left, !isSuspended else {
           await stream.close()
           return
         }
         await pipeline.connectSSH(transport: stream, key: sessionKey)
+        // Backgrounded past the grace while this was attaching: let go, or zmx keeps counting us.
+        guard !isSuspended else {
+          await pipeline.disconnect()
+          return
+        }
         status = .connected
+        agentStatusBaseline = nil
+        agentStatusAvailable = true
         // A fresh PTY is 80x24 and the view never re-reports on a switch; push the last size.
         pipeline.outbound.yield(.serverResize(cols: lastCols, rows: lastRows))
         // Zero-session host: leave the bare login shell, don't auto-create.
@@ -258,10 +281,57 @@ public final class SSHTerminalController {
     for attempt in 0..<3 {
       if let output = try? await control.exec("\(Self.zmx) ls") {
         let parsed = ZmxSession.parse(output)
-        if !parsed.isEmpty || attempt == 2 { sessions = parsed; return }
+        if !parsed.isEmpty || attempt == 2 { sessions = parsed; break }
       }
       try? await Task.sleep(nanoseconds: 400_000_000)
     }
+    await refreshAgentStatus()
+  }
+
+  public var othersWaiting: Bool {
+    agentStatuses.values.contains { $0.session != attach && $0.state == .waiting }
+  }
+
+  public func refreshAgentStatus() async {
+    guard agentStatusAvailable, status == .connected else { return }
+    guard let output = try? await control.exec(Self.agentStatusCommand) else {
+      if let last = lastAgentStatusRead, clock().timeIntervalSince(last) > Self.agentStatusStaleAfter {
+        agentStatuses = [:]
+      }
+      return
+    }
+    // An older binary without `status` prints usage to stderr and nothing we can parse.
+    if output.contains("__tether_notify_missing") || !output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[") {
+      agentStatusAvailable = false
+      agentStatuses = [:]
+      return
+    }
+    let parsed = AgentStatus.parse(output)
+    let byName = Dictionary(parsed.map { ($0.session, $0) }, uniquingKeysWith: { first, _ in first })
+    if let shown = agentAlert, byName[shown.session]?.state != shown.state { agentAlert = nil }
+    if let alert = AgentStatusChanges.alerts(old: agentStatusBaseline, new: parsed, current: attach).first {
+      agentAlert = alert
+    }
+    agentStatusBaseline = byName
+    agentStatuses = byName
+    lastAgentStatusRead = clock()
+    knownHostLabels.formUnion(parsed.compactMap(\.hostLabel))
+  }
+
+  public func dismissAgentAlert() { agentAlert = nil }
+
+  /// The auto-hide timer's callback: a newer banner for the same session must survive it.
+  public func expireAgentAlert(_ alert: AgentStatus) {
+    if agentAlert == alert { agentAlert = nil }
+  }
+
+  /// A foreground push is hidden only when the in-app banner is showing it; a push with no
+  /// state behind it (an agent outside zmx, a baseline read) must still reach the user.
+  public func coversPush(_ link: SessionDeepLink) async -> Bool {
+    guard status == .connected else { return false }
+    await refreshAgentStatus()
+    guard knownHostLabels.contains(link.identityName), link.sessionId != attach else { return false }
+    return agentAlert?.session == link.sessionId
   }
 
   /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
@@ -272,6 +342,7 @@ public final class SSHTerminalController {
     guard name != attach || !hasSession else { return }
     let wasAttached = hasSession
     attach = name
+    if agentAlert?.session == name { agentAlert = nil }
     pendingNoSession = false
     hasSession = true
     let connected = { if case .connected = status { return true } else { return false } }()
@@ -593,6 +664,27 @@ public final class SSHTerminalController {
   /// Shares the gate with the path observer so the two triggers can't race.
   public func reconnectIfNeeded() async {
     await connect(trigger: .foreground)
+  }
+
+  /// zmx counts an attached phone as a viewer and the host skips its pushes, so a
+  /// phone left in the background must actually let go.
+  public func detachAfterGrace(_ grace: TimeInterval = backgroundGrace) async {
+    try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+    guard !Task.isCancelled else { return }
+    await suspendNow()
+  }
+
+  public func suspendNow() async {
+    guard !left, !isSuspended else { return }
+    isSuspended = true
+    status = .disconnected
+    await pipeline.disconnect()
+    await control.close()
+  }
+
+  public func enterForeground() async {
+    isSuspended = false
+    await reconnectIfNeeded()
   }
 
   /// Watch the network path for this screen. Redials only when a path *becomes*

@@ -24,12 +24,40 @@ set -eu
 agent="${1:-claude}"
 state="${2:-done}"
 host="${TETHER_NOTIFY_HOST:-$TETHER_HOOK_HOST_DEFAULT}"
-sess="${ZMX_SESSION:-default}"
+sess="${ZMX_SESSION:-}"
+case "$state" in working|waiting|done|failed|clear) ;; *) state=done ;; esac
+
+# Codex parses stdout as a decision ({} = accept); Cursor's beforeSubmitPrompt needs
+# an explicit continue. Claude ignores stdout on these events.
+reply() {
+  case "$agent:$state" in
+    codex:*) echo '{}' ;;
+    cursor:working) echo '{"continue": true}' ;;
+    cursor:*) echo '{}' ;;
+  esac
+}
+
+notify_bin="$(dirname "$0")/tether-notify"
+[ -x "$notify_bin" ] || notify_bin="tether-notify"
 
 input="$(cat 2>/dev/null || true)"
 field() { printf '%s' "$input" | jq -r "$1" 2>/dev/null || true; }
 
-# Project name: cwd (Claude/Codex) or the first workspace root (Cursor).
+# Hot path (every tool call): no jq, no push.
+if [ "$state" = working ] || [ "$state" = clear ]; then
+  [ -n "$sess" ] && "$notify_bin" state --session "$sess" --agent "$agent" --state "$state" >/dev/null 2>&1 || true
+  reply
+  exit 0
+fi
+
+# Claude's idle reminder fires a minute after Stop; only real asks are "waiting".
+if [ "$agent:$state" = claude:waiting ]; then
+  case "$(field '.notification_type // empty')" in
+    ""|permission_prompt|elicitation_dialog|agent_needs_input) ;;
+    *) reply; exit 0 ;;
+  esac
+fi
+
 project="$host"
 if [ -n "$input" ]; then
   cwd="$(field '.cwd // (.workspace_roots[0]?) // empty')"
@@ -60,7 +88,13 @@ if [ -n "$input" ]; then
     cursor:waiting) body="$(field '.command // .message // empty')" ;;
   esac
 fi
-[ -n "$body" ] || { [ "$state" = waiting ] && body="Waiting for input" || body="Agent finished"; }
+if [ "$state" = failed ]; then
+  body="Stopped with an error"
+  state_out=done
+else
+  state_out="$state"
+fi
+[ -n "$body" ] || { [ "$state_out" = waiting ] && body="Waiting for input" || body="Agent finished"; }
 
 # One clean line: drop markdown noise, collapse whitespace, cap length.
 body="$(printf '%s' "$body" | tr '\n\t' '  ' | sed 's/[`*#>_]//g' | tr -s ' ' | sed 's/^ //; s/ $//')"
@@ -68,18 +102,17 @@ if [ "${#body}" -gt 120 ]; then
   body="$(printf '%s' "$body" | cut -c1-117)…"
 fi
 
-# tether-notify sits next to this wrapper; call it by path so a hook env without
-# ~/.local/bin on PATH still finds it.
-notify_bin="$(dirname "$0")/tether-notify"
-[ -x "$notify_bin" ] || notify_bin="tether-notify"
-"$notify_bin" notify \
-  --title "$project · $verb" --body "$body" \
-  --link "tether://session/${sess}?host=${host}" \
-  --collapse "agent-${sess}" >/dev/null 2>&1 || true
+link="tether://session/${sess:-default}?host=${host}"
+if [ -n "$sess" ]; then
+  "$notify_bin" state --session "$sess" --agent "$agent" --state "$state_out" \
+    --title "$project · $verb" --body "$body" --link "$link" \
+    --collapse "agent-${sess}" >/dev/null 2>&1 || true
+else
+  "$notify_bin" notify --title "$project · $verb" --body "$body" --link "$link" \
+    --collapse "agent-default" >/dev/null 2>&1 || true
+fi
 
-# Codex parses the hook's stdout as a JSON decision; empty {} = accept. The
-# other agents ignore stdout on these observe events.
-[ "$agent" = codex ] && echo '{}'
+reply
 exit 0
 EOF
 chmod +x "$WRAPPER"
@@ -113,22 +146,33 @@ merge_cursor() { # <file> <event> <command>
   ' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
-# Claude Code — always (create if missing).
-merge_nested "${HOME}/.claude/settings.json" Notification "'${WRAPPER}' claude waiting"
-merge_nested "${HOME}/.claude/settings.json" Stop        "'${WRAPPER}' claude done"
-echo "Registered Claude Code hooks (Notification + Stop)."
+# Claude Code — always (create if missing). Working hooks stay synchronous: an async
+# PreToolUse write could land after the permission prompt's "waiting".
+merge_nested "${HOME}/.claude/settings.json" UserPromptSubmit "'${WRAPPER}' claude working"
+merge_nested "${HOME}/.claude/settings.json" PreToolUse       "'${WRAPPER}' claude working"
+merge_nested "${HOME}/.claude/settings.json" PostToolUse      "'${WRAPPER}' claude working"
+merge_nested "${HOME}/.claude/settings.json" Notification     "'${WRAPPER}' claude waiting"
+merge_nested "${HOME}/.claude/settings.json" Stop             "'${WRAPPER}' claude done"
+merge_nested "${HOME}/.claude/settings.json" StopFailure      "'${WRAPPER}' claude failed"
+merge_nested "${HOME}/.claude/settings.json" SessionEnd       "'${WRAPPER}' claude clear"
+echo "Registered Claude Code hooks."
 
 # Codex — only if it's set up on this host.
 if [ -d "${HOME}/.codex" ]; then
-  merge_nested "${HOME}/.codex/hooks.json" Stop              "'${WRAPPER}' codex done"
+  merge_nested "${HOME}/.codex/hooks.json" UserPromptSubmit  "'${WRAPPER}' codex working"
+  merge_nested "${HOME}/.codex/hooks.json" PreToolUse        "'${WRAPPER}' codex working"
+  merge_nested "${HOME}/.codex/hooks.json" PostToolUse       "'${WRAPPER}' codex working"
   merge_nested "${HOME}/.codex/hooks.json" PermissionRequest "'${WRAPPER}' codex waiting"
-  echo "Registered Codex hooks (Stop + PermissionRequest) — Codex will ask you to TRUST the new hook on its next run."
+  merge_nested "${HOME}/.codex/hooks.json" Stop              "'${WRAPPER}' codex done"
+  merge_nested "${HOME}/.codex/hooks.json" SessionEnd        "'${WRAPPER}' codex clear"
+  echo "Registered Codex hooks — Codex will ask you to TRUST the new hooks on its next run."
 fi
 
 # Cursor — only if it's set up on this host.
 if [ -d "${HOME}/.cursor" ]; then
-  merge_cursor "${HOME}/.cursor/hooks.json" stop "'${WRAPPER}' cursor done"
-  echo "Registered Cursor hook (stop)."
+  merge_cursor "${HOME}/.cursor/hooks.json" beforeSubmitPrompt "'${WRAPPER}' cursor working"
+  merge_cursor "${HOME}/.cursor/hooks.json" stop               "'${WRAPPER}' cursor done"
+  echo "Registered Cursor hooks."
 fi
 
 echo

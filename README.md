@@ -58,6 +58,13 @@ tether-notify notify --title "homelab · agent" --body "Waiting for input" \
   --link "tether://session/default?host=homelab"
 ```
 
+Agent hooks also record each session's state (`working`, `waiting`, `done`) with
+`tether-notify state`; the app reads it with `tether-notify status` to badge sessions.
+A `waiting`/`done` push is skipped while any zmx client is attached to that session —
+including a desktop terminal. The app detaches 15 s after it goes to the background, so
+a locked phone gets its pushes. As a backstop for an app killed while attached, set
+`ClientAliveInterval 30` / `ClientAliveCountMax 2` in the host's `sshd_config`.
+
 ## Layout
 
 ```

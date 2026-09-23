@@ -39,6 +39,10 @@ func main() {
 		err = cmdList()
 	case "remove":
 		err = cmdRemove(os.Args[2:])
+	case "state":
+		err = runState(os.Args[2:], defaultStateDeps(false))
+	case "status":
+		err = runStatus(os.Stdout, defaultStatusDeps())
 	default:
 		usage()
 		os.Exit(2)
@@ -54,6 +58,11 @@ func usage() {
 
   register <token> <secretKeyB64> [label]   register/replace a phone
   notify --title T --body B [--link L] [--collapse ID] [--dry-run]
+  state --session S --agent A --state working|waiting|done|clear
+        [--title T --body B --link L] [--collapse ID] [--dry-run]
+                                             record a session's agent state; pushes waiting/done
+                                             unless the session has an attached zmx client
+  status                                     print every session's agent state as JSON
   list                                       list registered phones
   remove <token>                             forget a phone
 `)
@@ -114,6 +123,10 @@ func cmdNotify(args []string) error {
 	if *title == "" || *body == "" {
 		return fmt.Errorf("notify requires --title and --body")
 	}
+	return sendPush(PushContent{Title: *title, Body: *body, Link: *link}, *collapse, *dryRun)
+}
+
+func sendPush(content PushContent, collapse string, dryRun bool) error {
 	devices, err := loadDevices()
 	if err != nil {
 		return err
@@ -121,7 +134,6 @@ func cmdNotify(args []string) error {
 	if len(devices) == 0 {
 		return fmt.Errorf("no registered devices")
 	}
-	content := PushContent{Title: *title, Body: *body, Link: *link}
 	url := strings.TrimRight(relayURL(), "/") + "/push"
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -132,8 +144,8 @@ func cmdNotify(args []string) error {
 			fmt.Fprintf(os.Stderr, "encrypt for %s failed: %v\n", shortToken(device.Token), err)
 			continue
 		}
-		req := relayRequest{Token: device.Token, Ciphertext: ciphertext, CollapseID: *collapse}
-		if *dryRun {
+		req := relayRequest{Token: device.Token, Ciphertext: ciphertext, CollapseID: collapse}
+		if dryRun {
 			out, _ := json.Marshal(req)
 			fmt.Println(string(out))
 			sent++
@@ -149,7 +161,7 @@ func cmdNotify(args []string) error {
 			// advisory: logged, never fatal
 		}
 	}
-	if sent == 0 && !*dryRun {
+	if sent == 0 && !dryRun {
 		return fmt.Errorf("no device accepted the push")
 	}
 	return nil
