@@ -30,6 +30,9 @@ jobs:
       - name: Lint (biome)
         run: bun lint
 
+      - name: Release script tests
+        run: bun test scripts/
+
   # Host CLI: the Go encrypted-push tool (apps/tether-notify). Build, vet, and
   # run its crypto/devices tests.
   host-tools:
