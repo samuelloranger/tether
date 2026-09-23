@@ -11,7 +11,7 @@ never see the plaintext; the iOS Notification Service Extension decrypts it.
     go build -o ~/.local/bin/tether-notify .
     # or, from the repo root:  bash install.sh
 
-Wire it into agent hooks (Claude Code Notification + Stop) with
+Wire it into agent hooks (Claude Code, Codex, Cursor) with
 `bash scripts/install-agent-hooks.sh [host-label]`.
 
 ## Use
@@ -23,10 +23,20 @@ Wire it into agent hooks (Claude Code Notification + Stop) with
     tether-notify notify --title "homelab · claude" --body "Waiting for input" \
       --link "tether://session/default?host=homelab" --collapse default
 
+    # agent hooks run this on every state change; waiting/done also push,
+    # unless `zmx ls` shows a client attached to the session:
+    tether-notify state --session work --agent claude --state waiting \
+      --title "proj · needs you" --body "Allow Bash?" \
+      --link "tether://session/work?host=devbox"
+
+    # the app runs this to badge sessions; prunes dead agents and gone sessions:
+    tether-notify status
+
     tether-notify list
     tether-notify remove <apns-token>
 
-Devices live in `~/.tether-notify/devices.json` (override with
-`TETHER_NOTIFY_HOME`). Relay URL defaults to the official one; override with
+Devices live in `~/.tether-notify/devices.json`, session state in
+`~/.tether-notify/sessions/` (override the directory with `TETHER_NOTIFY_HOME`).
+zmx is found at `TETHER_ZMX`, else `~/.local/bin/zmx`, else on `PATH`. Relay URL defaults to the official one; override with
 `TETHER_PUSH_RELAY_URL`. `--dry-run` prints the relay requests instead of
 sending — used to prove wire-format parity with the server/NSE.
