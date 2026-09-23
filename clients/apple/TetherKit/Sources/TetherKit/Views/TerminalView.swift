@@ -38,15 +38,16 @@ public struct TerminalAccessoryBar: View {
     self.onHideKeyboard = onHideKeyboard
   }
 
-  /// Every key in the bar is this tall, the D-pad included — a control that is
-  /// taller than its neighbours reads as a different kind of thing.
+  /// Every key in the bar is this size, the D-pad included — a key that is larger
+  /// than its neighbours reads as a different kind of thing. Width fits "Home"/"PgDn".
   static let keySize: CGFloat = 40
+  static let keyWidth: CGFloat = 52
   static let barVerticalPadding: CGFloat = 8
   /// First-frame fallback before GeometryReader reports the real docked height.
   /// Derived from key + padding so it cannot drift from the row's layout again.
   public static let barHeight: CGFloat = keySize + barVerticalPadding * 2
 
-  /// No arrow keys: the D-pad is one square key covering all four directions.
+  /// No arrow keys: the D-pad is one key covering all four directions.
   public var body: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
@@ -54,7 +55,7 @@ public struct TerminalAccessoryBar: View {
         accessoryButton("Tab") { send(base: "\t") }
         accessoryButton("Esc") { onKey("\u{1B}") }
         accessoryButton("/") { onKey("/") }
-        DpadView(size: Self.keySize, onArrow: onArrow)
+        DpadView(size: CGSize(width: Self.keyWidth, height: Self.keySize), onArrow: onArrow)
         pasteButton
         accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
         accessoryButton("Del") { onKey("\u{1B}[3~") }
@@ -124,7 +125,7 @@ public struct TerminalAccessoryBar: View {
     .labelStyle(.iconOnly)
     .buttonBorderShape(.roundedRectangle(radius: 8))
     .tint(TetherColors.surface)
-    .frame(minWidth: Self.keySize, minHeight: Self.keySize)
+    .frame(width: Self.keyWidth, height: Self.keySize)
   }
 
   /// Arming Ctrl changes what the next key does with nothing else moving on screen,
