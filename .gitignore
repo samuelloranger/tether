@@ -45,3 +45,6 @@ clients/apple/TetherKit/.build/
 # Local design-critique artifacts (impeccable skill)
 .impeccable/
 .worktrees/
+
+# Go build output
+apps/tether-notify/tether-notify
