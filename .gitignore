@@ -36,16 +36,6 @@ Thumbs.db
 # Playwright MCP scratch output
 .playwright-mcp/
 
-# Rust build artifacts
-**/target/
-
-# SSH transport XCFrameworks are prebuilt deps (committed); TetherFFI + its
-# generated bindings are produced by scripts/build-xcframework.sh (not committed).
-clients/apple/TetherKit/Frameworks/*
-!clients/apple/TetherKit/Frameworks/SSH/
-!clients/apple/TetherKit/Frameworks/SSH/**
-clients/apple/TetherKit/Sources/TetherFFIBindings/
-
 # SwiftPM build output
 clients/apple/TetherKit/.build/
 

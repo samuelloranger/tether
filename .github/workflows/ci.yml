@@ -49,10 +49,9 @@ jobs:
           go vet ./...
           go test ./...
 
-  # The shipping product: the native Swift client. This assembles the
-  # XCFramework from crates/ (the compile check for tether-ffi/core/proto), then
-  # builds TetherIOS for the simulator and runs the TetherKit tests. Signing is
-  # off — this proves the sources compile and render, nothing more.
+  # The shipping product: the native Swift client. Builds TetherIOS for the
+  # simulator and runs the TetherKit tests. Signing is off — this proves the
+  # sources compile and render, nothing more.
   ios-build:
     runs-on: macos-15
     steps:
@@ -61,23 +60,6 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
-
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/tether-core
-          shared-key: tether-ios-ci
-          cache-on-failure: true
-
-      - name: Build tether-ffi and assemble the XCFramework
-        timeout-minutes: 30
-        env:
-          PROFILE: debug
-        run: bash scripts/build-xcframework.sh
 
       - name: Build TetherIOS for the simulator
         timeout-minutes: 30

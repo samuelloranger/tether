@@ -537,7 +537,7 @@ public final class TetherSurfaceView: UIView {
       )
       scrollRemainder = result.remainder
       if result.lines != 0 {
-        // touchScrollLines matches xterm; alacritty Delta is inverted.
+        // touchScrollLines matches xterm; scrollViewport counts into history.
         onScrollLines?(Int32(-result.lines))
       }
       applyScrollOffset()

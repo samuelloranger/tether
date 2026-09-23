@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Ensure dependencies are installed
-for cmd in jq cargo git bun gh; do
+for cmd in jq git bun gh; do
   if ! command -v "$cmd" &> /dev/null; then
     echo "Error: $cmd is required but not installed." >&2
     exit 1

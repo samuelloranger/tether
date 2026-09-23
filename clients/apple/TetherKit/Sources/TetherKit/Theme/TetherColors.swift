@@ -35,8 +35,8 @@ public enum TetherColors {
   public static let heatDone = dynamic(dark: 0x6E_E7_A8, light: 0x1C_7A_4F)
   public static let heatCool = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
 
-  /// NOT dynamic. Must equal the emulator's cell background — `theme.background` in
-  /// `crates/tether-core/src/terminal/alacritty.rs` (0x1E1E2E) — or a seam shows.
+  /// NOT dynamic. Must equal the emulator's cell background —
+  /// `TerminalPalette.background` (0x1E1E2E) — or a seam shows.
   public static let terminalBackgroundHex: UInt32 = 0x1E1E2E
   public static let terminalBackground = Color(hex: "1E1E2E")
 

@@ -1,8 +1,7 @@
 # v5 SSH transport dependencies
 
 Prebuilt iOS XCFrameworks for the v5 libssh2 transport spike. They are
-vendored build inputs, not generated output — `scripts/build-xcframework.sh`
-only ever produced `TetherFFI.xcframework` (see `.gitignore`).
+vendored build inputs, not generated output.
 
 ## Contents
 

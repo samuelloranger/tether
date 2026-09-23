@@ -72,7 +72,7 @@ enum TerminalResizePublish {
 /// at the new size rebuilds it correctly.
 ///
 /// - Alt-screen: any size change clamps CUP rows and needs a rebuild.
-/// - Primary screen: a row GROW makes alacritty's reflow duplicate a content row
+/// - Primary screen: a row GROW's reflow can duplicate a content row
 ///   into the newly exposed rows. Agent TUIs redraw with cursor-home rather than
 ///   a full clear, so the stale copy sticks and scrolls into scrollback — the
 ///   line-doubling bug. Shrink and column-only changes reflow cleanly, so they

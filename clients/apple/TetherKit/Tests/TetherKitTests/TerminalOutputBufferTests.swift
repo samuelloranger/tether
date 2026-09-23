@@ -64,7 +64,7 @@ final class TerminalResizeStrategyTests: XCTestCase {
         altScreen: false, oldCols: 20, oldRows: 12, newCols: 20, newRows: 8
       )
     )
-    // Column-only change: alacritty's column reflow is correct here.
+    // Column-only change: the emulator's column reflow is correct here.
     XCTAssertFalse(
       TerminalResizeStrategy.shouldRebuildFromBuffer(
         altScreen: false, oldCols: 80, oldRows: 24, newCols: 100, newRows: 24
@@ -73,7 +73,7 @@ final class TerminalResizeStrategyTests: XCTestCase {
   }
 
   func testPrimaryScreenGrowRebuildsToAvoidReflowDuplication() {
-    // A row grow on the primary screen makes alacritty's reflow duplicate a
+    // A row grow on the primary screen can make the reflow duplicate a
     // content row into the newly exposed rows (the agent-TUI line-doubling bug).
     // Rebuild from the buffer at the new size instead.
     XCTAssertTrue(

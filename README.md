@@ -27,7 +27,6 @@ A native iOS terminal for your own machines. Tether connects over **SSH** to [`z
 The app is built from source and installed to your device (there is no public distribution). You need a Mac with Xcode.
 
 ```bash
-bash scripts/build-xcframework.sh      # build the Rust terminal engine
 xcodebuild build \
   -project clients/apple/Tether.xcodeproj \
   -scheme TetherIOS \
@@ -62,9 +61,8 @@ tether-notify notify --title "homelab · agent" --body "Waiting for input" \
 
 ```
 clients/apple/        native iOS app (TetherKit package + TetherIOS + NSE)
-crates/               Rust VT emulator (tether-core + tether-ffi), consumed as an XCFramework
 apps/tether-notify/   Go host CLI for encrypted push
-scripts/              build-xcframework.sh, install.sh, install-agent-hooks.sh, release.sh
+scripts/              install.sh, install-agent-hooks.sh, release.sh
 ```
 
 Architecture, data flow, and conventions: [`CLAUDE.md`](CLAUDE.md).
