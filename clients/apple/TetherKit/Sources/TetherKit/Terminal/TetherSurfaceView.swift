@@ -31,7 +31,7 @@ public final class TetherSurfaceView: UIView {
   /// into scrollback.
   public var onGridSizeSettled: ((UInt16, UInt16) -> Void)?
 
-  /// Alacritty scroll delta: positive = into history. Built from pan pixels via
+  /// Engine scroll delta: positive = into history. Built from pan pixels via
   /// `TouchScrollModel` (finger-down → history).
   public var onScrollLines: ((Int32) -> Void)?
 

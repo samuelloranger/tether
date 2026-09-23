@@ -66,8 +66,8 @@ actor TerminalPipeline {
   private var lastMouseMode: MouseMode = .off
   private var lastMouseSgr = true
   private var lastAltScreen = false
-  /// When false, output is still fed to the emulator and the replay cursor still
-  /// advances, but grid snapshots are not produced — a background (non-visible)
+  /// When false, output is still fed to the emulator, but grid snapshots are not
+  /// produced — a background (non-visible)
   /// session stays current without paying to rasterize.
   private var rendering = true
   /// One source of truth for the grid size: the channel, the parser and any

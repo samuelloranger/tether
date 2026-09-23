@@ -110,8 +110,9 @@ final class TerminalPipelineRenderingTests: XCTestCase {
     let first = StubTerminalByteStream()
     let second = StubTerminalByteStream()
     await pipeline.connectSSH(transport: first, key: "one")
-    pipeline.outbound.yield(.reply(Data("\u{1B}[1;1R".utf8), key: "one"))
     await pipeline.connectSSH(transport: second, key: "two")
+    // Queued after the switch, so only the key guard can keep it off `second`.
+    pipeline.outbound.yield(.reply(Data("\u{1B}[1;1R".utf8), key: "one"))
     pipeline.outbound.yield(.input("x", key: "two"))
     let writes = try await eventually {
       let writes = await second.writes()

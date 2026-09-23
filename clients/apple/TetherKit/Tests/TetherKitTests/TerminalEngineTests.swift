@@ -66,7 +66,8 @@ final class TerminalEngineTests: XCTestCase {
     engine.feed("\u{1F468}\u{200D}\u{1F469}x")
     let cells = engine.frame().cells
     XCTAssertEqual(cells[0].codepoint, 0x1F468)
-    XCTAssertTrue(rowText(engine.frame(), 0).hasSuffix("x"))
+    XCTAssertEqual(cells[1].codepoint, 0x20, "the emoji occupies two columns")
+    XCTAssertEqual(cells[2].codepoint, 0x78)
   }
 
   func test_style_bits_map_to_grid_attrs() {
@@ -425,5 +426,27 @@ final class TerminalEngineLockingTests: XCTestCase {
     Thread.sleep(forTimeInterval: 1.3)
     engine.feed("done\u{1B}[?2026l")
     XCTAssertTrue(rowText(engine.frame(), 0).hasSuffix("done"))
+  }
+}
+
+final class TerminalEngineMinorFixTests: XCTestCase {
+  func test_palette_change_without_cell_change_repaints() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("\u{1B}[31mR\u{1B}[0m")
+    let before = engine.generation
+    XCTAssertEqual(engine.frame().cells[0].foreground, 0xFFF3_8BA8)
+    engine.feed("\u{1B}]4;1;rgb:00/ff/00\u{07}")
+    XCTAssertEqual(engine.frame().cells[0].foreground, 0xFF00_FF00)
+    XCTAssertEqual(engine.generation, before + 1)
+  }
+
+  func test_cursor_hides_while_scrolled_back_past_it() {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
+    engine.feed((1...30).map { "L\($0)" }.joined(separator: "\r\n") + "\r\n")
+    XCTAssertTrue(engine.frame().header.cursorVisible)
+    engine.scrollViewport(lines: 10)
+    XCTAssertFalse(engine.frame().header.cursorVisible, "the cursor is below the view, not on a history line")
+    engine.scrollViewport(lines: -10)
+    XCTAssertTrue(engine.frame().header.cursorVisible)
   }
 }

@@ -164,8 +164,11 @@ final class TerminalEngine {
     guard !terminal.synchronizedOutputActive else { return }
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
-    guard needsRefresh || stateChanged || terminal.getUpdateRange() != nil else { return }
+    // OSC 4/104 repaint colors without touching the update range.
+    guard needsRefresh || stateChanged || delegate.paletteChanged || terminal.getUpdateRange() != nil
+    else { return }
     needsRefresh = false
+    delegate.paletteChanged = false
     terminal.clearUpdateRange()
     let cells = buildCells()
     if stateChanged || cells != cached.cells {
@@ -191,7 +194,8 @@ final class TerminalEngine {
       cursorCol: UInt16(clamping: min(max(cursor.x, 0), dims.cols - 1)),
       cursorRow: UInt16(clamping: min(max(cursor.y + scrollOffset, 0), dims.rows - 1)),
       generation: generationCounter,
-      cursorVisible: delegate.cursorVisible,
+      // Scrolled back past it, the cursor is below the view, not on a history line.
+      cursorVisible: delegate.cursorVisible && cursor.y + scrollOffset < dims.rows,
       altScreen: terminal.isCurrentBufferAlternate)
   }
 
@@ -247,6 +251,7 @@ final class TerminalEngine {
 
 private final class EngineDelegate: TerminalDelegate {
   var cursorVisible = true
+  var paletteChanged = false
   var replies: [UInt8] = []
 
   func send(source: Terminal, data: ArraySlice<UInt8>) {
@@ -255,4 +260,5 @@ private final class EngineDelegate: TerminalDelegate {
 
   func showCursor(source: Terminal) { cursorVisible = true }
   func hideCursor(source: Terminal) { cursorVisible = false }
+  func colorChanged(source: Terminal, idx: Int?) { paletteChanged = true }
 }

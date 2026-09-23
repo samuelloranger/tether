@@ -2,8 +2,8 @@ import XCTest
 
 @testable import TetherKit
 
-/// Switch-back reuses the emulator and replays only missed log ids onto it.
-/// A server `{t:reset}` is the one path that wipes the grid.
+/// Switch-back reuses the emulator and its grid; `reset` is the one path that
+/// wipes it.
 final class TerminalSessionGridsTests: XCTestCase {
   func testFirstAttachIsAFreshEmulator() {
     let grids = TerminalSessionGrids()

@@ -56,7 +56,7 @@ final class TerminalResizeStrategyTests: XCTestCase {
     )
   }
 
-  func testPrimaryScreenShrinkAndColumnChangeKeepAlacrittyReflow() {
+  func testPrimaryScreenShrinkAndColumnChangeKeepTheEmulatorReflow() {
     // Shrink: reflow is clean, and rebuilding would drop scrollback past the
     // buffer budget for nothing.
     XCTAssertFalse(
