@@ -71,7 +71,6 @@ jobs:
             -skipPackagePluginValidation \
             -project clients/apple/Tether.xcodeproj \
             -scheme TetherIOS \
-            -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \

@@ -199,7 +199,7 @@ jobs:
           if [ "$SIGN_MODE" = manual ]; then
             xcodebuild -project clients/apple/Tether.xcodeproj \
               -scheme TetherIOS \
-              -configuration Release -sdk iphoneos \
+              -configuration Release -destination 'generic/platform=iOS' \
               -archivePath build/TetherIOS.xcarchive archive \
               -skipPackagePluginValidation \
               DEVELOPMENT_TEAM="$TEAM_ID" \
@@ -212,7 +212,7 @@ jobs:
           else
             xcodebuild -project clients/apple/Tether.xcodeproj \
               -scheme TetherIOS \
-              -configuration Release -sdk iphoneos \
+              -configuration Release -destination 'generic/platform=iOS' \
               -archivePath build/TetherIOS.xcarchive archive \
               -skipPackagePluginValidation \
               -allowProvisioningUpdates \
