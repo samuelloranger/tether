@@ -127,7 +127,7 @@ public final class SSHTerminalController {
   private var lastAgentStatusRead: Date?
   private var knownHostLabels: Set<String> = []
   var clock: () -> Date = Date.init
-  public static let backgroundGrace: TimeInterval = 15
+  public nonisolated static let backgroundGrace: TimeInterval = 15
   /// Set while backgrounded past the grace period: nothing but a return to the
   /// foreground (or a person tapping Retry) may redial.
   public private(set) var isSuspended = false
