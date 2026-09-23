@@ -113,6 +113,10 @@ actor TerminalPipeline {
   private func readLoopSSH(key: String, transport: any TerminalByteStream) async {
     do {
       while !Task.isCancelled, let bytes = try await transport.read() {
+        // A replaced connection shares the host key, and its closed stream still
+        // hands out buffered chunks: cancellation is the only thing that tells
+        // them apart from the live connection's output.
+        guard !Task.isCancelled else { break }
         guard key == emulatorKey else { continue }
         applyOutput(bytes)
       }

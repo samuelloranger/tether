@@ -120,6 +120,43 @@ final class TerminalPipelineRenderingTests: XCTestCase {
     }
     XCTAssertEqual(writes, [Data("x".utf8)], "a reply keyed to the old session must not reach the new one")
   }
+  /// A redial replaces the transport under the same host key. A chunk the old
+  /// connection had already buffered must not be drawn into the new session.
+  func test_output_buffered_on_a_replaced_connection_is_dropped() async throws {
+    let pipeline = TerminalPipeline()
+    let old = BufferedAfterCloseStream()
+    let fresh = StubTerminalByteStream()
+    await pipeline.connectSSH(transport: old, key: "ssh:host:22")
+    _ = try await eventually { await old.isReading ? true : nil }
+    await pipeline.connectSSH(transport: fresh, key: "ssh:host:22")
+    await old.deliver(Data("OLD-SESSION-REDRAW".utf8))
+    await fresh.receive(Data("new session".utf8))
+    _ = try await eventually {
+      let text = await pipeline.historyText()
+      return text.contains("new session") ? text : nil
+    }
+    try await Task.sleep(nanoseconds: 100_000_000)
+    let text = await pipeline.historyText()
+    XCTAssertFalse(text.contains("OLD-SESSION-REDRAW"), "the replaced connection's output leaked into: \(text)")
+  }
+}
+
+/// A pump's inbound stream is unbounded: closing it still hands out chunks it
+/// already buffered. Models that — `close` does not end a pending read.
+private actor BufferedAfterCloseStream: TerminalByteStream {
+  private var reader: CheckedContinuation<Data?, Never>?
+  var isReading: Bool { reader != nil }
+
+  func read() async throws -> Data? {
+    await withCheckedContinuation { reader = $0 }
+  }
+  func write(_ bytes: Data) async throws {}
+  func resize(cols: UInt16, rows: UInt16) async {}
+  func close() async {}
+  func deliver(_ bytes: Data) {
+    reader?.resume(returning: bytes)
+    reader = nil
+  }
 }
 
 private actor StubTerminalByteStream: TerminalByteStream {
