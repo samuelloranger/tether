@@ -343,3 +343,33 @@ final class TerminalEngineScreenTests: XCTestCase {
     XCTAssertEqual(rowText(engine.frame(), 0), "L27")
   }
 }
+
+final class TerminalEngineReplyTests: XCTestCase {
+  func test_cursor_position_report_is_answered() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("\u{1B}[6n")
+    XCTAssertEqual(String(decoding: engine.takeReplies(), as: UTF8.self), "\u{1B}[1;1R")
+  }
+
+  func test_primary_device_attributes_are_answered() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("\u{1B}[c")
+    XCTAssertTrue(String(decoding: engine.takeReplies(), as: UTF8.self).hasPrefix("\u{1B}[?"))
+  }
+
+  func test_take_drains_and_discard_drops() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("\u{1B}[6n")
+    XCTAssertFalse(engine.takeReplies().isEmpty)
+    XCTAssertTrue(engine.takeReplies().isEmpty)
+    engine.feed("\u{1B}[6n")
+    engine.discardReplies()
+    XCTAssertTrue(engine.takeReplies().isEmpty)
+  }
+
+  func test_plain_output_produces_no_replies() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("hello\r\n\u{1B}[1mbold\u{1B}[0m")
+    XCTAssertTrue(engine.takeReplies().isEmpty)
+  }
+}
