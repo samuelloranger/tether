@@ -215,11 +215,16 @@ public final class SSHTerminalController {
       guard !left else { return }
       do {
         let stream = try await dial(config, hostKeyStore)
-        guard !left else {
+        guard !left, !isSuspended else {
           await stream.close()
           return
         }
         await pipeline.connectSSH(transport: stream, key: sessionKey)
+        // Backgrounded past the grace while this was attaching: let go, or zmx keeps counting us.
+        guard !isSuspended else {
+          await pipeline.disconnect()
+          return
+        }
         status = .connected
         agentStatusBaseline = nil
         agentStatusAvailable = true
@@ -295,7 +300,8 @@ public final class SSHTerminalController {
       }
       return
     }
-    if output.contains("__tether_notify_missing") {
+    // An older binary without `status` prints usage to stderr and nothing we can parse.
+    if output.contains("__tether_notify_missing") || !output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[") {
       agentStatusAvailable = false
       agentStatuses = [:]
       return
@@ -319,16 +325,13 @@ public final class SSHTerminalController {
     if agentAlert == alert { agentAlert = nil }
   }
 
-  /// A foreground push about this host is shown in-app instead. The host label is only
-  /// learnt from a status read, so the first push waits for one.
+  /// A foreground push is hidden only when the in-app banner is showing it; a push with no
+  /// state behind it (an agent outside zmx, a baseline read) must still reach the user.
   public func coversPush(_ link: SessionDeepLink) async -> Bool {
     guard status == .connected else { return false }
-    if knownHostLabels.isEmpty {
-      await refreshAgentStatus()
-    } else {
-      Task { await refreshAgentStatus() }
-    }
-    return knownHostLabels.contains(link.identityName)
+    await refreshAgentStatus()
+    guard knownHostLabels.contains(link.identityName), link.sessionId != attach else { return false }
+    return agentAlert?.session == link.sessionId
   }
 
   /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
@@ -672,7 +675,7 @@ public final class SSHTerminalController {
   }
 
   public func suspendNow() async {
-    guard !left, !isSuspended, !connectInFlight else { return }
+    guard !left, !isSuspended else { return }
     isSuspended = true
     status = .disconnected
     await pipeline.disconnect()

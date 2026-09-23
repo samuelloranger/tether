@@ -62,4 +62,22 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
     XCTAssertEqual(controller.status, .connected)
     await controller.leave()
   }
+
+  func test_a_suspend_during_a_dial_still_lets_go() async {
+    let stream = ScriptedByteStream()
+    let script = DialScript([stream], held: true)
+    let controller = makeController(script)
+    let connecting = Task { await controller.connect() }
+    let entered = await eventually { script.hasEntered }
+    XCTAssertTrue(entered)
+
+    await controller.suspendNow()
+    script.open()
+    await connecting.value
+
+    XCTAssertTrue(stream.closed, "a dial that lands after the suspend must not stay attached")
+    XCTAssertTrue(controller.isSuspended)
+    XCTAssertNotEqual(controller.status, .connected)
+    await controller.leave()
+  }
 }

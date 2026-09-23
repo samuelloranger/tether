@@ -110,20 +110,47 @@ final class SSHTerminalControllerAgentStatusTests: XCTestCase {
     await controller.leave()
   }
 
-  func test_covers_pushes_for_this_host_only_while_connected() async {
-    let done = "[\(row("other", "done"))]"
-    let ops = makeOps { done }
+  func test_a_push_is_covered_only_when_its_banner_is_showing() async {
+    var reply = "[\(row("other", "working"))]"
+    let ops = makeOps { reply }
     let controller = makeController(ops)
-    let thisHost = SessionDeepLink(sessionId: "other", identityName: "devbox")
-    let otherHost = SessionDeepLink(sessionId: "other", identityName: "elsewhere")
+    let pushed = SessionDeepLink(sessionId: "other", identityName: "devbox")
 
-    let beforeConnect = await controller.coversPush(thisHost)
+    let beforeConnect = await controller.coversPush(pushed)
     XCTAssertFalse(beforeConnect)
     await connectSettled(controller, ops)
-    let same = await controller.coversPush(thisHost)
-    let different = await controller.coversPush(otherHost)
-    XCTAssertTrue(same, "a status read teaches the controller this host's label")
-    XCTAssertFalse(different)
+
+    reply = "[\(row("other", "done", since: 200))]"
+    let covered = await controller.coversPush(pushed)
+    XCTAssertTrue(covered, "the push's own refresh raised the in-app banner")
+    let otherHost = await controller.coversPush(SessionDeepLink(sessionId: "other", identityName: "elsewhere"))
+    XCTAssertFalse(otherHost)
+    await controller.leave()
+  }
+
+  func test_a_push_with_no_banner_behind_it_still_shows() async {
+    let working = "[\(row("other", "working"))]"
+    let ops = makeOps { working }
+    let controller = makeController(ops)
+    await connectSettled(controller, ops)
+
+    // An agent outside zmx pushes without a state file; a session that is still working raises no banner.
+    let stateless = await controller.coversPush(SessionDeepLink(sessionId: "lonely", identityName: "devbox"))
+    let noBanner = await controller.coversPush(SessionDeepLink(sessionId: "other", identityName: "devbox"))
+    XCTAssertFalse(stateless, "hiding it would lose the notification entirely")
+    XCTAssertFalse(noBanner)
+    await controller.leave()
+  }
+
+  func test_an_older_tether_notify_without_status_stops_being_asked() async {
+    // An old binary prints usage to stderr (discarded) and nothing on stdout.
+    let ops = makeOps { "" }
+    let controller = makeController(ops)
+    await connectSettled(controller, ops)
+    let asked = statusExecs(ops)
+    await controller.refreshAgentStatus()
+    await controller.refreshAgentStatus()
+    XCTAssertEqual(statusExecs(ops), asked, "a host that cannot answer must not be polled every 5 s")
     await controller.leave()
   }
 
