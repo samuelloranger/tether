@@ -28,6 +28,7 @@ public struct SSHTerminalView: View {
   @State private var photoItem: PhotosPickerItem?
   @State private var showCopyConfirmation = false
   @Environment(\.scenePhase) private var scenePhase
+  @State private var backgroundDetach = BackgroundDetach()
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   /// The drawer holds text, so it grows with it — but never past the screen.
@@ -107,7 +108,15 @@ public struct SSHTerminalView: View {
       #endif
     }
     .onChange(of: scenePhase) { _, phase in
-      if phase == .active { Task { await controller.reconnectIfNeeded() } }
+      switch phase {
+      case .active:
+        backgroundDetach.end(controller: controller)
+        Task { await controller.enterForeground() }
+      case .background:
+        backgroundDetach.begin(controller: controller)
+      default:
+        break
+      }
     }
     .sheet(isPresented: $showSettings) { TerminalSettingsSheet(preferences: preferences) { showSettings = false } }
     .sheet(isPresented: $showGit) { GitDiffView(controller: controller) { showGit = false } }

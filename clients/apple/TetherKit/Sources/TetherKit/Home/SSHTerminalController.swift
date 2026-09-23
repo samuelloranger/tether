@@ -127,6 +127,10 @@ public final class SSHTerminalController {
   private var lastAgentStatusRead: Date?
   private var knownHostLabels: Set<String> = []
   var clock: () -> Date = Date.init
+  public static let backgroundGrace: TimeInterval = 15
+  /// Set while backgrounded past the grace period: nothing but a return to the
+  /// foreground (or a person tapping Retry) may redial.
+  public private(set) var isSuspended = false
 
   private let pathObserver = NetworkPathObserver()
   /// Opened lazily on first use, which is always after the terminal connects.
@@ -187,6 +191,7 @@ public final class SSHTerminalController {
 
   public func connect(trigger: ConnectTrigger = .initial) async {
     guard !left else { return }
+    if isSuspended, trigger != .manual { return }
     if !trigger.bypassesRecoveryGate,
       !Self.shouldRedialOnForeground(status: status, dialing: connectInFlight, reachability: reachability) {
       return
@@ -656,6 +661,27 @@ public final class SSHTerminalController {
   /// Shares the gate with the path observer so the two triggers can't race.
   public func reconnectIfNeeded() async {
     await connect(trigger: .foreground)
+  }
+
+  /// zmx counts an attached phone as a viewer and the host skips its pushes, so a
+  /// phone left in the background must actually let go.
+  public func detachAfterGrace(_ grace: TimeInterval = backgroundGrace) async {
+    try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+    guard !Task.isCancelled else { return }
+    await suspendNow()
+  }
+
+  public func suspendNow() async {
+    guard !left, !isSuspended, !connectInFlight else { return }
+    isSuspended = true
+    status = .disconnected
+    await pipeline.disconnect()
+    await control.close()
+  }
+
+  public func enterForeground() async {
+    isSuspended = false
+    await reconnectIfNeeded()
   }
 
   /// Watch the network path for this screen. Redials only when a path *becomes*
