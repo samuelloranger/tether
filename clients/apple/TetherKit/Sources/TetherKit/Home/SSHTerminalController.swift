@@ -119,12 +119,23 @@ public final class SSHTerminalController {
   public private(set) var gitLoading = false
   public private(set) var transfer: TransferState = .idle
   public private(set) var reachability: NetworkReachability?
+  public private(set) var agentStatuses: [String: AgentStatus] = [:]
+  public private(set) var agentAlert: AgentStatus?
+  /// `nil` until the first read on this connection — that read is a baseline, not news.
+  private var agentStatusBaseline: [String: AgentStatus]?
+  private var agentStatusAvailable = true
+  private var lastAgentStatusRead: Date?
+  private var knownHostLabels: Set<String> = []
+  var clock: () -> Date = Date.init
 
   private let pathObserver = NetworkPathObserver()
   /// Opened lazily on first use, which is always after the terminal connects.
   private let control: ControlConnection
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
+  static let agentStatusCommand =
+    "if [ -x \(notify) ]; then \(notify) status 2>/dev/null; else echo __tether_notify_missing; fi"
+  private static let agentStatusStaleAfter: TimeInterval = 30
   private let pipeline = TerminalPipeline()
   private let config: SSHConnectionConfig
   private let hostKeyStore: HostKeyStore
@@ -205,6 +216,8 @@ public final class SSHTerminalController {
         }
         await pipeline.connectSSH(transport: stream, key: sessionKey)
         status = .connected
+        agentStatusBaseline = nil
+        agentStatusAvailable = true
         // A fresh PTY is 80x24 and the view never re-reports on a switch; push the last size.
         pipeline.outbound.yield(.serverResize(cols: lastCols, rows: lastRows))
         // Zero-session host: leave the bare login shell, don't auto-create.
@@ -258,10 +271,59 @@ public final class SSHTerminalController {
     for attempt in 0..<3 {
       if let output = try? await control.exec("\(Self.zmx) ls") {
         let parsed = ZmxSession.parse(output)
-        if !parsed.isEmpty || attempt == 2 { sessions = parsed; return }
+        if !parsed.isEmpty || attempt == 2 { sessions = parsed; break }
       }
       try? await Task.sleep(nanoseconds: 400_000_000)
     }
+    await refreshAgentStatus()
+  }
+
+  public var othersWaiting: Bool {
+    agentStatuses.values.contains { $0.session != attach && $0.state == .waiting }
+  }
+
+  public func refreshAgentStatus() async {
+    guard agentStatusAvailable, status == .connected else { return }
+    guard let output = try? await control.exec(Self.agentStatusCommand) else {
+      if let last = lastAgentStatusRead, clock().timeIntervalSince(last) > Self.agentStatusStaleAfter {
+        agentStatuses = [:]
+      }
+      return
+    }
+    if output.contains("__tether_notify_missing") {
+      agentStatusAvailable = false
+      agentStatuses = [:]
+      return
+    }
+    let parsed = AgentStatus.parse(output)
+    let byName = Dictionary(parsed.map { ($0.session, $0) }, uniquingKeysWith: { first, _ in first })
+    if let shown = agentAlert, byName[shown.session]?.state != shown.state { agentAlert = nil }
+    if let alert = AgentStatusChanges.alerts(old: agentStatusBaseline, new: parsed, current: attach).first {
+      agentAlert = alert
+    }
+    agentStatusBaseline = byName
+    agentStatuses = byName
+    lastAgentStatusRead = clock()
+    knownHostLabels.formUnion(parsed.compactMap(\.hostLabel))
+  }
+
+  public func dismissAgentAlert() { agentAlert = nil }
+
+  /// The auto-hide timer's callback: a newer banner for the same session must survive it.
+  public func expireAgentAlert(_ alert: AgentStatus) {
+    if agentAlert == alert { agentAlert = nil }
+  }
+
+  /// A foreground push about this host is shown in-app instead. The host label is only
+  /// learnt from a status read, so the first push waits for one.
+  public func coversPush(_ link: SessionDeepLink) async -> Bool {
+    guard status == .connected else { return false }
+    if knownHostLabels.isEmpty {
+      await refreshAgentStatus()
+    } else {
+      Task { await refreshAgentStatus() }
+    }
+    return knownHostLabels.contains(link.identityName)
   }
 
   /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
@@ -272,6 +334,7 @@ public final class SSHTerminalController {
     guard name != attach || !hasSession else { return }
     let wasAttached = hasSession
     attach = name
+    if agentAlert?.session == name { agentAlert = nil }
     pendingNoSession = false
     hasSession = true
     let connected = { if case .connected = status { return true } else { return false } }()
