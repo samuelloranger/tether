@@ -161,3 +161,185 @@ final class TerminalEngineTests: XCTestCase {
     XCTAssertEqual(header.rows, 5)
   }
 }
+
+final class TerminalEngineScreenTests: XCTestCase {
+  private func altScreenBytes(cols: Int, rows: Int) -> String {
+    var out = "\u{1B}[?1049h\u{1B}[2J"
+    for row in 1...rows {
+      let label = "R\(row)"
+      out += "\u{1B}[\(row);1H" + label + String(repeating: "x", count: max(0, cols - label.count))
+    }
+    return out
+  }
+
+  func test_soft_wrapped_lines_rejoin_when_columns_grow() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    // Cursor below the wrapped group: SwiftTerm (like xterm.js) leaves the
+    // cursor's own line group for the shell to repaint on SIGWINCH.
+    engine.feed("abcdefghijKLMNOPQRST")
+    engine.feed("uvwxyz0123456789XXXX\r\n")
+    XCTAssertEqual(rowText(engine.frame(), 0), "abcdefghijKLMNOPQRST")
+    XCTAssertEqual(rowText(engine.frame(), 1), "uvwxyz0123456789XXXX")
+    engine.resize(cols: 40, rows: 8)
+    XCTAssertEqual(rowText(engine.frame(), 0), "abcdefghijKLMNOPQRSTuvwxyz0123456789XXXX")
+    XCTAssertEqual(rowText(engine.frame(), 1), "")
+  }
+
+  func test_exact_width_line_plus_lf_does_not_right_shift_on_grow() {
+    let engine = TerminalEngine(cols: 20, rows: 10)
+    // \r\n as a PTY delivers it (onlcr); a bare LF keeps the column, per VT.
+    engine.feed("abcdefghijKLMNOPQRST\r\n")
+    engine.feed("uvwxyz0123456789XXXX\r\n")
+    engine.resize(cols: 40, rows: 10)
+    let frame = engine.frame()
+    let cols = Int(frame.header.cols)
+    var rows: [String] = []
+    for r in 0..<3 {
+      let raw = String(String.UnicodeScalarView(
+        frame.cells[r * cols..<(r + 1) * cols].compactMap { Unicode.Scalar($0.codepoint) }))
+      if raw.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+      XCTAssertFalse(raw.hasPrefix(" "), "row \(r) acquired leading spaces on grow: [\(raw)]")
+      rows.append(rowText(frame, r))
+    }
+    XCTAssertTrue(rows.contains("abcdefghijKLMNOPQRST"))
+    XCTAssertTrue(rows.contains("uvwxyz0123456789XXXX"))
+  }
+
+  func test_alt_screen_full_paint_fills_every_row() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    engine.feed(altScreenBytes(cols: 20, rows: 8))
+    XCTAssertEqual(rowText(engine.frame(), 0), "R1xxxxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(engine.frame(), 7), "R8xxxxxxxxxxxxxxxxxx")
+  }
+
+  func test_alt_screen_sets_the_frame_flag() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    XCTAssertFalse(engine.frame().header.altScreen)
+    engine.feed("\u{1B}[?1049h")
+    XCTAssertTrue(engine.frame().header.altScreen)
+    XCTAssertTrue(engine.altScreen)
+    engine.feed("\u{1B}[?1049l")
+    XCTAssertFalse(engine.frame().header.altScreen)
+  }
+
+  // The pipeline's TerminalResizeStrategy depends on the next five. If one
+  // fails, stop and report: the strategy may need to change, not the test.
+  func test_alt_screen_resize_up_leaves_trailing_empty_rows() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    engine.feed(altScreenBytes(cols: 20, rows: 8))
+    engine.resize(cols: 20, rows: 12)
+    let frame = engine.frame()
+    XCTAssertEqual(frame.header.rows, 12)
+    XCTAssertTrue(frame.header.altScreen)
+    XCTAssertEqual(rowText(frame, 0), "R1xxxxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(frame, 7), "R8xxxxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(frame, 8), "")
+    XCTAssertEqual(rowText(frame, 11), "")
+  }
+
+  func test_alt_screen_scroll_does_not_move_the_gap() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    engine.feed(altScreenBytes(cols: 20, rows: 8))
+    engine.resize(cols: 20, rows: 12)
+    let before = engine.frame()
+    engine.scrollViewport(lines: 40)
+    engine.scrollViewport(lines: -40)
+    let after = engine.frame()
+    XCTAssertEqual(rowText(after, 0), rowText(before, 0))
+    XCTAssertEqual(rowText(after, 11), "")
+  }
+
+  func test_alt_screen_repaint_at_new_size_fills_the_gap() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    engine.feed(altScreenBytes(cols: 20, rows: 8))
+    engine.resize(cols: 20, rows: 12)
+    engine.feed(altScreenBytes(cols: 20, rows: 12))
+    XCTAssertEqual(rowText(engine.frame(), 0), "R1xxxxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(engine.frame(), 11), "R12xxxxxxxxxxxxxxxxx")
+  }
+
+  func test_alt_screen_replay_at_the_same_size_restores_the_last_row() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    engine.feed(altScreenBytes(cols: 20, rows: 8))
+    XCTAssertEqual(rowText(engine.frame(), 7), "R8xxxxxxxxxxxxxxxxxx")
+  }
+
+  func test_alt_screen_replay_into_a_shorter_grid_then_grow_drops_the_bottom() {
+    let engine = TerminalEngine(cols: 20, rows: 8)
+    engine.feed(altScreenBytes(cols: 20, rows: 12))
+    XCTAssertEqual(rowText(engine.frame(), 0), "R1xxxxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(engine.frame(), 7), "R12xxxxxxxxxxxxxxxxx")
+    engine.resize(cols: 20, rows: 12)
+    XCTAssertEqual(rowText(engine.frame(), 7), "R12xxxxxxxxxxxxxxxxx")
+    XCTAssertEqual(rowText(engine.frame(), 11), "")
+  }
+
+  func test_zero_size_resize_is_ignored() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("hi")
+    engine.resize(cols: 0, rows: 5)
+    engine.resize(cols: 20, rows: 0)
+    XCTAssertEqual(engine.frame().header.cols, 20)
+    XCTAssertEqual(engine.frame().header.rows, 5)
+    XCTAssertEqual(rowText(engine.frame(), 0), "hi")
+  }
+
+  private func numbered(_ range: ClosedRange<Int>) -> String {
+    range.map { "L\($0)" }.joined(separator: "\r\n") + "\r\n"
+  }
+
+  func test_scroll_viewport_moves_into_history_and_back() {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
+    engine.feed(numbered(1...30))
+    XCTAssertEqual(rowText(engine.frame(), 0), "L27")
+    engine.scrollViewport(lines: 10)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L17")
+    engine.scrollViewport(lines: -10)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L27")
+  }
+
+  func test_scroll_clamps_at_history_top_and_live_bottom() {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
+    engine.feed(numbered(1...30))
+    engine.scrollViewport(lines: 10_000)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L1")
+    engine.scrollViewport(lines: -10_000)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L27")
+  }
+
+  func test_scroll_bumps_generation() {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
+    engine.feed(numbered(1...30))
+    let before = engine.generation
+    engine.scrollViewport(lines: 3)
+    XCTAssertEqual(engine.generation, before + 1)
+  }
+
+  func test_scrolled_back_view_stays_on_the_same_lines_while_output_arrives() {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
+    engine.feed(numbered(1...30))
+    engine.scrollViewport(lines: 10)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L17")
+    engine.feed(numbered(31...33))
+    XCTAssertEqual(rowText(engine.frame(), 0), "L17")
+    engine.scrollViewport(lines: -10_000)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L30")
+  }
+
+  func test_pinned_view_survives_scrollback_trimming() {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 10)
+    engine.feed(numbered(1...40))
+    engine.scrollViewport(lines: 5)
+    let pinned = rowText(engine.frame(), 0)
+    engine.feed(numbered(41...43))
+    XCTAssertEqual(rowText(engine.frame(), 0), pinned)
+  }
+
+  func test_resize_returns_the_view_to_live() {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
+    engine.feed(numbered(1...30))
+    engine.scrollViewport(lines: 10)
+    engine.resize(cols: 30, rows: 5)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L27")
+  }
+}
