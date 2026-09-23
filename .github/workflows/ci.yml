@@ -83,6 +83,7 @@ jobs:
         timeout-minutes: 30
         run: |
           xcodebuild build \
+            -skipPackagePluginValidation \
             -project clients/apple/Tether.xcodeproj \
             -scheme TetherIOS \
             -sdk iphonesimulator \
@@ -95,6 +96,7 @@ jobs:
         timeout-minutes: 20
         run: |
           xcodebuild test \
+            -skipPackagePluginValidation \
             -scheme TetherKit \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             CODE_SIGNING_ALLOWED=NO \

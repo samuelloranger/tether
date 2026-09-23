@@ -10,6 +10,13 @@ let package = Package(
   products: [
     .library(name: "TetherKit", targets: ["TetherKit"]),
   ],
+  dependencies: [
+    // 2.0 API on main; switch to from: "2.0.0" once tagged.
+    .package(
+      url: "https://github.com/migueldeicaza/SwiftTerm.git",
+      revision: "082119f6fe9207eca15ed7083460792eb2883d7d"
+    ),
+  ],
   targets: [
     .binaryTarget(
       name: "TetherFFI",
@@ -41,12 +48,18 @@ let package = Package(
     ),
     .target(
       name: "TetherKit",
-      dependencies: ["TetherFFIBindings", "CLibSSH2"],
+      dependencies: [
+        "TetherFFIBindings", "CLibSSH2",
+        .product(name: "SwiftTerm", package: "SwiftTerm"),
+      ],
       path: "Sources/TetherKit"
     ),
     .testTarget(
       name: "TetherKitTests",
-      dependencies: ["TetherKit", "TetherFFIBindings"],
+      dependencies: [
+        "TetherKit", "TetherFFIBindings",
+        .product(name: "SwiftTerm", package: "SwiftTerm"),
+      ],
       path: "Tests/TetherKitTests"
     ),
   ]
