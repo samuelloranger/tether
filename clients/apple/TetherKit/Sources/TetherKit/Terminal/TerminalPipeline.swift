@@ -67,8 +67,8 @@ actor TerminalPipeline {
   private var lastMouseSgr = true
   private var lastAltScreen = false
   /// When false, output is still fed to the emulator, but grid snapshots are not
-  /// produced — a background (non-visible)
-  /// session stays current without paying to rasterize.
+  /// produced — a background (non-visible) session stays current without paying
+  /// to rasterize.
   private var rendering = true
   /// One source of truth for the grid size: the channel, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
@@ -188,30 +188,11 @@ actor TerminalPipeline {
   private func handleOutbound(_ frame: OutboundFrame) async {
     switch frame {
     case let .input(text, key):
-      guard let transport = sshTransport, stillCurrent(key) else { return }
-      do {
-        try await transport.write(Data(text.utf8))
-      } catch {
-        sshTransport = nil
-        eventSink.yield(.error(error.localizedDescription))
-      }
+      await write(Data(text.utf8), key: key)
     case let .paste(text, key):
-      guard let transport = sshTransport, stillCurrent(key) else { return }
-      let payload = emulator?.pastePayload(text) ?? text
-      do {
-        try await transport.write(Data(payload.utf8))
-      } catch {
-        sshTransport = nil
-        eventSink.yield(.error(error.localizedDescription))
-      }
+      await write(Data((emulator?.pastePayload(text) ?? text).utf8), key: key)
     case let .reply(bytes, key):
-      guard let transport = sshTransport, stillCurrent(key) else { return }
-      do {
-        try await transport.write(bytes)
-      } catch {
-        sshTransport = nil
-        eventSink.yield(.error(error.localizedDescription))
-      }
+      await write(bytes, key: key)
     case let .localResize(newCols, newRows):
       // Local emulator only — no PTY resize, so no SIGWINCH. Keeps the rendered
       // grid matching the view through a keyboard animation's every frame.
@@ -223,6 +204,16 @@ actor TerminalPipeline {
       if let transport = sshTransport {
         await transport.resize(cols: newCols, rows: newRows)
       }
+    }
+  }
+
+  private func write(_ bytes: Data, key: String?) async {
+    guard let transport = sshTransport, stillCurrent(key) else { return }
+    do {
+      try await transport.write(bytes)
+    } catch {
+      sshTransport = nil
+      eventSink.yield(.error(error.localizedDescription))
     }
   }
 
@@ -320,21 +311,17 @@ actor TerminalPipeline {
 
   // MARK: - Publishing
 
-  /// Publishes a new grid only when the visible contents actually changed.
-  ///
-  /// `generation` is why this is cheap: it is compared before copying the
-  /// frame, so a burst of output that does not alter the viewport costs
-  /// nothing beyond the counter read.
+  /// Publishes a new grid only when the visible contents actually changed: the
+  /// engine returns its cached frame (copy-on-write) until something dirties it.
   private func publishSnapshot() {
     guard rendering else { return }
     guard let emulator else { return }
-    let generation = emulator.generation
+    let frame = emulator.frame()
     // Mouse mode can flip without a viewport change (e.g. vim entering or
     // leaving mouse tracking). Keep the surface's input path in sync either way.
     syncMouseModes(from: emulator)
-    guard generation != lastRenderedGeneration else { return }
-    lastRenderedGeneration = generation
-    let frame = emulator.frame()
+    guard frame.header.generation != lastRenderedGeneration else { return }
+    lastRenderedGeneration = frame.header.generation
     if frame.header.altScreen != lastAltScreen {
       lastAltScreen = frame.header.altScreen
       currentGrid?.lastAltScreen = frame.header.altScreen

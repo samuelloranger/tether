@@ -1,5 +1,3 @@
-import Foundation
-
 /// Terminal grid value types shared by the engine and the renderer.
 public enum GridSnapshot {
   public static let attrBold: UInt32 = 1 << 0

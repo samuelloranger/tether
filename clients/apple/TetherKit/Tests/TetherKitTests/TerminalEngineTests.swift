@@ -3,10 +3,7 @@ import XCTest
 
 func rowText(_ frame: TerminalFrame, _ row: Int) -> String {
   let cols = Int(frame.header.cols)
-  let scalars = frame.cells[row * cols..<(row + 1) * cols].compactMap { Unicode.Scalar($0.codepoint) }
-  var text = String(String.UnicodeScalarView(scalars))
-  while text.last == " " { text.removeLast() }
-  return text
+  return TerminalRunBuilder.rowText(cells: frame.cells, rowStart: row * cols, cols: cols)
 }
 
 extension TerminalEngine {

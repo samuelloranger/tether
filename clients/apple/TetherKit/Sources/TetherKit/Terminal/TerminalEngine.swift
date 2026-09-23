@@ -11,7 +11,11 @@ final class TerminalEngine {
   private let terminal: Terminal
   private let delegate: EngineDelegate
   private var generationCounter: UInt64 = 0
-  private var cached: TerminalFrame
+  private var cached = TerminalFrame(
+    header: GridSnapshot.Header(cols: 0, rows: 0, cursorCol: 0, cursorRow: 0, generation: 0, cursorVisible: true),
+    cells: [])
+  /// Rebuilt only when a program repaints the palette (OSC 4/104).
+  private var palette: [UInt32] = []
   private var needsRefresh = false
   /// Lines above the live bottom the view is scrolled back; 0 = live.
   private var scrollOffset = 0
@@ -31,10 +35,7 @@ final class TerminalEngine {
     options.ansi256PaletteStrategy = .xterm
     terminal = Terminal(delegate: delegate, options: options)
     TerminalPalette.install(on: terminal)
-    cached = TerminalFrame(
-      header: GridSnapshot.Header(
-        cols: 0, rows: 0, cursorCol: 0, cursorRow: 0, generation: 0, cursorVisible: true),
-      cells: [])
+    palette = TerminalPalette.table(of: terminal)
     cached = TerminalFrame(header: currentHeader(), cells: buildCells())
     terminal.clearUpdateRange()
   }
@@ -168,7 +169,10 @@ final class TerminalEngine {
     guard needsRefresh || stateChanged || delegate.paletteChanged || terminal.getUpdateRange() != nil
     else { return }
     needsRefresh = false
-    delegate.paletteChanged = false
+    if delegate.paletteChanged {
+      palette = TerminalPalette.table(of: terminal)
+      delegate.paletteChanged = false
+    }
     terminal.clearUpdateRange()
     let cells = buildCells()
     if stateChanged || cells != cached.cells {
@@ -202,7 +206,6 @@ final class TerminalEngine {
   private func buildCells() -> [GridSnapshot.Cell] {
     let dims = terminal.getDims()
     var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell, count: dims.cols * dims.rows)
-    let palette = TerminalPalette.table(of: terminal)
     for row in 0..<dims.rows {
       guard let line = terminal.getLine(row: row) else { continue }
       for col in 0..<min(dims.cols, line.count) {
