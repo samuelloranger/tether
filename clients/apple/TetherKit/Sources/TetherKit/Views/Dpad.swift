@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -165,4 +164,3 @@ public struct DpadView: View {
     repeatTask = nil
   }
 }
-#endif

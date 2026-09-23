@@ -34,7 +34,6 @@ public enum MediaTransfer {
   }
 }
 
-#if canImport(UIKit)
 import CoreTransferable
 import SwiftUI
 import PhotosUI
@@ -86,4 +85,3 @@ struct PickedMovie: Transferable {
     }
   }
 }
-#endif

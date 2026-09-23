@@ -24,12 +24,6 @@ type PushContent struct {
 	Link  string `json:"link,omitempty"`
 }
 
-func generateSecretKeyBase64() string {
-	b := make([]byte, keyBytes)
-	_, _ = rand.Read(b)
-	return base64.StdEncoding.EncodeToString(b)
-}
-
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {
 	key, err := base64.StdEncoding.DecodeString(keyBase64)
 	if err != nil {
@@ -52,30 +46,6 @@ func encryptPushContent(keyBase64 string, content PushContent) (string, error) {
 	}
 	sealed := gcm.Seal(nonce, nonce, plaintext, nil)
 	return base64.StdEncoding.EncodeToString(sealed), nil
-}
-
-func decryptPushContent(keyBase64, payload string) (PushContent, error) {
-	var content PushContent
-	key, err := base64.StdEncoding.DecodeString(keyBase64)
-	if err != nil {
-		return content, err
-	}
-	raw, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
-		return content, err
-	}
-	if len(raw) < nonceBytes+tagBytes {
-		return content, errors.New("payload too short")
-	}
-	gcm, err := newGCM(key)
-	if err != nil {
-		return content, err
-	}
-	plaintext, err := gcm.Open(nil, raw[:nonceBytes], raw[nonceBytes:], nil)
-	if err != nil {
-		return content, err
-	}
-	return content, json.Unmarshal(plaintext, &content)
 }
 
 func newGCM(key []byte) (cipher.AEAD, error) {

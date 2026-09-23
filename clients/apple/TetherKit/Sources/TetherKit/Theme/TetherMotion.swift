@@ -1,14 +1,9 @@
 import SwiftUI
 
-/// Motion tokens. One principle: heat rises fast and cools slowly,
-/// so arriving and leaving read as different events. Durations stay short — this sits on a live PTY.
+/// Motion tokens. Durations stay short — this sits on a live PTY.
 public enum TetherMotion {
-  /// Heat arriving: idle → working.
-  public static let ignite: Double = 0.26
   /// Heat arriving with a question attached: → waiting.
   public static let arrive: Double = 0.34
-  /// Heat leaving: → idle / stopped.
-  public static let cool: Double = 0.70
   /// Routine state change (selection, arming, a row becoming active).
   public static let state: Double = 0.20
   /// Immediate acknowledgement of a touch.

@@ -2,8 +2,7 @@ import XCTest
 
 @testable import TetherKit
 
-/// Switch-back reuses the emulator and its grid; `reset` is the one path that
-/// wipes it.
+/// Switch-back reuses the emulator and its grid.
 final class TerminalSessionGridsTests: XCTestCase {
   func testFirstAttachIsAFreshEmulator() {
     let grids = TerminalSessionGrids()
@@ -19,23 +18,5 @@ final class TerminalSessionGridsTests: XCTestCase {
     let again = grids.attach(key: "h:term-1", cols: 20, rows: 8)
     XCTAssertTrue(again.reused)
     XCTAssertTrue(rowText(again.grid.emulator.frame(), 0).hasPrefix("kept"))
-  }
-
-  func testForgetDropsTheEmulatorSoTheNextAttachIsFresh() {
-    let grids = TerminalSessionGrids()
-    _ = grids.attach(key: "h:term-1", cols: 20, rows: 8)
-    grids.forget("h:term-1")
-    XCTAssertFalse(grids.attach(key: "h:term-1", cols: 20, rows: 8).reused)
-  }
-
-  func testResetWipesTheEmulatorAndByteBuffer() {
-    let grid = TerminalSessionGrid(cols: 20, rows: 8)
-    grid.emulator.feed(Data("kept".utf8))
-    grid.buffer.append(Data("kept".utf8))
-    grid.lastAltScreen = true
-    grid.reset(cols: 20, rows: 8)
-    XCTAssertTrue(grid.buffer.data.isEmpty)
-    XCTAssertFalse(grid.lastAltScreen)
-    XCTAssertEqual(rowText(grid.emulator.frame(), 0), "")
   }
 }

@@ -17,15 +17,12 @@ public enum MouseSeq {
     col: Int,
     row: Int,
     sgr: Bool,
-    release: Bool = false,
-    motion: Bool = false
+    release: Bool = false
   ) -> String {
-    let motionBit = motion ? 32 : 0
     if sgr {
-      let cb = btn + motionBit
-      return "\u{1B}[<\(cb);\(col);\(row)\(release ? "m" : "M")"
+      return "\u{1B}[<\(btn);\(col);\(row)\(release ? "m" : "M")"
     }
-    let cb = (release ? (btn & ~0b11) | 0b11 : btn) + motionBit
+    let cb = release ? (btn & ~0b11) | 0b11 : btn
     func enc(_ n: Int) -> String {
       String(UnicodeScalar(UInt8(clamping: min(127, max(0, n + 32)))))
     }
@@ -60,18 +57,6 @@ public enum MouseSeq {
   ) -> String? {
     if mode == .x10 { return nil }
     return encode(btn: btn + mods, col: col, row: row, sgr: sgr, release: true)
-  }
-
-  public static func motionSeq(
-    col: Int,
-    row: Int,
-    mode: MouseMode,
-    sgr: Bool,
-    btn: Int = 0,
-    mods: Int = 0
-  ) -> String? {
-    if mode != .button, mode != .any { return nil }
-    return encode(btn: btn + mods, col: col, row: row, sgr: sgr, motion: true)
   }
 
   public static func clickSeqs(

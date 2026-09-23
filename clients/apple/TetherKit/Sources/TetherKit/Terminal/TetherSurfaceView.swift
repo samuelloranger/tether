@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 import CoreText
 import SwiftUI
@@ -636,4 +635,3 @@ private extension UIFont {
   }
 }
 
-#endif

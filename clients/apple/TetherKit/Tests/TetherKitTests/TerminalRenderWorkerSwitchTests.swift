@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 import UIKit
 import XCTest
@@ -112,4 +111,3 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
       cells: cells)
   }
 }
-#endif

@@ -9,21 +9,21 @@ final class SSHRandomartTests: XCTestCase {
     0x03, 0x74, 0xe1, 0x0b, 0xf4, 0xb6, 0xcd, 0x67, 0xaf, 0x8a, 0x59, 0x59, 0x2d, 0xa0, 0x23, 0xca,
   ])
 
-  func test_matches_ssh_keygen_drunken_bishop_output() {
-    let expected = """
-      +--[ED25519 256]--+
-      |                 |
-      | . .             |
-      |. o ..           |
-      | + =.o. ..       |
-      |+++*X  oS.       |
-      |BoB++=o+.        |
-      |oE+.oo+ .        |
-      |.. ==+ . .       |
-      |ooo++.o..        |
-      +----[SHA256]-----+
-      """
-    let art = SSHRandomart.render(digest: digest, title: "[ED25519 256]", footer: "[SHA256]")
-    XCTAssertEqual(art, expected)
+  func test_field_matches_ssh_keygen_drunken_bishop_output() {
+    // ssh-keygen's art body; its glyph for each visit count, 15 = start, 16 = end.
+    let glyphs = Array(" .o+=*BOX@%&#/^SE")
+    let expected = [
+      "                 ",
+      " . .             ",
+      ". o ..           ",
+      " + =.o. ..       ",
+      "+++*X  oS.       ",
+      "BoB++=o+.        ",
+      "oE+.oo+ .        ",
+      ".. ==+ . .       ",
+      "ooo++.o..        ",
+    ]
+    let rows = SSHRandomart.field(digest: digest).map { String($0.map { glyphs[$0] }) }
+    XCTAssertEqual(rows, expected)
   }
 }

@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -128,4 +127,3 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     }
   }
 }
-#endif

@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 
 /// The v5 app root: SSH-first. Home is the hub; opening a machine pushes an
@@ -65,4 +64,3 @@ public struct AppRootView: View {
     Task { await leaving?.leave() }
   }
 }
-#endif

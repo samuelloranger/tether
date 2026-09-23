@@ -2,11 +2,6 @@ import CLibSSH2
 import Foundation
 
 enum LibSSH2TransportProbe {
-  static var libraryVersion: String {
-    guard let version = libssh2_version(0) else { return "" }
-    return String(cString: version)
-  }
-
   static func openInteractiveChannel(
     session: OpaquePointer,
     terminal: String = "xterm-256color",

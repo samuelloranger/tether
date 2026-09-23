@@ -135,14 +135,8 @@ wait_for_ci() {
   done
 }
 
-# Require CI to be green before we spend the work. release.sh used to validate
-# less than CI did (lint+format here vs. lint + server tests + mobile tests +
-# build:web there) — and build:web is what broke every desktop bundle in v2.0.0.
-# Gating on CI keeps one definition of "good" instead of two that drift. Runs
-# after the pre-flight rebase so the run we read belongs to the tree we release.
-#
-# This is only the fast fail: the commit that actually gets tagged does not exist
-# yet, and it is gated separately below.
+# Fast fail on red CI, after the rebase so the run belongs to this tree. The tagged
+# commit does not exist yet; it is gated separately below.
 if [ "$DRY_RUN" = false ]; then
   HEAD_SHA=$(git rev-parse HEAD)
   echo "Checking CI status for $HEAD_SHA..."
@@ -303,16 +297,8 @@ else
     fi
   fi
 
-  # Pushing the tag is what starts release.yml. That workflow opens a DRAFT
-  # release, attaches every artifact to it, and only then publishes — so a failed
-  # build never becomes the public `releases/latest` that install.sh and
-  # `tether update` resolve stable asset names from (the exact way v2.0.0 shipped
-  # a release with no working desktop bundles).
-  #
-  # The tag, unlike a release, has to exist up front: GitHub does not run
-  # workflows for draft releases, so CI cannot be triggered by a draft — it has to
-  # create one. A bare tag is invisible to both clients, which resolve the releases
-  # API, so nothing user-facing exists until the publish job runs.
+  # The tag starts release.yml, which publishes only after every artifact lands, so a
+  # failed build never becomes `releases/latest` (GitHub runs no workflow for drafts).
   echo "Tagging v$TARGET_VERSION..."
   git tag -a "v$TARGET_VERSION" -m "v$TARGET_VERSION"
   if ! git push origin "v$TARGET_VERSION"; then

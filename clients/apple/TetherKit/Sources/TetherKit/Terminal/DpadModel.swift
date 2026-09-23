@@ -22,15 +22,6 @@ public enum DPadDirection: String, Sendable, CaseIterable {
     case .D: "\u{1B}[D"
     }
   }
-
-  public var accessibilityLabel: String {
-    switch self {
-    case .A: "Up"
-    case .B: "Down"
-    case .C: "Right"
-    case .D: "Left"
-    }
-  }
 }
 
 public enum DPadModel {
@@ -70,20 +61,6 @@ public enum DPadModel {
       return dx >= 0 ? .C : .D
     }
     return dy >= 0 ? .B : .A
-  }
-
-  /// Touch location inside the puck as an offset from its center.
-  ///
-  /// `size` is passed in rather than read from `buttonSize`: the bar renders the
-  /// pad at the same height as its text keys, and a center computed from a
-  /// different size biases every drag by the difference.
-  public static func grantOffset(
-    locationX: CGFloat,
-    locationY: CGFloat,
-    size: CGFloat = buttonSize
-  ) -> CGPoint {
-    let center = size / 2
-    return CGPoint(x: locationX - center, y: locationY - center)
   }
 
   /// Icon rides the locked cardinal only — never free-slides diagonally.

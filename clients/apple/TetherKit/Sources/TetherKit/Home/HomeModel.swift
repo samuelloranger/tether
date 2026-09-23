@@ -50,10 +50,6 @@ public final class HomeModel {
     reload()
   }
 
-  public func publicKey(forKeyId id: String) -> String? {
-    keys.first { $0.id == id }?.publicKey
-  }
-
   public func keyName(_ id: String) -> String? {
     keys.first { $0.id == id }?.name
   }

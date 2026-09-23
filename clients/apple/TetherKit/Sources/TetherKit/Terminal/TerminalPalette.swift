@@ -30,10 +30,6 @@ enum TerminalPalette {
     }
   }
 
-  static func resolve(_ value: Attribute.Color, isForeground: Bool, terminal: Terminal) -> UInt32 {
-    resolve(value, isForeground: isForeground, palette: table(of: terminal))
-  }
-
   static func resolve(_ value: Attribute.Color, isForeground: Bool, palette: [UInt32]) -> UInt32 {
     switch value {
     case let .trueColor(red, green, blue):

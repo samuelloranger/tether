@@ -118,33 +118,33 @@ final class TerminalEngineTests: XCTestCase {
 
   func test_generation_increments_when_visible_grid_changes() {
     let engine = TerminalEngine(cols: 20, rows: 5)
-    XCTAssertEqual(engine.generation, 0)
+    XCTAssertEqual(engine.frame().header.generation, 0)
     engine.feed("x")
-    XCTAssertEqual(engine.generation, 1)
+    XCTAssertEqual(engine.frame().header.generation, 1)
     engine.feed("y")
-    XCTAssertEqual(engine.generation, 2)
+    XCTAssertEqual(engine.frame().header.generation, 2)
   }
 
   func test_generation_does_not_increment_on_no_op_feed() {
     let engine = TerminalEngine(cols: 20, rows: 5)
     engine.feed("hi")
-    XCTAssertEqual(engine.generation, 1)
+    XCTAssertEqual(engine.frame().header.generation, 1)
     engine.feed("\u{07}")
-    XCTAssertEqual(engine.generation, 1)
+    XCTAssertEqual(engine.frame().header.generation, 1)
     engine.feed("\u{1B}[?25h")
-    XCTAssertEqual(engine.generation, 1)
+    XCTAssertEqual(engine.frame().header.generation, 1)
     engine.feed(Data())
-    XCTAssertEqual(engine.generation, 1)
+    XCTAssertEqual(engine.frame().header.generation, 1)
   }
 
   func test_cursor_visibility_change_bumps_generation() {
     let engine = TerminalEngine(cols: 20, rows: 5)
     engine.feed("hi\u{1B}[?25l")
-    let hidden = engine.generation
+    let hidden = engine.frame().header.generation
     XCTAssertGreaterThanOrEqual(hidden, 1)
     XCTAssertFalse(engine.frame().header.cursorVisible)
     engine.feed("\u{1B}[?25h")
-    XCTAssertEqual(engine.generation, hidden + 1)
+    XCTAssertEqual(engine.frame().header.generation, hidden + 1)
     XCTAssertTrue(engine.frame().header.cursorVisible)
   }
 
@@ -152,7 +152,7 @@ final class TerminalEngineTests: XCTestCase {
     let engine = TerminalEngine(cols: 20, rows: 5)
     engine.feed("abc")
     let header = engine.frame().header
-    XCTAssertEqual(header.generation, engine.generation)
+    XCTAssertEqual(header.generation, 1)
     XCTAssertEqual(header.cursorCol, 3)
     XCTAssertEqual(header.cursorRow, 0)
     XCTAssertEqual(header.cols, 20)
@@ -215,7 +215,6 @@ final class TerminalEngineScreenTests: XCTestCase {
     XCTAssertFalse(engine.frame().header.altScreen)
     engine.feed("\u{1B}[?1049h")
     XCTAssertTrue(engine.frame().header.altScreen)
-    XCTAssertTrue(engine.altScreen)
     engine.feed("\u{1B}[?1049l")
     XCTAssertFalse(engine.frame().header.altScreen)
   }
@@ -308,9 +307,9 @@ final class TerminalEngineScreenTests: XCTestCase {
   func test_scroll_bumps_generation() {
     let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
     engine.feed(numbered(1...30))
-    let before = engine.generation
+    let before = engine.frame().header.generation
     engine.scrollViewport(lines: 3)
-    XCTAssertEqual(engine.generation, before + 1)
+    XCTAssertEqual(engine.frame().header.generation, before + 1)
   }
 
   func test_scrolled_back_view_stays_on_the_same_lines_while_output_arrives() {
@@ -401,12 +400,12 @@ final class TerminalEngineReviewFixTests: XCTestCase {
   func test_synchronized_output_is_shown_only_once_complete() {
     let engine = TerminalEngine(cols: 20, rows: 5)
     engine.feed("hello")
-    let before = engine.generation
+    let before = engine.frame().header.generation
     engine.feed("\u{1B}[?2026h\u{1B}[2J\u{1B}[Hwor")
-    XCTAssertEqual(engine.generation, before, "a half-drawn synchronized frame must not publish")
+    XCTAssertEqual(engine.frame().header.generation, before, "a half-drawn synchronized frame must not publish")
     XCTAssertEqual(rowText(engine.frame(), 0), "hello")
     engine.feed("ld\u{1B}[?2026l")
-    XCTAssertEqual(engine.generation, before + 1)
+    XCTAssertEqual(engine.frame().header.generation, before + 1)
     XCTAssertEqual(rowText(engine.frame(), 0), "world")
   }
 }
@@ -430,11 +429,11 @@ final class TerminalEngineMinorFixTests: XCTestCase {
   func test_palette_change_without_cell_change_repaints() {
     let engine = TerminalEngine(cols: 20, rows: 5)
     engine.feed("\u{1B}[31mR\u{1B}[0m")
-    let before = engine.generation
+    let before = engine.frame().header.generation
     XCTAssertEqual(engine.frame().cells[0].foreground, 0xFFF3_8BA8)
     engine.feed("\u{1B}]4;1;rgb:00/ff/00\u{07}")
     XCTAssertEqual(engine.frame().cells[0].foreground, 0xFF00_FF00)
-    XCTAssertEqual(engine.generation, before + 1)
+    XCTAssertEqual(engine.frame().header.generation, before + 1)
   }
 
   func test_cursor_hides_while_scrolled_back_past_it() {

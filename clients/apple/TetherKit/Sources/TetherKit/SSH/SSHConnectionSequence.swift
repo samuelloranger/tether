@@ -88,23 +88,6 @@ enum SSHConnectionSequence {
     }
   }
 
-  static func runExec(
-    config: SSHConnectionConfig,
-    ops: SSHConnectionOps,
-    store: HostKeyStore,
-    command: String
-  ) throws -> String {
-    defer { ops.teardown() }
-    try gate(config: config, ops: ops, store: store)
-    do {
-      return try ops.exec(command)
-    } catch let error as SSHConnectError {
-      throw error
-    } catch {
-      throw SSHConnectError.transport("\(error)")
-    }
-  }
-
   static func runExecStream(
     config: SSHConnectionConfig,
     ops: SSHConnectionOps,
@@ -149,7 +132,7 @@ enum SSHConnectionSequence {
   }
 
   /// Connect and authenticate, leaving the session open for repeated use —
-  /// unlike `runExec`, which tears it down.
+  /// unlike `runExecStream`, which tears it down.
   static func authenticate(
     config: SSHConnectionConfig,
     ops: SSHConnectionOps,

@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import QuartzCore
 import UIKit
 
@@ -64,4 +63,3 @@ final class TerminalFrameScheduler: NSObject {
     }
   }
 }
-#endif

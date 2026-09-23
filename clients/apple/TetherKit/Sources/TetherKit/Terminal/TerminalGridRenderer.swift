@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 import CoreText
 import UIKit
@@ -45,12 +44,6 @@ final class TerminalGridRenderer {
   private var colors: [UInt32: CGColor] = [:]
   private var glyphOffsetX: CGFloat = 0
 
-  private var lastCells: [GridSnapshot.Cell] = []
-  private var lastCols = 0
-  private var lastRows = 0
-  private var lastOriginY: CGFloat = 0
-  private var forceFullRepaintNext = false
-
   /// Forces the next render to repaint every row (font change, resize, a new
   /// session's first frame).
   func invalidate() {
@@ -59,20 +52,6 @@ final class TerminalGridRenderer {
     metrics = nil
     glyphCache = nil
     colors.removeAll(keepingCapacity: true)
-    lastCells = []
-    lastCols = 0
-    lastRows = 0
-  }
-
-  /// Forces a full repaint on the next frame without touching the context or
-  /// the currently displayed image (that would be `invalidate`'s blank
-  /// flash). A session switch reuses this surface for a DIFFERENT session's
-  /// grid, so partial dirty-row diffing against `lastCells` — still the
-  /// PREVIOUS session's content — is unsound: any row that happens to match
-  /// byte-for-byte between the two sessions never repaints and keeps
-  /// showing the old session's pixels indefinitely.
-  func forceFullRepaintOnNextFrame() {
-    forceFullRepaintNext = true
   }
 
   func render(
@@ -97,12 +76,6 @@ final class TerminalGridRenderer {
     // trailing empties are omitted from the draw height so they become slack
     // at the top rather than a gap under the TUI.
     let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
-
-    lastCells = cells
-    lastCols = cols
-    lastRows = rows
-    lastOriginY = originY
-    forceFullRepaintNext = false
 
     guard drawRows > 0 else { return image }
 
@@ -286,9 +259,6 @@ final class TerminalGridRenderer {
     self.metrics = metrics
     glyphCache = cache
     colors.removeAll(keepingCapacity: true)
-    lastCells = []
-    lastCols = 0
-    lastRows = 0
     glyphOffsetX = Self.horizontalInset(cellWidth: metrics.cellWidth, cache: cache)
     return true
   }
@@ -313,4 +283,3 @@ final class TerminalGridRenderer {
     return color
   }
 }
-#endif

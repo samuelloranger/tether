@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 import CoreText
 import UIKit
@@ -71,4 +70,3 @@ final class TerminalGlyphCache {
     return first
   }
 }
-#endif

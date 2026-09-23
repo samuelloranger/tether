@@ -13,7 +13,7 @@ clients/apple/
   Frameworks/                    Vendored XCFrameworks (SSH: libssh2/openssl)
 ```
 
-## Build (macOS + Xcode only)
+## Build (macOS + Xcode 26 or later)
 
 ```bash
 # Build the iOS app (matches CI)
@@ -21,11 +21,12 @@ xcodebuild -project clients/apple/Tether.xcodeproj \
   -scheme TetherIOS \
   -destination 'generic/platform=iOS Simulator' \
   -configuration Debug \
+  -skipPackagePluginValidation \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
 
-Add `-skipPackagePluginValidation` to command-line builds: SwiftTerm runs a build-tool plugin.
+`-skipPackagePluginValidation` is needed because SwiftTerm runs a build-tool plugin.
 
 ## Architecture
 
@@ -38,7 +39,7 @@ Add `-skipPackagePluginValidation` to command-line builds: SwiftTerm runs a buil
 
 ```sh
 cd clients/apple/TetherKit
-xcodebuild test -scheme TetherKit -destination "id=<simulator-udid>"
+xcodebuild test -scheme TetherKit -destination "id=<simulator-udid>" -skipPackagePluginValidation
 ```
 
 `swift test` does **not** work here: it builds for the host (macOS) while the

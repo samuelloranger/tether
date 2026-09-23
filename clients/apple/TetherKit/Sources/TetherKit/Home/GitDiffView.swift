@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -175,7 +174,7 @@ private struct PullRequestDetailView: View {
     .background(TetherColors.background)
     .copyConfirmation(isPresented: $showCopied)
     .sheet(isPresented: $showDiff) {
-      PatchSheet(title: "#\(pullRequest.number)", subtitle: pullRequest.title, files: diffFiles)
+      PatchSheet(title: "#\(pullRequest.number)", files: diffFiles)
     }
     .task {
       refreshDescription(detail.body)
@@ -590,7 +589,6 @@ private struct CommitDetailView: View {
 /// A patch shown over whatever opened it, so closing it returns you there.
 private struct PatchSheet: View {
   let title: String
-  let subtitle: String
   let files: [DiffFile]
 
   @Environment(\.dismiss) private var dismiss
@@ -625,4 +623,3 @@ private struct PatchSheet: View {
   }
 }
 
-#endif

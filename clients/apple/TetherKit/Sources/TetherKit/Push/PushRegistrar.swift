@@ -2,10 +2,8 @@ import Foundation
 import OSLog
 import Security
 
-#if canImport(UIKit)
 import UIKit
 import UserNotifications
-#endif
 
 /// Requests notification permission, obtains the APNs device token, and holds
 /// the device push identity the SSH path hands to the host's `tether-notify`.
@@ -42,17 +40,12 @@ public final class PushRegistrar {
 
   public func pushIdentity() -> PushIdentity? {
     guard let token = storedDeviceToken, let secret = try? loadOrCreateSecretKey() else { return nil }
-    #if canImport(UIKit)
     let label = UIDevice.current.name
-    #else
-    let label = "iOS"
-    #endif
     return PushIdentity(token: token, secretKey: secret, label: label)
   }
 
   /// Ask for alert/sound/badge, then `registerForRemoteNotifications`.
   public func start() {
-    #if canImport(UIKit)
     #if DEBUG
     // A preseeded UI-test launch skips the system notification prompt: it steals
     // first responder from the terminal and blocks the keyboard a headless-sim
@@ -73,7 +66,6 @@ public final class PushRegistrar {
       }
       UIApplication.shared.registerForRemoteNotifications()
     }
-    #endif
   }
 
   /// Called from `UIApplicationDelegate.didRegisterForRemoteNotifications`.

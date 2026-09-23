@@ -17,14 +17,14 @@ A native iOS terminal for your own machines. Tether connects over **SSH** to [`z
 ## What you get
 
 - **Persistent sessions** — the shell lives in `zmx` on the host. Disconnect, background the app, reboot the phone: the session (and whatever runs in it) is still there when you reattach.
-- **A real terminal** — full VT emulator (TUIs, box drawing, CJK / emoji), rendered from a Rust grid engine. Live session switching, per-session working directory, scrollback history you can select and copy.
+- **A real terminal** — full VT emulator (TUIs, box drawing, CJK / emoji) on SwiftTerm, rendered natively. Live session switching, per-session working directory, scrollback history you can select and copy.
 - **On-device key vault** — generate ed25519 keys in the Keychain, import or paste existing ones, see each key's SSH randomart and fingerprint. Private halves never leave the device except in memory, to libssh2.
 - **Trust on first use** — an unknown host key is pinned on first connect; a later change is refused.
 - **Built in** — git diff of the session's working directory, send a file or photo (SCP), kill a session, and encrypted push when an agent needs you.
 
 ## Install (iOS)
 
-The app is built from source and installed to your device (there is no public distribution). You need a Mac with Xcode.
+The app is built from source and installed to your device (there is no public distribution). You need a Mac with Xcode 26 or later.
 
 ```bash
 xcodebuild build \
@@ -32,6 +32,7 @@ xcodebuild build \
   -scheme TetherIOS \
   -destination 'generic/platform=iOS Simulator' \
   -configuration Debug \
+  -skipPackagePluginValidation \
   CODE_SIGNING_ALLOWED=NO
 ```
 
@@ -62,7 +63,8 @@ tether-notify notify --title "homelab · agent" --body "Waiting for input" \
 ```
 clients/apple/        native iOS app (TetherKit package + TetherIOS + NSE)
 apps/tether-notify/   Go host CLI for encrypted push
-scripts/              install.sh, install-agent-hooks.sh, release.sh
+install.sh            build + install tether-notify
+scripts/              install-agent-hooks.sh, release.sh
 ```
 
 Architecture, data flow, and conventions: [`CLAUDE.md`](CLAUDE.md).

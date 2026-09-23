@@ -30,12 +30,6 @@ final class GitDiffModelTests: XCTestCase {
     XCTAssertTrue(GitDiffModel.classify("").isEmpty)
   }
 
-  func test_counts_added_and_removed() {
-    let stat = GitDiffModel.stat(GitDiffModel.classify("@@ -0,0 +1,2 @@\n+a\n+b\n-c"))
-    XCTAssertEqual(stat.added, 2)
-    XCTAssertEqual(stat.removed, 1)
-  }
-
   func test_a_commit_show_is_split_into_its_message_and_its_patch() {
     // `git show --format=%b%x1e` marks the end of the body, so the patch the
     // diff pipeline receives never contains commit prose.
@@ -69,9 +63,9 @@ final class GitDiffModelTests: XCTestCase {
     // Regression: `---` fell through to the `-` rule, rendering as a deletion
     // numbered 0 and inflating every commit's removed count by one.
     let shown = GitDiffModel.commitShow("\u{1E}diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b")
-    let stat = GitDiffModel.stat(GitDiffModel.classify(shown.patch))
-    XCTAssertEqual(stat.removed, 1)
-    XCTAssertEqual(stat.added, 1)
+    let kinds = GitDiffModel.classify(shown.patch).map(\.kind)
+    XCTAssertEqual(kinds.filter { $0 == .removed }.count, 1)
+    XCTAssertEqual(kinds.filter { $0 == .added }.count, 1)
   }
 
   func test_output_without_the_marker_is_all_patch() {

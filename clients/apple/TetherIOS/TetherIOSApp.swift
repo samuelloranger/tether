@@ -11,7 +11,6 @@ struct TetherIOSApp: App {
   #if canImport(UIKit)
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   #endif
-  @Environment(\.scenePhase) private var scenePhase
 
   var body: some Scene {
     WindowGroup {

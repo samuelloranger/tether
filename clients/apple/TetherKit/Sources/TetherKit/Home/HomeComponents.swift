@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 struct RandomartGridView: View {
   let publicKey: String
@@ -125,9 +123,7 @@ struct KeyCardView: View {
         Text(usedBy.isEmpty ? "not used yet" : "used by \(usedBy.joined(separator: ", "))")
           .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
         Button {
-          #if canImport(UIKit)
           UIPasteboard.general.string = record.publicKey
-          #endif
         } label: {
           Text("Copy public key").font(.caption.weight(.semibold))
             .foregroundStyle(TetherColors.accent)

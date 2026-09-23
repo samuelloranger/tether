@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 
 /// A patch, read as code rather than as git output: one band per file, a line
@@ -178,4 +177,3 @@ struct MarkdownBodyView: View {
     (try? AttributedString(markdown: text)) ?? AttributedString(text)
   }
 }
-#endif

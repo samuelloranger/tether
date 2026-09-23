@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -12,7 +11,6 @@ struct TerminalHistoryView: View {
 
   @State private var text: String?
   @State private var showCopyConfirmation = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     NavigationStack {
@@ -112,4 +110,3 @@ private struct SelectableTextView: UIViewRepresentable {
     var didScrollToBottom = false
   }
 }
-#endif

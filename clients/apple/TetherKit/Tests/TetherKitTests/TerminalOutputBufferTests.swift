@@ -10,13 +10,6 @@ final class TerminalOutputBufferTests: XCTestCase {
     XCTAssertEqual(buffer.data, Data("abcd".utf8))
   }
 
-  func testResetClearsTheBytes() {
-    let buffer = TerminalOutputBuffer()
-    buffer.append(Data("ab".utf8))
-    buffer.reset()
-    XCTAssertTrue(buffer.data.isEmpty)
-  }
-
   func testOverBudgetKeepsTheNewestTwoThirds() {
     let buffer = TerminalOutputBuffer(byteBudget: 6)
     buffer.append(Data("abcdefg".utf8))

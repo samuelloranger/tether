@@ -37,7 +37,6 @@ actor TerminalPipeline {
   private let eventSink: AsyncStream<TerminalPipelineEvent>.Continuation
   private let outboundFrames: AsyncStream<OutboundFrame>
 
-  private let snapshotCache = TerminalSnapshotCache()
   private let sessionGrids = TerminalSessionGrids()
   private var currentGrid: TerminalSessionGrid?
   private var emulator: TerminalEngine? { currentGrid?.emulator }
@@ -51,8 +50,6 @@ actor TerminalPipeline {
   private var lastMouseMode: MouseMode = .off
   private var lastMouseSgr = true
   private var lastAltScreen = false
-  /// False for a background session: output still feeds the emulator, but nothing is rasterized.
-  private var rendering = true
   /// One source of truth for the grid size: the channel, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
   private var cols: UInt16 = 80
@@ -120,26 +117,6 @@ actor TerminalPipeline {
     if let transport = sshTransport {
       sshTransport = nil
       Task { await transport.close() }
-    }
-  }
-
-  /// Leaves the terminal entirely, as opposed to reconnecting to the same
-  /// session: the emulator and its scrollback go too.
-  func release() {
-    disconnect()
-    currentGrid = nil
-    emulatorKey = nil
-    lastRenderedGeneration = nil
-    snapshotSink.yield(nil)
-    resetMouseModes()
-  }
-
-  func forget(key: String) {
-    snapshotCache.forget(key)
-    sessionGrids.forget(key)
-    if emulatorKey == key {
-      currentGrid = nil
-      emulatorKey = nil
     }
   }
 
@@ -253,18 +230,6 @@ actor TerminalPipeline {
     publishSnapshot()
   }
 
-  func setRendering(_ on: Bool) {
-    rendering = on
-    if on {
-      // Force a frame even if unchanged, or a session switched back into view keeps
-      // showing the previous tab's grid until its next output.
-      lastRenderedGeneration = nil
-      publishSnapshot()
-    }
-  }
-
-  var isConnected: Bool { sshTransport != nil }
-
   #if DEBUG
   /// Test seam: stand up a live emulator without a connection.
   func attachForTest(cols: UInt16, rows: UInt16) {
@@ -284,7 +249,6 @@ actor TerminalPipeline {
   /// Publishes a new grid only when the visible contents actually changed: the
   /// engine returns its cached frame (copy-on-write) until something dirties it.
   private func publishSnapshot() {
-    guard rendering else { return }
     guard let emulator else { return }
     let frame = emulator.frame()
     // Mouse mode can flip without a viewport change (e.g. vim entering or
@@ -296,9 +260,6 @@ actor TerminalPipeline {
       lastAltScreen = frame.header.altScreen
       currentGrid?.lastAltScreen = frame.header.altScreen
       eventSink.yield(.altScreen(frame.header.altScreen))
-    }
-    if let emulatorKey {
-      snapshotCache.remember(frame, for: emulatorKey)
     }
     snapshotSink.yield(frame)
   }

@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 
 /// Terminal appearance settings — theme, font, size — bound to AppPreferences.
@@ -42,4 +41,3 @@ struct TerminalSettingsSheet: View {
     .tint(TetherColors.accent)
   }
 }
-#endif

@@ -10,12 +10,6 @@ final class TerminalSessionGrid {
     emulator = TerminalEngine(cols: cols, rows: rows)
     buffer = TerminalOutputBuffer()
   }
-
-  func reset(cols: UInt16, rows: UInt16) {
-    buffer.reset()
-    emulator = TerminalEngine(cols: cols, rows: rows)
-    lastAltScreen = false
-  }
 }
 
 final class TerminalSessionGrids {
@@ -28,9 +22,5 @@ final class TerminalSessionGrids {
     let grid = TerminalSessionGrid(cols: cols, rows: rows)
     grids[key] = grid
     return (grid, false)
-  }
-
-  func forget(_ key: String) {
-    grids.removeValue(forKey: key)
   }
 }

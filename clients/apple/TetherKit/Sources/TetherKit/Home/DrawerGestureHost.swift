@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -11,7 +10,6 @@ import UIKit
 struct DrawerGestureHost: UIViewRepresentable {
   /// Read when a gesture starts, not when this view is built.
   var isOpen: () -> Bool
-  var panelWidth: () -> CGFloat
   var onBegan: () -> Void
   var onChanged: (CGFloat) -> Void
   var onEnded: (CGFloat, CGFloat) -> Void
@@ -133,4 +131,3 @@ struct DrawerGestureHost: UIViewRepresentable {
     }
   }
 }
-#endif

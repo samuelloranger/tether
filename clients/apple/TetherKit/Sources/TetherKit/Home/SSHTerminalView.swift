@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -12,7 +11,6 @@ public struct SSHTerminalView: View {
   var preferences: AppPreferences
   var onHome: () -> Void
 
-  @State private var input = ""
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
   @State private var drawerOpen = false
@@ -152,7 +150,6 @@ public struct SSHTerminalView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       TerminalInputBridge(
-        text: $input,
         accessory: AnyView(
           TerminalAccessoryBar(
             model: accessory,
@@ -415,7 +412,6 @@ public struct SSHTerminalView: View {
   private var drawerGestures: some View {
     DrawerGestureHost(
       isOpen: { drawerOpen },
-      panelWidth: { panelWidth },
       onBegan: { dragTranslation = 0 },
       onChanged: { dragTranslation = $0 },
       onEnded: { translation, velocity in
@@ -551,4 +547,3 @@ public struct SSHTerminalView: View {
     }
   }
 }
-#endif

@@ -1,8 +1,6 @@
 import Foundation
-#if canImport(UIKit)
 import SwiftUI
 import PhotosUI
-#endif
 
 /// Lets a `@Sendable` stream callback carry its parse buffer across chunks. Calls arrive
 /// serially; the lock only satisfies `Sendable`.
@@ -349,7 +347,6 @@ public final class SSHTerminalController {
 
   public func clearTransfer() { transfer = .idle }
 
-  #if canImport(UIKit)
   public func sendPickedMedia(_ item: PhotosPickerItem, isVideo: Bool) async {
     switch await MediaTransfer.load(item, isVideo: isVideo) {
     case let .ready(name, data):
@@ -359,7 +356,6 @@ public final class SSHTerminalController {
       reportTransferFailure(message)
     }
   }
-  #endif
 
   /// A transfer that failed before any SSH work reuses the upload banner.
   private func reportTransferFailure(_ message: String) { transfer = .failed(message) }
@@ -388,7 +384,7 @@ public final class SSHTerminalController {
       // Keep gh's stderr: swallowing it into an empty list made the screen blame
       // a missing CLI for a repository with nothing open.
       let ghMissing = shellQuote(GitRepositoryModel.ghMissingSentinel)
-      pullRequestsCommand = "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state all --limit 50 --json number,title,headRefName,baseRefName,url,updatedAt,isDraft,changedFiles,reviewDecision,state 2>&1); else printf '%s' \(ghMissing); fi"
+      pullRequestsCommand = "if command -v gh >/dev/null 2>&1; then (cd \(q) && gh pr list --state all --limit 50 --json number,title,headRefName,baseRefName,url,isDraft,changedFiles,reviewDecision,state 2>&1); else printf '%s' \(ghMissing); fi"
     case .changes:
       diffCommand = "git -C \(q) --no-pager diff 2>&1"
       commitsCommand = "printf ''"
@@ -635,13 +631,6 @@ public final class SSHTerminalController {
     previous: NetworkReachability?, next: NetworkReachability
   ) -> Bool {
     next.isUsable && previous?.isUsable != true
-  }
-
-  nonisolated static func shouldRedial(
-    previous: NetworkReachability?, next: NetworkReachability, status: Status, dialing: Bool
-  ) -> Bool {
-    guard pathBecameUsable(previous: previous, next: next) else { return false }
-    return shouldRedialOnForeground(status: status, dialing: dialing, reachability: next)
   }
 
   /// Shared tail of both triggers: never disturb a live or in-flight connection,

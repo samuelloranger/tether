@@ -20,10 +20,6 @@ final class TerminalOutputBuffer {
     }
   }
 
-  func reset() {
-    data.removeAll(keepingCapacity: true)
-  }
-
   func replay(cols: UInt16, rows: UInt16) -> TerminalEngine {
     let engine = TerminalEngine(cols: cols, rows: rows)
     if !data.isEmpty {

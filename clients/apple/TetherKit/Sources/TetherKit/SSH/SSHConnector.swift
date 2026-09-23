@@ -10,12 +10,6 @@ enum SSHConnector {
     }
   }
 
-  static func exec(config: SSHConnectionConfig, store: HostKeyStore, command: String) async throws -> String {
-    try await onThread(named: "tether.ssh.exec") {
-      try SSHConnectionSequence.runExec(config: config, ops: LibSSH2Ops(config: config), store: store, command: command)
-    }
-  }
-
   /// Streams a long-running command's output. `onChunk` is called on the worker
   /// thread as bytes arrive and returns false to stop and tear the channel down.
   /// Cancelling the calling task shuts the socket, so a quiet command stops too.

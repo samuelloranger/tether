@@ -38,12 +38,6 @@ public enum GitDiffModel {
     )
   }
 
-  public static func stat(_ lines: [GitDiffLine]) -> (added: Int, removed: Int) {
-    lines.reduce(into: (0, 0)) { counts, line in
-      if line.kind == .added { counts.0 += 1 } else if line.kind == .removed { counts.1 += 1 }
-    }
-  }
-
   private static func kind(of line: String) -> GitDiffLineKind {
     if line.hasPrefix("diff ") || line.hasPrefix("index ")
       || line.hasPrefix("--- ") || line.hasPrefix("+++ ")

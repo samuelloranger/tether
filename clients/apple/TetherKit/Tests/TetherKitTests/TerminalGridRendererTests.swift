@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 import UIKit
 import XCTest
@@ -402,4 +401,3 @@ final class TerminalGridRendererTests: XCTestCase {
     return m.r + m.g + m.b
   }
 }
-#endif

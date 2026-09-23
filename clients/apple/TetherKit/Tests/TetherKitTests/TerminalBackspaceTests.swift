@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 import XCTest
@@ -187,4 +186,3 @@ final class TerminalBackspaceTests: XCTestCase {
     XCTAssertEqual(TerminalKeyMap.specialKeyBytes(keyCode: .keyboardEscape, mod: 1), "\u{1B}")
   }
 }
-#endif

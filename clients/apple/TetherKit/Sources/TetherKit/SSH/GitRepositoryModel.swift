@@ -19,7 +19,6 @@ public struct GitPullRequest: Codable, Equatable, Identifiable, Sendable {
   public let head: String
   public let base: String
   public let url: String
-  public let updatedAt: String
   public let isDraft: Bool
   public let changedFiles: Int
   public let reviewDecision: String?
@@ -30,7 +29,7 @@ public struct GitPullRequest: Codable, Equatable, Identifiable, Sendable {
   public var state: PRState { PRState(rawValue: (rawState ?? "").uppercased()) ?? .open }
 
   enum CodingKeys: String, CodingKey {
-    case number, title, url, updatedAt, isDraft, changedFiles, reviewDecision
+    case number, title, url, isDraft, changedFiles, reviewDecision
     case head = "headRefName"
     case base = "baseRefName"
     case rawState = "state"

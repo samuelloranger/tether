@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 import XCTest
@@ -59,4 +58,3 @@ final class TerminalFocusTests: XCTestCase {
     wait(for: [noDeferredWrite], timeout: 1)
   }
 }
-#endif

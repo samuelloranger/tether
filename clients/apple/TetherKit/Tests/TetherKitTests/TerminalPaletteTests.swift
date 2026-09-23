@@ -19,33 +19,33 @@ final class TerminalPaletteTests: XCTestCase {
   func test_truecolor_resolves_directly() {
     let (t, d) = terminal()
     XCTAssertEqual(
-      TerminalPalette.resolve(.trueColor(red: 255, green: 0, blue: 0), isForeground: true, terminal: t),
+      TerminalPalette.resolve(.trueColor(red: 255, green: 0, blue: 0), isForeground: true, palette: TerminalPalette.table(of: t)),
       0xFFFF_0000)
     withExtendedLifetime(d) {}
   }
 
   func test_ansi_16_uses_the_installed_theme() {
     let (t, d) = terminal()
-    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 1), isForeground: true, terminal: t), 0xFFF3_8BA8)
-    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 15), isForeground: true, terminal: t), 0xFFFF_FFFF)
+    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 1), isForeground: true, palette: TerminalPalette.table(of: t)), 0xFFF3_8BA8)
+    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 15), isForeground: true, palette: TerminalPalette.table(of: t)), 0xFFFF_FFFF)
     withExtendedLifetime(d) {}
   }
 
   func test_ansi_256_uses_the_standard_xterm_cube() {
     let (t, d) = terminal()
     // 67 = cube (1,2,3) → xterm levels 95,135,175.
-    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 67), isForeground: true, terminal: t), 0xFF5F_87AF)
+    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 67), isForeground: true, palette: TerminalPalette.table(of: t)), 0xFF5F_87AF)
     // 244 = gray ramp step 12 → 8 + 12*10 = 128.
-    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 244), isForeground: true, terminal: t), 0xFF80_8080)
+    XCTAssertEqual(TerminalPalette.resolve(.ansi256(code: 244), isForeground: true, palette: TerminalPalette.table(of: t)), 0xFF80_8080)
     withExtendedLifetime(d) {}
   }
 
   func test_default_colors_map_to_the_theme_pair_and_invert_swaps_it() {
     let (t, d) = terminal()
-    XCTAssertEqual(TerminalPalette.resolve(.defaultColor, isForeground: true, terminal: t), TerminalPalette.foreground)
-    XCTAssertEqual(TerminalPalette.resolve(.defaultColor, isForeground: false, terminal: t), TerminalPalette.background)
-    XCTAssertEqual(TerminalPalette.resolve(.defaultInvertedColor, isForeground: true, terminal: t), TerminalPalette.background)
-    XCTAssertEqual(TerminalPalette.resolve(.defaultInvertedColor, isForeground: false, terminal: t), TerminalPalette.foreground)
+    XCTAssertEqual(TerminalPalette.resolve(.defaultColor, isForeground: true, palette: TerminalPalette.table(of: t)), TerminalPalette.foreground)
+    XCTAssertEqual(TerminalPalette.resolve(.defaultColor, isForeground: false, palette: TerminalPalette.table(of: t)), TerminalPalette.background)
+    XCTAssertEqual(TerminalPalette.resolve(.defaultInvertedColor, isForeground: true, palette: TerminalPalette.table(of: t)), TerminalPalette.background)
+    XCTAssertEqual(TerminalPalette.resolve(.defaultInvertedColor, isForeground: false, palette: TerminalPalette.table(of: t)), TerminalPalette.foreground)
     withExtendedLifetime(d) {}
   }
 

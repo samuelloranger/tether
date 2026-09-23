@@ -35,13 +35,6 @@ final class TerminalEngine {
     terminal.clearUpdateRange()
   }
 
-  var generation: UInt64 {
-    locked {
-      refresh()
-      return generationCounter
-    }
-  }
-
   func frame() -> TerminalFrame {
     locked {
       refresh()
@@ -49,7 +42,6 @@ final class TerminalEngine {
     }
   }
 
-  var altScreen: Bool { locked { terminal.isCurrentBufferAlternate } }
   var bracketedPaste: Bool { locked { terminal.bracketedPasteMode } }
 
   var mouseMode: MouseMode {

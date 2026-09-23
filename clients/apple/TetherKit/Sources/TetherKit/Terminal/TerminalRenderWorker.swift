@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import CoreGraphics
 import Foundation
 import UIKit
@@ -32,11 +31,9 @@ final class TerminalRenderWorker {
     lastLinkSpans = []
   }
 
-  /// Keeps the last image but lets a new session's generation 1 through, and forces a full
-  /// repaint since the dirty-row diff would otherwise compare against the previous session.
+  /// Keeps the last image but lets a new session's generation 1 through.
   func forgetGeneration() {
     lastGeneration = nil
-    renderer.forceFullRepaintOnNextFrame()
   }
 
   /// `nil` when the frame carries nothing new to show.
@@ -82,4 +79,3 @@ final class TerminalRenderWorker {
     )
   }
 }
-#endif
