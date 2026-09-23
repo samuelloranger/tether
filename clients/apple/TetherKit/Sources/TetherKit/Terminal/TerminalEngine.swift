@@ -5,7 +5,8 @@ import SwiftTerm
 /// keeps private (cursor visibility, scrollback position) and maps cells into
 /// the renderer's model.
 ///
-/// Not thread-safe: only `TerminalPipeline`'s actor touches it.
+/// Every entry point takes SwiftTerm's `terminalLock`: its synchronized-output
+/// watchdog mutates the terminal from its own queue.
 final class TerminalEngine {
   private let terminal: Terminal
   private let delegate: EngineDelegate
@@ -39,30 +40,36 @@ final class TerminalEngine {
   }
 
   var generation: UInt64 {
-    refresh()
-    return generationCounter
+    locked {
+      refresh()
+      return generationCounter
+    }
   }
 
   func frame() -> TerminalFrame {
-    refresh()
-    return cached
+    locked {
+      refresh()
+      return cached
+    }
   }
 
-  var altScreen: Bool { terminal.isCurrentBufferAlternate }
-  var bracketedPaste: Bool { terminal.bracketedPasteMode }
+  var altScreen: Bool { locked { terminal.isCurrentBufferAlternate } }
+  var bracketedPaste: Bool { locked { terminal.bracketedPasteMode } }
 
   var mouseMode: MouseMode {
-    switch terminal.mouseMode {
-    case .off: return .off
-    case .x10: return .x10
-    case .vt200: return .normal
-    case .buttonEventTracking: return .button
-    case .anyEvent: return .any
+    locked {
+      switch terminal.mouseMode {
+      case .off: return .off
+      case .x10: return .x10
+      case .vt200: return .normal
+      case .buttonEventTracking: return .button
+      case .anyEvent: return .any
+      }
     }
   }
 
   /// Bits 3–5 of `hostPointerModes` are the report encoding; 2 is SGR (1006).
-  var mouseSgr: Bool { (terminal.hostPointerModes >> 3) & 0b111 == 2 }
+  var mouseSgr: Bool { locked { (terminal.hostPointerModes >> 3) & 0b111 == 2 } }
 
   func pastePayload(_ text: String) -> String {
     PastePayload.make(text, bracketed: bracketedPaste)
@@ -70,16 +77,39 @@ final class TerminalEngine {
 
   /// Answers to DA/DSR/DECRQM queries produced since the last call.
   func takeReplies() -> [UInt8] {
-    defer { delegate.replies.removeAll(keepingCapacity: true) }
-    return delegate.replies
+    locked {
+      defer { delegate.replies.removeAll(keepingCapacity: true) }
+      return delegate.replies
+    }
   }
 
   func discardReplies() {
-    delegate.replies.removeAll()
+    locked { delegate.replies.removeAll() }
   }
 
   func feed(_ bytes: Data) {
     guard !bytes.isEmpty else { return }
+    locked { feedLocked(bytes) }
+  }
+
+  func resize(cols: UInt16, rows: UInt16) {
+    guard cols > 0, rows > 0 else { return }
+    locked { resizeLocked(cols: cols, rows: rows) }
+  }
+
+  /// Positive `lines` moves into history, negative toward the live bottom.
+  /// No-op on the alt screen, which has no scrollback.
+  func scrollViewport(lines: Int32) {
+    guard lines != 0 else { return }
+    locked { scrollLocked(lines: lines) }
+  }
+
+  /// The lock is a ticket lock and not re-entrant: take it once per entry point.
+  private func locked<T>(_ body: () -> T) -> T {
+    terminal.terminalLock.withLock(body)
+  }
+
+  private func feedLocked(_ bytes: Data) {
     let pinned = scrollOffset
     let oldLiveTop = liveTop
     let trimmedBefore = terminal.buffer.totalLinesTrimmed
@@ -91,14 +121,20 @@ final class TerminalEngine {
       return
     }
     let trimmed = terminal.buffer.totalLinesTrimmed - trimmedBefore
-    let top = max(0, oldLiveTop - pinned - trimmed)
+    let wanted = oldLiveTop - pinned - trimmed
+    // ED 3 or RIS shrank the history under the view: what was being read is gone.
+    guard trimmed >= 0, wanted <= liveTop else {
+      scrollOffset = 0
+      needsRefresh = true
+      return
+    }
+    let top = max(0, wanted)
     terminal.buffer.yDisp = top
     scrollOffset = liveTop - top
     needsRefresh = true
   }
 
-  func resize(cols: UInt16, rows: UInt16) {
-    guard cols > 0, rows > 0 else { return }
+  private func resizeLocked(cols: UInt16, rows: UInt16) {
     let dims = terminal.getDims()
     guard Int(cols) != dims.cols || Int(rows) != dims.rows else { return }
     returnToLive()
@@ -108,10 +144,8 @@ final class TerminalEngine {
     needsRefresh = true
   }
 
-  /// Positive `lines` moves into history, negative toward the live bottom.
-  /// No-op on the alt screen, which has no scrollback.
-  func scrollViewport(lines: Int32) {
-    guard lines != 0, !terminal.isCurrentBufferAlternate else { return }
+  private func scrollLocked(lines: Int32) {
+    guard !terminal.isCurrentBufferAlternate else { return }
     let next = min(max(scrollOffset + Int(lines), 0), liveTop)
     guard next != scrollOffset else { return }
     scrollOffset = next
@@ -125,6 +159,9 @@ final class TerminalEngine {
   }
 
   private func refresh() {
+    // A synchronized update (DECSET 2026) shows only once complete; the dirty
+    // range survives, so the frame after it rebuilds.
+    guard !terminal.synchronizedOutputActive else { return }
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
     guard needsRefresh || stateChanged || terminal.getUpdateRange() != nil else { return }

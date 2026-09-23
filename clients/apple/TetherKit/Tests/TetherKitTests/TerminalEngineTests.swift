@@ -373,3 +373,57 @@ final class TerminalEngineReplyTests: XCTestCase {
     XCTAssertTrue(engine.takeReplies().isEmpty)
   }
 }
+
+final class TerminalEngineReviewFixTests: XCTestCase {
+  private func scrolledBack() -> TerminalEngine {
+    let engine = TerminalEngine(cols: 20, rows: 5, scrollback: 100)
+    engine.feed((1...30).map { "L\($0)" }.joined(separator: "\r\n") + "\r\n")
+    engine.scrollViewport(lines: 10)
+    XCTAssertEqual(rowText(engine.frame(), 0), "L17")
+    return engine
+  }
+
+  func test_clearing_scrollback_while_scrolled_back_returns_to_live() {
+    let engine = scrolledBack()
+    engine.feed("\u{1B}[3J")
+    XCTAssertEqual(rowText(engine.frame(), 0), "L27")
+    engine.scrollViewport(lines: -1)
+    engine.feed("x")
+    XCTAssertEqual(rowText(engine.frame(), 0), "L27")
+    XCTAssertEqual(rowText(engine.frame(), 4), "x")
+  }
+
+  func test_full_reset_while_scrolled_back_returns_to_live() {
+    let engine = scrolledBack()
+    engine.feed("\u{1B}c")
+    engine.feed("hi")
+    XCTAssertEqual(rowText(engine.frame(), 0), "hi")
+  }
+
+  func test_synchronized_output_is_shown_only_once_complete() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("hello")
+    let before = engine.generation
+    engine.feed("\u{1B}[?2026h\u{1B}[2J\u{1B}[Hwor")
+    XCTAssertEqual(engine.generation, before, "a half-drawn synchronized frame must not publish")
+    XCTAssertEqual(rowText(engine.frame(), 0), "hello")
+    engine.feed("ld\u{1B}[?2026l")
+    XCTAssertEqual(engine.generation, before + 1)
+    XCTAssertEqual(rowText(engine.frame(), 0), "world")
+  }
+}
+
+/// Run under Thread Sanitizer: SwiftTerm's synchronized-output watchdog fires on
+/// its own queue after ~1 s and mutates the terminal under `terminalLock`.
+final class TerminalEngineLockingTests: XCTestCase {
+  func test_feeding_after_the_sync_watchdog_fires_is_race_free() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.feed("\u{1B}[?2026hpartial")
+    Thread.sleep(forTimeInterval: 1.3)
+    engine.feed("\u{1B}[?2026hmore")
+    _ = engine.frame()
+    Thread.sleep(forTimeInterval: 1.3)
+    engine.feed("done\u{1B}[?2026l")
+    XCTAssertTrue(rowText(engine.frame(), 0).hasSuffix("done"))
+  }
+}
