@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -85,8 +87,36 @@ func runState(args []string, d stateDeps) error {
 	return nil
 }
 
-type statusDeps struct{}
+type statusDeps struct {
+	run   runner
+	alive func(int) bool
+}
 
-func defaultStatusDeps() statusDeps { return statusDeps{} }
+func defaultStatusDeps() statusDeps { return statusDeps{run: execRunner, alive: pidAlive} }
 
-func runStatus(w io.Writer, d statusDeps) error { return nil }
+// runStatus prunes what can be proven stale — a dead agent, or a session zmx no
+// longer lists — and never deletes on a failed `zmx ls`.
+func runStatus(w io.Writer, d statusDeps) error {
+	out := []SessionState{}
+	err := withSessionsLock(func() error {
+		states, err := listSessions()
+		if err != nil {
+			return err
+		}
+		live, lsErr := zmxClients(d.run)
+		for _, s := range states {
+			_, listed := live[s.Session]
+			if !d.alive(s.AgentPid) || (lsErr == nil && !listed) {
+				_ = removeSession(s.Session)
+				continue
+			}
+			out = append(out, s)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Session < out[j].Session })
+	return json.NewEncoder(w).Encode(out)
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -128,5 +129,84 @@ func TestStateUnwritableDirStillPushes(t *testing.T) {
 	}
 	if !strings.Contains(d.stderr.(*bytes.Buffer).String(), "state") {
 		t.Fatalf("storage failure must be reported on stderr")
+	}
+}
+
+func seed(t *testing.T, states ...SessionState) {
+	t.Helper()
+	for i := range states {
+		s := states[i]
+		if err := withSessionsLock(func() error { return writeSession(&s) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func statusOf(t *testing.T, d statusDeps) []SessionState {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := runStatus(&buf, d); err != nil {
+		t.Fatal(err)
+	}
+	var out []SessionState
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("not JSON: %q", buf.String())
+	}
+	return out
+}
+
+func zmxOnly(out string, err error) runner {
+	return func(name string, args ...string) (string, error) { return out, err }
+}
+
+func TestStatusEmptyIsAnArray(t *testing.T) {
+	t.Setenv("TETHER_NOTIFY_HOME", t.TempDir())
+	var buf bytes.Buffer
+	if err := runStatus(&buf, statusDeps{run: zmxOnly("", nil), alive: func(int) bool { return true }}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(buf.String()) != "[]" {
+		t.Fatalf("got %q", buf.String())
+	}
+}
+
+func TestStatusPrunesDeadAgentsAndVanishedSessions(t *testing.T) {
+	t.Setenv("TETHER_NOTIFY_HOME", t.TempDir())
+	seed(t,
+		SessionState{Session: "alive", State: stateWorking, AgentPid: 10},
+		SessionState{Session: "dead", State: stateWorking, AgentPid: 20},
+		SessionState{Session: "gone", State: stateDone, AgentPid: 10},
+	)
+	d := statusDeps{
+		run:   zmxOnly("name=alive\tclients=0\nname=dead\tclients=0\n", nil),
+		alive: func(pid int) bool { return pid == 10 },
+	}
+	out := statusOf(t, d)
+	if len(out) != 1 || out[0].Session != "alive" {
+		t.Fatalf("got %+v", out)
+	}
+	if s, _ := readSession("dead"); s != nil {
+		t.Fatal("dead agent's file must be deleted")
+	}
+	if s, _ := readSession("gone"); s != nil {
+		t.Fatal("vanished session's file must be deleted")
+	}
+}
+
+func TestStatusKeepsSessionsWhenZmxLsFails(t *testing.T) {
+	t.Setenv("TETHER_NOTIFY_HOME", t.TempDir())
+	seed(t, SessionState{Session: "a", State: stateDone, AgentPid: 10})
+	out := statusOf(t, statusDeps{run: zmxOnly("", errors.New("boom")), alive: func(int) bool { return true }})
+	if len(out) != 1 {
+		t.Fatalf("a failed ls must not delete anything: %+v", out)
+	}
+}
+
+func TestStatusSortedBySession(t *testing.T) {
+	t.Setenv("TETHER_NOTIFY_HOME", t.TempDir())
+	seed(t, SessionState{Session: "b", State: stateDone}, SessionState{Session: "a", State: stateDone})
+	out := statusOf(t, statusDeps{run: zmxOnly("name=a\nname=b\n", nil), alive: func(int) bool { return true }})
+	if len(out) != 2 || out[0].Session != "a" || out[1].Session != "b" {
+		t.Fatalf("got %+v", out)
 	}
 }
