@@ -14,7 +14,7 @@ final class TerminalSnapshotCacheTests: XCTestCase {
 
   func testSwitchingBackShowsTheCachedGridInsteadOfNil() {
     let cache = TerminalSnapshotCache()
-    let grid = Data([1, 2, 3])
+    let grid = frame(1)
     cache.remember(grid, for: "host:term-1")
     XCTAssertEqual(cache.openingSnapshot(for: "host:term-1"), grid)
     XCTAssertNil(
@@ -25,15 +25,22 @@ final class TerminalSnapshotCacheTests: XCTestCase {
 
   func testALaterSnapshotReplacesTheCache() {
     let cache = TerminalSnapshotCache()
-    cache.remember(Data([1]), for: "a")
-    cache.remember(Data([2]), for: "a")
-    XCTAssertEqual(cache.openingSnapshot(for: "a"), Data([2]))
+    cache.remember(frame(1), for: "a")
+    cache.remember(frame(2), for: "a")
+    XCTAssertEqual(cache.openingSnapshot(for: "a"), frame(2))
   }
 
   func testForgetDropsTheCachedGrid() {
     let cache = TerminalSnapshotCache()
-    cache.remember(Data([1]), for: "a")
+    cache.remember(frame(1), for: "a")
     cache.forget("a")
     XCTAssertNil(cache.openingSnapshot(for: "a"))
   }
+}
+
+private func frame(_ generation: UInt64) -> TerminalFrame {
+  TerminalFrame(
+    header: GridSnapshot.Header(
+      cols: 1, rows: 1, cursorCol: 0, cursorRow: 0, generation: generation, cursorVisible: true),
+    cells: [TerminalPalette.blankCell])
 }

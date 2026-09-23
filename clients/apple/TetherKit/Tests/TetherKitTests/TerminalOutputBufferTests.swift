@@ -91,3 +91,13 @@ final class TerminalResizeStrategyTests: XCTestCase {
     )
   }
 }
+
+final class TerminalOutputBufferReplayTests: XCTestCase {
+  func testReplayRebuildsTheGridWithoutAnsweringOldQueries() {
+    let buffer = TerminalOutputBuffer()
+    buffer.append(Data("hi\u{1B}[6n".utf8))
+    let engine = buffer.replay(cols: 20, rows: 5)
+    XCTAssertEqual(rowText(engine.frame(), 0), "hi")
+    XCTAssertTrue(engine.takeReplies().isEmpty, "replayed history must not re-answer queries")
+  }
+}

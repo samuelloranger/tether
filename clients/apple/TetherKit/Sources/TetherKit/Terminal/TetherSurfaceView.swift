@@ -101,7 +101,7 @@ public final class TetherSurfaceView: UIView {
   private let renderQueue = DispatchQueue(label: "cloud.samlo.tether.surface-render", qos: .userInteractive)
   private let worker = TerminalRenderWorker()
   private var scheduler: TerminalFrameScheduler?
-  private var pendingSnapshot: Data?
+  private var pendingSnapshot: TerminalFrame?
   private var needsRepaint = false
   private var isRendering = false
   /// Bumped whenever the surface's contents stop being the ones a render was
@@ -186,12 +186,10 @@ public final class TetherSurfaceView: UIView {
 
   // MARK: - Snapshot intake
 
-  /// Hands the newest packed TGRD bytes to the frame pump.
-  ///
-  /// Deliberately does no work: decoding here meant one decode per WebSocket
-  /// frame, most of them discarded before the next vsync.
-  public func updateSnapshot(_ bytes: Data) {
-    pendingSnapshot = bytes
+  /// Hands the newest frame to the frame pump. Deliberately does no work: most
+  /// frames are superseded before the next vsync.
+  public func updateSnapshot(_ frame: TerminalFrame) {
+    pendingSnapshot = frame
     scheduler?.requestFrame()
   }
 
@@ -240,8 +238,8 @@ public final class TetherSurfaceView: UIView {
   /// One display-link tick. Returns whether it had work to do.
   private func pumpFrame() -> Bool {
     if isRendering { return true }
-    let bytes = pendingSnapshot
-    guard bytes != nil || needsRepaint else { return false }
+    let frame = pendingSnapshot
+    guard frame != nil || needsRepaint else { return false }
     guard let metrics = currentMetrics() else { return false }
 
     pendingSnapshot = nil
@@ -251,8 +249,8 @@ public final class TetherSurfaceView: UIView {
     let epoch = frameEpoch
     renderQueue.async { [weak self, worker] in
       let output: TerminalRenderOutput?
-      if let bytes {
-        output = worker.render(bytes: bytes, metrics: metrics)
+      if let frame {
+        output = worker.render(frame: frame, metrics: metrics)
       } else {
         output = worker.rerender(metrics: metrics)
       }

@@ -1,5 +1,4 @@
 import Foundation
-import TetherFFIBindings
 #if canImport(UIKit)
 import SwiftUI
 import PhotosUI
@@ -102,7 +101,7 @@ public final class SSHTerminalController {
 
   public static let defaultAttach = "default"
 
-  public var snapshot: Data?
+  public var snapshot: TerminalFrame?
   public private(set) var status: Status = .connecting
   public private(set) var mouseMode: MouseMode = .off
   public private(set) var mouseSgr = true
@@ -135,7 +134,7 @@ public final class SSHTerminalController {
   private let control: ControlConnection
   private static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
-  private let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
+  private let pipeline = TerminalPipeline()
   private let config: SSHConnectionConfig
   private let hostKeyStore: HostKeyStore
   private let pushIdentity: PushRegistrar.PushIdentity?

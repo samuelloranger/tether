@@ -1,10 +1,9 @@
-import TetherFFIBindings
 import XCTest
 @testable import TetherKit
 
 final class TerminalPipelineRenderingTests: XCTestCase {
   func test_connectSSH_feeds_received_bytes_into_the_existing_snapshot_stream() async throws {
-    let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
+    let pipeline = TerminalPipeline()
     let transport = StubTerminalByteStream()
     let snapshot = Task {
       for await snapshot in pipeline.snapshots {
@@ -21,7 +20,7 @@ final class TerminalPipelineRenderingTests: XCTestCase {
   }
 
   func test_connectSSH_routes_terminal_input_to_the_byte_stream() async throws {
-    let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
+    let pipeline = TerminalPipeline()
     let transport = StubTerminalByteStream()
     await pipeline.connectSSH(transport: transport, key: "ssh-test")
 
@@ -34,7 +33,7 @@ final class TerminalPipelineRenderingTests: XCTestCase {
   }
 
   func test_setRendering_false_suppresses_snapshots() async throws {
-    let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
+    let pipeline = TerminalPipeline()
     await pipeline.attachForTest(cols: 80, rows: 24)
     await pipeline.setRendering(false)
 
@@ -50,7 +49,7 @@ final class TerminalPipelineRenderingTests: XCTestCase {
   }
 
   func test_rendering_on_produces_snapshots() async throws {
-    let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
+    let pipeline = TerminalPipeline()
     await pipeline.attachForTest(cols: 80, rows: 24)
     // rendering defaults to true.
 
@@ -70,7 +69,7 @@ final class TerminalPipelineRenderingTests: XCTestCase {
   /// generation guard would skip it and the surface would keep showing the
   /// previous tab's frame. Turning rendering back on must force a fresh frame.
   func test_setRendering_on_republishes_the_current_grid_after_backgrounding() async throws {
-    let pipeline = TerminalPipeline(replayStore: FfiReplayStore())
+    let pipeline = TerminalPipeline()
     await pipeline.attachForTest(cols: 80, rows: 24)
 
     let box = SnapshotBox()
@@ -92,6 +91,33 @@ final class TerminalPipelineRenderingTests: XCTestCase {
     XCTAssertGreaterThan(
       afterReshow, afterFirst,
       "returning to a quiescent resident session must re-publish its current grid")
+  }
+
+  func test_query_replies_are_written_back_to_the_host() async throws {
+    let pipeline = TerminalPipeline()
+    let transport = StubTerminalByteStream()
+    await pipeline.connectSSH(transport: transport, key: "ssh-test")
+    await transport.receive(Data("\u{1B}[6n".utf8))
+    let writes = try await eventually {
+      let writes = await transport.writes()
+      return writes.isEmpty ? nil : writes
+    }
+    XCTAssertEqual(writes, [Data("\u{1B}[1;1R".utf8)])
+  }
+
+  func test_replies_from_a_switched_away_session_are_dropped() async throws {
+    let pipeline = TerminalPipeline()
+    let first = StubTerminalByteStream()
+    let second = StubTerminalByteStream()
+    await pipeline.connectSSH(transport: first, key: "one")
+    pipeline.outbound.yield(.reply(Data("\u{1B}[1;1R".utf8), key: "one"))
+    await pipeline.connectSSH(transport: second, key: "two")
+    pipeline.outbound.yield(.input("x", key: "two"))
+    let writes = try await eventually {
+      let writes = await second.writes()
+      return writes.isEmpty ? nil : writes
+    }
+    XCTAssertEqual(writes, [Data("x".utf8)], "a reply keyed to the old session must not reach the new one")
   }
 }
 
@@ -128,9 +154,8 @@ private func eventually<T>(
   throw NSError(domain: "TerminalPipelineRenderingTests", code: 1, userInfo: nil)
 }
 
-private func gridText(_ data: Data) -> String {
-  guard let (_, cells) = try? GridSnapshotDecoder.decode(data) else { return "" }
-  return String(String.UnicodeScalarView(cells.compactMap {
+private func gridText(_ frame: TerminalFrame) -> String {
+  String(String.UnicodeScalarView(frame.cells.compactMap {
     $0.codepoint == 0 ? nil : Unicode.Scalar($0.codepoint)
   }))
 }

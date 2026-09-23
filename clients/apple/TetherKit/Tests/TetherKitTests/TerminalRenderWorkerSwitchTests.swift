@@ -12,10 +12,10 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
   func testWithoutResetANewSessionWithTheSameGenerationIsDropped() {
     let worker = TerminalRenderWorker()
     let m = metrics(cols: 4, rows: 2)
-    let first = worker.render(bytes: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: m)
+    let first = worker.render(frame: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: m)
     XCTAssertEqual(first?.rowTexts.first, "AAAA")
 
-    let second = worker.render(bytes: grid("BBBB", cols: 4, rows: 2, generation: 1), metrics: m)
+    let second = worker.render(frame: grid("BBBB", cols: 4, rows: 2, generation: 1), metrics: m)
     XCTAssertNil(
       second,
       "a generation collision must not paint the new session over the old one without reset"
@@ -25,9 +25,9 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
   func testAfterResetTheNewSessionsFirstFramePaints() {
     let worker = TerminalRenderWorker()
     let m = metrics(cols: 4, rows: 2)
-    _ = worker.render(bytes: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: m)
+    _ = worker.render(frame: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: m)
     worker.reset()
-    let second = worker.render(bytes: grid("BBBB", cols: 4, rows: 2, generation: 1), metrics: m)
+    let second = worker.render(frame: grid("BBBB", cols: 4, rows: 2, generation: 1), metrics: m)
     XCTAssertEqual(
       second?.rowTexts.first,
       "BBBB",
@@ -41,9 +41,9 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
   func testAfterForgettingGenerationTheNewSessionsFirstFramePaints() {
     let worker = TerminalRenderWorker()
     let m = metrics(cols: 4, rows: 2)
-    _ = worker.render(bytes: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: m)
+    _ = worker.render(frame: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: m)
     worker.forgetGeneration()
-    let second = worker.render(bytes: grid("BBBB", cols: 4, rows: 2, generation: 1), metrics: m)
+    let second = worker.render(frame: grid("BBBB", cols: 4, rows: 2, generation: 1), metrics: m)
     XCTAssertEqual(
       second?.rowTexts.first,
       "BBBB",
@@ -57,11 +57,11 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
   func testMetricsChangeAtSameGenerationStillRepaints() {
     let worker = TerminalRenderWorker()
     let first = worker.render(
-      bytes: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: metrics(cols: 4, rows: 2)
+      frame: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: metrics(cols: 4, rows: 2)
     )
     XCTAssertNotNil(first)
     let second = worker.render(
-      bytes: grid("AAAA", cols: 4, rows: 2, generation: 1),
+      frame: grid("AAAA", cols: 4, rows: 2, generation: 1),
       metrics: metrics(cols: 4, rows: 2, fontSize: 20)
     )
     XCTAssertNotNil(
@@ -79,7 +79,7 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
   func testRerenderReusesLastGridAfterMetricsChange() {
     let worker = TerminalRenderWorker()
     _ = worker.render(
-      bytes: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: metrics(cols: 4, rows: 2)
+      frame: grid("AAAA", cols: 4, rows: 2, generation: 1), metrics: metrics(cols: 4, rows: 2)
     )
     let re = worker.rerender(metrics: metrics(cols: 4, rows: 2, fontSize: 20))
     XCTAssertEqual(
@@ -106,53 +106,18 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
     )
   }
 
-  private func grid(_ text: String, cols: Int, rows: Int, generation: UInt64) -> Data {
+  private func grid(_ text: String, cols: Int, rows: Int, generation: UInt64) -> TerminalFrame {
     var cells = [GridSnapshot.Cell](
-      repeating: GridSnapshot.Cell(
-        codepoint: 0x20,
-        foreground: 0xFFFF_FFFF,
-        background: 0xFF00_0000,
-        attrs: 0
-      ),
-      count: cols * rows
-    )
+      repeating: GridSnapshot.Cell(codepoint: 0x20, foreground: 0xFFFF_FFFF, background: 0xFF00_0000, attrs: 0),
+      count: cols * rows)
     for (index, scalar) in text.unicodeScalars.enumerated() where index < cells.count {
       cells[index].codepoint = scalar.value
     }
-    return encode(
-      cols: UInt16(cols),
-      rows: UInt16(rows),
-      generation: generation,
-      cells: cells
-    )
-  }
-
-  private func encode(
-    cols: UInt16,
-    rows: UInt16,
-    generation: UInt64,
-    cells: [GridSnapshot.Cell]
-  ) -> Data {
-    var data = Data()
-    func put<T: FixedWidthInteger>(_ value: T) {
-      var little = value.littleEndian
-      withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
-    }
-    put(GridSnapshot.magic)
-    put(GridSnapshot.version)
-    put(cols)
-    put(rows)
-    put(UInt16(0))
-    put(UInt16(0))
-    put(generation)
-    put(GridSnapshot.flagCursorVisible)
-    for cell in cells {
-      put(cell.codepoint)
-      put(cell.foreground)
-      put(cell.background)
-      put(cell.attrs)
-    }
-    return data
+    return TerminalFrame(
+      header: GridSnapshot.Header(
+        cols: UInt16(cols), rows: UInt16(rows), cursorCol: 0, cursorRow: 0,
+        generation: generation, cursorVisible: true),
+      cells: cells)
   }
 }
 #endif

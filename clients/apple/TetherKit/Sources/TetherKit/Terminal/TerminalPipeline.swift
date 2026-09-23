@@ -1,5 +1,4 @@
 import Foundation
-import TetherFFIBindings
 
 /// Everything the pipeline tells the store that is not a grid.
 ///
@@ -28,6 +27,9 @@ enum OutboundFrame: Sendable {
   /// before a session switch is not delivered to the session that replaced it.
   case input(String, key: String?)
   case paste(String, key: String?)
+  /// The emulator's answer to a terminal query (DA, DSR…). Queued, not written
+  /// directly, so it stays ordered with typed input.
+  case reply(Data, key: String?)
   /// Resize the LOCAL emulator only (fires on every reported size change).
   case localResize(cols: UInt16, rows: UInt16)
   /// Resize the server PTY only (fires once the bounds settle).
@@ -41,20 +43,19 @@ enum OutboundFrame: Sendable {
 actor TerminalPipeline {
   /// Newest-wins: if the main actor is busy, intermediate grids are dropped
   /// rather than queued. `nil` means "clear the surface".
-  nonisolated let snapshots: AsyncStream<Data?>
+  nonisolated let snapshots: AsyncStream<TerminalFrame?>
   nonisolated let events: AsyncStream<TerminalPipelineEvent>
   /// Callable from any isolation without awaiting — see `OutboundFrame`.
   nonisolated let outbound: AsyncStream<OutboundFrame>.Continuation
 
-  private let snapshotSink: AsyncStream<Data?>.Continuation
+  private let snapshotSink: AsyncStream<TerminalFrame?>.Continuation
   private let eventSink: AsyncStream<TerminalPipelineEvent>.Continuation
   private let outboundFrames: AsyncStream<OutboundFrame>
 
-  private let replayStore: FfiReplayStore
   private let snapshotCache = TerminalSnapshotCache()
   private let sessionGrids = TerminalSessionGrids()
   private var currentGrid: TerminalSessionGrid?
-  private var emulator: FfiTerminalEmulator? { currentGrid?.emulator }
+  private var emulator: TerminalEngine? { currentGrid?.emulator }
   private var outputBuffer: TerminalOutputBuffer { currentGrid?.buffer ?? TerminalOutputBuffer() }
   /// Which session key `emulator` holds the scrollback for.
   private var emulatorKey: String?
@@ -74,12 +75,9 @@ actor TerminalPipeline {
   private var cols: UInt16 = 80
   private var rows: UInt16 = 24
 
-  /// The replay cursor store is injected (and shared across every pipeline) so
-  /// N concurrent sessions never write the persisted cursor file at once.
-  init(replayStore: FfiReplayStore) {
-    self.replayStore = replayStore
+  init() {
     (snapshots, snapshotSink) = AsyncStream.makeStream(
-      of: Optional<Data>.self,
+      of: Optional<TerminalFrame>.self,
       bufferingPolicy: .bufferingNewest(1)
     )
     (events, eventSink) = AsyncStream.makeStream(of: TerminalPipelineEvent.self)
@@ -153,7 +151,6 @@ actor TerminalPipeline {
   }
 
   func forget(key: String) {
-    replayStore.forget(sessionId: key)
     snapshotCache.forget(key)
     sessionGrids.forget(key)
     if emulatorKey == key {
@@ -196,9 +193,17 @@ actor TerminalPipeline {
       }
     case let .paste(text, key):
       guard let transport = sshTransport, stillCurrent(key) else { return }
-      let payload = emulator?.pastePayload(text: text) ?? text
+      let payload = emulator?.pastePayload(text) ?? text
       do {
         try await transport.write(Data(payload.utf8))
+      } catch {
+        sshTransport = nil
+        eventSink.yield(.error(error.localizedDescription))
+      }
+    case let .reply(bytes, key):
+      guard let transport = sshTransport, stillCurrent(key) else { return }
+      do {
+        try await transport.write(bytes)
       } catch {
         sshTransport = nil
         eventSink.yield(.error(error.localizedDescription))
@@ -263,14 +268,19 @@ actor TerminalPipeline {
     guard let buffer = currentGrid?.buffer, !buffer.data.isEmpty else { return "" }
     let newlines = buffer.data.reduce(into: 0) { if $1 == 0x0A { $0 += 1 } }
     let tall = UInt16(min(20_000, max(Int(rows), newlines + Int(rows) + 2)))
-    let emulator = buffer.replay(cols: cols, rows: tall)
-    guard let decoded = try? GridSnapshotDecoder.decode(emulator.snapshot()) else { return "" }
-    return TerminalGridText.plainText(header: decoded.0, cells: decoded.1)
+    let frame = buffer.replay(cols: cols, rows: tall).frame()
+    return TerminalGridText.plainText(header: frame.header, cells: frame.cells)
   }
 
   private func applyOutput(_ bytes: Data) {
     outputBuffer.append(bytes)
-    emulator?.feed(bytes: bytes)
+    if let emulator {
+      emulator.feed(bytes)
+      let replies = emulator.takeReplies()
+      if !replies.isEmpty {
+        outbound.yield(.reply(Data(replies), key: emulatorKey))
+      }
+    }
     publishSnapshot()
   }
 
@@ -308,33 +318,33 @@ actor TerminalPipeline {
 
   /// Publishes a new grid only when the visible contents actually changed.
   ///
-  /// `generation` is why this is cheap: it is compared before pulling the
-  /// packed bytes, so a burst of output that does not alter the viewport costs
+  /// `generation` is why this is cheap: it is compared before copying the
+  /// frame, so a burst of output that does not alter the viewport costs
   /// nothing beyond the counter read.
   private func publishSnapshot() {
     guard rendering else { return }
     guard let emulator else { return }
-    let generation = emulator.generation()
+    let generation = emulator.generation
     // Mouse mode can flip without a viewport change (e.g. vim entering or
     // leaving mouse tracking). Keep the surface's input path in sync either way.
     syncMouseModes(from: emulator)
     guard generation != lastRenderedGeneration else { return }
     lastRenderedGeneration = generation
-    let packed = emulator.snapshot()
-    if let header = try? GridSnapshotDecoder.peekHeader(packed), header.altScreen != lastAltScreen {
-      lastAltScreen = header.altScreen
-      currentGrid?.lastAltScreen = header.altScreen
-      eventSink.yield(.altScreen(header.altScreen))
+    let frame = emulator.frame()
+    if frame.header.altScreen != lastAltScreen {
+      lastAltScreen = frame.header.altScreen
+      currentGrid?.lastAltScreen = frame.header.altScreen
+      eventSink.yield(.altScreen(frame.header.altScreen))
     }
     if let emulatorKey {
-      snapshotCache.remember(packed, for: emulatorKey)
+      snapshotCache.remember(frame, for: emulatorKey)
     }
-    snapshotSink.yield(packed)
+    snapshotSink.yield(frame)
   }
 
-  private func syncMouseModes(from emulator: FfiTerminalEmulator) {
-    let mode = MouseMode(rawValue: emulator.mouseMode()) ?? .off
-    let sgr = emulator.mouseSgr()
+  private func syncMouseModes(from emulator: TerminalEngine) {
+    let mode = emulator.mouseMode
+    let sgr = emulator.mouseSgr
     guard mode != lastMouseMode || sgr != lastMouseSgr else { return }
     lastMouseMode = mode
     lastMouseSgr = sgr
