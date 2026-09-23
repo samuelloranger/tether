@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -8,12 +9,18 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type runner func(name string, args ...string) (string, error)
 
+// Hooks run synchronously on every tool call, so no helper command may hang one.
+var commandTimeout = 2 * time.Second
+
 func execRunner(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
 	return string(out), err
 }
 

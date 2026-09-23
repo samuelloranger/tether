@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -209,4 +212,23 @@ func TestStatusSortedBySession(t *testing.T) {
 	if len(out) != 2 || out[0].Session != "a" || out[1].Session != "b" {
 		t.Fatalf("got %+v", out)
 	}
+}
+
+func TestStatusRunsZmxLsWithoutHoldingTheLock(t *testing.T) {
+	t.Setenv("TETHER_NOTIFY_HOME", t.TempDir())
+	seed(t, SessionState{Session: "a", State: stateDone})
+	run := func(name string, args ...string) (string, error) {
+		lock, err := os.OpenFile(filepath.Join(sessionsDir(), ".lock"), os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Close()
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			t.Error("zmx ls ran under the sessions lock: a slow ls would stall every hook")
+		} else {
+			syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+		}
+		return "name=a\n", nil
+	}
+	statusOf(t, statusDeps{run: run, alive: func(int) bool { return true }})
 }

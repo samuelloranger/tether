@@ -98,12 +98,13 @@ func defaultStatusDeps() statusDeps { return statusDeps{run: execRunner, alive: 
 // longer lists — and never deletes on a failed `zmx ls`.
 func runStatus(w io.Writer, d statusDeps) error {
 	out := []SessionState{}
+	// Outside the lock: a slow ls must not stall the hooks queued behind it.
+	live, lsErr := zmxClients(d.run)
 	err := withSessionsLock(func() error {
 		states, err := listSessions()
 		if err != nil {
 			return err
 		}
-		live, lsErr := zmxClients(d.run)
 		for _, s := range states {
 			_, listed := live[s.Session]
 			if !d.alive(s.AgentPid) || (lsErr == nil && !listed) {

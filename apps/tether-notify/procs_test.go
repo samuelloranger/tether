@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseZmxClients(t *testing.T) {
@@ -82,5 +83,18 @@ func TestPidAlive(t *testing.T) {
 	}
 	if pidAlive(1 << 22) {
 		t.Fatal("pid beyond pid_max must be dead")
+	}
+}
+
+func TestExecRunnerTimesOut(t *testing.T) {
+	old := commandTimeout
+	commandTimeout = 100 * time.Millisecond
+	defer func() { commandTimeout = old }()
+	start := time.Now()
+	if _, err := execRunner("sleep", "5"); err == nil {
+		t.Fatal("a hung command must fail, not block the hook")
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("took %v", time.Since(start))
 	}
 }
