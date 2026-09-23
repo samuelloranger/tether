@@ -1,10 +1,7 @@
 import Network
 
-/// A normalized `NWPath` reading: what the radio can route, nothing more.
-///
-/// A `.usable` value means the device has *a* path — never that the SSH host
-/// answered, that the port is open, or that authentication succeeded. Those
-/// remain the transport's job to report.
+/// A normalized `NWPath` reading. `.usable` means the device has *a* path, never that the
+/// SSH host answered or that auth succeeded; that stays the transport's job.
 public struct NetworkReachability: Equatable, Sendable {
   public enum Availability: Equatable, Sendable {
     case offline

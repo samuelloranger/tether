@@ -5,10 +5,8 @@ import Security
 import UIKit
 import UserNotifications
 
-/// Requests notification permission, obtains the APNs device token, and holds
-/// the device push identity the SSH path hands to the host's `tether-notify`.
-///
-/// Failures are logged and swallowed — push must never block or throw into UI.
+/// Holds the device push identity handed to the host's `tether-notify`. Failures are logged
+/// and swallowed: push must never block or throw into UI.
 @MainActor
 public final class PushRegistrar {
   private enum PushError: Error { case secretUnavailable }
@@ -44,12 +42,10 @@ public final class PushRegistrar {
     return PushIdentity(token: token, secretKey: secret, label: label)
   }
 
-  /// Ask for alert/sound/badge, then `registerForRemoteNotifications`.
   public func start() {
     #if DEBUG
-    // A preseeded UI-test launch skips the system notification prompt: it steals
-    // first responder from the terminal and blocks the keyboard a headless-sim
-    // repro needs. No-op only under that env; normal dev/Release is untouched.
+    // The system notification prompt steals first responder and blocks the keyboard a
+    // headless-sim repro needs.
     if ProcessInfo.processInfo.environment["TETHER_UITEST_PRESEED"] != nil { return }
     #endif
     Task {

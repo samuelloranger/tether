@@ -1,11 +1,7 @@
 import Foundation
 
-/// Every bound the transport puts on a network that stops answering.
-///
-/// The kernel options catch a dead peer in about 25 s while idle (keepalive
-/// idle + interval × count) and 15 s with bytes unacknowledged, whichever the
-/// connection is doing. libssh2's timeout only bounds hangs: it counts in
-/// whole seconds, so it is never used to pace a loop.
+/// Kernel options catch a dead peer in ~25 s idle (keepalive idle + interval x count), 15 s
+/// with bytes unacked. libssh2's timeout counts whole seconds, so it only bounds hangs.
 enum SSHTimeouts {
   static let connectSeconds: Int32 = 8
   static let operationMs = 15_000

@@ -1,9 +1,8 @@
 import Darwin
 import Foundation
 
-/// A loopback TCP listener that never accepts: the kernel completes the TCP
-/// handshake from the backlog and then nothing speaks, which is exactly what a
-/// peer on a silently dead path looks like.
+/// Never accepts: the kernel completes the handshake from the backlog and then nothing
+/// speaks, which is what a peer on a silently dead path looks like.
 final class LocalListener {
   private(set) var fd: Int32
   let port: Int

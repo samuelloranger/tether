@@ -6,9 +6,7 @@ protocol SSHConnectionOps: AnyObject {
   func authenticate(_ credential: SSHCredential) throws -> Bool
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
   func exec(_ command: String) throws -> String
-  /// Runs `command` and hands back output as it arrives. `onChunk` returns false
-  /// to stop reading and tear the channel down. Default: fall back to a single
-  /// buffered `exec`, delivered as one chunk.
+  /// `onChunk` returns false to stop reading and tear the channel down.
   func execStream(_ command: String, onChunk: (String) -> Bool) throws
   func scpSend(data: Data, remotePath: String, mode: Int32) throws
   var lastAuthDetail: String? { get }
@@ -141,11 +139,8 @@ enum SSHConnectionSequence {
     try gate(config: config, ops: ops, store: store)
   }
 
-  /// Signing the publickey challenge on two sessions at once intermittently
-  /// fails: the server accepts the key offer and the client cannot sign it
-  /// ("Callback returned error", libssh2 -19). Only the signing is serialized,
-  /// and only per host — holding a lock across the TCP connect let one
-  /// unreachable host stall dials to every other one for its whole timeout.
+  /// Concurrent publickey signing intermittently fails (libssh2 -19). Serialize only the signing,
+  /// per host: a lock across the TCP connect lets one unreachable host stall every other dial.
   private static let authLocksGuard = NSLock()
   private static var authLocks: [String: NSLock] = [:]
 
@@ -159,9 +154,7 @@ enum SSHConnectionSequence {
     return lock
   }
 
-  /// Shared connect → host-key gate → auth. Trust-on-first-use pins an unknown
-  /// key and refuses a changed one. Tears the session down on any failure and
-  /// leaves it authenticated on success.
+  /// Tears the session down on any failure; leaves it authenticated on success.
   private static func gate(
     config: SSHConnectionConfig,
     ops: SSHConnectionOps,

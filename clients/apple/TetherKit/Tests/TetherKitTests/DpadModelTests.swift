@@ -18,9 +18,8 @@ final class DpadModelTests: XCTestCase {
     XCTAssertEqual(DPadModel.resolveDirection(dx: 0, dy: 20, active: nil, sampled: true), .B)
   }
 
-  /// The first few pixels of a thumb drag are noisy. After sampling, pick the
-  /// larger axis of the accumulated translation — not whichever axis first
-  /// beat a dominance ratio.
+  /// The first pixels of a thumb drag are noisy: pick the larger accumulated axis, not whichever
+  /// first beat a dominance ratio.
   func test_after_sample_picks_the_larger_axis_of_the_measured_vector() {
     XCTAssertEqual(DPadModel.resolveDirection(dx: 16, dy: 12, active: nil, sampled: true), .C)
     XCTAssertEqual(DPadModel.resolveDirection(dx: 12, dy: -16, active: nil, sampled: true), .A)

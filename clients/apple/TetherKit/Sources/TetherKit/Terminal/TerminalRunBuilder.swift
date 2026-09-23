@@ -1,16 +1,7 @@
 import Foundation
 
-/// Collapses one grid row into the fewest draw operations that still reproduce
-/// it: one fill per stretch of equal background, one glyph run per stretch that
-/// shares a foreground colour and style.
-///
-/// The renderer used to pay a `CGContext.fill` and a freshly shaped `CTLine`
-/// for every cell — ~3200 of each on an 80x40 grid, every frame, on the main
-/// thread. Grouping first is what makes the per-frame cost proportional to how
-/// much the row actually varies rather than to how wide it is.
-///
-/// Pure on purpose: CoreText and the bitmap context are untestable, and the
-/// off-by-one bugs all live in the splitting.
+/// One fill per stretch of equal background, one glyph run per stretch of shared fg and style.
+/// Pure on purpose: CoreText is untestable, and the off-by-one bugs all live in the splitting.
 public enum TerminalRunBuilder {
   /// Style bits that force a new glyph run. Inverse is resolved away before
   /// grouping, so it is deliberately absent.

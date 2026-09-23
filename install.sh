@@ -1,9 +1,6 @@
 #!/bin/sh
-# Tether host CLI installer. Builds `tether-notify` (v5 encrypted push) from the
-# repo checkout and installs it to ~/.local/bin. Run from a clone:
-#   bash install.sh
-# Requires Go — the host tool is tiny and builds from source, so there is no
-# release binary to download and no checksum to verify.
+# Builds `tether-notify` from this checkout into ~/.local/bin. Requires Go: there is no
+# release binary, so nothing to download or checksum.
 set -eu
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

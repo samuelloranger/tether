@@ -1,10 +1,7 @@
 import XCTest
 
-/// Proves the real-UI harness works end to end:
-/// 1. the app launches into the foreground on the simulator,
-/// 2. real iOS lifecycle can be driven — background via the home button and
-///    reactivate — which is the exact mechanism every reconnect test needs.
-/// No app-specific hooks yet; this only validates the driving harness.
+/// Validates the real-UI harness: launch to foreground, then background via the home
+/// button and reactivate — the lifecycle mechanism every reconnect test relies on.
 final class SmokeTests: XCTestCase {
   override func setUpWithError() throws {
     continueAfterFailure = false
@@ -19,9 +16,8 @@ final class SmokeTests: XCTestCase {
 
     attachShot(app, "01-launched")
 
-    // Real lifecycle: send to background with the home button. The AUT's own
-    // `.state` reports a stale foreground once suspended, so observe Springboard
-    // coming to the front instead — the reliable signal the press landed.
+    // The AUT's own `.state` reports a stale foreground once suspended, so observe
+    // Springboard coming to the front instead.
     XCUIDevice.shared.press(.home)
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
     XCTAssertTrue(
@@ -37,10 +33,8 @@ final class SmokeTests: XCTestCase {
     attachShot(app, "02-reopened")
   }
 
-  /// The drawer's edge swipe has to win over the terminal surface's own pan,
-  /// which begins the moment a finger moves. When it lost that race the swipe
-  /// did nothing over the grid — it only worked starting on the header, where
-  /// the terminal has no recognizer.
+  /// The edge swipe has to beat the terminal's own pan, which begins the moment a
+  /// finger moves; losing that race made the swipe work only from the header.
   func testEdgeSwipeOverTheTerminalGridOpensTheDrawer() throws {
     let app = XCUIApplication()
     app.launchEnvironment["TETHER_SSH_DEMO"] = "1"
@@ -83,7 +77,6 @@ final class SmokeTests: XCTestCase {
     XCTAssertTrue(drawer.waitForExistence(timeout: 5), "drawer never opened from the header button")
     attachShot(app, "20-drawer-open")
 
-    // From the middle of the panel, leftwards.
     app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
       .press(forDuration: 0.05,
              thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)),

@@ -14,8 +14,7 @@ public struct GitDiffLine: Equatable, Identifiable, Sendable {
   public let text: String
 }
 
-/// Classifies raw `git diff` output for display. Swift-side so it stands alone
-/// once the Rust core is removed.
+/// Classifies raw `git diff` output for display.
 public enum GitDiffModel {
   public static func classify(_ diff: String) -> [GitDiffLine] {
     guard !diff.isEmpty else { return [] }
@@ -24,10 +23,8 @@ public enum GitDiffModel {
     }
   }
 
-  /// Splits `git show --format=%b%x1e` into the commit message and the patch.
-  /// Without the marker git separates the two with a bare `---`, which the
-  /// classifier reads as a removed line and the grouper then renders as a
-  /// deletion numbered 0.
+  /// Splits `git show --format=%b%x1e` into message and patch. Without the marker git
+  /// separates them with a bare `---`, which the classifier would read as a deletion.
   public static func commitShow(_ output: String) -> (body: String, patch: String) {
     guard let marker = output.firstIndex(of: "\u{1E}") else { return ("", output) }
     var patch = Substring(output[output.index(after: marker)...])

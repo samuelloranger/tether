@@ -1,9 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Full session transcript on its own screen: read-only, selectable text so you
-/// can drag-select and copy exactly what you want. Opens scrolled to the bottom
-/// (the newest output).
+/// Full session transcript as read-only selectable text, opened scrolled to the newest output.
 struct TerminalHistoryView: View {
   let controller: SSHTerminalController
   var preferences: AppPreferences

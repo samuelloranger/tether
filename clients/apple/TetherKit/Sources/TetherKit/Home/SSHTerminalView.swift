@@ -3,9 +3,8 @@ import UIKit
 import UniformTypeIdentifiers
 import PhotosUI
 
-/// The v5 terminal screen: header + slide-over session sidebar + terminal,
-/// matching the old layout but backed by SSH + zmx. Home is reached from the
-/// bottom of the sidebar.
+/// The terminal screen: header + slide-over session sidebar + terminal, backed by
+/// SSH + zmx. Home is reached from the bottom of the sidebar.
 public struct SSHTerminalView: View {
   @Bindable var controller: SSHTerminalController
   var preferences: AppPreferences
@@ -406,9 +405,8 @@ public struct SSHTerminalView: View {
     )?.shortLabel ?? "live"
   }
 
-  /// The drag lives in UIKit — see `DrawerGestureHost` for why. This view takes
-  /// no touches of its own; the terminal keeps every one the drawer does not
-  /// claim, and the header button stays the primary, assistive-tech route in.
+  /// The drag lives in UIKit (see `DrawerGestureHost`) and takes no touches itself;
+  /// the header button stays the primary, assistive-tech route in.
   private var drawerGestures: some View {
     DrawerGestureHost(
       isOpen: { drawerOpen },
@@ -482,9 +480,8 @@ public struct SSHTerminalView: View {
       .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
   }
 
-  /// One overlay for every not-connected state. The copy comes from the
-  /// controller so a network blocker and an SSH failure can never be confused:
-  /// a reachable path is never reported as a working connection.
+  /// One overlay for every not-connected state. The copy comes from the controller so
+  /// a network blocker and an SSH failure can never be confused.
   @ViewBuilder
   private var statusOverlay: some View {
     if let copy = SSHTerminalController.connectionCopy(
@@ -519,9 +516,8 @@ public struct SSHTerminalView: View {
     }
   }
 
-  /// Shown over the terminal when connected to a host that has no zmx session:
-  /// nothing is auto-created, so the terminal stays gated until the user starts
-  /// one from the drawer.
+  /// Shown when the host has no zmx session: nothing is auto-created, so the terminal
+  /// stays gated until the user starts one from the drawer.
   @ViewBuilder
   private var emptyStateOverlay: some View {
     if case .connected = controller.status, !controller.hasSession {

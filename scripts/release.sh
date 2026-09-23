@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure dependencies are installed
 for cmd in jq git bun gh; do
   if ! command -v "$cmd" &> /dev/null; then
     echo "Error: $cmd is required but not installed." >&2
@@ -14,7 +13,6 @@ FORCE=false
 BUMP_TYPE=""
 TARGET_VERSION=""
 
-# Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run)
@@ -44,7 +42,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Verify clean working directory
 if [ "$FORCE" = false ] && [ "$DRY_RUN" = false ]; then
   if ! git diff-index --quiet HEAD --; then
     echo "Error: Working directory has uncommitted changes. Stash or commit them, or use --force/--dry-run." >&2
@@ -58,11 +55,8 @@ if [ -z "$BRANCH" ]; then
   exit 1
 fi
 
-# Sync with origin BEFORE the version-bump commit. Anything that landed on the
-# remote since our last pull (historically the altstore bot committing to main;
-# now any other push) would make a bare `git push` get rejected as diverged.
-# Rebasing after the bump is riskier (conflict in the version files), so do it
-# while the tree is still clean.
+# Rebase before the bump commit: a remote push since our last pull would reject `git push`,
+# and rebasing after the bump risks conflicts in the version files.
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would run: git fetch origin $BRANCH && git rebase origin/$BRANCH"
 else
@@ -78,15 +72,10 @@ else
   fi
 fi
 
-# How long to wait for CI on the release commit. It has to outlast a cold run —
-# the iOS job builds tether-ffi for three targets and assembles the XCFramework
-# before it tests anything — so this is a backstop, not an expected wait.
+# Backstop: must outlast a cold CI run, whose iOS job builds tether-ffi for three targets first.
 CI_WAIT_SECONDS=${CI_WAIT_SECONDS:-3600}
 CI_POLL_SECONDS=${CI_POLL_SECONDS:-20}
-# How long to keep looking for a run that does not exist yet. CI triggers on
-# pushes to main and on pull requests, so releasing from any other branch
-# produces no run at all — and waiting the full hour to discover that is worse
-# than saying so.
+# CI only runs on pushes to main and PRs; other branches never get a run, so fail fast.
 CI_APPEAR_SECONDS=${CI_APPEAR_SECONDS:-300}
 
 # Latest CI run for one commit as "status|conclusion|url". Empty when GitHub has
@@ -150,11 +139,9 @@ if [ "$DRY_RUN" = false ]; then
   fi
 fi
 
-# Detect current version
 CURRENT_VERSION=$(jq -r .version package.json)
 echo "Current version: $CURRENT_VERSION"
 
-# Parse SemVer parts
 IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
 
 if [ -z "$BUMP_TYPE" ] && [ -z "$TARGET_VERSION" ] && [ ! -t 0 ]; then
@@ -164,7 +151,6 @@ if [ -z "$BUMP_TYPE" ] && [ -z "$TARGET_VERSION" ] && [ ! -t 0 ]; then
 fi
 
 if [ -z "$BUMP_TYPE" ] && [ -z "$TARGET_VERSION" ]; then
-  # Interactive mode
   NEXT_PATCH="$major.$minor.$((patch + 1))"
   NEXT_MINOR="$major.$((minor + 1)).0"
   NEXT_MAJOR="$((major + 1)).0.0"
@@ -191,7 +177,6 @@ elif [ -n "$BUMP_TYPE" ]; then
   esac
 fi
 
-# Validate target version format
 if [[ ! "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "Error: Target version '$TARGET_VERSION' does not match SemVer pattern." >&2
   exit 1
@@ -204,7 +189,6 @@ fi
 
 echo "Updating file versions..."
 
-# Helper function to update JSON version
 update_json() {
   local path=$1
   local filter=$2
@@ -218,38 +202,29 @@ update_json() {
 
 update_json "package.json" ".version = \$v"
 
-# Update the Xcode marketing version
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would update Xcode to version $TARGET_VERSION"
 else
-  # The native iOS client is what release.yml's `ios` job archives, and its
-  # marketing version lives in the Xcode project. CI overrides it on the command
-  # line for the build it uploads, but a project committed at an older number is
-  # what anyone building locally gets — and it is the number TestFlight shows.
+  # CI overrides this for its upload, but local builds and TestFlight show the committed number.
   sed -i -E 's/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = '"$TARGET_VERSION"';/g' \
     clients/apple/Tether.xcodeproj/project.pbxproj
   echo "Updated clients/apple/Tether.xcodeproj/project.pbxproj"
 fi
 
-# The complete set of files a release is allowed to modify. Anything else showing
-# up dirty below means `bun format` reformatted real source, which must be its own
-# commit — not silently swept into (or, worse, dropped from) the release.
+# The only files a release may modify; anything else dirty means `bun format` touched real
+# source, which must be its own commit.
 VERSION_FILES=(
   package.json
   clients/apple/Tether.xcodeproj/project.pbxproj
 )
 
-# Validation
 echo "Running validation checks (lint & format)..."
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would run: bun lint && bun format"
 else
   bun lint
-  # `bun format` is `biome check --write` — it mutates. Stage the files we own,
-  # run it, re-stage them (it normalizes jq's JSON output), then require the tree
-  # to be otherwise clean. Previously a reformat of any source file landed in the
-  # working tree, was never staged (the add list is version files only), and got
-  # left behind by the push.
+  # `bun format` mutates: re-stage our files after it (it normalizes jq's JSON), then require
+  # the rest of the tree clean so a source reformat is never left behind unstaged.
   git add "${VERSION_FILES[@]}"
   bun format
   git add "${VERSION_FILES[@]}"
@@ -261,7 +236,6 @@ else
   fi
 fi
 
-# Git Ops
 echo "Preparing Git commit on branch '$BRANCH'..."
 
 if [ "$DRY_RUN" = true ]; then
@@ -276,12 +250,8 @@ else
   echo "Pushing changes to origin/$BRANCH..."
   git push origin "$BRANCH"
 
-  # The gate above ran on the PARENT of this commit. The version bump is a new
-  # commit, so `release: vX` itself has never been through CI — and pushing its
-  # tag starts release.yml immediately, in parallel with the CI run for the same
-  # push. That is the v3.0.0 hole: CI went red on the release commit and every
-  # artifact published anyway, because release.yml depends on nothing. Wait here,
-  # while the only thing pushed is a version bump that ships to nobody.
+  # The gate above ran on this commit's parent, and release.yml depends on no CI run, so wait
+  # for CI on the bump commit itself before the tag starts publishing.
   if [ "$FORCE" = true ]; then
     echo "Warning: --force set, tagging without waiting for CI on the release commit."
   else

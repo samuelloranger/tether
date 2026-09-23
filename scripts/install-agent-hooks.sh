@@ -1,12 +1,6 @@
 #!/bin/sh
-# Wire agent notifications to tether-notify across Claude Code, Codex, and Cursor.
-# Installs one wrapper (~/.local/bin/tether-notify-hook) and registers it in each
-# agent's hook config that exists, preserving any hooks already there.
-#
-#   bash scripts/install-agent-hooks.sh [host-label]
-#
-# host-label is shown in the notification and used in the deep link
-# (tether://session/<zmx session>?host=<label>). Defaults to this host's name.
+# Wire Claude Code, Codex and Cursor notifications to tether-notify via one hook wrapper.
+# Usage: install-agent-hooks.sh [host-label]  (label shown in notifications and deep links)
 set -eu
 
 HOST_LABEL="${1:-$(hostname -s 2>/dev/null || hostname)}"
@@ -19,13 +13,8 @@ command -v jq >/dev/null 2>&1 || {
 }
 mkdir -p "$BIN_DIR"
 
-# --- the wrapper ---------------------------------------------------------------
-# Invoked as: tether-notify-hook <agent> <waiting|done>. It reads the agent's
-# hook JSON on stdin, fills a notification from the right fields, swallows
-# tether-notify's own output, and emits whatever terminator the agent expects
-# (Codex parses hook stdout as a decision; the others ignore it). Host label is
-# baked in the expanded heredoc; the body is a quoted heredoc so $ / backticks
-# stay literal.
+# --- the wrapper: tether-notify-hook <agent> <waiting|done>, hook JSON on stdin ----------
+# Host label is baked into the expanded heredoc; the body heredoc is quoted to stay literal.
 cat > "$WRAPPER" <<EOF
 #!/bin/sh
 TETHER_HOOK_HOST_DEFAULT='${HOST_LABEL}'
@@ -57,10 +46,8 @@ if [ -n "$input" ]; then
     claude:done)
       tp="$(field '.transcript_path // empty')"
       if [ -n "$tp" ] && [ -f "$tp" ]; then
-        # Last assistant text turn. Per-line with fromjson? so one unparseable
-        # line doesn't blank the whole read (jq -s would); scan the file rather
-        # than a tail window, since a turn can end with a long run of tool calls
-        # after the final prose.
+        # Per-line fromjson? so one bad line doesn't blank the read; whole file, not a tail,
+        # since a turn can end with a long run of tool calls after the final prose.
         body="$(jq -R -r '
           fromjson? | select(.type=="assistant")
           | (.message.content? // []) | map(select(.type=="text") | .text) | join(" ")

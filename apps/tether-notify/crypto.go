@@ -10,8 +10,7 @@ import (
 )
 
 // Wire format shared with the iOS NSE: base64( nonce[12] || ciphertext || tag[16] ),
-// AES-256-GCM over JSON {title, body, link?}. The per-device key is generated on
-// the phone; the relay routes the ciphertext without ever holding it.
+// AES-256-GCM over JSON {title, body, link?}.
 const (
 	nonceBytes = 12
 	keyBytes   = 32

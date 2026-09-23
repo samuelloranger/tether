@@ -1,8 +1,7 @@
 import Foundation
 
-/// Word extraction for double-tap-to-select — port of `apps/mobile/src/wordAt.ts`.
-///
-/// "Word" is shell-flavored: paths, flags, URLs, identifiers.
+/// Word extraction for double-tap-to-select. "Word" is shell-flavored: paths, flags,
+/// URLs, identifiers.
 public enum WordAt {
   private static let wordCharacters = CharacterSet(
     charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@$%+=:~./-"

@@ -78,12 +78,9 @@ public enum GitMergeMethod: String, Equatable, Sendable, Identifiable {
   }
 }
 
-/// Parses machine-readable output from the remote repository commands. Keeping
-/// this pure makes the SSH boundary small and gives UI code typed state only.
+/// Parses machine-readable output from the remote repository commands.
 public enum GitRepositoryModel {
-  /// Splits the one workspace command's output. The outer separator is 0x1d,
-  /// not 0x1e: the commit format already ends every record with 0x1e, so an
-  /// outer 0x1e would be ambiguous against the commits payload itself.
+  /// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e.
   public static func workspaceSections(
     _ output: String
   ) -> (diff: String, branch: String, commits: String, pullRequests: String)? {
@@ -108,9 +105,7 @@ public enum GitRepositoryModel {
     try JSONDecoder().decode([GitPullRequest].self, from: Data(output.utf8))
   }
 
-  /// "None open" and "could not ask" are different answers; collapsing both
-  /// into an empty list made the screen blame a missing GitHub CLI for a
-  /// repository that simply had nothing open.
+  /// "None open" and "could not ask" are different answers; never collapse both into an empty list.
   public enum PullRequestResult: Equatable {
     case list([GitPullRequest])
     case toolMissing
@@ -169,22 +164,18 @@ public enum GitRepositoryModel {
   /// led by this line. Splitting on it turns the growing stream into snapshots.
   private static let watchHeaderPrefix = "Refreshing checks status"
 
-  /// The completed snapshots in an accumulating watch buffer, plus the trailing
-  /// partial block still arriving. A block is complete once the next header has
-  /// begun, so the last segment is always held back as the remainder.
+  /// A block is complete only once the next header has begun, so the last segment is
+  /// always held back as the remainder.
   public static func watchSnapshots(splitting buffer: String) -> (blocks: [String], remainder: String) {
     let segments = buffer.components(separatedBy: watchHeaderPrefix)
-    // The first segment is whatever preceded the first header (usually empty);
-    // it is never a snapshot. The last is the still-arriving block.
+    // The first segment precedes the first header and is never a snapshot.
     guard segments.count >= 2 else { return ([], buffer) }
     let blocks = segments[1..<(segments.count - 1)].map { watchHeaderPrefix + $0 }
     let remainder = watchHeaderPrefix + segments[segments.count - 1]
     return (blocks, remainder)
   }
 
-  /// Parses one reprinted block into checks. Rows are tab-separated
-  /// `name\tbucket\telapsed\turl`; the header and blank lines are skipped, and a
-  /// row missing its columns is dropped rather than guessed at.
+  /// Rows are tab-separated `name\tbucket\telapsed\turl`; a row missing columns is dropped.
   public static func watchChecks(fromBlock block: String) -> [GitCheck] {
     block.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
       let raw = String(line)

@@ -24,16 +24,13 @@ public enum TetherMotion {
     .timingCurve(0.16, 1, 0.3, 1, duration: duration)
   }
 
-  /// Settling a panel the finger was just holding. A spring, unlike the rest of
-  /// the chrome: here an overshoot reads as momentum continuing, not as a second
-  /// state change. Duration is short enough that a flick feels answered.
+  /// A spring, unlike the rest of the chrome: after a drag an overshoot reads as momentum,
+  /// not as a second state change.
   public static func drawerSettle(reduceMotion: Bool) -> Animation {
     reduceMotion ? .easeOut(duration: crossfade) : .snappy(duration: 0.3, extraBounce: 0.04)
   }
 
-  /// A side panel arrives from its own edge. Without this it is *inserted*, and
-  /// SwiftUI's default insertion is a fade — so opening from the button faded
-  /// while dragging slid, two different answers to the same action.
+  /// SwiftUI's default insertion is a fade; opening from the button must slide like the drag does.
   public static func drawerTransition(reduceMotion: Bool) -> AnyTransition {
     reduceMotion ? .opacity : .move(edge: .leading)
   }

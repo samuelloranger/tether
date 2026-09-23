@@ -26,15 +26,7 @@ struct TerminalRenderMetrics: Equatable {
   }
 }
 
-/// Draws the grid into a retained bitmap, off the main thread, repainting only
-/// the rows that changed.
-///
-/// The surface used to render inside `UIView.draw(_:)`, which meant the whole
-/// grid was re-shaped on the main thread every time a single character
-/// arrived. Everything here runs on the render queue and hands back a
-/// `CGImage` for the text layer's `contents`; the main thread's only job is to
-/// assign it.
-///
+/// Draws the grid into a bitmap on the render queue; the main thread only assigns the `CGImage`.
 /// Not thread-safe by design — one instance belongs to one serial queue.
 final class TerminalGridRenderer {
   private var context: CGContext?
@@ -71,20 +63,14 @@ final class TerminalGridRenderer {
     let drawRows = TerminalGridLayout.paintedRows(
       cells: cells, cols: cols, rows: rows, altScreen: header.altScreen
     )
-    // The grid is anchored to the bottom of the view (newest output nearest the
-    // key bar), so a row-count change moves every row on screen. Alt-screen
-    // trailing empties are omitted from the draw height so they become slack
-    // at the top rather than a gap under the TUI.
+    // Bottom-anchored, so a row-count change moves every row. Alt-screen trailing
+    // empties are left out so they become slack at the top, not a gap under the TUI.
     let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
 
     guard drawRows > 0 else { return image }
 
-    // Full repaint every frame. Row-granular diffing against the retained
-    // bitmap desynced on keyboard/resize/tab-switch — a mis-diffed or
-    // partially-cleared row left stale pixels that accumulated into the
-    // spliced/torn text the terminal kept showing. Redrawing the whole grid
-    // onto a freshly cleared context each frame is cheap at phone grid sizes
-    // and cannot drift out of sync with the source cells.
+    // Full repaint every frame: row-granular diffing desynced on resize and left torn
+    // text. A whole grid is cheap at phone sizes and cannot drift from the cells.
     context.setFillColor(metrics.background)
     context.fill(CGRect(origin: .zero, size: metrics.size))
 
@@ -148,10 +134,8 @@ final class TerminalGridRenderer {
       }
       context.setFillColor(textColor)
 
-      // A run shares a colour and a style, but not necessarily a FONT: a
-      // codepoint the terminal face cannot draw comes back from the cache on
-      // whatever fallback Core Text picked for it. Glyph ids only mean anything
-      // relative to their own font, so the run is flushed at every font change.
+      // A run can mix fonts (Core Text fallback for uncovered codepoints), and glyph
+      // ids only mean anything relative to their font, so flush on every font change.
       var batchFont: CTFont?
       var glyphs: [CGGlyph] = []
       var positions: [CGPoint] = []
@@ -159,16 +143,8 @@ final class TerminalGridRenderer {
       positions.reserveCapacity(run.codepoints.count)
       var drewAnything = false
 
-      // CTFontDrawGlyphs takes positions in TEXT space, which the text matrix
-      // then maps into user space — unlike CTLineDraw, which anchors on
-      // `context.textPosition` in user space. Under the flipped text matrix
-      // this originally carried, a glyph asked for at `baseline` was drawn at
-      // `-baseline`: every glyph landed above the top of the canvas and the
-      // terminal rendered nothing but its cursor.
-      //
-      // So the flip is done explicitly here instead, around the baseline, with
-      // an identity text matrix and glyphs at y = 0. The whole run shares one
-      // baseline, so this is one save/restore per run rather than per glyph.
+      // CTFontDrawGlyphs positions are in TEXT space: a flipped text matrix draws at
+      // -baseline, off the canvas. So flip the CTM around the baseline, glyphs at y = 0.
       func flush() {
         guard let batchFont, !glyphs.isEmpty else { return }
         context.saveGState()

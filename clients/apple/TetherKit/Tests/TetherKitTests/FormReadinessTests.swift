@@ -1,9 +1,7 @@
 import XCTest
 @testable import TetherKit
 
-/// A dimmed Save button tells a sighted user nothing and a VoiceOver user even
-/// less. Each form says which field is still missing, in the order the form
-/// asks for them.
+/// A dimmed Save says nothing, least of all to VoiceOver: each form names the first missing field.
 final class FormReadinessTests: XCTestCase {
   func test_a_complete_key_backed_server_is_ready() {
     XCTAssertNil(FormReadiness.serverBlocker(

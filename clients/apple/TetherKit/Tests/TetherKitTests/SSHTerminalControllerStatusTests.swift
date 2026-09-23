@@ -1,9 +1,8 @@
 import XCTest
 @testable import TetherKit
 
-/// A mid-session transport drop must not leave the status at `.connected`:
-/// every reconnect gate skips while `.connected`, so a stale value meant the
-/// terminal stayed dead until the app was force-quit.
+/// A mid-session transport drop must not leave the status at `.connected`: every
+/// reconnect gate skips while `.connected`, so the terminal would stay dead.
 final class SSHTerminalControllerStatusTests: XCTestCase {
   func test_transport_drop_while_connected_flips_off_connected() {
     XCTAssertEqual(

@@ -1,8 +1,7 @@
 import Foundation
 
-/// Why a form's primary action is still unavailable, in the order the form asks
-/// for its fields. `nil` means the form is ready. A dimmed button on its own
-/// explains nothing — this is the sentence shown beside it and read as its hint.
+/// Why a form's primary action is still unavailable, in field order; `nil` means ready.
+/// Shown beside the dimmed button and read as its accessibility hint.
 public enum FormReadiness {
   public static func serverBlocker(
     name: String, host: String, username: String, usesPassword: Bool, password: String, hasKey: Bool

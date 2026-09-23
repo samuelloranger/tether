@@ -1,8 +1,7 @@
 import XCTest
 
-/// Drives the v5 SSH screen end to end against a live sshd+zmx host (preseeded
-/// via TETHER_SSH_* launch env). Screenshots each step; run under a screen
-/// recording to capture the switch behaviour (live switch vs. reconnect flash).
+/// Drives the SSH screen end to end against a live sshd+zmx host, preseeded via the
+/// TETHER_SSH_* launch env. Screenshots each step.
 final class SSHV5FlowTests: TetherUITestCase {
   private func liveApp(sendFile: String? = nil) -> XCUIApplication {
     let app = XCUIApplication()

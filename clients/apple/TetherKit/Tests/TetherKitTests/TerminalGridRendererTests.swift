@@ -4,15 +4,8 @@ import XCTest
 
 @testable import TetherKit
 
-/// Pixel-level checks on the rasterizer.
-///
-/// These exist because v3.2.1 shipped a terminal that drew nothing at all. Every
-/// unit test passed: the run splitting was right, the diff was right, the glyph
-/// ids were right. What was wrong was the coordinate space handed to
-/// `CTFontDrawGlyphs` — positions are TEXT space, mapped through the text
-/// matrix, so under a flipped matrix every glyph was drawn above the top of the
-/// canvas. Nothing short of looking at the output catches that, so these tests
-/// look at the output.
+/// Pixel checks: `CTFontDrawGlyphs` takes text-space positions, so a wrong matrix draws
+/// off-canvas while every structural test still passes. Only the output catches it.
 final class TerminalGridRendererTests: XCTestCase {
   private let background = UIColor.black.cgColor
   private let backgroundARGB: UInt32 = 0xFF00_0000
@@ -182,9 +175,8 @@ final class TerminalGridRendererTests: XCTestCase {
     XCTAssertEqual(inkedPixels(gap), 0)
   }
 
-  /// Alt-screen TUI after a grow: trailing empty rows are unpainted, not
-  /// content. They must sit as slack against the title bar so the painted TUI
-  /// stays on the key bar — otherwise the whole screen looks pushed up.
+  /// Alt-screen trailing empty rows are unpainted slack: they sit against the title bar so
+  /// the painted TUI stays on the key bar.
   func testAltScreenTrailingEmptyRowsSitAsSlackAtTheTop() {
     let renderer = TerminalGridRenderer()
     let cols = 8
@@ -215,9 +207,7 @@ final class TerminalGridRendererTests: XCTestCase {
     XCTAssertGreaterThan(inkedPixels(content), 0, "the painted TUI never landed")
   }
 
-  /// When the snapshot has fewer rows than the view, slack belongs at the TOP
-  /// (against the title bar), not under the last line. A regression here is
-  /// the other way to get a gap at the bottom: content top-aligned in a tall view.
+  /// Slack belongs at the top (against the title bar), not under the last line.
   func testAShortGridInATallViewPutsSlackAtTheTop() {
     let renderer = TerminalGridRenderer()
     let cols = 8
@@ -246,13 +236,8 @@ final class TerminalGridRendererTests: XCTestCase {
 
   // MARK: - Attribute / colour edge cases
 
-  /// The bitmap is retained across frames, so a changed row that never makes it
-  /// into the repaint keeps the previous frame's glyphs on screen. A dense row
-  /// replaced by blanks on the SAME renderer (the incremental dirty-row path,
-  /// not a full repaint) must come back to pure background. A dirty-detection or
-  /// return-early regression that left the old image standing shows here — and
-  /// nothing but the pixels catches it. (Verified by mutation: forcing the
-  /// stale image to be returned turns this red.)
+  /// The bitmap is retained across frames, so a dirty row the incremental repaint misses
+  /// keeps the previous frame's glyphs; only the pixels catch it.
   func testIncrementalRepaintClearsStaleGlyphs() {
     let renderer = TerminalGridRenderer()
     let cols = 4
@@ -276,9 +261,7 @@ final class TerminalGridRendererTests: XCTestCase {
     )
   }
 
-  /// A non-default cell background must actually paint its colour. Inverse video
-  /// and any coloured background land through this span path; a regression here
-  /// shows blank where a highlighted line should be.
+  /// Inverse video and every coloured background paint through this span path.
   func testColoredBackgroundPaintsItsColor() {
     let renderer = TerminalGridRenderer()
     let cols = 4
@@ -372,9 +355,8 @@ final class TerminalGridRendererTests: XCTestCase {
     XCTAssertGreaterThan(inkMass(lined), inkMass(bare), "the underline stroke never landed")
   }
 
-  /// Total per-channel coverage — sums the R, G and B of every pixel. Unlike
-  /// `inkedPixels` (a count over a threshold) this is sensitive to how much and
-  /// what colour was drawn, which is what the attribute/colour tests turn on.
+  /// Sums R, G and B over every pixel: unlike `inkedPixels`, sensitive to how much and
+  /// what colour was drawn.
   private func channelMass(_ image: CGImage) -> (r: Int, g: Int, b: Int) {
     let width = image.width
     let height = image.height

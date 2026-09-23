@@ -1,10 +1,8 @@
 import XCTest
 @testable import TetherKit
 
-/// The drawer follows the finger: every point of the drag maps to a position,
-/// and the release settles where the flick was actually headed. Previously the
-/// drag only produced a verdict at the end, so the panel played a canned
-/// animation instead of tracking.
+/// The drawer follows the finger: every point of the drag maps to a position, and the
+/// release settles where the flick was actually headed.
 final class DrawerTrackingTests: XCTestCase {
   private let width: CGFloat = 280
 
