@@ -130,6 +130,17 @@ actor TerminalPipeline {
     publishSnapshot()
   }
 
+  /// False when the shell marked no OSC 133 prompt in that direction.
+  func jumpToPrompt(_ direction: PromptJump) -> Bool {
+    guard let emulator, emulator.jumpToPrompt(direction) else { return false }
+    publishSnapshot()
+    return true
+  }
+
+  func lastCommandOutput() -> String? {
+    emulator?.lastCommandOutput()
+  }
+
   // MARK: - Outbound
 
   private func startOutboundPumpIfNeeded() {

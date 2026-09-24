@@ -124,6 +124,15 @@ public enum LinkSpans {
     return out
   }
 
+  /// OSC 8 links win over text that merely looks like a link: `target` returns the first
+  /// span that covers a cell.
+  public static func merging(explicit: [[LinkSpan]], detected: [[LinkSpan]]) -> [[LinkSpan]] {
+    guard !explicit.isEmpty else { return detected }
+    return detected.indices.map { row in
+      (row < explicit.count ? explicit[row] : []) + detected[row]
+    }
+  }
+
   public static func target(atColumn col: Int, row: Int, spans: [[LinkSpan]]) -> LinkTarget? {
     guard row >= 0, row < spans.count else { return nil }
     for span in spans[row] where col >= span.start && col < span.end {
