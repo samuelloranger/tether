@@ -49,6 +49,22 @@ final class TerminalFontsTests: XCTestCase {
     }
   }
 
+  func test_the_symbols_cascade_keeps_the_system_fallback_for_cjk_and_emoji() {
+    for name in ["Menlo-Regular", "JetBrainsMono-Regular", "ComicMono"] {
+      let cache = TerminalGlyphCache(
+        regular: TerminalFonts.font(postScriptName: name, size: 12, bold: false),
+        bold: TerminalFonts.font(postScriptName: name, size: 12, bold: true)
+      )
+      // 你 あ 한 😀: none are in the terminal faces or the symbols font.
+      for codepoint: UInt32 in [0x4F60, 0x3042, 0xD55C, 0x1F600] {
+        let face = cache.glyph(for: codepoint, bold: false).map { postScriptName($0.font) }
+        XCTAssertNotNil(face, "\(name) U+\(String(codepoint, radix: 16)) has no glyph")
+        XCTAssertNotEqual(face, TerminalFonts.symbolsPostScriptName)
+        XCTAssertNotEqual(face, name)
+      }
+    }
+  }
+
   func test_saved_ids_from_the_old_enum_still_resolve_and_unknown_ones_fall_back() {
     XCTAssertEqual(TerminalFont.named("SF Mono").postScriptName, "SFMono-Regular")
     XCTAssertEqual(TerminalFont.named("Courier New").postScriptName, "CourierNewPSMT")
