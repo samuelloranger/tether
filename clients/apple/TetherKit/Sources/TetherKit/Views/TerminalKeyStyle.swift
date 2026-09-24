@@ -5,6 +5,7 @@ import SwiftUI
 struct TerminalKeyStyle: ButtonStyle {
   /// Latched state — Ctrl, which stays on until it is spent.
   var armed = false
+  static let cornerRadius: CGFloat = 8
 
   func makeBody(configuration: Configuration) -> some View {
     // A nested View, not the style itself: `@Environment` read directly on a
@@ -21,7 +22,7 @@ struct TerminalKeyStyle: ButtonStyle {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 8, style: .continuous) }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: TerminalKeyStyle.cornerRadius, style: .continuous) }
 
     var body: some View {
       label()
