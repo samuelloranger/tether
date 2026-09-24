@@ -112,13 +112,47 @@ for lib in ssh2 crypto ssl; do
 done
 
 log "Installing into $OUT"
+# Stage next to the destinations so each swap is a rename, and roll back on any failure:
+# a half-replaced set would pair the new libssh2 with an old OpenSSL or header.
+stage="$(mktemp -d "$OUT/.stage.XXXXXX")"
+backup="$(mktemp -d "$OUT/.backup.XXXXXX")"
 for lib in ssh2 crypto ssl; do
-  rm -rf "${OUT:?}/$lib.xcframework"
-  cp -R "$WORK/$lib.xcframework" "$OUT/"
+  cp -R "$WORK/$lib.xcframework" "$stage/"
 done
-cp "$WORK/prefix/ios-arm64/include/libssh2.h" "$HEADER_OUT/libssh2.h"
-cp libssh2/COPYING "$OUT/LICENSE-libssh2"
-cp "openssl-ios-arm64/LICENSE.txt" "$OUT/LICENSE-openssl"
+cp "$WORK/prefix/ios-arm64/include/libssh2.h" "$stage/libssh2.h"
+cp libssh2/COPYING "$stage/LICENSE-libssh2"
+cp "openssl-ios-arm64/LICENSE.txt" "$stage/LICENSE-openssl"
+
+swapped=()
+installed=false
+rollback() {
+  # Best effort: one failed restore must not stop the others.
+  set +e
+  # `${a[@]+…}`: bash 3.2 (macOS) treats an empty array as unset under `set -u`.
+  for dest in ${swapped[@]+"${swapped[@]}"}; do
+    rm -rf "$dest"
+    if [[ -e "$backup/$(basename "$dest")" ]]; then mv "$backup/$(basename "$dest")" "$dest"; fi
+  done
+  rm -rf "$stage"
+  # A backup that could not be put back stays on disk rather than being lost.
+  if rmdir "$backup" 2>/dev/null; then
+    echo "install failed; restored the previous frameworks and header" >&2
+  else
+    echo "install failed; originals that could not be restored are in $backup" >&2
+  fi
+}
+trap '$installed || rollback' EXIT
+
+for name in ssh2.xcframework crypto.xcframework ssl.xcframework libssh2.h LICENSE-libssh2 LICENSE-openssl; do
+  if [[ "$name" == libssh2.h ]]; then dest="$HEADER_OUT/$name"; else dest="$OUT/$name"; fi
+  if [[ -e "$dest" ]]; then mv "$dest" "$backup/"; fi
+  # Only after the original is safe in the backup: rollback deletes what it lists.
+  swapped+=("$dest")
+  mv "$stage/$name" "$dest"
+done
+installed=true
+trap - EXIT
+rm -rf "$stage" "$backup"
 
 log "Done"
 echo "libssh2  $LIBSSH2_SHA"
