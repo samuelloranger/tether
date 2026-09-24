@@ -5,7 +5,7 @@ import UIKit
 /// A face the terminal can draw with. `id` is what preferences store.
 public struct TerminalFont: Hashable, Identifiable, Sendable {
   public enum Source: Hashable, Sendable {
-    case system, bundled
+    case system, bundled, downloaded
   }
 
   public var id: String
@@ -55,6 +55,22 @@ public enum TerminalFonts {
     "SymbolsNerdFontMono-Regular.ttf",
   ]
 
+  private static let boldLock = NSLock()
+  nonisolated(unsafe) private static var boldFaces: [String: String] = Dictionary(
+    uniqueKeysWithValues: TerminalFont.builtIn.compactMap { font in font.boldPostScriptName.map { (font.postScriptName, $0) } }
+  )
+
+  /// A downloaded family's bold face, found by its regular face's PostScript name.
+  static func setBoldFace(_ bold: String?, for regular: String) {
+    boldLock.lock(); defer { boldLock.unlock() }
+    boldFaces[regular] = bold
+  }
+
+  static func boldFace(for regular: String) -> String? {
+    boldLock.lock(); defer { boldLock.unlock() }
+    return boldFaces[regular]
+  }
+
   private static let registration: Void = {
     for file in bundledFiles {
       let name = (file as NSString).deletingPathExtension
@@ -73,7 +89,7 @@ public enum TerminalFonts {
   /// so prompt icons and powerline glyphs draw instead of empty boxes.
   public static func font(postScriptName: String, size: CGFloat, bold: Bool) -> UIFont {
     registerBundledFonts()
-    let boldName = bold ? TerminalFont.builtIn.first { $0.postScriptName == postScriptName }?.boldPostScriptName : nil
+    let boldName = bold ? boldFace(for: postScriptName) : nil
     var base: UIFont
     if let boldName, let named = UIFont(name: boldName, size: size) {
       base = named

@@ -32,6 +32,7 @@ public final class AppPreferences {
     static let terminalFont = "tether.terminalFont"
     static let terminalFontSize = "tether.terminalFontSize"
     static let terminalTheme = "tether.terminalTheme"
+    static let downloadedFonts = "tether.downloadedFonts"
   }
 
   public var colorSchemePreference: ColorSchemePreference {
@@ -48,8 +49,36 @@ public final class AppPreferences {
 
   /// An id no longer offered falls back to Menlo.
   public var terminalFont: TerminalFont {
-    get { TerminalFont.named(terminalFontID) }
+    get { availableFonts.first { $0.id == terminalFontID } ?? .menlo }
     set { terminalFontID = newValue.id }
+  }
+
+  /// Families fetched from Google Fonts; their files are registered at launch.
+  public private(set) var downloadedFonts: [DownloadedFont] {
+    didSet {
+      UserDefaults.standard.set(try? JSONEncoder().encode(downloadedFonts), forKey: Key.downloadedFonts)
+    }
+  }
+
+  public var availableFonts: [TerminalFont] {
+    TerminalFont.builtIn + downloadedFonts.map(\.terminalFont)
+  }
+
+  @ObservationIgnored private let fontInstaller = GoogleFontsInstaller()
+
+  /// Downloads a family from a Google Fonts link or name and selects it.
+  public func downloadFont(_ link: String) async throws {
+    let font = try await fontInstaller.install(link)
+    fontInstaller.register(font)
+    downloadedFonts.removeAll { $0.slug == font.slug }
+    downloadedFonts.append(font)
+    terminalFontID = font.id
+  }
+
+  public func removeDownloadedFont(_ font: DownloadedFont) {
+    fontInstaller.remove(font)
+    downloadedFonts.removeAll { $0.id == font.id }
+    if terminalFontID == font.id { terminalFontID = TerminalFont.menlo.id }
   }
 
   public var terminalFontSize: Double {
@@ -76,7 +105,12 @@ public final class AppPreferences {
       rawValue: defaults.string(forKey: Key.colorScheme) ?? ""
     ) ?? .dark
     terminalFontID = defaults.string(forKey: Key.terminalFont) ?? TerminalFont.menlo.id
+    let downloaded = defaults.data(forKey: Key.downloadedFonts)
+      .flatMap { try? JSONDecoder().decode([DownloadedFont].self, from: $0) } ?? []
+    downloadedFonts = downloaded
     TerminalFonts.registerBundledFonts()
+    let installer = GoogleFontsInstaller()
+    for font in downloaded { installer.register(font) }
     let size = defaults.double(forKey: Key.terminalFontSize)
     terminalFontSize = size > 0 ? size : 11
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
