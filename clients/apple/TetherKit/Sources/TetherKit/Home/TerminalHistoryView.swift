@@ -89,7 +89,7 @@ private struct SelectableTextView: UIViewRepresentable {
   }
 
   func updateUIView(_ view: UITextView, context: Context) {
-    view.font = UIFont(name: fontName, size: fontSize) ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    view.font = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: false)
     view.backgroundColor = theme.uiBackground
     view.textColor = TerminalTheme.uiColor(theme.foreground)
     if view.text != text {

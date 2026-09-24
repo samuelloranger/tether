@@ -480,13 +480,8 @@ public final class TetherSurfaceView: UIView {
   }
 
   private func invalidateMetrics() {
-    font = UIFont(name: fontName, size: fontSize)
-      ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-    boldFont = UIFont(name: fontName, size: fontSize)
-      ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-    if let boldDescriptor = font.fontDescriptor.withSymbolicTraits(.traitBold) {
-      boldFont = UIFont(descriptor: boldDescriptor, size: fontSize)
-    }
+    font = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: false)
+    boldFont = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: true)
     cellWidth = ceil(font.advancement(for: "M"))
     cellHeight = ceil(font.lineHeight)
     invalidateIntrinsicContentSize()
