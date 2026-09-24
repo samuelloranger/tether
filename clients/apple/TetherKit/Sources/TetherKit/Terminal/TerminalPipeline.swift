@@ -101,15 +101,22 @@ actor TerminalPipeline {
         applyOutput(bytes)
       }
       if !Task.isCancelled, key == emulatorKey {
-        sshTransport = nil
+        connectionLost()
         eventSink.yield(.error("Connection closed"))
       }
     } catch {
       if !Task.isCancelled, key == emulatorKey {
-        sshTransport = nil
+        connectionLost()
         eventSink.yield(.error(error.localizedDescription))
       }
     }
+  }
+
+  /// The stream ended by itself: nothing new will arrive, so the image watch stops too.
+  private func connectionLost() {
+    sshTransport = nil
+    imagesWatchable = false
+    watchImages(nil)
   }
 
   /// Drops the transport but KEEPS the emulator, so a foreground reconnect to

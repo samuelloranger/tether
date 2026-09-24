@@ -289,6 +289,18 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertFalse(watching)
   }
 
+  func test_a_connection_that_ends_by_itself_stops_the_image_watch() async throws {
+    let pipeline = TerminalPipeline()
+    let stream = ClosingByteStream(chunks: [Data(kitty("a=T,f=32,s=2,v=2,q=2", solidRed).utf8)])
+    await pipeline.connectSSH(transport: stream, key: "k")
+    var watching = true
+    for _ in 0..<40 where watching {
+      try await Task.sleep(for: .milliseconds(25))
+      watching = await pipeline.isWatchingImagesForTest
+    }
+    XCTAssertFalse(watching, "the watch kept polling after the stream ended")
+  }
+
   func test_disconnecting_stops_the_image_watch() async {
     let pipeline = TerminalPipeline()
     await pipeline.attachForTest(cols: 20, rows: 5)
@@ -328,4 +340,13 @@ final class TerminalImageTests: XCTestCase {
     let offset = (y * width + x) * 4
     return (Int(raw[offset]), Int(raw[offset + 1]), Int(raw[offset + 2]))
   }
+}
+
+/// Yields its chunks, then ends like a closed SSH channel.
+private actor ClosingByteStream: TerminalByteStream {
+  private var chunks: [Data]
+  init(chunks: [Data]) { self.chunks = chunks }
+  func read() async throws -> Data? { chunks.isEmpty ? nil : chunks.removeFirst() }
+  func write(_ bytes: Data) async throws {}
+  func close() async {}
 }
