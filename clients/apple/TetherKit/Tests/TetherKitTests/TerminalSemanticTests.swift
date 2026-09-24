@@ -129,6 +129,27 @@ final class TerminalSemanticTests: XCTestCase {
     XCTAssertEqual(engine.lastCommandOutput(), "a\n\nb")
   }
 
+  func test_marks_from_before_a_reset_are_dropped() {
+    let engine = TerminalEngine(cols: 30, rows: 8)
+    // The old command's D lands on row 2, inside the next command's output once RIS
+    // restarts the buffer at row 0.
+    shell(engine, commands: [("one", ["a"])])
+    engine.feed("\u{1B}c")
+    shell(engine, commands: [("two", ["x", "y", "z"])])
+    XCTAssertEqual(engine.lastCommandOutput(), "x\ny\nz")
+  }
+
+  func test_marks_from_before_a_clear_are_not_taken_for_the_next_command() {
+    for clear in ["\u{1B}[H\u{1B}[2J", "\u{1B}[3J\u{1B}[H\u{1B}[2J"] {
+      let engine = TerminalEngine(cols: 30, rows: 8)
+      // `one` ends with D on row 2; after `clear` the next command's output covers rows 1–3.
+      engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)one\r\n\u{1B}]133;C\(st)a\r\n\u{1B}]133;D;0\(st)")
+      engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)clear\r\n\u{1B}]133;C\(st)\(clear)\u{1B}]133;D;0\(st)")
+      shell(engine, commands: [("two", ["x", "y", "z"])])
+      XCTAssertEqual(engine.lastCommandOutput(), "x\ny\nz", clear.debugDescription)
+    }
+  }
+
   func test_output_that_starts_on_the_command_row_is_kept() {
     let engine = TerminalEngine(cols: 30, rows: 8)
     engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)echo -n hi\u{1B}]133;C\(st)hi\u{1B}]133;D;0\(st)\r\n")

@@ -14,8 +14,8 @@ final class TerminalEngine {
   private var palette: [UInt32] = []
   private var needsRefresh = false
   private var oscScanner = OSCScanner()
-  /// OSC 133 C / D positions. `line` counts from the first line ever written, so it survives
-  /// scrollback trimming; subtract `totalLinesTrimmed` for a buffer row.
+  /// OSC 133 A / C / D positions. `line` counts from the first line ever written, so it
+  /// survives scrollback trimming; subtract `totalLinesTrimmed` for a buffer row.
   private var commandMarks: [CommandMark] = []
   /// Lines above the live bottom the view is scrolled back; 0 = live.
   private var scrollOffset = 0
@@ -119,23 +119,47 @@ final class TerminalEngine {
   /// ends (D). Output is fed up to each of those, so the cursor there is exactly the mark.
   private func feedMarkingCommands(_ bytes: [UInt8]) {
     var start = 0
-    for event in oscScanner.scan(bytes) {
-      guard case let .osc("133", body, end) = event,
-            let kind = body.first, kind == UInt8(ascii: "C") || kind == UInt8(ascii: "D")
-      else { continue }
+    var top = screenTopLine()
+    // RIS, ED 3 and reflow renumber the buffer; marks from before would point at other rows.
+    func feed(through end: Int) {
       terminal.feed(buffer: bytes[start..<end])
       start = end
-      guard !terminal.isCurrentBufferAlternate else { continue }
-      let buffer = terminal.buffer
-      // While output arrives the view is live, so yDisp is the top of the screen.
-      let mark = CommandMark(
-        isEnd: kind == UInt8(ascii: "D"),
-        line: buffer.yDisp + buffer.y + buffer.totalLinesTrimmed, col: buffer.x
-      )
-      commandMarks.append(mark)
-      if commandMarks.count > 400 { commandMarks.removeFirst(commandMarks.count - 400) }
+      let now = screenTopLine()
+      if now < top { commandMarks.removeAll() }
+      top = now
     }
-    if start < bytes.count { terminal.feed(buffer: bytes[start...]) }
+    for event in oscScanner.scan(bytes) {
+      switch event {
+      case let .reset(end):
+        feed(through: end)
+        commandMarks.removeAll()
+      case let .osc("133", body, end):
+        let kind: CommandMark.Kind
+        switch body.first {
+        case UInt8(ascii: "A"), UInt8(ascii: "N"): kind = .prompt
+        case UInt8(ascii: "C"): kind = .outputStart
+        case UInt8(ascii: "D"): kind = .outputEnd
+        default: continue
+        }
+        feed(through: end)
+        guard !terminal.isCurrentBufferAlternate else { continue }
+        let buffer = terminal.buffer
+        commandMarks.append(CommandMark(
+          kind: kind, line: buffer.yDisp + buffer.y + buffer.totalLinesTrimmed, col: buffer.x
+        ))
+        if commandMarks.count > 400 { commandMarks.removeFirst(commandMarks.count - 400) }
+      default:
+        continue
+      }
+    }
+    if start < bytes.count { feed(through: bytes.count) }
+  }
+
+  /// The first screen row as a line count from the start of output. While output arrives
+  /// the view is live, so yDisp is the top of the screen. It only goes backwards when the
+  /// buffer was reset or its scrollback cleared.
+  private func screenTopLine() -> Int {
+    terminal.buffer.yDisp + terminal.buffer.totalLinesTrimmed
   }
 
   private func feedLocked(_ bytes: Data) {
@@ -168,6 +192,8 @@ final class TerminalEngine {
     guard Int(cols) != dims.cols || Int(rows) != dims.rows else { return }
     returnToLive()
     scrollOffset = 0
+    // A reflow moves text between rows; recorded command marks no longer line up.
+    commandMarks.removeAll()
     terminal.resize(cols: Int(cols), rows: Int(rows))
     liveTop = terminal.buffer.yDisp
     needsRefresh = true
@@ -264,14 +290,20 @@ final class TerminalEngine {
   /// the command line to the row before the next prompt.
   private func outputBounds(in group: Range<Int>, cols: Int) -> (start: (row: Int, col: Int), end: (row: Int, col: Int)) {
     let trimmed = terminal.buffer.totalLinesTrimmed
-    let marks = commandMarks.map { (isEnd: $0.isEnd, row: $0.line - trimmed, col: $0.col) }
-      .filter { group.contains($0.row) || $0.row == group.upperBound }
-    if let begin = marks.last(where: { !$0.isEnd && group.contains($0.row) }) {
-      let finish = marks.first { $0.isEnd && ($0.row, $0.col) >= (begin.row, begin.col) }
-      // D at the start of a line ends the output on the line above.
-      let end: (row: Int, col: Int) = finish.map { $0.col == 0 ? ($0.row - 1, cols) : ($0.row, $0.col) }
-        ?? (group.upperBound - 1, cols)
-      return ((begin.row, begin.col), end)
+    // The C and D between the last two prompts the shell announced, in the order it sent
+    // them: an older D at a lower row can't be taken for this command's.
+    let prompts = commandMarks.indices.filter { commandMarks[$0].kind == .prompt }
+    if prompts.count >= 2 {
+      let between = commandMarks[(prompts[prompts.count - 2] + 1)..<prompts[prompts.count - 1]]
+      if let begin = between.first(where: { $0.kind == .outputStart }) {
+        let finish = between.first { $0.kind == .outputEnd && ($0.line, $0.col) >= (begin.line, begin.col) }
+        let startRow = max(0, begin.line - trimmed)
+        let startCol = begin.line - trimmed < 0 ? 0 : begin.col
+        // D at the start of a line ends the output on the line above.
+        let end: (row: Int, col: Int) = finish.map { $0.col == 0 ? ($0.line - trimmed - 1, cols) : ($0.line - trimmed, $0.col) }
+          ?? (group.upperBound - 1, cols)
+        return ((startRow, startCol), end)
+      }
     }
     let inputRows = group.filter { row in
       guard let line = terminal.bufferLine(atRow: row) else { return false }
@@ -407,8 +439,11 @@ final class TerminalEngine {
   }
 }
 
+/// An OSC 133 mark in stream order. SwiftTerm keeps prompt marks per row but no C or D;
+/// matching C and D to their prompt by order, not by row, holds across renumbering.
 struct CommandMark: Equatable {
-  var isEnd: Bool
+  enum Kind { case prompt, outputStart, outputEnd }
+  var kind: Kind
   var line: Int
   var col: Int
 }
