@@ -150,6 +150,24 @@ final class TerminalSemanticTests: XCTestCase {
     }
   }
 
+  func test_output_on_the_command_row_survives_a_resize() {
+    let engine = TerminalEngine(cols: 30, rows: 8)
+    engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)echo -n hi\u{1B}]133;C\(st)hi\u{1B}]133;D;0\(st)\r\n")
+    engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)")
+    // The resize drops the recorded marks; the row-based range must still find "hi".
+    engine.resize(cols: 30, rows: 10)
+    XCTAssertEqual(engine.lastCommandOutput(), "hi")
+  }
+
+  func test_a_p_prompt_anchors_the_same_command_swiftterm_chose() {
+    let engine = TerminalEngine(cols: 30, rows: 8)
+    shell(engine, commands: [("one", ["old"])])
+    // The next commands' prompts are announced with P instead of A.
+    engine.feed("\u{1B}]133;P\(st)$ \u{1B}]133;B\(st)two\r\n\u{1B}]133;C\(st)new\r\n\u{1B}]133;D;0\(st)")
+    engine.feed("\u{1B}]133;P\(st)$ \u{1B}]133;B\(st)")
+    XCTAssertEqual(engine.lastCommandOutput(), "new")
+  }
+
   func test_output_that_starts_on_the_command_row_is_kept() {
     let engine = TerminalEngine(cols: 30, rows: 8)
     engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)echo -n hi\u{1B}]133;C\(st)hi\u{1B}]133;D;0\(st)\r\n")

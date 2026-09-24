@@ -136,7 +136,11 @@ final class TerminalEngine {
       case let .osc("133", body, end):
         let kind: CommandMark.Kind
         switch body.first {
-        case UInt8(ascii: "A"), UInt8(ascii: "N"): kind = .prompt
+        case UInt8(ascii: "A"), UInt8(ascii: "N"), UInt8(ascii: "P"):
+          // A secondary (PS2) or right prompt belongs to the command already being typed.
+          let options = String(decoding: body, as: UTF8.self).split(separator: ";").dropFirst()
+          guard !options.contains("k=s"), !options.contains("k=r") else { continue }
+          kind = .prompt
         case UInt8(ascii: "C"): kind = .outputStart
         case UInt8(ascii: "D"): kind = .outputEnd
         default: continue
@@ -290,31 +294,38 @@ final class TerminalEngine {
   /// the command line to the row before the next prompt.
   private func outputBounds(in group: Range<Int>, cols: Int) -> (start: (row: Int, col: Int), end: (row: Int, col: Int)) {
     let trimmed = terminal.buffer.totalLinesTrimmed
-    // The C and D between the last two prompts the shell announced, in the order it sent
-    // them: an older D at a lower row can't be taken for this command's.
+    // The C and D between the last two prompts the shell announced (A, N or P), in the order
+    // it sent them: an older D at a lower row can't be taken for this command's. SwiftTerm's
+    // own prompt rows aren't used here: it keeps prompt marks on rows `clear` has wiped.
     let prompts = commandMarks.indices.filter { commandMarks[$0].kind == .prompt }
     if prompts.count >= 2 {
-      let between = commandMarks[(prompts[prompts.count - 2] + 1)..<prompts[prompts.count - 1]]
-      if let begin = between.first(where: { $0.kind == .outputStart }) {
-        let finish = between.first { $0.kind == .outputEnd && ($0.line, $0.col) >= (begin.line, begin.col) }
+      let window = commandMarks[(prompts[prompts.count - 2] + 1)..<prompts[prompts.count - 1]]
+      if let begin = window.first(where: { $0.kind == .outputStart }) {
+        let finish = window.first { $0.kind == .outputEnd && ($0.line, $0.col) >= (begin.line, begin.col) }
         let startRow = max(0, begin.line - trimmed)
         let startCol = begin.line - trimmed < 0 ? 0 : begin.col
-        // D at the start of a line ends the output on the line above.
+        // D at the start of a line ends the output on the line above; with no D, the output
+        // runs to the row before the next prompt.
+        let nextPrompt = commandMarks[prompts[prompts.count - 1]].line - trimmed
         let end: (row: Int, col: Int) = finish.map { $0.col == 0 ? ($0.line - trimmed - 1, cols) : ($0.line - trimmed, $0.col) }
-          ?? (group.upperBound - 1, cols)
+          ?? (nextPrompt - 1, cols)
         return ((startRow, startCol), end)
       }
     }
-    let inputRows = group.filter { row in
-      guard let line = terminal.bufferLine(atRow: row) else { return false }
-      return (0..<min(cols, line.count)).contains { col in
+    // No marks (a shell that sends no C, or a resize dropped them): output starts after
+    // the last prompt or input cell of the command line, on that same row if it has more.
+    var last: (row: Int, col: Int)?
+    for row in group {
+      guard let line = terminal.bufferLine(atRow: row) else { continue }
+      for col in 0..<min(cols, line.count) {
         switch terminal.semanticContent(at: Position(col: col, row: row)) {
-        case .prompt, .input: return true
-        default: return false
+        case .prompt, .input: last = (row, col)
+        default: break
         }
       }
     }
-    return (((inputRows.last ?? group.lowerBound - 1) + 1, 0), (group.upperBound - 1, cols))
+    let start = last.map { ($0.row, $0.col + 1) } ?? (group.lowerBound, 0)
+    return (start, (group.upperBound - 1, cols))
   }
 
   private func returnToLive() {
