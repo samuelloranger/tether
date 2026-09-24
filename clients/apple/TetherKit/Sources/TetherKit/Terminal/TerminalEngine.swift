@@ -13,6 +13,10 @@ final class TerminalEngine {
   /// Rebuilt only when a program repaints the palette (OSC 4/104).
   private var palette: [UInt32] = []
   private var needsRefresh = false
+  private var oscScanner = OSCScanner()
+  /// OSC 133 A / C / D positions. `line` counts from the first line ever written, so it
+  /// survives scrollback trimming; subtract `totalLinesTrimmed` for a buffer row.
+  private var commandMarks: [CommandMark] = []
   /// Lines above the live bottom the view is scrolled back; 0 = live.
   private var scrollOffset = 0
   /// `buffer.yDisp` at the live bottom. SwiftTerm's yDisp follows output only while there,
@@ -31,7 +35,8 @@ final class TerminalEngine {
     terminal = Terminal(delegate: delegate, options: options)
     TerminalPalette.install(on: terminal)
     palette = TerminalPalette.table(of: terminal)
-    cached = TerminalFrame(header: currentHeader(), cells: buildCells())
+    let grid = buildGrid()
+    cached = TerminalFrame(header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks)
     terminal.clearUpdateRange()
   }
 
@@ -92,9 +97,73 @@ final class TerminalEngine {
     locked { scrollLocked(lines: lines) }
   }
 
+  /// Scrolls so the previous / next OSC 133 prompt is the top row. False when the shell
+  /// has marked no prompt in that direction.
+  @discardableResult
+  func jumpToPrompt(_ direction: PromptJump) -> Bool {
+    locked { jumpToPromptLocked(direction) }
+  }
+
+  /// Text of the newest finished command's output, from the OSC 133 marks. Nil when the
+  /// shell marks no prompts or the last command printed nothing.
+  func lastCommandOutput() -> String? {
+    locked { lastCommandOutputLocked() }
+  }
+
   /// The lock is a ticket lock and not re-entrant: take it once per entry point.
   private func locked<T>(_ body: () -> T) -> T {
     terminal.terminalLock.withLock(body)
+  }
+
+  /// SwiftTerm keeps OSC 133 prompt marks but not where a command's output starts (C) and
+  /// ends (D). Output is fed up to each of those, so the cursor there is exactly the mark.
+  private func feedMarkingCommands(_ bytes: [UInt8]) {
+    var start = 0
+    var top = screenTopLine()
+    // RIS, ED 3 and reflow renumber the buffer; marks from before would point at other rows.
+    func feed(through end: Int) {
+      terminal.feed(buffer: bytes[start..<end])
+      start = end
+      let now = screenTopLine()
+      if now < top { commandMarks.removeAll() }
+      top = now
+    }
+    for event in oscScanner.scan(bytes) {
+      switch event {
+      case let .reset(end):
+        feed(through: end)
+        commandMarks.removeAll()
+      case let .osc("133", body, end):
+        let kind: CommandMark.Kind
+        switch body.first {
+        case UInt8(ascii: "A"), UInt8(ascii: "N"), UInt8(ascii: "P"):
+          // A secondary (PS2) or right prompt belongs to the command already being typed.
+          let options = String(decoding: body, as: UTF8.self).split(separator: ";").dropFirst()
+          guard !options.contains("k=s"), !options.contains("k=r") else { continue }
+          kind = .prompt
+        case UInt8(ascii: "C"): kind = .outputStart
+        case UInt8(ascii: "D"): kind = .outputEnd
+        default: continue
+        }
+        feed(through: end)
+        guard !terminal.isCurrentBufferAlternate else { continue }
+        let buffer = terminal.buffer
+        commandMarks.append(CommandMark(
+          kind: kind, line: buffer.yDisp + buffer.y + buffer.totalLinesTrimmed, col: buffer.x
+        ))
+        if commandMarks.count > 400 { commandMarks.removeFirst(commandMarks.count - 400) }
+      default:
+        continue
+      }
+    }
+    if start < bytes.count { feed(through: bytes.count) }
+  }
+
+  /// The first screen row as a line count from the start of output. While output arrives
+  /// the view is live, so yDisp is the top of the screen. It only goes backwards when the
+  /// buffer was reset or its scrollback cleared.
+  private func screenTopLine() -> Int {
+    terminal.buffer.yDisp + terminal.buffer.totalLinesTrimmed
   }
 
   private func feedLocked(_ bytes: Data) {
@@ -102,7 +171,7 @@ final class TerminalEngine {
     let oldLiveTop = liveTop
     let trimmedBefore = terminal.buffer.totalLinesTrimmed
     returnToLive()
-    terminal.feed(byteArray: [UInt8](bytes))
+    feedMarkingCommands([UInt8](bytes))
     liveTop = terminal.buffer.yDisp
     guard pinned > 0, !terminal.isCurrentBufferAlternate else {
       scrollOffset = 0
@@ -127,6 +196,8 @@ final class TerminalEngine {
     guard Int(cols) != dims.cols || Int(rows) != dims.rows else { return }
     returnToLive()
     scrollOffset = 0
+    // A reflow moves text between rows; recorded command marks no longer line up.
+    commandMarks.removeAll()
     terminal.resize(cols: Int(cols), rows: Int(rows))
     liveTop = terminal.buffer.yDisp
     needsRefresh = true
@@ -139,6 +210,122 @@ final class TerminalEngine {
     scrollOffset = next
     terminal.buffer.yDisp = liveTop - scrollOffset
     needsRefresh = true
+  }
+
+  /// Buffer-absolute rows (scrollback included) where a prompt group starts, oldest first.
+  /// A prompt row always carries a mark, so unmarked rows are skipped: asking
+  /// `semanticRowKind` about them walks back through continuation rows, which makes a full
+  /// scan quadratic on long soft-wrapped commands. Marked rows get SwiftTerm's own answer,
+  /// which also counts a secondary-prompt opener.
+  private func promptRows() -> [Int] {
+    let last = liveTop + terminal.getDims().rows
+    return (0..<last).filter { row in
+      !terminal.semanticPromptMarks(at: row).isEmpty && terminal.semanticRowKind(at: row) == .initial
+    }
+  }
+
+  private func jumpToPromptLocked(_ direction: PromptJump) -> Bool {
+    guard !terminal.isCurrentBufferAlternate else { return false }
+    let top = liveTop - scrollOffset
+    let prompts = promptRows()
+    let target: Int?
+    switch direction {
+    case .previous: target = prompts.last { $0 < top }
+    case .next: target = prompts.first { $0 > top }
+    }
+    guard let target else { return false }
+    // A prompt on the live screen is reached by going live, not by scrolling past it.
+    let next = target >= liveTop ? 0 : liveTop - target
+    guard next != scrollOffset else { return false }
+    scrollOffset = next
+    terminal.buffer.yDisp = liveTop - scrollOffset
+    needsRefresh = true
+    return true
+  }
+
+  private func lastCommandOutputLocked() -> String? {
+    guard !terminal.isCurrentBufferAlternate else { return nil }
+    let prompts = promptRows()
+    // The newest prompt is the one waiting for input; the output before it belongs to the
+    // command started from the prompt above.
+    guard prompts.count >= 2 else { return nil }
+    let cols = terminal.getDims().cols
+    let group = prompts[prompts.count - 2]..<prompts[prompts.count - 1]
+    let (start, end) = outputBounds(in: group, cols: cols)
+    guard start.row <= end.row else { return nil }
+    var rows: [(text: String, wrapped: Bool)] = []
+    var sawOutput = false
+    for row in start.row...end.row {
+      guard let line = terminal.bufferLine(atRow: row) else { continue }
+      let from = row == start.row ? start.col : 0
+      let limit = min(cols, line.count, row == end.row ? end.col : cols)
+      let isOutput = (0..<limit).map { col in
+        col >= from && terminal.semanticContent(at: Position(col: col, row: row)) == .output
+      }
+      // Up to the last cell the program wrote: its trailing spaces stay, padding doesn't.
+      guard let last = isOutput.lastIndex(of: true) else {
+        // The rest of the command line, when C came before its newline, isn't output.
+        if row == start.row, start.col > 0 { continue }
+        rows.append(("", line.isWrapped))
+        continue
+      }
+      sawOutput = true
+      var text = ""
+      for col in from...last {
+        let data = line[col]
+        if data.width == 0 { continue }
+        let character = data.getText()
+        text += !isOutput[col] || character.isEmpty || character == "\u{0}" ? " " : character
+      }
+      rows.append((text, line.isWrapped && row != start.row))
+    }
+    guard sawOutput else { return nil }
+    var output = ""
+    for (index, row) in rows.enumerated() {
+      // A soft-wrapped row continues the line above; only real line breaks become newlines.
+      if index > 0, !row.wrapped { output += "\n" }
+      output += row.text
+    }
+    return output
+  }
+
+  /// Where the output of the command in `group` starts and stops (end column exclusive).
+  /// From its OSC 133 C and D marks when the shell sent them; otherwise from the row after
+  /// the command line to the row before the next prompt.
+  private func outputBounds(in group: Range<Int>, cols: Int) -> (start: (row: Int, col: Int), end: (row: Int, col: Int)) {
+    let trimmed = terminal.buffer.totalLinesTrimmed
+    // The C and D between the last two prompts the shell announced (A, N or P), in the order
+    // it sent them: an older D at a lower row can't be taken for this command's. SwiftTerm's
+    // own prompt rows aren't used here: it keeps prompt marks on rows `clear` has wiped.
+    let prompts = commandMarks.indices.filter { commandMarks[$0].kind == .prompt }
+    if prompts.count >= 2 {
+      let window = commandMarks[(prompts[prompts.count - 2] + 1)..<prompts[prompts.count - 1]]
+      if let begin = window.first(where: { $0.kind == .outputStart }) {
+        let finish = window.first { $0.kind == .outputEnd && ($0.line, $0.col) >= (begin.line, begin.col) }
+        let startRow = max(0, begin.line - trimmed)
+        let startCol = begin.line - trimmed < 0 ? 0 : begin.col
+        // D at the start of a line ends the output on the line above; with no D, the output
+        // runs to the row before the next prompt.
+        let nextPrompt = commandMarks[prompts[prompts.count - 1]].line - trimmed
+        let end: (row: Int, col: Int) = finish.map { $0.col == 0 ? ($0.line - trimmed - 1, cols) : ($0.line - trimmed, $0.col) }
+          ?? (nextPrompt - 1, cols)
+        return ((startRow, startCol), end)
+      }
+    }
+    // No marks (a shell that sends no C, or a resize dropped them): output starts after
+    // the last prompt or input cell of the command line, on that same row if it has more.
+    var last: (row: Int, col: Int)?
+    for row in group {
+      guard let line = terminal.bufferLine(atRow: row) else { continue }
+      for col in 0..<min(cols, line.count) {
+        switch terminal.semanticContent(at: Position(col: col, row: row)) {
+        case .prompt, .input: last = (row, col)
+        default: break
+        }
+      }
+    }
+    let start = last.map { ($0.row, $0.col + 1) } ?? (group.lowerBound, 0)
+    return (start, (group.upperBound - 1, cols))
   }
 
   private func returnToLive() {
@@ -161,13 +348,13 @@ final class TerminalEngine {
       delegate.paletteChanged = false
     }
     terminal.clearUpdateRange()
-    let cells = buildCells()
-    if stateChanged || cells != cached.cells {
+    let grid = buildGrid()
+    if stateChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks {
       generationCounter &+= 1
     }
     var stamped = header
     stamped.generation = generationCounter
-    cached = TerminalFrame(header: stamped, cells: cells)
+    cached = TerminalFrame(header: stamped, cells: grid.cells, hyperlinks: grid.hyperlinks)
   }
 
   private static func sameState(_ lhs: GridSnapshot.Header, _ rhs: GridSnapshot.Header) -> Bool {
@@ -190,16 +377,40 @@ final class TerminalEngine {
       altScreen: terminal.isCurrentBufferAlternate)
   }
 
-  private func buildCells() -> [GridSnapshot.Cell] {
+  private func buildGrid() -> (cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]]) {
     let dims = terminal.getDims()
     var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell, count: dims.cols * dims.rows)
+    var hyperlinks: [[LinkSpan]] = []
     for row in 0..<dims.rows {
       guard let line = terminal.getLine(row: row) else { continue }
-      for col in 0..<min(dims.cols, line.count) {
-        cells[row * dims.cols + col] = Self.cell(line[col], palette: palette)
+      var open: (start: Int, target: LinkTarget)?
+      func close(at end: Int) {
+        guard let run = open else { return }
+        if hyperlinks.isEmpty { hyperlinks = Array(repeating: [], count: dims.rows) }
+        hyperlinks[row].append(LinkSpan(start: run.start, end: end, target: run.target))
+        open = nil
       }
+      for col in 0..<min(dims.cols, line.count) {
+        let data = line[col]
+        var cell = Self.cell(data, palette: palette)
+        // A wide glyph's tail carries no payload of its own; it belongs to the head's link.
+        let target = data.width == 0 ? open?.target : Self.hyperlinkTarget(data)
+        if target != open?.target { close(at: col) }
+        if let target {
+          if open == nil { open = (col, target) }
+          // Shown underlined: an OSC 8 link's text need not look like a URL.
+          cell.attrs |= GridSnapshot.attrUnderline
+        }
+        cells[row * dims.cols + col] = cell
+      }
+      close(at: min(dims.cols, line.count))
     }
-    return cells
+    return (cells, hyperlinks)
+  }
+
+  private static func hyperlinkTarget(_ data: CharData) -> LinkTarget? {
+    guard data.hasPayload, let payload = data.getPayload() as? String else { return nil }
+    return OSC8.target(payload: payload)
   }
 
   private static func cell(_ data: CharData, palette: [UInt32]) -> GridSnapshot.Cell {
@@ -236,6 +447,38 @@ final class TerminalEngine {
     if style.contains(.dim) { bits |= GridSnapshot.attrDim }
     if style.contains(.crossedOut) { bits |= GridSnapshot.attrStrikethrough }
     return bits
+  }
+}
+
+/// An OSC 133 mark in stream order. SwiftTerm keeps prompt marks per row but no C or D;
+/// matching C and D to their prompt by order, not by row, holds across renumbering.
+struct CommandMark: Equatable {
+  enum Kind { case prompt, outputStart, outputEnd }
+  var kind: Kind
+  var line: Int
+  var col: Int
+}
+
+public enum PromptJump: Sendable {
+  case previous, next
+}
+
+/// OSC 8 payloads as SwiftTerm stores them: `params;URI`.
+enum OSC8 {
+  /// Web links and `file://` paths only — the URI is whatever the remote program wrote.
+  static func target(payload: String) -> LinkTarget? {
+    guard let separator = payload.firstIndex(of: ";") else { return nil }
+    let uri = String(payload[payload.index(after: separator)...])
+    guard let url = URL(string: uri), let scheme = url.scheme?.lowercased() else { return nil }
+    switch scheme {
+    case "http", "https":
+      return .external(url: uri)
+    case "file":
+      let path = url.path
+      return path.isEmpty ? nil : .file(path: path, line: nil, column: nil)
+    default:
+      return nil
+    }
   }
 }
 

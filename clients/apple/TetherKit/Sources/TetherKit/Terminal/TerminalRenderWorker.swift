@@ -52,9 +52,9 @@ final class TerminalRenderWorker {
     lastRowTexts = TerminalRunBuilder.rowTexts(cells: lastCells, cols: cols, rows: rows)
     // Frames carry no soft-wrap flags yet — the hard-wrap heuristic in
     // LinkSpans still runs.
-    lastLinkSpans = LinkSpans.compute(
-      texts: lastRowTexts,
-      wrapped: Array(repeating: false, count: lastRowTexts.count)
+    lastLinkSpans = LinkSpans.merging(
+      explicit: frame.hyperlinks,
+      detected: LinkSpans.compute(texts: lastRowTexts, wrapped: Array(repeating: false, count: lastRowTexts.count))
     )
     return rasterize(metrics: metrics)
   }

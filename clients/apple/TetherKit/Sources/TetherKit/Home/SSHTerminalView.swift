@@ -27,6 +27,7 @@ public struct SSHTerminalView: View {
   @State private var showPhotoPicker = false
   @State private var photoItem: PhotosPickerItem?
   @State private var showCopyConfirmation = false
+  @State private var promptNotice: String?
   @Environment(\.scenePhase) private var scenePhase
   @State private var backgroundDetach = BackgroundDetach()
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -63,6 +64,17 @@ public struct SSHTerminalView: View {
       transferBanner.animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.transfer)
     }
     .copyConfirmation(isPresented: $showCopyConfirmation)
+    .overlay(alignment: .top) {
+      if let promptNotice {
+        transferPill { Label(promptNotice, systemImage: "text.line.first.and.arrowtriangle.forward") }
+          .padding(.top, 56)
+          .onTapGesture { self.promptNotice = nil }
+          .task(id: promptNotice) {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            self.promptNotice = nil
+          }
+      }
+    }
     .overlay { drawerGestures }
     .sensoryFeedback(trigger: controller.status) {
       switch controller.status {
@@ -165,6 +177,11 @@ public struct SSHTerminalView: View {
           onTap: { focused = true },
           onSelectionText: { selectionText = $0 },
           onOpenURL: { UIApplication.shared.open($0) },
+          // The file is on the host, not the phone: hand over its path instead.
+          onOpenFile: { path, line, column in
+            let location = [path, line.map(String.init), column.map(String.init)].compactMap { $0 }.joined(separator: ":")
+            acknowledgeCopy(location, announce: "Path copied", into: $showCopyConfirmation)
+          },
           onMouseBytes: { controller.sendInput($0) },
           mouseMode: controller.mouseMode,
           mouseSgr: controller.mouseSgr
@@ -240,6 +257,10 @@ public struct SSHTerminalView: View {
         Button(action: copySelection) { Label("Copy selection", systemImage: "doc.on.doc") }
           .disabled(selectionText?.isEmpty ?? true)
         Button { showHistory = true } label: { Label("Terminal history", systemImage: "clock.arrow.circlepath") }
+        Divider()
+        Button { jump(.previous) } label: { Label("Previous prompt", systemImage: "chevron.up") }
+        Button { jump(.next) } label: { Label("Next prompt", systemImage: "chevron.down") }
+        Button(action: copyLastOutput) { Label("Copy last output", systemImage: "text.badge.checkmark") }
         Divider()
         Button(role: .destructive) { pendingKill = controller.attach } label: { Label("Kill \(controller.attach)", systemImage: "xmark.circle") }
       } label: {
@@ -489,6 +510,29 @@ public struct SSHTerminalView: View {
       drawerOpen = open
     }
     if open { Task { await controller.refreshSessions() } }
+  }
+
+  private func jump(_ direction: PromptJump) {
+    Task {
+      if await !controller.jumpToPrompt(direction) {
+        showPromptNotice(direction == .previous ? "No earlier prompt" : "No later prompt")
+      }
+    }
+  }
+
+  private func copyLastOutput() {
+    Task {
+      guard let output = await controller.lastCommandOutput() else {
+        showPromptNotice("No finished command to copy")
+        return
+      }
+      acknowledgeCopy(output, into: $showCopyConfirmation)
+    }
+  }
+
+  /// Prompt navigation reads the shell's OSC 133 marks; a shell that emits none finds nothing.
+  private func showPromptNotice(_ message: String) {
+    promptNotice = "\(message) — needs a shell that marks prompts (OSC 133)"
   }
 
   private func copySelection() {

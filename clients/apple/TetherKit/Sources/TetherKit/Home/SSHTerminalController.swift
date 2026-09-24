@@ -794,6 +794,8 @@ public final class SSHTerminalController {
     pipeline.outbound.yield(.serverResize(cols: cols, rows: rows))
   }
   public func scroll(lines: Int32) { Task { await pipeline.scrollViewport(lines: lines) } }
+  public func jumpToPrompt(_ direction: PromptJump) async -> Bool { await pipeline.jumpToPrompt(direction) }
+  public func lastCommandOutput() async -> String? { await pipeline.lastCommandOutput() }
   public func leave() async {
     left = true
     stopNetworkWatch()
