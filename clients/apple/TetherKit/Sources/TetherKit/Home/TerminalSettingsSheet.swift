@@ -24,9 +24,13 @@ struct TerminalSettingsSheet: View {
               Text(preferences.terminalTheme.name).foregroundStyle(.secondary)
             }
           }
-          Picker("Font", selection: $preferences.terminalFontID) {
-            ForEach(TerminalFont.builtIn) { font in
-              Text(font.label).font(.custom(font.postScriptName, size: 17)).tag(font.id)
+          NavigationLink {
+            TerminalFontPicker(preferences: preferences)
+          } label: {
+            HStack {
+              Text("Font")
+              Spacer()
+              Text(preferences.terminalFont.label).foregroundStyle(.secondary)
             }
           }
           Stepper(value: $preferences.terminalFontSize, in: 8...24, step: 1) {
