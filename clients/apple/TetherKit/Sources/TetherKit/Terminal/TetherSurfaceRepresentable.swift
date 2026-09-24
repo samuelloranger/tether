@@ -6,6 +6,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var sessionKey: String
   public var fontName: String
   public var fontSize: CGFloat
+  public var theme: TerminalTheme
   public var onGridSizeChange: (UInt16, UInt16) -> Void
   public var onGridSizeSettled: (UInt16, UInt16) -> Void
   public var onCellPixelSize: (Int, Int) -> Void
@@ -23,6 +24,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     sessionKey: String = "",
     fontName: String,
     fontSize: CGFloat,
+    theme: TerminalTheme = .tether,
     onGridSizeChange: @escaping (UInt16, UInt16) -> Void,
     onGridSizeSettled: @escaping (UInt16, UInt16) -> Void = { _, _ in },
     onCellPixelSize: @escaping (Int, Int) -> Void = { _, _ in },
@@ -39,6 +41,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.sessionKey = sessionKey
     self.fontName = fontName
     self.fontSize = fontSize
+    self.theme = theme
     self.onGridSizeChange = onGridSizeChange
     self.onGridSizeSettled = onGridSizeSettled
     self.onCellPixelSize = onCellPixelSize
@@ -60,6 +63,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     let view = TetherSurfaceView()
     view.fontName = fontName
     view.fontSize = fontSize
+    view.apply(theme: theme)
     view.onGridSizeChange = { cols, rows in onGridSizeChange(cols, rows) }
     view.onGridSizeSettled = { cols, rows in onGridSizeSettled(cols, rows) }
     view.onCellPixelSize = { width, height in onCellPixelSize(width, height) }
@@ -72,6 +76,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public func updateUIView(_ uiView: TetherSurfaceView, context: Context) {
     context.coordinator.parent = self
     if uiView.fontName != fontName { uiView.fontName = fontName }
+    uiView.apply(theme: theme)
     if uiView.fontSize != fontSize { uiView.fontSize = fontSize }
     uiView.mouseMode = mouseMode
     uiView.mouseSgr = mouseSgr

@@ -21,8 +21,10 @@ final class TerminalOutputBuffer {
   }
 
   /// The cell pixel size is set before the bytes go in: kitty sizes placements as it parses.
-  func replay(cols: UInt16, rows: UInt16, cellPixelSize: (width: Int, height: Int)? = nil) -> TerminalEngine {
-    let engine = TerminalEngine(cols: cols, rows: rows)
+  func replay(
+    cols: UInt16, rows: UInt16, theme: TerminalTheme = .tether, cellPixelSize: (width: Int, height: Int)? = nil
+  ) -> TerminalEngine {
+    let engine = TerminalEngine(cols: cols, rows: rows, theme: theme)
     if let cellPixelSize { engine.setCellPixelSize(width: cellPixelSize.width, height: cellPixelSize.height) }
     if !data.isEmpty {
       engine.feed(data)

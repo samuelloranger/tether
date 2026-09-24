@@ -169,6 +169,10 @@ actor TerminalPipeline {
         await self.watchTick()
       }
     }
+  func setTheme(_ theme: TerminalTheme) {
+    guard theme != sessionGrids.theme else { return }
+    sessionGrids.theme = theme
+    publishSnapshot()
   }
 
   /// New output while the watch was backed off: a sleep already under way would hold the
@@ -268,7 +272,9 @@ actor TerminalPipeline {
       altScreen: lastAltScreen,
       oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
     ), !outputBuffer.data.isEmpty {
-      currentGrid?.emulator = outputBuffer.replay(cols: newCols, rows: newRows, cellPixelSize: cellPixelSize)
+      currentGrid?.emulator = outputBuffer.replay(
+        cols: newCols, rows: newRows, theme: sessionGrids.theme, cellPixelSize: cellPixelSize
+      )
       lastRenderedGeneration = nil
       publishSnapshot()
       return true

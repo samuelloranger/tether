@@ -799,6 +799,7 @@ public final class SSHTerminalController {
   }
   public func jumpToPrompt(_ direction: PromptJump) async -> Bool { await pipeline.jumpToPrompt(direction) }
   public func lastCommandOutput() async -> String? { await pipeline.lastCommandOutput() }
+  public func setTheme(_ theme: TerminalTheme) { Task { await pipeline.setTheme(theme) } }
   public func leave() async {
     left = true
     stopNetworkWatch()

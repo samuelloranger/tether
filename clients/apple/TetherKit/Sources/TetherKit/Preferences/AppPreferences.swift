@@ -57,6 +57,7 @@ public final class AppPreferences {
     static let colorScheme = "tether.colorScheme"
     static let terminalFont = "tether.terminalFont"
     static let terminalFontSize = "tether.terminalFontSize"
+    static let terminalTheme = "tether.terminalTheme"
   }
 
   public var colorSchemePreference: ColorSchemePreference {
@@ -77,6 +78,18 @@ public final class AppPreferences {
     }
   }
 
+  public var terminalThemeID: String {
+    didSet {
+      UserDefaults.standard.set(terminalThemeID, forKey: Key.terminalTheme)
+    }
+  }
+
+  /// An id no longer in the catalog falls back to Tether's own theme.
+  public var terminalTheme: TerminalTheme {
+    get { TerminalTheme.named(terminalThemeID) }
+    set { terminalThemeID = newValue.id }
+  }
+
   public init() {
     let defaults = UserDefaults.standard
     colorSchemePreference = ColorSchemePreference(
@@ -85,5 +98,6 @@ public final class AppPreferences {
     terminalFont = TerminalFont(rawValue: defaults.string(forKey: Key.terminalFont) ?? "") ?? .menlo
     let size = defaults.double(forKey: Key.terminalFontSize)
     terminalFontSize = size > 0 ? size : 11
+    terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
   }
 }

@@ -17,7 +17,8 @@ struct TerminalHistoryView: View {
           SelectableTextView(
             text: text,
             fontName: preferences.terminalFont.postScriptName,
-            fontSize: preferences.terminalFontSize
+            fontSize: preferences.terminalFontSize,
+            theme: preferences.terminalTheme
           )
           .ignoresSafeArea(edges: .bottom)
         } else if text != nil {
@@ -33,7 +34,7 @@ struct TerminalHistoryView: View {
           }
           .padding(24)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(TetherColors.terminalBackground)
+          .background(preferences.terminalTheme.backgroundColor)
         } else {
           VStack(spacing: 10) {
             ProgressView().tint(TetherColors.accent)
@@ -41,7 +42,7 @@ struct TerminalHistoryView: View {
               .foregroundStyle(TetherColors.textSecondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(TetherColors.terminalBackground)
+          .background(preferences.terminalTheme.backgroundColor)
           .accessibilityLabel("Loading history")
         }
       }
@@ -72,6 +73,7 @@ private struct SelectableTextView: UIViewRepresentable {
   let text: String
   let fontName: String
   let fontSize: CGFloat
+  let theme: TerminalTheme
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -80,7 +82,6 @@ private struct SelectableTextView: UIViewRepresentable {
     view.isEditable = false
     view.isSelectable = true
     view.alwaysBounceVertical = true
-    view.backgroundColor = UIColor(TetherColors.terminalBackground)
     view.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
     view.autocorrectionType = .no
     view.autocapitalizationType = .none
@@ -89,7 +90,8 @@ private struct SelectableTextView: UIViewRepresentable {
 
   func updateUIView(_ view: UITextView, context: Context) {
     view.font = UIFont(name: fontName, size: fontSize) ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-    view.textColor = UIColor(TetherColors.textPrimary)
+    view.backgroundColor = theme.uiBackground
+    view.textColor = TerminalTheme.uiColor(theme.foreground)
     if view.text != text {
       view.text = text
       context.coordinator.didScrollToBottom = false

@@ -109,11 +109,22 @@ public final class TetherSurfaceView: UIView {
     scheduler?.stop()
   }
 
+  /// The theme's background also fills the view around the grid, so the two are one colour.
+  public private(set) var theme: TerminalTheme = .tether
+
+  public func apply(theme: TerminalTheme) {
+    guard theme != self.theme else { return }
+    self.theme = theme
+    backgroundColor = theme.uiBackground
+    cursorLayer.backgroundColor = TerminalTheme.uiColor(theme.cursor, alpha: 0.4).cgColor
+    selectionLayer.fillColor = (theme.selection.map { TerminalTheme.uiColor($0, alpha: 0.45) }
+      ?? UIColor.systemBlue.withAlphaComponent(0.35)).cgColor
+    requestRepaint()
+  }
+
   private func commonInit() {
     isOpaque = true
-    // Same constant the SwiftUI chrome uses, so the grid and everything around
-    // it are one colour rather than two that nearly match.
-    backgroundColor = UIColor(TetherColors.terminalBackground)
+    backgroundColor = theme.uiBackground
     isMultipleTouchEnabled = false
     installLayers()
     scheduler = TerminalFrameScheduler { [weak self] in
