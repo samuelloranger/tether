@@ -4,12 +4,17 @@
 #   bash scripts/generate-terminal-themes.sh <path/to/iTerm2-Color-Schemes>
 #
 # Reads the Ghostty-format files in ghostty/ for the names below and writes
-# clients/apple/TetherKit/Sources/TetherKit/Resources/TerminalThemes.json.
+# clients/apple/TetherKit/Sources/TetherKit/Resources/TerminalThemes.json, plus the
+# collection's LICENSE beside it.
+#
+# The bundled file was last generated from mbadolato/iTerm2-Color-Schemes at
+# 9775766ab21973c7c0896587eacefe55f0f6906b (2026-09-23).
 set -euo pipefail
 
-[ $# -eq 1 ] || { sed -n '2,7s/^# \{0,1\}//p' "$0"; exit 2; }
+[ $# -eq 1 ] || { sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 2; }
 source_dir="$1/ghostty"
 out="$(cd "$(dirname "$0")/.." && pwd)/clients/apple/TetherKit/Sources/TetherKit/Resources/TerminalThemes.json"
+license="${out%.json}-LICENSE.txt"
 
 # Shown in this order: display name|file name in ghostty/.
 themes=(
@@ -114,4 +119,5 @@ trap 'rm -f "$out.tmp"' EXIT
   echo "]"
 } > "$out.tmp"
 mv "$out.tmp" "$out"
+cp "$1/LICENSE" "$license"
 echo "wrote ${#themes[@]} themes to $out"
