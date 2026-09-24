@@ -112,47 +112,69 @@ for lib in ssh2 crypto ssl; do
 done
 
 log "Installing into $OUT"
-# Stage next to the destinations so each swap is a rename, and roll back on any failure:
-# a half-replaced set would pair the new libssh2 with an old OpenSSL or header.
-stage="$(mktemp -d "$OUT/.stage.XXXXXX")"
-backup="$(mktemp -d "$OUT/.backup.XXXXXX")"
-for lib in ssh2 crypto ssl; do
-  cp -R "$WORK/$lib.xcframework" "$stage/"
-done
-cp "$WORK/prefix/ios-arm64/include/libssh2.h" "$stage/libssh2.h"
-cp libssh2/COPYING "$stage/LICENSE-libssh2"
-cp "openssl-ios-arm64/LICENSE.txt" "$stage/LICENSE-openssl"
-
+# Everything is staged and backed up beside its own destination, so every swap is a rename
+# on one volume, and rolled back on any failure: a half-replaced set would pair the new
+# libssh2 with an old OpenSSL or header.
+dirs=()
 swapped=()
+replaced=0
 installed=false
 rollback() {
   # Best effort: one failed restore must not stop the others.
   set +e
   # `${a[@]+…}`: bash 3.2 (macOS) treats an empty array as unset under `set -u`.
   for dest in ${swapped[@]+"${swapped[@]}"}; do
+    backup_dir="$(dirname "$dest")/.tether-install-backup"
     rm -rf "$dest"
-    if [[ -e "$backup/$(basename "$dest")" ]]; then mv "$backup/$(basename "$dest")" "$dest"; fi
+    if [[ -e "$backup_dir/$(basename "$dest")" ]]; then mv "$backup_dir/$(basename "$dest")" "$dest"; fi
   done
-  rm -rf "$stage"
-  # A backup that could not be put back stays on disk rather than being lost.
-  if rmdir "$backup" 2>/dev/null; then
-    echo "install failed; restored the previous frameworks and header" >&2
+  kept=""
+  for dir in ${dirs[@]+"${dirs[@]}"}; do
+    if [[ "$dir" == */.tether-install-backup ]] && ! rmdir "$dir" 2>/dev/null; then kept="$kept $dir"; fi
+    [[ "$dir" == */.tether-install-stage ]] && rm -rf "$dir"
+  done
+  if [[ -n "$kept" ]]; then
+    echo "install failed; originals that could not be restored are in:$kept" >&2
+  elif [[ $replaced -eq 0 ]]; then
+    echo "install failed; nothing was replaced" >&2
   else
-    echo "install failed; originals that could not be restored are in $backup" >&2
+    echo "install failed; restored the previous frameworks and header" >&2
   fi
 }
 trap '$installed || rollback' EXIT
 
+prepare() { # <destination dir>: fresh stage and backup dirs beside it
+  # A backup left by an earlier failed run may hold the only copy of an original.
+  if [[ -d "$1/.tether-install-backup" ]] && [[ -n "$(ls -A "$1/.tether-install-backup")" ]]; then
+    echo "$1/.tether-install-backup holds files from a failed install; restore or remove them first" >&2
+    exit 1
+  fi
+  rm -rf "$1/.tether-install-stage" "$1/.tether-install-backup"
+  mkdir "$1/.tether-install-stage" "$1/.tether-install-backup"
+  dirs+=("$1/.tether-install-stage" "$1/.tether-install-backup")
+}
+prepare "$OUT"
+[[ "$HEADER_OUT" -ef "$OUT" ]] || prepare "$HEADER_OUT"
+
+for lib in ssh2 crypto ssl; do
+  cp -R "$WORK/$lib.xcframework" "$OUT/.tether-install-stage/"
+done
+cp "$WORK/prefix/ios-arm64/include/libssh2.h" "$HEADER_OUT/.tether-install-stage/libssh2.h"
+cp libssh2/COPYING "$OUT/.tether-install-stage/LICENSE-libssh2"
+cp "openssl-ios-arm64/LICENSE.txt" "$OUT/.tether-install-stage/LICENSE-openssl"
+
 for name in ssh2.xcframework crypto.xcframework ssl.xcframework libssh2.h LICENSE-libssh2 LICENSE-openssl; do
-  if [[ "$name" == libssh2.h ]]; then dest="$HEADER_OUT/$name"; else dest="$OUT/$name"; fi
-  if [[ -e "$dest" ]]; then mv "$dest" "$backup/"; fi
+  if [[ "$name" == libssh2.h ]]; then dir="$HEADER_OUT"; else dir="$OUT"; fi
+  dest="$dir/$name"
+  if [[ -e "$dest" ]]; then mv "$dest" "$dir/.tether-install-backup/"; fi
   # Only after the original is safe in the backup: rollback deletes what it lists.
   swapped+=("$dest")
-  mv "$stage/$name" "$dest"
+  replaced=$((replaced + 1))
+  mv "$dir/.tether-install-stage/$name" "$dest"
 done
 installed=true
 trap - EXIT
-rm -rf "$stage" "$backup"
+for dir in "${dirs[@]}"; do rm -rf "$dir"; done
 
 log "Done"
 echo "libssh2  $LIBSSH2_SHA"

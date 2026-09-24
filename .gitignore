@@ -48,3 +48,7 @@ clients/apple/TetherKit/.build/
 
 # Go build output
 apps/tether-notify/tether-notify
+
+# build-ssh-xcframeworks.sh staging, present only while an install runs or after it fails
+.tether-install-stage/
+.tether-install-backup/
