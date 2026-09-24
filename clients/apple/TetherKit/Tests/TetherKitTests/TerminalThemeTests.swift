@@ -71,6 +71,34 @@ final class TerminalThemeTests: XCTestCase {
     XCTAssertEqual(cells[2].foreground, dracula.ansi[2], "an untouched entry follows the new theme")
   }
 
+  func test_an_osc4_color_equal_to_the_old_themes_is_still_the_programs() {
+    let engine = TerminalEngine(cols: 10, rows: 2)
+    // The program sets red to exactly the Tether theme's red.
+    engine.feed("\u{1B}]4;1;rgb:f3/8b/a8\u{07}\u{1B}[31mR")
+    engine.setTheme(dracula)
+    XCTAssertEqual(engine.frame().cells[0].foreground, 0xFFF3_8BA8)
+  }
+
+  func test_an_entry_reset_with_osc104_or_ris_follows_the_new_theme() {
+    let reset = TerminalEngine(cols: 10, rows: 2)
+    reset.feed("\u{1B}]4;1;rgb:12/34/56\u{1B}\\\u{1B}]104;1\u{1B}\\\u{1B}[31mR")
+    reset.setTheme(dracula)
+    XCTAssertEqual(reset.frame().cells[0].foreground, dracula.ansi[1])
+
+    let hard = TerminalEngine(cols: 10, rows: 2)
+    hard.feed("\u{1B}]4;1;rgb:12/34/56\u{1B}\\\u{1B}c\u{1B}[31mR")
+    hard.setTheme(dracula)
+    XCTAssertEqual(hard.frame().cells[0].foreground, dracula.ansi[1])
+  }
+
+  func test_override_tracking_survives_sequences_split_across_reads_and_ignores_queries() {
+    var overrides = PaletteOverrides()
+    for chunk in ["\u{1B}]", "4;7", ";rgb:1/2/3;9;?", "\u{1B}", "\\"] { overrides.scan(Array(chunk.utf8)) }
+    XCTAssertEqual(overrides.indices, [7])
+    overrides.scan(Array("\u{1B}]4;200;#ffffff\u{07}\u{1B}]104\u{07}".utf8))
+    XCTAssertEqual(overrides.indices, [])
+  }
+
   func test_the_palette_sequence_is_one_osc4() {
     XCTAssertEqual(
       TerminalEngine.paletteSequence([(1, 0xFF12_3456), (200, 0xFFAB_CDEF)]),

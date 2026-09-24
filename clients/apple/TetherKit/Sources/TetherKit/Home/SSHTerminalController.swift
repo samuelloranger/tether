@@ -802,9 +802,12 @@ public final class SSHTerminalController {
   }
   public func jumpToPrompt(_ direction: PromptJump) async -> Bool { await pipeline.jumpToPrompt(direction) }
   public func lastCommandOutput() async -> String? { await pipeline.lastCommandOutput() }
-  public func setTheme(_ theme: TerminalTheme) async {
+  /// Numbered here, synchronously, so the pipeline can drop a request that reaches it
+  /// after a newer one, however the tasks carrying them are scheduled.
+  public func requestTheme(_ theme: TerminalTheme) {
     themeSequence += 1
-    await pipeline.setTheme(theme, sequence: themeSequence)
+    let sequence = themeSequence
+    Task { await pipeline.setTheme(theme, sequence: sequence) }
   }
   public func leave() async {
     left = true

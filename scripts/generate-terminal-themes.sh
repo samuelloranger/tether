@@ -59,19 +59,22 @@ themes=(
   "Cyberpunk|Cyberpunk"
 )
 
-# "Rosé Pine Moon" -> "rose-pine-moon". Accents are mapped byte-wise: iconv's
-# transliteration depends on the locale and fails in macOS's default one.
+# "Rosé Pine Moon" -> "rose-pine-moon". Each accented letter is replaced as a whole byte
+# sequence: bracket expressions and iconv both depend on the locale, and under LC_ALL=C a
+# bracket matches each byte of "é" separately.
+accents='s/à/a/g;s/á/a/g;s/â/a/g;s/ä/a/g;s/ã/a/g;s/å/a/g;s/À/a/g;s/Á/a/g;s/Â/a/g;s/Ä/a/g;s/Ã/a/g;s/Å/a/g;s/è/e/g;s/é/e/g;s/ê/e/g;s/ë/e/g;s/È/e/g;s/É/e/g;s/Ê/e/g;s/Ë/e/g;s/ì/i/g;s/í/i/g;s/î/i/g;s/ï/i/g;s/Ì/i/g;s/Í/i/g;s/Î/i/g;s/Ï/i/g;s/ò/o/g;s/ó/o/g;s/ô/o/g;s/ö/o/g;s/õ/o/g;s/ø/o/g;s/Ò/o/g;s/Ó/o/g;s/Ô/o/g;s/Ö/o/g;s/Õ/o/g;s/Ø/o/g;s/ù/u/g;s/ú/u/g;s/û/u/g;s/ü/u/g;s/Ù/u/g;s/Ú/u/g;s/Û/u/g;s/Ü/u/g;s/ç/c/g;s/Ç/c/g;s/ñ/n/g;s/Ñ/n/g'
 slug() {
-  printf '%s' "$1" \
-    | sed -e 's/[ÀÁÂÄàáâä]/a/g' -e 's/[ÈÉÊËèéêë]/e/g' -e 's/[ÌÍÎÏìíîï]/i/g' \
-          -e 's/[ÒÓÔÖòóôö]/o/g' -e 's/[ÙÚÛÜùúûü]/u/g' -e 's/[Çç]/c/g' -e 's/[Ññ]/n/g' \
+  printf '%s' "$1" | sed -e "$accents" \
     | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9' ' ' | tr -s ' ' \
     | sed 's/^ //; s/ $//; s/ /-/g'
 }
 
 # One JSON object per theme on one line, which keeps diffs readable.
 theme_json() { # <id> <name> <file>
-  awk -v id="$1" -v name="$2" -v file="$3" '
+  # Through the environment: `awk -v` would interpret backslashes in the values itself.
+  THEME_ID="$1" THEME_NAME="$2" THEME_FILE="$3" awk '
+    function json(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+    BEGIN { id = json(ENVIRON["THEME_ID"]); name = json(ENVIRON["THEME_NAME"]); file = ENVIRON["THEME_FILE"] }
     function hex(v) { sub(/^#/, "", v); return toupper(v) }
     {
       split($0, kv, "=")

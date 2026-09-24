@@ -13,6 +13,7 @@ final class TerminalEngine {
   /// Rebuilt only when a program repaints the palette (OSC 4/104) or the theme changes.
   private var palette: [UInt32] = []
   private var theme: TerminalTheme
+  private var paletteOverrides = PaletteOverrides()
   private var needsRefresh = false
   private var oscScanner = OSCScanner()
   /// OSC 133 A / C / D positions. `line` counts from the first line ever written, so it
@@ -67,19 +68,14 @@ final class TerminalEngine {
   func setTheme(_ theme: TerminalTheme) {
     locked {
       guard theme != self.theme else { return }
-      let old = self.theme
-      let current = TerminalPalette.table(of: terminal, fallback: old.foreground)
+      let current = TerminalPalette.table(of: terminal, fallback: self.theme.foreground)
       self.theme = theme
       TerminalPalette.install(theme, on: terminal)
-      let fresh = TerminalPalette.table(of: terminal, fallback: theme.foreground)
-      // Entries a program set with OSC 4 survive: the first 16 differ from the old theme's
-      // own colors, the rest from the xterm cube every theme shares.
-      let overrides = current.indices.filter { index in
-        index < old.ansi.count ? current[index] != old.ansi[index] : current[index] != fresh[index]
-      }
-      if !overrides.isEmpty {
-        // Fed to the local parser only; nothing reaches the host.
-        terminal.feed(text: Self.paletteSequence(overrides.map { ($0, current[$0]) }))
+      // Entries a program set with OSC 4 keep the program's color.
+      let kept = paletteOverrides.indices.sorted().map { ($0, current[$0]) }
+      if !kept.isEmpty {
+        // Straight to the parser, not through feedLocked: nothing reaches the host.
+        terminal.feed(text: Self.paletteSequence(kept))
       }
       palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
       graphicsDirty = true
@@ -227,6 +223,7 @@ final class TerminalEngine {
   }
 
   private func feedLocked(_ bytes: Data) {
+    paletteOverrides.scan(bytes)
     graphicsDirty = true
     let pinned = scrollOffset
     let oldLiveTop = liveTop
