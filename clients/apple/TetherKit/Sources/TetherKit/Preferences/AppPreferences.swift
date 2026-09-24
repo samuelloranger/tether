@@ -65,14 +65,23 @@ public final class AppPreferences {
   }
 
   @ObservationIgnored private let fontInstaller = GoogleFontsInstaller()
+  /// One download at a time: two of the same family would swap one folder under each other.
+  @ObservationIgnored private var downloading = false
 
   /// Downloads a family from a Google Fonts link or name and selects it.
   public func downloadFont(_ link: String) async throws {
-    let font = try await fontInstaller.install(link)
+    guard !downloading else { throw GoogleFontsError.busy }
+    downloading = true
+    defer { downloading = false }
+    let installed = try await fontInstaller.install(link)
+    let font = installed.font
     guard fontInstaller.register(font) else {
-      fontInstaller.remove(font)
+      fontInstaller.rollback(installed)
+      // The replaced files are back; so is their registration.
+      if let previous = downloadedFonts.first(where: { $0.slug == font.slug }) { fontInstaller.register(previous) }
       throw GoogleFontsError.unreadable
     }
+    fontInstaller.commit(installed)
     downloadedFonts.removeAll { $0.slug == font.slug }
     downloadedFonts.append(font)
     terminalFontID = font.id

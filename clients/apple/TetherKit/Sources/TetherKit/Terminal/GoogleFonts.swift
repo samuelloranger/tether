@@ -28,6 +28,7 @@ public enum GoogleFontsError: LocalizedError, Equatable {
   case unreadable
   case offHost(String)
   case nameTaken(String)
+  case busy
 
   public var errorDescription: String? {
     switch self {
@@ -38,6 +39,7 @@ public enum GoogleFontsError: LocalizedError, Equatable {
     case .unreadable: return "The downloaded file isn’t a font this device can use."
     case let .offHost(host): return "The download was redirected to \(host); nothing was installed."
     case let .nameTaken(name): return "A font named “\(name)” is already installed, so this one would never be used."
+    case .busy: return "Another font is still downloading."
     }
   }
 }
@@ -148,9 +150,17 @@ public struct GoogleFontsInstaller: Sendable {
       .appendingPathComponent("Fonts", isDirectory: true)
   }
 
+  /// A family moved into place, with the files it replaced kept aside until the caller
+  /// knows the new ones register.
+  public struct Installed: Sendable {
+    public let font: DownloadedFont
+    let backup: URL?
+  }
+
   /// Downloads and stores a family without registering it. A re-download replaces the
-  /// previous files only once the new ones are complete.
-  public func install(_ input: String) async throws -> DownloadedFont {
+  /// previous files only once the new ones are complete, and keeps them in a backup until
+  /// `commit` or `rollback`.
+  public func install(_ input: String) async throws -> Installed {
     guard let family = GoogleFonts.family(from: input) else { throw GoogleFontsError.notALink }
     // A family without a 700 answers the weighted request with 400.
     var css = try await text(GoogleFonts.cssURL(family: family, weights: true))
@@ -178,19 +188,45 @@ public struct GoogleFontsInstaller: Sendable {
       for name in [regular.postScriptName] + (bold.map { [$0.postScriptName] } ?? []) {
         if Self.isInstalled(postScriptName: name, outside: folder) { throw GoogleFontsError.nameTaken(name) }
       }
-      unregisterAll(in: folder)
-      try? FileManager.default.removeItem(at: folder)
-      try FileManager.default.moveItem(at: staging, to: folder)
-      return DownloadedFont(
+      var backup: URL?
+      if FileManager.default.fileExists(atPath: folder.path) {
+        unregisterAll(in: folder)
+        let aside = directory.appendingPathComponent(".\(slug)-old-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.moveItem(at: folder, to: aside)
+        backup = aside
+      }
+      do {
+        try FileManager.default.moveItem(at: staging, to: folder)
+      } catch {
+        // Put the previous files back rather than leave the family with neither.
+        if let backup { try? FileManager.default.moveItem(at: backup, to: folder) }
+        throw error
+      }
+      let font = DownloadedFont(
         family: family, slug: slug,
         postScriptName: regular.postScriptName, boldPostScriptName: bold?.postScriptName,
         files: [regular.file] + (bold.map { [$0.file] } ?? []),
         isMonospaced: regular.isMonospaced
       )
+      return Installed(font: font, backup: backup)
     } catch {
       try? FileManager.default.removeItem(at: staging)
       throw error
     }
+  }
+
+  /// The new files registered: the replaced ones can go.
+  public func commit(_ installed: Installed) {
+    if let backup = installed.backup { try? FileManager.default.removeItem(at: backup) }
+  }
+
+  /// The new files didn't register: remove them and put the replaced ones back.
+  public func rollback(_ installed: Installed) {
+    let folder = directory.appendingPathComponent(installed.font.slug, isDirectory: true)
+    unregisterAll(in: folder)
+    try? FileManager.default.removeItem(at: folder)
+    if let backup = installed.backup { try? FileManager.default.moveItem(at: backup, to: folder) }
+    TerminalFonts.setDownloadedBoldFace(nil, for: installed.font.postScriptName)
   }
 
   /// Registers a stored family's files, e.g. at launch. False when a file is gone or Core

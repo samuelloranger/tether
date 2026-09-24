@@ -124,7 +124,7 @@ final class GoogleFontsTests: XCTestCase {
       }
       return (url.lastPathComponent == "bold.ttf" ? bold : regular, self.response(url, 200))
     }
-    let font = try await installer.install("https://fonts.google.com/specimen/Fira+Code")
+    let font = try await installer.install("https://fonts.google.com/specimen/Fira+Code").font
     XCTAssertEqual(font.id, "gf-fira-code")
     XCTAssertEqual(font.postScriptName, "JetBrainsMono-Regular")
     XCTAssertEqual(font.boldPostScriptName, "JetBrainsMono-Bold")
@@ -151,7 +151,7 @@ final class GoogleFontsTests: XCTestCase {
       }
       return (regular, self.response(url, 200))
     }
-    let font = try await installer.install("VT323")
+    let font = try await installer.install("VT323").font
     XCTAssertNil(font.boldPostScriptName)
     XCTAssertEqual(font.files, ["regular.ttf"])
     XCTAssertEqual(requested.value.count, 3)
@@ -197,21 +197,44 @@ final class GoogleFontsTests: XCTestCase {
     }
   }
 
-  func test_a_re_download_replaces_the_old_files() async throws {
+  func test_a_re_download_replaces_the_old_files_once_committed() async throws {
     let regular = try bundled("JetBrainsMono-Regular")
     let bold = try bundled("JetBrainsMono-Bold")
     let directory = temporaryDirectory()
     let first = GoogleFontsInstaller(directory: directory, fetch: stub(css: css, faces: ["regular.ttf": regular, "bold.ttf": bold]))
     let installed = try await first.install("Fira Code")
-    XCTAssertTrue(first.register(installed))
+    XCTAssertTrue(first.register(installed.font))
+    first.commit(installed)
 
     let regularOnly = "@font-face { font-weight: 400; src: url(https://fonts.gstatic.com/s/f/regular.ttf) format('truetype'); }"
     let second = GoogleFontsInstaller(directory: directory, fetch: stub(css: regularOnly, faces: ["regular.ttf": regular]))
     let replaced = try await second.install("Fira Code")
-    XCTAssertEqual(replaced.files, ["regular.ttf"])
-    let files = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("fira-code").path)
-    XCTAssertEqual(files, ["regular.ttf"], "the old bold face is still on disk")
-    second.remove(replaced)
+    XCTAssertEqual(replaced.font.files, ["regular.ttf"])
+    XCTAssertNotNil(replaced.backup, "the replaced files must be kept until the new ones register")
+    second.commit(replaced)
+    let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+    XCTAssertEqual(files, ["fira-code"], "a backup or staging folder was left behind")
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("fira-code").path), ["regular.ttf"])
+    second.remove(replaced.font)
+  }
+
+  func test_a_rolled_back_re_download_puts_the_previous_files_back() async throws {
+    let regular = try bundled("JetBrainsMono-Regular")
+    let bold = try bundled("JetBrainsMono-Bold")
+    let directory = temporaryDirectory()
+    let first = GoogleFontsInstaller(directory: directory, fetch: stub(css: css, faces: ["regular.ttf": regular, "bold.ttf": bold]))
+    let original = try await first.install("Fira Code")
+    first.commit(original)
+
+    let regularOnly = "@font-face { font-weight: 400; src: url(https://fonts.gstatic.com/s/f/regular.ttf) format('truetype'); }"
+    let second = GoogleFontsInstaller(directory: directory, fetch: stub(css: regularOnly, faces: ["regular.ttf": regular]))
+    let replaced = try await second.install("Fira Code")
+    second.rollback(replaced)
+    let folder = directory.appendingPathComponent("fira-code").path
+    XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: folder)), ["regular.ttf", "bold.ttf"])
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["fira-code"])
+    XCTAssertTrue(first.register(original.font), "the restored files no longer register")
+    first.remove(original.font)
   }
 
   func test_a_family_whose_files_are_gone_does_not_register() {
