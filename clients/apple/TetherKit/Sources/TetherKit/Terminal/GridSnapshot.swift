@@ -6,6 +6,8 @@ public enum GridSnapshot {
   public static let attrInverse: UInt32 = 1 << 3
   public static let attrDim: UInt32 = 1 << 4
   public static let attrStrikethrough: UInt32 = 1 << 5
+  /// The cell's background is the terminal default, not a color a program set.
+  public static let attrDefaultBackground: UInt32 = 1 << 6
 
   public struct Header: Equatable, Sendable {
     public var cols: UInt16
@@ -31,10 +33,15 @@ public struct TerminalFrame: Sendable, Equatable {
   public var cells: [GridSnapshot.Cell]
   /// OSC 8 hyperlinks per visible row; empty when the screen has none.
   public var hyperlinks: [[LinkSpan]]
+  public var images: TerminalImageLayer
 
-  public init(header: GridSnapshot.Header, cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]] = []) {
+  public init(
+    header: GridSnapshot.Header, cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]] = [],
+    images: TerminalImageLayer = .empty
+  ) {
     self.header = header
     self.cells = cells
     self.hyperlinks = hyperlinks
+    self.images = images
   }
 }

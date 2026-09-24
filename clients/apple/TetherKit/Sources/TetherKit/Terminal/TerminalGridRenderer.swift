@@ -35,12 +35,18 @@ final class TerminalGridRenderer {
   private var glyphCache: TerminalGlyphCache?
   private var colors: [UInt32: CGColor] = [:]
   private var glyphOffsetX: CGFloat = 0
+  /// Decoded once per image content; dropped when no placement shows it any more.
+  private var bitmaps: [TerminalImageLayer.Key: CGImage] = [:]
+  /// Whether `image` shows any kitty placement: an empty frame may keep a stale bitmap,
+  /// but not one with a deleted image still on it.
+  private var imageShowsPlacements = false
 
   /// Forces the next render to repaint every row (font change, resize, a new
   /// session's first frame).
   func invalidate() {
     context = nil
     image = nil
+    imageShowsPlacements = false
     metrics = nil
     glyphCache = nil
     colors.removeAll(keepingCapacity: true)
@@ -49,6 +55,7 @@ final class TerminalGridRenderer {
   func render(
     header: GridSnapshot.Header,
     cells: [GridSnapshot.Cell],
+    images: TerminalImageLayer = .empty,
     metrics: TerminalRenderMetrics
   ) -> CGImage? {
     let cols = Int(header.cols)
@@ -61,59 +68,126 @@ final class TerminalGridRenderer {
     guard let context, let glyphCache else { return nil }
 
     let drawRows = TerminalGridLayout.paintedRows(
-      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen
+      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen, images: images
     )
     // Bottom-anchored, so a row-count change moves every row. Alt-screen trailing
     // empties are left out so they become slack at the top, not a gap under the TUI.
     let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
 
-    guard drawRows > 0 else { return image }
+    guard drawRows > 0 || imageShowsPlacements else { return image }
 
     // Full repaint every frame: row-granular diffing desynced on resize and left torn
     // text. A whole grid is cheap at phone sizes and cannot drift from the cells.
     context.setFillColor(metrics.background)
     context.fill(CGRect(origin: .zero, size: metrics.size))
 
+    // Kitty's order: images under the backgrounds, cell backgrounds, images under the text,
+    // text, then everything else.
+    drawImages(images, depth: .belowBackground, originY: originY, metrics: metrics, context: context)
+    // With an image under them, cells that were never given a background stay see-through,
+    // as in kitty; the fill above already painted the default color everywhere else. A cell
+    // a program painted, even in the default color, still covers the image.
+    let seeThrough = images.placements.contains { $0.depth == .belowBackground }
+    let backgroundCells = seeThrough ? cells.map(Self.clearingDefaultBackground) : cells
     for row in 0..<drawRows {
-      draw(
-        row: row, cols: cols, cells: cells, originY: originY,
-        metrics: metrics, glyphCache: glyphCache, context: context,
-        clearFirst: false
+      drawBackgrounds(
+        row: row, cols: cols, cells: backgroundCells, originY: originY, metrics: metrics, context: context,
+        skipping: seeThrough ? Self.transparent : nil
       )
     }
+    drawImages(images, depth: .belowText, originY: originY, metrics: metrics, context: context)
+    for row in 0..<drawRows {
+      drawGlyphs(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, glyphCache: glyphCache, context: context)
+    }
+    drawImages(images, depth: .aboveText, originY: originY, metrics: metrics, context: context)
+    bitmaps = bitmaps.filter { images.bitmaps[$0.key] != nil }
+    imageShowsPlacements = !images.isEmpty
 
     image = context.makeImage()
     return image
   }
 
+  // MARK: - Images
+
+  private static let transparent: UInt32 = 0
+
+  private static func clearingDefaultBackground(_ cell: GridSnapshot.Cell) -> GridSnapshot.Cell {
+    guard cell.attrs & GridSnapshot.attrDefaultBackground != 0 else { return cell }
+    var cleared = cell
+    cleared.background = transparent
+    return cleared
+  }
+
+  private func drawImages(
+    _ layer: TerminalImageLayer, depth: TerminalImageLayer.Depth, originY: CGFloat,
+    metrics: TerminalRenderMetrics, context: CGContext
+  ) {
+    for placement in layer.placements where placement.depth == depth {
+      guard let bitmap = bitmap(for: placement.key, in: layer),
+            let source = bitmap.cropping(to: CGRect(
+              x: placement.sourceX, y: placement.sourceY,
+              width: placement.sourceWidth, height: placement.sourceHeight))
+      else { continue }
+      let rect = Self.imageRect(placement, originY: originY, metrics: metrics)
+      // The context is flipped to top-left; images draw y-up, so flip back around the rect.
+      context.saveGState()
+      context.translateBy(x: rect.minX, y: rect.maxY)
+      context.scaleBy(x: 1, y: -1)
+      context.interpolationQuality = .high
+      context.draw(source, in: CGRect(origin: .zero, size: rect.size))
+      context.restoreGState()
+    }
+  }
+
+  /// The placement's cell box, with the image aspect-fit inside it from the top left: a
+  /// box sized from the image's pixels is at most a cell larger than the image.
+  static func imageRect(
+    _ placement: TerminalImageLayer.Placement, originY: CGFloat, metrics: TerminalRenderMetrics
+  ) -> CGRect {
+    let offsetX = CGFloat(placement.offsetX) / metrics.scale
+    let offsetY = CGFloat(placement.offsetY) / metrics.scale
+    let box = CGSize(
+      width: CGFloat(placement.cols) * metrics.cellWidth - offsetX,
+      height: CGFloat(placement.rows) * metrics.cellHeight - offsetY
+    )
+    let fit = min(
+      box.width / CGFloat(max(placement.sourceWidth, 1)),
+      box.height / CGFloat(max(placement.sourceHeight, 1))
+    )
+    return CGRect(
+      x: CGFloat(placement.col) * metrics.cellWidth + offsetX,
+      y: originY + CGFloat(placement.row) * metrics.cellHeight + offsetY,
+      width: CGFloat(placement.sourceWidth) * fit,
+      height: CGFloat(placement.sourceHeight) * fit
+    )
+  }
+
+  private func bitmap(for key: TerminalImageLayer.Key, in layer: TerminalImageLayer) -> CGImage? {
+    if let cached = bitmaps[key] { return cached }
+    guard let pixels = layer.bitmaps[key], pixels.width > 0, pixels.height > 0,
+          pixels.rgba.count >= pixels.width * pixels.height * 4,
+          let provider = CGDataProvider(data: Data(pixels.rgba) as CFData),
+          let image = CGImage(
+            width: pixels.width, height: pixels.height,
+            bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: pixels.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
+          )
+    else { return nil }
+    bitmaps[key] = image
+    return image
+  }
+
   // MARK: - Drawing
 
-  private func draw(
-    row: Int,
-    cols: Int,
-    cells: [GridSnapshot.Cell],
-    originY: CGFloat,
-    metrics: TerminalRenderMetrics,
-    glyphCache: TerminalGlyphCache,
-    context: CGContext,
-    clearFirst: Bool
+  private func drawBackgrounds(
+    row: Int, cols: Int, cells: [GridSnapshot.Cell], originY: CGFloat,
+    metrics: TerminalRenderMetrics, context: CGContext, skipping skipped: UInt32? = nil
   ) {
     let rowStart = row * cols
     let y = CGFloat(row) * metrics.cellHeight + originY
-    let rowRect = CGRect(
-      x: 0, y: y,
-      width: CGFloat(cols) * metrics.cellWidth,
-      height: metrics.cellHeight
-    )
-
-    if clearFirst {
-      // The bitmap is retained between frames, so a repainted row has to be
-      // cleared or the old glyphs bleed through the new ones.
-      context.setFillColor(metrics.background)
-      context.fill(rowRect)
-    }
-
-    for span in TerminalRunBuilder.backgrounds(cells: cells, rowStart: rowStart, cols: cols) {
+    for span in TerminalRunBuilder.backgrounds(cells: cells, rowStart: rowStart, cols: cols) where span.color != skipped {
       context.setFillColor(color(span.color))
       context.fill(
         CGRect(
@@ -124,7 +198,14 @@ final class TerminalGridRenderer {
         )
       )
     }
+  }
 
+  private func drawGlyphs(
+    row: Int, cols: Int, cells: [GridSnapshot.Cell], originY: CGFloat,
+    metrics: TerminalRenderMetrics, glyphCache: TerminalGlyphCache, context: CGContext
+  ) {
+    let rowStart = row * cols
+    let y = CGFloat(row) * metrics.cellHeight + originY
     let baseline = y + (metrics.cellHeight - metrics.font.lineHeight) / 2 + metrics.font.ascender
     for run in TerminalRunBuilder.glyphRuns(cells: cells, rowStart: rowStart, cols: cols) {
       let bold = run.style & GridSnapshot.attrBold != 0

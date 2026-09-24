@@ -38,6 +38,7 @@ actor TerminalPipeline {
   private let outboundFrames: AsyncStream<OutboundFrame>
 
   private let sessionGrids = TerminalSessionGrids()
+  private var cellPixelSize: (width: Int, height: Int)?
   private var currentGrid: TerminalSessionGrid?
   private var emulator: TerminalEngine? { currentGrid?.emulator }
   private var outputBuffer: TerminalOutputBuffer { currentGrid?.buffer ?? TerminalOutputBuffer() }
@@ -69,9 +70,11 @@ actor TerminalPipeline {
   /// Connection and auth belong to the caller: this takes raw PTY bytes, so it tests hostless.
   func connectSSH(transport: any TerminalByteStream, key: String) async {
     disconnect()
+    imagesWatchable = true
     startOutboundPumpIfNeeded()
     let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
     currentGrid = attached.grid
+    if let cellPixelSize { attached.grid.emulator.setCellPixelSize(width: cellPixelSize.width, height: cellPixelSize.height) }
     emulatorKey = key
     lastRenderedGeneration = nil
     lastAltScreen = attached.grid.lastAltScreen
@@ -98,20 +101,29 @@ actor TerminalPipeline {
         applyOutput(bytes)
       }
       if !Task.isCancelled, key == emulatorKey {
-        sshTransport = nil
+        connectionLost()
         eventSink.yield(.error("Connection closed"))
       }
     } catch {
       if !Task.isCancelled, key == emulatorKey {
-        sshTransport = nil
+        connectionLost()
         eventSink.yield(.error(error.localizedDescription))
       }
     }
   }
 
+  /// The stream ended by itself: nothing new will arrive, so the image watch stops too.
+  private func connectionLost() {
+    sshTransport = nil
+    imagesWatchable = false
+    watchImages(nil)
+  }
+
   /// Drops the transport but KEEPS the emulator, so a foreground reconnect to
   /// the same session reuses its scrollback.
   func disconnect() {
+    imagesWatchable = false
+    watchImages(nil)
     sshReadTask?.cancel()
     sshReadTask = nil
     if let transport = sshTransport {
@@ -122,12 +134,66 @@ actor TerminalPipeline {
 
   // MARK: - Local emulator control
 
+  /// SwiftTerm advances kitty animations on its own timer and tells no one; while images
+  /// are on screen the frame is re-read, at 20 Hz while it keeps changing and backing off
+  /// to once a second while it doesn't, so a still image costs next to nothing.
+  private var imageWatch: Task<Void, Never>?
+  private weak var watchedEmulator: TerminalEngine?
+  private static let fastWatch = Duration.milliseconds(50)
+  private static let slowWatch = Duration.seconds(1)
+  private var watchDelay = fastWatch
+
+  private func watchTick() {
+    let changed = publishSnapshot()
+    watchDelay = changed ? Self.fastWatch : min(watchDelay * 2, Self.slowWatch)
+  }
+
+  /// Off while disconnected: nothing new can arrive, and a later local redraw (a scroll)
+  /// must not start polling again.
+  private var imagesWatchable = false
+  private var imageWatchStarts = 0
+
+  private func watchImages(_ emulator: TerminalEngine?) {
+    let wanted = imagesWatchable ? emulator : nil
+    guard wanted !== watchedEmulator || (wanted != nil && imageWatch == nil) else { return }
+    imageWatch?.cancel()
+    imageWatch = nil
+    watchedEmulator = wanted
+    guard wanted != nil else { return }
+    watchDelay = Self.fastWatch
+    imageWatchStarts += 1
+    imageWatch = Task { [weak self] in
+      while let self {
+        // A cancelled sleep ends the watch; it must not tick once more on its way out.
+        do { try await Task.sleep(for: await self.watchDelay) } catch { return }
+        await self.watchTick()
+      }
+    }
+  }
+
+  /// New output while the watch was backed off: a sleep already under way would hold the
+  /// next animation frame back by up to a second, so start over at the fast interval.
+  private func speedUpImageWatch() {
+    guard watchDelay != Self.fastWatch, let emulator = watchedEmulator else {
+      watchDelay = Self.fastWatch
+      return
+    }
+    imageWatch?.cancel()
+    imageWatch = nil
+    watchImages(emulator)
+  }
+
   /// Scrolls the local VT viewport through scrollback (not PTY PgUp/PgDn).
   /// Positive `lines` moves into history; negative toward the live bottom.
   func scrollViewport(lines: Int32) {
     guard lines != 0, let emulator else { return }
     emulator.scrollViewport(lines: lines)
     publishSnapshot()
+  }
+
+  func setCellPixelSize(width: Int, height: Int) {
+    cellPixelSize = (width, height)
+    emulator?.setCellPixelSize(width: width, height: height)
   }
 
   /// False when the shell marked no OSC 133 prompt in that direction.
@@ -202,7 +268,7 @@ actor TerminalPipeline {
       altScreen: lastAltScreen,
       oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
     ), !outputBuffer.data.isEmpty {
-      currentGrid?.emulator = outputBuffer.replay(cols: newCols, rows: newRows)
+      currentGrid?.emulator = outputBuffer.replay(cols: newCols, rows: newRows, cellPixelSize: cellPixelSize)
       lastRenderedGeneration = nil
       publishSnapshot()
       return true
@@ -244,6 +310,7 @@ actor TerminalPipeline {
   #if DEBUG
   /// Test seam: stand up a live emulator without a connection.
   func attachForTest(cols: UInt16, rows: UInt16) {
+    imagesWatchable = true
     let attached = sessionGrids.attach(key: "test", cols: cols, rows: rows)
     currentGrid = attached.grid
     emulatorKey = "test"
@@ -253,26 +320,37 @@ actor TerminalPipeline {
 
   /// Test seam: feed bytes through the normal output path.
   func feedForTest(_ bytes: Data) { applyOutput(bytes) }
+
+  var isWatchingImagesForTest: Bool { imageWatch != nil }
+  var imageWatchDelayForTest: Duration { watchDelay }
+  var imageWatchStartsForTest: Int { imageWatchStarts }
+  func imageWatchTickForTest() { watchTick() }
   #endif
 
   // MARK: - Publishing
 
   /// Publishes a new grid only when the visible contents actually changed: the
   /// engine returns its cached frame (copy-on-write) until something dirties it.
-  private func publishSnapshot() {
-    guard let emulator else { return }
+  /// True when a new frame went out.
+  @discardableResult
+  private func publishSnapshot() -> Bool {
+    guard let emulator else { return false }
     let frame = emulator.frame()
+    watchImages(frame.images.isEmpty ? nil : emulator)
     // Mouse mode can flip without a viewport change (e.g. vim entering or
     // leaving mouse tracking). Keep the surface's input path in sync either way.
     syncMouseModes(from: emulator)
-    guard frame.header.generation != lastRenderedGeneration else { return }
+    guard frame.header.generation != lastRenderedGeneration else { return false }
     lastRenderedGeneration = frame.header.generation
+    // Output or an animation frame: watch closely again.
+    speedUpImageWatch()
     if frame.header.altScreen != lastAltScreen {
       lastAltScreen = frame.header.altScreen
       currentGrid?.lastAltScreen = frame.header.altScreen
       eventSink.yield(.altScreen(frame.header.altScreen))
     }
     snapshotSink.yield(frame)
+    return true
   }
 
   private func syncMouseModes(from emulator: TerminalEngine) {

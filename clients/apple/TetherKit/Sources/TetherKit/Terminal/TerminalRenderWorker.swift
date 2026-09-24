@@ -7,6 +7,7 @@ struct TerminalRenderOutput {
   var cells: [GridSnapshot.Cell]
   var rowTexts: [String]
   var linkSpans: [[LinkSpan]]
+  var images: TerminalImageLayer
   var image: CGImage?
 }
 
@@ -20,6 +21,7 @@ final class TerminalRenderWorker {
   private var lastCells: [GridSnapshot.Cell] = []
   private var lastRowTexts: [String] = []
   private var lastLinkSpans: [[LinkSpan]] = []
+  private var lastImages = TerminalImageLayer.empty
 
   func reset() {
     renderer.invalidate()
@@ -29,6 +31,7 @@ final class TerminalRenderWorker {
     lastCells = []
     lastRowTexts = []
     lastLinkSpans = []
+    lastImages = .empty
   }
 
   /// Keeps the last image but lets a new session's generation 1 through.
@@ -47,6 +50,7 @@ final class TerminalRenderWorker {
     lastGeneration = header.generation
     lastHeader = header
     lastCells = frame.cells
+    lastImages = frame.images
     let cols = Int(header.cols)
     let rows = Int(header.rows)
     lastRowTexts = TerminalRunBuilder.rowTexts(cells: lastCells, cols: cols, rows: rows)
@@ -69,12 +73,13 @@ final class TerminalRenderWorker {
   private func rasterize(metrics: TerminalRenderMetrics) -> TerminalRenderOutput? {
     guard let header = lastHeader else { return nil }
     lastMetrics = metrics
-    let image = renderer.render(header: header, cells: lastCells, metrics: metrics)
+    let image = renderer.render(header: header, cells: lastCells, images: lastImages, metrics: metrics)
     return TerminalRenderOutput(
       header: header,
       cells: lastCells,
       rowTexts: lastRowTexts,
       linkSpans: lastLinkSpans,
+      images: lastImages,
       image: image
     )
   }

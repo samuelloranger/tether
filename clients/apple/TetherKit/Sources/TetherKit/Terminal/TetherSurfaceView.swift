@@ -21,6 +21,9 @@ public final class TetherSurfaceView: UIView {
   /// Fires once the bounds settle, for the PTY: a resize per transient size makes an inline TUI
   /// rewrap each time and bake duplicate footers into scrollback.
   public var onGridSizeSettled: ((UInt16, UInt16) -> Void)?
+  /// A cell's size in device pixels, for programs that size images in pixels.
+  public var onCellPixelSize: ((Int, Int) -> Void)?
+  private var reportedCellPixels: (width: Int, height: Int)?
 
   /// Engine scroll delta: positive = into history. Built from pan pixels via
   /// `TouchScrollModel` (finger-down → history).
@@ -59,6 +62,7 @@ public final class TetherSurfaceView: UIView {
   private var gridSettleWork: DispatchWorkItem?
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
+  private var images = TerminalImageLayer.empty
   private var cachedRowTexts: [String] = []
   private var linkSpans: [[LinkSpan]] = []
 
@@ -183,6 +187,7 @@ public final class TetherSurfaceView: UIView {
     needsRepaint = false
     header = nil
     cells = []
+    images = .empty
     cachedRowTexts = []
     linkSpans = []
     renderQueue.async { [worker] in
@@ -253,6 +258,7 @@ public final class TetherSurfaceView: UIView {
 
     header = output.header
     cells = output.cells
+    images = output.images
     cachedRowTexts = output.rowTexts
     linkSpans = output.linkSpans
 
@@ -383,7 +389,7 @@ public final class TetherSurfaceView: UIView {
     let cols = Int(header.cols)
     let rows = Int(header.rows)
     let drawRows = TerminalGridLayout.paintedRows(
-      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen
+      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen, images: images
     )
     let drawn = CGFloat(drawRows) * cellHeight
     return max(0, bounds.height - drawn)
@@ -408,6 +414,13 @@ public final class TetherSurfaceView: UIView {
 
   private func reportGridSize() {
     guard let size = currentGridSize() else { return }
+
+    let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+    let pixels = (width: Int((cellWidth * scale).rounded()), height: Int((cellHeight * scale).rounded()))
+    if reportedCellPixels?.width != pixels.width || reportedCellPixels?.height != pixels.height {
+      reportedCellPixels = pixels
+      onCellPixelSize?(pixels.width, pixels.height)
+    }
 
     // Local emulator follows the view immediately, every frame: the rendered
     // grid must match the bounds or a keyboard shrink leaves blank rows.

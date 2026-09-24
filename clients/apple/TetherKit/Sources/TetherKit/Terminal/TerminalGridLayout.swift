@@ -28,16 +28,18 @@ enum TerminalGridLayout {
     cells: [GridSnapshot.Cell],
     cols: Int,
     rows: Int,
-    altScreen: Bool
+    altScreen: Bool,
+    images: TerminalImageLayer = .empty
   ) -> Int {
     guard altScreen, cols > 0, rows > 0, cells.count >= cols * rows else { return rows }
-    var lastPainted = -1
+    // An image sits over blank cells; its rows are painted too.
+    var lastPainted = min(rows, images.placements.map { $0.row + $0.rows }.max() ?? 0) - 1
     for row in 0..<rows {
       let start = row * cols
       let painted = cells[start..<(start + cols)].contains {
         $0.codepoint != 0 && $0.codepoint != 0x20
       }
-      if painted { lastPainted = row }
+      if painted { lastPainted = max(lastPainted, row) }
     }
     return lastPainted + 1
   }
