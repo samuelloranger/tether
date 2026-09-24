@@ -149,15 +149,19 @@ func runStatus(w io.Writer, d statusDeps) error {
 	out := []SessionState{}
 	// Outside the lock: a slow ls must not stall the hooks queued behind it.
 	live, lsErr := zmxClients(d.run)
+	stale := func(s SessionState) bool {
+		_, listed := live[s.Session]
+		return !d.alive(s.AgentPid) || (lsErr == nil && !listed)
+	}
+	var doomed []string
 	err := withSessionsLock(func() error {
 		states, err := listSessions()
 		if err != nil {
 			return err
 		}
 		for _, s := range states {
-			_, listed := live[s.Session]
-			if !d.alive(s.AgentPid) || (lsErr == nil && !listed) {
-				_ = removeSession(s.Session)
+			if stale(s) {
+				doomed = append(doomed, s.Session)
 				continue
 			}
 			out = append(out, s)
@@ -166,6 +170,18 @@ func runStatus(w io.Writer, d statusDeps) error {
 	})
 	if err != nil {
 		return err
+	}
+	// Each removal takes its session's lock first, like every other writer, so it can't
+	// land between `answer`'s check and its send; the record is checked again under it.
+	for _, name := range doomed {
+		_ = withSessionLock(name, func() error {
+			return withSessionsLock(func() error {
+				if s, _ := readSession(name); s != nil && stale(*s) {
+					return removeSession(name)
+				}
+				return nil
+			})
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Session < out[j].Session })
 	return json.NewEncoder(w).Encode(out)

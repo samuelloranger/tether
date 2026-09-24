@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +77,8 @@ func nextState(prev *SessionState, in SessionState, now int64) *SessionState {
 
 // withSessionLock serializes one session's state changes with `answer` typing into it,
 // without holding up hooks for other sessions. Taken before withSessionsLock, never after.
+// Sessions share a fixed set of lock files by name hash: a file per session would pile up,
+// and one can't be deleted safely while another process may be waiting on it.
 func withSessionLock(name string, fn func() error) error {
 	if !validSessionName(name) {
 		return fmt.Errorf("invalid session name %q", name)
@@ -83,7 +86,7 @@ func withSessionLock(name string, fn func() error) error {
 	if err := os.MkdirAll(sessionsDir(), 0o700); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(filepath.Join(sessionsDir(), ".lock-"+name), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(sessionLockPath(name), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
@@ -93,6 +96,14 @@ func withSessionLock(name string, fn func() error) error {
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	return fn()
+}
+
+const sessionLockStripes = 64
+
+func sessionLockPath(name string) string {
+	h := fnv.New32a()
+	h.Write([]byte(name))
+	return filepath.Join(sessionsDir(), fmt.Sprintf(".lock-%02x", h.Sum32()%sessionLockStripes))
 }
 
 // One lock for the whole directory: hooks and `status` pruning never interleave.

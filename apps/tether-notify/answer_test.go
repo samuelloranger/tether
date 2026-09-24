@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -116,6 +118,49 @@ func TestAnswerHoldsOnlyItsOwnSessionsLock(t *testing.T) {
 	}
 	if err := runAnswer(answerArgs("v1", "\r"), d); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSessionLocksAreAFixedSetOfFiles(t *testing.T) {
+	t.Setenv("TETHER_NOTIFY_HOME", t.TempDir())
+	paths := map[string]bool{}
+	for i := 0; i < 500; i++ {
+		name := fmt.Sprintf("s%d", i)
+		if err := withSessionLock(name, func() error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		paths[sessionLockPath(name)] = true
+	}
+	entries, _ := os.ReadDir(sessionsDir())
+	if len(paths) > sessionLockStripes || len(entries) > sessionLockStripes {
+		t.Fatalf("%d lock paths, %d files for 500 sessions", len(paths), len(entries))
+	}
+}
+
+func TestStatusPrunesUnderTheSessionLock(t *testing.T) {
+	d, _, _ := answerFixture(t, waiting)
+	pruned := make(chan error, 1)
+	held := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		_ = withSessionLock("work", func() error { close(held); <-release; return nil })
+	}()
+	<-held
+	go func() {
+		// The session's zmx process is gone: status would prune it.
+		pruned <- runStatus(&bytes.Buffer{}, statusDeps{run: d.run, alive: func(int) bool { return false }})
+	}()
+	select {
+	case <-pruned:
+		t.Fatal("status pruned a session while its lock was held")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if err := <-pruned; err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := readSession("work"); s != nil {
+		t.Fatalf("not pruned after the lock was released: %+v", s)
 	}
 }
 
