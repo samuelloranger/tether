@@ -91,12 +91,29 @@ final class TerminalThemeTests: XCTestCase {
     XCTAssertEqual(hard.frame().cells[0].foreground, dracula.ansi[1])
   }
 
-  func test_override_tracking_survives_sequences_split_across_reads_and_ignores_queries() {
+  func test_override_tracking_survives_split_reads_ignores_queries_and_control_strings() {
+    var scanner = OSCScanner()
     var overrides = PaletteOverrides()
-    for chunk in ["\u{1B}]", "4;7", ";rgb:1/2/3;9;?", "\u{1B}", "\\"] { overrides.scan(Array(chunk.utf8)) }
+    let feed = { (text: String) in for event in scanner.scan(Array(text.utf8)) { overrides.apply(event) } }
+    for chunk in ["\u{1B}]", "4;7", ";rgb:1/2/3;9;?", "\u{1B}", "\\"] { feed(chunk) }
     XCTAssertEqual(overrides.indices, [7])
-    overrides.scan(Array("\u{1B}]4;200;#ffffff\u{07}\u{1B}]104\u{07}".utf8))
+    // Inside a kitty graphics APC payload: not a palette command.
+    feed("\u{1B}_Gq=2;\u{1B}]4;3;rgb:9/9/9\u{07}\u{1B}\\")
+    XCTAssertEqual(overrides.indices, [7])
+    feed("\u{1B}]4;200;#ffffff\u{07}\u{1B}]104\u{07}")
     XCTAssertEqual(overrides.indices, [])
+  }
+
+  func test_a_grid_rebuilt_from_truncated_output_keeps_the_programs_colors() {
+    let live = TerminalEngine(cols: 10, rows: 2)
+    live.feed("\u{1B}]4;1;rgb:12/34/56\u{07}")
+    // The rebuild's buffer no longer holds the OSC 4.
+    let rebuilt = TerminalEngine(cols: 10, rows: 2)
+    rebuilt.restorePaletteOverrides(live.paletteOverrideEntries())
+    rebuilt.feed("\u{1B}[31mR")
+    XCTAssertEqual(rebuilt.frame().cells[0].foreground, 0xFF12_3456)
+    rebuilt.setTheme(dracula)
+    XCTAssertEqual(rebuilt.frame().cells[0].foreground, 0xFF12_3456, "the carried entry isn't tracked as the program's")
   }
 
   func test_the_palette_sequence_is_one_osc4() {

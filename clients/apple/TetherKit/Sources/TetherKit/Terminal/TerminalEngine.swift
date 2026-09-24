@@ -83,6 +83,27 @@ final class TerminalEngine {
     }
   }
 
+  /// The entries a program set, with their current colors, to hand to an engine that
+  /// replaces this one.
+  func paletteOverrideEntries() -> [(index: Int, argb: UInt32)] {
+    locked {
+      let current = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      return paletteOverrides.indices.sorted().map { ($0, current[$0]) }
+    }
+  }
+
+  /// Re-applies another engine's program-set entries: its output may be gone from the
+  /// buffer this engine was rebuilt from.
+  func restorePaletteOverrides(_ entries: [(index: Int, argb: UInt32)]) {
+    guard !entries.isEmpty else { return }
+    locked {
+      terminal.feed(text: Self.paletteSequence(entries))
+      paletteOverrides.adopt(entries.map(\.index))
+      palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      needsRefresh = true
+    }
+  }
+
   /// One OSC 4 setting each entry to its ARGB color.
   static func paletteSequence(_ entries: [(index: Int, argb: UInt32)]) -> String {
     let specs = entries.map { entry in
@@ -185,6 +206,7 @@ final class TerminalEngine {
       top = now
     }
     for event in oscScanner.scan(bytes) {
+      paletteOverrides.apply(event)
       switch event {
       case let .reset(end):
         feed(through: end)
@@ -223,7 +245,6 @@ final class TerminalEngine {
   }
 
   private func feedLocked(_ bytes: Data) {
-    paletteOverrides.scan(bytes)
     graphicsDirty = true
     let pinned = scrollOffset
     let oldLiveTop = liveTop
