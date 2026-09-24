@@ -73,23 +73,36 @@ public final class AppPreferences {
     guard !downloading else { throw GoogleFontsError.busy }
     downloading = true
     defer { downloading = false }
-    let installed = try await fontInstaller.install(link)
+    let family = GoogleFonts.family(from: link)
+    let previous = family.flatMap { name in downloadedFonts.first { $0.slug == GoogleFonts.slug(name) } }
+    let installed: GoogleFontsInstaller.Installed
+    do {
+      installed = try await fontInstaller.install(link, previous: previous)
+    } catch {
+      // A replace that failed half way may have taken the previous files with it; its
+      // journal lets the next launch bring them back.
+      if let previous, !fontInstaller.register(previous) { forget(previous) }
+      throw error
+    }
     let font = installed.font
     guard fontInstaller.register(font) else {
       let restored = fontInstaller.rollback(installed)
       // The replaced files are back; so is their registration. If not, the previous
       // font is gone too, and is no longer offered.
-      if let previous = downloadedFonts.first(where: { $0.slug == font.slug }),
-         !restored || !fontInstaller.register(previous) {
-        downloadedFonts.removeAll { $0.slug == font.slug }
-        if terminalFontID == previous.id { terminalFontID = TerminalFont.menlo.id }
-      }
+      if let previous, !restored || !fontInstaller.register(previous) { forget(previous) }
       throw GoogleFontsError.unreadable
     }
-    fontInstaller.commit(installed)
     downloadedFonts.removeAll { $0.slug == font.slug }
     downloadedFonts.append(font)
     terminalFontID = font.id
+    // Only once preferences hold the new record: until then a launch rolls the swap back.
+    fontInstaller.commit(installed)
+  }
+
+  /// Stops offering a font whose files are gone, without touching disk.
+  private func forget(_ font: DownloadedFont) {
+    downloadedFonts.removeAll { $0.slug == font.slug }
+    if terminalFontID == font.id { terminalFontID = TerminalFont.menlo.id }
   }
 
   public func removeDownloadedFont(_ font: DownloadedFont) {
@@ -128,10 +141,10 @@ public final class AppPreferences {
     let saved = defaults.data(forKey: Key.downloadedFonts)
       .flatMap { try? JSONDecoder().decode([DownloadedFont].self, from: $0) } ?? []
     let installer = GoogleFontsInstaller()
-    installer.recoverInterrupted(saved: saved)
-    let usable = saved.filter { installer.register($0) }
+    let recovered = installer.recoverInterrupted(saved: saved)
+    let usable = recovered.filter { installer.register($0) }
     downloadedFonts = usable
-    if usable.count != saved.count {
+    if usable != saved {
       defaults.set(try? JSONEncoder().encode(usable), forKey: Key.downloadedFonts)
     }
     if fontID.hasPrefix("gf-"), !usable.contains(where: { $0.id == fontID }) {

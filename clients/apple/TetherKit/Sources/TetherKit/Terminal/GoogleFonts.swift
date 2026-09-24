@@ -93,6 +93,11 @@ public enum GoogleFonts {
     return decoded
   }
 
+  /// The folder and id stem for a family: "Fira Code" -> "fira-code".
+  public static func slug(_ family: String) -> String {
+    family.lowercased().split(separator: " ").joined(separator: "-")
+  }
+
   static func cssURL(family: String, weights: Bool) -> URL {
     var components = URLComponents(string: "https://fonts.googleapis.com/css2")!
     components.queryItems = [URLQueryItem(name: "family", value: family + (weights ? ":wght@400;700" : ""))]
@@ -160,12 +165,25 @@ public struct GoogleFontsInstaller: @unchecked Sendable {
   public struct Installed: Sendable {
     public let font: DownloadedFont
     let backup: URL?
+    let journal: URL
+  }
+
+  /// Written before the old folder moves aside and removed by `commit` once preferences
+  /// hold the new record, so a launch after a crash knows which side of the swap it's on
+  /// instead of guessing from which files exist.
+  struct Journal: Codable, Equatable {
+    var installed: DownloadedFont
+    var previous: DownloadedFont?
+    /// The backup folder's name, when there was a previous folder to keep aside.
+    var backup: String?
   }
 
   /// Downloads and stores a family without registering it. A re-download replaces the
   /// previous files only once the new ones are complete, and keeps them in a backup until
   /// `commit` or `rollback`.
-  public func install(_ input: String) async throws -> Installed {
+  /// `previous` is the saved record this download replaces, if any; it is journaled so a
+  /// failed or interrupted replace can bring it back.
+  public func install(_ input: String, previous: DownloadedFont? = nil) async throws -> Installed {
     guard let family = GoogleFonts.family(from: input) else { throw GoogleFontsError.notALink }
     // A family without a 700 answers the weighted request with 400.
     var css = try await text(GoogleFonts.cssURL(family: family, weights: true))
@@ -180,7 +198,7 @@ public struct GoogleFontsInstaller: @unchecked Sendable {
       throw GoogleFontsError.unknownFamily(family)
     }
 
-    let slug = family.lowercased().split(separator: " ").joined(separator: "-")
+    let slug = GoogleFonts.slug(family)
     let folder = directory.appendingPathComponent(slug, isDirectory: true)
     let staging = directory.appendingPathComponent(".\(slug)-\(UUID().uuidString)", isDirectory: true)
     try files.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -193,42 +211,59 @@ public struct GoogleFontsInstaller: @unchecked Sendable {
       for name in [regular.postScriptName] + (bold.map { [$0.postScriptName] } ?? []) {
         if Self.isInstalled(postScriptName: name, outside: folder) { throw GoogleFontsError.nameTaken(name) }
       }
-      var backup: URL?
-      if files.fileExists(atPath: folder.path) {
-        unregisterAll(in: folder)
-        let aside = directory.appendingPathComponent(".\(slug)-old-\(UUID().uuidString)", isDirectory: true)
-        do {
-          try files.moveItem(at: folder, to: aside)
-        } catch {
-          // The previous files never moved: serve them again.
-          registerAll(in: folder)
-          throw error
-        }
-        backup = aside
-      }
-      do {
-        try files.moveItem(at: staging, to: folder)
-      } catch {
-        // Put the previous files back rather than leave the family with neither.
-        if let backup, (try? files.moveItem(at: backup, to: folder)) != nil { registerAll(in: folder) }
-        throw error
-      }
       let font = DownloadedFont(
         family: family, slug: slug,
         postScriptName: regular.postScriptName, boldPostScriptName: bold?.postScriptName,
         files: [regular.file] + (bold.map { [$0.file] } ?? []),
         isMonospaced: regular.isMonospaced
       )
-      return Installed(font: font, backup: backup)
+      let hasPrevious = files.fileExists(atPath: folder.path)
+      let backup = hasPrevious
+        ? directory.appendingPathComponent(".\(slug)-old-\(UUID().uuidString)", isDirectory: true) : nil
+      let journal = Self.journalURL(slug: slug, in: directory)
+      try JSONEncoder().encode(Journal(installed: font, previous: previous, backup: backup?.lastPathComponent))
+        .write(to: journal, options: .atomic)
+      if let backup {
+        unregisterAll(in: folder)
+        do {
+          try files.moveItem(at: folder, to: backup)
+        } catch {
+          // The previous files never moved: serve them again.
+          registerAll(in: folder)
+          try? files.removeItem(at: journal)
+          throw error
+        }
+      }
+      do {
+        try files.moveItem(at: staging, to: folder)
+      } catch {
+        // Put the previous files back rather than leave the family with neither. If that
+        // fails too, the journal stays for the next launch to finish the job.
+        if let backup {
+          if (try? files.moveItem(at: backup, to: folder)) != nil {
+            registerAll(in: folder)
+            try? files.removeItem(at: journal)
+          }
+        } else {
+          try? files.removeItem(at: journal)
+        }
+        throw error
+      }
+      return Installed(font: font, backup: backup, journal: journal)
     } catch {
       try? files.removeItem(at: staging)
       throw error
     }
   }
 
-  /// The new files registered: the replaced ones can go.
+  /// Preferences now hold the new record: the replaced files and the journal can go.
   public func commit(_ installed: Installed) {
     if let backup = installed.backup { try? files.removeItem(at: backup) }
+    try? files.removeItem(at: installed.journal)
+  }
+
+  static func journalURL(slug: String, in directory: URL) -> URL {
+    directory.appendingPathComponent(".\(slug)-pending.json")
   }
 
   /// The new files didn't register: remove them and put the replaced ones back. False when
@@ -240,33 +275,49 @@ public struct GoogleFontsInstaller: @unchecked Sendable {
     unregisterAll(in: folder)
     TerminalFonts.setDownloadedBoldFace(nil, for: installed.font.postScriptName)
     guard (try? files.removeItem(at: folder)) != nil || !files.fileExists(atPath: folder.path) else { return false }
-    guard let backup = installed.backup else { return true }
-    return (try? files.moveItem(at: backup, to: folder)) != nil
+    if let backup = installed.backup, (try? files.moveItem(at: backup, to: folder)) == nil { return false }
+    try? files.removeItem(at: installed.journal)
+    return true
   }
 
-  /// Finishes installs a crash interrupted, before saved fonts are registered: staging
-  /// folders go, and a kept-aside backup is put back when its family's folder no longer
-  /// holds the files `saved` names, or dropped when it does.
-  public func recoverInterrupted(saved: [DownloadedFont]) {
+  /// Finishes installs a crash or a failed restore left half done, before saved fonts are
+  /// registered, and returns the saved list to use. Per journal: when the saved record is
+  /// the new font, the swap was committed and its backup goes; otherwise the previous files
+  /// come back, and so does their record if it was dropped. Staging folders and backups no
+  /// journal claims are removed.
+  public func recoverInterrupted(saved: [DownloadedFont]) -> [DownloadedFont] {
+    var fonts = saved
+    var claimed: Set<String> = []
     let entries = (try? files.contentsOfDirectory(atPath: directory.path)) ?? []
-    for entry in entries where entry.hasPrefix(".") {
-      let url = directory.appendingPathComponent(entry, isDirectory: true)
-      guard let range = entry.range(of: "-old-") else {
+    for entry in entries where entry.hasPrefix(".") && entry.hasSuffix("-pending.json") {
+      let url = directory.appendingPathComponent(entry)
+      guard let data = files.contents(atPath: url.path),
+            let journal = try? JSONDecoder().decode(Journal.self, from: data)
+      else {
         try? files.removeItem(at: url)
         continue
       }
-      let slug = String(entry[entry.index(after: entry.startIndex)..<range.lowerBound])
+      let slug = journal.installed.slug
       let folder = directory.appendingPathComponent(slug, isDirectory: true)
-      let complete = saved.first { $0.slug == slug }.map { font in
-        font.files.allSatisfy { files.fileExists(atPath: folder.appendingPathComponent($0).path) }
-      } ?? true
-      if complete {
-        try? files.removeItem(at: url)
-      } else {
+      let backup = journal.backup.map { directory.appendingPathComponent($0, isDirectory: true) }
+      if let backup { claimed.insert(backup.lastPathComponent) }
+      let committed = fonts.first { $0.slug == slug } == journal.installed
+      if committed {
+        if let backup { try? files.removeItem(at: backup) }
+      } else if let backup, files.fileExists(atPath: backup.path) {
         try? files.removeItem(at: folder)
-        try? files.moveItem(at: url, to: folder)
+        guard (try? files.moveItem(at: backup, to: folder)) != nil else { continue }
+        if let previous = journal.previous, !fonts.contains(where: { $0.slug == slug }) { fonts.append(previous) }
+      } else if journal.previous == nil {
+        // A first install that never reached preferences: its files belong to no one.
+        try? files.removeItem(at: folder)
       }
+      try? files.removeItem(at: url)
     }
+    for entry in entries where entry.hasPrefix(".") && !entry.hasSuffix("-pending.json") && !claimed.contains(entry) {
+      try? files.removeItem(at: directory.appendingPathComponent(entry, isDirectory: true))
+    }
+    return fonts
   }
 
   /// Registers a stored family's files, e.g. at launch. False when a file is gone or Core
