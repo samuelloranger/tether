@@ -320,6 +320,9 @@ public final class SSHTerminalController {
 
   public func dismissAgentAlert() { agentAlert = nil }
 
+  /// Whether a push or link labelled `label` is about this host, as learnt from status reads.
+  public func answers(toHostLabel label: String) -> Bool { knownHostLabels.contains(label) }
+
   /// The auto-hide timer's callback: a newer banner for the same session must survive it.
   public func expireAgentAlert(_ alert: AgentStatus) {
     if agentAlert == alert { agentAlert = nil }

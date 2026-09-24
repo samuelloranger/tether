@@ -172,4 +172,16 @@ final class SSHTerminalControllerAgentStatusTests: XCTestCase {
     XCTAssertNil(controller.agentAlert)
     await controller.leave()
   }
+
+
+  func test_the_controller_answers_to_the_host_label_its_status_reports() async {
+    let done = "[\(row("other", "done"))]"
+    let ops = makeOps { done }
+    let controller = makeController(ops)
+    XCTAssertFalse(controller.answers(toHostLabel: "devbox"), "nothing is known before a status read")
+    await connectSettled(controller, ops)
+    XCTAssertTrue(controller.answers(toHostLabel: "devbox"))
+    XCTAssertFalse(controller.answers(toHostLabel: "elsewhere"))
+    await controller.leave()
+  }
 }

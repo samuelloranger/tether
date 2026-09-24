@@ -53,4 +53,22 @@ final class NotificationTapRouterTests: XCTestCase {
     let options = await router.presentationOptions(for: [:])
     XCTAssertEqual(options, [.banner, .sound, .badge])
   }
+
+  func test_a_tap_that_arrives_before_the_app_is_ready_is_delivered_once() {
+    let router = NotificationTapRouter()
+    let url = URL(string: "tether://session/work?host=devbox")!
+    router.open(url)
+    var opened: [URL] = []
+    router.onOpenURL = { opened.append($0) }
+    router.onOpenURL = { opened.append($0) }
+    XCTAssertEqual(opened, [url], "a cold-launch tap must reach the app exactly once")
+  }
+
+  func test_a_tap_while_the_app_is_ready_is_delivered_at_once() {
+    let router = NotificationTapRouter()
+    var opened: [URL] = []
+    router.onOpenURL = { opened.append($0) }
+    router.open(URL(string: "tether://session/b?host=devbox")!)
+    XCTAssertEqual(opened.count, 1)
+  }
 }
