@@ -105,6 +105,21 @@ final class TerminalSemanticTests: XCTestCase {
     XCTAssertEqual(engine.lastCommandOutput(), "first\n  indented  \n\nlast")
   }
 
+  func test_blank_lines_at_either_end_of_the_output_are_kept() {
+    let engine = TerminalEngine(cols: 30, rows: 8)
+    shell(engine, commands: [("one", ["x"]), ("two", ["", "text", ""])])
+    XCTAssertEqual(engine.lastCommandOutput(), "\ntext\n")
+  }
+
+  func test_a_secondary_prompt_opener_counts_as_a_prompt() {
+    let engine = TerminalEngine(cols: 30, rows: 5)
+    shell(engine, commands: [("one", lines("a", 6))])
+    // A continuation prompt that opens its own group (k=s) with no primary mark.
+    engine.feed("\u{1B}]133;A;k=s\(st)> \u{1B}]133;B\(st)")
+    XCTAssertTrue(engine.jumpToPrompt(.previous))
+    XCTAssertEqual(rowText(engine.frame(), 0), "$ one")
+  }
+
   func test_a_soft_wrapped_output_line_is_copied_as_one_line() {
     let engine = TerminalEngine(cols: 10, rows: 5)
     let long = String(repeating: "x", count: 25)

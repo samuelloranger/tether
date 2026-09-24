@@ -156,12 +156,14 @@ final class TerminalEngine {
   }
 
   /// Buffer-absolute rows (scrollback included) where a prompt group starts, oldest first.
-  /// Reads each row's stored marks: `semanticRowKind` walks back through continuation
-  /// rows, which makes a full scan quadratic on long soft-wrapped commands.
+  /// A prompt row always carries a mark, so unmarked rows are skipped: asking
+  /// `semanticRowKind` about them walks back through continuation rows, which makes a full
+  /// scan quadratic on long soft-wrapped commands. Marked rows get SwiftTerm's own answer,
+  /// which also counts a secondary-prompt opener.
   private func promptRows() -> [Int] {
     let last = liveTop + terminal.getDims().rows
     return (0..<last).filter { row in
-      terminal.semanticPromptMarks(at: row).contains { $0.kind == .initial }
+      !terminal.semanticPromptMarks(at: row).isEmpty && terminal.semanticRowKind(at: row) == .initial
     }
   }
 
@@ -191,17 +193,31 @@ final class TerminalEngine {
     // command started from the prompt above.
     guard prompts.count >= 2 else { return nil }
     let cols = terminal.getDims().cols
-    // nil: the row has no output cells. Kept, so blank lines inside the output survive.
-    var rows: [(text: String?, wrapped: Bool)] = []
-    for row in prompts[prompts.count - 2]..<prompts[prompts.count - 1] {
+    let group = prompts[prompts.count - 2]..<prompts[prompts.count - 1]
+    // Output starts after the command line (its prompt and input cells) and runs to the next
+    // prompt, so blank lines at either end are part of it.
+    let inputRows = group.filter { row in
+      guard let line = terminal.bufferLine(atRow: row) else { return false }
+      return (0..<min(cols, line.count)).contains { col in
+        switch terminal.semanticContent(at: Position(col: col, row: row)) {
+        case .prompt, .input: return true
+        default: return false
+        }
+      }
+    }
+    let start = (inputRows.last ?? group.lowerBound - 1) + 1
+    var rows: [(text: String, wrapped: Bool)] = []
+    var sawOutput = false
+    for row in start..<group.upperBound {
       guard let line = terminal.bufferLine(atRow: row) else { continue }
       let limit = min(cols, line.count)
       let isOutput = (0..<limit).map { terminal.semanticContent(at: Position(col: $0, row: row)) == .output }
       // Up to the last cell the program wrote: its trailing spaces stay, padding doesn't.
       guard let last = isOutput.lastIndex(of: true) else {
-        rows.append((nil, line.isWrapped))
+        rows.append(("", line.isWrapped))
         continue
       }
+      sawOutput = true
       var text = ""
       for col in 0...last {
         let data = line[col]
@@ -211,16 +227,14 @@ final class TerminalEngine {
       }
       rows.append((text, line.isWrapped))
     }
-    guard let first = rows.firstIndex(where: { $0.text != nil }),
-          let last = rows.lastIndex(where: { $0.text != nil })
-    else { return nil }
+    guard sawOutput else { return nil }
     var output = ""
-    for (index, row) in rows[first...last].enumerated() {
+    for (index, row) in rows.enumerated() {
       // A soft-wrapped row continues the line above; only real line breaks become newlines.
       if index > 0, !row.wrapped { output += "\n" }
-      output += row.text ?? ""
+      output += row.text
     }
-    return output.isEmpty ? nil : output
+    return output
   }
 
   private func returnToLive() {
