@@ -83,21 +83,41 @@ func TestStatePushesCarryTheAgentCategoryAndState(t *testing.T) {
 			t.Fatalf("%s: pushes %+v", state, *pushes)
 		}
 		got := (*pushes)[0].content
-		if got.Category != want || got.State != state || got.Since != 1000 {
-			t.Fatalf("%s: content %+v", state, got)
+		stored, _ := readSession("work")
+		if got.Category != want || got.State != state || got.Version == "" || stored == nil || got.Version != stored.Version {
+			t.Fatalf("%s: content %+v stored %+v", state, got, stored)
 		}
 	}
 }
 
 func TestStateWithoutASessionLinkOffersNoActions(t *testing.T) {
-	for _, link := range []string{"", "https://example.com", "tether://session/work"} {
+	for _, link := range []string{
+		"", "https://example.com", "tether://session/work", "tether://session/other?host=h",
+		"tether://session/work?host=", "tether://elsewhere/work?host=h",
+	} {
 		d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
 		if err := runState(args("waiting", "--title", "t", "--body", "b", "--link", link), d); err != nil {
 			t.Fatal(err)
 		}
-		if len(*pushes) != 1 || (*pushes)[0].content.Category != "" || (*pushes)[0].content.Since != 0 {
+		if len(*pushes) != 1 || (*pushes)[0].content.Category != "" || (*pushes)[0].content.Version != "" {
 			t.Fatalf("link %q: pushes %+v", link, *pushes)
 		}
+	}
+}
+
+func TestEveryStateChangeGetsANewVersionButWorkingKeepsIt(t *testing.T) {
+	d, _ := fakeDeps(t, "name=work\tclients=1\n", nil)
+	versions := []string{}
+	for _, state := range []string{"waiting", "working", "working", "waiting"} {
+		if err := runState(args(state), d); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := readSession("work")
+		versions = append(versions, s.Version)
+	}
+	// Same second throughout: only the version tells the two waiting prompts apart.
+	if versions[0] == versions[3] || versions[1] != versions[2] || versions[0] == versions[1] {
+		t.Fatalf("versions %q", versions)
 	}
 }
 

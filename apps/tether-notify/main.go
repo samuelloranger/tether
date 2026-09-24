@@ -50,6 +50,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "tether-notify: the agent has moved on; nothing was sent")
 			os.Exit(3)
 		}
+		if errors.Is(err, errNotSubmitted) {
+			fmt.Fprintln(os.Stderr, "tether-notify: typed, but the agent moved on before Return")
+			os.Exit(4)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -70,9 +74,10 @@ func usage() {
                                              record a session's agent state; pushes waiting/done
                                              unless the session has an attached zmx client
   status                                     print every session's agent state as JSON
-  answer --session S --state ST --since N --input B64 [--submit]
-                                             type a notification action's input, only if the
-                                             agent is still in state ST since N (exit 3 if not)
+  answer --session S --state ST --version V --input B64 [--submit]
+                                             type a notification action's input, only while the
+                                             agent is still in state ST version V (exit 3 if not;
+                                             exit 4 if it moved on before Return)
   list                                       list registered phones
   remove <token>                             forget a phone
 `)

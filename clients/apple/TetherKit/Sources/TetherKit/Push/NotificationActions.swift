@@ -14,7 +14,7 @@ public enum NotificationInput: Equatable, Sendable {
 /// still in it, so an old Approve cannot answer a newer prompt.
 public struct AgentExpectation: Equatable, Sendable {
   public var state: String
-  public var since: Int64
+  public var version: String
 }
 
 public struct NotificationActionRequest: Equatable, Sendable {
@@ -26,7 +26,7 @@ public struct NotificationActionRequest: Equatable, Sendable {
 /// A tapped action: something to send, or a push that can't be answered from here.
 public enum NotificationActionAttempt: Equatable, Sendable {
   case answer(NotificationActionRequest)
-  case unanswerable(link: String?)
+  case unanswerable(link: String?, reason: String)
 }
 
 /// Approve / Deny / Reply on agent pushes. `tether-notify` stamps the category and the
@@ -40,6 +40,8 @@ public enum NotificationActions {
   static let denyAction = "tether.action.deny"
   static let replyAction = "tether.action.reply"
   static let actionIdentifiers: Set<String> = [approveAction, denyAction, replyAction]
+  /// Well inside a remote shell's argument limit once base64 encoded.
+  static let maxReplyLength = 2000
 
   /// Every action requires an unlocked phone: each one types into a live shell.
   public static func categories() -> Set<UNNotificationCategory> {
@@ -83,26 +85,27 @@ public enum NotificationActions {
   ) -> NotificationActionAttempt? {
     guard actionIdentifiers.contains(actionIdentifier) else { return nil }
     let link = NotificationTapRouter.link(from: userInfo)
+    let openInstead = "This notification can’t be answered from here; open the session instead."
     guard let input = input(actionIdentifier: actionIdentifier, text: text) else {
-      return .unanswerable(link: link)
+      return .unanswerable(link: link, reason: "The reply was empty; nothing was sent.")
+    }
+    if case let .line(reply) = input, reply.count > maxReplyLength {
+      return .unanswerable(
+        link: link, reason: "Replies from a notification are limited to \(maxReplyLength) characters; open the session instead."
+      )
     }
     guard let link, let deep = DeepLinkCoordinator.parse(link),
           !deep.sessionId.hasPrefix("-"),
           let expect = expectation(from: userInfo)
-    else { return .unanswerable(link: link) }
+    else { return .unanswerable(link: link, reason: openInstead) }
     return .answer(NotificationActionRequest(link: deep, expect: expect, input: input))
   }
 
   static func expectation(from userInfo: [AnyHashable: Any]) -> AgentExpectation? {
-    guard let state = userInfo["agentState"] as? String, !state.isEmpty else { return nil }
-    let since: Int64?
-    switch userInfo["agentSince"] {
-    case let number as NSNumber: since = number.int64Value
-    case let text as String: since = Int64(text)
-    default: since = nil
-    }
-    guard let since, since > 0 else { return nil }
-    return AgentExpectation(state: state, since: since)
+    guard let state = userInfo["agentState"] as? String, !state.isEmpty,
+          let version = userInfo["agentVersion"] as? String, !version.isEmpty
+    else { return nil }
+    return AgentExpectation(state: state, version: version)
   }
 
   /// `tether-notify answer` checks the agent state and runs `zmx send` itself, passing the
@@ -118,7 +121,7 @@ public enum NotificationActions {
       notify, "answer",
       "--session", shellQuote(request.link.sessionId),
       "--state", shellQuote(request.expect.state),
-      "--since", String(request.expect.since),
+      "--version", shellQuote(request.expect.version),
       "--input", shellQuote(Data(bytes.utf8).base64EncodedString()),
     ]
     if submit { parts.append("--submit") }
@@ -138,6 +141,9 @@ public final class NotificationActionRunner {
   private let model: HomeModel
   private let timeout: Duration
   private let exec: Exec
+  /// Dials still running, including ones a deadline gave up on: name resolution can't be
+  /// cancelled, so repeated taps must not pile blocked threads up.
+  private let outstanding = LockedBox(0)
 
   init(model: HomeModel, timeout: Duration = .seconds(20), exec: @escaping Exec) {
     self.model = model
@@ -159,6 +165,15 @@ public final class NotificationActionRunner {
 
   /// Returns why the action failed, or nil once the host accepted the input.
   func run(_ request: NotificationActionRequest) async -> String? {
+    let admitted = outstanding.update { count -> Bool in
+      guard count == 0 else { return false }
+      count = 1
+      return true
+    }
+    guard admitted else { return "The previous action is still being sent; try again in a moment." }
+    // Released once the dial really ends; a deadline alone doesn't.
+    var handedOff = false
+    defer { if !handedOff { outstanding.update { $0 = 0 } } }
     model.reload()
     let label = request.link.identityName
     let matches = Self.candidates(for: label, in: model.profiles)
@@ -173,9 +188,11 @@ public final class NotificationActionRunner {
     let command = NotificationActions.command(notify: Self.notify, request: request)
       + " 2>&1; echo \(Self.exitMarker)$?"
     let output: String
+    handedOff = true
     do {
-      output = try await withDeadline(timeout) { [exec, store = model.hostKeyStore] in
-        try await exec(config, store, command)
+      output = try await withDeadline(timeout) { [exec, outstanding, store = model.hostKeyStore] in
+        defer { outstanding.update { $0 = 0 } }
+        return try await exec(config, store, command)
       }
     } catch {
       return error.localizedDescription
@@ -202,6 +219,7 @@ public final class NotificationActionRunner {
     switch code {
     case 0: return nil
     case 3: return "The agent in “\(session)” has moved on; nothing was sent."
+    case 4: return "The reply was typed in “\(session)”, but the agent moved on before it was submitted."
     // 127: not installed; 2: an older build without `answer` prints its usage.
     case 127, 2: return "Update tether-notify on \(machine) to answer notifications."
     default: return detail.isEmpty ? "tether-notify couldn’t answer on \(machine)." : detail
@@ -233,9 +251,8 @@ public final class NotificationActionRunner {
     case let .answer(request):
       guard let failure = await run(request) else { return }
       await notifyFailure(failure, session: request.link.sessionId, link: Self.link(for: request.link))
-    case let .unanswerable(link):
-      await notifyFailure("This notification can’t be answered from here; open the session instead.",
-                          session: nil, link: link)
+    case let .unanswerable(link, reason):
+      await notifyFailure(reason, session: nil, link: link)
     }
   }
 

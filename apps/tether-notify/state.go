@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -58,7 +61,7 @@ func runState(args []string, d stateDeps) error {
 		*collapse = "agent-" + *session
 	}
 
-	in := SessionState{Session: *session, Agent: *agent, State: *state, Message: *body, Link: *link}
+	in := SessionState{Session: *session, Agent: *agent, State: *state, Message: *body, Link: *link, Version: newVersion()}
 	if *state != stateClear {
 		in.AgentPid = agentPid(d.run, d.ppid)
 	}
@@ -89,10 +92,10 @@ func runState(args []string, d stateDeps) error {
 	}
 	content := PushContent{Title: *title, Body: *body, Link: *link}
 	// Actions need a session link to answer and a saved state to check against.
-	if stored != nil && actionableLink(*link) {
+	if stored != nil && stored.Version != "" && actionableLink(*link, *session) {
 		content.Category = agentCategory(*state)
 		content.State = stored.State
-		content.Since = stored.Since
+		content.Version = stored.Version
 	}
 	if err := d.push(content, *collapse); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
@@ -100,8 +103,22 @@ func runState(args []string, d stateDeps) error {
 	return nil
 }
 
-func actionableLink(link string) bool {
-	return strings.HasPrefix(link, "tether://session/") && strings.Contains(link, "?host=")
+// actionableLink is a tether://session/<session>?host=<label> link for this very session:
+// the phone answers whatever session the link names.
+func actionableLink(link, session string) bool {
+	u, err := url.Parse(link)
+	if err != nil || u.Scheme != "tether" || u.Host != "session" {
+		return false
+	}
+	return strings.TrimPrefix(u.Path, "/") == session && u.Query().Get("host") != ""
+}
+
+func newVersion() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // agentCategory names the iOS notification category for an agent push; the app

@@ -12,6 +12,12 @@ final class LockedBox<Value>: @unchecked Sendable {
     get { lock.lock(); defer { lock.unlock() }; return stored }
     set { lock.lock(); defer { lock.unlock() }; stored = newValue }
   }
+
+  /// Read-modify-write under one lock; `value += 1` would take it twice.
+  func update<T>(_ body: (inout Value) -> T) -> T {
+    lock.lock(); defer { lock.unlock() }
+    return body(&stored)
+  }
 }
 
 public struct PullRequestDetail: Equatable, Sendable {

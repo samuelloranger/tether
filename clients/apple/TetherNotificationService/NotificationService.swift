@@ -39,10 +39,10 @@ class NotificationService: UNNotificationServiceExtension {
     // Actions need a session link and the agent state to check against; without them the
     // buttons could do nothing.
     if let category = payload.category, Self.categories.contains(category),
-       payload.link != nil, let state = payload.state, let since = payload.since, since > 0 {
+       payload.link != nil, let state = payload.state, let version = payload.version, !version.isEmpty {
       content.categoryIdentifier = category
       content.userInfo["agentState"] = state
-      content.userInfo["agentSince"] = since
+      content.userInfo["agentVersion"] = version
     }
     contentHandler(content)
   }
@@ -60,7 +60,7 @@ class NotificationService: UNNotificationServiceExtension {
     let link: String?
     let category: String?
     let state: String?
-    let since: Int64?
+    let version: String?
   }
 
   // Mirrors NotificationActions.categoryIdentifiers; the extension doesn't link TetherKit.

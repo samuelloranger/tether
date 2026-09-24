@@ -25,8 +25,8 @@ type PushContent struct {
 	Category string `json:"category,omitempty"`
 	// The agent state the push is about, echoed back by `answer` so a stale action
 	// cannot type into a newer prompt.
-	State string `json:"state,omitempty"`
-	Since int64  `json:"since,omitempty"`
+	State   string `json:"state,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {

@@ -7,9 +7,9 @@ final class NotificationActionsTests: XCTestCase {
   private let userInfo: [AnyHashable: Any] = [
     "link": "tether://session/work?host=devbox",
     "agentState": "waiting",
-    "agentSince": NSNumber(value: Int64(1_700_000_000)),
+    "agentVersion": "3f9a0c",
   ]
-  private let expect = AgentExpectation(state: "waiting", since: 1_700_000_000)
+  private let expect = AgentExpectation(state: "waiting", version: "3f9a0c")
 
   func test_waiting_offers_approve_deny_and_reply_and_done_offers_reply() {
     let categories = Dictionary(uniqueKeysWithValues: NotificationActions.categories().map { ($0.identifier, $0) })
@@ -47,13 +47,13 @@ final class NotificationActionsTests: XCTestCase {
         link: SessionDeepLink(sessionId: "work", identityName: "devbox"), expect: expect, input: .keys("\r")
       ))
     )
-    var textSince = userInfo
-    textSince["agentSince"] = "1700000000"
-    XCTAssertNotNil(NotificationActions.expectation(from: textSince))
+    var noVersion = userInfo
+    noVersion["agentVersion"] = ""
+    XCTAssertNil(NotificationActions.expectation(from: noVersion))
   }
 
   func test_a_push_missing_its_link_or_state_is_reported_not_silently_dropped() {
-    for missing in ["link", "agentState", "agentSince"] {
+    for missing in ["link", "agentState", "agentVersion"] {
       var info = userInfo
       info[missing] = nil
       guard case .unanswerable = NotificationActions.attempt(
@@ -73,6 +73,14 @@ final class NotificationActionsTests: XCTestCase {
     ) else { return XCTFail("--help was answered") }
   }
 
+  func test_an_overlong_reply_is_refused_with_a_reason() {
+    let long = String(repeating: "x", count: NotificationActions.maxReplyLength + 1)
+    guard case let .unanswerable(_, reason) = NotificationActions.attempt(
+      actionIdentifier: NotificationActions.replyAction, text: long, userInfo: userInfo
+    ) else { return XCTFail("an overlong reply was answered") }
+    XCTAssertTrue(reason.contains("\(NotificationActions.maxReplyLength)"), reason)
+  }
+
   func test_other_actions_are_not_ours() {
     XCTAssertNil(NotificationActions.attempt(actionIdentifier: "other", text: nil, userInfo: userInfo))
   }
@@ -85,7 +93,7 @@ final class NotificationActionsTests: XCTestCase {
     let encoded = Data("it's $(rm -rf ~)".utf8).base64EncodedString()
     XCTAssertEqual(
       NotificationActions.command(notify: "tn", request: request),
-      "tn answer --session 'my '\"'\"'box'\"'\"'' --state 'waiting' --since 1700000000 --input '\(encoded)' --submit"
+      "tn answer --session 'my '\"'\"'box'\"'\"'' --state 'waiting' --version '3f9a0c' --input '\(encoded)' --submit"
     )
   }
 
@@ -152,10 +160,33 @@ final class NotificationActionsTests: XCTestCase {
     XCTAssertNil(failure("__tether_sent=0\n"))
     XCTAssertEqual(failure("tether-notify: the agent has moved on\n__tether_sent=3\n"),
                    "The agent in “work” has moved on; nothing was sent.")
+    XCTAssertEqual(failure("typed\n__tether_sent=4\n"),
+                   "The reply was typed in “work”, but the agent moved on before it was submitted.")
     XCTAssertEqual(failure("zsh: no such file\n__tether_sent=127\n"), "Update tether-notify on devbox to answer notifications.")
     XCTAssertEqual(failure("usage…\n__tether_sent=2\n"), "Update tether-notify on devbox to answer notifications.")
     XCTAssertEqual(failure("tether-notify: zmx send: exit status 1\n__tether_sent=1\n"), "tether-notify: zmx send: exit status 1")
     XCTAssertEqual(failure(""), "No answer from devbox.")
+  }
+
+  func test_a_second_action_waits_for_a_dial_the_deadline_gave_up_on() async {
+    let release = LockedBox<CheckedContinuation<Void, Never>?>(nil)
+    let dials = LockedBox(0)
+    let runner = NotificationActionRunner(model: model(), timeout: .milliseconds(100)) { _, _, _ in
+      dials.update { $0 += 1 }
+      await withCheckedContinuation { release.value = $0 }
+      return "__tether_sent=0"
+    }
+    let first = await runner.run(approve)
+    XCTAssertEqual(first, SSHConnectError.commandTimedOut.errorDescription)
+    let second = await runner.run(approve)
+    XCTAssertEqual(second, "The previous action is still being sent; try again in a moment.")
+    XCTAssertEqual(dials.value, 1, "a second thread was started while the first was stuck")
+    release.value?.resume()
+    try? await Task.sleep(for: .milliseconds(100))
+    let third = await runner.run(approve)
+    XCTAssertEqual(third, SSHConnectError.commandTimedOut.errorDescription)
+    XCTAssertEqual(dials.value, 2)
+    release.value?.resume()
   }
 
   func test_the_deadline_holds_even_when_the_work_ignores_cancellation() async {

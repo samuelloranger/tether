@@ -11,11 +11,14 @@ import (
 
 // SessionState is one zmx session's agent state, written by hooks via `state`.
 type SessionState struct {
-	Session  string `json:"session"`
-	Agent    string `json:"agent"`
-	State    string `json:"state"`
-	Since    int64  `json:"since"`
-	Updated  int64  `json:"updated"`
+	Session string `json:"session"`
+	Agent   string `json:"agent"`
+	State   string `json:"state"`
+	Since   int64  `json:"since"`
+	Updated int64  `json:"updated"`
+	// Version is new on every state change. `answer` compares it, not Since: two prompts
+	// within one second share a Since.
+	Version  string `json:"version,omitempty"`
 	Message  string `json:"message,omitempty"`
 	Link     string `json:"link,omitempty"`
 	AgentPid int    `json:"agentPid,omitempty"`
