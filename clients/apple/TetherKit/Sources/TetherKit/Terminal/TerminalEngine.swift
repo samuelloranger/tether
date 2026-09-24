@@ -17,6 +17,18 @@ final class TerminalEngine {
   /// OSC 133 A / C / D positions. `line` counts from the first line ever written, so it
   /// survives scrollback trimming; subtract `totalLinesTrimmed` for a buffer row.
   private var commandMarks: [CommandMark] = []
+  /// Set by anything that can add, move or remove a kitty image, so an unchanged screen
+  /// doesn't rebuild the graphics snapshot every refresh.
+  private var graphicsDirty = true
+  private let imageOwner = TerminalEngine.nextImageOwner()
+  private static let ownerLock = NSLock()
+  nonisolated(unsafe) private static var lastImageOwner: UInt64 = 0
+
+  private static func nextImageOwner() -> UInt64 {
+    ownerLock.lock(); defer { ownerLock.unlock() }
+    lastImageOwner += 1
+    return lastImageOwner
+  }
   /// Lines above the live bottom the view is scrolled back; 0 = live.
   private var scrollOffset = 0
   /// `buffer.yDisp` at the live bottom. SwiftTerm's yDisp follows output only while there,
@@ -70,7 +82,10 @@ final class TerminalEngine {
   /// answers pixel-size queries with.
   func setCellPixelSize(width: Int, height: Int) {
     guard width > 0, height > 0 else { return }
-    locked { delegate.cellPixelSize = (width, height) }
+    locked {
+      delegate.cellPixelSize = (width, height)
+      graphicsDirty = true
+    }
   }
 
   func pastePayload(_ text: String) -> String {
@@ -176,6 +191,7 @@ final class TerminalEngine {
   }
 
   private func feedLocked(_ bytes: Data) {
+    graphicsDirty = true
     let pinned = scrollOffset
     let oldLiveTop = liveTop
     let trimmedBefore = terminal.buffer.totalLinesTrimmed
@@ -203,6 +219,7 @@ final class TerminalEngine {
   private func resizeLocked(cols: UInt16, rows: UInt16) {
     let dims = terminal.getDims()
     guard Int(cols) != dims.cols || Int(rows) != dims.rows else { return }
+    graphicsDirty = true
     returnToLive()
     scrollOffset = 0
     // A reflow moves text between rows; recorded command marks no longer line up.
@@ -216,6 +233,7 @@ final class TerminalEngine {
     guard !terminal.isCurrentBufferAlternate else { return }
     let next = min(max(scrollOffset + Int(lines), 0), liveTop)
     guard next != scrollOffset else { return }
+    graphicsDirty = true
     scrollOffset = next
     terminal.buffer.yDisp = liveTop - scrollOffset
     needsRefresh = true
@@ -246,6 +264,7 @@ final class TerminalEngine {
     // A prompt on the live screen is reached by going live, not by scrolling past it.
     let next = target >= liveTop ? 0 : liveTop - target
     guard next != scrollOffset else { return false }
+    graphicsDirty = true
     scrollOffset = next
     terminal.buffer.yDisp = liveTop - scrollOffset
     needsRefresh = true
@@ -348,7 +367,10 @@ final class TerminalEngine {
     guard !terminal.synchronizedOutputActive else { return }
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
-    let images = TerminalImageLayer(terminal.kittyGraphicsRenderSnapshot())
+    let images = graphicsDirty
+      ? TerminalImageLayer(terminal.kittyGraphicsRenderSnapshot(), owner: imageOwner)
+      : cached.images
+    graphicsDirty = false
     let imagesChanged = images != cached.images
     // OSC 4/104 repaint colors without touching the update range; a kitty placement or
     // delete may not touch it either.

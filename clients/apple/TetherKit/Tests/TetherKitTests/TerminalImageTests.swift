@@ -26,7 +26,7 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertEqual(layer.placements.count, 1)
     let placement = layer.placements[0]
     XCTAssertEqual([placement.col, placement.row, placement.cols, placement.rows], [2, 0, 1, 1])
-    XCTAssertTrue(placement.aboveText)
+    XCTAssertEqual(placement.depth, .aboveText)
     XCTAssertEqual(layer.bitmaps[placement.key]?.rgba, redOverBlue)
   }
 
@@ -47,7 +47,7 @@ final class TerminalImageTests: XCTestCase {
     let placement = engine.frame().images.placements.first
     XCTAssertEqual(placement?.cols, 6)
     XCTAssertEqual(placement?.rows, 3)
-    XCTAssertEqual(placement?.aboveText, false)
+    XCTAssertEqual(placement?.depth, .belowText)
   }
 
   func test_deleting_images_clears_the_layer_and_bumps_the_generation() {
@@ -89,15 +89,37 @@ final class TerminalImageTests: XCTestCase {
     )
   }
 
-  private func placement(col: Int = 0, row: Int = 0, cols: Int, rows: Int, width: Int = 2, height: Int = 2)
-    -> TerminalImageLayer.Placement
-  {
+  private func placement(
+    col: Int = 0, row: Int = 0, cols: Int, rows: Int, width: Int = 2, height: Int = 2,
+    owner: UInt64 = 1, depth: TerminalImageLayer.Depth = .aboveText
+  ) -> TerminalImageLayer.Placement {
     TerminalImageLayer.Placement(
-      key: .init(id: 1, generation: 1),
+      key: .init(owner: owner, id: 1, generation: 1),
       sourceX: 0, sourceY: 0, sourceWidth: width, sourceHeight: height,
-      col: col, row: row, cols: cols, rows: rows, offsetX: 0, offsetY: 0, aboveText: true
+      col: col, row: row, cols: cols, rows: rows, offsetX: 0, offsetY: 0, depth: depth
     )
   }
+
+  private let black = GridSnapshot.Cell(codepoint: 0x20, foreground: 0xFFFF_FFFF, background: 0xFF00_0000, attrs: 0)
+
+  private func layer(_ rgba: [UInt8], _ placement: TerminalImageLayer.Placement, background: UInt32 = 0xFF00_0000)
+    -> TerminalImageLayer
+  {
+    TerminalImageLayer(
+      bitmaps: [placement.key: .init(width: 2, height: 2, rgba: rgba)], placements: [placement],
+      defaultBackground: background
+    )
+  }
+
+  private func header(cols: Int, rows: Int, altScreen: Bool = false, generation: UInt64 = 1) -> GridSnapshot.Header {
+    GridSnapshot.Header(
+      cols: UInt16(cols), rows: UInt16(rows), cursorCol: 0, cursorRow: 0,
+      generation: generation, cursorVisible: false, altScreen: altScreen
+    )
+  }
+
+  private let solidRed: [UInt8] = Array(repeating: [255, 0, 0, 255], count: 4).flatMap { $0 }
+  private let solidBlue: [UInt8] = Array(repeating: [0, 0, 255, 255], count: 4).flatMap { $0 }
 
   func test_an_image_is_aspect_fit_into_its_cell_box_from_the_top_left() {
     let rect = TerminalGridRenderer.imageRect(
@@ -114,13 +136,19 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertEqual(TerminalGridLayout.paintedRows(cells: blank, cols: 4, rows: 6, altScreen: true, images: layer), 4)
   }
 
+  func test_text_above_an_image_does_not_cut_the_image_rows() {
+    var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell, count: 4 * 6)
+    cells[0].codepoint = 0x41
+    let layer = TerminalImageLayer(bitmaps: [:], placements: [placement(row: 2, cols: 2, rows: 3)])
+    XCTAssertEqual(TerminalGridLayout.paintedRows(cells: cells, cols: 4, rows: 6, altScreen: true, images: layer), 5)
+  }
+
   func test_the_renderer_draws_the_image_upright_in_its_box() {
     let cols = 4, rows = 2
     let layer = TerminalImageLayer(
-      bitmaps: [.init(id: 1, generation: 1): .init(width: 2, height: 2, rgba: redOverBlue)],
+      bitmaps: [.init(owner: 1, id: 1, generation: 1): .init(width: 2, height: 2, rgba: redOverBlue)],
       placements: [placement(cols: 2, rows: 2)]
     )
-    let black = GridSnapshot.Cell(codepoint: 0x20, foreground: 0xFFFF_FFFF, background: 0xFF00_0000, attrs: 0)
     let cells = [GridSnapshot.Cell](repeating: black, count: cols * rows)
     let header = GridSnapshot.Header(
       cols: UInt16(cols), rows: UInt16(rows), cursorCol: 0, cursorRow: 0, generation: 1, cursorVisible: false
@@ -137,6 +165,81 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertGreaterThan(bottom.b, 200, "bottom half should be blue: \(bottom)")
     XCTAssertLessThan(bottom.r, 60)
     XCTAssertLessThan(outside.r + outside.g + outside.b, 60, "the image spilled out of its box")
+  }
+
+  func test_two_sessions_with_the_same_image_id_never_share_pixels() throws {
+    let a = TerminalEngine(cols: 20, rows: 5)
+    let b = TerminalEngine(cols: 20, rows: 5)
+    a.feed(kitty("a=T,f=32,s=2,v=2,i=7,q=2", solidRed))
+    b.feed(kitty("a=T,f=32,s=2,v=2,i=7,q=2", solidBlue))
+    let keyA = try XCTUnwrap(a.frame().images.placements.first?.key)
+    let keyB = try XCTUnwrap(b.frame().images.placements.first?.key)
+    XCTAssertEqual(keyA.id, keyB.id)
+    XCTAssertNotEqual(keyA, keyB)
+
+    // One renderer draws both, as one surface does across a session switch.
+    let renderer = TerminalGridRenderer()
+    let cells = [GridSnapshot.Cell](repeating: black, count: 4 * 2)
+    _ = renderer.render(header: header(cols: 4, rows: 2), cells: cells, images: a.frame().images, metrics: metrics(cols: 4, rows: 2))
+    let second = try XCTUnwrap(renderer.render(
+      header: header(cols: 4, rows: 2, generation: 2), cells: cells, images: b.frame().images, metrics: metrics(cols: 4, rows: 2)
+    ))
+    let shown = pixel(second, x: 5, y: 5)
+    XCTAssertGreaterThan(shown.b, 200, "session B shows session A's image: \(shown)")
+  }
+
+  func test_a_grid_rebuilt_from_the_output_keeps_the_cell_pixel_size() {
+    let buffer = TerminalOutputBuffer()
+    buffer.append(Data(kitty("a=T,f=32,s=45,v=50,q=2", [UInt8](repeating: 9, count: 45 * 50 * 4)).utf8))
+    let placement = buffer.replay(cols: 40, rows: 10, cellPixelSize: (10, 20)).frame().images.placements.first
+    XCTAssertEqual(placement?.cols, 5)
+    XCTAssertEqual(placement?.rows, 3)
+  }
+
+  func test_output_and_scrolling_move_an_image_with_its_text() {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed("\r\n\r\n" + kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue))
+    XCTAssertEqual(engine.frame().images.placements.first?.row, 2)
+    engine.feed(String(repeating: "\r\nline", count: 4))
+    XCTAssertEqual(engine.frame().images.placements.first?.row, 0)
+    engine.scrollViewport(lines: 2)
+    XCTAssertEqual(engine.frame().images.placements.first?.row, 2)
+  }
+
+  func test_deleting_the_last_image_on_an_empty_alt_screen_clears_it() throws {
+    let renderer = TerminalGridRenderer()
+    let cells = [GridSnapshot.Cell](repeating: black, count: 4 * 2)
+    _ = renderer.render(
+      header: header(cols: 4, rows: 2, altScreen: true), cells: cells,
+      images: layer(solidRed, placement(cols: 2, rows: 2)), metrics: metrics(cols: 4, rows: 2)
+    )
+    let cleared = try XCTUnwrap(renderer.render(
+      header: header(cols: 4, rows: 2, altScreen: true, generation: 2), cells: cells,
+      images: .empty, metrics: metrics(cols: 4, rows: 2)
+    ))
+    XCTAssertLessThan(pixel(cleared, x: 5, y: 5).r, 60, "the deleted image is still drawn")
+  }
+
+  func test_an_image_under_the_backgrounds_shows_through_default_cells_only() throws {
+    var cells = [GridSnapshot.Cell](repeating: black, count: 4 * 2)
+    cells[1].background = 0xFF00_FF00
+    let under = layer(solidRed, placement(cols: 2, rows: 1, depth: .belowBackground))
+    let image = try XCTUnwrap(TerminalGridRenderer().render(
+      header: header(cols: 4, rows: 2), cells: cells, images: under, metrics: metrics(cols: 4, rows: 2)
+    ))
+    // Column 0 has the default background: the image shows. Column 1 is painted green over it.
+    XCTAssertGreaterThan(pixel(image, x: 5, y: 5).r, 200)
+    let covered = pixel(image, x: 25, y: 5)
+    XCTAssertGreaterThan(covered.g, 200)
+    XCTAssertLessThan(covered.r, 60)
+  }
+
+  func test_kitty_depths_follow_swiftterms_thresholds() {
+    XCTAssertEqual(TerminalImageLayer.Depth(zIndex: 0), .aboveText)
+    XCTAssertEqual(TerminalImageLayer.Depth(zIndex: -1), .belowText)
+    XCTAssertEqual(TerminalImageLayer.Depth(zIndex: Int32.min / 2), .belowText)
+    XCTAssertEqual(TerminalImageLayer.Depth(zIndex: Int32.min / 2 - 1), .belowBackground)
   }
 
   /// Device pixel at (x, y) from the top left.

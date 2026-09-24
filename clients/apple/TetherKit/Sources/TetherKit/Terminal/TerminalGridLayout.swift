@@ -39,7 +39,7 @@ enum TerminalGridLayout {
       let painted = cells[start..<(start + cols)].contains {
         $0.codepoint != 0 && $0.codepoint != 0x20
       }
-      if painted { lastPainted = row }
+      if painted { lastPainted = max(lastPainted, row) }
     }
     return lastPainted + 1
   }

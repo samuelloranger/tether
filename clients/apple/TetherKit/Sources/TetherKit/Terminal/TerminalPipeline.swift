@@ -209,7 +209,7 @@ actor TerminalPipeline {
       altScreen: lastAltScreen,
       oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
     ), !outputBuffer.data.isEmpty {
-      currentGrid?.emulator = outputBuffer.replay(cols: newCols, rows: newRows)
+      currentGrid?.emulator = outputBuffer.replay(cols: newCols, rows: newRows, cellPixelSize: cellPixelSize)
       lastRenderedGeneration = nil
       publishSnapshot()
       return true

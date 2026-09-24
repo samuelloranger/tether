@@ -37,12 +37,16 @@ final class TerminalGridRenderer {
   private var glyphOffsetX: CGFloat = 0
   /// Decoded once per image content; dropped when no placement shows it any more.
   private var bitmaps: [TerminalImageLayer.Key: CGImage] = [:]
+  /// Whether `image` shows any kitty placement: an empty frame may keep a stale bitmap,
+  /// but not one with a deleted image still on it.
+  private var imageShowsPlacements = false
 
   /// Forces the next render to repaint every row (font change, resize, a new
   /// session's first frame).
   func invalidate() {
     context = nil
     image = nil
+    imageShowsPlacements = false
     metrics = nil
     glyphCache = nil
     colors.removeAll(keepingCapacity: true)
@@ -70,23 +74,29 @@ final class TerminalGridRenderer {
     // empties are left out so they become slack at the top, not a gap under the TUI.
     let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
 
-    guard drawRows > 0 else { return image }
+    guard drawRows > 0 || imageShowsPlacements else { return image }
 
     // Full repaint every frame: row-granular diffing desynced on resize and left torn
     // text. A whole grid is cheap at phone sizes and cannot drift from the cells.
     context.setFillColor(metrics.background)
     context.fill(CGRect(origin: .zero, size: metrics.size))
 
-    // Backgrounds, then images meant to sit under text, then text, then the rest.
+    // Kitty's order: images under the backgrounds, cell backgrounds, images under the text,
+    // text, then everything else.
+    drawImages(images, depth: .belowBackground, originY: originY, metrics: metrics, context: context)
+    // With an image under them, default-colored cells stay see-through, as in kitty; the
+    // fill above already painted that color everywhere else.
+    let skip = images.placements.contains { $0.depth == .belowBackground } ? images.defaultBackground : nil
     for row in 0..<drawRows {
-      drawBackgrounds(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, context: context)
+      drawBackgrounds(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, context: context, skipping: skip)
     }
-    drawImages(images, aboveText: false, originY: originY, metrics: metrics, context: context)
+    drawImages(images, depth: .belowText, originY: originY, metrics: metrics, context: context)
     for row in 0..<drawRows {
       drawGlyphs(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, glyphCache: glyphCache, context: context)
     }
-    drawImages(images, aboveText: true, originY: originY, metrics: metrics, context: context)
+    drawImages(images, depth: .aboveText, originY: originY, metrics: metrics, context: context)
     bitmaps = bitmaps.filter { images.bitmaps[$0.key] != nil }
+    imageShowsPlacements = !images.isEmpty
 
     image = context.makeImage()
     return image
@@ -95,10 +105,10 @@ final class TerminalGridRenderer {
   // MARK: - Images
 
   private func drawImages(
-    _ layer: TerminalImageLayer, aboveText: Bool, originY: CGFloat,
+    _ layer: TerminalImageLayer, depth: TerminalImageLayer.Depth, originY: CGFloat,
     metrics: TerminalRenderMetrics, context: CGContext
   ) {
-    for placement in layer.placements where placement.aboveText == aboveText {
+    for placement in layer.placements where placement.depth == depth {
       guard let bitmap = bitmap(for: placement.key, in: layer),
             let source = bitmap.cropping(to: CGRect(
               x: placement.sourceX, y: placement.sourceY,
@@ -159,11 +169,11 @@ final class TerminalGridRenderer {
 
   private func drawBackgrounds(
     row: Int, cols: Int, cells: [GridSnapshot.Cell], originY: CGFloat,
-    metrics: TerminalRenderMetrics, context: CGContext
+    metrics: TerminalRenderMetrics, context: CGContext, skipping skipped: UInt32? = nil
   ) {
     let rowStart = row * cols
     let y = CGFloat(row) * metrics.cellHeight + originY
-    for span in TerminalRunBuilder.backgrounds(cells: cells, rowStart: rowStart, cols: cols) {
+    for span in TerminalRunBuilder.backgrounds(cells: cells, rowStart: rowStart, cols: cols) where span.color != skipped {
       context.setFillColor(color(span.color))
       context.fill(
         CGRect(
