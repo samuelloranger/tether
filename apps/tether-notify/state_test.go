@@ -94,6 +94,7 @@ func TestStateWithoutASessionLinkOffersNoActions(t *testing.T) {
 	for _, link := range []string{
 		"", "https://example.com", "tether://session/work", "tether://session/other?host=h",
 		"tether://session/work?host=", "tether://elsewhere/work?host=h",
+		"tether://session/wo%72k?host=h", // decodes to "work", but the phone would read "wo%72k"
 	} {
 		d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
 		if err := runState(args("waiting", "--title", "t", "--body", "b", "--link", link), d); err != nil {

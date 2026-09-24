@@ -189,6 +189,22 @@ final class NotificationActionsTests: XCTestCase {
     release.value?.resume()
   }
 
+  func test_a_dial_that_never_returns_stops_blocking_after_a_while() async {
+    let clock = LockedBox(Date(timeIntervalSince1970: 1000))
+    let runner = NotificationActionRunner(
+      model: model(), timeout: .milliseconds(50), abandonAfter: 120, now: { clock.value }
+    ) { _, _, _ in
+      await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+      return ""
+    }
+    _ = await runner.run(approve)
+    let blocked = await runner.run(approve)
+    XCTAssertEqual(blocked, "The previous action is still being sent; try again in a moment.")
+    clock.value = clock.value.addingTimeInterval(121)
+    let later = await runner.run(approve)
+    XCTAssertEqual(later, SSHConnectError.commandTimedOut.errorDescription, "an abandoned dial still blocks actions")
+  }
+
   func test_the_deadline_holds_even_when_the_work_ignores_cancellation() async {
     // Stands in for a blocked getaddrinfo: nothing ever resumes it.
     let runner = NotificationActionRunner(model: model(), timeout: .milliseconds(200)) { _, _, _ in

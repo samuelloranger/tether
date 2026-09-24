@@ -140,14 +140,23 @@ public final class NotificationActionRunner {
 
   private let model: HomeModel
   private let timeout: Duration
+  private let abandonAfter: TimeInterval
+  private let now: @Sendable () -> Date
   private let exec: Exec
-  /// Dials still running, including ones a deadline gave up on: name resolution can't be
-  /// cancelled, so repeated taps must not pile blocked threads up.
-  private let outstanding = LockedBox(0)
+  /// Dials still running, including ones a deadline gave up on, by start time: name
+  /// resolution can't be cancelled, so repeated taps must not pile blocked threads up. A
+  /// dial still stuck after `abandonAfter` stops counting, so one that never returns can't
+  /// refuse every later action.
+  private let outstanding = LockedBox<[UUID: Date]>([:])
 
-  init(model: HomeModel, timeout: Duration = .seconds(20), exec: @escaping Exec) {
+  init(
+    model: HomeModel, timeout: Duration = .seconds(20), abandonAfter: TimeInterval = 120,
+    now: @escaping @Sendable () -> Date = Date.init, exec: @escaping Exec
+  ) {
     self.model = model
     self.timeout = timeout
+    self.abandonAfter = abandonAfter
+    self.now = now
     self.exec = exec
   }
 
@@ -165,15 +174,18 @@ public final class NotificationActionRunner {
 
   /// Returns why the action failed, or nil once the host accepted the input.
   func run(_ request: NotificationActionRequest) async -> String? {
-    let admitted = outstanding.update { count -> Bool in
-      guard count == 0 else { return false }
-      count = 1
+    let attempt = UUID()
+    let started = now()
+    let admitted = outstanding.update { dials -> Bool in
+      dials = dials.filter { started.timeIntervalSince($0.value) < abandonAfter }
+      guard dials.isEmpty else { return false }
+      dials[attempt] = started
       return true
     }
     guard admitted else { return "The previous action is still being sent; try again in a moment." }
     // Released once the dial really ends; a deadline alone doesn't.
     var handedOff = false
-    defer { if !handedOff { outstanding.update { $0 = 0 } } }
+    defer { if !handedOff { outstanding.update { $0[attempt] = nil } } }
     model.reload()
     let label = request.link.identityName
     let matches = Self.candidates(for: label, in: model.profiles)
@@ -191,7 +203,7 @@ public final class NotificationActionRunner {
     handedOff = true
     do {
       output = try await withDeadline(timeout) { [exec, outstanding, store = model.hostKeyStore] in
-        defer { outstanding.update { $0 = 0 } }
+        defer { outstanding.update { $0[attempt] = nil } }
         return try await exec(config, store, command)
       }
     } catch {

@@ -28,8 +28,8 @@ func defaultAnswerDeps() answerDeps {
 
 // runAnswer types a notification action's input into a session, but only while the
 // session's agent is still in the state the push was about: an Approve left on the
-// lock screen must not answer a newer prompt. Each check and its send hold the sessions
-// lock, so a hook can't record a new state in between.
+// lock screen must not answer a newer prompt. Each check and its send hold that session's
+// lock, so its hook can't record a new state in between; other sessions aren't held up.
 func runAnswer(args []string, d answerDeps) error {
 	fs := flag.NewFlagSet("answer", flag.ContinueOnError)
 	fs.SetOutput(d.stderr)
@@ -70,7 +70,7 @@ func runAnswer(args []string, d answerDeps) error {
 		return nil
 	}
 
-	if err := withSessionsLock(func() error {
+	if err := withSessionLock(*session, func() error {
 		if err := current(); err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func runAnswer(args []string, d answerDeps) error {
 	// A TUI that reads text and Return together can take them as a paste. The wait is
 	// outside the lock; the state is checked again before Return is pressed.
 	d.sleep(300 * time.Millisecond)
-	err = withSessionsLock(func() error {
+	err = withSessionLock(*session, func() error {
 		if err := current(); err != nil {
 			return err
 		}

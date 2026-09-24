@@ -87,7 +87,7 @@ func TestAnswerHoldsBackReturnIfTheAgentMovedOnMeanwhile(t *testing.T) {
 	d.sleep = func(time.Duration) {
 		next := *waiting
 		next.Version = "v2"
-		if err := withSessionsLock(func() error { return writeSession(&next) }); err != nil {
+		if err := withSessionLock("work", func() error { return writeSession(&next) }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -96,6 +96,26 @@ func TestAnswerHoldsBackReturnIfTheAgentMovedOnMeanwhile(t *testing.T) {
 	}
 	if len(*sends) != 1 {
 		t.Fatalf("Return was pressed: %q", *sends)
+	}
+}
+
+func TestAnswerHoldsOnlyItsOwnSessionsLock(t *testing.T) {
+	d, _, _ := answerFixture(t, waiting)
+	other := make(chan error, 1)
+	d.run = func(name string, args ...string) (string, error) {
+		// While typing into "work", a hook for another session must still get through.
+		go func() {
+			other <- withSessionLock("elsewhere", func() error { return withSessionsLock(func() error { return nil }) })
+		}()
+		select {
+		case err := <-other:
+			return "", err
+		case <-time.After(time.Second):
+			return "", errors.New("another session's hook was blocked")
+		}
+	}
+	if err := runAnswer(answerArgs("v1", "\r"), d); err != nil {
+		t.Fatal(err)
 	}
 }
 

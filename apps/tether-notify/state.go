@@ -67,17 +67,19 @@ func runState(args []string, d stateDeps) error {
 	}
 	now := d.now().Unix()
 	var stored *SessionState
-	err := withSessionsLock(func() error {
-		prev, _ := readSession(*session)
-		next := nextState(prev, in, now)
-		if next == nil {
-			return removeSession(*session)
-		}
-		if err := writeSession(next); err != nil {
-			return err
-		}
-		stored = next
-		return nil
+	err := withSessionLock(*session, func() error {
+		return withSessionsLock(func() error {
+			prev, _ := readSession(*session)
+			next := nextState(prev, in, now)
+			if next == nil {
+				return removeSession(*session)
+			}
+			if err := writeSession(next); err != nil {
+				return err
+			}
+			stored = next
+			return nil
+		})
 	})
 	if err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: state for %s not saved: %v\n", *session, err)
@@ -104,13 +106,14 @@ func runState(args []string, d stateDeps) error {
 }
 
 // actionableLink is a tether://session/<session>?host=<label> link for this very session:
-// the phone answers whatever session the link names.
+// the phone answers whatever session the link names. The path is compared raw, as the
+// phone reads it; an encoded path would name a different session there.
 func actionableLink(link, session string) bool {
-	u, err := url.Parse(link)
-	if err != nil || u.Scheme != "tether" || u.Host != "session" {
+	if !strings.HasPrefix(link, "tether://session/"+session+"?") {
 		return false
 	}
-	return strings.TrimPrefix(u.Path, "/") == session && u.Query().Get("host") != ""
+	u, err := url.Parse(link)
+	return err == nil && u.Query().Get("host") != ""
 }
 
 func newVersion() string {

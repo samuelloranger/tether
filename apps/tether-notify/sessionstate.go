@@ -74,6 +74,27 @@ func nextState(prev *SessionState, in SessionState, now int64) *SessionState {
 	return &next
 }
 
+// withSessionLock serializes one session's state changes with `answer` typing into it,
+// without holding up hooks for other sessions. Taken before withSessionsLock, never after.
+func withSessionLock(name string, fn func() error) error {
+	if !validSessionName(name) {
+		return fmt.Errorf("invalid session name %q", name)
+	}
+	if err := os.MkdirAll(sessionsDir(), 0o700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filepath.Join(sessionsDir(), ".lock-"+name), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	return fn()
+}
+
 // One lock for the whole directory: hooks and `status` pruning never interleave.
 func withSessionsLock(fn func() error) error {
 	if err := os.MkdirAll(sessionsDir(), 0o700); err != nil {
