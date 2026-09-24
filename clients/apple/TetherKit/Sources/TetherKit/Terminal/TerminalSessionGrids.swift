@@ -6,20 +6,24 @@ final class TerminalSessionGrid {
   let buffer: TerminalOutputBuffer
   var lastAltScreen = false
 
-  init(cols: UInt16, rows: UInt16) {
-    emulator = TerminalEngine(cols: cols, rows: rows)
+  init(cols: UInt16, rows: UInt16, theme: TerminalTheme = .tether) {
+    emulator = TerminalEngine(cols: cols, rows: rows, theme: theme)
     buffer = TerminalOutputBuffer()
   }
 }
 
 final class TerminalSessionGrids {
   private var grids: [String: TerminalSessionGrid] = [:]
+  /// Applied to every kept grid, so switching back to a session shows the current theme.
+  var theme: TerminalTheme = .tether {
+    didSet { grids.values.forEach { $0.emulator.setTheme(theme) } }
+  }
 
   func attach(key: String, cols: UInt16, rows: UInt16) -> (grid: TerminalSessionGrid, reused: Bool) {
     if let existing = grids[key] {
       return (existing, true)
     }
-    let grid = TerminalSessionGrid(cols: cols, rows: rows)
+    let grid = TerminalSessionGrid(cols: cols, rows: rows, theme: theme)
     grids[key] = grid
     return (grid, false)
   }

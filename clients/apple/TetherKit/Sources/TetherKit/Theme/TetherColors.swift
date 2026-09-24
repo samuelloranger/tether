@@ -25,8 +25,8 @@ public enum TetherColors {
 
   public static let heatCool = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
 
-  /// NOT dynamic. Must equal the emulator's cell background —
-  /// `TerminalPalette.background` (0x1E1E2E) — or a seam shows.
+  /// NOT dynamic. The default terminal theme's background (`TerminalTheme.tether`); a
+  /// terminal view itself follows the chosen theme.
   public static let terminalBackground = Color(hex: "1E1E2E")
 
   private static func dynamic(dark: UInt32, light: UInt32) -> Color {

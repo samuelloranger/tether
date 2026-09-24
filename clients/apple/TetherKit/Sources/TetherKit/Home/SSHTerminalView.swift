@@ -171,6 +171,7 @@ public struct SSHTerminalView: View {
           sessionKey: controller.sessionKey,
           fontName: preferences.terminalFont.postScriptName,
           fontSize: preferences.terminalFontSize,
+          theme: preferences.terminalTheme,
           onGridSizeChange: { controller.updateGrid(cols: $0, rows: $1) },
           onGridSizeSettled: { controller.updateGridServer(cols: $0, rows: $1) },
           onCellPixelSize: { controller.updateCellPixelSize(width: $0, height: $1) },
@@ -189,7 +190,8 @@ public struct SSHTerminalView: View {
         )
         .accessibilityIdentifier("sshTerminalSurface")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TetherColors.terminalBackground)
+        .background(preferences.terminalTheme.backgroundColor)
+        .onChange(of: preferences.terminalTheme.id) { controller.requestTheme(preferences.terminalTheme) }
         statusOverlay
         emptyStateOverlay
       }
@@ -211,7 +213,7 @@ public struct SSHTerminalView: View {
       .frame(height: 1)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(TetherColors.terminalBackground.ignoresSafeArea())
+    .background(preferences.terminalTheme.backgroundColor.ignoresSafeArea())
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: controller.agentAlert?.id)
   }
 

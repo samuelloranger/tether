@@ -1,45 +1,46 @@
 import SwiftTerm
 
-/// `background` must equal `TetherColors.terminalBackground` or a seam shows around the grid.
+/// The theme's `background` is also the view background around the grid, or a seam shows.
 enum TerminalPalette {
-  static let foreground: UInt32 = 0xFFCC_CCCC
-  static let background: UInt32 = 0xFF1E_1E2E
-  static let ansi: [UInt32] = [
-    0xFF1E_1E2E, 0xFFF3_8BA8, 0xFFA6_E3A1, 0xFFF9_E2AF,
-    0xFF89_B4FA, 0xFFCB_A6F7, 0xFF94_E2D5, 0xFFCD_D6F4,
-    0xFF58_5872, 0xFFF3_8BA8, 0xFFA6_E3A1, 0xFFF9_E2AF,
-    0xFF89_B4FA, 0xFFCB_A6F7, 0xFF94_E2D5, 0xFFFF_FFFF,
-  ]
+  static let foreground = TerminalTheme.tether.foreground
+  static let background = TerminalTheme.tether.background
 
-  static var blankCell: GridSnapshot.Cell {
-    GridSnapshot.Cell(codepoint: 0x20, foreground: foreground, background: background, attrs: GridSnapshot.attrDefaultBackground)
+  static var blankCell: GridSnapshot.Cell { blankCell(for: .tether) }
+
+  static func blankCell(for theme: TerminalTheme) -> GridSnapshot.Cell {
+    GridSnapshot.Cell(
+      codepoint: 0x20, foreground: theme.foreground, background: theme.background,
+      attrs: GridSnapshot.attrDefaultBackground
+    )
   }
 
-  static func install(on terminal: Terminal) {
-    terminal.installPalette(colors: ansi.map(color))
-    terminal.foregroundColor = color(foreground)
-    terminal.backgroundColor = color(background)
+  static func install(_ theme: TerminalTheme = .tether, on terminal: Terminal) {
+    terminal.installPalette(colors: theme.ansi.map(color))
+    terminal.foregroundColor = color(theme.foreground)
+    terminal.backgroundColor = color(theme.background)
   }
 
   /// The live 256-entry palette, read once per frame. From `paletteColor`, not
-  /// `ansi`: programs can repaint entries with OSC 4.
-  static func table(of terminal: Terminal) -> [UInt32] {
+  /// the theme: programs can repaint entries with OSC 4.
+  static func table(of terminal: Terminal, fallback: UInt32 = foreground) -> [UInt32] {
     (0..<256).map { index in
-      guard let entry = terminal.paletteColor(index: index) else { return foreground }
+      guard let entry = terminal.paletteColor(index: index) else { return fallback }
       return pack(UInt8(entry.red >> 8), UInt8(entry.green >> 8), UInt8(entry.blue >> 8))
     }
   }
 
-  static func resolve(_ value: Attribute.Color, isForeground: Bool, palette: [UInt32]) -> UInt32 {
+  static func resolve(
+    _ value: Attribute.Color, isForeground: Bool, palette: [UInt32], theme: TerminalTheme = .tether
+  ) -> UInt32 {
     switch value {
     case let .trueColor(red, green, blue):
       return pack(red, green, blue)
     case let .ansi256(code):
       return palette[Int(code)]
     case .defaultColor:
-      return isForeground ? foreground : background
+      return isForeground ? theme.foreground : theme.background
     case .defaultInvertedColor:
-      return isForeground ? background : foreground
+      return isForeground ? theme.background : theme.foreground
     }
   }
 

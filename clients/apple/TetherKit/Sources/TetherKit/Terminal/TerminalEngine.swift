@@ -10,8 +10,10 @@ final class TerminalEngine {
   private var cached = TerminalFrame(
     header: GridSnapshot.Header(cols: 0, rows: 0, cursorCol: 0, cursorRow: 0, generation: 0, cursorVisible: true),
     cells: [])
-  /// Rebuilt only when a program repaints the palette (OSC 4/104).
+  /// Rebuilt only when a program repaints the palette (OSC 4/104) or the theme changes.
   private var palette: [UInt32] = []
+  private var theme: TerminalTheme
+  private var paletteOverrides = PaletteOverrides()
   private var needsRefresh = false
   private var oscScanner = OSCScanner()
   /// OSC 133 A / C / D positions. `line` counts from the first line ever written, so it
@@ -35,7 +37,8 @@ final class TerminalEngine {
   /// so it is restored before every feed and resize.
   private var liveTop = 0
 
-  init(cols: UInt16, rows: UInt16, scrollback: Int = 10_000) {
+  init(cols: UInt16, rows: UInt16, scrollback: Int = 10_000, theme: TerminalTheme = .tether) {
+    self.theme = theme
     let delegate = EngineDelegate()
     self.delegate = delegate
     var options = TerminalOptions.default
@@ -47,8 +50,8 @@ final class TerminalEngine {
     // Sixel is parsed but never drawn; claiming it steers image tools away from kitty graphics.
     options.enableSixelReported = false
     terminal = Terminal(delegate: delegate, options: options)
-    TerminalPalette.install(on: terminal)
-    palette = TerminalPalette.table(of: terminal)
+    TerminalPalette.install(theme, on: terminal)
+    palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
     let grid = buildGrid()
     cached = TerminalFrame(header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks, images: .empty)
     terminal.clearUpdateRange()
@@ -59,6 +62,56 @@ final class TerminalEngine {
       refresh()
       return cached
     }
+  }
+
+  /// Repaints every cell in the new colors. Entries a program set with OSC 4 are replaced.
+  func setTheme(_ theme: TerminalTheme) {
+    locked {
+      guard theme != self.theme else { return }
+      let current = TerminalPalette.table(of: terminal, fallback: self.theme.foreground)
+      self.theme = theme
+      TerminalPalette.install(theme, on: terminal)
+      // Entries a program set with OSC 4 keep the program's color.
+      let kept = paletteOverrides.indices.sorted().map { ($0, current[$0]) }
+      if !kept.isEmpty {
+        // Straight to the parser, not through feedLocked: nothing reaches the host.
+        terminal.feed(text: Self.paletteSequence(kept))
+      }
+      palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      graphicsDirty = true
+      needsRefresh = true
+    }
+  }
+
+  /// The entries a program set, with their current colors, to hand to an engine that
+  /// replaces this one.
+  func paletteOverrideEntries() -> [(index: Int, argb: UInt32)] {
+    locked {
+      let current = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      return paletteOverrides.indices.sorted().map { ($0, current[$0]) }
+    }
+  }
+
+  /// Re-applies another engine's program-set entries: its output may be gone from the
+  /// buffer this engine was rebuilt from.
+  func restorePaletteOverrides(_ entries: [(index: Int, argb: UInt32)]) {
+    guard !entries.isEmpty else { return }
+    locked {
+      terminal.feed(text: Self.paletteSequence(entries))
+      paletteOverrides.adopt(entries.map(\.index))
+      palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      needsRefresh = true
+    }
+  }
+
+  /// One OSC 4 setting each entry to its ARGB color.
+  static func paletteSequence(_ entries: [(index: Int, argb: UInt32)]) -> String {
+    let specs = entries.map { entry in
+      "\(entry.index);rgb:" + String(
+        format: "%02x/%02x/%02x", (entry.argb >> 16) & 0xFF, (entry.argb >> 8) & 0xFF, entry.argb & 0xFF
+      )
+    }
+    return "\u{1B}]4;" + specs.joined(separator: ";") + "\u{1B}\\"
   }
 
   var bracketedPaste: Bool { locked { terminal.bracketedPasteMode } }
@@ -153,6 +206,7 @@ final class TerminalEngine {
       top = now
     }
     for event in oscScanner.scan(bytes) {
+      paletteOverrides.apply(event)
       switch event {
       case let .reset(end):
         feed(through: end)
@@ -380,7 +434,7 @@ final class TerminalEngine {
     else { return }
     needsRefresh = false
     if delegate.paletteChanged {
-      palette = TerminalPalette.table(of: terminal)
+      palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
       delegate.paletteChanged = false
     }
     terminal.clearUpdateRange()
@@ -415,7 +469,7 @@ final class TerminalEngine {
 
   private func buildGrid() -> (cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]]) {
     let dims = terminal.getDims()
-    var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell, count: dims.cols * dims.rows)
+    var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell(for: theme), count: dims.cols * dims.rows)
     var hyperlinks: [[LinkSpan]] = []
     for row in 0..<dims.rows {
       guard let line = terminal.getLine(row: row) else { continue }
@@ -428,7 +482,7 @@ final class TerminalEngine {
       }
       for col in 0..<min(dims.cols, line.count) {
         let data = line[col]
-        var cell = Self.cell(data, palette: palette)
+        var cell = Self.cell(data, palette: palette, theme: theme)
         // A wide glyph's tail carries no payload of its own; it belongs to the head's link.
         let target = data.width == 0 ? open?.target : Self.hyperlinkTarget(data)
         if target != open?.target { close(at: col) }
@@ -449,15 +503,15 @@ final class TerminalEngine {
     return OSC8.target(payload: payload)
   }
 
-  private static func cell(_ data: CharData, palette: [UInt32]) -> GridSnapshot.Cell {
+  private static func cell(_ data: CharData, palette: [UInt32], theme: TerminalTheme) -> GridSnapshot.Cell {
     let attribute = data.attribute
     var bits = attrs(attribute.style)
     // Resolved colors can't tell "never painted" from "painted the default color".
     if case .defaultColor = attribute.bg { bits |= GridSnapshot.attrDefaultBackground }
     return GridSnapshot.Cell(
       codepoint: codepoint(data),
-      foreground: TerminalPalette.resolve(attribute.fg, isForeground: true, palette: palette),
-      background: TerminalPalette.resolve(attribute.bg, isForeground: false, palette: palette),
+      foreground: TerminalPalette.resolve(attribute.fg, isForeground: true, palette: palette, theme: theme),
+      background: TerminalPalette.resolve(attribute.bg, isForeground: false, palette: palette, theme: theme),
       attrs: bits)
   }
 

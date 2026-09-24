@@ -42,7 +42,8 @@ let package = Package(
         "CLibSSH2",
         .product(name: "SwiftTerm", package: "SwiftTerm"),
       ],
-      path: "Sources/TetherKit"
+      path: "Sources/TetherKit",
+      resources: [.process("Resources")]
     ),
     .testTarget(
       name: "TetherKitTests",

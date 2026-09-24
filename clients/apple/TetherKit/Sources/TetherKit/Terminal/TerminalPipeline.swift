@@ -56,7 +56,10 @@ actor TerminalPipeline {
   private var cols: UInt16 = 80
   private var rows: UInt16 = 24
 
-  init() {
+  /// `theme` is the one the first grid is created in, so the first frame is never drawn in
+  /// the default colors.
+  init(theme: TerminalTheme = .tether) {
+    sessionGrids.theme = theme
     (snapshots, snapshotSink) = AsyncStream.makeStream(
       of: Optional<TerminalFrame>.self,
       bufferingPolicy: .bufferingNewest(1)
@@ -171,6 +174,17 @@ actor TerminalPipeline {
     }
   }
 
+  private var themeSequence: UInt64 = 0
+
+  /// Calls from separate tasks can arrive out of order; the newest request wins.
+  func setTheme(_ theme: TerminalTheme, sequence: UInt64) {
+    guard sequence > themeSequence else { return }
+    themeSequence = sequence
+    guard theme != sessionGrids.theme else { return }
+    sessionGrids.theme = theme
+    publishSnapshot()
+  }
+
   /// New output while the watch was backed off: a sleep already under way would hold the
   /// next animation frame back by up to a second, so start over at the fast interval.
   private func speedUpImageWatch() {
@@ -268,7 +282,12 @@ actor TerminalPipeline {
       altScreen: lastAltScreen,
       oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
     ), !outputBuffer.data.isEmpty {
-      currentGrid?.emulator = outputBuffer.replay(cols: newCols, rows: newRows, cellPixelSize: cellPixelSize)
+      let carried = currentGrid?.emulator.paletteOverrideEntries() ?? []
+      let rebuilt = outputBuffer.replay(
+        cols: newCols, rows: newRows, theme: sessionGrids.theme, cellPixelSize: cellPixelSize
+      )
+      rebuilt.restorePaletteOverrides(carried)
+      currentGrid?.emulator = rebuilt
       lastRenderedGeneration = nil
       publishSnapshot()
       return true
@@ -325,6 +344,8 @@ actor TerminalPipeline {
   var imageWatchDelayForTest: Duration { watchDelay }
   var imageWatchStartsForTest: Int { imageWatchStarts }
   func imageWatchTickForTest() { watchTick() }
+  /// Test seam: the current emulator's frame.
+  func frameForTest() -> TerminalFrame? { emulator?.frame() }
   #endif
 
   // MARK: - Publishing

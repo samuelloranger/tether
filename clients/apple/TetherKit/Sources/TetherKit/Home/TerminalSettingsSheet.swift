@@ -15,6 +15,15 @@ struct TerminalSettingsSheet: View {
           .pickerStyle(.segmented)
         }
         Section("Terminal") {
+          NavigationLink {
+            TerminalThemePicker(preferences: preferences)
+          } label: {
+            HStack {
+              Text("Color scheme")
+              Spacer()
+              Text(preferences.terminalTheme.name).foregroundStyle(.secondary)
+            }
+          }
           Picker("Font", selection: $preferences.terminalFont) {
             ForEach(AppPreferences.TerminalFont.allCases) { Text($0.label).tag($0) }
           }
@@ -29,8 +38,11 @@ struct TerminalSettingsSheet: View {
           HStack {
             Text("Preview").foregroundStyle(.secondary)
             Spacer()
-            Text("samuelloranger@homelab")
+            Text("me@devbox ~ $")
               .font(.custom(preferences.terminalFont.postScriptName, size: preferences.terminalFontSize))
+              .foregroundStyle(Color(uiColor: TerminalTheme.uiColor(preferences.terminalTheme.foreground)))
+              .padding(.horizontal, 8).padding(.vertical, 4)
+              .background(preferences.terminalTheme.backgroundColor, in: RoundedRectangle(cornerRadius: 6))
           }
         }
       }
