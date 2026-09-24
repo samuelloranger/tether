@@ -98,10 +98,18 @@ final class TerminalSemanticTests: XCTestCase {
     XCTAssertFalse(engine.jumpToPrompt(.next))
   }
 
-  func test_last_output_is_the_newest_finished_command() {
+  func test_last_output_is_the_newest_finished_command_as_printed() {
     let engine = TerminalEngine(cols: 30, rows: 5)
-    shell(engine, commands: [("one", lines("a", 2)), ("two", ["first", "  indented  ", "last"])])
-    XCTAssertEqual(engine.lastCommandOutput(), "first\n  indented\nlast")
+    shell(engine, commands: [("one", lines("a", 2)), ("two", ["first", "  indented  ", "", "last"])])
+    // Printed trailing spaces and blank lines survive; the row padding after them doesn't.
+    XCTAssertEqual(engine.lastCommandOutput(), "first\n  indented  \n\nlast")
+  }
+
+  func test_a_soft_wrapped_output_line_is_copied_as_one_line() {
+    let engine = TerminalEngine(cols: 10, rows: 5)
+    let long = String(repeating: "x", count: 25)
+    shell(engine, commands: [("cat", [long, "end"])])
+    XCTAssertEqual(engine.lastCommandOutput(), long + "\nend")
   }
 
   func test_a_command_with_no_output_copies_nothing() {

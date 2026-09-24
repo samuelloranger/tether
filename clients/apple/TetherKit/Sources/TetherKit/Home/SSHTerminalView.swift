@@ -177,6 +177,11 @@ public struct SSHTerminalView: View {
           onTap: { focused = true },
           onSelectionText: { selectionText = $0 },
           onOpenURL: { UIApplication.shared.open($0) },
+          // The file is on the host, not the phone: hand over its path instead.
+          onOpenFile: { path, line, column in
+            let location = [path, line.map(String.init), column.map(String.init)].compactMap { $0 }.joined(separator: ":")
+            acknowledgeCopy(location, announce: "Path copied", into: $showCopyConfirmation)
+          },
           onMouseBytes: { controller.sendInput($0) },
           mouseMode: controller.mouseMode,
           mouseSgr: controller.mouseSgr

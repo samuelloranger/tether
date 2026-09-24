@@ -156,9 +156,13 @@ final class TerminalEngine {
   }
 
   /// Buffer-absolute rows (scrollback included) where a prompt group starts, oldest first.
+  /// Reads each row's stored marks: `semanticRowKind` walks back through continuation
+  /// rows, which makes a full scan quadratic on long soft-wrapped commands.
   private func promptRows() -> [Int] {
     let last = liveTop + terminal.getDims().rows
-    return (0..<last).filter { terminal.semanticRowKind(at: $0) == .initial }
+    return (0..<last).filter { row in
+      terminal.semanticPromptMarks(at: row).contains { $0.kind == .initial }
+    }
   }
 
   private func jumpToPromptLocked(_ direction: PromptJump) -> Bool {
@@ -187,23 +191,35 @@ final class TerminalEngine {
     // command started from the prompt above.
     guard prompts.count >= 2 else { return nil }
     let cols = terminal.getDims().cols
-    var lines: [String] = []
+    // nil: the row has no output cells. Kept, so blank lines inside the output survive.
+    var rows: [(text: String?, wrapped: Bool)] = []
     for row in prompts[prompts.count - 2]..<prompts[prompts.count - 1] {
       guard let line = terminal.bufferLine(atRow: row) else { continue }
+      let limit = min(cols, line.count)
+      let isOutput = (0..<limit).map { terminal.semanticContent(at: Position(col: $0, row: row)) == .output }
+      // Up to the last cell the program wrote: its trailing spaces stay, padding doesn't.
+      guard let last = isOutput.lastIndex(of: true) else {
+        rows.append((nil, line.isWrapped))
+        continue
+      }
       var text = ""
-      var any = false
-      for col in 0..<min(cols, line.count) {
-        guard terminal.semanticContent(at: Position(col: col, row: row)) == .output else { continue }
-        any = true
+      for col in 0...last {
         let data = line[col]
         if data.width == 0 { continue }
         let character = data.getText()
-        text += character.isEmpty || character == "\u{0}" ? " " : character
+        text += !isOutput[col] || character.isEmpty || character == "\u{0}" ? " " : character
       }
-      if any { lines.append(text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)) }
+      rows.append((text, line.isWrapped))
     }
-    while lines.last?.isEmpty == true { lines.removeLast() }
-    let output = lines.joined(separator: "\n")
+    guard let first = rows.firstIndex(where: { $0.text != nil }),
+          let last = rows.lastIndex(where: { $0.text != nil })
+    else { return nil }
+    var output = ""
+    for (index, row) in rows[first...last].enumerated() {
+      // A soft-wrapped row continues the line above; only real line breaks become newlines.
+      if index > 0, !row.wrapped { output += "\n" }
+      output += row.text ?? ""
+    }
     return output.isEmpty ? nil : output
   }
 
