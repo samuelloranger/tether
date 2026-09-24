@@ -36,6 +36,14 @@ class NotificationService: UNNotificationServiceExtension {
     if let link = payload.link {
       content.userInfo["link"] = link
     }
+    // Actions need a session link and the agent state to check against; without them the
+    // buttons could do nothing.
+    if let category = payload.category, Self.categories.contains(category),
+       payload.link != nil, let state = payload.state, let version = payload.version, !version.isEmpty {
+      content.categoryIdentifier = category
+      content.userInfo["agentState"] = state
+      content.userInfo["agentVersion"] = version
+    }
     contentHandler(content)
   }
 
@@ -50,7 +58,13 @@ class NotificationService: UNNotificationServiceExtension {
     let title: String
     let body: String
     let link: String?
+    let category: String?
+    let state: String?
+    let version: String?
   }
+
+  // Mirrors NotificationActions.categoryIdentifiers; the extension doesn't link TetherKit.
+  private static let categories: Set<String> = ["tether.agent.waiting", "tether.agent.done"]
 
   // Reads the AES key PushRegistrar wrote, via the shared keychain group. The
   // extension has its own bundle id, so without that group this returns nothing.

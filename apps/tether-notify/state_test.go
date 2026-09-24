@@ -73,6 +73,55 @@ func TestStateDonePushesWhenNobodyAttached(t *testing.T) {
 	}
 }
 
+func TestStatePushesCarryTheAgentCategoryAndState(t *testing.T) {
+	for state, want := range map[string]string{"waiting": "tether.agent.waiting", "done": "tether.agent.done"} {
+		d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+		if err := runState(args(state, "--title", "t", "--body", "b", "--link", "tether://session/work?host=h"), d); err != nil {
+			t.Fatal(err)
+		}
+		if len(*pushes) != 1 {
+			t.Fatalf("%s: pushes %+v", state, *pushes)
+		}
+		got := (*pushes)[0].content
+		stored, _ := readSession("work")
+		if got.Category != want || got.State != state || got.Version == "" || stored == nil || got.Version != stored.Version {
+			t.Fatalf("%s: content %+v stored %+v", state, got, stored)
+		}
+	}
+}
+
+func TestStateWithoutASessionLinkOffersNoActions(t *testing.T) {
+	for _, link := range []string{
+		"", "https://example.com", "tether://session/work", "tether://session/other?host=h",
+		"tether://session/work?host=", "tether://elsewhere/work?host=h",
+		"tether://session/wo%72k?host=h", // decodes to "work", but the phone would read "wo%72k"
+	} {
+		d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+		if err := runState(args("waiting", "--title", "t", "--body", "b", "--link", link), d); err != nil {
+			t.Fatal(err)
+		}
+		if len(*pushes) != 1 || (*pushes)[0].content.Category != "" || (*pushes)[0].content.Version != "" {
+			t.Fatalf("link %q: pushes %+v", link, *pushes)
+		}
+	}
+}
+
+func TestEveryStateChangeGetsANewVersionButWorkingKeepsIt(t *testing.T) {
+	d, _ := fakeDeps(t, "name=work\tclients=1\n", nil)
+	versions := []string{}
+	for _, state := range []string{"waiting", "working", "working", "waiting"} {
+		if err := runState(args(state), d); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := readSession("work")
+		versions = append(versions, s.Version)
+	}
+	// Same second throughout: only the version tells the two waiting prompts apart.
+	if versions[0] == versions[3] || versions[1] != versions[2] || versions[0] == versions[1] {
+		t.Fatalf("versions %q", versions)
+	}
+}
+
 func TestStateWaitingSkipsPushWhenAttached(t *testing.T) {
 	d, pushes := fakeDeps(t, "name=work\tclients=1\n", nil)
 	if err := runState(args("waiting", "--title", "t", "--body", "b"), d); err != nil {

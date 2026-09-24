@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -43,6 +44,16 @@ func main() {
 		err = runState(os.Args[2:], defaultStateDeps(false))
 	case "status":
 		err = runStatus(os.Stdout, defaultStatusDeps())
+	case "answer":
+		err = runAnswer(os.Args[2:], defaultAnswerDeps())
+		if errors.Is(err, errStale) {
+			fmt.Fprintln(os.Stderr, "tether-notify: the agent has moved on; nothing was sent")
+			os.Exit(3)
+		}
+		if errors.Is(err, errNotSubmitted) {
+			fmt.Fprintln(os.Stderr, "tether-notify: typed, but the agent moved on before Return")
+			os.Exit(4)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -57,12 +68,16 @@ func usage() {
 	fmt.Fprint(os.Stderr, `tether-notify — encrypted push for the SSH host
 
   register <token> <secretKeyB64> [label]   register/replace a phone
-  notify --title T --body B [--link L] [--collapse ID] [--dry-run]
+  notify --title T --body B [--link L] [--category C] [--collapse ID] [--dry-run]
   state --session S --agent A --state working|waiting|done|clear
         [--title T --body B --link L] [--collapse ID] [--dry-run]
                                              record a session's agent state; pushes waiting/done
                                              unless the session has an attached zmx client
   status                                     print every session's agent state as JSON
+  answer --session S --state ST --version V --input B64 [--submit]
+                                             type a notification action's input, only while the
+                                             agent is still in state ST version V (exit 3 if not;
+                                             exit 4 if it moved on before Return)
   list                                       list registered phones
   remove <token>                             forget a phone
 `)
@@ -115,6 +130,7 @@ func cmdNotify(args []string) error {
 	title := fs.String("title", "", "notification title")
 	body := fs.String("body", "", "notification body")
 	link := fs.String("link", "", "tether:// deep link (optional)")
+	category := fs.String("category", "", "iOS notification category (optional)")
 	collapse := fs.String("collapse", "tether-notify", "APNs collapse id")
 	dryRun := fs.Bool("dry-run", false, "print requests instead of sending")
 	if err := fs.Parse(args); err != nil {
@@ -123,7 +139,7 @@ func cmdNotify(args []string) error {
 	if *title == "" || *body == "" {
 		return fmt.Errorf("notify requires --title and --body")
 	}
-	return sendPush(PushContent{Title: *title, Body: *body, Link: *link}, *collapse, *dryRun)
+	return sendPush(PushContent{Title: *title, Body: *body, Link: *link, Category: *category}, *collapse, *dryRun)
 }
 
 func sendPush(content PushContent, collapse string, dryRun bool) error {

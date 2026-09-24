@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -57,18 +61,25 @@ func runState(args []string, d stateDeps) error {
 		*collapse = "agent-" + *session
 	}
 
-	in := SessionState{Session: *session, Agent: *agent, State: *state, Message: *body, Link: *link}
+	in := SessionState{Session: *session, Agent: *agent, State: *state, Message: *body, Link: *link, Version: newVersion()}
 	if *state != stateClear {
 		in.AgentPid = agentPid(d.run, d.ppid)
 	}
 	now := d.now().Unix()
-	err := withSessionsLock(func() error {
-		prev, _ := readSession(*session)
-		next := nextState(prev, in, now)
-		if next == nil {
-			return removeSession(*session)
-		}
-		return writeSession(next)
+	var stored *SessionState
+	err := withSessionLock(*session, func() error {
+		return withSessionsLock(func() error {
+			prev, _ := readSession(*session)
+			next := nextState(prev, in, now)
+			if next == nil {
+				return removeSession(*session)
+			}
+			if err := writeSession(next); err != nil {
+				return err
+			}
+			stored = next
+			return nil
+		})
 	})
 	if err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: state for %s not saved: %v\n", *session, err)
@@ -81,10 +92,48 @@ func runState(args []string, d stateDeps) error {
 	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
 		return nil
 	}
-	if err := d.push(PushContent{Title: *title, Body: *body, Link: *link}, *collapse); err != nil {
+	content := PushContent{Title: *title, Body: *body, Link: *link}
+	// Actions need a session link to answer and a saved state to check against.
+	if stored != nil && stored.Version != "" && actionableLink(*link, *session) {
+		content.Category = agentCategory(*state)
+		content.State = stored.State
+		content.Version = stored.Version
+	}
+	if err := d.push(content, *collapse); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
 	}
 	return nil
+}
+
+// actionableLink is a tether://session/<session>?host=<label> link for this very session:
+// the phone answers whatever session the link names. The path is compared raw, as the
+// phone reads it; an encoded path would name a different session there.
+func actionableLink(link, session string) bool {
+	if !strings.HasPrefix(link, "tether://session/"+session+"?") {
+		return false
+	}
+	u, err := url.Parse(link)
+	return err == nil && u.Query().Get("host") != ""
+}
+
+func newVersion() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// agentCategory names the iOS notification category for an agent push; the app
+// registers the same identifiers.
+func agentCategory(state string) string {
+	switch state {
+	case stateWaiting:
+		return "tether.agent.waiting"
+	case stateDone:
+		return "tether.agent.done"
+	}
+	return ""
 }
 
 type statusDeps struct {
@@ -100,15 +149,19 @@ func runStatus(w io.Writer, d statusDeps) error {
 	out := []SessionState{}
 	// Outside the lock: a slow ls must not stall the hooks queued behind it.
 	live, lsErr := zmxClients(d.run)
+	stale := func(s SessionState) bool {
+		_, listed := live[s.Session]
+		return !d.alive(s.AgentPid) || (lsErr == nil && !listed)
+	}
+	var doomed []SessionState
 	err := withSessionsLock(func() error {
 		states, err := listSessions()
 		if err != nil {
 			return err
 		}
 		for _, s := range states {
-			_, listed := live[s.Session]
-			if !d.alive(s.AgentPid) || (lsErr == nil && !listed) {
-				_ = removeSession(s.Session)
+			if stale(s) {
+				doomed = append(doomed, s)
 				continue
 			}
 			out = append(out, s)
@@ -117,6 +170,19 @@ func runStatus(w io.Writer, d statusDeps) error {
 	})
 	if err != nil {
 		return err
+	}
+	// Each removal takes its session's lock first, like every other writer, so it can't
+	// land between `answer`'s check and its send. Only the very record judged stale goes:
+	// one a hook wrote since was never checked against a fresh `zmx ls`.
+	for _, old := range doomed {
+		_ = withSessionLock(old.Session, func() error {
+			return withSessionsLock(func() error {
+				if s, _ := readSession(old.Session); s != nil && s.Revision == old.Revision {
+					return removeSession(old.Session)
+				}
+				return nil
+			})
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Session < out[j].Session })
 	return json.NewEncoder(w).Encode(out)

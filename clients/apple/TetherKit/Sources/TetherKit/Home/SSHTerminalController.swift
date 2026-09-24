@@ -12,6 +12,12 @@ final class LockedBox<Value>: @unchecked Sendable {
     get { lock.lock(); defer { lock.unlock() }; return stored }
     set { lock.lock(); defer { lock.unlock() }; stored = newValue }
   }
+
+  /// Read-modify-write under one lock; `value += 1` would take it twice.
+  func update<T>(_ body: (inout Value) -> T) -> T {
+    lock.lock(); defer { lock.unlock() }
+    return body(&stored)
+  }
 }
 
 public struct PullRequestDetail: Equatable, Sendable {
@@ -135,7 +141,7 @@ public final class SSHTerminalController {
   private let pathObserver = NetworkPathObserver()
   /// Opened lazily on first use, which is always after the terminal connects.
   private let control: ControlConnection
-  private static let zmx = "~/.local/bin/zmx"
+  static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
   static let agentStatusCommand =
     "if [ -x \(notify) ]; then \(notify) status 2>/dev/null; else echo __tether_notify_missing; fi"

@@ -20,6 +20,10 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
   /// Set while a terminal is open: true when that terminal shows this push in-app.
   public var coversForegroundPush: (@MainActor (SessionDeepLink) async -> Bool)?
 
+  /// Runs Approve / Deny / Reply. Set at launch, not by the UI: an action can wake the
+  /// app in the background with no scene.
+  public var onAction: (@MainActor (NotificationActionAttempt) async -> Void)?
+
   public override init() {
     super.init()
   }
@@ -47,8 +51,22 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
+    if response.actionIdentifier != UNNotificationDefaultActionIdentifier {
+      let text = (response as? UNTextInputNotificationResponse)?.userText
+      guard let onAction,
+            let attempt = NotificationActions.attempt(
+              actionIdentifier: response.actionIdentifier, text: text,
+              userInfo: response.notification.request.content.userInfo
+            )
+      else { return completionHandler() }
+      // The system keeps a backgrounded app alive until the handler runs.
+      Task { @MainActor in
+        await onAction(attempt)
+        completionHandler()
+      }
+      return
+    }
     defer { completionHandler() }
-    guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
     guard let link = Self.link(from: response.notification.request.content.userInfo),
           let url = URL(string: link)
     else { return }

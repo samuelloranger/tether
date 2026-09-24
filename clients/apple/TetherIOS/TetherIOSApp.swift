@@ -56,12 +56,16 @@ struct TetherIOSApp: App {
 final class AppDelegate: NSObject, UIApplicationDelegate {
   let pushRegistrar = PushRegistrar()
   let tapRouter = NotificationTapRouter()
+  private lazy var actionRunner = NotificationActionRunner.live()
 
   func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    UNUserNotificationCenter.current().delegate = tapRouter
+    let center = UNUserNotificationCenter.current()
+    center.delegate = tapRouter
+    center.setNotificationCategories(NotificationActions.categories())
+    tapRouter.onAction = { [weak self] attempt in await self?.actionRunner.perform(attempt) }
     return true
   }
 
