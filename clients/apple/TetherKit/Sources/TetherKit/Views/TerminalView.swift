@@ -110,22 +110,9 @@ public struct TerminalAccessoryBar: View {
     DispatchQueue.main.async { model.dockedHeight = height }
   }
 
-  /// Matches the D-pad's feedback: the clipboard's contents are invisible until
-  /// the shell echoes them, so the tap needs its own confirmation.
-  private static let pasteFeedback = UIImpactFeedbackGenerator(style: .light)
-
-  /// The system paste control. Reading `UIPasteboard.general` directly is denied
-  /// silently; `PasteButton` is granted access without a prompt.
   private var pasteButton: some View {
-    PasteButton(payloadType: String.self) { strings in
-      guard let text = strings.first else { return }
-      Self.pasteFeedback.impactOccurred()
-      onPaste(text)
-    }
-    .labelStyle(.iconOnly)
-    .buttonBorderShape(.roundedRectangle(radius: 8))
-    .tint(TetherColors.surface)
-    .frame(width: Self.keyWidth, height: Self.keySize)
+    TerminalPasteKey(onPaste: onPaste)
+      .frame(width: Self.keyWidth, height: Self.keySize)
   }
 
   /// Arming Ctrl changes what the next key does with nothing else moving on screen,
