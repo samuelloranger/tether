@@ -19,7 +19,9 @@ type SessionState struct {
 	Updated int64  `json:"updated"`
 	// Version is new on every state change. `answer` compares it, not Since: two prompts
 	// within one second share a Since.
-	Version  string `json:"version,omitempty"`
+	Version string `json:"version,omitempty"`
+	// Revision is new on every write, so `status` removes only the exact record it judged.
+	Revision string `json:"revision,omitempty"`
 	Message  string `json:"message,omitempty"`
 	Link     string `json:"link,omitempty"`
 	AgentPid int    `json:"agentPid,omitempty"`
@@ -145,6 +147,7 @@ func writeSession(s *SessionState) error {
 	if !validSessionName(s.Session) {
 		return fmt.Errorf("invalid session name %q", s.Session)
 	}
+	s.Revision = newVersion()
 	if err := os.MkdirAll(sessionsDir(), 0o700); err != nil {
 		return err
 	}

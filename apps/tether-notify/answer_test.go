@@ -165,6 +165,14 @@ func TestStatusPrunesUnderTheSessionLock(t *testing.T) {
 }
 
 func TestStatusKeepsARecordWrittenAfterItJudgedTheSession(t *testing.T) {
+	t.Run("new state", func(t *testing.T) {
+		keepsRewrite(t, func(s *SessionState) { s.Version, s.Updated = "v2", 2000 })
+	})
+	// A repeated `working` hook within the same second writes the same version and time.
+	t.Run("same fields", func(t *testing.T) { keepsRewrite(t, func(*SessionState) {}) })
+}
+
+func keepsRewrite(t *testing.T, change func(*SessionState)) {
 	answerFixture(t, waiting)
 	held := make(chan struct{})
 	release := make(chan struct{})
@@ -183,7 +191,7 @@ func TestStatusKeepsARecordWrittenAfterItJudgedTheSession(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	// Meanwhile the session comes back and its hook records a new state.
 	next := *waiting
-	next.Version, next.Updated = "v2", 2000
+	change(&next)
 	if err := withSessionsLock(func() error { return writeSession(&next) }); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +199,7 @@ func TestStatusKeepsARecordWrittenAfterItJudgedTheSession(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if s, _ := readSession("work"); s == nil || s.Version != "v2" {
+	if s, _ := readSession("work"); s == nil || s.Revision != next.Revision {
 		t.Fatalf("the newer record was pruned: %+v", s)
 	}
 }

@@ -177,7 +177,7 @@ func runStatus(w io.Writer, d statusDeps) error {
 	for _, old := range doomed {
 		_ = withSessionLock(old.Session, func() error {
 			return withSessionsLock(func() error {
-				if s, _ := readSession(old.Session); s != nil && s.Version == old.Version && s.Updated == old.Updated {
+				if s, _ := readSession(old.Session); s != nil && s.Revision == old.Revision {
 					return removeSession(old.Session)
 				}
 				return nil
