@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Tether v5 is a **native iOS terminal that connects over SSH to `zmx`** — a persistent session manager running on your own hosts. The phone speaks libssh2 straight to the host, attaches a zmx session, and renders the live PTY. Sessions survive disconnects because **zmx owns them on the host**; Tether is a pure client with no server of its own.
 
-Tether through v4 was a Bun server + Noise transport with desktop and web clients. **All of that was removed in v5** — `apps/server`, `apps/desktop`, `apps/relay`, the VitePress docs site, and the whole Noise / holder / replay / WebSocket stack are gone. Do **not** reintroduce a server, a Noise channel, a WebSocket transport, or a desktop/web client. The only host-side artifact is `tether-notify`, a small Go tool for push.
+Tether through v4 was a Bun server + Noise transport with desktop and web clients. **All of that was removed in v5** — `apps/server`, `apps/desktop`, the VitePress docs site, and the whole Noise / holder / replay / WebSocket stack are gone. Do **not** reintroduce a server, a Noise channel, a WebSocket transport, or a desktop/web client. The only host-side artifact is `tether-notify`, a small Go tool for push. The push relay (`apps/relay`) is separate infrastructure, not part of any host: it routes ciphertext to APNs and is the only piece that holds the APNs key.
 
 The VT emulator is SwiftTerm's headless engine, wrapped by `TerminalEngine` (pinned by revision in `TetherKit/Package.swift`). It does no networking — it only turns a PTY byte stream into a `TerminalFrame`; Tether renders its own grid.
 
@@ -16,8 +16,9 @@ The VT emulator is SwiftTerm's headless engine, wrapped by `TerminalEngine` (pin
 |---|---|---|
 | `clients/apple/` | Swift / SwiftUI | The iOS app. `TetherKit` package (SSH transport, terminal pipeline + `TerminalEngine` + renderer, Home / key vault, all UI), `TetherIOS` app target, `TetherNotificationService` (NSE — decrypts push), `Tether.xcodeproj`. |
 | `apps/tether-notify/` | Go | Host-side encrypted-push CLI. Registers a phone's APNs token + AES key (sent by the app over SSH) and posts ciphertext to the relay. |
+| `apps/relay/` | Bun + Hono | Push relay: forwards ciphertext to APNs (production first, sandbox on `BadDeviceToken`). Own image via `relay-publish.yml`, deployed on its own. |
 | `scripts/` | shell / ruby | `install.sh` (install `tether-notify`), `install-agent-hooks.sh` (wire agent push), `release.sh`. |
-| `.github/workflows/` | — | `ci.yml` (lint + host-tools + iOS build/test), `release.yml` (signed iOS archive → TestFlight). |
+| `.github/workflows/` | — | `ci.yml` (lint + host-tools + relay + iOS build/test), `release.yml` (signed iOS archive → TestFlight), `relay-publish.yml` (relay image on tag or manual run). |
 
 ## Commands
 
