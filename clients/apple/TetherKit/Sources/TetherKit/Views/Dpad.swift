@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Terminal D-pad: one bar key, drag for a locked cardinal + capped auto-repeat.
+/// Backing off the locked direction flips to the opposite one without lifting.
 /// Position is owned by the parent so the pad can be dragged around the surface.
 public struct DpadView: View {
   public var size: CGSize
@@ -9,6 +10,7 @@ public struct DpadView: View {
 
   @State private var thumb = CGSize.zero
   @State private var active: DPadDirection?
+  @State private var lock = DPadLock()
   @State private var sampleDx: CGFloat = 0
   @State private var sampleDy: CGFloat = 0
   @State private var sampled = false
@@ -86,13 +88,10 @@ public struct DpadView: View {
 
   /// Finger translation only — where the thumb landed on the puck is not a vote.
   private func applyCurrent() {
-    let next = DPadModel.resolveDirection(
-      dx: sampleDx,
-      dy: sampleDy,
-      active: active,
-      sampled: sampled
-    )
-    let offset = DPadModel.thumbOffset(dx: sampleDx, dy: sampleDy, direction: next)
+    let translation = CGPoint(x: sampleDx, y: sampleDy)
+    let next = lock.update(translation: translation, sampled: sampled)
+    let r = lock.relative(translation)
+    let offset = DPadModel.thumbOffset(dx: r.x, dy: r.y, direction: next)
     thumb = CGSize(width: offset.x, height: offset.y)
     activate(next)
   }
@@ -113,12 +112,8 @@ public struct DpadView: View {
     sampleTask?.cancel()
     sampleTask = nil
     guard active == nil else { return }
-    let next = DPadModel.resolveDirection(
-      dx: sampleDx,
-      dy: sampleDy,
-      active: nil,
-      sampled: true
-    )
+    let r = lock.relative(CGPoint(x: sampleDx, y: sampleDy))
+    let next = DPadModel.resolveDirection(dx: r.x, dy: r.y, active: nil, sampled: true)
     guard let next else { return }
     Self.feedback.impactOccurred()
     onArrow(next)
@@ -151,6 +146,7 @@ public struct DpadView: View {
     sampleTask = nil
     stopRepeat()
     active = nil
+    lock = DPadLock()
     sampleDx = 0
     sampleDy = 0
     sampled = false
