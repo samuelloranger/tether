@@ -23,15 +23,21 @@ public struct DownloadedFont: Codable, Hashable, Identifiable, Sendable {
 public enum GoogleFontsError: LocalizedError, Equatable {
   case notALink
   case unknownFamily(String)
+  case service(status: Int)
   case download(String)
   case unreadable
+  case offHost(String)
+  case nameTaken(String)
 
   public var errorDescription: String? {
     switch self {
     case .notALink: return "Paste a fonts.google.com link or a family name."
     case let .unknownFamily(family): return "Google Fonts has no family named “\(family)”."
+    case let .service(status): return "Google Fonts answered HTTP \(status); try again later."
     case let .download(reason): return "Download failed: \(reason)"
     case .unreadable: return "The downloaded file isn’t a font this device can use."
+    case let .offHost(host): return "The download was redirected to \(host); nothing was installed."
+    case let .nameTaken(name): return "A font named “\(name)” is already installed, so this one would never be used."
     }
   }
 }
@@ -142,71 +148,127 @@ public struct GoogleFontsInstaller: Sendable {
       .appendingPathComponent("Fonts", isDirectory: true)
   }
 
+  /// Downloads and stores a family without registering it. A re-download replaces the
+  /// previous files only once the new ones are complete.
   public func install(_ input: String) async throws -> DownloadedFont {
     guard let family = GoogleFonts.family(from: input) else { throw GoogleFontsError.notALink }
     // A family without a 700 answers the weighted request with 400.
     var css = try await text(GoogleFonts.cssURL(family: family, weights: true))
-    if css == nil { css = try await text(GoogleFonts.cssURL(family: family, weights: false)) }
-    guard let css, let picked = GoogleFonts.pick(GoogleFonts.faces(css: css)) else {
+    if case .missing = css { css = try await text(GoogleFonts.cssURL(family: family, weights: false)) }
+    let body: String
+    switch css {
+    case let .found(text): body = text
+    case .missing: throw GoogleFontsError.unknownFamily(family)
+    case let .failed(status): throw GoogleFontsError.service(status: status)
+    }
+    guard let picked = GoogleFonts.pick(GoogleFonts.faces(css: body)) else {
       throw GoogleFontsError.unknownFamily(family)
     }
 
     let slug = family.lowercased().split(separator: " ").joined(separator: "-")
     let folder = directory.appendingPathComponent(slug, isDirectory: true)
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-
-    let regular = try await save(picked.regular, as: "regular", in: folder)
-    var bold: (file: String, postScriptName: String, isMonospaced: Bool)?
-    if let face = picked.bold { bold = try await save(face, as: "bold", in: folder) }
-    return DownloadedFont(
-      family: family, slug: slug,
-      postScriptName: regular.postScriptName, boldPostScriptName: bold?.postScriptName,
-      files: [regular.file] + (bold.map { [$0.file] } ?? []),
-      isMonospaced: regular.isMonospaced
-    )
+    let staging = directory.appendingPathComponent(".\(slug)-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    do {
+      let regular = try await save(picked.regular, as: "regular", in: staging)
+      var bold: SavedFace?
+      if let face = picked.bold { bold = try await save(face, as: "bold", in: staging) }
+      // Core Text serves one face per PostScript name; a clash with a bundled, system or
+      // other downloaded face would leave this one unused.
+      for name in [regular.postScriptName] + (bold.map { [$0.postScriptName] } ?? []) {
+        if Self.isInstalled(postScriptName: name, outside: folder) { throw GoogleFontsError.nameTaken(name) }
+      }
+      unregisterAll(in: folder)
+      try? FileManager.default.removeItem(at: folder)
+      try FileManager.default.moveItem(at: staging, to: folder)
+      return DownloadedFont(
+        family: family, slug: slug,
+        postScriptName: regular.postScriptName, boldPostScriptName: bold?.postScriptName,
+        files: [regular.file] + (bold.map { [$0.file] } ?? []),
+        isMonospaced: regular.isMonospaced
+      )
+    } catch {
+      try? FileManager.default.removeItem(at: staging)
+      throw error
+    }
   }
 
-  /// Registers a stored family's files, e.g. at launch.
-  public func register(_ font: DownloadedFont) {
+  /// Registers a stored family's files, e.g. at launch. False when a file is gone or Core
+  /// Text refuses it, so the caller can stop offering the font.
+  @discardableResult
+  public func register(_ font: DownloadedFont) -> Bool {
+    let folder = directory.appendingPathComponent(font.slug, isDirectory: true)
+    var ok = true
     for file in font.files {
-      let url = directory.appendingPathComponent(font.slug).appendingPathComponent(file)
-      CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+      let url = folder.appendingPathComponent(file)
+      guard FileManager.default.fileExists(atPath: url.path) else { ok = false; continue }
+      var error: Unmanaged<CFError>?
+      if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+        let code = error.map { CFErrorGetCode($0.takeRetainedValue()) } ?? 0
+        if code != CTFontManagerError.alreadyRegistered.rawValue { ok = false }
+      }
     }
-    TerminalFonts.setBoldFace(font.boldPostScriptName, for: font.postScriptName)
+    guard ok else {
+      unregisterAll(in: folder)
+      return false
+    }
+    TerminalFonts.setDownloadedBoldFace(font.boldPostScriptName, for: font.postScriptName)
+    return true
   }
 
   public func remove(_ font: DownloadedFont) {
     let folder = directory.appendingPathComponent(font.slug, isDirectory: true)
-    for file in font.files {
-      CTFontManagerUnregisterFontsForURL(folder.appendingPathComponent(file) as CFURL, .process, nil)
-    }
+    unregisterAll(in: folder)
     try? FileManager.default.removeItem(at: folder)
-    TerminalFonts.setBoldFace(nil, for: font.postScriptName)
+    TerminalFonts.setDownloadedBoldFace(nil, for: font.postScriptName)
   }
 
-  private func text(_ url: URL) async throws -> String? {
+  private func unregisterAll(in folder: URL) {
+    let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+    for url in files {
+      CTFontManagerUnregisterFontsForURL(url as CFURL, .process, nil)
+    }
+  }
+
+  /// A face by that name that Core Text already serves from somewhere other than `folder`.
+  static func isInstalled(postScriptName name: String, outside folder: URL) -> Bool {
+    let font = CTFontCreateWithName(name as CFString, 12, nil)
+    // An unknown name resolves to a fallback face with a different name.
+    guard CTFontCopyPostScriptName(font) as String == name else { return false }
+    guard let url = CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL else { return true }
+    return !url.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path + "/")
+  }
+
+  private enum CSS {
+    case found(String)
+    case missing
+    case failed(status: Int)
+  }
+
+  private func text(_ url: URL) async throws -> CSS {
     var request = URLRequest(url: url)
     // A browser user agent gets WOFF2; anything else gets TrueType, which Core Text reads.
     request.setValue("Tether", forHTTPHeaderField: "User-Agent")
-    let (data, response) = try await load(request)
-    guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-    return String(data: data, encoding: .utf8)
+    let (data, response) = try await load(request, host: "fonts.googleapis.com")
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    switch status {
+    case 200: return String(data: data, encoding: .utf8).map(CSS.found) ?? .failed(status: status)
+    case 400, 404: return .missing
+    default: return .failed(status: status)
+    }
   }
 
-  private func save(_ face: GoogleFonts.Face, as name: String, in folder: URL) async throws
-    -> (file: String, postScriptName: String, isMonospaced: Bool)
-  {
-    let (data, response) = try await load(URLRequest(url: face.url))
+  private typealias SavedFace = (file: String, postScriptName: String, isMonospaced: Bool)
+
+  private func save(_ face: GoogleFonts.Face, as name: String, in folder: URL) async throws -> SavedFace {
+    let (data, response) = try await load(URLRequest(url: face.url), host: "fonts.gstatic.com")
     guard (response as? HTTPURLResponse)?.statusCode == 200,
           let descriptor = (CTFontManagerCreateFontDescriptorsFromData(data as CFData) as? [CTFontDescriptor])?.first,
           let postScriptName = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute) as? String
     else { throw GoogleFontsError.unreadable }
-    let ext = face.url.pathExtension.isEmpty ? "ttf" : face.url.pathExtension
+    let ext = ["ttf", "otf"].contains(face.url.pathExtension.lowercased()) ? face.url.pathExtension.lowercased() : "ttf"
     let file = "\(name).\(ext)"
-    let url = folder.appendingPathComponent(file)
-    try data.write(to: url, options: .atomic)
-    CTFontManagerUnregisterFontsForURL(url as CFURL, .process, nil)
-    CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+    try data.write(to: folder.appendingPathComponent(file), options: .atomic)
     return (file, postScriptName, Self.isMonospaced(CTFontCreateWithFontDescriptor(descriptor, 12, nil)))
   }
 
@@ -221,8 +283,15 @@ public struct GoogleFontsInstaller: Sendable {
     return Set(advances.map { ($0.width * 100).rounded() }).count == 1
   }
 
-  private func load(_ request: URLRequest) async throws -> (Data, URLResponse) {
-    do { return try await fetch(request) }
+  /// The allow-list is checked on the URL the data finally came from, after redirects.
+  private func load(_ request: URLRequest, host: String) async throws -> (Data, URLResponse) {
+    let result: (Data, URLResponse)
+    do { result = try await fetch(request) }
     catch { throw GoogleFontsError.download(error.localizedDescription) }
+    let final = result.1.url ?? request.url
+    guard final?.scheme == "https", final?.host == host else {
+      throw GoogleFontsError.offHost(final?.host ?? "an unknown host")
+    }
+    return result
   }
 }

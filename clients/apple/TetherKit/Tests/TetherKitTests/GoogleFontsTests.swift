@@ -81,9 +81,23 @@ final class GoogleFontsTests: XCTestCase {
 
   // MARK: - install
 
+  /// The face's data, with the bundled copy taken out of Core Text for the test: the
+  /// installer rightly refuses a download whose name is already served.
   private func bundled(_ name: String) throws -> Data {
+    TerminalFonts.registerBundledFonts()
     let url = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: "ttf"))
+    CTFontManagerUnregisterFontsForURL(url as CFURL, .process, nil)
+    addTeardownBlock { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
     return try Data(contentsOf: url)
+  }
+
+  /// A stub that serves `css` for the CSS API and `faces[file]` for gstatic files.
+  private func stub(css: String, faces: [String: Data], status: Int = 200) -> GoogleFontsInstaller.Fetch {
+    { request in
+      let url = request.url!
+      if url.host == "fonts.googleapis.com" { return (Data(css.utf8), self.response(url, status)) }
+      return (faces[url.lastPathComponent] ?? Data(), self.response(url, 200))
+    }
   }
 
   private func response(_ url: URL, _ status: Int) -> URLResponse {
@@ -141,6 +155,76 @@ final class GoogleFontsTests: XCTestCase {
     XCTAssertNil(font.boldPostScriptName)
     XCTAssertEqual(font.files, ["regular.ttf"])
     XCTAssertEqual(requested.value.count, 3)
+  }
+
+  func test_a_name_core_text_already_serves_is_refused() async throws {
+    TerminalFonts.registerBundledFonts()
+    let data = try Data(contentsOf: XCTUnwrap(Bundle.module.url(forResource: "JetBrainsMono-Regular", withExtension: "ttf")))
+    let directory = temporaryDirectory()
+    let installer = GoogleFontsInstaller(directory: directory, fetch: stub(css: css, faces: ["regular.ttf": data, "bold.ttf": data]))
+    do {
+      _ = try await installer.install("JetBrains Mono")
+      XCTFail("installed a copy of a bundled face")
+    } catch {
+      XCTAssertEqual(error as? GoogleFontsError, .nameTaken("JetBrainsMono-Regular"))
+    }
+    let left = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+    XCTAssertEqual(left, [], "a refused download left files behind")
+  }
+
+  func test_a_redirect_off_gstatic_is_refused() async throws {
+    let data = try bundled("JetBrainsMono-Regular")
+    let installer = GoogleFontsInstaller(directory: temporaryDirectory()) { request in
+      let url = request.url!
+      if url.host == "fonts.googleapis.com" { return (Data(self.css.utf8), self.response(url, 200)) }
+      return (data, self.response(URL(string: "https://evil.example/x.ttf")!, 200))
+    }
+    do {
+      _ = try await installer.install("Fira Code")
+      XCTFail("accepted a font from another host")
+    } catch {
+      XCTAssertEqual(error as? GoogleFontsError, .offHost("evil.example"))
+    }
+  }
+
+  func test_a_service_error_is_not_reported_as_an_unknown_family() async {
+    let installer = GoogleFontsInstaller(directory: temporaryDirectory(), fetch: stub(css: "", faces: [:], status: 503))
+    do {
+      _ = try await installer.install("Fira Code")
+      XCTFail("installed during an outage")
+    } catch {
+      XCTAssertEqual(error as? GoogleFontsError, .service(status: 503))
+    }
+  }
+
+  func test_a_re_download_replaces_the_old_files() async throws {
+    let regular = try bundled("JetBrainsMono-Regular")
+    let bold = try bundled("JetBrainsMono-Bold")
+    let directory = temporaryDirectory()
+    let first = GoogleFontsInstaller(directory: directory, fetch: stub(css: css, faces: ["regular.ttf": regular, "bold.ttf": bold]))
+    let installed = try await first.install("Fira Code")
+    XCTAssertTrue(first.register(installed))
+
+    let regularOnly = "@font-face { font-weight: 400; src: url(https://fonts.gstatic.com/s/f/regular.ttf) format('truetype'); }"
+    let second = GoogleFontsInstaller(directory: directory, fetch: stub(css: regularOnly, faces: ["regular.ttf": regular]))
+    let replaced = try await second.install("Fira Code")
+    XCTAssertEqual(replaced.files, ["regular.ttf"])
+    let files = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("fira-code").path)
+    XCTAssertEqual(files, ["regular.ttf"], "the old bold face is still on disk")
+    second.remove(replaced)
+  }
+
+  func test_a_family_whose_files_are_gone_does_not_register() {
+    let font = DownloadedFont(
+      family: "Gone Mono", slug: "gone-mono", postScriptName: "GoneMono-Regular",
+      boldPostScriptName: nil, files: ["regular.ttf"], isMonospaced: true
+    )
+    XCTAssertFalse(GoogleFontsInstaller(directory: temporaryDirectory()).register(font))
+  }
+
+  func test_removing_a_download_never_touches_a_bundled_bold_face() {
+    TerminalFonts.setDownloadedBoldFace(nil, for: "JetBrainsMono-Regular")
+    XCTAssertEqual(TerminalFonts.boldFace(for: "JetBrainsMono-Regular"), "JetBrainsMono-Bold")
   }
 
   func test_an_unknown_family_and_a_non_font_file_fail_clearly() async {

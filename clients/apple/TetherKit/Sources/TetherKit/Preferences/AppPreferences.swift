@@ -69,7 +69,10 @@ public final class AppPreferences {
   /// Downloads a family from a Google Fonts link or name and selects it.
   public func downloadFont(_ link: String) async throws {
     let font = try await fontInstaller.install(link)
-    fontInstaller.register(font)
+    guard fontInstaller.register(font) else {
+      fontInstaller.remove(font)
+      throw GoogleFontsError.unreadable
+    }
     downloadedFonts.removeAll { $0.slug == font.slug }
     downloadedFonts.append(font)
     terminalFontID = font.id
@@ -104,13 +107,23 @@ public final class AppPreferences {
     colorSchemePreference = ColorSchemePreference(
       rawValue: defaults.string(forKey: Key.colorScheme) ?? ""
     ) ?? .dark
-    terminalFontID = defaults.string(forKey: Key.terminalFont) ?? TerminalFont.menlo.id
-    let downloaded = defaults.data(forKey: Key.downloadedFonts)
-      .flatMap { try? JSONDecoder().decode([DownloadedFont].self, from: $0) } ?? []
-    downloadedFonts = downloaded
+    var fontID = defaults.string(forKey: Key.terminalFont) ?? TerminalFont.menlo.id
     TerminalFonts.registerBundledFonts()
+    // A family whose files are gone (or that Core Text refuses) is no longer offered, and
+    // a selection of it falls back to Menlo rather than silently drawing in something else.
+    let saved = defaults.data(forKey: Key.downloadedFonts)
+      .flatMap { try? JSONDecoder().decode([DownloadedFont].self, from: $0) } ?? []
     let installer = GoogleFontsInstaller()
-    for font in downloaded { installer.register(font) }
+    let usable = saved.filter { installer.register($0) }
+    downloadedFonts = usable
+    if usable.count != saved.count {
+      defaults.set(try? JSONEncoder().encode(usable), forKey: Key.downloadedFonts)
+    }
+    if fontID.hasPrefix("gf-"), !usable.contains(where: { $0.id == fontID }) {
+      fontID = TerminalFont.menlo.id
+      defaults.set(fontID, forKey: Key.terminalFont)
+    }
+    terminalFontID = fontID
     let size = defaults.double(forKey: Key.terminalFontSize)
     terminalFontSize = size > 0 ? size : 11
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id

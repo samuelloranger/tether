@@ -55,20 +55,23 @@ public enum TerminalFonts {
     "SymbolsNerdFontMono-Regular.ttf",
   ]
 
-  private static let boldLock = NSLock()
-  nonisolated(unsafe) private static var boldFaces: [String: String] = Dictionary(
+  private static let builtInBoldFaces: [String: String] = Dictionary(
     uniqueKeysWithValues: TerminalFont.builtIn.compactMap { font in font.boldPostScriptName.map { (font.postScriptName, $0) } }
   )
+  private static let boldLock = NSLock()
+  /// Kept apart from the built-in faces, so removing a download can't touch them.
+  nonisolated(unsafe) private static var downloadedBoldFaces: [String: String] = [:]
 
   /// A downloaded family's bold face, found by its regular face's PostScript name.
-  static func setBoldFace(_ bold: String?, for regular: String) {
+  static func setDownloadedBoldFace(_ bold: String?, for regular: String) {
     boldLock.lock(); defer { boldLock.unlock() }
-    boldFaces[regular] = bold
+    downloadedBoldFaces[regular] = bold
   }
 
   static func boldFace(for regular: String) -> String? {
+    if let builtIn = builtInBoldFaces[regular] { return builtIn }
     boldLock.lock(); defer { boldLock.unlock() }
-    return boldFaces[regular]
+    return downloadedBoldFaces[regular]
   }
 
   private static let registration: Void = {
