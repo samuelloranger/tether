@@ -13,6 +13,10 @@ final class TerminalEngine {
   /// Rebuilt only when a program repaints the palette (OSC 4/104).
   private var palette: [UInt32] = []
   private var needsRefresh = false
+  private var oscScanner = OSCScanner()
+  /// OSC 133 C / D positions. `line` counts from the first line ever written, so it survives
+  /// scrollback trimming; subtract `totalLinesTrimmed` for a buffer row.
+  private var commandMarks: [CommandMark] = []
   /// Lines above the live bottom the view is scrolled back; 0 = live.
   private var scrollOffset = 0
   /// `buffer.yDisp` at the live bottom. SwiftTerm's yDisp follows output only while there,
@@ -111,12 +115,35 @@ final class TerminalEngine {
     terminal.terminalLock.withLock(body)
   }
 
+  /// SwiftTerm keeps OSC 133 prompt marks but not where a command's output starts (C) and
+  /// ends (D). Output is fed up to each of those, so the cursor there is exactly the mark.
+  private func feedMarkingCommands(_ bytes: [UInt8]) {
+    var start = 0
+    for event in oscScanner.scan(bytes) {
+      guard case let .osc("133", body, end) = event,
+            let kind = body.first, kind == UInt8(ascii: "C") || kind == UInt8(ascii: "D")
+      else { continue }
+      terminal.feed(buffer: bytes[start..<end])
+      start = end
+      guard !terminal.isCurrentBufferAlternate else { continue }
+      let buffer = terminal.buffer
+      // While output arrives the view is live, so yDisp is the top of the screen.
+      let mark = CommandMark(
+        isEnd: kind == UInt8(ascii: "D"),
+        line: buffer.yDisp + buffer.y + buffer.totalLinesTrimmed, col: buffer.x
+      )
+      commandMarks.append(mark)
+      if commandMarks.count > 400 { commandMarks.removeFirst(commandMarks.count - 400) }
+    }
+    if start < bytes.count { terminal.feed(buffer: bytes[start...]) }
+  }
+
   private func feedLocked(_ bytes: Data) {
     let pinned = scrollOffset
     let oldLiveTop = liveTop
     let trimmedBefore = terminal.buffer.totalLinesTrimmed
     returnToLive()
-    terminal.feed(byteArray: [UInt8](bytes))
+    feedMarkingCommands([UInt8](bytes))
     liveTop = terminal.buffer.yDisp
     guard pinned > 0, !terminal.isCurrentBufferAlternate else {
       scrollOffset = 0
@@ -194,38 +221,33 @@ final class TerminalEngine {
     guard prompts.count >= 2 else { return nil }
     let cols = terminal.getDims().cols
     let group = prompts[prompts.count - 2]..<prompts[prompts.count - 1]
-    // Output starts after the command line (its prompt and input cells) and runs to the next
-    // prompt, so blank lines at either end are part of it.
-    let inputRows = group.filter { row in
-      guard let line = terminal.bufferLine(atRow: row) else { return false }
-      return (0..<min(cols, line.count)).contains { col in
-        switch terminal.semanticContent(at: Position(col: col, row: row)) {
-        case .prompt, .input: return true
-        default: return false
-        }
-      }
-    }
-    let start = (inputRows.last ?? group.lowerBound - 1) + 1
+    let (start, end) = outputBounds(in: group, cols: cols)
+    guard start.row <= end.row else { return nil }
     var rows: [(text: String, wrapped: Bool)] = []
     var sawOutput = false
-    for row in start..<group.upperBound {
+    for row in start.row...end.row {
       guard let line = terminal.bufferLine(atRow: row) else { continue }
-      let limit = min(cols, line.count)
-      let isOutput = (0..<limit).map { terminal.semanticContent(at: Position(col: $0, row: row)) == .output }
+      let from = row == start.row ? start.col : 0
+      let limit = min(cols, line.count, row == end.row ? end.col : cols)
+      let isOutput = (0..<limit).map { col in
+        col >= from && terminal.semanticContent(at: Position(col: col, row: row)) == .output
+      }
       // Up to the last cell the program wrote: its trailing spaces stay, padding doesn't.
       guard let last = isOutput.lastIndex(of: true) else {
+        // The rest of the command line, when C came before its newline, isn't output.
+        if row == start.row, start.col > 0 { continue }
         rows.append(("", line.isWrapped))
         continue
       }
       sawOutput = true
       var text = ""
-      for col in 0...last {
+      for col in from...last {
         let data = line[col]
         if data.width == 0 { continue }
         let character = data.getText()
         text += !isOutput[col] || character.isEmpty || character == "\u{0}" ? " " : character
       }
-      rows.append((text, line.isWrapped))
+      rows.append((text, line.isWrapped && row != start.row))
     }
     guard sawOutput else { return nil }
     var output = ""
@@ -235,6 +257,32 @@ final class TerminalEngine {
       output += row.text
     }
     return output
+  }
+
+  /// Where the output of the command in `group` starts and stops (end column exclusive).
+  /// From its OSC 133 C and D marks when the shell sent them; otherwise from the row after
+  /// the command line to the row before the next prompt.
+  private func outputBounds(in group: Range<Int>, cols: Int) -> (start: (row: Int, col: Int), end: (row: Int, col: Int)) {
+    let trimmed = terminal.buffer.totalLinesTrimmed
+    let marks = commandMarks.map { (isEnd: $0.isEnd, row: $0.line - trimmed, col: $0.col) }
+      .filter { group.contains($0.row) || $0.row == group.upperBound }
+    if let begin = marks.last(where: { !$0.isEnd && group.contains($0.row) }) {
+      let finish = marks.first { $0.isEnd && ($0.row, $0.col) >= (begin.row, begin.col) }
+      // D at the start of a line ends the output on the line above.
+      let end: (row: Int, col: Int) = finish.map { $0.col == 0 ? ($0.row - 1, cols) : ($0.row, $0.col) }
+        ?? (group.upperBound - 1, cols)
+      return ((begin.row, begin.col), end)
+    }
+    let inputRows = group.filter { row in
+      guard let line = terminal.bufferLine(atRow: row) else { return false }
+      return (0..<min(cols, line.count)).contains { col in
+        switch terminal.semanticContent(at: Position(col: col, row: row)) {
+        case .prompt, .input: return true
+        default: return false
+        }
+      }
+    }
+    return (((inputRows.last ?? group.lowerBound - 1) + 1, 0), (group.upperBound - 1, cols))
   }
 
   private func returnToLive() {
@@ -357,6 +405,12 @@ final class TerminalEngine {
     if style.contains(.crossedOut) { bits |= GridSnapshot.attrStrikethrough }
     return bits
   }
+}
+
+struct CommandMark: Equatable {
+  var isEnd: Bool
+  var line: Int
+  var col: Int
 }
 
 public enum PromptJump: Sendable {

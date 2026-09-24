@@ -120,6 +120,31 @@ final class TerminalSemanticTests: XCTestCase {
     XCTAssertEqual(rowText(engine.frame(), 0), "$ one")
   }
 
+  func test_output_is_bounded_by_the_commands_c_and_d_marks() {
+    let engine = TerminalEngine(cols: 30, rows: 8)
+    // C before the newline echo, output on the command's own row, and a prompt that
+    // starts with a newline of its own after D.
+    engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)ls\u{1B}]133;C\(st)\r\na\r\n\r\nb\r\n\u{1B}]133;D;0\(st)")
+    engine.feed("\r\n\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)")
+    XCTAssertEqual(engine.lastCommandOutput(), "a\n\nb")
+  }
+
+  func test_output_that_starts_on_the_command_row_is_kept() {
+    let engine = TerminalEngine(cols: 30, rows: 8)
+    engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)echo -n hi\u{1B}]133;C\(st)hi\u{1B}]133;D;0\(st)\r\n")
+    engine.feed("\u{1B}]133;A\(st)$ \u{1B}]133;B\(st)")
+    XCTAssertEqual(engine.lastCommandOutput(), "hi")
+  }
+
+  func test_the_scanner_skips_control_strings_and_survives_split_reads() {
+    var scanner = OSCScanner()
+    // An APC (kitty graphics) payload holding "ESC ] 4;…" is not a command.
+    XCTAssertEqual(scanner.scan(Array("\u{1B}_Gq=2;\u{1B}]4;1;red\u{07}\u{1B}\\".utf8)), [])
+    XCTAssertEqual(scanner.scan(Array("\u{1B}]13".utf8)), [])
+    XCTAssertEqual(scanner.scan(Array("3;D;0\u{1B}\\x".utf8)), [.osc(code: "133", body: Array("D;0".utf8), end: 7)])
+    XCTAssertEqual(scanner.scan(Array("ab\u{1B}c".utf8)), [.reset(end: 4)])
+  }
+
   func test_a_soft_wrapped_output_line_is_copied_as_one_line() {
     let engine = TerminalEngine(cols: 10, rows: 5)
     let long = String(repeating: "x", count: 25)
