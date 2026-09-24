@@ -378,6 +378,24 @@ final class GoogleFontsTests: XCTestCase {
     XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
   }
 
+  func test_an_unfinished_replace_blocks_a_retry_instead_of_losing_its_backup() async throws {
+    let directory = temporaryDirectory()
+    _ = try interrupted(in: directory, installed: record(["regular.ttf"], name: "FiraCode-New"), previous: record(["regular.ttf"], name: "FiraCode-Old"))
+    let regular = try bundled("JetBrainsMono-Regular")
+    let regularOnly = "@font-face { font-weight: 400; src: url(https://fonts.gstatic.com/s/f/regular.ttf) format('truetype'); }"
+    let installer = GoogleFontsInstaller(directory: directory, fetch: stub(css: regularOnly, faces: ["regular.ttf": regular]))
+    do {
+      _ = try await installer.install("Fira Code")
+      XCTFail("a second install ran over the unfinished one")
+    } catch {
+      XCTAssertEqual(error as? GoogleFontsError, .unfinished("Fira Code"))
+    }
+    XCTAssertTrue(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.contains("-old-") },
+      "the unfinished replace's backup is gone"
+    )
+  }
+
   func test_a_committed_install_leaves_no_journal() async throws {
     let regular = try bundled("JetBrainsMono-Regular")
     let directory = temporaryDirectory()

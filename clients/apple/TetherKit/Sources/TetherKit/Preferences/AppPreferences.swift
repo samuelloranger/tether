@@ -73,6 +73,11 @@ public final class AppPreferences {
     guard !downloading else { throw GoogleFontsError.busy }
     downloading = true
     defer { downloading = false }
+    // Settle a replace an earlier failure left journaled before starting another.
+    let settled = fontInstaller.recoverInterrupted(saved: downloadedFonts)
+    if settled != downloadedFonts {
+      downloadedFonts = settled.filter { fontInstaller.register($0) }
+    }
     let family = GoogleFonts.family(from: link)
     let previous = family.flatMap { name in downloadedFonts.first { $0.slug == GoogleFonts.slug(name) } }
     let installed: GoogleFontsInstaller.Installed

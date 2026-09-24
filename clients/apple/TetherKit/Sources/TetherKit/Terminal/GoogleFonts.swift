@@ -29,6 +29,7 @@ public enum GoogleFontsError: LocalizedError, Equatable {
   case offHost(String)
   case nameTaken(String)
   case busy
+  case unfinished(String)
 
   public var errorDescription: String? {
     switch self {
@@ -40,6 +41,7 @@ public enum GoogleFontsError: LocalizedError, Equatable {
     case let .offHost(host): return "The download was redirected to \(host); nothing was installed."
     case let .nameTaken(name): return "A font named “\(name)” is already installed, so this one would never be used."
     case .busy: return "Another font is still downloading."
+    case let .unfinished(family): return "An earlier install of “\(family)” didn’t finish; restart Tether to recover it."
     }
   }
 }
@@ -199,6 +201,10 @@ public struct GoogleFontsInstaller: @unchecked Sendable {
     }
 
     let slug = GoogleFonts.slug(family)
+    // A journal still here would be overwritten, and its backup lost at the next launch.
+    guard !files.fileExists(atPath: Self.journalURL(slug: slug, in: directory).path) else {
+      throw GoogleFontsError.unfinished(family)
+    }
     let folder = directory.appendingPathComponent(slug, isDirectory: true)
     let staging = directory.appendingPathComponent(".\(slug)-\(UUID().uuidString)", isDirectory: true)
     try files.createDirectory(at: staging, withIntermediateDirectories: true)
