@@ -12,7 +12,7 @@ enum TerminalPalette {
   ]
 
   static var blankCell: GridSnapshot.Cell {
-    GridSnapshot.Cell(codepoint: 0x20, foreground: foreground, background: background, attrs: 0)
+    GridSnapshot.Cell(codepoint: 0x20, foreground: foreground, background: background, attrs: GridSnapshot.attrDefaultBackground)
   }
 
   static func install(on terminal: Terminal) {

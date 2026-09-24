@@ -43,22 +43,19 @@ public struct TerminalImageLayer: Sendable, Equatable {
 
   public var bitmaps: [Key: Bitmap]
   public var placements: [Placement]
-  /// Cells in this color are see-through to images under the backgrounds, as in kitty.
-  public var defaultBackground: UInt32
 
   public static let empty = TerminalImageLayer(bitmaps: [:], placements: [])
 
   public var isEmpty: Bool { placements.isEmpty }
 
-  init(bitmaps: [Key: Bitmap], placements: [Placement], defaultBackground: UInt32 = TerminalPalette.background) {
+  init(bitmaps: [Key: Bitmap], placements: [Placement]) {
     self.bitmaps = bitmaps
     self.placements = placements
-    self.defaultBackground = defaultBackground
   }
 
   /// Virtual placements (Unicode placeholders) are skipped: the grid would have to draw
   /// them cell by cell.
-  init(_ snapshot: KittyGraphicsRenderSnapshot, owner: UInt64, defaultBackground: UInt32 = TerminalPalette.background) {
+  init(_ snapshot: KittyGraphicsRenderSnapshot, owner: UInt64) {
     var bitmaps: [Key: Bitmap] = [:]
     var placements: [Placement] = []
     for placement in snapshot.placements where !placement.isVirtual {
@@ -77,12 +74,11 @@ public struct TerminalImageLayer: Sendable, Equatable {
         depth: Depth(zIndex: placement.zIndex)
       ))
     }
-    self.init(bitmaps: bitmaps, placements: placements, defaultBackground: defaultBackground)
+    self.init(bitmaps: bitmaps, placements: placements)
   }
 
   /// Pixels are never compared: a key changes whenever an image's content does.
   public static func == (lhs: TerminalImageLayer, rhs: TerminalImageLayer) -> Bool {
     lhs.placements == rhs.placements && Set(lhs.bitmaps.keys) == Set(rhs.bitmaps.keys)
-      && lhs.defaultBackground == rhs.defaultBackground
   }
 }

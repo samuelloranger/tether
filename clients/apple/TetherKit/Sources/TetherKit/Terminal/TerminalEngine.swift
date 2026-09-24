@@ -367,7 +367,8 @@ final class TerminalEngine {
     guard !terminal.synchronizedOutputActive else { return }
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
-    let images = graphicsDirty
+    // An animation tick marks the screen for update without any output.
+    let images = graphicsDirty || terminal.getUpdateRange() != nil
       ? TerminalImageLayer(terminal.kittyGraphicsRenderSnapshot(), owner: imageOwner)
       : cached.images
     graphicsDirty = false
@@ -450,11 +451,14 @@ final class TerminalEngine {
 
   private static func cell(_ data: CharData, palette: [UInt32]) -> GridSnapshot.Cell {
     let attribute = data.attribute
+    var bits = attrs(attribute.style)
+    // Resolved colors can't tell "never painted" from "painted the default color".
+    if case .defaultColor = attribute.bg { bits |= GridSnapshot.attrDefaultBackground }
     return GridSnapshot.Cell(
       codepoint: codepoint(data),
       foreground: TerminalPalette.resolve(attribute.fg, isForeground: true, palette: palette),
       background: TerminalPalette.resolve(attribute.bg, isForeground: false, palette: palette),
-      attrs: attrs(attribute.style))
+      attrs: bits)
   }
 
   /// One codepoint per cell: combining marks NFC-compose into their base;

@@ -84,11 +84,16 @@ final class TerminalGridRenderer {
     // Kitty's order: images under the backgrounds, cell backgrounds, images under the text,
     // text, then everything else.
     drawImages(images, depth: .belowBackground, originY: originY, metrics: metrics, context: context)
-    // With an image under them, default-colored cells stay see-through, as in kitty; the
-    // fill above already painted that color everywhere else.
-    let skip = images.placements.contains { $0.depth == .belowBackground } ? images.defaultBackground : nil
+    // With an image under them, cells that were never given a background stay see-through,
+    // as in kitty; the fill above already painted the default color everywhere else. A cell
+    // a program painted, even in the default color, still covers the image.
+    let seeThrough = images.placements.contains { $0.depth == .belowBackground }
+    let backgroundCells = seeThrough ? cells.map(Self.clearingDefaultBackground) : cells
     for row in 0..<drawRows {
-      drawBackgrounds(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, context: context, skipping: skip)
+      drawBackgrounds(
+        row: row, cols: cols, cells: backgroundCells, originY: originY, metrics: metrics, context: context,
+        skipping: seeThrough ? Self.transparent : nil
+      )
     }
     drawImages(images, depth: .belowText, originY: originY, metrics: metrics, context: context)
     for row in 0..<drawRows {
@@ -103,6 +108,15 @@ final class TerminalGridRenderer {
   }
 
   // MARK: - Images
+
+  private static let transparent: UInt32 = 0
+
+  private static func clearingDefaultBackground(_ cell: GridSnapshot.Cell) -> GridSnapshot.Cell {
+    guard cell.attrs & GridSnapshot.attrDefaultBackground != 0 else { return cell }
+    var cleared = cell
+    cleared.background = transparent
+    return cleared
+  }
 
   private func drawImages(
     _ layer: TerminalImageLayer, depth: TerminalImageLayer.Depth, originY: CGFloat,

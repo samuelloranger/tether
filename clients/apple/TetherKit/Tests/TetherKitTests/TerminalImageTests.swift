@@ -102,13 +102,8 @@ final class TerminalImageTests: XCTestCase {
 
   private let black = GridSnapshot.Cell(codepoint: 0x20, foreground: 0xFFFF_FFFF, background: 0xFF00_0000, attrs: 0)
 
-  private func layer(_ rgba: [UInt8], _ placement: TerminalImageLayer.Placement, background: UInt32 = 0xFF00_0000)
-    -> TerminalImageLayer
-  {
-    TerminalImageLayer(
-      bitmaps: [placement.key: .init(width: 2, height: 2, rgba: rgba)], placements: [placement],
-      defaultBackground: background
-    )
+  private func layer(_ rgba: [UInt8], _ placement: TerminalImageLayer.Placement) -> TerminalImageLayer {
+    TerminalImageLayer(bitmaps: [placement.key: .init(width: 2, height: 2, rgba: rgba)], placements: [placement])
   }
 
   private func header(cols: Int, rows: Int, altScreen: Bool = false, generation: UInt64 = 1) -> GridSnapshot.Header {
@@ -221,18 +216,55 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertLessThan(pixel(cleared, x: 5, y: 5).r, 60, "the deleted image is still drawn")
   }
 
-  func test_an_image_under_the_backgrounds_shows_through_default_cells_only() throws {
+  func test_an_image_under_the_backgrounds_shows_through_unpainted_cells_only() throws {
     var cells = [GridSnapshot.Cell](repeating: black, count: 4 * 2)
-    cells[1].background = 0xFF00_FF00
-    let under = layer(solidRed, placement(cols: 2, rows: 1, depth: .belowBackground))
+    cells[0].attrs = GridSnapshot.attrDefaultBackground      // never painted
+    cells[1].background = 0xFF00_FF00                        // painted green
+    // cells[2]: painted by a program in exactly the default color: still covers the image.
+    let under = layer(solidRed, placement(cols: 3, rows: 1, width: 2, height: 2, depth: .belowBackground))
     let image = try XCTUnwrap(TerminalGridRenderer().render(
       header: header(cols: 4, rows: 2), cells: cells, images: under, metrics: metrics(cols: 4, rows: 2)
     ))
-    // Column 0 has the default background: the image shows. Column 1 is painted green over it.
-    XCTAssertGreaterThan(pixel(image, x: 5, y: 5).r, 200)
-    let covered = pixel(image, x: 25, y: 5)
-    XCTAssertGreaterThan(covered.g, 200)
-    XCTAssertLessThan(covered.r, 60)
+    XCTAssertGreaterThan(pixel(image, x: 5, y: 5).r, 200, "an unpainted cell hides the image")
+    let green = pixel(image, x: 25, y: 5)
+    XCTAssertGreaterThan(green.g, 200)
+    XCTAssertLessThan(green.r, 60)
+    XCTAssertLessThan(pixel(image, x: 35, y: 5).r, 60, "a cell painted in the default color went see-through")
+  }
+
+  func test_the_engine_marks_which_cells_keep_the_default_background() {
+    let engine = TerminalEngine(cols: 10, rows: 1)
+    engine.feed("a\u{1B}[41mb\u{1B}[49mc")
+    let cells = engine.frame().cells
+    XCTAssertNotEqual(cells[0].attrs & GridSnapshot.attrDefaultBackground, 0)
+    XCTAssertEqual(cells[1].attrs & GridSnapshot.attrDefaultBackground, 0)
+    XCTAssertNotEqual(cells[2].attrs & GridSnapshot.attrDefaultBackground, 0)
+  }
+
+  func test_an_animation_advances_without_any_output() async throws {
+    let engine = TerminalEngine(cols: 20, rows: 5)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed(kitty("a=T,f=32,s=2,v=2,i=9,q=2", solidRed))
+    engine.feed(kitty("a=f,i=9,f=32,s=2,v=2,z=20,q=2", solidBlue))
+    engine.feed(kitty("a=a,i=9,s=3,z=20,q=2"))
+    let first = try XCTUnwrap(engine.frame().images.placements.first?.key)
+    var advanced = false
+    for _ in 0..<40 where !advanced {
+      try await Task.sleep(for: .milliseconds(25))
+      advanced = engine.frame().images.placements.first?.key != first
+    }
+    XCTAssertTrue(advanced, "the animated image never changed")
+  }
+
+  func test_the_pipeline_watches_the_frame_only_while_images_are_shown() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 20, rows: 5)
+    await pipeline.feedForTest(Data(kitty("a=T,f=32,s=2,v=2,q=2", solidRed).utf8))
+    var watching = await pipeline.isWatchingImagesForTest
+    XCTAssertTrue(watching)
+    await pipeline.feedForTest(Data(kitty("a=d,d=A,q=2").utf8))
+    watching = await pipeline.isWatchingImagesForTest
+    XCTAssertFalse(watching)
   }
 
   func test_kitty_depths_follow_swiftterms_thresholds() {

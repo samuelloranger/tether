@@ -6,6 +6,8 @@ public enum GridSnapshot {
   public static let attrInverse: UInt32 = 1 << 3
   public static let attrDim: UInt32 = 1 << 4
   public static let attrStrikethrough: UInt32 = 1 << 5
+  /// The cell's background is the terminal default, not a color a program set.
+  public static let attrDefaultBackground: UInt32 = 1 << 6
 
   public struct Header: Equatable, Sendable {
     public var cols: UInt16

@@ -124,6 +124,26 @@ actor TerminalPipeline {
 
   // MARK: - Local emulator control
 
+  /// SwiftTerm advances kitty animations on its own timer and tells no one; while images
+  /// are on screen the frame is re-read at 20 Hz. Unchanged, a read costs a lock and a
+  /// few comparisons, and publishes nothing.
+  private var imageWatch: Task<Void, Never>?
+  private weak var watchedEmulator: TerminalEngine?
+
+  private func watchImages(_ emulator: TerminalEngine?) {
+    guard emulator !== watchedEmulator || (emulator != nil && imageWatch == nil) else { return }
+    imageWatch?.cancel()
+    imageWatch = nil
+    watchedEmulator = emulator
+    guard emulator != nil else { return }
+    imageWatch = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(50))
+        await self?.publishSnapshot()
+      }
+    }
+  }
+
   /// Scrolls the local VT viewport through scrollback (not PTY PgUp/PgDn).
   /// Positive `lines` moves into history; negative toward the live bottom.
   func scrollViewport(lines: Int32) {
@@ -260,6 +280,8 @@ actor TerminalPipeline {
 
   /// Test seam: feed bytes through the normal output path.
   func feedForTest(_ bytes: Data) { applyOutput(bytes) }
+
+  var isWatchingImagesForTest: Bool { imageWatch != nil }
   #endif
 
   // MARK: - Publishing
@@ -269,6 +291,7 @@ actor TerminalPipeline {
   private func publishSnapshot() {
     guard let emulator else { return }
     let frame = emulator.frame()
+    watchImages(frame.images.isEmpty ? nil : emulator)
     // Mouse mode can flip without a viewport change (e.g. vim entering or
     // leaving mouse tracking). Keep the surface's input path in sync either way.
     syncMouseModes(from: emulator)
