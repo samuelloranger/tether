@@ -70,7 +70,7 @@ public struct TerminalTheme: Equatable, Identifiable, Sendable {
     return entries.compactMap(\.theme)
   }
 
-  /// The generated JSON: hex RGB strings (`scripts/generate-terminal-themes.py`).
+  /// The generated JSON: hex RGB strings (`scripts/generate-terminal-themes.sh`).
   private struct Entry: Decodable {
     let id: String
     let name: String
