@@ -54,7 +54,7 @@ public struct TerminalAccessoryBar: View {
         ctrlButton
         accessoryButton("Tab") { send(base: "\t") }
         accessoryButton("Esc") { onKey("\u{1B}") }
-        accessoryButton("/") { onKey("/") }
+        slashKey
         DpadView(size: CGSize(width: Self.keyWidth, height: Self.keySize), onArrow: onArrow)
         pasteButton
         accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
@@ -129,6 +129,23 @@ public struct TerminalAccessoryBar: View {
     .buttonStyle(TerminalKeyStyle(armed: model.ctrlArmed))
     .accessibilityLabel("Control modifier")
     .accessibilityValue(model.ctrlArmed ? "Armed" : "Off")
+  }
+
+  /// Hold for `\`, like the system keyboard's long-press alternates — its own
+  /// backslash sits two layers deep.
+  private var slashKey: some View {
+    Menu {
+      Button("\\") { onKey("\\") }
+    } label: {
+      Text("/")
+    } primaryAction: {
+      onKey("/")
+    }
+    .menuStyle(.button)
+    .buttonStyle(TerminalKeyStyle())
+    .menuIndicator(.hidden)
+    .accessibilityLabel("Slash")
+    .accessibilityHint("Hold for backslash")
   }
 
   private func accessoryButton(_ title: String, systemImage: String? = nil, action: @escaping () -> Void) -> some View {
