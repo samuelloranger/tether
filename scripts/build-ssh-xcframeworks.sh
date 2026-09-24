@@ -114,7 +114,12 @@ done
 log "Installing into $OUT"
 # Everything is staged and backed up beside its own destination, so every swap is a rename
 # on one volume, and rolled back on any failure: a half-replaced set would pair the new
-# libssh2 with an old OpenSSL or header.
+# libssh2 with an old OpenSSL or header. A lock keeps two runs from sharing those folders.
+lock="$OUT/.tether-install-lock"
+if ! mkdir "$lock" 2>/dev/null; then
+  echo "another install holds $lock; if none is running, remove it and retry" >&2
+  exit 1
+fi
 dirs=()
 swapped=()
 replaced=0
@@ -122,18 +127,29 @@ installed=false
 rollback() {
   # Best effort: one failed restore must not stop the others.
   set +e
-  # `${a[@]+…}`: bash 3.2 (macOS) treats an empty array as unset under `set -u`.
-  for dest in ${swapped[@]+"${swapped[@]}"}; do
-    backup_dir="$(dirname "$dest")/.tether-install-backup"
+  failed=""
+  # Newest first, so the set is never a mix of new and old for longer than it must be.
+  i=$((replaced - 1))
+  while [[ $i -ge 0 ]]; do
+    dest="${swapped[$i]}"
+    backup="$(dirname "$dest")/.tether-install-backup/$(basename "$dest")"
+    i=$((i - 1))
     rm -rf "$dest"
-    if [[ -e "$backup_dir/$(basename "$dest")" ]]; then mv "$backup_dir/$(basename "$dest")" "$dest"; fi
+    # A destination that is still there would swallow the original as a subdirectory.
+    if [[ -e "$dest" ]]; then failed="$failed $dest"; continue; fi
+    if [[ -e "$backup" ]] && ! mv "$backup" "$dest"; then failed="$failed $dest"; fi
   done
   kept=""
   for dir in ${dirs[@]+"${dirs[@]}"}; do
-    if [[ "$dir" == */.tether-install-backup ]] && ! rmdir "$dir" 2>/dev/null; then kept="$kept $dir"; fi
-    [[ "$dir" == */.tether-install-stage ]] && rm -rf "$dir"
+    case "$dir" in
+      */.tether-install-backup) rmdir "$dir" 2>/dev/null || kept="$kept $dir" ;;
+      *) rm -rf "$dir" ;;
+    esac
   done
-  if [[ -n "$kept" ]]; then
+  rmdir "$lock" 2>/dev/null
+  if [[ -n "$failed" ]]; then
+    echo "install failed; could not restore:$failed (originals are in:$kept)" >&2
+  elif [[ -n "$kept" ]]; then
     echo "install failed; originals that could not be restored are in:$kept" >&2
   elif [[ $replaced -eq 0 ]]; then
     echo "install failed; nothing was replaced" >&2
@@ -149,9 +165,12 @@ prepare() { # <destination dir>: fresh stage and backup dirs beside it
     echo "$1/.tether-install-backup holds files from a failed install; restore or remove them first" >&2
     exit 1
   fi
-  rm -rf "$1/.tether-install-stage" "$1/.tether-install-backup"
-  mkdir "$1/.tether-install-stage" "$1/.tether-install-backup"
-  dirs+=("$1/.tether-install-stage" "$1/.tether-install-backup")
+  for dir in "$1/.tether-install-stage" "$1/.tether-install-backup"; do
+    rm -rf "$dir"
+    # Recorded before it exists, so a failure right after still cleans it up.
+    dirs+=("$dir")
+    mkdir "$dir"
+  done
 }
 prepare "$OUT"
 [[ "$HEADER_OUT" -ef "$OUT" ]] || prepare "$HEADER_OUT"
@@ -175,6 +194,7 @@ done
 installed=true
 trap - EXIT
 for dir in "${dirs[@]}"; do rm -rf "$dir"; done
+rmdir "$lock"
 
 log "Done"
 echo "libssh2  $LIBSSH2_SHA"
