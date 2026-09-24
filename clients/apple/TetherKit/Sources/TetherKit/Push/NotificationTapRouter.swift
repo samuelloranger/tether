@@ -5,8 +5,17 @@ import UserNotifications
 /// about the open host to its in-app banner.
 @MainActor
 public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDelegate {
-  /// Invoked with a `tether://…` URL when a notification is tapped.
-  public var onOpenURL: ((URL) -> Void)?
+  /// Invoked with a `tether://…` URL when a notification is tapped. A tap that launches
+  /// the app arrives before the UI sets this, so it is held until then.
+  public var onOpenURL: ((URL) -> Void)? {
+    didSet {
+      guard let onOpenURL, let pending = pendingURL else { return }
+      pendingURL = nil
+      onOpenURL(pending)
+    }
+  }
+  private var pendingURL: URL?
+  public var hasPendingURL: Bool { pendingURL != nil }
 
   /// Set while a terminal is open: true when that terminal shows this push in-app.
   public var coversForegroundPush: (@MainActor (SessionDeepLink) async -> Bool)?
@@ -43,7 +52,11 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
     guard let link = Self.link(from: response.notification.request.content.userInfo),
           let url = URL(string: link)
     else { return }
-    onOpenURL?(url)
+    open(url)
+  }
+
+  func open(_ url: URL) {
+    if let onOpenURL { onOpenURL(url) } else { pendingURL = url }
   }
 
   /// Only `tether://` URLs are accepted — the payload is server-influenced.

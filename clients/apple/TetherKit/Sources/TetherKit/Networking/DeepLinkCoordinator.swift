@@ -66,3 +66,27 @@ public enum DeepLinkCoordinator {
     SessionDeepLink.parse(url)
   }
 }
+
+public enum DeepLinkRoute: Equatable, Sendable {
+  /// The open terminal is on the link's host: switch sessions in place.
+  case switchSession(String)
+  case open(profileID: String, session: String)
+  case none
+}
+
+extension SessionDeepLink {
+  /// The link's host is the label the hook stamped (a hostname by default), not a saved
+  /// machine's name, so it is matched against both: the open host's reported labels first,
+  /// then a saved machine's name, its address, or its address's first DNS label.
+  public func route(
+    profiles: [SSHHostProfile], currentProfileID: String?, currentHostLabels: Set<String>
+  ) -> DeepLinkRoute {
+    if currentProfileID != nil, currentHostLabels.contains(identityName) { return .switchSession(sessionId) }
+    let label = identityName.lowercased()
+    let match = profiles.first { $0.name.lowercased() == label }
+      ?? profiles.first { $0.host.lowercased() == label }
+      ?? profiles.first { $0.host.lowercased().split(separator: ".").first.map(String.init) == label }
+    guard let match else { return .none }
+    return match.id == currentProfileID ? .switchSession(sessionId) : .open(profileID: match.id, session: sessionId)
+  }
+}
