@@ -1,4 +1,5 @@
 import CoreText
+import UIKit
 import XCTest
 @testable import TetherKit
 
@@ -235,6 +236,106 @@ final class GoogleFontsTests: XCTestCase {
     XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["fira-code"])
     XCTAssertTrue(first.register(original.font), "the restored files no longer register")
     first.remove(original.font)
+  }
+
+  /// Fails the moves `failing` picks, like a full disk or a sandbox refusal would.
+  private final class FailingFileManager: FileManager, @unchecked Sendable {
+    var failing: (URL, URL) -> Bool = { _, _ in false }
+    override func moveItem(at srcURL: URL, to dstURL: URL) throws {
+      if failing(srcURL, dstURL) { throw CocoaError(.fileWriteUnknown) }
+      try super.moveItem(at: srcURL, to: dstURL)
+    }
+  }
+
+  private func installTwice(files: FailingFileManager, directory: URL) async throws
+    -> (first: GoogleFontsInstaller.Installed, second: GoogleFontsInstaller)
+  {
+    let regular = try bundled("JetBrainsMono-Regular")
+    let bold = try bundled("JetBrainsMono-Bold")
+    let first = GoogleFontsInstaller(directory: directory, files: files, fetch: stub(css: css, faces: ["regular.ttf": regular, "bold.ttf": bold]))
+    let installed = try await first.install("Fira Code")
+    XCTAssertTrue(first.register(installed.font))
+    first.commit(installed)
+    let regularOnly = "@font-face { font-weight: 400; src: url(https://fonts.gstatic.com/s/f/regular.ttf) format('truetype'); }"
+    return (installed, GoogleFontsInstaller(directory: directory, files: files, fetch: stub(css: regularOnly, faces: ["regular.ttf": regular])))
+  }
+
+  func test_a_failed_move_into_place_puts_the_previous_family_back_and_serves_it() async throws {
+    let files = FailingFileManager()
+    let directory = temporaryDirectory()
+    let (original, second) = try await installTwice(files: files, directory: directory)
+    let folder = directory.appendingPathComponent("fira-code")
+    files.failing = { source, destination in source.lastPathComponent.hasPrefix(".fira-code-") && destination == folder && !source.lastPathComponent.contains("-old-") }
+    do {
+      _ = try await second.install("Fira Code")
+      XCTFail("the failing move was not reported")
+    } catch {}
+    XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: folder.path)), ["regular.ttf", "bold.ttf"])
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["fira-code"])
+    XCTAssertNotNil(UIFont(name: original.font.postScriptName, size: 12), "the restored family isn't served")
+    second.remove(original.font)
+  }
+
+  func test_a_failed_move_aside_keeps_the_previous_family_served() async throws {
+    let files = FailingFileManager()
+    let directory = temporaryDirectory()
+    let (original, second) = try await installTwice(files: files, directory: directory)
+    files.failing = { _, destination in destination.lastPathComponent.contains("-old-") }
+    do {
+      _ = try await second.install("Fira Code")
+      XCTFail("the failing move was not reported")
+    } catch {}
+    XCTAssertNotNil(UIFont(name: original.font.postScriptName, size: 12), "the untouched family is no longer served")
+    second.remove(original.font)
+  }
+
+  func test_a_rollback_that_cannot_restore_says_so() async throws {
+    let files = FailingFileManager()
+    let directory = temporaryDirectory()
+    let (_, second) = try await installTwice(files: files, directory: directory)
+    let replaced = try await second.install("Fira Code")
+    files.failing = { source, _ in source.lastPathComponent.contains("-old-") }
+    XCTAssertFalse(second.rollback(replaced))
+    XCTAssertTrue(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.contains("-old-") },
+      "the backup that couldn't move back was deleted"
+    )
+  }
+
+  func test_launch_recovery_restores_an_interrupted_replace_and_clears_staging() throws {
+    let directory = temporaryDirectory()
+    let folder = directory.appendingPathComponent("fira-code")
+    let backup = directory.appendingPathComponent(".fira-code-old-\(UUID().uuidString)")
+    let staging = directory.appendingPathComponent(".vt323-\(UUID().uuidString)")
+    for dir in [folder, backup, staging] { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+    // The crash left the new folder with only a regular face; the saved record names both.
+    FileManager.default.createFile(atPath: folder.appendingPathComponent("regular.ttf").path, contents: Data("new".utf8))
+    for file in ["regular.ttf", "bold.ttf"] {
+      FileManager.default.createFile(atPath: backup.appendingPathComponent(file).path, contents: Data("old".utf8))
+    }
+    let saved = DownloadedFont(
+      family: "Fira Code", slug: "fira-code", postScriptName: "FiraCode-Regular",
+      boldPostScriptName: "FiraCode-Bold", files: ["regular.ttf", "bold.ttf"], isMonospaced: true
+    )
+    GoogleFontsInstaller(directory: directory).recoverInterrupted(saved: [saved])
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["fira-code"])
+    XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: folder.path)), ["regular.ttf", "bold.ttf"])
+    XCTAssertEqual(FileManager.default.contents(atPath: folder.appendingPathComponent("regular.ttf").path), Data("old".utf8))
+  }
+
+  func test_launch_recovery_drops_the_backup_of_a_completed_replace() throws {
+    let directory = temporaryDirectory()
+    let folder = directory.appendingPathComponent("fira-code")
+    let backup = directory.appendingPathComponent(".fira-code-old-\(UUID().uuidString)")
+    for dir in [folder, backup] { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+    FileManager.default.createFile(atPath: folder.appendingPathComponent("regular.ttf").path, contents: Data("new".utf8))
+    let saved = DownloadedFont(
+      family: "Fira Code", slug: "fira-code", postScriptName: "FiraCode-Regular",
+      boldPostScriptName: nil, files: ["regular.ttf"], isMonospaced: true
+    )
+    GoogleFontsInstaller(directory: directory).recoverInterrupted(saved: [saved])
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["fira-code"])
+    XCTAssertEqual(FileManager.default.contents(atPath: folder.appendingPathComponent("regular.ttf").path), Data("new".utf8))
   }
 
   func test_a_family_whose_files_are_gone_does_not_register() {

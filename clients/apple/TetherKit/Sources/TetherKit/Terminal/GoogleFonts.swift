@@ -131,17 +131,22 @@ public enum GoogleFonts {
 }
 
 /// Downloads a family's regular and bold faces, stores them, and registers them.
-public struct GoogleFontsInstaller: Sendable {
+/// `@unchecked`: FileManager isn't marked Sendable, but its file operations are safe to call
+/// from any thread; tests hand in one that fails on purpose.
+public struct GoogleFontsInstaller: @unchecked Sendable {
   public typealias Fetch = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
   let directory: URL
   let fetch: Fetch
+  let files: FileManager
 
   public init(
     directory: URL = GoogleFontsInstaller.defaultDirectory,
+    files: FileManager = .default,
     fetch: @escaping Fetch = { try await URLSession.shared.data(for: $0) }
   ) {
     self.directory = directory
+    self.files = files
     self.fetch = fetch
   }
 
@@ -178,7 +183,7 @@ public struct GoogleFontsInstaller: Sendable {
     let slug = family.lowercased().split(separator: " ").joined(separator: "-")
     let folder = directory.appendingPathComponent(slug, isDirectory: true)
     let staging = directory.appendingPathComponent(".\(slug)-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    try files.createDirectory(at: staging, withIntermediateDirectories: true)
     do {
       let regular = try await save(picked.regular, as: "regular", in: staging)
       var bold: SavedFace?
@@ -189,17 +194,23 @@ public struct GoogleFontsInstaller: Sendable {
         if Self.isInstalled(postScriptName: name, outside: folder) { throw GoogleFontsError.nameTaken(name) }
       }
       var backup: URL?
-      if FileManager.default.fileExists(atPath: folder.path) {
+      if files.fileExists(atPath: folder.path) {
         unregisterAll(in: folder)
         let aside = directory.appendingPathComponent(".\(slug)-old-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.moveItem(at: folder, to: aside)
+        do {
+          try files.moveItem(at: folder, to: aside)
+        } catch {
+          // The previous files never moved: serve them again.
+          registerAll(in: folder)
+          throw error
+        }
         backup = aside
       }
       do {
-        try FileManager.default.moveItem(at: staging, to: folder)
+        try files.moveItem(at: staging, to: folder)
       } catch {
         // Put the previous files back rather than leave the family with neither.
-        if let backup { try? FileManager.default.moveItem(at: backup, to: folder) }
+        if let backup, (try? files.moveItem(at: backup, to: folder)) != nil { registerAll(in: folder) }
         throw error
       }
       let font = DownloadedFont(
@@ -210,23 +221,52 @@ public struct GoogleFontsInstaller: Sendable {
       )
       return Installed(font: font, backup: backup)
     } catch {
-      try? FileManager.default.removeItem(at: staging)
+      try? files.removeItem(at: staging)
       throw error
     }
   }
 
   /// The new files registered: the replaced ones can go.
   public func commit(_ installed: Installed) {
-    if let backup = installed.backup { try? FileManager.default.removeItem(at: backup) }
+    if let backup = installed.backup { try? files.removeItem(at: backup) }
   }
 
-  /// The new files didn't register: remove them and put the replaced ones back.
-  public func rollback(_ installed: Installed) {
+  /// The new files didn't register: remove them and put the replaced ones back. False when
+  /// the previous files couldn't be restored; a backup that couldn't move stays on disk for
+  /// `recoverInterrupted` at the next launch.
+  @discardableResult
+  public func rollback(_ installed: Installed) -> Bool {
     let folder = directory.appendingPathComponent(installed.font.slug, isDirectory: true)
     unregisterAll(in: folder)
-    try? FileManager.default.removeItem(at: folder)
-    if let backup = installed.backup { try? FileManager.default.moveItem(at: backup, to: folder) }
     TerminalFonts.setDownloadedBoldFace(nil, for: installed.font.postScriptName)
+    guard (try? files.removeItem(at: folder)) != nil || !files.fileExists(atPath: folder.path) else { return false }
+    guard let backup = installed.backup else { return true }
+    return (try? files.moveItem(at: backup, to: folder)) != nil
+  }
+
+  /// Finishes installs a crash interrupted, before saved fonts are registered: staging
+  /// folders go, and a kept-aside backup is put back when its family's folder no longer
+  /// holds the files `saved` names, or dropped when it does.
+  public func recoverInterrupted(saved: [DownloadedFont]) {
+    let entries = (try? files.contentsOfDirectory(atPath: directory.path)) ?? []
+    for entry in entries where entry.hasPrefix(".") {
+      let url = directory.appendingPathComponent(entry, isDirectory: true)
+      guard let range = entry.range(of: "-old-") else {
+        try? files.removeItem(at: url)
+        continue
+      }
+      let slug = String(entry[entry.index(after: entry.startIndex)..<range.lowerBound])
+      let folder = directory.appendingPathComponent(slug, isDirectory: true)
+      let complete = saved.first { $0.slug == slug }.map { font in
+        font.files.allSatisfy { files.fileExists(atPath: folder.appendingPathComponent($0).path) }
+      } ?? true
+      if complete {
+        try? files.removeItem(at: url)
+      } else {
+        try? files.removeItem(at: folder)
+        try? files.moveItem(at: url, to: folder)
+      }
+    }
   }
 
   /// Registers a stored family's files, e.g. at launch. False when a file is gone or Core
@@ -237,7 +277,7 @@ public struct GoogleFontsInstaller: Sendable {
     var ok = true
     for file in font.files {
       let url = folder.appendingPathComponent(file)
-      guard FileManager.default.fileExists(atPath: url.path) else { ok = false; continue }
+      guard files.fileExists(atPath: url.path) else { ok = false; continue }
       var error: Unmanaged<CFError>?
       if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
         let code = error.map { CFErrorGetCode($0.takeRetainedValue()) } ?? 0
@@ -255,12 +295,17 @@ public struct GoogleFontsInstaller: Sendable {
   public func remove(_ font: DownloadedFont) {
     let folder = directory.appendingPathComponent(font.slug, isDirectory: true)
     unregisterAll(in: folder)
-    try? FileManager.default.removeItem(at: folder)
+    try? files.removeItem(at: folder)
     TerminalFonts.setDownloadedBoldFace(nil, for: font.postScriptName)
   }
 
+  private func registerAll(in folder: URL) {
+    let urls = (try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+    for url in urls { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
+  }
+
   private func unregisterAll(in folder: URL) {
-    let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+    let files = (try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
     for url in files {
       CTFontManagerUnregisterFontsForURL(url as CFURL, .process, nil)
     }

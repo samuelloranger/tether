@@ -76,9 +76,14 @@ public final class AppPreferences {
     let installed = try await fontInstaller.install(link)
     let font = installed.font
     guard fontInstaller.register(font) else {
-      fontInstaller.rollback(installed)
-      // The replaced files are back; so is their registration.
-      if let previous = downloadedFonts.first(where: { $0.slug == font.slug }) { fontInstaller.register(previous) }
+      let restored = fontInstaller.rollback(installed)
+      // The replaced files are back; so is their registration. If not, the previous
+      // font is gone too, and is no longer offered.
+      if let previous = downloadedFonts.first(where: { $0.slug == font.slug }),
+         !restored || !fontInstaller.register(previous) {
+        downloadedFonts.removeAll { $0.slug == font.slug }
+        if terminalFontID == previous.id { terminalFontID = TerminalFont.menlo.id }
+      }
       throw GoogleFontsError.unreadable
     }
     fontInstaller.commit(installed)
@@ -123,6 +128,7 @@ public final class AppPreferences {
     let saved = defaults.data(forKey: Key.downloadedFonts)
       .flatMap { try? JSONDecoder().decode([DownloadedFont].self, from: $0) } ?? []
     let installer = GoogleFontsInstaller()
+    installer.recoverInterrupted(saved: saved)
     let usable = saved.filter { installer.register($0) }
     downloadedFonts = usable
     if usable.count != saved.count {
