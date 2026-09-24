@@ -29,9 +29,14 @@ Wire it into agent hooks (Claude Code, Codex, Cursor) with
       --title "proj · needs you" --body "Allow Bash?" \
       --link "tether://session/work?host=devbox"
 
-    # waiting/done pushes carry category tether.agent.waiting / tether.agent.done,
-    # which gives them Approve / Deny / Reply on the phone (answered with
-    # `zmx send` into the linked session). `notify` takes --category for the same.
+    # waiting/done pushes with a tether://session link carry category
+    # tether.agent.waiting / tether.agent.done plus the agent's state and since,
+    # which gives them Approve / Deny / Reply on the phone.
+
+    # the app runs this over SSH to answer an action; it types the input with
+    # `zmx send` only while the agent is still in that state (exit 3 otherwise):
+    tether-notify answer --session work --state waiting --since 1700000000 \
+      --input DQ== [--submit]
 
     # the app runs this to badge sessions; prunes dead agents and gone sessions:
     tether-notify status

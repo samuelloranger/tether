@@ -23,6 +23,10 @@ type PushContent struct {
 	Link  string `json:"link,omitempty"`
 	// Category picks the phone's notification actions (Approve / Deny / Reply).
 	Category string `json:"category,omitempty"`
+	// The agent state the push is about, echoed back by `answer` so a stale action
+	// cannot type into a newer prompt.
+	State string `json:"state,omitempty"`
+	Since int64  `json:"since,omitempty"`
 }
 
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {

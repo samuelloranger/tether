@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -62,13 +63,18 @@ func runState(args []string, d stateDeps) error {
 		in.AgentPid = agentPid(d.run, d.ppid)
 	}
 	now := d.now().Unix()
+	var stored *SessionState
 	err := withSessionsLock(func() error {
 		prev, _ := readSession(*session)
 		next := nextState(prev, in, now)
 		if next == nil {
 			return removeSession(*session)
 		}
-		return writeSession(next)
+		if err := writeSession(next); err != nil {
+			return err
+		}
+		stored = next
+		return nil
 	})
 	if err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: state for %s not saved: %v\n", *session, err)
@@ -81,11 +87,21 @@ func runState(args []string, d stateDeps) error {
 	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
 		return nil
 	}
-	content := PushContent{Title: *title, Body: *body, Link: *link, Category: agentCategory(*state)}
+	content := PushContent{Title: *title, Body: *body, Link: *link}
+	// Actions need a session link to answer and a saved state to check against.
+	if stored != nil && actionableLink(*link) {
+		content.Category = agentCategory(*state)
+		content.State = stored.State
+		content.Since = stored.Since
+	}
 	if err := d.push(content, *collapse); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
 	}
 	return nil
+}
+
+func actionableLink(link string) bool {
+	return strings.HasPrefix(link, "tether://session/") && strings.Contains(link, "?host=")
 }
 
 // agentCategory names the iOS notification category for an agent push; the app

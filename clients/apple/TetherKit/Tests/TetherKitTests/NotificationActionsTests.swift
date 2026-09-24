@@ -4,7 +4,12 @@ import XCTest
 
 @MainActor
 final class NotificationActionsTests: XCTestCase {
-  private let link: [AnyHashable: Any] = ["link": "tether://session/work?host=devbox"]
+  private let userInfo: [AnyHashable: Any] = [
+    "link": "tether://session/work?host=devbox",
+    "agentState": "waiting",
+    "agentSince": NSNumber(value: Int64(1_700_000_000)),
+  ]
+  private let expect = AgentExpectation(state: "waiting", since: 1_700_000_000)
 
   func test_waiting_offers_approve_deny_and_reply_and_done_offers_reply() {
     let categories = Dictionary(uniqueKeysWithValues: NotificationActions.categories().map { ($0.identifier, $0) })
@@ -28,43 +33,65 @@ final class NotificationActionsTests: XCTestCase {
     XCTAssertEqual(NotificationActions.input(actionIdentifier: NotificationActions.denyAction, text: nil), .keys("\u{1b}"))
   }
 
-  func test_a_reply_is_one_trimmed_line_and_an_empty_one_sends_nothing() {
+  func test_a_reply_is_one_trimmed_line() {
     XCTAssertEqual(
       NotificationActions.input(actionIdentifier: NotificationActions.replyAction, text: "  run the tests\nthen push  "),
       .line("run the tests then push")
     )
-    XCTAssertNil(NotificationActions.input(actionIdentifier: NotificationActions.replyAction, text: "   "))
-    XCTAssertNil(NotificationActions.input(actionIdentifier: NotificationActions.replyAction, text: nil))
   }
 
-  func test_an_unknown_action_or_a_push_without_a_tether_link_makes_no_request() {
-    XCTAssertNil(NotificationActions.request(actionIdentifier: "other", text: nil, userInfo: link))
-    XCTAssertNil(NotificationActions.request(
-      actionIdentifier: NotificationActions.approveAction, text: nil, userInfo: ["link": "https://example.com"]
-    ))
+  func test_a_complete_push_becomes_an_answer_with_its_expected_state() {
     XCTAssertEqual(
-      NotificationActions.request(actionIdentifier: NotificationActions.approveAction, text: nil, userInfo: link),
-      NotificationActionRequest(link: SessionDeepLink(sessionId: "work", identityName: "devbox"), input: .keys("\r"))
+      NotificationActions.attempt(actionIdentifier: NotificationActions.approveAction, text: nil, userInfo: userInfo),
+      .answer(NotificationActionRequest(
+        link: SessionDeepLink(sessionId: "work", identityName: "devbox"), expect: expect, input: .keys("\r")
+      ))
     )
+    var textSince = userInfo
+    textSince["agentSince"] = "1700000000"
+    XCTAssertNotNil(NotificationActions.expectation(from: textSince))
   }
 
-  func test_keys_are_sent_as_octal_escapes_in_one_write() {
-    XCTAssertEqual(
-      NotificationActions.command(zmx: "zmx", session: "work", input: .keys("\u{1b}")),
-      #"zmx send 'work' "$(printf '\033')""#
+  func test_a_push_missing_its_link_or_state_is_reported_not_silently_dropped() {
+    for missing in ["link", "agentState", "agentSince"] {
+      var info = userInfo
+      info[missing] = nil
+      guard case .unanswerable = NotificationActions.attempt(
+        actionIdentifier: NotificationActions.approveAction, text: nil, userInfo: info
+      ) else { return XCTFail("missing \(missing) still answered") }
+    }
+    guard case .unanswerable = NotificationActions.attempt(
+      actionIdentifier: NotificationActions.replyAction, text: "   ", userInfo: userInfo
+    ) else { return XCTFail("an empty reply still answered") }
+  }
+
+  func test_a_flag_like_session_name_is_never_answered() {
+    var info = userInfo
+    info["link"] = "tether://session/--help?host=devbox"
+    guard case .unanswerable = NotificationActions.attempt(
+      actionIdentifier: NotificationActions.approveAction, text: nil, userInfo: info
+    ) else { return XCTFail("--help was answered") }
+  }
+
+  func test_other_actions_are_not_ours() {
+    XCTAssertNil(NotificationActions.attempt(actionIdentifier: "other", text: nil, userInfo: userInfo))
+  }
+
+  func test_the_command_passes_input_as_base64_to_tether_notify() {
+    let request = NotificationActionRequest(
+      link: SessionDeepLink(sessionId: "my 'box'", identityName: "devbox"), expect: expect,
+      input: .line("it's $(rm -rf ~)")
     )
-  }
-
-  func test_a_line_is_quoted_then_submitted_in_a_second_write() {
+    let encoded = Data("it's $(rm -rf ~)".utf8).base64EncodedString()
     XCTAssertEqual(
-      NotificationActions.command(zmx: "zmx", session: "my 'box'", input: .line("it's $HOME")),
-      #"zmx send 'my '"'"'box'"'"'' 'it'"'"'s $HOME' && sleep 0.3 && zmx send 'my '"'"'box'"'"'' "$(printf '\015')""#
+      NotificationActions.command(notify: "tn", request: request),
+      "tn answer --session 'my '\"'\"'box'\"'\"'' --state 'waiting' --since 1700000000 --input '\(encoded)' --submit"
     )
   }
 
   // MARK: - runner
 
-  private func model(host: String = "devbox") -> HomeModel {
+  private func model(_ machines: [(name: String, host: String)] = [("devbox", "10.0.0.2")]) -> HomeModel {
     let suite = "tether.notification-actions.tests"
     let defaults = UserDefaults(suiteName: suite)!
     defaults.removePersistentDomain(forName: suite)
@@ -74,15 +101,17 @@ final class NotificationActionsTests: XCTestCase {
       vault: SSHKeyVault(storage: UserDefaultsSSHStore(defaults: defaults), secrets: secrets),
       secrets: secrets
     )
-    model.addServer(name: host, host: "10.0.0.2", port: 22, username: "me", auth: .password, password: "pw")
+    for machine in machines {
+      model.addServer(name: machine.name, host: machine.host, port: 22, username: "me", auth: .password, password: "pw")
+    }
     return model
   }
 
-  private let approve = NotificationActionRequest(
-    link: SessionDeepLink(sessionId: "work", identityName: "devbox"), input: .keys("\r")
-  )
+  private var approve: NotificationActionRequest {
+    NotificationActionRequest(link: SessionDeepLink(sessionId: "work", identityName: "devbox"), expect: expect, input: .keys("\r"))
+  }
 
-  func test_the_runner_sends_to_the_linked_session_on_the_matching_machine() async {
+  func test_the_runner_answers_through_tether_notify_on_the_one_matching_machine() async {
     let commands = LockedBox<[String]>([])
     let hosts = LockedBox<[String]>([])
     let runner = NotificationActionRunner(model: model()) { config, _, command in
@@ -93,13 +122,23 @@ final class NotificationActionsTests: XCTestCase {
     let failure = await runner.run(approve)
     XCTAssertNil(failure)
     XCTAssertEqual(hosts.value, ["10.0.0.2"])
-    XCTAssertEqual(commands.value.count, 1)
-    XCTAssertTrue(commands.value[0].hasPrefix("~/.local/bin/zmx send 'work' "), commands.value[0])
+    XCTAssertTrue(commands.value.first?.hasPrefix("~/.local/bin/tether-notify answer --session 'work' ") == true)
   }
 
-  func test_the_runner_reports_an_unknown_machine_without_dialing() async {
+  func test_a_label_two_machines_answer_to_is_refused_without_dialing() async {
     let dialed = LockedBox(false)
-    let runner = NotificationActionRunner(model: model(host: "elsewhere")) { _, _, _ in
+    let runner = NotificationActionRunner(model: model([("devbox", "10.0.0.2"), ("work", "devbox.lan")])) { _, _, _ in
+      dialed.value = true
+      return "__tether_sent=0"
+    }
+    let failure = await runner.run(approve)
+    XCTAssertEqual(failure, "“devbox” matches 2 saved machines; open the session to answer.")
+    XCTAssertFalse(dialed.value)
+  }
+
+  func test_an_unknown_machine_is_refused_without_dialing() async {
+    let dialed = LockedBox(false)
+    let runner = NotificationActionRunner(model: model([("elsewhere", "10.0.0.9")])) { _, _, _ in
       dialed.value = true
       return ""
     }
@@ -108,13 +147,26 @@ final class NotificationActionsTests: XCTestCase {
     XCTAssertFalse(dialed.value)
   }
 
-  func test_the_runner_reports_a_zmx_failure_and_an_ssh_error() async {
-    let zmxFailed = NotificationActionRunner(model: model()) { _, _, _ in "session work is unresponsive\n__tether_sent=1\n" }
-    let failure = await zmxFailed.run(approve)
-    XCTAssertEqual(failure, "zmx could not reach session “work” on devbox.")
+  func test_host_answers_map_to_clear_messages() {
+    let failure = { NotificationActionRunner.failure(output: $0, session: "work", machine: "devbox") }
+    XCTAssertNil(failure("__tether_sent=0\n"))
+    XCTAssertEqual(failure("tether-notify: the agent has moved on\n__tether_sent=3\n"),
+                   "The agent in “work” has moved on; nothing was sent.")
+    XCTAssertEqual(failure("zsh: no such file\n__tether_sent=127\n"), "Update tether-notify on devbox to answer notifications.")
+    XCTAssertEqual(failure("usage…\n__tether_sent=2\n"), "Update tether-notify on devbox to answer notifications.")
+    XCTAssertEqual(failure("tether-notify: zmx send: exit status 1\n__tether_sent=1\n"), "tether-notify: zmx send: exit status 1")
+    XCTAssertEqual(failure(""), "No answer from devbox.")
+  }
 
-    let sshFailed = NotificationActionRunner(model: model()) { _, _, _ in throw SSHConnectError.commandTimedOut }
-    let sshFailure = await sshFailed.run(approve)
-    XCTAssertEqual(sshFailure, SSHConnectError.commandTimedOut.errorDescription)
+  func test_the_deadline_holds_even_when_the_work_ignores_cancellation() async {
+    // Stands in for a blocked getaddrinfo: nothing ever resumes it.
+    let runner = NotificationActionRunner(model: model(), timeout: .milliseconds(200)) { _, _, _ in
+      await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+      return ""
+    }
+    let started = Date()
+    let failure = await runner.run(approve)
+    XCTAssertEqual(failure, SSHConnectError.commandTimedOut.errorDescription)
+    XCTAssertLessThan(Date().timeIntervalSince(started), 2)
   }
 }

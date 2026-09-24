@@ -73,14 +73,30 @@ func TestStateDonePushesWhenNobodyAttached(t *testing.T) {
 	}
 }
 
-func TestStatePushesCarryTheAgentCategory(t *testing.T) {
+func TestStatePushesCarryTheAgentCategoryAndState(t *testing.T) {
 	for state, want := range map[string]string{"waiting": "tether.agent.waiting", "done": "tether.agent.done"} {
 		d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
-		if err := runState(args(state, "--title", "t", "--body", "b"), d); err != nil {
+		if err := runState(args(state, "--title", "t", "--body", "b", "--link", "tether://session/work?host=h"), d); err != nil {
 			t.Fatal(err)
 		}
-		if len(*pushes) != 1 || (*pushes)[0].content.Category != want {
+		if len(*pushes) != 1 {
 			t.Fatalf("%s: pushes %+v", state, *pushes)
+		}
+		got := (*pushes)[0].content
+		if got.Category != want || got.State != state || got.Since != 1000 {
+			t.Fatalf("%s: content %+v", state, got)
+		}
+	}
+}
+
+func TestStateWithoutASessionLinkOffersNoActions(t *testing.T) {
+	for _, link := range []string{"", "https://example.com", "tether://session/work"} {
+		d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+		if err := runState(args("waiting", "--title", "t", "--body", "b", "--link", link), d); err != nil {
+			t.Fatal(err)
+		}
+		if len(*pushes) != 1 || (*pushes)[0].content.Category != "" || (*pushes)[0].content.Since != 0 {
+			t.Fatalf("link %q: pushes %+v", link, *pushes)
 		}
 	}
 }

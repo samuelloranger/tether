@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     let center = UNUserNotificationCenter.current()
     center.delegate = tapRouter
     center.setNotificationCategories(NotificationActions.categories())
-    tapRouter.onAction = { [weak self] request in await self?.actionRunner.perform(request) }
+    tapRouter.onAction = { [weak self] attempt in await self?.actionRunner.perform(attempt) }
     return true
   }
 

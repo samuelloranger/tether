@@ -22,7 +22,7 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
 
   /// Runs Approve / Deny / Reply. Set at launch, not by the UI: an action can wake the
   /// app in the background with no scene.
-  public var onAction: (@MainActor (NotificationActionRequest) async -> Void)?
+  public var onAction: (@MainActor (NotificationActionAttempt) async -> Void)?
 
   public override init() {
     super.init()
@@ -54,14 +54,14 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
     if response.actionIdentifier != UNNotificationDefaultActionIdentifier {
       let text = (response as? UNTextInputNotificationResponse)?.userText
       guard let onAction,
-            let request = NotificationActions.request(
+            let attempt = NotificationActions.attempt(
               actionIdentifier: response.actionIdentifier, text: text,
               userInfo: response.notification.request.content.userInfo
             )
       else { return completionHandler() }
       // The system keeps a backgrounded app alive until the handler runs.
       Task { @MainActor in
-        await onAction(request)
+        await onAction(attempt)
         completionHandler()
       }
       return

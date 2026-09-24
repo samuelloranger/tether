@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -43,6 +44,12 @@ func main() {
 		err = runState(os.Args[2:], defaultStateDeps(false))
 	case "status":
 		err = runStatus(os.Stdout, defaultStatusDeps())
+	case "answer":
+		err = runAnswer(os.Args[2:], defaultAnswerDeps())
+		if errors.Is(err, errStale) {
+			fmt.Fprintln(os.Stderr, "tether-notify: the agent has moved on; nothing was sent")
+			os.Exit(3)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -63,6 +70,9 @@ func usage() {
                                              record a session's agent state; pushes waiting/done
                                              unless the session has an attached zmx client
   status                                     print every session's agent state as JSON
+  answer --session S --state ST --since N --input B64 [--submit]
+                                             type a notification action's input, only if the
+                                             agent is still in state ST since N (exit 3 if not)
   list                                       list registered phones
   remove <token>                             forget a phone
 `)
