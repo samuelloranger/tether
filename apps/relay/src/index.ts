@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { ApnsTokenCache } from './apnsAuth';
 import { APNS_PROD, APNS_SANDBOX, ApnsClient } from './apnsClient';
 import { clientIpFromForwarded } from './clientIp';
+import { sendToEitherEnvironment } from './environments';
 import { buildApnsPayload, classifyApnsStatus, pushRequestSchema } from './payload';
 import { RateLimiter } from './rateLimit';
 
@@ -19,9 +20,11 @@ const TRUSTED_PROXY_HOPS = Number(process.env.TRUSTED_PROXY_HOPS ?? 1);
 // Comfortably above the largest legitimate request (a 3KB ciphertext plus a
 // 64-char token) and far below anything worth buffering.
 const MAX_BODY_BYTES = 8 * 1024;
-// TestFlight and App Store builds are 'production'; a build run from Xcode onto
-// a device is 'sandbox'. Sending to the wrong one fails with BadDeviceToken.
+// TestFlight and App Store builds are 'production'; a development-signed build is
+// 'sandbox'. APNS_ENV picks which one is tried first; a BadDeviceToken from it is
+// retried on the other, so both kinds of build get their pushes.
 const HOST = process.env.APNS_ENV === 'sandbox' ? APNS_SANDBOX : APNS_PROD;
+const OTHER_HOST = HOST === APNS_PROD ? APNS_SANDBOX : APNS_PROD;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -35,6 +38,8 @@ const tokens = new ApnsTokenCache({
   privateKeyPem: readFileSync(KEY_PATH, 'utf8'),
 });
 const apns = new ApnsClient(tokens, HOST);
+// Connects lazily, so a deployment that only sees one kind of build never opens it.
+const otherApns = new ApnsClient(tokens, OTHER_HOST);
 
 // A device realistically needs a handful of notifications a minute; a server
 // stuck in a loop needs stopping. Burst of 10, sustained 1 every 6s.
@@ -79,7 +84,7 @@ app.post('/push', async (c) => {
 
   let result: Awaited<ReturnType<ApnsClient['send']>>;
   try {
-    result = await apns.send({
+    result = await sendToEitherEnvironment(apns, otherApns, {
       token: req.token,
       payload: buildApnsPayload(req),
       topic: BUNDLE_ID,
@@ -106,6 +111,6 @@ app.post('/push', async (c) => {
   }
 });
 
-console.log(`tether-relay listening on :${PORT} (${HOST}, topic ${BUNDLE_ID})`);
+console.log(`tether-relay listening on :${PORT} (${HOST}, falls back to ${OTHER_HOST}, topic ${BUNDLE_ID})`);
 
 export default { port: PORT, fetch: app.fetch };

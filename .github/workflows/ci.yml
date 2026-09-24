@@ -33,6 +33,13 @@ jobs:
       - name: Release script tests
         run: bun test scripts/
 
+      - name: Relay tests
+        working-directory: apps/relay
+        run: |
+          bun install --frozen-lockfile
+          ../../node_modules/.bin/tsc --noEmit -p .
+          bun test
+
   # Host CLI: the Go encrypted-push tool (apps/tether-notify). Build, vet, and
   # run its crypto/devices tests.
   host-tools:

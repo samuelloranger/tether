@@ -42,7 +42,7 @@ binds to localhost in the compose file for exactly that reason.
 | `APNS_TEAM_ID` | yes | Apple Developer team ID |
 | `APNS_BUNDLE_ID` | yes | Sent as `apns-topic`; must match the app |
 | `APNS_KEY_PATH` | yes | Path to the `.p8`, mounted read-only |
-| `APNS_ENV` | no | `production` (default) or `sandbox` |
+| `APNS_ENV` | no | Environment tried first: `production` (default) or `sandbox`. A `BadDeviceToken` is retried once on the other, so TestFlight and development-signed builds both work |
 | `PORT` | no | Default `8090` |
 
 ## API

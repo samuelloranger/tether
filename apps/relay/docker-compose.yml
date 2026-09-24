@@ -12,8 +12,8 @@ services:
       APNS_TEAM_ID: ${APNS_TEAM_ID:?set APNS_TEAM_ID}
       APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:?set APNS_BUNDLE_ID}
       APNS_KEY_PATH: /run/secrets/apns_key.p8
-      # 'production' serves TestFlight and App Store builds; 'sandbox' only
-      # serves builds installed directly from Xcode.
+      # Tried first; a BadDeviceToken is retried on the other environment, so
+      # TestFlight/App Store (production) and development-signed (sandbox) builds both work.
       APNS_ENV: ${APNS_ENV:-production}
     volumes:
       # Mounted read-only, never copied into the image.
