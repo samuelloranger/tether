@@ -57,7 +57,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `tether-notify — encrypted push for the SSH host
 
   register <token> <secretKeyB64> [label]   register/replace a phone
-  notify --title T --body B [--link L] [--collapse ID] [--dry-run]
+  notify --title T --body B [--link L] [--category C] [--collapse ID] [--dry-run]
   state --session S --agent A --state working|waiting|done|clear
         [--title T --body B --link L] [--collapse ID] [--dry-run]
                                              record a session's agent state; pushes waiting/done
@@ -115,6 +115,7 @@ func cmdNotify(args []string) error {
 	title := fs.String("title", "", "notification title")
 	body := fs.String("body", "", "notification body")
 	link := fs.String("link", "", "tether:// deep link (optional)")
+	category := fs.String("category", "", "iOS notification category (optional)")
 	collapse := fs.String("collapse", "tether-notify", "APNs collapse id")
 	dryRun := fs.Bool("dry-run", false, "print requests instead of sending")
 	if err := fs.Parse(args); err != nil {
@@ -123,7 +124,7 @@ func cmdNotify(args []string) error {
 	if *title == "" || *body == "" {
 		return fmt.Errorf("notify requires --title and --body")
 	}
-	return sendPush(PushContent{Title: *title, Body: *body, Link: *link}, *collapse, *dryRun)
+	return sendPush(PushContent{Title: *title, Body: *body, Link: *link, Category: *category}, *collapse, *dryRun)
 }
 
 func sendPush(content PushContent, collapse string, dryRun bool) error {

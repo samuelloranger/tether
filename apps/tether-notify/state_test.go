@@ -73,6 +73,18 @@ func TestStateDonePushesWhenNobodyAttached(t *testing.T) {
 	}
 }
 
+func TestStatePushesCarryTheAgentCategory(t *testing.T) {
+	for state, want := range map[string]string{"waiting": "tether.agent.waiting", "done": "tether.agent.done"} {
+		d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+		if err := runState(args(state, "--title", "t", "--body", "b"), d); err != nil {
+			t.Fatal(err)
+		}
+		if len(*pushes) != 1 || (*pushes)[0].content.Category != want {
+			t.Fatalf("%s: pushes %+v", state, *pushes)
+		}
+	}
+}
+
 func TestStateWaitingSkipsPushWhenAttached(t *testing.T) {
 	d, pushes := fakeDeps(t, "name=work\tclients=1\n", nil)
 	if err := runState(args("waiting", "--title", "t", "--body", "b"), d); err != nil {

@@ -81,10 +81,23 @@ func runState(args []string, d stateDeps) error {
 	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
 		return nil
 	}
-	if err := d.push(PushContent{Title: *title, Body: *body, Link: *link}, *collapse); err != nil {
+	content := PushContent{Title: *title, Body: *body, Link: *link, Category: agentCategory(*state)}
+	if err := d.push(content, *collapse); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
 	}
 	return nil
+}
+
+// agentCategory names the iOS notification category for an agent push; the app
+// registers the same identifiers.
+func agentCategory(state string) string {
+	switch state {
+	case stateWaiting:
+		return "tether.agent.waiting"
+	case stateDone:
+		return "tether.agent.done"
+	}
+	return ""
 }
 
 type statusDeps struct {

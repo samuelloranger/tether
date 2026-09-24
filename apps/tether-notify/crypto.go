@@ -21,6 +21,8 @@ type PushContent struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Link  string `json:"link,omitempty"`
+	// Category picks the phone's notification actions (Approve / Deny / Reply).
+	Category string `json:"category,omitempty"`
 }
 
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {

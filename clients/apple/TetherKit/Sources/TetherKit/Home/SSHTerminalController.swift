@@ -135,7 +135,7 @@ public final class SSHTerminalController {
   private let pathObserver = NetworkPathObserver()
   /// Opened lazily on first use, which is always after the terminal connects.
   private let control: ControlConnection
-  private static let zmx = "~/.local/bin/zmx"
+  static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether-notify"
   static let agentStatusCommand =
     "if [ -x \(notify) ]; then \(notify) status 2>/dev/null; else echo __tether_notify_missing; fi"

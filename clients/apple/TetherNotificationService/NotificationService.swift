@@ -36,6 +36,10 @@ class NotificationService: UNNotificationServiceExtension {
     if let link = payload.link {
       content.userInfo["link"] = link
     }
+    // Only categories the app registers: an unknown one would show no actions anyway.
+    if let category = payload.category, Self.categories.contains(category) {
+      content.categoryIdentifier = category
+    }
     contentHandler(content)
   }
 
@@ -50,7 +54,11 @@ class NotificationService: UNNotificationServiceExtension {
     let title: String
     let body: String
     let link: String?
+    let category: String?
   }
+
+  // Mirrors NotificationActions.categoryIdentifiers; the extension doesn't link TetherKit.
+  private static let categories: Set<String> = ["tether.agent.waiting", "tether.agent.done"]
 
   // Reads the AES key PushRegistrar wrote, via the shared keychain group. The
   // extension has its own bundle id, so without that group this returns nothing.
