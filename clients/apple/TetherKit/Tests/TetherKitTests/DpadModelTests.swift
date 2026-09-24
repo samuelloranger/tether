@@ -32,4 +32,47 @@ final class DpadModelTests: XCTestCase {
   func test_returning_inside_threshold_unlocks() {
     XCTAssertNil(DPadModel.resolveDirection(dx: 2, dy: 2, active: .C, sampled: true))
   }
+
+  private func drive(_ lock: inout DPadLock, _ xs: [CGFloat], y: CGFloat = 0) -> [DPadDirection?] {
+    xs.map { lock.update(translation: CGPoint(x: $0, y: y), sampled: true) }
+  }
+
+  func test_reversing_past_the_far_point_flips_without_returning_to_touch_down() {
+    var lock = DPadLock()
+    XCTAssertEqual(drive(&lock, [20, 60, 55, 46, 43]), [.C, .C, .C, nil, .D])
+  }
+
+  func test_backing_off_a_little_stops_then_resumes_on_return() {
+    var lock = DPadLock()
+    XCTAssertEqual(drive(&lock, [20, 40, 31, 40]), [.C, .C, nil, .C])
+  }
+
+  func test_can_reverse_back_and_forth_in_one_gesture() {
+    var lock = DPadLock()
+    XCTAssertEqual(drive(&lock, [30, 10, -20, 0]), [.C, .D, .D, .C])
+  }
+
+  func test_fast_reversal_flips_in_a_single_move() {
+    var lock = DPadLock()
+    XCTAssertEqual(drive(&lock, [60, 30]), [.C, .D])
+  }
+
+  func test_perpendicular_drift_while_locked_cannot_pick_a_new_axis_on_release() {
+    var lock = DPadLock()
+    XCTAssertEqual(lock.update(translation: CGPoint(x: 40, y: 0), sampled: true), .C)
+    XCTAssertEqual(lock.update(translation: CGPoint(x: 40, y: 30), sampled: true), .C)
+    XCTAssertEqual(lock.update(translation: CGPoint(x: 20, y: 34), sampled: true), .D)
+  }
+
+  func test_lock_waits_for_the_sample_window() {
+    var lock = DPadLock()
+    XCTAssertNil(lock.update(translation: CGPoint(x: 20, y: 0), sampled: false))
+    XCTAssertEqual(lock.update(translation: CGPoint(x: 20, y: 0), sampled: true), .C)
+  }
+
+  func test_relative_translation_restarts_from_the_release_point() {
+    var lock = DPadLock()
+    _ = drive(&lock, [60, 40])
+    XCTAssertEqual(lock.relative(CGPoint(x: 40, y: 0)).x, -12)
+  }
 }

@@ -56,6 +56,25 @@ public enum DPadModel {
     return dy >= 0 ? .B : .A
   }
 
+  /// Signed travel along `direction`; positive means further that way.
+  static func travel(_ point: CGPoint, along direction: DPadDirection) -> CGFloat {
+    switch direction {
+    case .C: point.x
+    case .D: -point.x
+    case .B: point.y
+    case .A: -point.y
+    }
+  }
+
+  static func unit(_ direction: DPadDirection) -> CGPoint {
+    switch direction {
+    case .C: CGPoint(x: 1, y: 0)
+    case .D: CGPoint(x: -1, y: 0)
+    case .B: CGPoint(x: 0, y: 1)
+    case .A: CGPoint(x: 0, y: -1)
+    }
+  }
+
   /// Icon rides the locked cardinal only — never free-slides diagonally.
   public static func thumbOffset(
     dx: CGFloat,
@@ -70,5 +89,41 @@ public enum DPadModel {
     case .B: return CGPoint(x: 0, y: travel)
     case .A: return CGPoint(x: 0, y: -travel)
     }
+  }
+}
+
+/// One gesture's direction lock. The neutral point ratchets to the finger's furthest travel in
+/// the locked direction, so backing off releases the lock and keeps going into the opposite
+/// arrow — the finger never has to return to where it landed.
+public struct DPadLock: Sendable {
+  public private(set) var direction: DPadDirection?
+  private var origin: CGPoint = .zero
+  private var peak: CGFloat = 0
+
+  public init() {}
+
+  /// `translation` is the raw drag translation since touch-down.
+  public mutating func update(translation: CGPoint, sampled: Bool) -> DPadDirection? {
+    if let direction {
+      let travel = DPadModel.travel(translation, along: direction)
+      peak = max(peak, travel)
+      if peak - travel < DPadModel.threshold { return direction }
+      // Re-centre just inside the neutral band: a further `threshold` back picks the opposite
+      // arrow, a return to the peak resumes the old one. The perpendicular drift is dropped so
+      // it can't vote for a new axis.
+      let ahead = peak - DPadModel.threshold - travel
+      let unit = DPadModel.unit(direction)
+      origin = CGPoint(x: translation.x + unit.x * ahead, y: translation.y + unit.y * ahead)
+      self.direction = nil
+    }
+    let r = relative(translation)
+    direction = DPadModel.resolveDirection(dx: r.x, dy: r.y, active: nil, sampled: sampled)
+    if let direction { peak = DPadModel.travel(translation, along: direction) }
+    return direction
+  }
+
+  /// Translation measured from the current neutral point.
+  public func relative(_ translation: CGPoint) -> CGPoint {
+    CGPoint(x: translation.x - origin.x, y: translation.y - origin.y)
   }
 }
