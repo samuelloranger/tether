@@ -56,7 +56,10 @@ actor TerminalPipeline {
   private var cols: UInt16 = 80
   private var rows: UInt16 = 24
 
-  init() {
+  /// `theme` is the one the first grid is created in, so the first frame is never drawn in
+  /// the default colors.
+  init(theme: TerminalTheme = .tether) {
+    sessionGrids.theme = theme
     (snapshots, snapshotSink) = AsyncStream.makeStream(
       of: Optional<TerminalFrame>.self,
       bufferingPolicy: .bufferingNewest(1)
@@ -169,7 +172,14 @@ actor TerminalPipeline {
         await self.watchTick()
       }
     }
-  func setTheme(_ theme: TerminalTheme) {
+  }
+
+  private var themeSequence: UInt64 = 0
+
+  /// Calls from separate tasks can arrive out of order; the newest request wins.
+  func setTheme(_ theme: TerminalTheme, sequence: UInt64) {
+    guard sequence > themeSequence else { return }
+    themeSequence = sequence
     guard theme != sessionGrids.theme else { return }
     sessionGrids.theme = theme
     publishSnapshot()
@@ -331,6 +341,8 @@ actor TerminalPipeline {
   var imageWatchDelayForTest: Duration { watchDelay }
   var imageWatchStartsForTest: Int { imageWatchStarts }
   func imageWatchTickForTest() { watchTick() }
+  /// Test seam: the current emulator's frame.
+  func frameForTest() -> TerminalFrame? { emulator?.frame() }
   #endif
 
   // MARK: - Publishing

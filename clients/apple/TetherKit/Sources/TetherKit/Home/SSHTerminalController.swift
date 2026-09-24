@@ -140,7 +140,8 @@ public final class SSHTerminalController {
   static let agentStatusCommand =
     "if [ -x \(notify) ]; then \(notify) status 2>/dev/null; else echo __tether_notify_missing; fi"
   private static let agentStatusStaleAfter: TimeInterval = 30
-  private let pipeline = TerminalPipeline()
+  private let pipeline: TerminalPipeline
+  private var themeSequence: UInt64 = 0
   private let config: SSHConnectionConfig
   private let hostKeyStore: HostKeyStore
   private let pushIdentity: PushRegistrar.PushIdentity?
@@ -163,9 +164,11 @@ public final class SSHTerminalController {
     hostKeyStore: HostKeyStore,
     attach: String = defaultAttach,
     pushIdentity: PushRegistrar.PushIdentity? = nil,
+    theme: TerminalTheme = .tether,
     dial: @escaping Dialer = { try await SSHConnector.connect(config: $0, store: $1) },
     control: ControlConnection? = nil
   ) {
+    self.pipeline = TerminalPipeline(theme: theme)
     self.title = title
     self.config = config
     self.hostKeyStore = hostKeyStore
@@ -799,7 +802,10 @@ public final class SSHTerminalController {
   }
   public func jumpToPrompt(_ direction: PromptJump) async -> Bool { await pipeline.jumpToPrompt(direction) }
   public func lastCommandOutput() async -> String? { await pipeline.lastCommandOutput() }
-  public func setTheme(_ theme: TerminalTheme) { Task { await pipeline.setTheme(theme) } }
+  public func setTheme(_ theme: TerminalTheme) async {
+    themeSequence += 1
+    await pipeline.setTheme(theme, sequence: themeSequence)
+  }
   public func leave() async {
     left = true
     stopNetworkWatch()

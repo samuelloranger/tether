@@ -67,11 +67,34 @@ final class TerminalEngine {
   func setTheme(_ theme: TerminalTheme) {
     locked {
       guard theme != self.theme else { return }
+      let old = self.theme
+      let current = TerminalPalette.table(of: terminal, fallback: old.foreground)
       self.theme = theme
       TerminalPalette.install(theme, on: terminal)
+      let fresh = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      // Entries a program set with OSC 4 survive: the first 16 differ from the old theme's
+      // own colors, the rest from the xterm cube every theme shares.
+      let overrides = current.indices.filter { index in
+        index < old.ansi.count ? current[index] != old.ansi[index] : current[index] != fresh[index]
+      }
+      if !overrides.isEmpty {
+        // Fed to the local parser only; nothing reaches the host.
+        terminal.feed(text: Self.paletteSequence(overrides.map { ($0, current[$0]) }))
+      }
       palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      graphicsDirty = true
       needsRefresh = true
     }
+  }
+
+  /// One OSC 4 setting each entry to its ARGB color.
+  static func paletteSequence(_ entries: [(index: Int, argb: UInt32)]) -> String {
+    let specs = entries.map { entry in
+      "\(entry.index);rgb:" + String(
+        format: "%02x/%02x/%02x", (entry.argb >> 16) & 0xFF, (entry.argb >> 8) & 0xFF, entry.argb & 0xFF
+      )
+    }
+    return "\u{1B}]4;" + specs.joined(separator: ";") + "\u{1B}\\"
   }
 
   var bracketedPaste: Bool { locked { terminal.bracketedPasteMode } }

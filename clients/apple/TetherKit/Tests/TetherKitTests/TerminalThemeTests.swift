@@ -60,6 +60,40 @@ final class TerminalThemeTests: XCTestCase {
     XCTAssertEqual(after.cells[9].background, dracula.background)
   }
 
+  func test_colors_a_program_set_with_osc4_survive_a_theme_switch() {
+    let engine = TerminalEngine(cols: 10, rows: 2)
+    // Entry 1 (red) and entry 200 (from the xterm cube) repainted by the program.
+    engine.feed("\u{1B}]4;1;rgb:12/34/56;200;rgb:ab/cd/ef\u{1B}\\\u{1B}[31mR\u{1B}[38;5;200mC\u{1B}[32mG")
+    engine.setTheme(dracula)
+    let cells = engine.frame().cells
+    XCTAssertEqual(cells[0].foreground, 0xFF12_3456, "the program's red was replaced by the theme's")
+    XCTAssertEqual(cells[1].foreground, 0xFFAB_CDEF)
+    XCTAssertEqual(cells[2].foreground, dracula.ansi[2], "an untouched entry follows the new theme")
+  }
+
+  func test_the_palette_sequence_is_one_osc4() {
+    XCTAssertEqual(
+      TerminalEngine.paletteSequence([(1, 0xFF12_3456), (200, 0xFFAB_CDEF)]),
+      "\u{1B}]4;1;rgb:12/34/56;200;rgb:ab/cd/ef\u{1B}\\"
+    )
+  }
+
+  func test_a_pipeline_starts_its_first_grid_in_the_given_theme() async {
+    let pipeline = TerminalPipeline(theme: dracula)
+    await pipeline.attachForTest(cols: 10, rows: 2)
+    let frame = await pipeline.frameForTest()
+    XCTAssertEqual(frame?.cells[0].background, dracula.background)
+  }
+
+  func test_an_older_theme_request_arriving_late_is_ignored() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 10, rows: 2)
+    await pipeline.setTheme(TerminalTheme.named("nord"), sequence: 2)
+    await pipeline.setTheme(dracula, sequence: 1)
+    let frame = await pipeline.frameForTest()
+    XCTAssertEqual(frame?.cells[0].background, TerminalTheme.named("nord").background)
+  }
+
   func test_setting_the_same_theme_is_a_no_op() {
     let engine = TerminalEngine(cols: 10, rows: 2, theme: dracula)
     let before = engine.frame()

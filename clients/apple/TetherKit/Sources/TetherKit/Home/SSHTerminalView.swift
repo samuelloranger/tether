@@ -191,7 +191,7 @@ public struct SSHTerminalView: View {
         .accessibilityIdentifier("sshTerminalSurface")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(preferences.terminalTheme.backgroundColor)
-        .task(id: preferences.terminalTheme.id) { controller.setTheme(preferences.terminalTheme) }
+        .task(id: preferences.terminalTheme.id) { await controller.setTheme(preferences.terminalTheme) }
         statusOverlay
         emptyStateOverlay
       }

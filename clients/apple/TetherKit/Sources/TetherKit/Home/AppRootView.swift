@@ -80,7 +80,7 @@ public struct AppRootView: View {
       ?? ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] ?? SSHTerminalController.defaultAttach
     controller = SSHTerminalController(
       title: profile.name, config: config, hostKeyStore: model.hostKeyStore,
-      attach: attach, pushIdentity: pushIdentityProvider()
+      attach: attach, pushIdentity: pushIdentityProvider(), theme: preferences.terminalTheme
     )
     model.rememberLastHost(profile.id)
     openProfileID = profile.id
