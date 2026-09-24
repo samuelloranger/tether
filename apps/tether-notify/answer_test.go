@@ -164,6 +164,38 @@ func TestStatusPrunesUnderTheSessionLock(t *testing.T) {
 	}
 }
 
+func TestStatusKeepsARecordWrittenAfterItJudgedTheSession(t *testing.T) {
+	answerFixture(t, waiting)
+	held := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		_ = withSessionLock("work", func() error { close(held); <-release; return nil })
+	}()
+	<-held
+	done := make(chan error, 1)
+	go func() {
+		// zmx no longer lists "work": status judges the current record stale.
+		done <- runStatus(&bytes.Buffer{}, statusDeps{
+			run:   func(string, ...string) (string, error) { return "", nil },
+			alive: func(int) bool { return true },
+		})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	// Meanwhile the session comes back and its hook records a new state.
+	next := *waiting
+	next.Version, next.Updated = "v2", 2000
+	if err := withSessionsLock(func() error { return writeSession(&next) }); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := readSession("work"); s == nil || s.Version != "v2" {
+		t.Fatalf("the newer record was pruned: %+v", s)
+	}
+}
+
 func TestAnswerRejectsFlagLikeSessionsAndBadInput(t *testing.T) {
 	d, sends, _ := answerFixture(t, waiting)
 	bad := [][]string{

@@ -153,7 +153,7 @@ func runStatus(w io.Writer, d statusDeps) error {
 		_, listed := live[s.Session]
 		return !d.alive(s.AgentPid) || (lsErr == nil && !listed)
 	}
-	var doomed []string
+	var doomed []SessionState
 	err := withSessionsLock(func() error {
 		states, err := listSessions()
 		if err != nil {
@@ -161,7 +161,7 @@ func runStatus(w io.Writer, d statusDeps) error {
 		}
 		for _, s := range states {
 			if stale(s) {
-				doomed = append(doomed, s.Session)
+				doomed = append(doomed, s)
 				continue
 			}
 			out = append(out, s)
@@ -172,12 +172,13 @@ func runStatus(w io.Writer, d statusDeps) error {
 		return err
 	}
 	// Each removal takes its session's lock first, like every other writer, so it can't
-	// land between `answer`'s check and its send; the record is checked again under it.
-	for _, name := range doomed {
-		_ = withSessionLock(name, func() error {
+	// land between `answer`'s check and its send. Only the very record judged stale goes:
+	// one a hook wrote since was never checked against a fresh `zmx ls`.
+	for _, old := range doomed {
+		_ = withSessionLock(old.Session, func() error {
 			return withSessionsLock(func() error {
-				if s, _ := readSession(name); s != nil && stale(*s) {
-					return removeSession(name)
+				if s, _ := readSession(old.Session); s != nil && s.Version == old.Version && s.Updated == old.Updated {
+					return removeSession(old.Session)
 				}
 				return nil
 			})
