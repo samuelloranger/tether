@@ -268,6 +268,27 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertEqual(delay, .milliseconds(50))
   }
 
+  func test_output_restarts_a_backed_off_watch_at_the_fast_interval() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 20, rows: 5)
+    await pipeline.feedForTest(Data(kitty("a=T,f=32,s=2,v=2,q=2", solidRed).utf8))
+    for _ in 0..<6 { await pipeline.imageWatchTickForTest() }
+    let restartsBefore = await pipeline.imageWatchStartsForTest
+    await pipeline.feedForTest(Data("x".utf8))
+    let restartsAfter = await pipeline.imageWatchStartsForTest
+    XCTAssertEqual(restartsAfter, restartsBefore + 1, "a 1 s sleep already under way was left to run out")
+  }
+
+  func test_a_scroll_after_disconnect_does_not_start_watching_again() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 20, rows: 5)
+    await pipeline.feedForTest(Data(kitty("a=T,f=32,s=2,v=2,q=2", solidRed).utf8))
+    await pipeline.disconnect()
+    await pipeline.scrollViewport(lines: 1)
+    let watching = await pipeline.isWatchingImagesForTest
+    XCTAssertFalse(watching)
+  }
+
   func test_disconnecting_stops_the_image_watch() async {
     let pipeline = TerminalPipeline()
     await pipeline.attachForTest(cols: 20, rows: 5)

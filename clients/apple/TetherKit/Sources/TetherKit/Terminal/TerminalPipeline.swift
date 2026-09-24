@@ -70,6 +70,7 @@ actor TerminalPipeline {
   /// Connection and auth belong to the caller: this takes raw PTY bytes, so it tests hostless.
   func connectSSH(transport: any TerminalByteStream, key: String) async {
     disconnect()
+    imagesWatchable = true
     startOutboundPumpIfNeeded()
     let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
     currentGrid = attached.grid
@@ -114,6 +115,7 @@ actor TerminalPipeline {
   /// Drops the transport but KEEPS the emulator, so a foreground reconnect to
   /// the same session reuses its scrollback.
   func disconnect() {
+    imagesWatchable = false
     watchImages(nil)
     sshReadTask?.cancel()
     sshReadTask = nil
@@ -139,19 +141,39 @@ actor TerminalPipeline {
     watchDelay = changed ? Self.fastWatch : min(watchDelay * 2, Self.slowWatch)
   }
 
+  /// Off while disconnected: nothing new can arrive, and a later local redraw (a scroll)
+  /// must not start polling again.
+  private var imagesWatchable = false
+  private var imageWatchStarts = 0
+
   private func watchImages(_ emulator: TerminalEngine?) {
-    guard emulator !== watchedEmulator || (emulator != nil && imageWatch == nil) else { return }
+    let wanted = imagesWatchable ? emulator : nil
+    guard wanted !== watchedEmulator || (wanted != nil && imageWatch == nil) else { return }
     imageWatch?.cancel()
     imageWatch = nil
-    watchedEmulator = emulator
-    guard emulator != nil else { return }
+    watchedEmulator = wanted
+    guard wanted != nil else { return }
     watchDelay = Self.fastWatch
+    imageWatchStarts += 1
     imageWatch = Task { [weak self] in
-      while !Task.isCancelled, let self {
-        try? await Task.sleep(for: await self.watchDelay)
+      while let self {
+        // A cancelled sleep ends the watch; it must not tick once more on its way out.
+        do { try await Task.sleep(for: await self.watchDelay) } catch { return }
         await self.watchTick()
       }
     }
+  }
+
+  /// New output while the watch was backed off: a sleep already under way would hold the
+  /// next animation frame back by up to a second, so start over at the fast interval.
+  private func speedUpImageWatch() {
+    guard watchDelay != Self.fastWatch, let emulator = watchedEmulator else {
+      watchDelay = Self.fastWatch
+      return
+    }
+    imageWatch?.cancel()
+    imageWatch = nil
+    watchImages(emulator)
   }
 
   /// Scrolls the local VT viewport through scrollback (not PTY PgUp/PgDn).
@@ -281,6 +303,7 @@ actor TerminalPipeline {
   #if DEBUG
   /// Test seam: stand up a live emulator without a connection.
   func attachForTest(cols: UInt16, rows: UInt16) {
+    imagesWatchable = true
     let attached = sessionGrids.attach(key: "test", cols: cols, rows: rows)
     currentGrid = attached.grid
     emulatorKey = "test"
@@ -293,6 +316,7 @@ actor TerminalPipeline {
 
   var isWatchingImagesForTest: Bool { imageWatch != nil }
   var imageWatchDelayForTest: Duration { watchDelay }
+  var imageWatchStartsForTest: Int { imageWatchStarts }
   func imageWatchTickForTest() { watchTick() }
   #endif
 
@@ -312,7 +336,7 @@ actor TerminalPipeline {
     guard frame.header.generation != lastRenderedGeneration else { return false }
     lastRenderedGeneration = frame.header.generation
     // Output or an animation frame: watch closely again.
-    watchDelay = Self.fastWatch
+    speedUpImageWatch()
     if frame.header.altScreen != lastAltScreen {
       lastAltScreen = frame.header.altScreen
       currentGrid?.lastAltScreen = frame.header.altScreen
