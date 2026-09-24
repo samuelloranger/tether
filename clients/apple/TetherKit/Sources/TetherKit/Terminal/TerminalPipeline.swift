@@ -114,6 +114,7 @@ actor TerminalPipeline {
   /// Drops the transport but KEEPS the emulator, so a foreground reconnect to
   /// the same session reuses its scrollback.
   func disconnect() {
+    watchImages(nil)
     sshReadTask?.cancel()
     sshReadTask = nil
     if let transport = sshTransport {
@@ -125,10 +126,18 @@ actor TerminalPipeline {
   // MARK: - Local emulator control
 
   /// SwiftTerm advances kitty animations on its own timer and tells no one; while images
-  /// are on screen the frame is re-read at 20 Hz. Unchanged, a read costs a lock and a
-  /// few comparisons, and publishes nothing.
+  /// are on screen the frame is re-read, at 20 Hz while it keeps changing and backing off
+  /// to once a second while it doesn't, so a still image costs next to nothing.
   private var imageWatch: Task<Void, Never>?
   private weak var watchedEmulator: TerminalEngine?
+  private static let fastWatch = Duration.milliseconds(50)
+  private static let slowWatch = Duration.seconds(1)
+  private var watchDelay = fastWatch
+
+  private func watchTick() {
+    let changed = publishSnapshot()
+    watchDelay = changed ? Self.fastWatch : min(watchDelay * 2, Self.slowWatch)
+  }
 
   private func watchImages(_ emulator: TerminalEngine?) {
     guard emulator !== watchedEmulator || (emulator != nil && imageWatch == nil) else { return }
@@ -136,10 +145,11 @@ actor TerminalPipeline {
     imageWatch = nil
     watchedEmulator = emulator
     guard emulator != nil else { return }
+    watchDelay = Self.fastWatch
     imageWatch = Task { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(50))
-        await self?.publishSnapshot()
+      while !Task.isCancelled, let self {
+        try? await Task.sleep(for: await self.watchDelay)
+        await self.watchTick()
       }
     }
   }
@@ -282,27 +292,34 @@ actor TerminalPipeline {
   func feedForTest(_ bytes: Data) { applyOutput(bytes) }
 
   var isWatchingImagesForTest: Bool { imageWatch != nil }
+  var imageWatchDelayForTest: Duration { watchDelay }
+  func imageWatchTickForTest() { watchTick() }
   #endif
 
   // MARK: - Publishing
 
   /// Publishes a new grid only when the visible contents actually changed: the
   /// engine returns its cached frame (copy-on-write) until something dirties it.
-  private func publishSnapshot() {
-    guard let emulator else { return }
+  /// True when a new frame went out.
+  @discardableResult
+  private func publishSnapshot() -> Bool {
+    guard let emulator else { return false }
     let frame = emulator.frame()
     watchImages(frame.images.isEmpty ? nil : emulator)
     // Mouse mode can flip without a viewport change (e.g. vim entering or
     // leaving mouse tracking). Keep the surface's input path in sync either way.
     syncMouseModes(from: emulator)
-    guard frame.header.generation != lastRenderedGeneration else { return }
+    guard frame.header.generation != lastRenderedGeneration else { return false }
     lastRenderedGeneration = frame.header.generation
+    // Output or an animation frame: watch closely again.
+    watchDelay = Self.fastWatch
     if frame.header.altScreen != lastAltScreen {
       lastAltScreen = frame.header.altScreen
       currentGrid?.lastAltScreen = frame.header.altScreen
       eventSink.yield(.altScreen(frame.header.altScreen))
     }
     snapshotSink.yield(frame)
+    return true
   }
 
   private func syncMouseModes(from emulator: TerminalEngine) {

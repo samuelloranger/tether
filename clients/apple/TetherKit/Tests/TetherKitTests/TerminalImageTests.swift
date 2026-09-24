@@ -256,6 +256,27 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertTrue(advanced, "the animated image never changed")
   }
 
+  func test_a_still_image_is_watched_ever_more_slowly_and_output_speeds_it_up() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 20, rows: 5)
+    await pipeline.feedForTest(Data(kitty("a=T,f=32,s=2,v=2,q=2", solidRed).utf8))
+    for _ in 0..<6 { await pipeline.imageWatchTickForTest() }
+    var delay = await pipeline.imageWatchDelayForTest
+    XCTAssertEqual(delay, .seconds(1))
+    await pipeline.feedForTest(Data("x".utf8))
+    delay = await pipeline.imageWatchDelayForTest
+    XCTAssertEqual(delay, .milliseconds(50))
+  }
+
+  func test_disconnecting_stops_the_image_watch() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 20, rows: 5)
+    await pipeline.feedForTest(Data(kitty("a=T,f=32,s=2,v=2,q=2", solidRed).utf8))
+    await pipeline.disconnect()
+    let watching = await pipeline.isWatchingImagesForTest
+    XCTAssertFalse(watching)
+  }
+
   func test_the_pipeline_watches_the_frame_only_while_images_are_shown() async {
     let pipeline = TerminalPipeline()
     await pipeline.attachForTest(cols: 20, rows: 5)
