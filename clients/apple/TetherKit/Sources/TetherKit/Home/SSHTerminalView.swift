@@ -173,6 +173,7 @@ public struct SSHTerminalView: View {
           fontSize: preferences.terminalFontSize,
           onGridSizeChange: { controller.updateGrid(cols: $0, rows: $1) },
           onGridSizeSettled: { controller.updateGridServer(cols: $0, rows: $1) },
+          onCellPixelSize: { controller.updateCellPixelSize(width: $0, height: $1) },
           onScrollLines: { controller.scroll(lines: $0) },
           onTap: { focused = true },
           onSelectionText: { selectionText = $0 },

@@ -38,6 +38,7 @@ actor TerminalPipeline {
   private let outboundFrames: AsyncStream<OutboundFrame>
 
   private let sessionGrids = TerminalSessionGrids()
+  private var cellPixelSize: (width: Int, height: Int)?
   private var currentGrid: TerminalSessionGrid?
   private var emulator: TerminalEngine? { currentGrid?.emulator }
   private var outputBuffer: TerminalOutputBuffer { currentGrid?.buffer ?? TerminalOutputBuffer() }
@@ -72,6 +73,7 @@ actor TerminalPipeline {
     startOutboundPumpIfNeeded()
     let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
     currentGrid = attached.grid
+    if let cellPixelSize { attached.grid.emulator.setCellPixelSize(width: cellPixelSize.width, height: cellPixelSize.height) }
     emulatorKey = key
     lastRenderedGeneration = nil
     lastAltScreen = attached.grid.lastAltScreen
@@ -128,6 +130,11 @@ actor TerminalPipeline {
     guard lines != 0, let emulator else { return }
     emulator.scrollViewport(lines: lines)
     publishSnapshot()
+  }
+
+  func setCellPixelSize(width: Int, height: Int) {
+    cellPixelSize = (width, height)
+    emulator?.setCellPixelSize(width: width, height: height)
   }
 
   /// False when the shell marked no OSC 133 prompt in that direction.

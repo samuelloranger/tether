@@ -31,10 +31,15 @@ public struct TerminalFrame: Sendable, Equatable {
   public var cells: [GridSnapshot.Cell]
   /// OSC 8 hyperlinks per visible row; empty when the screen has none.
   public var hyperlinks: [[LinkSpan]]
+  public var images: TerminalImageLayer
 
-  public init(header: GridSnapshot.Header, cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]] = []) {
+  public init(
+    header: GridSnapshot.Header, cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]] = [],
+    images: TerminalImageLayer = .empty
+  ) {
     self.header = header
     self.cells = cells
     self.hyperlinks = hyperlinks
+    self.images = images
   }
 }

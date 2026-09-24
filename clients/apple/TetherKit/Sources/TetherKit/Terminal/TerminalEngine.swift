@@ -32,11 +32,13 @@ final class TerminalEngine {
     options.scrollback = scrollback
     // Default .base16Lab derives 16–255 from the theme; keep the xterm cube.
     options.ansi256PaletteStrategy = .xterm
+    // Sixel is parsed but never drawn; claiming it steers image tools away from kitty graphics.
+    options.enableSixelReported = false
     terminal = Terminal(delegate: delegate, options: options)
     TerminalPalette.install(on: terminal)
     palette = TerminalPalette.table(of: terminal)
     let grid = buildGrid()
-    cached = TerminalFrame(header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks)
+    cached = TerminalFrame(header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks, images: .empty)
     terminal.clearUpdateRange()
   }
 
@@ -63,6 +65,13 @@ final class TerminalEngine {
 
   /// Bits 3–5 of `hostPointerModes` are the report encoding; 2 is SGR (1006).
   var mouseSgr: Bool { locked { (terminal.hostPointerModes >> 3) & 0b111 == 2 } }
+
+  /// The device-pixel size of one cell, which kitty graphics uses to size placements and
+  /// answers pixel-size queries with.
+  func setCellPixelSize(width: Int, height: Int) {
+    guard width > 0, height > 0 else { return }
+    locked { delegate.cellPixelSize = (width, height) }
+  }
 
   func pastePayload(_ text: String) -> String {
     PastePayload.make(text, bracketed: bracketedPaste)
@@ -339,8 +348,12 @@ final class TerminalEngine {
     guard !terminal.synchronizedOutputActive else { return }
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
-    // OSC 4/104 repaint colors without touching the update range.
-    guard needsRefresh || stateChanged || delegate.paletteChanged || terminal.getUpdateRange() != nil
+    let images = TerminalImageLayer(terminal.kittyGraphicsRenderSnapshot())
+    let imagesChanged = images != cached.images
+    // OSC 4/104 repaint colors without touching the update range; a kitty placement or
+    // delete may not touch it either.
+    guard needsRefresh || stateChanged || imagesChanged || delegate.paletteChanged
+      || terminal.getUpdateRange() != nil
     else { return }
     needsRefresh = false
     if delegate.paletteChanged {
@@ -349,12 +362,12 @@ final class TerminalEngine {
     }
     terminal.clearUpdateRange()
     let grid = buildGrid()
-    if stateChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks {
+    if stateChanged || imagesChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks {
       generationCounter &+= 1
     }
     var stamped = header
     stamped.generation = generationCounter
-    cached = TerminalFrame(header: stamped, cells: grid.cells, hyperlinks: grid.hyperlinks)
+    cached = TerminalFrame(header: stamped, cells: grid.cells, hyperlinks: grid.hyperlinks, images: images)
   }
 
   private static func sameState(_ lhs: GridSnapshot.Header, _ rhs: GridSnapshot.Header) -> Bool {
@@ -486,6 +499,9 @@ private final class EngineDelegate: TerminalDelegate {
   var cursorVisible = true
   var paletteChanged = false
   var replies: [UInt8] = []
+  var cellPixelSize: (width: Int, height: Int)?
+
+  func cellSizeInPixels(source: Terminal) -> (width: Int, height: Int)? { cellPixelSize }
 
   func send(source: Terminal, data: ArraySlice<UInt8>) {
     replies.append(contentsOf: data)
