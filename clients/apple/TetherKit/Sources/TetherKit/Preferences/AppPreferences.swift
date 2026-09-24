@@ -27,32 +27,6 @@ public final class AppPreferences {
     }
   }
 
-  public enum TerminalFont: String, CaseIterable, Identifiable, Sendable {
-    case menlo = "Menlo"
-    case sfMono = "SF Mono"
-    case courier = "Courier New"
-
-    public var id: String { rawValue }
-
-    public var label: String {
-      switch self {
-      case .menlo: "Menlo"
-      case .sfMono: "SF Mono"
-      case .courier: "Courier"
-      }
-    }
-
-    /// `UIFont(name:)` resolves PostScript names, not display names — passing
-    /// "SF Mono" silently falls back to the system font.
-    public var postScriptName: String {
-      switch self {
-      case .menlo: "Menlo-Regular"
-      case .sfMono: "SFMono-Regular"
-      case .courier: "CourierNewPSMT"
-      }
-    }
-  }
-
   private enum Key {
     static let colorScheme = "tether.colorScheme"
     static let terminalFont = "tether.terminalFont"
@@ -66,10 +40,16 @@ public final class AppPreferences {
     }
   }
 
-  public var terminalFont: TerminalFont {
+  public var terminalFontID: String {
     didSet {
-      UserDefaults.standard.set(terminalFont.rawValue, forKey: Key.terminalFont)
+      UserDefaults.standard.set(terminalFontID, forKey: Key.terminalFont)
     }
+  }
+
+  /// An id no longer offered falls back to Menlo.
+  public var terminalFont: TerminalFont {
+    get { TerminalFont.named(terminalFontID) }
+    set { terminalFontID = newValue.id }
   }
 
   public var terminalFontSize: Double {
@@ -95,7 +75,8 @@ public final class AppPreferences {
     colorSchemePreference = ColorSchemePreference(
       rawValue: defaults.string(forKey: Key.colorScheme) ?? ""
     ) ?? .dark
-    terminalFont = TerminalFont(rawValue: defaults.string(forKey: Key.terminalFont) ?? "") ?? .menlo
+    terminalFontID = defaults.string(forKey: Key.terminalFont) ?? TerminalFont.menlo.id
+    TerminalFonts.registerBundledFonts()
     let size = defaults.double(forKey: Key.terminalFontSize)
     terminalFontSize = size > 0 ? size : 11
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
