@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><radialGradient id="paper-bg" cx="26%" cy="22%" r="95%"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7E2D6"/></radialGradient>
+<linearGradient id="cur-paper" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6D6AF5"/><stop offset="1" stop-color="#4338CA"/></linearGradient>
+<filter id="paper-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="0"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#paper-bg)"/>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#1F2937" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-paper)"/>
+</svg>

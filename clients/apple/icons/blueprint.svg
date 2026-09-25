@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><radialGradient id="blueprint-bg" cx="26%" cy="22%" r="95%"><stop offset="0" stop-color="#1D5BB8"/><stop offset="1" stop-color="#0A2D66"/></radialGradient><pattern id="blueprint-grid" width="64" height="64" patternUnits="userSpaceOnUse"><path d="M64 0H0V64" fill="none" stroke="#FFFFFF" stroke-width="3" opacity="0.12"/></pattern>
+<linearGradient id="cur-blueprint" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE8FF"/></linearGradient>
+<filter id="blueprint-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="0"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#blueprint-bg)"/>
+<rect width="1024" height="1024" fill="url(#blueprint-grid)"/>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#FFFFFF" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><path d="M357 392L475 511L357 632" fill="none" stroke="#0F3F8C" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/><rect x="597" y="367" width="96" height="290" rx="18" fill="none" stroke="url(#cur-blueprint)" stroke-width="30"/>
+</svg>
