@@ -71,6 +71,15 @@ struct TerminalSettingsSheet: View {
           }
         }
         Section {
+          NavigationLink {
+            KeyBarEditor(preferences: preferences)
+          } label: {
+            HStack {
+              Text("Key bar")
+              Spacer()
+              Text("\(preferences.keyBar.items.count) keys").foregroundStyle(.secondary)
+            }
+          }
           Picker("Bell", selection: $preferences.bellMode) {
             ForEach(BellMode.allCases) { Text($0.label).tag($0) }
           }

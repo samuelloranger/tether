@@ -203,6 +203,7 @@ public struct SSHTerminalView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .onChange(of: controller.bellRings) { ringBell() }
+      .onChange(of: preferences.keyBar, initial: true) { accessory.layout = preferences.keyBar }
       TerminalInputBridge(
         accessory: AnyView(
           TerminalAccessoryBar(
@@ -449,14 +450,17 @@ public struct SSHTerminalView: View {
     setDrawer(open: false)
   }
 
-  /// Folds a latched Ctrl into typed input so the keyboard can produce Ctrl+C etc.
+  /// Folds latched Ctrl/Alt into typed input so the keyboard can produce Ctrl+C, Alt+B etc.
   private func submit(_ text: String) {
-    if accessory.ctrlArmed, let folded = TerminalKeyMap.ctrlFolded(text) {
-      accessory.ctrlArmed = false
-      controller.sendInput(folded)
+    let ctrl = accessory.ctrlArmed && TerminalKeyMap.ctrlFolded(text) != nil
+    let alt = accessory.altArmed && text.count == 1
+    guard ctrl || alt else {
+      controller.sendInput(text)
       return
     }
-    controller.sendInput(text)
+    if ctrl { accessory.ctrlArmed = false }
+    if alt { accessory.altArmed = false }
+    controller.sendInput(TerminalKeyMap.modified(text, ctrl: ctrl, alt: alt))
   }
 
   private func nextSessionName() -> String {

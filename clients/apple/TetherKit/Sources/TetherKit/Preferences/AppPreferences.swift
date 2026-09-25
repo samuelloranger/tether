@@ -36,6 +36,7 @@ public final class AppPreferences {
     static let cursorShape = "tether.cursorShape"
     static let cursorBlink = "tether.cursorBlink"
     static let bellMode = "tether.bellMode"
+    static let keyBar = "tether.keyBar"
     static let terminalTheme = "tether.terminalTheme"
     static let downloadedFonts = "tether.downloadedFonts"
   }
@@ -158,6 +159,12 @@ public final class AppPreferences {
     }
   }
 
+  public var keyBar: KeyBarLayout {
+    didSet {
+      UserDefaults.standard.set(keyBar.encoded(), forKey: Key.keyBar)
+    }
+  }
+
   public var terminalCursorStyle: TerminalCursorStyle {
     TerminalCursorStyle(shape: cursorShape, blink: cursorBlink)
   }
@@ -207,6 +214,7 @@ public final class AppPreferences {
     cursorShape = TerminalCursorStyle.Shape(rawValue: defaults.string(forKey: Key.cursorShape) ?? "") ?? .block
     cursorBlink = defaults.bool(forKey: Key.cursorBlink)
     bellMode = BellMode(rawValue: defaults.string(forKey: Key.bellMode) ?? "") ?? .off
+    keyBar = defaults.data(forKey: Key.keyBar).flatMap(KeyBarLayout.decode) ?? .default
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
   }
 }
