@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><linearGradient id="ocean-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0B3A5B"/><stop offset="1" stop-color="#020E18"/></linearGradient>
+<linearGradient id="cur-ocean" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7DD3FC"/><stop offset="1" stop-color="#0EA5E9"/></linearGradient>
+<filter id="ocean-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#ocean-bg)"/>
+<g filter="url(#ocean-glow)" opacity="0.75"><path d="M357 392L475 511L357 632" fill="none" stroke="#5EEAD4" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-ocean)"/></g>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#5EEAD4" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-ocean)"/>
+</svg>

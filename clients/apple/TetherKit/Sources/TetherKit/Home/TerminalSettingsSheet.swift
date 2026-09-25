@@ -4,6 +4,7 @@ import SwiftUI
 struct TerminalSettingsSheet: View {
   @Bindable var preferences: AppPreferences
   var onDone: () -> Void
+  @State private var appIcon = AppIconChoice.primary
 
   var body: some View {
     NavigationStack {
@@ -13,6 +14,15 @@ struct TerminalSettingsSheet: View {
             ForEach(AppPreferences.ColorSchemePreference.allCases) { Text($0.label).tag($0) }
           }
           .pickerStyle(.segmented)
+          NavigationLink {
+            AppIconPicker(current: $appIcon)
+          } label: {
+            HStack {
+              Text("App icon")
+              Spacer()
+              Text(appIcon.name).foregroundStyle(.secondary)
+            }
+          }
         }
         Section("Terminal") {
           NavigationLink {
@@ -89,6 +99,7 @@ struct TerminalSettingsSheet: View {
           Text("The bell is what a program rings when it wants your attention. Only the session on screen rings.")
         }
       }
+      .onAppear { appIcon = .current(alternateName: UIApplication.shared.alternateIconName) }
       .navigationTitle("Settings")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: onDone) } }

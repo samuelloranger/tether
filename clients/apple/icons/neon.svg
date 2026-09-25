@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><radialGradient id="neon-bg" cx="26%" cy="22%" r="95%"><stop offset="0" stop-color="#15101F"/><stop offset="1" stop-color="#030206"/></radialGradient>
+<linearGradient id="cur-neon" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3EF3FF"/><stop offset="1" stop-color="#3EF3FF"/></linearGradient>
+<filter id="neon-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="20"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#neon-bg)"/>
+<g filter="url(#neon-glow)" opacity="1"><path d="M357 392L475 511L357 632" fill="none" stroke="#FF3EA5" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><path d="M357 392L475 511L357 632" fill="none" stroke="#07050C" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/><rect x="597" y="367" width="96" height="290" rx="18" fill="none" stroke="url(#cur-neon)" stroke-width="30"/></g>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#FF3EA5" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><path d="M357 392L475 511L357 632" fill="none" stroke="#07050C" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/><rect x="597" y="367" width="96" height="290" rx="18" fill="none" stroke="url(#cur-neon)" stroke-width="30"/>
+</svg>

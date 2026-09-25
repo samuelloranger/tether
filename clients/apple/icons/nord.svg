@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><radialGradient id="nord-bg" cx="26%" cy="22%" r="95%"><stop offset="0" stop-color="#3B4252"/><stop offset="1" stop-color="#232831"/></radialGradient>
+<linearGradient id="cur-nord" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A3BE8C"/><stop offset="1" stop-color="#8FBCBB"/></linearGradient>
+<filter id="nord-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#nord-bg)"/>
+<g filter="url(#nord-glow)" opacity="0.6"><path d="M357 392L475 511L357 632" fill="none" stroke="#88C0D0" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-nord)"/></g>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#88C0D0" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-nord)"/>
+</svg>

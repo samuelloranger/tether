@@ -422,6 +422,7 @@
 		B10000000000000000000072 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-amber AppIcon-aurora AppIcon-blueprint AppIcon-dracula AppIcon-ember AppIcon-gold AppIcon-mocha AppIcon-mono AppIcon-neon AppIcon-nord AppIcon-ocean AppIcon-paper AppIcon-phosphor AppIcon-pride AppIcon-rose AppIcon-solarized AppIcon-synthwave";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TetherIOS/TetherIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -448,6 +449,7 @@
 		B10000000000000000000073 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-amber AppIcon-aurora AppIcon-blueprint AppIcon-dracula AppIcon-ember AppIcon-gold AppIcon-mocha AppIcon-mono AppIcon-neon AppIcon-nord AppIcon-ocean AppIcon-paper AppIcon-phosphor AppIcon-pride AppIcon-rose AppIcon-solarized AppIcon-synthwave";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TetherIOS/TetherIOSRelease.entitlements;
 				CODE_SIGN_STYLE = Automatic;

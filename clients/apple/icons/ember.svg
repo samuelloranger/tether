@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><radialGradient id="ember-bg" cx="26%" cy="22%" r="95%"><stop offset="0" stop-color="#3B1409"/><stop offset="1" stop-color="#100403"/></radialGradient>
+<linearGradient id="cur-ember" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD166"/><stop offset="1" stop-color="#F97316"/></linearGradient>
+<filter id="ember-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="18"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#ember-bg)"/>
+<g filter="url(#ember-glow)" opacity="0.75"><path d="M357 392L475 511L357 632" fill="none" stroke="#FF7A45" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-ember)"/></g>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#FF7A45" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-ember)"/>
+</svg>

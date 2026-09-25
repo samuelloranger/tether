@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><radialGradient id="rose-bg" cx="26%" cy="22%" r="95%"><stop offset="0" stop-color="#26233A"/><stop offset="1" stop-color="#12101C"/></radialGradient>
+<linearGradient id="cur-rose" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EBBCBA"/><stop offset="1" stop-color="#C4A7E7"/></linearGradient>
+<filter id="rose-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#rose-bg)"/>
+<g filter="url(#rose-glow)" opacity="0.75"><path d="M357 392L475 511L357 632" fill="none" stroke="#9CCFD8" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-rose)"/></g>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#9CCFD8" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-rose)"/>
+</svg>

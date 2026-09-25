@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><radialGradient id="amber-bg" cx="26%" cy="22%" r="95%"><stop offset="0" stop-color="#2A1703"/><stop offset="1" stop-color="#0B0601"/></radialGradient><pattern id="amber-scan" width="1024" height="12" patternUnits="userSpaceOnUse"><rect width="1024" height="5" fill="#000" opacity="0.35"/></pattern>
+<linearGradient id="cur-amber" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFC94D"/><stop offset="1" stop-color="#F59E0B"/></linearGradient>
+<filter id="amber-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="26"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#amber-bg)"/>
+<rect width="1024" height="1024" fill="url(#amber-scan)"/>
+<g filter="url(#amber-glow)" opacity="0.9"><path d="M357 392L475 511L357 632" fill="none" stroke="#FFB000" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-amber)"/></g>
+<path d="M357 392L475 511L357 632" fill="none" stroke="#FFB000" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/><rect x="582" y="352" width="126" height="320" rx="28" fill="url(#cur-amber)"/>
+</svg>
