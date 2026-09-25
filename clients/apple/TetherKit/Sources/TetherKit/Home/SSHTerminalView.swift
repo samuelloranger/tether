@@ -28,6 +28,8 @@ public struct SSHTerminalView: View {
   @State private var photoItem: PhotosPickerItem?
   @State private var showCopyConfirmation = false
   @State private var promptNotice: String?
+  /// Bumped per bell that should flash; drives the flash's keyframes.
+  @State private var bellFlashes = 0
   @Environment(\.scenePhase) private var scenePhase
   @State private var backgroundDetach = BackgroundDetach()
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -197,8 +199,10 @@ public struct SSHTerminalView: View {
         .onChange(of: preferences.terminalTheme.id) { controller.requestTheme(preferences.terminalTheme) }
         statusOverlay
         emptyStateOverlay
+        bellFlashOverlay
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .onChange(of: controller.bellRings) { ringBell() }
       TerminalInputBridge(
         accessory: AnyView(
           TerminalAccessoryBar(
@@ -572,6 +576,27 @@ public struct SSHTerminalView: View {
       .padding(.bottom, 24).padding(.horizontal, 16)
       .shadow(radius: 8, y: 2)
       .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+  }
+
+  private static let bellHaptic = UIImpactFeedbackGenerator(style: .medium)
+
+  private func ringBell() {
+    let mode = preferences.bellMode
+    if mode.haptic { Self.bellHaptic.impactOccurred() }
+    if mode.flash { bellFlashes += 1 }
+  }
+
+  private var bellFlashOverlay: some View {
+    let peak = reduceMotion ? 0.08 : 0.18
+    return Color(uiColor: TerminalTheme.uiColor(preferences.terminalTheme.foreground))
+      .keyframeAnimator(initialValue: 0.0, trigger: bellFlashes) { flash, opacity in
+        flash.opacity(opacity)
+      } keyframes: { _ in
+        LinearKeyframe(peak, duration: 0.02)
+        LinearKeyframe(0, duration: reduceMotion ? 0.3 : 0.15)
+      }
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
   }
 
   /// One overlay for every not-connected state. The copy comes from the controller so

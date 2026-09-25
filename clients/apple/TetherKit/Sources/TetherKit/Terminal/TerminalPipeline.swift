@@ -5,6 +5,8 @@ public enum TerminalPipelineEvent: Sendable {
   case mouseModes(mode: MouseMode, sgr: Bool)
   /// A full-screen program took or left the screen: a typed command may not reach a shell.
   case altScreen(Bool)
+  /// Live output rang the terminal bell. Never sent for replayed output.
+  case bell
   case error(String)
 }
 
@@ -324,6 +326,7 @@ actor TerminalPipeline {
       if !replies.isEmpty {
         outbound.yield(.reply(Data(replies), key: emulatorKey))
       }
+      if emulator.takeBells() > 0 { eventSink.yield(.bell) }
     }
     publishSnapshot()
   }

@@ -35,6 +35,7 @@ public final class AppPreferences {
     static let terminalPadding = "tether.terminalPadding"
     static let cursorShape = "tether.cursorShape"
     static let cursorBlink = "tether.cursorBlink"
+    static let bellMode = "tether.bellMode"
     static let terminalTheme = "tether.terminalTheme"
     static let downloadedFonts = "tether.downloadedFonts"
   }
@@ -151,6 +152,12 @@ public final class AppPreferences {
     }
   }
 
+  public var bellMode: BellMode {
+    didSet {
+      UserDefaults.standard.set(bellMode.rawValue, forKey: Key.bellMode)
+    }
+  }
+
   public var terminalCursorStyle: TerminalCursorStyle {
     TerminalCursorStyle(shape: cursorShape, blink: cursorBlink)
   }
@@ -199,6 +206,7 @@ public final class AppPreferences {
       : TerminalGridInset.clampedPadding(defaults.double(forKey: Key.terminalPadding))
     cursorShape = TerminalCursorStyle.Shape(rawValue: defaults.string(forKey: Key.cursorShape) ?? "") ?? .block
     cursorBlink = defaults.bool(forKey: Key.cursorBlink)
+    bellMode = BellMode(rawValue: defaults.string(forKey: Key.bellMode) ?? "") ?? .off
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
   }
 }

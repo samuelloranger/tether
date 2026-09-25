@@ -173,6 +173,18 @@ final class TerminalEngine {
     locked { delegate.replies.removeAll() }
   }
 
+  /// BEL characters executed since the last call. A BEL that ends an OSC is not one.
+  func takeBells() -> Int {
+    locked {
+      defer { delegate.bells = 0 }
+      return delegate.bells
+    }
+  }
+
+  func discardBells() {
+    locked { delegate.bells = 0 }
+  }
+
   func feed(_ bytes: Data) {
     guard !bytes.isEmpty else { return }
     locked { feedLocked(bytes) }
@@ -596,6 +608,7 @@ private final class EngineDelegate: TerminalDelegate {
   var cursorVisible = true
   var paletteChanged = false
   var replies: [UInt8] = []
+  var bells = 0
   var cellPixelSize: (width: Int, height: Int)?
 
   func cellSizeInPixels(source: Terminal) -> (width: Int, height: Int)? { cellPixelSize }
@@ -607,4 +620,5 @@ private final class EngineDelegate: TerminalDelegate {
   func showCursor(source: Terminal) { cursorVisible = true }
   func hideCursor(source: Terminal) { cursorVisible = false }
   func colorChanged(source: Terminal, idx: Int?) { paletteChanged = true }
+  func bell(source: Terminal) { bells += 1 }
 }

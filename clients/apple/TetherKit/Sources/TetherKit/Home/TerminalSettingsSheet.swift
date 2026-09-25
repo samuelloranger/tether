@@ -70,6 +70,15 @@ struct TerminalSettingsSheet: View {
             TerminalSettingsPreview(preferences: preferences)
           }
         }
+        Section {
+          Picker("Bell", selection: $preferences.bellMode) {
+            ForEach(BellMode.allCases) { Text($0.label).tag($0) }
+          }
+        } header: {
+          Text("Keyboard")
+        } footer: {
+          Text("The bell is what a program rings when it wants your attention. Only the session on screen rings.")
+        }
       }
       .navigationTitle("Settings")
       .navigationBarTitleDisplayMode(.inline)

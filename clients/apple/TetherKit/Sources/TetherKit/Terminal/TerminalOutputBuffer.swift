@@ -29,6 +29,8 @@ final class TerminalOutputBuffer {
     if !data.isEmpty {
       engine.feed(data)
       engine.discardReplies()
+      // Replayed output rang its bells when it first arrived.
+      engine.discardBells()
     }
     return engine
   }

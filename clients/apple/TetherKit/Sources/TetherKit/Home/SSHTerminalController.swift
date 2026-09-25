@@ -104,6 +104,11 @@ public final class SSHTerminalController {
   public private(set) var status: Status = .connecting
   public private(set) var mouseMode: MouseMode = .off
   public private(set) var mouseSgr = true
+  /// Bumped each time the bell rings, at most once per throttle window.
+  public private(set) var bellRings = 0
+  @ObservationIgnored private var bellThrottle = BellThrottle()
+  /// A bell that arrives in the background grace period would otherwise buzz on return.
+  @ObservationIgnored var appIsActive: @MainActor () -> Bool = { UIApplication.shared.applicationState == .active }
   public let title: String
   public private(set) var sessionKey: String
   public private(set) var sessions: [ZmxSession] = []
@@ -832,6 +837,9 @@ public final class SSHTerminalController {
       // The pipeline needs it for resize; a switch no longer does — an inline
       // CLI agent holds the keyboard without ever taking the alt-screen.
       break
+    case .bell:
+      guard appIsActive(), bellThrottle.shouldRing(at: ProcessInfo.processInfo.systemUptime) else { return }
+      bellRings += 1
     case .error:
       markDisconnectedAndReconnect()
     }
