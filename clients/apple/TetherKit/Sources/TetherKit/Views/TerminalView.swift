@@ -6,6 +6,9 @@ import UIKit
 @Observable
 public final class TerminalAccessoryModel {
   public var ctrlArmed = false
+  public var altArmed = false
+  /// The keys the bar shows, in order.
+  public var layout = KeyBarLayout.default
   /// Drives the bar's own slide-out — UIKit's dismissal only travels the bar's
   /// height (a short hop); this carries it fully off the bottom first.
   public var visible = true
@@ -47,22 +50,15 @@ public struct TerminalAccessoryBar: View {
   /// Derived from key + padding so it cannot drift from the row's layout again.
   public static let barHeight: CGFloat = keySize + barVerticalPadding * 2
 
-  /// No arrow keys: the D-pad is one key covering all four directions.
   public var body: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
-        ctrlButton
-        accessoryButton("Tab") { send(base: "\t") }
-        accessoryButton("Esc") { onKey("\u{1B}") }
-        slashKey
-        DpadView(size: CGSize(width: Self.keyWidth, height: Self.keySize), onArrow: onArrow)
-        pasteButton
-        accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
-        accessoryButton("Del") { onKey("\u{1B}[3~") }
-        accessoryButton("Home") { send(base: "\u{1B}[H") }
-        accessoryButton("End") { send(base: "\u{1B}[F") }
-        accessoryButton("PgUp") { onKey("\u{1B}[5~") }
-        accessoryButton("PgDn") { onKey("\u{1B}[6~") }
+        ForEach(model.layout.items) { item in
+          switch item {
+          case let .builtIn(key): builtInKey(key)
+          case let .macro(macro): macroKey(macro)
+          }
+        }
       }
       .padding(.horizontal, 12)
       .padding(.vertical, Self.barVerticalPadding)
@@ -119,6 +115,60 @@ public struct TerminalAccessoryBar: View {
   /// so it gets its own haptic confirmation.
   private static let armFeedback = UISelectionFeedbackGenerator()
 
+  @ViewBuilder
+  private func builtInKey(_ key: BuiltInKey) -> some View {
+    switch key {
+    case .ctrl: ctrlButton
+    case .alt: altButton
+    case .slash: slashKey
+    case .dpad: DpadView(size: CGSize(width: Self.keyWidth, height: Self.keySize), onArrow: arrow)
+    case .paste: pasteButton
+    case .hide: accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
+    case .fn: fnKey
+    default:
+      accessoryButton(key.label) {
+        guard let bytes = key.bytes else { return }
+        if key.takesModifiers { send(base: bytes) } else { onKey(bytes) }
+      }
+    }
+  }
+
+  /// Sent as-is: armed modifiers are dropped rather than applied to a whole string.
+  private func macroKey(_ macro: MacroKey) -> some View {
+    accessoryButton(macro.label) {
+      model.ctrlArmed = false
+      model.altArmed = false
+      onKey(MacroText.bytes(from: macro.text))
+    }
+    .accessibilityHint(MacroText.visible(MacroText.bytes(from: macro.text)))
+  }
+
+  private var altButton: some View {
+    Button {
+      Self.armFeedback.selectionChanged()
+      model.altArmed.toggle()
+    } label: {
+      Text("Alt")
+    }
+    .buttonStyle(TerminalKeyStyle(armed: model.altArmed))
+    .accessibilityLabel("Alt modifier")
+    .accessibilityValue(model.altArmed ? "Armed" : "Off")
+  }
+
+  private var fnKey: some View {
+    Menu {
+      ForEach(BuiltInKey.functionKeys, id: \.label) { key in
+        Button(key.label) { send(base: key.bytes) }
+      }
+    } label: {
+      Text("Fn")
+    }
+    .menuStyle(.button)
+    .buttonStyle(TerminalKeyStyle())
+    .menuIndicator(.hidden)
+    .accessibilityLabel("Function keys")
+  }
+
   private var ctrlButton: some View {
     Button {
       Self.armFeedback.selectionChanged()
@@ -163,13 +213,17 @@ public struct TerminalAccessoryBar: View {
     .buttonStyle(TerminalKeyStyle())
   }
 
+  /// An armed modifier applies to one arrow, not to the repeats that follow while the pad is held.
+  private func arrow(_ direction: DPadDirection) {
+    guard model.ctrlArmed || model.altArmed else { return onArrow(direction) }
+    send(base: direction.escapeSequence)
+  }
+
   private func send(base: String) {
-    guard model.ctrlArmed else {
-      onKey(base)
-      return
-    }
+    let bytes = TerminalKeyMap.modified(base, ctrl: model.ctrlArmed, alt: model.altArmed)
     model.ctrlArmed = false
-    onKey(TerminalKeyMap.ctrlModified(base))
+    model.altArmed = false
+    onKey(bytes)
   }
 }
 
@@ -329,11 +383,24 @@ enum TerminalKeyMap {
     return "\u{1B}" + String(ch)
   }
 
-  /// Applies the Ctrl latch to an accessory-bar key. A CSI sequence carries its modifier
-  /// as a parameter — masking the final byte instead made Ctrl+Left 0x04 (EOF) and killed the shell.
-  static func ctrlModified(_ sequence: String) -> String {
-    guard sequence.hasPrefix("\u{1B}["), let final = sequence.last else { return sequence }
-    return "\u{1B}[1;5\(final)"
+  /// Applies the Ctrl and Alt latches to an accessory-bar key. A CSI sequence takes them as
+  /// its modifier parameter — masking the final byte instead made Ctrl+Left 0x04 (EOF) and
+  /// killed the shell. A printable character is folded (Ctrl) and prefixed with Esc (Alt).
+  static func modified(_ base: String, ctrl: Bool, alt: Bool) -> String {
+    guard ctrl || alt else { return base }
+    let mod = 1 + (alt ? 2 : 0) + (ctrl ? 4 : 0)
+    // SS3 keys (F1–F4) take their modifier in CSI form, as xterm sends them.
+    if base.hasPrefix("\u{1B}O"), base.count == 3, let final = base.last {
+      return "\u{1B}[1;\(mod)\(final)"
+    }
+    if base.hasPrefix("\u{1B}["), let final = base.last {
+      let number = base.dropFirst(2).dropLast()
+      if final == "~", !number.isEmpty { return "\u{1B}[\(number);\(mod)~" }
+      return "\u{1B}[1;\(mod)\(final)"
+    }
+    guard base.count == 1 else { return base }
+    let folded = ctrl ? ctrlFolded(base) ?? base : base
+    return alt ? "\u{1B}" + folded : folded
   }
 
   /// Folds a latched Ctrl into the next typed character. Only printable ASCII has
