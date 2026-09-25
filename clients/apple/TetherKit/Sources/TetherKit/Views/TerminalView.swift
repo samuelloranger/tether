@@ -7,6 +7,8 @@ import UIKit
 public final class TerminalAccessoryModel {
   public var ctrlArmed = false
   public var altArmed = false
+  /// Smaller keys, so more of the bar fits on screen.
+  public var compact = false
   /// The keys the bar shows, in order.
   public var layout = KeyBarLayout.default
   /// Drives the bar's own slide-out — UIKit's dismissal only travels the bar's
@@ -41,14 +43,7 @@ public struct TerminalAccessoryBar: View {
     self.onHideKeyboard = onHideKeyboard
   }
 
-  /// Every key in the bar is this size, the D-pad included — a key that is larger
-  /// than its neighbours reads as a different kind of thing. Width fits "Home"/"PgDn".
-  static let keySize: CGFloat = 40
-  static let keyWidth: CGFloat = 52
-  static let barVerticalPadding: CGFloat = 8
-  /// First-frame fallback before GeometryReader reports the real docked height.
-  /// Derived from key + padding so it cannot drift from the row's layout again.
-  public static let barHeight: CGFloat = keySize + barVerticalPadding * 2
+  private var metrics: TerminalKeyMetrics { model.compact ? .compact : .regular }
 
   public var body: some View {
     ScrollView(.horizontal, showsIndicators: false) {
@@ -61,7 +56,8 @@ public struct TerminalAccessoryBar: View {
         }
       }
       .padding(.horizontal, 12)
-      .padding(.vertical, Self.barVerticalPadding)
+      .padding(.vertical, metrics.barVerticalPadding)
+      .environment(\.terminalKeyMetrics, metrics)
     }
     // Confine the material to its bounds: the default .all bled into the indicator
     // strip and the bar read half again as tall.
@@ -77,7 +73,7 @@ public struct TerminalAccessoryBar: View {
     )
     // Slide the whole row clear of the bottom edge, not just UIKit's own-height
     // nudge. Reduce Motion keeps the fade and drops the travel.
-    .offset(y: model.visible || reduceMotion ? 0 : Self.keySize * 2.4)
+    .offset(y: model.visible || reduceMotion ? 0 : metrics.keySize * 2.4)
     .opacity(model.visible ? 1 : 0)
     .animation(
       TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion),
@@ -108,7 +104,7 @@ public struct TerminalAccessoryBar: View {
 
   private var pasteButton: some View {
     TerminalPasteKey(onPaste: onPaste)
-      .frame(width: Self.keyWidth, height: Self.keySize)
+      .frame(width: metrics.keyWidth, height: metrics.keySize)
   }
 
   /// Arming Ctrl changes what the next key does with nothing else moving on screen,
@@ -121,7 +117,7 @@ public struct TerminalAccessoryBar: View {
     case .ctrl: ctrlButton
     case .alt: altButton
     case .slash: slashKey
-    case .dpad: DpadView(size: CGSize(width: Self.keyWidth, height: Self.keySize), onArrow: arrow)
+    case .dpad: DpadView(size: CGSize(width: metrics.keyWidth, height: metrics.keySize), onArrow: arrow)
     case .paste: pasteButton
     case .hide: accessoryButton("Hide", systemImage: "keyboard.chevron.compact.down", action: onHideKeyboard)
     case .fn: fnKey
@@ -233,17 +229,20 @@ public struct TerminalInputBridge: UIViewRepresentable {
   /// Gate the ACCESSORY, never the bridge's existence: a `.focused()` view that
   /// appears and disappears makes SwiftUI and UIKit focus machinery loop at 100% CPU.
   public var showsAccessory: Bool = true
+  public var compactAccessory = false
   public var onSubmitBytes: (String) -> Void
   public var isFocused: Binding<Bool>
 
   public init(
     accessory: AnyView,
     showsAccessory: Bool = true,
+    compactAccessory: Bool = false,
     onSubmitBytes: @escaping (String) -> Void,
     isFocused: Binding<Bool>
   ) {
     self.accessory = accessory
     self.showsAccessory = showsAccessory
+    self.compactAccessory = compactAccessory
     self.onSubmitBytes = onSubmitBytes
     self.isFocused = isFocused
   }
@@ -275,6 +274,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     view.isAccessibilityElement = true
     view.accessoryHosting.rootView = accessory
     view.showsAccessory = showsAccessory
+    view.compactAccessory = compactAccessory
     Self.wire(view, onSubmitBytes: onSubmitBytes)
     view.refillFiller()
     return view
@@ -283,6 +283,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
   public func updateUIView(_ uiView: TerminalInputTextView, context: Context) {
     // rootView is set once in makeUIView. Reassigning it here is what made
     // reloadInputViews() rebuild SwiftUI inside a SwiftUI update.
+    uiView.compactAccessory = compactAccessory
     if uiView.showsAccessory != showsAccessory {
       uiView.showsAccessory = showsAccessory
       uiView.reloadInputViews()
@@ -537,17 +538,35 @@ public final class TerminalInputTextView: UITextView {
   /// Configured once, not on every getter call — UIKit asks for the accessory often.
   private lazy var accessoryContainer: UIView = {
     let view = accessoryHosting.view!
-    // Ask the bar its height rather than asserting 52pt: a fixed assertion clipped
-    // 4pt off the row and reserved the wrong amount of terminal.
+    view.frame.size.height = fittedAccessoryHeight(view)
+    view.backgroundColor = .clear
+    return view
+  }()
+
+  /// Ask the bar its height rather than asserting 52pt: a fixed assertion clipped
+  /// 4pt off the row and reserved the wrong amount of terminal.
+  private func fittedAccessoryHeight(_ view: UIView) -> CGFloat {
     let width = view.window?.bounds.width
       ?? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width
       ?? 390
     let fitted = accessoryHosting.sizeThatFits(
       in: CGSize(width: width, height: .greatestFiniteMagnitude))
-    view.frame.size.height = fitted.height > 0 ? fitted.height : TerminalAccessoryBar.barHeight
-    view.backgroundColor = .clear
-    return view
-  }()
+    guard fitted.height <= 0 else { return fitted.height }
+    return (compactAccessory ? TerminalKeyMetrics.compact : .regular).barHeight
+  }
+
+  /// The container keeps the height it was first measured at, so a key-size change
+  /// re-measures it — after the next pass, once the hosted bar has laid out at the new size.
+  var compactAccessory = false {
+    didSet {
+      guard compactAccessory != oldValue else { return }
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        self.accessoryContainer.frame.size.height = self.fittedAccessoryHeight(self.accessoryContainer)
+        if self.isFirstResponder { self.reloadInputViews() }
+      }
+    }
+  }
 
 
   private var assignedAccessoryView: UIView?

@@ -90,6 +90,10 @@ struct TerminalSettingsSheet: View {
               Text("\(preferences.keyBar.items.count) keys").foregroundStyle(.secondary)
             }
           }
+          Picker("Key size", selection: $preferences.compactKeys) {
+            Text("Regular").tag(false)
+            Text("Compact").tag(true)
+          }
           Picker("Bell", selection: $preferences.bellMode) {
             ForEach(BellMode.allCases) { Text($0.label).tag($0) }
           }
