@@ -392,6 +392,10 @@ public final class TerminalInputTextView: UITextView {
   /// `hasText`; this view's text is always empty, so claim text unconditionally.
   public override var hasText: Bool { true }
 
+  /// The document is filler, so there is nothing to undo. Without this, shaking the
+  /// phone offers "Undo Typing" over the terminal.
+  public override var undoManager: UndoManager? { nil }
+
   /// Invisible filler so the delete key always has something to consume: holding it
   /// auto-repeats only while each press shortens the document.
   private static let filler = "\u{00A0}"
