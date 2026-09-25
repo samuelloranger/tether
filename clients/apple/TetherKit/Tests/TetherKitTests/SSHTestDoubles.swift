@@ -125,14 +125,29 @@ final class ScriptedByteStream: TerminalByteStream, @unchecked Sendable {
   private let lock = NSLock()
   private var isClosed = false
   private var waiter: CheckedContinuation<Data?, Never>?
+  private var queued: [Data] = []
 
   var closed: Bool { lock.lock(); defer { lock.unlock() }; return isClosed }
 
   func read() async throws -> Data? {
     await withCheckedContinuation { continuation in
       lock.lock()
+      if !queued.isEmpty { let next = queued.removeFirst(); lock.unlock(); continuation.resume(returning: next); return }
       if isClosed { lock.unlock(); continuation.resume(returning: nil); return }
       waiter = continuation
+      lock.unlock()
+    }
+  }
+
+  /// Output from the "host": handed to a waiting read, or queued for the next one.
+  func push(_ bytes: Data) {
+    lock.lock()
+    if let pending = waiter {
+      waiter = nil
+      lock.unlock()
+      pending.resume(returning: bytes)
+    } else {
+      queued.append(bytes)
       lock.unlock()
     }
   }
