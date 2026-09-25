@@ -204,6 +204,7 @@ public struct SSHTerminalView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .onChange(of: controller.bellRings) { ringBell() }
       .onChange(of: preferences.keyBar, initial: true) { accessory.layout = preferences.keyBar }
+      .onChange(of: preferences.compactKeys, initial: true) { accessory.compact = preferences.compactKeys }
       TerminalInputBridge(
         accessory: AnyView(
           TerminalAccessoryBar(
@@ -215,6 +216,7 @@ public struct SSHTerminalView: View {
           )
         ),
         showsAccessory: !drawerOpen,
+        compactAccessory: preferences.compactKeys,
         onSubmitBytes: submit,
         isFocused: $focused
       )

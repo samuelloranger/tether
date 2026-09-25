@@ -37,6 +37,7 @@ public final class AppPreferences {
     static let cursorBlink = "tether.cursorBlink"
     static let bellMode = "tether.bellMode"
     static let keyBar = "tether.keyBar"
+    static let compactKeys = "tether.compactKeys"
     static let terminalTheme = "tether.terminalTheme"
     static let downloadedFonts = "tether.downloadedFonts"
   }
@@ -165,6 +166,13 @@ public final class AppPreferences {
     }
   }
 
+  /// Smaller keys in the bar above the keyboard.
+  public var compactKeys: Bool {
+    didSet {
+      UserDefaults.standard.set(compactKeys, forKey: Key.compactKeys)
+    }
+  }
+
   public var terminalCursorStyle: TerminalCursorStyle {
     TerminalCursorStyle(shape: cursorShape, blink: cursorBlink)
   }
@@ -215,6 +223,7 @@ public final class AppPreferences {
     cursorBlink = defaults.bool(forKey: Key.cursorBlink)
     bellMode = BellMode(rawValue: defaults.string(forKey: Key.bellMode) ?? "") ?? .off
     keyBar = defaults.data(forKey: Key.keyBar).flatMap(KeyBarLayout.decode) ?? .default
+    compactKeys = defaults.bool(forKey: Key.compactKeys)
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
   }
 }

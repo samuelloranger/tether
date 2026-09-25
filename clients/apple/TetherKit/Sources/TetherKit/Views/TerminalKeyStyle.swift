@@ -21,16 +21,17 @@ struct TerminalKeyStyle: ButtonStyle {
     @ViewBuilder var label: () -> Label
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.terminalKeyMetrics) private var metrics
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: TerminalKeyStyle.cornerRadius, style: .continuous) }
 
     var body: some View {
       label()
-        .font(.callout.weight(.medium))
+        .font(metrics.font)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .padding(.horizontal, 4)
-        .frame(width: TerminalAccessoryBar.keyWidth, height: TerminalAccessoryBar.keySize)
+        .frame(width: metrics.keyWidth, height: metrics.keySize)
         .foregroundStyle(armed ? TetherColors.onAccent : TetherColors.textPrimary)
         .background(armed ? TetherColors.accent : TetherColors.surfaceRaised)
         // Tinted from the foreground rather than white, so the press reads the
@@ -46,5 +47,35 @@ struct TerminalKeyStyle: ButtonStyle {
         .animation(.easeOut(duration: TetherMotion.feedback), value: pressed)
         .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: armed)
     }
+  }
+}
+
+/// Key and bar dimensions. Every key is the same size, the D-pad included — a key larger
+/// than its neighbours reads as a different kind of thing. Width fits "Home"/"PgDn".
+public struct TerminalKeyMetrics: Equatable {
+  public var keySize: CGFloat
+  public var keyWidth: CGFloat
+  public var barVerticalPadding: CGFloat
+  var font: Font
+
+  /// The bar's height, derived from key + padding so it cannot drift from the row's layout.
+  public var barHeight: CGFloat { keySize + barVerticalPadding * 2 }
+
+  public static let regular = TerminalKeyMetrics(
+    keySize: 40, keyWidth: 52, barVerticalPadding: 8, font: .callout.weight(.medium)
+  )
+  public static let compact = TerminalKeyMetrics(
+    keySize: 32, keyWidth: 42, barVerticalPadding: 6, font: .footnote.weight(.medium)
+  )
+}
+
+private struct TerminalKeyMetricsKey: EnvironmentKey {
+  static let defaultValue = TerminalKeyMetrics.regular
+}
+
+extension EnvironmentValues {
+  var terminalKeyMetrics: TerminalKeyMetrics {
+    get { self[TerminalKeyMetricsKey.self] }
+    set { self[TerminalKeyMetricsKey.self] = newValue }
   }
 }
