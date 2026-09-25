@@ -60,6 +60,10 @@ struct TerminalSettingsSheet: View {
                 .font(.system(.body, design: .monospaced))
             }
           }
+          Picker("Cursor", selection: $preferences.cursorShape) {
+            ForEach(TerminalCursorStyle.Shape.allCases) { Text($0.label).tag($0) }
+          }
+          Toggle("Blink cursor", isOn: $preferences.cursorBlink)
           HStack {
             Text("Preview").foregroundStyle(.secondary)
             Spacer()
@@ -75,7 +79,7 @@ struct TerminalSettingsSheet: View {
   }
 }
 
-/// A few lines in the chosen font, colours, spacing and padding.
+/// A few lines in the chosen font, colours, spacing, padding and cursor.
 struct TerminalSettingsPreview: View {
   var preferences: AppPreferences
 
@@ -85,11 +89,27 @@ struct TerminalSettingsPreview: View {
       size: preferences.terminalFontSize,
       bold: false
     )
-    Text("me@devbox ~ $ ls\nsrc  README.md")
-      .font(Font(font))
-      .lineSpacing(font.lineHeight * (preferences.terminalLineSpacing - 1))
-      .foregroundStyle(Color(uiColor: TerminalTheme.uiColor(preferences.terminalTheme.foreground)))
-      .padding(.horizontal, preferences.terminalPadding).padding(.vertical, 4)
-      .background(preferences.terminalTheme.backgroundColor, in: RoundedRectangle(cornerRadius: 6))
+    let theme = preferences.terminalTheme
+    let cell = CGRect(
+      x: 0, y: 0,
+      width: ("M" as NSString).size(withAttributes: [.font: font]).width,
+      height: font.lineHeight
+    )
+    let cursor = preferences.terminalCursorStyle.frame(inCell: cell)
+    VStack(alignment: .leading, spacing: font.lineHeight * (preferences.terminalLineSpacing - 1)) {
+      Text("me@devbox ~ $ ls")
+      Text("src  README.md")
+      HStack(spacing: 0) {
+        Text("me@devbox ~ $ ")
+        Color(uiColor: TerminalTheme.uiColor(theme.cursor, alpha: preferences.cursorShape == .block ? 0.4 : 1))
+          .frame(width: cursor.width, height: cursor.height)
+          .frame(width: cell.width, height: cell.height, alignment: preferences.cursorShape == .underline ? .bottomLeading : .topLeading)
+          .accessibilityHidden(true)
+      }
+    }
+    .font(Font(font))
+    .foregroundStyle(Color(uiColor: TerminalTheme.uiColor(theme.foreground)))
+    .padding(.horizontal, preferences.terminalPadding).padding(.vertical, 4)
+    .background(theme.backgroundColor, in: RoundedRectangle(cornerRadius: 6))
   }
 }

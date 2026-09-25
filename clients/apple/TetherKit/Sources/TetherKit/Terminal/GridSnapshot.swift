@@ -17,6 +17,8 @@ public enum GridSnapshot {
     public var generation: UInt64
     public var cursorVisible: Bool
     public var altScreen: Bool = false
+    /// Set while a program has chosen the cursor's shape; nil means the user's setting.
+    public var programCursor: TerminalCursorStyle? = nil
   }
 
   public struct Cell: Equatable, Sendable {

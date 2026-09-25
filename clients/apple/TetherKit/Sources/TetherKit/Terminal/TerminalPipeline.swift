@@ -283,10 +283,12 @@ actor TerminalPipeline {
       oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
     ), !outputBuffer.data.isEmpty {
       let carried = currentGrid?.emulator.paletteOverrideEntries() ?? []
+      let carriedCursor = currentGrid?.emulator.programCursor
       let rebuilt = outputBuffer.replay(
         cols: newCols, rows: newRows, theme: sessionGrids.theme, cellPixelSize: cellPixelSize
       )
       rebuilt.restorePaletteOverrides(carried)
+      rebuilt.restoreProgramCursor(carriedCursor)
       currentGrid?.emulator = rebuilt
       lastRenderedGeneration = nil
       publishSnapshot()
