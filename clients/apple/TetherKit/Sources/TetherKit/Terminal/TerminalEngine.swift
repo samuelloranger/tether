@@ -49,6 +49,7 @@ final class TerminalEngine {
     options.ansi256PaletteStrategy = .xterm
     // Sixel is parsed but never drawn; claiming it steers image tools away from kitty graphics.
     options.enableSixelReported = false
+    options.cursorStyle = TerminalCursorStyle.engineDefault
     terminal = Terminal(delegate: delegate, options: options)
     TerminalPalette.install(theme, on: terminal)
     palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
@@ -100,6 +101,21 @@ final class TerminalEngine {
       terminal.feed(text: Self.paletteSequence(entries))
       paletteOverrides.adopt(entries.map(\.index))
       palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
+      needsRefresh = true
+    }
+  }
+
+  /// The cursor style a program chose, to hand to an engine that replaces this one.
+  var programCursor: TerminalCursorStyle? {
+    locked { TerminalCursorStyle(program: terminal.options.cursorStyle) }
+  }
+
+  /// Re-applies another engine's program-chosen cursor: the DECSCUSR that set it may be
+  /// gone from the buffer this engine was rebuilt from.
+  func restoreProgramCursor(_ style: TerminalCursorStyle?) {
+    guard let style else { return }
+    locked {
+      terminal.feed(text: "\u{1B}[\(style.decscusrParameter) q")
       needsRefresh = true
     }
   }
@@ -464,7 +480,8 @@ final class TerminalEngine {
       generation: generationCounter,
       // Scrolled back past it, the cursor is below the view, not on a history line.
       cursorVisible: delegate.cursorVisible && cursor.y + scrollOffset < dims.rows,
-      altScreen: terminal.isCurrentBufferAlternate)
+      altScreen: terminal.isCurrentBufferAlternate,
+      programCursor: TerminalCursorStyle(program: terminal.options.cursorStyle))
   }
 
   private func buildGrid() -> (cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]]) {

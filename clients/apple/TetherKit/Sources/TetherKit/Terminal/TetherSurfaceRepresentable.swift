@@ -8,6 +8,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var fontSize: CGFloat
   public var lineSpacing: CGFloat
   public var horizontalPadding: CGFloat
+  public var cursorStyle: TerminalCursorStyle
   public var theme: TerminalTheme
   public var onGridSizeChange: (UInt16, UInt16) -> Void
   public var onGridSizeSettled: (UInt16, UInt16) -> Void
@@ -28,6 +29,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     fontSize: CGFloat,
     lineSpacing: CGFloat = 1,
     horizontalPadding: CGFloat = TerminalGridInset.defaultPadding,
+    cursorStyle: TerminalCursorStyle = .default,
     theme: TerminalTheme = .tether,
     onGridSizeChange: @escaping (UInt16, UInt16) -> Void,
     onGridSizeSettled: @escaping (UInt16, UInt16) -> Void = { _, _ in },
@@ -47,6 +49,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.fontSize = fontSize
     self.lineSpacing = lineSpacing
     self.horizontalPadding = horizontalPadding
+    self.cursorStyle = cursorStyle
     self.theme = theme
     self.onGridSizeChange = onGridSizeChange
     self.onGridSizeSettled = onGridSizeSettled
@@ -71,6 +74,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     view.fontSize = fontSize
     view.lineSpacing = lineSpacing
     view.horizontalPadding = horizontalPadding
+    view.cursorPreference = cursorStyle
     view.apply(theme: theme)
     view.onGridSizeChange = { cols, rows in onGridSizeChange(cols, rows) }
     view.onGridSizeSettled = { cols, rows in onGridSizeSettled(cols, rows) }
@@ -88,6 +92,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     if uiView.fontSize != fontSize { uiView.fontSize = fontSize }
     if uiView.lineSpacing != lineSpacing { uiView.lineSpacing = lineSpacing }
     if uiView.horizontalPadding != horizontalPadding { uiView.horizontalPadding = horizontalPadding }
+    uiView.cursorPreference = cursorStyle
     uiView.mouseMode = mouseMode
     uiView.mouseSgr = mouseSgr
     bindCallbacks(uiView, context: context)

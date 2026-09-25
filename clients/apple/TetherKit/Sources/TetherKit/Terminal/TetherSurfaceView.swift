@@ -19,6 +19,14 @@ public final class TetherSurfaceView: UIView {
     didSet { invalidateMetrics() }
   }
 
+  /// The user's cursor; a shape a program asks for wins while it is set.
+  public var cursorPreference: TerminalCursorStyle = .default {
+    didSet {
+      guard cursorPreference != oldValue else { return }
+      withoutAnimations { updateCursorLayer() }
+    }
+  }
+
   /// Space reserved on each side of the grid, in points.
   public var horizontalPadding: CGFloat = TerminalGridInset.defaultPadding {
     didSet {
@@ -130,7 +138,7 @@ public final class TetherSurfaceView: UIView {
     guard theme != self.theme else { return }
     self.theme = theme
     backgroundColor = theme.uiBackground
-    cursorLayer.backgroundColor = TerminalTheme.uiColor(theme.cursor, alpha: 0.4).cgColor
+    withoutAnimations { updateCursorLayer() }
     selectionLayer.fillColor = (theme.selection.map { TerminalTheme.uiColor($0, alpha: 0.45) }
       ?? UIColor.systemBlue.withAlphaComponent(0.35)).cgColor
     requestRepaint()
@@ -146,6 +154,16 @@ public final class TetherSurfaceView: UIView {
     }
     invalidateMetrics()
     installGestures()
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(reduceMotionChanged),
+      name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil
+    )
+  }
+
+  /// An idle cursor gets no other update, so it would keep blinking (or not) until it moved.
+  @objc private func reduceMotionChanged() {
+    shownCursor = nil
+    withoutAnimations { updateCursorLayer() }
   }
 
   private func installLayers() {
@@ -214,6 +232,7 @@ public final class TetherSurfaceView: UIView {
     cells = []
     images = .empty
     cachedRowTexts = []
+    shownCursor = nil
     linkSpans = []
     renderQueue.async { [worker] in
       worker.reset()
@@ -221,6 +240,7 @@ public final class TetherSurfaceView: UIView {
     withoutAnimations {
       textLayer.contents = nil
       cursorLayer.isHidden = true
+      cursorLayer.removeAnimation(forKey: Self.blinkKey)
       selectionLayer.isHidden = true
       startHandleLayer.isHidden = true
       endHandleLayer.isHidden = true
@@ -334,15 +354,53 @@ public final class TetherSurfaceView: UIView {
   private func updateCursorLayer() {
     guard let header, header.cursorVisible else {
       cursorLayer.isHidden = true
+      cursorLayer.removeAnimation(forKey: Self.blinkKey)
+      shownCursor = nil
       return
     }
-    cursorLayer.isHidden = false
-    cursorLayer.frame = CGRect(
+    let style = header.programCursor ?? cursorPreference
+    let cell = CGRect(
       x: CGFloat(header.cursorCol) * cellWidth + gridOriginX,
       y: CGFloat(header.cursorRow) * cellHeight + gridOriginY,
       width: cellWidth,
       height: cellHeight
     )
+    cursorLayer.isHidden = false
+    cursorLayer.frame = style.frame(inCell: cell)
+    // A block covers the glyph, so it stays see-through; a thin bar or underline doesn't.
+    cursorLayer.backgroundColor = TerminalTheme.uiColor(
+      theme.cursor, alpha: style.shape == .block ? 0.4 : 1
+    ).cgColor
+
+    let blinks = style.blink && !UIAccessibility.isReduceMotionEnabled
+    let shown = ShownCursor(col: header.cursorCol, row: header.cursorRow, blinks: blinks)
+    guard shown != shownCursor else { return }
+    shownCursor = shown
+    cursorLayer.removeAnimation(forKey: Self.blinkKey)
+    // Restarted on every move, so the cursor is solid while you type.
+    if blinks { cursorLayer.add(Self.blinkAnimation(), forKey: Self.blinkKey) }
+  }
+
+  private struct ShownCursor: Equatable {
+    var col: UInt16
+    var row: UInt16
+    var blinks: Bool
+  }
+
+  private var shownCursor: ShownCursor?
+  private static let blinkKey = "blink"
+
+  /// Discrete keyframes need one more key time than values; with equal counts Core
+  /// Animation drops the animation without a word.
+  static func blinkAnimation() -> CAKeyframeAnimation {
+    let blink = CAKeyframeAnimation(keyPath: "opacity")
+    blink.values = [1, 0]
+    blink.keyTimes = [0, 0.5, 1]
+    blink.calculationMode = .discrete
+    blink.duration = 1.06
+    blink.repeatCount = .infinity
+    blink.beginTime = CACurrentMediaTime()
+    return blink
   }
 
   private func updateSelectionLayers() {

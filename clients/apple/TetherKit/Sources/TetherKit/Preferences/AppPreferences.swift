@@ -33,6 +33,8 @@ public final class AppPreferences {
     static let terminalFontSize = "tether.terminalFontSize"
     static let terminalLineSpacing = "tether.terminalLineSpacing"
     static let terminalPadding = "tether.terminalPadding"
+    static let cursorShape = "tether.cursorShape"
+    static let cursorBlink = "tether.cursorBlink"
     static let terminalTheme = "tether.terminalTheme"
     static let downloadedFonts = "tether.downloadedFonts"
   }
@@ -137,6 +139,22 @@ public final class AppPreferences {
     }
   }
 
+  public var cursorShape: TerminalCursorStyle.Shape {
+    didSet {
+      UserDefaults.standard.set(cursorShape.rawValue, forKey: Key.cursorShape)
+    }
+  }
+
+  public var cursorBlink: Bool {
+    didSet {
+      UserDefaults.standard.set(cursorBlink, forKey: Key.cursorBlink)
+    }
+  }
+
+  public var terminalCursorStyle: TerminalCursorStyle {
+    TerminalCursorStyle(shape: cursorShape, blink: cursorBlink)
+  }
+
   public var terminalThemeID: String {
     didSet {
       UserDefaults.standard.set(terminalThemeID, forKey: Key.terminalTheme)
@@ -179,6 +197,8 @@ public final class AppPreferences {
     terminalPadding = defaults.object(forKey: Key.terminalPadding) == nil
       ? Double(TerminalGridInset.defaultPadding)
       : TerminalGridInset.clampedPadding(defaults.double(forKey: Key.terminalPadding))
+    cursorShape = TerminalCursorStyle.Shape(rawValue: defaults.string(forKey: Key.cursorShape) ?? "") ?? .block
+    cursorBlink = defaults.bool(forKey: Key.cursorBlink)
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
   }
 }
