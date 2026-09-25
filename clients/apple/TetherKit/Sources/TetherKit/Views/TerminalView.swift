@@ -273,6 +273,20 @@ public struct TerminalInputBridge: UIViewRepresentable {
       return false
     }
 
+    /// UIKit hands focus back on its own after an alert (e.g. shake-to-undo). Unsynced, the
+    /// next update resigns it mid-keyboard-show, leaving a keyboard that feeds nothing.
+    public func textViewDidBeginEditing(_ textView: UITextView) {
+      guard !isFocused.wrappedValue else { return }
+      DispatchQueue.main.async { [weak textView, isFocused] in
+        guard
+          let textView,
+          textView.isFirstResponder,
+          !isFocused.wrappedValue
+        else { return }
+        isFocused.wrappedValue = true
+      }
+    }
+
     public func textViewDidEndEditing(_ textView: UITextView) {
       // This can arrive synchronously from `resignFirstResponder()` mid-update;
       // defer the UIKit-initiated focus loss so it doesn't re-enter SwiftUI.
