@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Terminal appearance settings — theme, font, size — bound to AppPreferences.
+/// Terminal appearance settings bound to AppPreferences.
 struct TerminalSettingsSheet: View {
   @Bindable var preferences: AppPreferences
   var onDone: () -> Void
@@ -41,14 +41,29 @@ struct TerminalSettingsSheet: View {
                 .font(.system(.body, design: .monospaced))
             }
           }
+          VStack(alignment: .leading, spacing: 6) {
+            HStack {
+              Text("Line spacing")
+              Spacer()
+              Text(String(format: "%.2f×", preferences.terminalLineSpacing))
+                .foregroundStyle(.secondary)
+                .font(.system(.body, design: .monospaced))
+            }
+            Slider(value: $preferences.terminalLineSpacing, in: TerminalLineSpacing.range, step: 0.05)
+              .accessibilityLabel("Line spacing")
+          }
+          Stepper(value: $preferences.terminalPadding, in: TerminalGridInset.paddingRange, step: 2) {
+            HStack {
+              Text("Padding")
+              Spacer()
+              Text("\(Int(preferences.terminalPadding)) pt").foregroundStyle(.secondary)
+                .font(.system(.body, design: .monospaced))
+            }
+          }
           HStack {
             Text("Preview").foregroundStyle(.secondary)
             Spacer()
-            Text("me@devbox ~ $")
-              .font(.custom(preferences.terminalFont.postScriptName, size: preferences.terminalFontSize))
-              .foregroundStyle(Color(uiColor: TerminalTheme.uiColor(preferences.terminalTheme.foreground)))
-              .padding(.horizontal, 8).padding(.vertical, 4)
-              .background(preferences.terminalTheme.backgroundColor, in: RoundedRectangle(cornerRadius: 6))
+            TerminalSettingsPreview(preferences: preferences)
           }
         }
       }
@@ -57,5 +72,24 @@ struct TerminalSettingsSheet: View {
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: onDone) } }
     }
     .tint(TetherColors.accent)
+  }
+}
+
+/// A few lines in the chosen font, colours, spacing and padding.
+struct TerminalSettingsPreview: View {
+  var preferences: AppPreferences
+
+  var body: some View {
+    let font = TerminalFonts.font(
+      postScriptName: preferences.terminalFont.postScriptName,
+      size: preferences.terminalFontSize,
+      bold: false
+    )
+    Text("me@devbox ~ $ ls\nsrc  README.md")
+      .font(Font(font))
+      .lineSpacing(font.lineHeight * (preferences.terminalLineSpacing - 1))
+      .foregroundStyle(Color(uiColor: TerminalTheme.uiColor(preferences.terminalTheme.foreground)))
+      .padding(.horizontal, preferences.terminalPadding).padding(.vertical, 4)
+      .background(preferences.terminalTheme.backgroundColor, in: RoundedRectangle(cornerRadius: 6))
   }
 }

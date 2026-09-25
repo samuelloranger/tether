@@ -68,6 +68,36 @@ final class TerminalGridInsetTests: XCTestCase {
     XCTAssertEqual(TerminalGridInset.columns(viewWidth: 10, cellWidth: 10), 0)
     XCTAssertEqual(TerminalGridInset.columns(viewWidth: 400, cellWidth: 0), 0)
   }
+
+  func testPaddingIsReservedOnEachSide() {
+    // 400pt, 10pt cells: no padding fits 40 columns flush; 24pt each side leaves 352 → 35.
+    XCTAssertEqual(TerminalGridInset.columns(viewWidth: 400, cellWidth: 10, padding: 0), 40)
+    XCTAssertEqual(TerminalGridInset.columns(viewWidth: 400, cellWidth: 10, padding: 24), 35)
+    XCTAssertEqual(TerminalGridInset.originX(viewWidth: 400, cellWidth: 10, cols: 40, padding: 0), 0)
+    // 352 available, 350 used: 1pt leftover each side on top of the padding.
+    XCTAssertEqual(
+      TerminalGridInset.originX(viewWidth: 400, cellWidth: 10, cols: 35, padding: 24), 25, accuracy: 0.001
+    )
+  }
+
+  func testSavedPaddingIsClampedToTheOfferedRange() {
+    XCTAssertEqual(TerminalGridInset.clampedPadding(-4), 0)
+    XCTAssertEqual(TerminalGridInset.clampedPadding(12), 12)
+    XCTAssertEqual(TerminalGridInset.clampedPadding(80), 24)
+  }
+}
+
+final class TerminalLineSpacingTests: XCTestCase {
+  func testRowHeightScalesTheLineHeightAndRoundsUp() {
+    XCTAssertEqual(TerminalLineSpacing.cellHeight(lineHeight: 16.7, spacing: 1), 17)
+    XCTAssertEqual(TerminalLineSpacing.cellHeight(lineHeight: 16.7, spacing: 1.3), 22)
+  }
+
+  func testSpacingOutsideTheRangeIsClamped() {
+    XCTAssertEqual(TerminalLineSpacing.cellHeight(lineHeight: 10, spacing: 0.5), 10)
+    XCTAssertEqual(TerminalLineSpacing.cellHeight(lineHeight: 10, spacing: 3), 16)
+    XCTAssertEqual(TerminalLineSpacing.clamped(1.25), 1.25)
+  }
 }
 
 final class TerminalResizePublishTests: XCTestCase {

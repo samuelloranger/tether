@@ -6,6 +6,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var sessionKey: String
   public var fontName: String
   public var fontSize: CGFloat
+  public var lineSpacing: CGFloat
+  public var horizontalPadding: CGFloat
   public var theme: TerminalTheme
   public var onGridSizeChange: (UInt16, UInt16) -> Void
   public var onGridSizeSettled: (UInt16, UInt16) -> Void
@@ -24,6 +26,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     sessionKey: String = "",
     fontName: String,
     fontSize: CGFloat,
+    lineSpacing: CGFloat = 1,
+    horizontalPadding: CGFloat = TerminalGridInset.defaultPadding,
     theme: TerminalTheme = .tether,
     onGridSizeChange: @escaping (UInt16, UInt16) -> Void,
     onGridSizeSettled: @escaping (UInt16, UInt16) -> Void = { _, _ in },
@@ -41,6 +45,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.sessionKey = sessionKey
     self.fontName = fontName
     self.fontSize = fontSize
+    self.lineSpacing = lineSpacing
+    self.horizontalPadding = horizontalPadding
     self.theme = theme
     self.onGridSizeChange = onGridSizeChange
     self.onGridSizeSettled = onGridSizeSettled
@@ -63,6 +69,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     let view = TetherSurfaceView()
     view.fontName = fontName
     view.fontSize = fontSize
+    view.lineSpacing = lineSpacing
+    view.horizontalPadding = horizontalPadding
     view.apply(theme: theme)
     view.onGridSizeChange = { cols, rows in onGridSizeChange(cols, rows) }
     view.onGridSizeSettled = { cols, rows in onGridSizeSettled(cols, rows) }
@@ -78,6 +86,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     if uiView.fontName != fontName { uiView.fontName = fontName }
     uiView.apply(theme: theme)
     if uiView.fontSize != fontSize { uiView.fontSize = fontSize }
+    if uiView.lineSpacing != lineSpacing { uiView.lineSpacing = lineSpacing }
+    if uiView.horizontalPadding != horizontalPadding { uiView.horizontalPadding = horizontalPadding }
     uiView.mouseMode = mouseMode
     uiView.mouseSgr = mouseSgr
     bindCallbacks(uiView, context: context)

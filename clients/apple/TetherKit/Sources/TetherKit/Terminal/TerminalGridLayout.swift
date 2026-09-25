@@ -1,22 +1,42 @@
 import CoreGraphics
 import Foundation
 
-/// Fixed inset on each side plus the sub-column leftover split evenly, so both margins match.
-enum TerminalGridInset {
-  static let horizontal: CGFloat = 8
+/// Side padding on each side plus the sub-column leftover split evenly, so both margins match.
+public enum TerminalGridInset {
+  public static let defaultPadding: CGFloat = 8
+  static let paddingRange: ClosedRange<Double> = 0...24
 
-  /// Columns that fit `viewWidth` once both insets are reserved.
-  static func columns(viewWidth: CGFloat, cellWidth: CGFloat) -> Int {
+  static func clampedPadding(_ padding: Double) -> Double {
+    min(max(padding, paddingRange.lowerBound), paddingRange.upperBound)
+  }
+
+  /// Columns that fit `viewWidth` once both paddings are reserved.
+  static func columns(viewWidth: CGFloat, cellWidth: CGFloat, padding: CGFloat = defaultPadding) -> Int {
     guard cellWidth > 0 else { return 0 }
-    let available = viewWidth - horizontal * 2
+    let available = viewWidth - padding * 2
     guard available > 0 else { return 0 }
     return max(1, Int(available / cellWidth))
   }
 
-  static func originX(viewWidth: CGFloat, cellWidth: CGFloat, cols: Int) -> CGFloat {
-    let available = viewWidth - horizontal * 2
+  static func originX(
+    viewWidth: CGFloat, cellWidth: CGFloat, cols: Int, padding: CGFloat = defaultPadding
+  ) -> CGFloat {
+    let available = viewWidth - padding * 2
     let leftover = max(0, available - CGFloat(cols) * cellWidth)
-    return horizontal + leftover / 2
+    return padding + leftover / 2
+  }
+}
+
+/// Row height from the font's line height and the line-spacing preference.
+enum TerminalLineSpacing {
+  static let range: ClosedRange<Double> = 1.0...1.6
+
+  static func clamped(_ spacing: Double) -> Double {
+    min(max(spacing, range.lowerBound), range.upperBound)
+  }
+
+  static func cellHeight(lineHeight: CGFloat, spacing: CGFloat) -> CGFloat {
+    ceil(lineHeight * CGFloat(clamped(Double(spacing))))
   }
 }
 
