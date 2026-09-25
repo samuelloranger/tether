@@ -14,6 +14,20 @@ public final class TetherSurfaceView: UIView {
     didSet { invalidateMetrics() }
   }
 
+  /// Row height as a multiple of the font's line height.
+  public var lineSpacing: CGFloat = 1 {
+    didSet { invalidateMetrics() }
+  }
+
+  /// Space reserved on each side of the grid, in points.
+  public var horizontalPadding: CGFloat = TerminalGridInset.defaultPadding {
+    didSet {
+      setNeedsLayout()
+      requestRepaint()
+      reportGridSize()
+    }
+  }
+
   /// Fires on every grid change, keyboard-animation frames included, for the local emulator:
   /// it must track the view or a shrink leaves blank rows.
   public var onGridSizeChange: ((UInt16, UInt16) -> Void)?
@@ -464,7 +478,9 @@ public final class TetherSurfaceView: UIView {
 
   private func currentGridSize() -> (cols: UInt16, rows: UInt16)? {
     guard bounds.width > 0, bounds.height > 0, cellWidth > 0, cellHeight > 0 else { return nil }
-    let cols = TerminalGridInset.columns(viewWidth: bounds.width, cellWidth: cellWidth)
+    let cols = TerminalGridInset.columns(
+      viewWidth: bounds.width, cellWidth: cellWidth, padding: horizontalPadding
+    )
     return (
       UInt16(max(1, min(500, cols))),
       UInt16(max(1, min(300, Int(bounds.height / cellHeight))))
@@ -475,7 +491,8 @@ public final class TetherSurfaceView: UIView {
   private var gridOriginX: CGFloat {
     guard let header, cellWidth > 0 else { return 0 }
     return TerminalGridInset.originX(
-      viewWidth: bounds.width, cellWidth: cellWidth, cols: Int(header.cols)
+      viewWidth: bounds.width, cellWidth: cellWidth, cols: Int(header.cols),
+      padding: horizontalPadding
     )
   }
 
@@ -483,7 +500,7 @@ public final class TetherSurfaceView: UIView {
     font = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: false)
     boldFont = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: true)
     cellWidth = ceil(font.advancement(for: "M"))
-    cellHeight = ceil(font.lineHeight)
+    cellHeight = TerminalLineSpacing.cellHeight(lineHeight: font.lineHeight, spacing: lineSpacing)
     invalidateIntrinsicContentSize()
     requestRepaint()
     reportGridSize()

@@ -18,6 +18,7 @@ struct TerminalHistoryView: View {
             text: text,
             fontName: preferences.terminalFont.postScriptName,
             fontSize: preferences.terminalFontSize,
+            lineSpacing: preferences.terminalLineSpacing,
             theme: preferences.terminalTheme
           )
           .ignoresSafeArea(edges: .bottom)
@@ -73,6 +74,7 @@ private struct SelectableTextView: UIViewRepresentable {
   let text: String
   let fontName: String
   let fontSize: CGFloat
+  let lineSpacing: CGFloat
   let theme: TerminalTheme
 
   func makeCoordinator() -> Coordinator { Coordinator() }
@@ -89,13 +91,21 @@ private struct SelectableTextView: UIViewRepresentable {
   }
 
   func updateUIView(_ view: UITextView, context: Context) {
-    view.font = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: false)
     view.backgroundColor = theme.uiBackground
-    view.textColor = TerminalTheme.uiColor(theme.foreground)
-    if view.text != text {
-      view.text = text
-      context.coordinator.didScrollToBottom = false
+    let style = Style(fontName: fontName, fontSize: fontSize, lineSpacing: lineSpacing, theme: theme)
+    let textChanged = context.coordinator.text != text
+    if textChanged || context.coordinator.style != style {
+      let paragraph = NSMutableParagraphStyle()
+      paragraph.lineHeightMultiple = lineSpacing
+      view.attributedText = NSAttributedString(string: text, attributes: [
+        .font: TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: false),
+        .foregroundColor: TerminalTheme.uiColor(theme.foreground),
+        .paragraphStyle: paragraph,
+      ])
+      context.coordinator.text = text
+      context.coordinator.style = style
     }
+    if textChanged { context.coordinator.didScrollToBottom = false }
     // Bottom-align on first paint of real content; never yank the view down
     // again once the user has started scrolling/selecting.
     guard !context.coordinator.didScrollToBottom, !text.isEmpty else { return }
@@ -106,7 +116,17 @@ private struct SelectableTextView: UIViewRepresentable {
     }
   }
 
+  struct Style: Equatable {
+    var fontName: String
+    var fontSize: CGFloat
+    var lineSpacing: CGFloat
+    var theme: TerminalTheme
+  }
+
+  /// What the text view last showed: re-setting a large transcript on every update is slow.
   final class Coordinator {
     var didScrollToBottom = false
+    var text: String?
+    var style: Style?
   }
 }

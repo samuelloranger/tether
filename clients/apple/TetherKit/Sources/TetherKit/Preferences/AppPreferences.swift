@@ -31,6 +31,8 @@ public final class AppPreferences {
     static let colorScheme = "tether.colorScheme"
     static let terminalFont = "tether.terminalFont"
     static let terminalFontSize = "tether.terminalFontSize"
+    static let terminalLineSpacing = "tether.terminalLineSpacing"
+    static let terminalPadding = "tether.terminalPadding"
     static let terminalTheme = "tether.terminalTheme"
     static let downloadedFonts = "tether.downloadedFonts"
   }
@@ -122,6 +124,19 @@ public final class AppPreferences {
     }
   }
 
+  public var terminalLineSpacing: Double {
+    didSet {
+      UserDefaults.standard.set(terminalLineSpacing, forKey: Key.terminalLineSpacing)
+    }
+  }
+
+  /// Side padding around the terminal grid, in points.
+  public var terminalPadding: Double {
+    didSet {
+      UserDefaults.standard.set(terminalPadding, forKey: Key.terminalPadding)
+    }
+  }
+
   public var terminalThemeID: String {
     didSet {
       UserDefaults.standard.set(terminalThemeID, forKey: Key.terminalTheme)
@@ -159,6 +174,11 @@ public final class AppPreferences {
     terminalFontID = fontID
     let size = defaults.double(forKey: Key.terminalFontSize)
     terminalFontSize = size > 0 ? size : 11
+    let spacing = defaults.double(forKey: Key.terminalLineSpacing)
+    terminalLineSpacing = spacing > 0 ? TerminalLineSpacing.clamped(spacing) : 1
+    terminalPadding = defaults.object(forKey: Key.terminalPadding) == nil
+      ? Double(TerminalGridInset.defaultPadding)
+      : TerminalGridInset.clampedPadding(defaults.double(forKey: Key.terminalPadding))
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
   }
 }

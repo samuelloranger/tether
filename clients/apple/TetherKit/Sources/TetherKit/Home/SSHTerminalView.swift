@@ -171,6 +171,8 @@ public struct SSHTerminalView: View {
           sessionKey: controller.sessionKey,
           fontName: preferences.terminalFont.postScriptName,
           fontSize: preferences.terminalFontSize,
+          lineSpacing: preferences.terminalLineSpacing,
+          horizontalPadding: preferences.terminalPadding,
           theme: preferences.terminalTheme,
           onGridSizeChange: { controller.updateGrid(cols: $0, rows: $1) },
           onGridSizeSettled: { controller.updateGridServer(cols: $0, rows: $1) },
