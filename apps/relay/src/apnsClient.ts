@@ -1,8 +1,8 @@
-import type { ApnsTokenCache } from "./apnsAuth";
-import type { ApnsPayload } from "./payload";
+import type { ApnsTokenCache } from './apnsAuth';
+import type { ApnsPayload } from './payload';
 
-export const APNS_PROD = "https://api.push.apple.com";
-export const APNS_SANDBOX = "https://api.sandbox.push.apple.com";
+export const APNS_PROD = 'https://api.push.apple.com';
+export const APNS_SANDBOX = 'https://api.sandbox.push.apple.com';
 
 export interface ApnsResult {
   status: number;
@@ -31,14 +31,14 @@ export class ApnsClient {
 
   async send(opts: ApnsSendOptions): Promise<ApnsResult> {
     const res = await this.fetchImpl(`${this.host}/3/device/${opts.token}`, {
-      method: "POST",
+      method: 'POST',
       headers: {
         authorization: `bearer ${await this.tokens.get()}`,
-        "apns-topic": opts.topic,
-        "apns-push-type": "alert",
-        "apns-priority": "10",
-        ...(opts.collapseId ? { "apns-collapse-id": opts.collapseId } : {}),
-        "content-type": "application/json",
+        'apns-topic': opts.topic,
+        'apns-push-type': 'alert',
+        'apns-priority': '10',
+        ...(opts.collapseId ? { 'apns-collapse-id': opts.collapseId } : {}),
+        'content-type': 'application/json',
       },
       body: JSON.stringify(opts.payload),
       signal: AbortSignal.timeout(TIMEOUT_MS),
