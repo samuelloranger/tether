@@ -16,9 +16,9 @@ The VT emulator is SwiftTerm's headless engine, wrapped by `TerminalEngine` (pin
 |---|---|---|
 | `clients/apple/` | Swift / SwiftUI | The iOS app. `TetherKit` package (SSH transport, terminal pipeline + `TerminalEngine` + renderer, Home / key vault, all UI), `TetherIOS` app target, `TetherNotificationService` (NSE — decrypts push), `Tether.xcodeproj`. |
 | `apps/tether-notify/` | Go | Host-side encrypted-push CLI. Registers a phone's APNs token + AES key (sent by the app over SSH) and posts ciphertext to the relay. |
-| `apps/relay/` | Bun + Hono | Push relay: forwards ciphertext to APNs (production first, sandbox on `BadDeviceToken`). Own image via `relay-publish.yml`, deployed on its own. |
+| `apps/relay/` | Cloudflare Worker (Hono) | Push relay: forwards ciphertext to APNs (production first, sandbox on `BadDeviceToken`). Deployed on its own by `relay-deploy.yml` (wrangler); APNs config lives in Worker secrets. |
 | `scripts/` | shell / ruby | `install.sh` (install `tether-notify`), `install-agent-hooks.sh` (wire agent push), `release.sh`. |
-| `.github/workflows/` | — | `ci.yml` (lint + host-tools + relay + iOS build/test), `release.yml` (signed iOS archive → TestFlight), `relay-publish.yml` (relay image on tag or manual run). |
+| `.github/workflows/` | — | `ci.yml` (lint + host-tools + relay + iOS build/test), `release.yml` (signed iOS archive → TestFlight), `relay-deploy.yml` (relay Worker deploy on tag or manual run). |
 
 ## Commands
 
