@@ -1,116 +1,125 @@
-import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { ApnsTokenCache } from './apnsAuth';
 import { APNS_PROD, APNS_SANDBOX, ApnsClient } from './apnsClient';
-import { clientIpFromForwarded } from './clientIp';
 import { sendToEitherEnvironment } from './environments';
 import { buildApnsPayload, classifyApnsStatus, pushRequestSchema } from './payload';
-import { RateLimiter } from './rateLimit';
 
-// Every value here is deployment config, never a default that could silently
-// point production at the wrong Apple environment or the wrong app.
-const KEY_ID = required('APNS_KEY_ID');
-const TEAM_ID = required('APNS_TEAM_ID');
-const BUNDLE_ID = required('APNS_BUNDLE_ID');
-const KEY_PATH = required('APNS_KEY_PATH');
-const PORT = Number(process.env.PORT ?? 8090);
-// How many reverse proxies sit in front of the relay. Used to read the real
-// peer from X-Forwarded-For, which is otherwise caller-controlled.
-const TRUSTED_PROXY_HOPS = Number(process.env.TRUSTED_PROXY_HOPS ?? 1);
-// Comfortably above the largest legitimate request (a 3KB ciphertext plus a
-// 64-char token) and far below anything worth buffering.
+// Bindings come from worker-configuration.d.ts (`wrangler types`); the APNs
+// values are Worker secrets, which the config can't describe, so they're added here.
+declare global {
+  interface Env {
+    APNS_KEY_ID: string;
+    APNS_TEAM_ID: string;
+    APNS_BUNDLE_ID: string;
+    /** Contents of the .p8 key. */
+    APNS_PRIVATE_KEY: string;
+    /** The environment tried first; the other one gets a single retry. */
+    APNS_ENV?: string;
+  }
+}
+
 const MAX_BODY_BYTES = 8 * 1024;
-// TestFlight and App Store builds are 'production'; a development-signed build is
-// 'sandbox'. APNS_ENV picks which one is tried first; a BadDeviceToken from it is
-// retried on the other, so both kinds of build get their pushes.
-const HOST = process.env.APNS_ENV === 'sandbox' ? APNS_SANDBOX : APNS_PROD;
-const OTHER_HOST = HOST === APNS_PROD ? APNS_SANDBOX : APNS_PROD;
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
+interface Relay {
+  tokens: ApnsTokenCache;
+  primary: ApnsClient;
+  other: ApnsClient;
+  topic: string;
+}
+
+function required(env: Env, name: keyof Env): string {
+  const value = env[name];
+  if (typeof value !== 'string' || value === '') throw new Error(`${name} is required`);
   return value;
 }
 
-const tokens = new ApnsTokenCache({
-  keyId: KEY_ID,
-  teamId: TEAM_ID,
-  privateKeyPem: readFileSync(KEY_PATH, 'utf8'),
-});
-const apns = new ApnsClient(tokens, HOST);
-// Connects lazily, so a deployment that only sees one kind of build never opens it.
-const otherApns = new ApnsClient(tokens, OTHER_HOST);
-
-// A device realistically needs a handful of notifications a minute; a server
-// stuck in a loop needs stopping. Burst of 10, sustained 1 every 6s.
-const perToken = new RateLimiter({ capacity: 10, refillPerSecond: 1 / 6 });
-const perIp = new RateLimiter({ capacity: 60, refillPerSecond: 1 });
-setInterval(() => {
-  perToken.sweep();
-  perIp.sweep();
-}, 60_000).unref?.();
-
-const app = new Hono();
-
-app.get('/health', (c) => c.json({ ok: true }));
-
-app.post('/push', async (c) => {
-  // Rate-limit BEFORE reading the body: /push is public, so parsing first lets an
-  // attacker spend memory/CPU on a huge JSON the schema was always going to reject.
-  const ip = clientIpFromForwarded(c.req.header('x-forwarded-for'), TRUSTED_PROXY_HOPS);
-  if (!perIp.take(ip)) return c.json({ error: 'rate_limited' }, 429);
-
-  const declaredLength = Number(c.req.header('content-length') ?? 0);
-  if (declaredLength > MAX_BODY_BYTES) {
-    return c.json({ error: 'payload_too_large' }, 413);
-  }
-  const raw = await c.req.text().catch(() => '');
-  // Content-Length is caller-supplied; check what actually arrived too.
-  if (raw.length > MAX_BODY_BYTES) return c.json({ error: 'payload_too_large' }, 413);
-
-  let body: unknown = null;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    return c.json({ error: 'invalid_request', detail: 'body must be JSON' }, 400);
-  }
-  const parsed = pushRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'invalid_request', detail: parsed.error.issues[0]?.message }, 400);
-  }
-  const req = parsed.data;
-
-  if (!perToken.take(req.token)) return c.json({ error: 'rate_limited' }, 429);
-
-  let result: Awaited<ReturnType<ApnsClient['send']>>;
-  try {
-    result = await sendToEitherEnvironment(apns, otherApns, {
-      token: req.token,
-      payload: buildApnsPayload(req),
-      topic: BUNDLE_ID,
-      collapseId: req.collapseId,
+export function createApp(fetchImpl: typeof fetch = fetch) {
+  // One per isolate, so the signed JWT is reused across requests as Apple asks.
+  let relay: Relay | null = null;
+  const relayFor = (env: Env): Relay => {
+    if (relay) return relay;
+    const tokens = new ApnsTokenCache({
+      keyId: required(env, 'APNS_KEY_ID'),
+      teamId: required(env, 'APNS_TEAM_ID'),
+      privateKeyPem: required(env, 'APNS_PRIVATE_KEY'),
     });
-  } catch (error) {
-    // Transport failure — the caller may retry. Deliberately not logging the
-    // request: the whole point of this service is that it holds no content.
-    console.warn('apns transport error:', error instanceof Error ? error.message : error);
-    return c.json({ error: 'upstream_unavailable' }, 502);
-  }
+    const host = env.APNS_ENV === 'sandbox' ? APNS_SANDBOX : APNS_PROD;
+    const otherHost = host === APNS_PROD ? APNS_SANDBOX : APNS_PROD;
+    relay = {
+      tokens,
+      primary: new ApnsClient(tokens, host, fetchImpl),
+      other: new ApnsClient(tokens, otherHost, fetchImpl),
+      topic: required(env, 'APNS_BUNDLE_ID'),
+    };
+    return relay;
+  };
 
-  switch (classifyApnsStatus(result.status)) {
-    case 'ok':
-      return c.json({ ok: true });
-    case 'unregistered':
-      // The app was uninstalled. The relay stores nothing, so the caller is the
-      // one that must forget this token.
-      return c.json({ error: 'unregistered' }, 410);
-    case 'retry':
-      return c.json({ error: 'upstream_busy', reason: result.reason }, 503);
-    default:
-      return c.json({ error: 'rejected', reason: result.reason }, 400);
-  }
-});
+  const app = new Hono<{ Bindings: Env }>();
 
-console.log(`tether-relay listening on :${PORT} (${HOST}, falls back to ${OTHER_HOST}, topic ${BUNDLE_ID})`);
+  // Reports whether the relay can deliver at all: the key has to sign.
+  app.get('/health', async (c) => {
+    let signable = true;
+    try {
+      await relayFor(c.env).tokens.get();
+    } catch {
+      signable = false;
+    }
+    return c.json({ ok: signable, signable }, signable ? 200 : 503);
+  });
 
-export default { port: PORT, fetch: app.fetch };
+  app.post('/push', async (c) => {
+    // Set by Cloudflare's edge; a caller cannot forge it. Without it the request
+    // didn't come through the edge, so there is no key to limit on.
+    const ip = c.req.header('cf-connecting-ip');
+    if (!ip) return c.json({ error: 'untrusted_peer' }, 403);
+    if (!(await c.env.PER_IP.limit({ key: ip })).success) return c.json({ error: 'rate_limited' }, 429);
+
+    const declaredLength = Number(c.req.header('content-length') ?? 0);
+    if (declaredLength > MAX_BODY_BYTES) return c.json({ error: 'payload_too_large' }, 413);
+    const raw = await c.req.text().catch(() => '');
+    if (raw.length > MAX_BODY_BYTES) return c.json({ error: 'payload_too_large' }, 413);
+
+    let body: unknown = null;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return c.json({ error: 'invalid_request', detail: 'body must be JSON' }, 400);
+    }
+    const parsed = pushRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: 'invalid_request', detail: parsed.error.issues[0]?.message }, 400);
+    }
+    const req = parsed.data;
+
+    if (!(await c.env.PER_TOKEN.limit({ key: req.token })).success) return c.json({ error: 'rate_limited' }, 429);
+
+    const { primary, other, topic } = relayFor(c.env);
+    let result: Awaited<ReturnType<ApnsClient['send']>>;
+    try {
+      result = await sendToEitherEnvironment(primary, other, {
+        token: req.token,
+        payload: buildApnsPayload(req),
+        topic,
+        collapseId: req.collapseId,
+      });
+    } catch (error) {
+      console.warn('apns transport error:', error instanceof Error ? error.message : error);
+      return c.json({ error: 'upstream_unavailable' }, 502);
+    }
+
+    switch (classifyApnsStatus(result.status)) {
+      case 'ok':
+        return c.json({ ok: true });
+      case 'unregistered':
+        return c.json({ error: 'unregistered' }, 410);
+      case 'retry':
+        return c.json({ error: 'upstream_busy', reason: result.reason }, 503);
+      default:
+        return c.json({ error: 'rejected', reason: result.reason }, 400);
+    }
+  });
+
+  return app;
+}
+
+export default createApp();

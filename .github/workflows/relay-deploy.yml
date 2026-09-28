@@ -1,0 +1,56 @@
+name: Deploy Relay
+
+# The push relay is separate infrastructure from the Tether server: it is the
+# only internet-facing piece, it holds the APNs key, and it must never ship
+# inside the `tether` binary. It runs as a Cloudflare Worker and deploys on its
+# own; the release workflow does not touch it.
+#
+# Triggered by the TAG push, not `release: published`. The release workflow
+# publishes with GITHUB_TOKEN, and GitHub does not trigger workflows from
+# events that token creates — so a `release` trigger here silently never fires.
+# The tag is pushed with real credentials, which is why release.yml uses it too.
+on:
+  push:
+    tags: ['v*.*.*']
+  # Lets the relay be redeployed without cutting a Tether release, since its
+  # lifecycle is genuinely independent of the app's.
+  workflow_dispatch:
+
+concurrency:
+  group: relay-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/relay
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@v2
+      # tsc comes from the root workspace, like the CI relay job.
+      - name: Install root tools
+        working-directory: .
+        run: bun install --frozen-lockfile
+
+      # The key-holding service is never deployed untested, even on a manual
+      # dispatch that bypassed the usual CI run on main.
+      - name: Test
+        run: |
+          bun install --frozen-lockfile
+          bunx wrangler types --check
+          ../../node_modules/.bin/tsc --noEmit -p tsconfig.json
+          ../../node_modules/.bin/tsc --noEmit -p tsconfig.test.json
+          bun test
+
+      # Secrets on the Worker (APNS_*) are managed with `wrangler secret put`
+      # and persist across deploys; CI only ships code and bindings.
+      - name: Deploy
+        run: bunx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

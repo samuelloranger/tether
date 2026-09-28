@@ -21,29 +21,40 @@ It stores nothing. No database, no accounts, no payload logging.
 
 ## Deploy it separately
 
-Run this on its own host. **Do not** put it beside a Tether server: the relay is
-internet-facing, and a Tether server is a remote shell on the machine hosting
-it. They should not share an address, a container, or a blast radius.
+The relay is a Cloudflare Worker, so it never sits beside a Tether server: a
+Tether server is a remote shell on the machine hosting it, and the relay holds
+the APNs key.
 
 ```sh
-export APNS_KEY_ID=XXXXXXXXXX
-export APNS_TEAM_ID=XXXXXXXXXX
-export APNS_BUNDLE_ID=com.example.yourapp
-export APNS_KEY_FILE=/secure/path/AuthKey_XXXXXXXXXX.p8
-docker compose up -d --build
+cd apps/relay
+bunx wrangler login
+bunx wrangler deploy
+bunx wrangler secret put APNS_KEY_ID
+bunx wrangler secret put APNS_TEAM_ID
+bunx wrangler secret put APNS_BUNDLE_ID
+bunx wrangler secret put APNS_PRIVATE_KEY < AuthKey_XXXXXXXXXX.p8
 ```
 
-Put it behind a TLS-terminating reverse proxy; it listens on plain HTTP and
-binds to localhost in the compose file for exactly that reason.
+Then attach a hostname under **Workers & Pages → tether-relay → Settings →
+Domains & Routes → Add → Custom domain**. `wrangler.jsonc` deliberately has no
+account or routes, so a deploy never needs them in the repo; a custom domain
+added in the dashboard survives later deploys.
 
-| Variable | Required | Notes |
+| Secret | Required | Notes |
 | --- | --- | --- |
 | `APNS_KEY_ID` | yes | Key ID of the APNs auth key |
 | `APNS_TEAM_ID` | yes | Apple Developer team ID |
 | `APNS_BUNDLE_ID` | yes | Sent as `apns-topic`; must match the app |
-| `APNS_KEY_PATH` | yes | Path to the `.p8`, mounted read-only |
+| `APNS_PRIVATE_KEY` | yes | Contents of the `.p8` |
 | `APNS_ENV` | no | Environment tried first: `production` (default) or `sandbox`. A `BadDeviceToken` is retried once on the other, so TestFlight and development-signed builds both work |
-| `PORT` | no | Default `8090` |
+
+Rate limits (`PER_IP` 60/min, `PER_TOKEN` 10/min) are Cloudflare Rate Limiting
+bindings in `wrangler.jsonc`, keyed on the `CF-Connecting-IP` the edge sets.
+Workers logs stay off, so nothing about a request is kept.
+
+APNs accepts HTTP/2 only. Cloudflare's edge makes that connection for the
+Worker, which `wrangler dev` can't reproduce, so pushes only reach Apple from a
+deployed Worker. `bun test` covers everything up to the APNs request.
 
 ## API
 
@@ -53,11 +64,12 @@ POST /push
 
 200 {"ok":true}          delivered
 410 {"error":"unregistered"}  app uninstalled — the CALLER prunes its own record
+403 {"error":"untrusted_peer"}  didn't come through Cloudflare's edge
 429 {"error":"rate_limited"}
 503 upstream busy, retry
 ```
 
-`GET /health` → `{"ok":true}`.
+`GET /health` → `{"ok":true,"signable":true}` while the key signs, `503` otherwise.
 
 A request may carry `body` (cleartext) **or** `ciphertext`, never both — sending
 both would mean the caller leaked the content the encryption exists to protect,
