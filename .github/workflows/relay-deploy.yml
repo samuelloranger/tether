@@ -32,13 +32,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@v2
+      # tsc comes from the root workspace, like the CI relay job.
+      - name: Install root tools
+        working-directory: .
+        run: bun install --frozen-lockfile
 
       # The key-holding service is never deployed untested, even on a manual
       # dispatch that bypassed the usual CI run on main.
       - name: Test
         run: |
           bun install --frozen-lockfile
-          bunx tsc --noEmit -p .
+          bunx wrangler types --check
+          ../../node_modules/.bin/tsc --noEmit -p tsconfig.json
+          ../../node_modules/.bin/tsc --noEmit -p tsconfig.test.json
           bun test
 
       # Secrets on the Worker (APNS_*) are managed with `wrangler secret put`

@@ -1,12 +1,12 @@
-// Test helpers: a throwaway APNs-shaped key and a fake Worker env.
-import type { Env, RateLimit } from './index';
+// Test helpers: a throwaway APNs-shaped key and a fake Worker env. Env and
+// RateLimit are the global Workers types from worker-configuration.d.ts.
 
 export async function generateP8(): Promise<{
   pem: string;
   publicKey: CryptoKey;
 }> {
-  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-  const der = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+  const pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+  const der = new Uint8Array((await crypto.subtle.exportKey('pkcs8', pair.privateKey)) as ArrayBuffer);
   let binary = '';
   for (const byte of der) binary += String.fromCharCode(byte);
   const body = btoa(binary).replace(/(.{64})/g, '$1\n');

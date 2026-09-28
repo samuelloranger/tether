@@ -5,10 +5,11 @@
   "scripts": {
     "dev": "wrangler dev",
     "test": "bun test --parallel",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "wrangler types --check && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "lint": "biome check",
     "format": "biome check --write",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "types": "wrangler types"
   },
   "dependencies": {
     "hono": "^4.13.3",

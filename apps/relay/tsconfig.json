@@ -1,14 +1,16 @@
 {
+  // The Worker itself: typed with the runtime types `wrangler types` generates
+  // for this compatibility date. Tests run under Bun and are checked separately.
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
     "strict": true,
-    "noImplicitOverride": true,
-    "noFallthroughCasesInSwitch": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "target": "esnext",
+    "lib": ["esnext"],
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["bun-types"]
+    "types": []
   },
-  "include": ["src/**/*"]
+  "include": ["src", "worker-configuration.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/testing.ts"]
 }

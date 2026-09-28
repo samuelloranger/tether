@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { createApp, type Env } from './index';
+import { createApp } from './index';
 import { fakeEnv, generateP8, limiter } from './testing';
 
 const TOKEN = 'a'.repeat(64);
@@ -41,7 +41,7 @@ describe('POST /push', () => {
     const { sent, fetchImpl } = apnsStub(ok);
     const res = await push(fakeEnv(pem), fetchImpl, { ...cleartext, collapseId: 's-1' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect((await res.json()) as unknown).toEqual({ ok: true });
     expect(sent).toHaveLength(1);
     expect(sent[0]?.url).toBe(`https://api.push.apple.com/3/device/${TOKEN}`);
     const headers = sent[0]?.init.headers as Record<string, string>;
@@ -116,7 +116,7 @@ describe('POST /push', () => {
       const { fetchImpl } = apnsStub(() => new Response(apnsBody, { status: apnsStatus }));
       const res = await push(fakeEnv(pem), fetchImpl, cleartext);
       expect(res.status).toBe(status);
-      expect(await res.json()).toEqual(body);
+      expect((await res.json()) as unknown).toEqual(body);
     }
   });
 
@@ -126,7 +126,7 @@ describe('POST /push', () => {
     });
     const res = await push(fakeEnv(pem), fetchImpl, cleartext);
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ error: 'upstream_unavailable' });
+    expect((await res.json()) as unknown).toEqual({ error: 'upstream_unavailable' });
   });
 });
 
@@ -134,7 +134,7 @@ describe('GET /health', () => {
   test('is healthy while the key signs', async () => {
     const res = await createApp().request('/health', {}, fakeEnv(pem));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, signable: true });
+    expect((await res.json()) as unknown).toEqual({ ok: true, signable: true });
   });
 
   test("fails when the key can't sign", async () => {

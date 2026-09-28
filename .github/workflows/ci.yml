@@ -37,7 +37,9 @@ jobs:
         working-directory: apps/relay
         run: |
           bun install --frozen-lockfile
-          ../../node_modules/.bin/tsc --noEmit -p .
+          bunx wrangler types --check
+          ../../node_modules/.bin/tsc --noEmit -p tsconfig.json
+          ../../node_modules/.bin/tsc --noEmit -p tsconfig.test.json
           bun test
 
   # Host CLI: the Go encrypted-push tool (apps/tether-notify). Build, vet, and
