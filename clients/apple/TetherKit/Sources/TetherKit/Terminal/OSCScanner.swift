@@ -18,6 +18,10 @@ struct OSCScanner {
   private var overflowed = false
   /// Commands Tether reads are short; a longer body is dropped rather than buffered.
   static let bodyLimit = 4096
+  /// OSC 52 carries a base64 clipboard: room for `OSCReports.clipboardLimit` bytes of text.
+  static let clipboardBodyLimit = 101_000
+
+  private static func limit(for code: String) -> Int { code == "52" ? clipboardBodyLimit : bodyLimit }
 
   mutating func scan(_ bytes: [UInt8]) -> [Event] {
     var events: [Event] = []
@@ -52,7 +56,7 @@ struct OSCScanner {
       case 0x07: return finish(end: end)
       case 0x1B: state = .bodyEscape
       default:
-        if body.count < Self.bodyLimit { body.append(byte) } else { overflowed = true }
+        if body.count < Self.limit(for: code) { body.append(byte) } else { overflowed = true }
       }
     case .bodyEscape:
       if byte == UInt8(ascii: "\\") { return finish(end: end) }

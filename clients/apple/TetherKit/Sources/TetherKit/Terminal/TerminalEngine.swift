@@ -14,6 +14,7 @@ final class TerminalEngine {
   private var palette: [UInt32] = []
   private var theme: TerminalTheme
   private var paletteOverrides = PaletteOverrides()
+  private var reports = OSCReports()
   private var needsRefresh = false
   private var oscScanner = OSCScanner()
   /// OSC 133 A / C / D positions. `line` counts from the first line ever written, so it
@@ -185,6 +186,26 @@ final class TerminalEngine {
     locked { delegate.bells = 0 }
   }
 
+  /// Title, working directory and progress the programs have reported so far.
+  var report: TerminalReport {
+    locked { reports.report }
+  }
+
+  /// OSC 52 texts written since the last call, oldest first.
+  func takeClipboard() -> [String] {
+    locked { reports.takeClipboard() }
+  }
+
+  func discardClipboard() {
+    locked { reports.discardClipboard() }
+  }
+
+  /// Re-applies another engine's report: its output may be gone from the buffer this engine
+  /// was rebuilt from.
+  func restoreReport(_ carried: TerminalReport) {
+    locked { reports.adopt(carried) }
+  }
+
   func feed(_ bytes: Data) {
     guard !bytes.isEmpty else { return }
     locked { feedLocked(bytes) }
@@ -235,6 +256,7 @@ final class TerminalEngine {
     }
     for event in oscScanner.scan(bytes) {
       paletteOverrides.apply(event)
+      reports.apply(event)
       switch event {
       case let .reset(end):
         feed(through: end)

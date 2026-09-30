@@ -50,7 +50,16 @@ final class TerminalBellTests: XCTestCase {
   }
 
   func testOutputWithoutABellSendsNone() async {
-    let received = await events(after: "\u{1B}]2;title\u{07}hello", count: 1)
-    guard case .mouseModes = received.first else { return XCTFail("expected no bell, got \(received)") }
+    let received = await events(after: "\u{1B}]2;title\u{07}hello", count: 2)
+    XCTAssertFalse(received.contains { if case .bell = $0 { true } else { false } }, "got \(received)")
+    guard case .report(let report) = received.first else { return XCTFail("expected the title report, got \(received)") }
+    XCTAssertEqual(report.title, "title")
+    guard case .mouseModes = received.last else { return XCTFail("expected mouse modes, got \(received)") }
+  }
+
+  func testClipboardWriteReachesTheEventStreamOnce() async {
+    let received = await events(after: "\u{1B}]52;c;aGk=\u{07}", count: 2)
+    guard case .clipboard("hi") = received.first else { return XCTFail("expected the clipboard text, got \(received)") }
+    guard case .mouseModes = received.last else { return XCTFail("expected mouse modes, got \(received)") }
   }
 }
