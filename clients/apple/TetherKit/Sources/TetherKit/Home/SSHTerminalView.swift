@@ -247,7 +247,7 @@ public struct SSHTerminalView: View {
         Text(controller.title).font(.subheadline.weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary)
         HStack(spacing: 4) {
-          Text(controller.attach)
+          Text(controller.terminalReport.title ?? controller.attach)
           Text("·")
           // State is spelled out as well as coloured — the lamp alone would be
           // invisible to Differentiate Without Color and to VoiceOver.
@@ -287,6 +287,30 @@ public struct SSHTerminalView: View {
     .animation(TetherMotion.ui(TetherMotion.arrive, reduceMotion: reduceMotion), value: controller.status)
     .padding(.horizontal, 10).padding(.vertical, 6)
     .background(TetherColors.surface)
+    .overlay(alignment: .bottom) {
+      if let progress = controller.terminalReport.progress { progressBar(progress) }
+    }
+  }
+
+  private func progressBar(_ progress: TerminalProgress) -> some View {
+    let tint: Color = switch progress.state {
+    case .error: TetherColors.danger
+    case .warning: TetherColors.warning
+    case .normal, .indeterminate: TetherColors.accent
+    }
+    return Group {
+      if progress.state == .indeterminate {
+        ProgressView().progressViewStyle(.linear)
+      } else {
+        ProgressView(value: Double(progress.percent), total: 100).progressViewStyle(.linear)
+      }
+    }
+    .tint(tint)
+    .scaleEffect(y: 0.6)
+    .accessibilityElement()
+    .accessibilityLabel(progress.state == .indeterminate ? "Working" : "Progress")
+    .accessibilityValue(progress.state == .indeterminate ? "" : "\(progress.percent) percent")
+    .accessibilityIdentifier("sshTerminalProgress")
   }
 
   private func headerButton(_ icon: String, id: String, label: String, action: @escaping () -> Void) -> some View {

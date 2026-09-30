@@ -109,6 +109,10 @@ public final class SSHTerminalController {
   @ObservationIgnored private var bellThrottle = BellThrottle()
   /// A bell that arrives in the background grace period would otherwise buzz on return.
   @ObservationIgnored var appIsActive: @MainActor () -> Bool = { UIApplication.shared.applicationState == .active }
+  /// What the programs in the attached session have reported: title, cwd, progress.
+  public private(set) var terminalReport = TerminalReport.empty
+  /// OSC 52 lands here. Only ever written, and never while the app is in the background.
+  @ObservationIgnored var writeClipboard: @MainActor (String) -> Void = { UIPasteboard.general.string = $0 }
   public let title: String
   public private(set) var sessionKey: String
   public private(set) var sessions: [ZmxSession] = []
@@ -412,6 +416,8 @@ public final class SSHTerminalController {
       let trimmed = live.trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmed.hasPrefix("/") { return trimmed }
     }
+    // No /proc (a macOS host): the shell's own report beats the directory the session started in.
+    if let reported = terminalReport.cwd { return reported }
     return refreshed.displayCwd.hasPrefix("/") ? refreshed.displayCwd : nil
   }
 
@@ -840,6 +846,11 @@ public final class SSHTerminalController {
     case .bell:
       guard appIsActive(), bellThrottle.shouldRing(at: ProcessInfo.processInfo.systemUptime) else { return }
       bellRings += 1
+    case let .report(report):
+      terminalReport = report
+    case let .clipboard(text):
+      guard appIsActive() else { return }
+      writeClipboard(text)
     case .error:
       markDisconnectedAndReconnect()
     }
@@ -850,6 +861,8 @@ public final class SSHTerminalController {
   private func markDisconnectedAndReconnect() {
     guard let next = Self.statusAfterTransportDrop(from: status) else { return }
     status = next
+    // Nothing will finish the job the bar was showing.
+    terminalReport.progress = nil
     // A drop caused by the network dying must not spin on a dead path: the
     // observer redials the moment a usable one comes back.
     Task { await self.connect(trigger: .foreground) }

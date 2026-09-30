@@ -31,6 +31,8 @@ final class TerminalOutputBuffer {
       engine.discardReplies()
       // Replayed output rang its bells when it first arrived.
       engine.discardBells()
+      // ...and wrote the clipboard.
+      engine.discardClipboard()
     }
     return engine
   }

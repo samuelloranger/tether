@@ -7,6 +7,10 @@ public enum TerminalPipelineEvent: Sendable {
   case altScreen(Bool)
   /// Live output rang the terminal bell. Never sent for replayed output.
   case bell
+  /// The session's title, working directory or progress changed; also sent on every attach.
+  case report(TerminalReport)
+  /// A program wrote this text to the clipboard (OSC 52). Never sent for replayed output.
+  case clipboard(String)
   case error(String)
 }
 
@@ -53,6 +57,7 @@ actor TerminalPipeline {
   private var lastMouseMode: MouseMode = .off
   private var lastMouseSgr = true
   private var lastAltScreen = false
+  private var lastReport = TerminalReport.empty
   /// One source of truth for the grid size: the channel, the parser and any
   /// later resize must agree or the rendered grid will not match the PTY.
   private var cols: UInt16 = 80
@@ -90,6 +95,8 @@ actor TerminalPipeline {
       snapshotSink.yield(nil)
     }
     resetMouseModes()
+    lastReport = attached.grid.emulator.report
+    eventSink.yield(.report(lastReport))
     sshTransport = transport
     sshReadTask = Task { [weak self] in
       await self?.readLoopSSH(key: key, transport: transport)
@@ -291,6 +298,7 @@ actor TerminalPipeline {
       )
       rebuilt.restorePaletteOverrides(carried)
       rebuilt.restoreProgramCursor(carriedCursor)
+      if let carriedReport = currentGrid?.emulator.report { rebuilt.restoreReport(carriedReport) }
       currentGrid?.emulator = rebuilt
       lastRenderedGeneration = nil
       publishSnapshot()
@@ -327,6 +335,8 @@ actor TerminalPipeline {
         outbound.yield(.reply(Data(replies), key: emulatorKey))
       }
       if emulator.takeBells() > 0 { eventSink.yield(.bell) }
+      for text in emulator.takeClipboard() { eventSink.yield(.clipboard(text)) }
+      syncReport(from: emulator)
     }
     publishSnapshot()
   }
@@ -377,6 +387,13 @@ actor TerminalPipeline {
     }
     snapshotSink.yield(frame)
     return true
+  }
+
+  private func syncReport(from emulator: TerminalEngine) {
+    let report = emulator.report
+    guard report != lastReport else { return }
+    lastReport = report
+    eventSink.yield(.report(report))
   }
 
   private func syncMouseModes(from emulator: TerminalEngine) {
