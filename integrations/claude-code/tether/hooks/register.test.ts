@@ -6,12 +6,13 @@ type World = { runs: string[][]; spawns: string[][] }
 
 function world(
   on: On,
-  { wait = '', holdExit = 0, verdict = 'ask', env = { ZMX_SESSION: 'work', HOME: '/home/u' } }:
-    { wait?: string; holdExit?: number; verdict?: 'ask' | 'allow' | 'deny'; env?: Record<string, string> } = {},
+  { wait = '', holdExit = 0, verdict = 'ask', env = { ZMX_SESSION: 'work', HOME: '/home/u' }, defaultMode }:
+    { wait?: string; holdExit?: number; verdict?: 'ask' | 'allow' | 'deny'; env?: Record<string, string>; defaultMode?: string } = {},
 ): World {
   const w: World = { runs: [], spawns: [] }
   mock.env(on, env)
   on('session.start', () => ({ cwd: '/x' }))
+  on('settings.read', () => ({ value: defaultMode ? { permissions: { defaultMode } } : {} }) as never)
   on('classic.UserPromptSubmit', () => ({}))
   on('classic.PostToolUse', () => ({}))
   on('tool.check', () => ({ decision: verdict, reason: 'needs approval' }))
@@ -124,6 +125,13 @@ describe('tool.check', () => {
     const w = world(on, { wait: '{"action":"approve"}\n' })
     await start($)
     await $.classic.UserPromptSubmit({ prompt: 'go', permission_mode: 'auto' } as never)
+    expect((await $.tool.check(BASH)).decision).toBe('ask')
+    expect(w.runs).toEqual([])
+  })
+
+  test('a settings default mode that settles asks is never held', async ($, on) => {
+    const w = world(on, { wait: '{"action":"approve"}\n', defaultMode: 'dontAsk' })
+    await start($)
     expect((await $.tool.check(BASH)).decision).toBe('ask')
     expect(w.runs).toEqual([])
   })

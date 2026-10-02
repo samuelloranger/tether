@@ -2,13 +2,21 @@ import type { Register } from 'claude-code'
 import { decide, holdsInMode, summarize } from './hold'
 
 let interactive = false
-// tool.check doesn't carry the permission mode; these classic events do, so the latest
-// one stands in for it (a mode switched mid-turn lands with the next tool's result).
+// tool.check doesn't carry the permission mode. The classic events do, so the latest
+// one stands in for it; where an organization's guard keeps classic events from user
+// mods, the settings' default mode is all there is (a mode picked by flag or shift+tab
+// then goes unseen, and its asks are held like any other).
 let mode: string | undefined
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     interactive = e.isInteractive
+    try {
+      const settings = (await $.settings.read()) as { permissions?: { defaultMode?: string } }
+      mode = settings.permissions?.defaultMode
+    } catch {
+      mode = undefined
+    }
     return next(e)
   })
 
