@@ -17,6 +17,7 @@ The VT emulator is SwiftTerm's headless engine, wrapped by `TerminalEngine` (pin
 | `clients/apple/` | Swift / SwiftUI | The iOS app. `TetherKit` package (SSH transport, terminal pipeline + `TerminalEngine` + renderer, Home / key vault, all UI), `TetherIOS` app target, `TetherNotificationService` (NSE — decrypts push), `Tether.xcodeproj`. |
 | `apps/tether-notify/` | Go | Host-side encrypted-push CLI. Registers a phone's APNs token + AES key (sent by the app over SSH) and posts ciphertext to the relay. |
 | `apps/relay/` | Cloudflare Worker (Hono) | Push relay: forwards ciphertext to APNs (production first, sandbox on `BadDeviceToken`). Deployed on its own by `relay-deploy.yml` (wrangler); APNs config lives in Worker secrets. |
+| `integrations/claude-code/` | Claude Code mod (TS) | `tether` plugin, published by the repo-root `.claude-plugin/marketplace.json`. Holds a permission prompt while no client is attached and applies the phone's Approve / Deny / Reply as the decision (`tether-notify hold` / `wait`). Installed by `install-agent-hooks.sh` on Claude Code ≥ 2.1.287. Test: `claude plugin test integrations/claude-code/tether`. |
 | `scripts/` | shell / ruby | `install.sh` (install `tether-notify`), `install-agent-hooks.sh` (wire agent push), `release.sh`. |
 | `.github/workflows/` | — | `ci.yml` (lint + host-tools + relay + iOS build/test), `release.yml` (signed iOS archive → TestFlight), `relay-deploy.yml` (relay Worker deploy on tag or manual run). |
 
@@ -54,7 +55,7 @@ bash scripts/install-agent-hooks.sh [host] # fire notifications from agent hooks
 
 ## Push
 
-`tether-notify` on the host encrypts each notification with the device's AES-256-GCM key — wire format `base64(nonce[12] ‖ ciphertext ‖ tag[16])`, byte-identical to what the NSE decrypts — and POSTs the ciphertext to the relay (`tether-relay.samlo.cloud`; override with `TETHER_PUSH_RELAY_URL`). The relay and Apple never see plaintext. The app registers its token over SSH on connect; agent hooks call `tether-notify notify` on session state changes. Devices live in `~/.tether-notify/devices.json`.
+`tether-notify` on the host encrypts each notification with the device's AES-256-GCM key — wire format `base64(nonce[12] ‖ ciphertext ‖ tag[16])`, byte-identical to what the NSE decrypts — and POSTs the ciphertext to the relay (`tether-relay.samlo.cloud`; override with `TETHER_PUSH_RELAY_URL`). The relay and Apple never see plaintext. The app registers its token over SSH on connect; agent hooks call `tether-notify notify` on session state changes. Devices live in `~/.tether-notify/devices.json`. With the Claude Code mod installed, a permission prompt in an unattached session is held instead of drawn; the phone's answer reaches it through `tether-notify answer` → the answer file → `wait`, not `zmx send`.
 
 ## Security
 
