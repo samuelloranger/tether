@@ -19,6 +19,7 @@ type stateDeps struct {
 	now    func() time.Time
 	ppid   int
 	push   func(PushContent, string) error
+	alive  func(int) bool
 	stderr io.Writer
 }
 
@@ -28,6 +29,7 @@ func defaultStateDeps(dryRun bool) stateDeps {
 		now:    time.Now,
 		ppid:   os.Getppid(),
 		push:   func(c PushContent, collapse string) error { return sendPush(c, collapse, dryRun) },
+		alive:  pidAlive,
 		stderr: os.Stderr,
 	}
 }
@@ -70,6 +72,12 @@ func runState(args []string, d stateDeps) error {
 	err := withSessionLock(*session, func() error {
 		return withSessionsLock(func() error {
 			prev, _ := readSession(*session)
+			// A parallel tool or a subagent must not drop a request the phone is deciding.
+			if *state == stateWorking && prev != nil && prev.Pending != nil &&
+				prev.Pending.WaiterPid > 0 && d.alive(prev.Pending.WaiterPid) {
+				prev.Updated = now
+				return writeSession(prev)
+			}
 			next := nextState(prev, in, now)
 			if next == nil {
 				return removeSession(*session)

@@ -189,8 +189,26 @@ func TestWaitReleasesWhenAClientAttaches(t *testing.T) {
 		t.Fatalf("result %+v", r)
 	}
 	s, _ := readSession("work")
-	if s.Pending != nil || s.State != stateWaiting || s.Version != "v1" {
+	// A new version: the hold's push can no longer type into the dialog that replaced it.
+	if s.Pending != nil || s.State != stateWaiting || s.Version == "v1" || s.Version == "" {
 		t.Fatalf("record %+v", s)
+	}
+	if _, err := os.Stat(answerPath("work")); !os.IsNotExist(err) {
+		t.Fatalf("answer file left behind: %v", err)
+	}
+}
+
+func TestWaitPrefersAnAnswerThatLandsAsAClientAttaches(t *testing.T) {
+	w := waitFixture(t, held)
+	w.deps.run = func(name string, args ...string) (string, error) {
+		_ = writeAnswer("work", heldAnswer{Version: "v1", Action: "approve"})
+		return "name=work\tclients=1\n", nil
+	}
+	if err := runWait(waitArgs, w.deps); err != nil {
+		t.Fatal(err)
+	}
+	if r := result(t, w.out); r.Action != "approve" {
+		t.Fatalf("result %+v", r)
 	}
 }
 

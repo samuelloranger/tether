@@ -121,6 +121,41 @@ func runWait(args []string, d waitDeps) error {
 		return emit(waitResult{Release: "stale"})
 	}
 
+	// take ends the hold: with the phone's answer when one is in (the call moves on to
+	// run), or, releasing, without one. The version moves either way, so the hold's push
+	// can't answer whatever replaces it.
+	take := func(s *SessionState, releasing bool) (*heldAnswer, error) {
+		var got *heldAnswer
+		if data, err := os.ReadFile(answerPath(*session)); err == nil {
+			var a heldAnswer
+			if json.Unmarshal(data, &a) == nil && a.Version == *version {
+				got = &a
+			}
+		}
+		if got == nil && !releasing {
+			return nil, nil
+		}
+		_ = os.Remove(answerPath(*session))
+		s.Pending = nil
+		s.Version = newVersion()
+		if got != nil {
+			s.State = stateWorking
+		}
+		return got, writeSession(s)
+	}
+	end := func(releasing bool) (got *heldAnswer, stale bool, err error) {
+		err = locked(func(s *SessionState) error {
+			if !isHeld(s) {
+				stale = true
+				return nil
+			}
+			var takeErr error
+			got, takeErr = take(s, releasing)
+			return takeErr
+		})
+		return got, stale, err
+	}
+
 	parent := d.ppid()
 	for i := 0; ; i++ {
 		select {
@@ -132,29 +167,8 @@ func runWait(args []string, d waitDeps) error {
 			return errWaitAbandoned
 		}
 
-		var got *heldAnswer
-		stale := false
-		if err := locked(func(s *SessionState) error {
-			if !isHeld(s) {
-				stale = true
-				return nil
-			}
-			data, err := os.ReadFile(answerPath(*session))
-			if err != nil {
-				return nil
-			}
-			var a heldAnswer
-			if json.Unmarshal(data, &a) != nil || a.Version != *version {
-				return nil
-			}
-			_ = os.Remove(answerPath(*session))
-			got = &a
-			// The call is decided: a second tap must find the agent moved on.
-			s.Pending = nil
-			s.State = stateWorking
-			s.Version = newVersion()
-			return writeSession(s)
-		}); err != nil {
+		got, stale, err := end(false)
+		if err != nil {
 			return err
 		}
 		if got != nil {
@@ -166,13 +180,13 @@ func runWait(args []string, d waitDeps) error {
 
 		if i%attachCheckEvery == 0 {
 			if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
-				_ = locked(func(s *SessionState) error {
-					if !isHeld(s) {
-						return nil
-					}
-					s.Pending = nil
-					return writeSession(s)
-				})
+				got, _, err := end(true)
+				if err != nil {
+					return err
+				}
+				if got != nil {
+					return emit(waitResult{Action: got.Action, Text: got.Text})
+				}
 				return emit(waitResult{Release: "attached"})
 			}
 		}
