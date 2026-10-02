@@ -33,3 +33,11 @@ export function decide(output: string, verdict: Verdict): Verdict {
   }
   return verdict
 }
+
+// In auto, dontAsk and bypass modes the mode itself settles an ask; holding it would
+// stall a session no person is meant to answer. An unknown mode errs the same way.
+const PERSON_DECIDES = new Set(['default', 'acceptEdits', 'plan'])
+
+export function holdsInMode(mode: string | undefined): boolean {
+  return mode === undefined || PERSON_DECIDES.has(mode)
+}
