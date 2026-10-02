@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -30,6 +31,7 @@ func answerFixture(t *testing.T, stored *SessionState) (answerDeps, *[]sendCall,
 			return "", nil
 		},
 		sleep:  func(d time.Duration) { sleeps = append(sleeps, d) },
+		alive:  func(pid int) bool { return pid == 777 },
 		stderr: &bytes.Buffer{},
 	}, &sends, &sleeps
 }
@@ -221,5 +223,96 @@ func TestAnswerRejectsFlagLikeSessionsAndBadInput(t *testing.T) {
 	}
 	if len(*sends) != 0 {
 		t.Fatalf("sent %q", *sends)
+	}
+}
+
+var heldBy777 = &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 1000, Updated: 1000,
+	Version: "v1", Pending: &Pending{Kind: "permission", Tool: "Bash", WaiterPid: 777}}
+
+func readAnswer(t *testing.T) heldAnswer {
+	t.Helper()
+	data, err := os.ReadFile(answerPath("work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a heldAnswer
+	if err := json.Unmarshal(data, &a); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func TestAnswerHandsAHeldRequestItsDecision(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		extra []string
+		want  heldAnswer
+	}{
+		{"approve", "\r", nil, heldAnswer{Version: "v1", Action: "approve"}},
+		{"deny", "\x1b", nil, heldAnswer{Version: "v1", Action: "deny"}},
+		{"reply", "use pnpm; rm -rf / $(x)", []string{"--submit"}, heldAnswer{Version: "v1", Action: "reply", Text: "use pnpm; rm -rf / $(x)"}},
+	}
+	for _, c := range cases {
+		d, sends, sleeps := answerFixture(t, heldBy777)
+		if err := runAnswer(answerArgs("v1", c.input, c.extra...), d); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if len(*sends) != 0 || len(*sleeps) != 0 {
+			t.Fatalf("%s: typed %q slept %v", c.name, *sends, *sleeps)
+		}
+		if got := readAnswer(t); got != c.want {
+			t.Fatalf("%s: answer %+v", c.name, got)
+		}
+	}
+}
+
+func TestAnswerToADeadWaiterIsStale(t *testing.T) {
+	gone := *heldBy777
+	gone.Pending = &Pending{Kind: "permission", WaiterPid: 999}
+	d, sends, _ := answerFixture(t, &gone)
+	if err := runAnswer(answerArgs("v1", "\r"), d); !errors.Is(err, errStale) {
+		t.Fatalf("err %v", err)
+	}
+	if len(*sends) != 0 {
+		t.Fatalf("typed %q", *sends)
+	}
+	if _, err := os.Stat(answerPath("work")); !os.IsNotExist(err) {
+		t.Fatal("answer written for a dead waiter")
+	}
+}
+
+func TestAnswerToAHeldRequestBeforeItsWaiterIsStale(t *testing.T) {
+	early := *heldBy777
+	early.Pending = &Pending{Kind: "permission"}
+	d, sends, _ := answerFixture(t, &early)
+	if err := runAnswer(answerArgs("v1", "\r"), d); !errors.Is(err, errStale) {
+		t.Fatalf("err %v", err)
+	}
+	if len(*sends) != 0 {
+		t.Fatalf("typed %q", *sends)
+	}
+}
+
+func TestAnswerRefusesOtherKeysForAHeldRequest(t *testing.T) {
+	d, sends, _ := answerFixture(t, heldBy777)
+	err := runAnswer(answerArgs("v1", "y"), d)
+	if err == nil || errors.Is(err, errStale) {
+		t.Fatalf("err %v", err)
+	}
+	if len(*sends) != 0 {
+		t.Fatalf("typed %q", *sends)
+	}
+}
+
+func TestAnswerAfterAHeldDecisionIsStale(t *testing.T) {
+	// What `wait` leaves behind once the phone decided: working, a new version.
+	decided := &SessionState{Session: "work", Agent: "claude", State: stateWorking, Since: 1000, Version: "v9"}
+	d, sends, _ := answerFixture(t, decided)
+	if err := runAnswer(answerArgs("v1", "\r"), d); !errors.Is(err, errStale) {
+		t.Fatalf("err %v", err)
+	}
+	if len(*sends) != 0 {
+		t.Fatalf("typed %q", *sends)
 	}
 }
