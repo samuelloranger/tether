@@ -59,6 +59,8 @@ func main() {
 		if errors.Is(err, errNotHeld) {
 			os.Exit(3)
 		}
+	case "wait":
+		err = runWait(os.Args[2:], defaultWaitDeps())
 	default:
 		usage()
 		os.Exit(2)
@@ -87,6 +89,9 @@ func usage() {
                                              hold a permission request for the phone: record it and
                                              push it, printing its version (exit 3 if not held: a
                                              client is attached, no host label, or the push failed)
+  wait --session S --version V               block until the phone answers held request V; prints one
+                                             JSON line: {"action":"approve|deny|reply","text":…} or
+                                             {"release":"attached|stale"}
   list                                       list registered phones
   remove <token>                             forget a phone
 `)
