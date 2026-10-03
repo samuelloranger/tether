@@ -245,3 +245,15 @@ func TestWaitRejectsUsageMistakes(t *testing.T) {
 		}
 	}
 }
+
+func TestWaitPassesAnswersThrough(t *testing.T) {
+	w := waitFixture(t, held)
+	answers := map[string]string{"Which fruits?": "Apple, Pear"}
+	*w.onSleep = func(int) { _ = writeAnswer("work", heldAnswer{Version: "v1", Action: "answers", Answers: answers}) }
+	if err := runWait(waitArgs, w.deps); err != nil {
+		t.Fatal(err)
+	}
+	if r := result(t, w.out); r.Action != "answers" || r.Answers["Which fruits?"] != "Apple, Pear" {
+		t.Fatalf("result %+v", r)
+	}
+}

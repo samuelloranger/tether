@@ -15,16 +15,18 @@ import (
 
 // heldAnswer is the phone's decision on a held request, written by `answer`.
 type heldAnswer struct {
-	Version string `json:"version"`
-	Action  string `json:"action"`
-	Text    string `json:"text,omitempty"`
+	Version string            `json:"version"`
+	Action  string            `json:"action"`
+	Text    string            `json:"text,omitempty"`
+	Answers map[string]string `json:"answers,omitempty"`
 }
 
 // waitResult is the one line `wait` prints for the mod.
 type waitResult struct {
-	Action  string `json:"action,omitempty"`
-	Text    string `json:"text,omitempty"`
-	Release string `json:"release,omitempty"`
+	Action  string            `json:"action,omitempty"`
+	Text    string            `json:"text,omitempty"`
+	Answers map[string]string `json:"answers,omitempty"`
+	Release string            `json:"release,omitempty"`
 }
 
 // Dot-prefixed: listSessions reads every other file there as a session record.
@@ -172,7 +174,7 @@ func runWait(args []string, d waitDeps) error {
 			return err
 		}
 		if got != nil {
-			return emit(waitResult{Action: got.Action, Text: got.Text})
+			return emit(waitResult{Action: got.Action, Text: got.Text, Answers: got.Answers})
 		}
 		if stale {
 			return emit(waitResult{Release: "stale"})
@@ -185,7 +187,7 @@ func runWait(args []string, d waitDeps) error {
 					return err
 				}
 				if got != nil {
-					return emit(waitResult{Action: got.Action, Text: got.Text})
+					return emit(waitResult{Action: got.Action, Text: got.Text, Answers: got.Answers})
 				}
 				return emit(waitResult{Release: "attached"})
 			}

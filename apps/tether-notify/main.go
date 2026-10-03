@@ -61,6 +61,12 @@ func main() {
 		}
 	case "wait":
 		err = runWait(os.Args[2:], defaultWaitDeps())
+	case "pending":
+		err = runPending(os.Args[2:], defaultPendingDeps())
+		if errors.Is(err, errStale) {
+			fmt.Fprintln(os.Stderr, "tether-notify: nothing is waiting for an answer")
+			os.Exit(3)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -81,7 +87,7 @@ func usage() {
                                              record a session's agent state; pushes waiting/done
                                              unless the session has an attached zmx client
   status                                     print every session's agent state as JSON
-  answer --session S --state ST --version V --input B64 [--submit]
+  answer --session S --state ST --version V (--input B64 [--submit] | --option N | --answers B64)
                                              type a notification action's input, only while the
                                              agent is still in state ST version V (exit 3 if not;
                                              exit 4 if it moved on before Return)
@@ -93,6 +99,8 @@ func usage() {
   wait --session S --version V               block until the phone answers held request V; prints one
                                              JSON line: {"action":"approve|deny|reply","text":…} or
                                              {"release":"attached|stale"}
+  pending --session S                        print the held question for the phone's answer sheet
+                                             (exit 3 if none)
   list                                       list registered phones
   remove <token>                             forget a phone
 `)

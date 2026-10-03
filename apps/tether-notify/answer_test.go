@@ -261,7 +261,7 @@ func TestAnswerHandsAHeldRequestItsDecision(t *testing.T) {
 		if len(*sends) != 0 || len(*sleeps) != 0 {
 			t.Fatalf("%s: typed %q slept %v", c.name, *sends, *sleeps)
 		}
-		if got := readAnswer(t); got != c.want {
+		if got := readAnswer(t); !reflect.DeepEqual(got, c.want) {
 			t.Fatalf("%s: answer %+v", c.name, got)
 		}
 	}
@@ -314,5 +314,133 @@ func TestAnswerAfterAHeldDecisionIsStale(t *testing.T) {
 	}
 	if len(*sends) != 0 {
 		t.Fatalf("typed %q", *sends)
+	}
+}
+
+var heldQuestion = &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 1000, Updated: 1000,
+	Version: "v1", Pending: &Pending{Kind: "question", Tool: "AskUserQuestion", WaiterPid: 777, Questions: []Question{{
+		Question: "Which DB?", Header: "DB", Options: []QuestionOption{{Label: "Postgres"}, {Label: "SQLite"}},
+	}}}}
+
+var heldTwoQuestions = &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 1000, Updated: 1000,
+	Version: "v1", Pending: &Pending{Kind: "question", Tool: "AskUserQuestion", WaiterPid: 777, Questions: []Question{
+		{Question: "Which fruits?", Header: "Fruit", MultiSelect: true, Options: []QuestionOption{{Label: "Apple"}, {Label: "Pear"}}},
+		{Question: "Which color?", Header: "Color", Options: []QuestionOption{{Label: "Red"}, {Label: "Blue"}}},
+	}}}
+
+func questionArgsFor(version string, extra ...string) []string {
+	return append([]string{"--session", "work", "--state", "waiting", "--version", version}, extra...)
+}
+
+func answersFlag(t *testing.T, m map[string]string) string {
+	t.Helper()
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func TestAnswerPicksAnOptionForAHeldQuestion(t *testing.T) {
+	d, sends, _ := answerFixture(t, heldQuestion)
+	if err := runAnswer(questionArgsFor("v1", "--option", "2"), d); err != nil {
+		t.Fatal(err)
+	}
+	want := heldAnswer{Version: "v1", Action: "answers", Answers: map[string]string{"Which DB?": "SQLite"}}
+	if got := readAnswer(t); !reflect.DeepEqual(got, want) || len(*sends) != 0 {
+		t.Fatalf("answer %+v sends %q", got, *sends)
+	}
+}
+
+func TestAnswerTakesAnswersForAHeldQuestion(t *testing.T) {
+	d, sends, _ := answerFixture(t, heldTwoQuestions)
+	given := map[string]string{"Which fruits?": "Apple, Pear", "Which color?": "a deep green"}
+	if err := runAnswer(questionArgsFor("v1", "--answers", answersFlag(t, given)), d); err != nil {
+		t.Fatal(err)
+	}
+	want := heldAnswer{Version: "v1", Action: "answers", Answers: given}
+	if got := readAnswer(t); !reflect.DeepEqual(got, want) || len(*sends) != 0 {
+		t.Fatalf("answer %+v sends %q", got, *sends)
+	}
+}
+
+func TestAnswerRejectsABadOption(t *testing.T) {
+	cases := map[string]struct {
+		stored *SessionState
+		option string
+	}{
+		"zero":           {heldQuestion, "0"},
+		"past the end":   {heldQuestion, "3"},
+		"negative":       {heldQuestion, "-1"},
+		"multi question": {heldTwoQuestions, "1"},
+	}
+	for name, c := range cases {
+		d, sends, _ := answerFixture(t, c.stored)
+		err := runAnswer(questionArgsFor("v1", "--option", c.option), d)
+		if err == nil || errors.Is(err, errStale) {
+			t.Fatalf("%s: err %v", name, err)
+		}
+		if _, statErr := os.Stat(answerPath("work")); !os.IsNotExist(statErr) || len(*sends) != 0 {
+			t.Fatalf("%s: wrote or typed", name)
+		}
+	}
+}
+
+func TestAnswerRejectsAnswersForUnknownQuestions(t *testing.T) {
+	cases := map[string]map[string]string{
+		"unknown question": {"Which DB?": "x", "Which OS?": "Linux"},
+		"empty answer":     {"Which DB?": ""},
+		"nothing":          {},
+	}
+	for name, given := range cases {
+		d, _, _ := answerFixture(t, heldQuestion)
+		err := runAnswer(questionArgsFor("v1", "--answers", answersFlag(t, given)), d)
+		if err == nil || errors.Is(err, errStale) {
+			t.Fatalf("%s: err %v", name, err)
+		}
+		if _, statErr := os.Stat(answerPath("work")); !os.IsNotExist(statErr) {
+			t.Fatalf("%s: wrote an answer", name)
+		}
+	}
+}
+
+func TestAnswerRejectsKeysForAHeldQuestion(t *testing.T) {
+	d, sends, _ := answerFixture(t, heldQuestion)
+	err := runAnswer(answerArgs("v1", "\r"), d)
+	if err == nil || errors.Is(err, errStale) || len(*sends) != 0 {
+		t.Fatalf("err %v sends %q", err, *sends)
+	}
+}
+
+func TestAnswerRejectsOptionsForAPermission(t *testing.T) {
+	d, _, _ := answerFixture(t, heldBy777)
+	err := runAnswer(questionArgsFor("v1", "--option", "1"), d)
+	if err == nil || errors.Is(err, errStale) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestAnswerToAQuestionAfterItMovedOnIsStale(t *testing.T) {
+	// Nothing held any more: an option must never fall back to typing.
+	d, sends, _ := answerFixture(t, waiting)
+	if err := runAnswer(questionArgsFor("v1", "--option", "1"), d); !errors.Is(err, errStale) {
+		t.Fatalf("err %v", err)
+	}
+	if len(*sends) != 0 {
+		t.Fatalf("typed %q", *sends)
+	}
+}
+
+func TestAnswerNeedsExactlyOneInput(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString([]byte("\r"))
+	for name, extra := range map[string][]string{
+		"none":               nil,
+		"input and option":   {"--input", b64, "--option", "1"},
+		"option and answers": {"--option", "1", "--answers", base64.StdEncoding.EncodeToString([]byte(`{"Which DB?":"x"}`))},
+	} {
+		d, _, _ := answerFixture(t, heldQuestion)
+		if err := runAnswer(questionArgsFor("v1", extra...), d); err == nil || errors.Is(err, errStale) {
+			t.Fatalf("%s: err %v", name, err)
+		}
 	}
 }
