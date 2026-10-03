@@ -43,7 +43,8 @@ struct TetherIOSApp: App {
   @ViewBuilder private var appRoot: some View {
     AppRootView(
       pushIdentityProvider: { appDelegate.pushRegistrar.pushIdentity() },
-      notificationRouter: appDelegate.tapRouter
+      notificationRouter: appDelegate.tapRouter,
+      questionRunner: appDelegate.actionRunner
     )
       .tint(TetherColors.accent)
       #if canImport(UIKit)
@@ -56,7 +57,7 @@ struct TetherIOSApp: App {
 final class AppDelegate: NSObject, UIApplicationDelegate {
   let pushRegistrar = PushRegistrar()
   let tapRouter = NotificationTapRouter()
-  private lazy var actionRunner = NotificationActionRunner.live()
+  lazy var actionRunner = NotificationActionRunner.live()
 
   func application(
     _ application: UIApplication,
@@ -64,7 +65,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
   ) -> Bool {
     let center = UNUserNotificationCenter.current()
     center.delegate = tapRouter
-    center.setNotificationCategories(NotificationActions.categories())
+    center.getNotificationCategories { existing in
+      center.setNotificationCategories(NotificationActions.launchCategories(existing: existing))
+    }
     tapRouter.onAction = { [weak self] attempt in await self?.actionRunner.perform(attempt) }
     return true
   }

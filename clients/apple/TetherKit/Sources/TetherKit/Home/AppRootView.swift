@@ -8,19 +8,23 @@ public struct AppRootView: View {
   @State private var controller: SSHTerminalController?
   @State private var didAutoConnect = false
   @State private var openProfileID: String?
+  @State private var question: AgentQuestionTarget?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   private let autoOpenFirst: Bool
   private let pushIdentityProvider: () -> PushRegistrar.PushIdentity?
   private let notificationRouter: NotificationTapRouter?
+  private let questionRunner: NotificationActionRunner?
 
   public init(
     pushIdentityProvider: @escaping () -> PushRegistrar.PushIdentity? = { nil },
-    notificationRouter: NotificationTapRouter? = nil
+    notificationRouter: NotificationTapRouter? = nil,
+    questionRunner: NotificationActionRunner? = nil
   ) {
     _model = State(initialValue: .live())
     autoOpenFirst = false
     self.pushIdentityProvider = pushIdentityProvider
     self.notificationRouter = notificationRouter
+    self.questionRunner = questionRunner
   }
 
   /// DEBUG entry: a seeded model that auto-opens its first machine.
@@ -29,6 +33,7 @@ public struct AppRootView: View {
     autoOpenFirst = true
     pushIdentityProvider = { nil }
     notificationRouter = nil
+    questionRunner = nil
   }
 
   public var body: some View {
@@ -44,10 +49,16 @@ public struct AppRootView: View {
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller == nil)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .onOpenURL { handle($0) }
+    .sheet(item: $question) { target in
+      if let questionRunner {
+        AgentQuestionSheet(target: target, runner: questionRunner) { question = nil }
+      }
+    }
     .task {
       // A tap that launched the app outranks reopening the last machine.
-      let linkWaiting = notificationRouter?.hasPendingURL == true
+      let linkWaiting = notificationRouter?.hasPendingURL == true || notificationRouter?.hasPendingQuestion == true
       notificationRouter?.onOpenURL = { handle($0) }
+      notificationRouter?.onOpenQuestion = { question = $0 }
       guard !didAutoConnect, !linkWaiting else { return }
       didAutoConnect = true
       if autoOpenFirst, let first = model.profiles.first { open(first) }
