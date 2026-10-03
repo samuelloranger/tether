@@ -314,3 +314,25 @@ func TestStateWorkingReplacesADeadHold(t *testing.T) {
 		t.Fatalf("stored %+v", s)
 	}
 }
+
+// The agent's own dialog fires its Notification hook ("waiting") while the question it
+// shows is held: the hold stays, and the held request's push is the only one.
+func TestStateWaitingLeavesALiveHoldAloneAndDoesNotPush(t *testing.T) {
+	d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+	held := &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 900, Updated: 900,
+		Version: "v1", Pending: &Pending{Kind: "question", WaiterPid: 777}}
+	if err := withSessionsLock(func() error { return writeSession(held) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := runState(args("waiting", "--title", "proj · needs you", "--body", "Claude needs your input",
+		"--link", "tether://session/work?host=devbox"), d); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := readSession("work")
+	if s.Version != "v1" || s.Pending == nil || s.Pending.WaiterPid != 777 {
+		t.Fatalf("hold dropped: %+v", s)
+	}
+	if len(*pushes) != 0 {
+		t.Fatalf("pushed beside the held request: %+v", *pushes)
+	}
+}

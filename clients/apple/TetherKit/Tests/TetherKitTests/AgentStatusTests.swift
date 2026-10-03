@@ -21,6 +21,17 @@ final class AgentStatusTests: XCTestCase {
     XCTAssertEqual(parsed[0].hostLabel, "devbox")
   }
 
+  func test_a_held_question_carries_its_kind_and_version() {
+    let out = """
+    [{"session":"work","agent":"claude","state":"waiting","since":100,"updated":120,"message":"Which DB?","link":"tether://session/work?host=devbox","version":"v7","pending":{"kind":"question","waiterPid":9,"questions":[]}},
+     {"session":"idle","agent":"claude","state":"done","since":100,"updated":120,"version":"v1"}]
+    """
+    let parsed = Dictionary(uniqueKeysWithValues: AgentStatus.parse(out).map { ($0.session, $0) })
+    XCTAssertEqual(parsed["work"]?.held, "question")
+    XCTAssertEqual(parsed["work"]?.version, "v7")
+    XCTAssertNil(parsed["idle"]?.held)
+  }
+
   func test_malformed_or_empty_output_is_no_statuses() {
     XCTAssertTrue(AgentStatus.parse("").isEmpty)
     XCTAssertTrue(AgentStatus.parse("not json").isEmpty)

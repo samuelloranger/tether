@@ -78,3 +78,45 @@ struct AgentAlertBanner: View {
     .overlay(alignment: .bottom) { Rectangle().fill(TetherColors.border).frame(height: 1) }
   }
 }
+
+/// Claude is asking a question in this session. Floats over the terminal so nothing
+/// underneath moves; the sheet answers it instead of the dialog's keys.
+struct HeldQuestionBanner: View {
+  let status: AgentStatus
+  let onAnswer: () -> Void
+  let onDismiss: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "questionmark.bubble.fill").foregroundStyle(TetherColors.accent)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 1) {
+        Text("Claude is asking").font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+        Text(status.message.isEmpty ? "A question" : status.message)
+          .font(.footnote).foregroundStyle(TetherColors.textPrimary).lineLimit(1).truncationMode(.tail)
+      }
+      Spacer(minLength: 4)
+      Button(action: onAnswer) {
+        Text("Answer").font(.footnote.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+          .padding(.horizontal, 14).padding(.vertical, 7)
+          .background(TetherColors.accent, in: Capsule())
+      }
+      .buttonStyle(TetherPressStyle())
+      .accessibilityIdentifier("heldQuestionAnswer")
+      Button(action: onDismiss) {
+        Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+          .frame(width: 28, height: 28).contentShape(Rectangle())
+      }
+      .buttonStyle(TetherPressStyle())
+      .accessibilityIdentifier("heldQuestionDismiss")
+      .accessibilityLabel("Dismiss")
+    }
+    .padding(.leading, 14).padding(.trailing, 6).padding(.vertical, 8)
+    .background(TetherColors.surface.opacity(0.97), in: RoundedRectangle(cornerRadius: 14))
+    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TetherColors.border))
+    .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
+    .padding(.horizontal, 12).padding(.bottom, 10)
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Claude is asking: \(status.message)")
+  }
+}

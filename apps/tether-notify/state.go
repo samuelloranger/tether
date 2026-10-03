@@ -69,13 +69,16 @@ func runState(args []string, d stateDeps) error {
 	}
 	now := d.now().Unix()
 	var stored *SessionState
+	preserved := false
 	err := withSessionLock(*session, func() error {
 		return withSessionsLock(func() error {
 			prev, _ := readSession(*session)
-			// A parallel tool or a subagent must not drop a request the phone is deciding.
-			if *state == stateWorking && prev != nil && prev.Pending != nil &&
+			// A parallel tool, a subagent, or the dialog a held question shows must not
+			// drop a request the phone is deciding; its own push already went out.
+			if (*state == stateWorking || *state == stateWaiting) && prev != nil && prev.Pending != nil &&
 				prev.Pending.WaiterPid > 0 && d.alive(prev.Pending.WaiterPid) {
 				prev.Updated = now
+				preserved = true
 				return writeSession(prev)
 			}
 			next := nextState(prev, in, now)
@@ -93,7 +96,7 @@ func runState(args []string, d stateDeps) error {
 		fmt.Fprintf(d.stderr, "tether-notify: state for %s not saved: %v\n", *session, err)
 	}
 
-	if (*state != stateWaiting && *state != stateDone) || *title == "" || *body == "" {
+	if preserved || (*state != stateWaiting && *state != stateDone) || *title == "" || *body == "" {
 		return nil
 	}
 	// A failed check pushes: losing a notification is worse than a duplicate.

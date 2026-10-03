@@ -34,30 +34,55 @@ export const register: Register = on => {
   })
 
   // A question always needs a person, so unlike a permission ask it is held in any mode.
+  // Claude's own dialog shows meanwhile; the phone (a push, or the app's banner in this
+  // session) and the dialog race, and the first answer wins. Returning while `next` is
+  // still pending closes the dialog.
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     if (!e.tool_use_id || !interactive) return next(e)
     const where = await phoneTarget($)
     if (!where) return next(e)
     const questions = e.questions.map(q => ({
       question: q.question, header: q.header, multiSelect: q.multiSelect,
-      options: q.options.map(o => ({ label: o.label, description: o.description })),
+      options: (q.options ?? []).map(o => ({ label: o.label, description: o.description })),
     }))
+    let held
     try {
-      const held = await $.process.run([
+      held = await $.process.run([
         where.notify, 'hold', '--session', where.session, '--kind', 'question',
         '--tool', 'AskUserQuestion', '--body', questionBody(questions), '--questions-stdin',
       ], { stdin: JSON.stringify(questions) })
-      if (held.exitCode !== 0) return next(e)
-      $.ui.status('waiting on phone')
-      const output = await waitFor($, where, held.stdout.trim())
-      const answers = answersFrom(output)
-      if (!answers) return next(e)
-      return { result: { questions: e.questions, answers } }
     } catch {
       return next(e)
-    } finally {
-      $.ui.status(undefined)
     }
+    if (held.exitCode !== 0) return next(e)
+
+    const wait = $.process.spawn({ argv: [where.notify, 'wait', '--session', where.session, '--version', held.stdout.trim()] })
+    let output = ''
+    const read = async (until?: () => boolean) => {
+      for (;;) {
+        const step = await wait.next()
+        if (step.done) return false
+        if (step.value.stream === 'stdout') output += step.value.text
+        if (until?.()) return true
+      }
+    }
+    // The dialog fires the agent's own hooks; they leave the record alone only once
+    // `wait` owns it.
+    const claimed = await read(() => output.includes('"claimed":true')).catch(() => false)
+    if (!claimed) return next(e)
+    const dialog = next(e)
+    const phone = read().then(() => answersFrom(output), () => null)
+    const first = await Promise.race([
+      dialog.then(answered => ({ answered })),
+      phone.then(answers => ({ answers })),
+    ])
+    if ('answered' in first) {
+      // Stops `wait`; the answer doesn't wait for it to go.
+      void wait.return(undefined as never).catch(() => {})
+      return first.answered
+    }
+    if (first.answers) return { result: { questions: e.questions, answers: first.answers } }
+    return dialog
   })
 
   on('tool.check', async ($, e, next) => {

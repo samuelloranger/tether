@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -69,7 +70,8 @@ func waitFixture(t *testing.T, stored *SessionState) waitWorld {
 func result(t *testing.T, out *bytes.Buffer) waitResult {
 	t.Helper()
 	var r waitResult
-	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &r); err != nil {
+	lines := bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n"))
+	if err := json.Unmarshal(lines[len(lines)-1], &r); err != nil {
 		t.Fatalf("output %q: %v", out, err)
 	}
 	return r
@@ -218,8 +220,8 @@ func TestWaitSignalLeavesTheRequestForAnswerToRefuse(t *testing.T) {
 	if err := runWait(waitArgs, w.deps); err == nil {
 		t.Fatal("expected an error")
 	}
-	if w.out.Len() != 0 {
-		t.Fatalf("printed %q", w.out)
+	if strings.TrimSpace(w.out.String()) != `{"claimed":true}` {
+		t.Fatalf("printed a result: %q", w.out)
 	}
 	if s, _ := readSession("work"); s.Pending == nil || s.Pending.WaiterPid != 777 {
 		t.Fatalf("record %+v", s)
@@ -232,8 +234,8 @@ func TestWaitExitsWhenItsParentDies(t *testing.T) {
 	if err := runWait(waitArgs, w.deps); err == nil {
 		t.Fatal("expected an error")
 	}
-	if w.out.Len() != 0 {
-		t.Fatalf("printed %q", w.out)
+	if strings.TrimSpace(w.out.String()) != `{"claimed":true}` {
+		t.Fatalf("printed a result: %q", w.out)
 	}
 }
 
@@ -255,5 +257,42 @@ func TestWaitPassesAnswersThrough(t *testing.T) {
 	}
 	if r := result(t, w.out); r.Action != "answers" || r.Answers["Which fruits?"] != "Apple, Pear" {
 		t.Fatalf("result %+v", r)
+	}
+}
+
+// The dialog is already showing for a question, so attaching changes nothing.
+func TestWaitKeepsAQuestionWhenAClientAttaches(t *testing.T) {
+	question := &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 1000, Updated: 1000,
+		Version: "v1", Pending: &Pending{Kind: "question", Questions: []Question{{Question: "Q?", Options: []QuestionOption{{Label: "a"}}}}}}
+	w := waitFixture(t, question)
+	*w.onSleep = func(n int) {
+		*w.clients = 1
+		if n == 6 {
+			_ = writeAnswer("work", heldAnswer{Version: "v1", Action: "answers", Answers: map[string]string{"Q?": "a"}})
+		}
+	}
+	if err := runWait(waitArgs, w.deps); err != nil {
+		t.Fatal(err)
+	}
+	if r := result(t, w.out); r.Action != "answers" {
+		t.Fatalf("result %+v", r)
+	}
+}
+
+// The mod shows the agent's dialog only once `wait` owns the request, so the dialog's own
+// hooks find it protected.
+func TestWaitAnnouncesItsClaimBeforeAnything(t *testing.T) {
+	w := waitFixture(t, held)
+	*w.onSleep = func(int) { _ = writeAnswer("work", heldAnswer{Version: "v1", Action: "deny"}) }
+	if err := runWait(waitArgs, w.deps); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(w.out.String()), "\n")
+	if len(lines) != 2 || lines[0] != `{"claimed":true}` {
+		t.Fatalf("output %q", w.out)
+	}
+	var r waitResult
+	if err := json.Unmarshal([]byte(lines[1]), &r); err != nil || r.Action != "deny" {
+		t.Fatalf("result %q", lines[1])
 	}
 }

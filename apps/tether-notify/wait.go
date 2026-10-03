@@ -23,6 +23,8 @@ type heldAnswer struct {
 
 // waitResult is the one line `wait` prints for the mod.
 type waitResult struct {
+	// Claimed comes first, alone: the request is now protected from the agent's own hooks.
+	Claimed bool              `json:"claimed,omitempty"`
 	Action  string            `json:"action,omitempty"`
 	Text    string            `json:"text,omitempty"`
 	Answers map[string]string `json:"answers,omitempty"`
@@ -108,12 +110,13 @@ func runWait(args []string, d waitDeps) error {
 	}
 	isHeld := func(s *SessionState) bool { return s != nil && s.Version == *version && s.Pending != nil }
 
-	claimed := false
+	claimed, heldQuestion := false, false
 	if err := locked(func(s *SessionState) error {
 		if !isHeld(s) {
 			return nil
 		}
 		s.Pending.WaiterPid = d.pid
+		heldQuestion = s.Pending.Kind == "question"
 		claimed = true
 		return writeSession(s)
 	}); err != nil {
@@ -121,6 +124,9 @@ func runWait(args []string, d waitDeps) error {
 	}
 	if !claimed {
 		return emit(waitResult{Release: "stale"})
+	}
+	if err := emit(waitResult{Claimed: true}); err != nil {
+		return err
 	}
 
 	// take ends the hold: with the phone's answer when one is in (the call moves on to
@@ -180,7 +186,8 @@ func runWait(args []string, d waitDeps) error {
 			return emit(waitResult{Release: "stale"})
 		}
 
-		if i%attachCheckEvery == 0 {
+		// A question's dialog already shows beside it: attaching changes nothing.
+		if i%attachCheckEvery == 0 && !heldQuestion {
 			if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
 				got, _, err := end(true)
 				if err != nil {

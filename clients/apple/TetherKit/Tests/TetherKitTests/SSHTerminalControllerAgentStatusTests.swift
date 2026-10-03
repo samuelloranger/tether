@@ -184,4 +184,43 @@ final class SSHTerminalControllerAgentStatusTests: XCTestCase {
     XCTAssertFalse(controller.answers(toHostLabel: "elsewhere"))
     await controller.leave()
   }
+
+  private func held(_ session: String, _ kind: String, version: String) -> String {
+    #"{"session":"\#(session)","agent":"claude","state":"waiting","since":100,"updated":100,"message":"Which DB?","link":"tether://session/\#(session)?host=devbox","version":"\#(version)","pending":{"kind":"\#(kind)","waiterPid":9}}"#
+  }
+
+  func test_a_question_held_in_this_session_is_offered_here() async {
+    var reply = "[\(held("work", "question", version: "v1")),\(held("other", "question", version: "v2"))]"
+    let ops = makeOps { reply }
+    let controller = makeController(ops)
+    await connectSettled(controller, ops)
+    await controller.refreshAgentStatus()
+    XCTAssertEqual(controller.heldQuestion?.session, "work")
+    XCTAssertEqual(controller.heldQuestion?.version, "v1")
+
+    reply = "[\(held("work", "permission", version: "v3"))]"
+    await controller.refreshAgentStatus()
+    XCTAssertNil(controller.heldQuestion, "a permission is answered in the terminal's own prompt")
+
+    reply = "[\(row("work", "working"))]"
+    await controller.refreshAgentStatus()
+    XCTAssertNil(controller.heldQuestion)
+    await controller.leave()
+  }
+
+  func test_a_dismissed_question_stays_hidden_until_a_new_one() async {
+    var reply = "[\(held("work", "question", version: "v1"))]"
+    let ops = makeOps { reply }
+    let controller = makeController(ops)
+    await connectSettled(controller, ops)
+    await controller.refreshAgentStatus()
+    controller.dismissHeldQuestion()
+    XCTAssertNil(controller.heldQuestion)
+    await controller.refreshAgentStatus()
+    XCTAssertNil(controller.heldQuestion)
+    reply = "[\(held("work", "question", version: "v2"))]"
+    await controller.refreshAgentStatus()
+    XCTAssertEqual(controller.heldQuestion?.version, "v2")
+    await controller.leave()
+  }
 }

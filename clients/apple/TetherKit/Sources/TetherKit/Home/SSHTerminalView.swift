@@ -9,6 +9,8 @@ public struct SSHTerminalView: View {
   @Bindable var controller: SSHTerminalController
   var preferences: AppPreferences
   var onHome: () -> Void
+  private let questionRunner: NotificationActionRunner?
+  @State private var answering: AgentQuestionTarget?
 
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
@@ -39,9 +41,13 @@ public struct SSHTerminalView: View {
   @ScaledMetric(relativeTo: .title3) private var tapTarget: CGFloat = 40
   @ScaledMetric(relativeTo: .caption2) private var lampSize: CGFloat = 9
 
-  public init(controller: SSHTerminalController, preferences: AppPreferences, onHome: @escaping () -> Void) {
+  public init(
+    controller: SSHTerminalController, preferences: AppPreferences,
+    questionRunner: NotificationActionRunner? = nil, onHome: @escaping () -> Void
+  ) {
     self.controller = controller
     self.preferences = preferences
+    self.questionRunner = questionRunner
     self.onHome = onHome
   }
 
@@ -138,6 +144,11 @@ public struct SSHTerminalView: View {
         break
       }
     }
+    .sheet(item: $answering, onDismiss: { Task { await controller.refreshAgentStatus() } }) { target in
+      if let questionRunner {
+        AgentQuestionSheet(target: target, runner: questionRunner) { answering = nil }
+      }
+    }
     .sheet(isPresented: $showSettings) { TerminalSettingsSheet(preferences: preferences) { showSettings = false } }
     .sheet(isPresented: $showGit) { GitDiffView(controller: controller) { showGit = false } }
     .sheet(isPresented: $showHistory) {
@@ -201,6 +212,7 @@ public struct SSHTerminalView: View {
         emptyStateOverlay
         bellFlashOverlay
       }
+      .overlay(alignment: .bottom) { heldQuestionBanner }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .onChange(of: controller.bellRings) { ringBell() }
       .onChange(of: preferences.keyBar, initial: true) { accessory.layout = preferences.keyBar }
@@ -225,6 +237,7 @@ public struct SSHTerminalView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(preferences.terminalTheme.backgroundColor.ignoresSafeArea())
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: controller.agentAlert?.id)
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.heldQuestion?.version)
   }
 
   private var header: some View {
@@ -578,6 +591,23 @@ public struct SSHTerminalView: View {
   private func copySelection() {
     guard let text = selectionText, !text.isEmpty else { return }
     acknowledgeCopy(text, into: $showCopyConfirmation)
+  }
+
+  @ViewBuilder
+  private var heldQuestionBanner: some View {
+    if questionRunner != nil, let question = controller.heldQuestion {
+      HeldQuestionBanner(
+        status: question,
+        onAnswer: {
+          answering = AgentQuestionTarget(
+            link: SessionDeepLink(sessionId: question.session, identityName: question.hostLabel ?? controller.title),
+            expect: AgentExpectation(state: question.state.rawValue, version: question.version)
+          )
+        },
+        onDismiss: { controller.dismissHeldQuestion() }
+      )
+      .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+    }
   }
 
   @ViewBuilder

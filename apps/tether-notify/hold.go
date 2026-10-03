@@ -87,15 +87,21 @@ func runHold(args []string, d holdDeps) error {
 		return fmt.Errorf("hold supports --kind permission|question")
 	}
 
+	// A permission hold hides the agent's dialog, so it needs proof nobody is at the
+	// terminal. A question keeps its dialog showing beside the phone's answer, so it is
+	// recorded either way and only the push waits for nobody being attached.
+	question := *kind == "question"
 	clients, err := zmxClients(d.run)
-	if err != nil || clients[*session] > 0 {
-		return errNotHeld
-	}
+	detached := err == nil && clients[*session] == 0
 	label := hostLabel()
-	if label == "" {
+	if !question && (!detached || label == "") {
 		return errNotHeld
 	}
-	link := "tether://session/" + *session + "?host=" + url.QueryEscape(label)
+	push := label != "" && (detached || (question && err != nil))
+	link := ""
+	if label != "" {
+		link = "tether://session/" + *session + "?host=" + url.QueryEscape(label)
+	}
 	project := label
 	if dir, err := d.cwd(); err == nil && dir != "" {
 		project = filepath.Base(dir)
@@ -123,6 +129,10 @@ func runHold(args []string, d holdDeps) error {
 		return errNotHeld
 	}
 
+	if !push {
+		fmt.Fprintln(d.stdout, stored.Version)
+		return nil
+	}
 	content := PushContent{
 		Title: project + " · needs you", Body: *body, Link: link,
 		Category: agentCategory(stateWaiting), State: stateWaiting, Version: stored.Version,
@@ -133,6 +143,10 @@ func runHold(args []string, d holdDeps) error {
 	}
 	if err := d.push(content, "agent-"+*session); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
+		if question {
+			fmt.Fprintln(d.stdout, stored.Version)
+			return nil
+		}
 		// Nobody will answer a request the phone never heard of.
 		_ = withSessionLock(*session, func() error {
 			return withSessionsLock(func() error {

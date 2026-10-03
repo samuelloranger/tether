@@ -11,6 +11,10 @@ public struct AgentStatus: Equatable, Sendable, Identifiable {
   public var updated: Date
   public var message: String
   public var link: String
+  /// What the Claude Code mod holds for the phone in this session (`question`,
+  /// `permission`), and the version an answer must name.
+  public var held: String?
+  public var version: String
 
   public var id: String { session }
 
@@ -20,7 +24,10 @@ public struct AgentStatus: Equatable, Sendable, Identifiable {
   /// `nil` stays until acted on: a question must not disappear on its own.
   public var bannerLifetime: TimeInterval? { state == .done ? 6 : nil }
 
-  public init(session: String, agent: String, state: State, since: Date, updated: Date, message: String, link: String) {
+  public init(
+    session: String, agent: String, state: State, since: Date, updated: Date, message: String, link: String,
+    held: String? = nil, version: String = ""
+  ) {
     self.session = session
     self.agent = agent
     self.state = state
@@ -28,6 +35,8 @@ public struct AgentStatus: Equatable, Sendable, Identifiable {
     self.updated = updated
     self.message = message
     self.link = link
+    self.held = held
+    self.version = version
   }
 
   public static func parse(_ output: String) -> [AgentStatus] {
@@ -39,6 +48,9 @@ public struct AgentStatus: Equatable, Sendable, Identifiable {
       let updated: Double?
       let message: String?
       let link: String?
+      let version: String?
+      let pending: Pending?
+      struct Pending: Decodable { let kind: String? }
     }
     guard let rows = try? JSONDecoder().decode([Row].self, from: Data(output.utf8)) else { return [] }
     return rows.compactMap { row in
@@ -47,7 +59,8 @@ public struct AgentStatus: Equatable, Sendable, Identifiable {
         session: row.session, agent: row.agent ?? "", state: state,
         since: Date(timeIntervalSince1970: row.since ?? 0),
         updated: Date(timeIntervalSince1970: row.updated ?? 0),
-        message: row.message ?? "", link: row.link ?? "")
+        message: row.message ?? "", link: row.link ?? "",
+        held: row.pending?.kind, version: row.version ?? "")
     }
   }
 
