@@ -8,6 +8,10 @@ public enum NotificationInput: Equatable, Sendable {
   /// Text, then Return in a separate write: a TUI that reads both at once can take them
   /// as a paste and not submit.
   case line(String)
+  /// A held question's option, 1-based.
+  case option(Int)
+  /// A held question's answers, keyed by question text.
+  case answers([String: String])
 }
 
 /// The agent state a push was about. The host only types the input while the agent is
@@ -27,6 +31,14 @@ public struct NotificationActionRequest: Equatable, Sendable {
 public enum NotificationActionAttempt: Equatable, Sendable {
   case answer(NotificationActionRequest)
   case unanswerable(link: String?, reason: String)
+  /// Answer… on a question: the app opens its answer sheet.
+  case openQuestion(link: SessionDeepLink, expect: AgentExpectation)
+}
+
+/// Why the answer sheet couldn't load a question or send its answer.
+public struct QuestionLoadError: Error, Equatable, Sendable {
+  public var message: String
+  init(_ message: String) { self.message = message }
 }
 
 /// Approve / Deny / Reply on agent pushes. `tether-notify` stamps the category and the
@@ -34,12 +46,18 @@ public enum NotificationActionAttempt: Equatable, Sendable {
 public enum NotificationActions {
   public static let waitingCategory = "tether.agent.waiting"
   public static let doneCategory = "tether.agent.done"
-  public static let categoryIdentifiers: Set<String> = [waitingCategory, doneCategory]
+  /// A question with no one-tap options; the NSE registers a per-push category,
+  /// `questionCategoryPrefix` + version, for one that has them.
+  public static let questionCategory = "tether.agent.question"
+  public static let questionCategoryPrefix = "tether.agent.question."
+  public static let categoryIdentifiers: Set<String> = [waitingCategory, doneCategory, questionCategory]
 
   static let approveAction = "tether.action.approve"
   static let denyAction = "tether.action.deny"
   static let replyAction = "tether.action.reply"
-  static let actionIdentifiers: Set<String> = [approveAction, denyAction, replyAction]
+  static let answerAction = "tether.action.answer"
+  static let optionActionPrefix = "tether.action.option."
+  static let actionIdentifiers: Set<String> = [approveAction, denyAction, replyAction, answerAction]
   /// Well inside a remote shell's argument limit once base64 encoded.
   static let maxReplyLength = 2000
 
@@ -61,7 +79,34 @@ public enum NotificationActions {
     return [
       UNNotificationCategory(identifier: waitingCategory, actions: [approve, deny, reply], intentIdentifiers: []),
       UNNotificationCategory(identifier: doneCategory, actions: [reply], intentIdentifiers: []),
+      UNNotificationCategory(identifier: questionCategory, actions: [answer], intentIdentifiers: []),
     ]
+  }
+
+  /// The one action that opens the app: the answer sheet doesn't fit a notification.
+  static var answer: UNNotificationAction {
+    UNNotificationAction(
+      identifier: answerAction, title: "Answer…", options: [.authenticationRequired, .foreground],
+      icon: UNNotificationActionIcon(systemImageName: "list.bullet")
+    )
+  }
+
+  static func optionAction(_ number: Int) -> String { optionActionPrefix + String(number) }
+
+  /// A question push's buttons: its options, then Answer…. The NSE builds the same shape.
+  public static func questionCategory(version: String, options: [String]) -> UNNotificationCategory {
+    let picks = options.prefix(4).enumerated().map { index, label in
+      UNNotificationAction(identifier: optionAction(index + 1), title: label, options: [.authenticationRequired])
+    }
+    return UNNotificationCategory(
+      identifier: questionCategoryPrefix + version, actions: picks + [answer], intentIdentifiers: []
+    )
+  }
+
+  /// Ours, plus the per-push question categories the NSE registered: replacing them at
+  /// launch would strip the buttons off questions still on the lock screen.
+  public static func launchCategories(existing: Set<UNNotificationCategory>) -> Set<UNNotificationCategory> {
+    categories().union(existing.filter { $0.identifier.hasPrefix(questionCategoryPrefix) })
   }
 
   /// Approve is Return — the highlighted "Yes" in Claude Code's and Codex's approval
@@ -70,6 +115,10 @@ public enum NotificationActions {
     switch actionIdentifier {
     case approveAction: return .keys("\r")
     case denyAction: return .keys("\u{1b}")
+    case _ where actionIdentifier.hasPrefix(optionActionPrefix):
+      guard let number = Int(actionIdentifier.dropFirst(optionActionPrefix.count)), (1...4).contains(number)
+      else { return nil }
+      return .option(number)
     case replyAction:
       // A newline mid-reply would submit early.
       let line = (text ?? "").components(separatedBy: .newlines).joined(separator: " ")
@@ -83,9 +132,17 @@ public enum NotificationActions {
   public static func attempt(
     actionIdentifier: String, text: String?, userInfo: [AnyHashable: Any]
   ) -> NotificationActionAttempt? {
-    guard actionIdentifiers.contains(actionIdentifier) else { return nil }
+    let isOption = actionIdentifier.hasPrefix(optionActionPrefix)
+    guard actionIdentifiers.contains(actionIdentifier) || isOption else { return nil }
     let link = NotificationTapRouter.link(from: userInfo)
     let openInstead = "This notification can’t be answered from here; open the session instead."
+    if actionIdentifier == answerAction {
+      guard let link, let deep = DeepLinkCoordinator.parse(link), !deep.sessionId.hasPrefix("-"),
+            let expect = expectation(from: userInfo)
+      else { return .unanswerable(link: link, reason: openInstead) }
+      return .openQuestion(link: deep, expect: expect)
+    }
+    if isOption, input(actionIdentifier: actionIdentifier, text: text) == nil { return nil }
     guard let input = input(actionIdentifier: actionIdentifier, text: text) else {
       return .unanswerable(link: link, reason: "The reply was empty; nothing was sent.")
     }
@@ -111,20 +168,25 @@ public enum NotificationActions {
   /// `tether-notify answer` checks the agent state and runs `zmx send` itself, passing the
   /// input as an argument: nothing the user typed is ever parsed by a shell.
   static func command(notify: String, request: NotificationActionRequest) -> String {
-    let bytes: String
-    let submit: Bool
-    switch request.input {
-    case let .keys(keys): bytes = keys; submit = false
-    case let .line(text): bytes = text; submit = true
-    }
     var parts = [
       notify, "answer",
       "--session", shellQuote(request.link.sessionId),
       "--state", shellQuote(request.expect.state),
       "--version", shellQuote(request.expect.version),
-      "--input", shellQuote(Data(bytes.utf8).base64EncodedString()),
     ]
-    if submit { parts.append("--submit") }
+    switch request.input {
+    case let .keys(keys):
+      parts += ["--input", shellQuote(Data(keys.utf8).base64EncodedString())]
+    case let .line(text):
+      parts += ["--input", shellQuote(Data(text.utf8).base64EncodedString()), "--submit"]
+    case let .option(number):
+      parts += ["--option", String(number)]
+    case let .answers(answers):
+      let encoder = JSONEncoder()
+      encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+      let json = (try? encoder.encode(answers)) ?? Data("{}".utf8)
+      parts += ["--answers", shellQuote(json.base64EncodedString())]
+    }
     return parts.joined(separator: " ")
   }
 }
@@ -174,6 +236,43 @@ public final class NotificationActionRunner {
 
   /// Returns why the action failed, or nil once the host accepted the input.
   func run(_ request: NotificationActionRequest) async -> String? {
+    let command = NotificationActions.command(notify: Self.notify, request: request) + " 2>&1"
+    switch await dial(request.link, command: command) {
+    case let .failure(reason): return reason.message
+    case let .success(sent): return Self.failure(output: sent.output, session: request.link.sessionId, machine: sent.machine)
+    }
+  }
+
+  /// The question the host holds for this session, for the answer sheet.
+  func pendingQuestions(for link: SessionDeepLink) async -> Result<PendingQuestions, QuestionLoadError> {
+    // stderr stays out of the JSON the sheet decodes.
+    let command = "\(Self.notify) pending --session \(shellQuote(link.sessionId)) 2>/dev/null"
+    switch await dial(link, command: command) {
+    case let .failure(reason):
+      return .failure(reason)
+    case let .success(sent):
+      guard let marker = sent.output.range(of: Self.exitMarker, options: .backwards) else {
+        return .failure(QuestionLoadError("No answer from \(sent.machine)."))
+      }
+      let code = Int(sent.output[marker.upperBound...].prefix { $0.isNumber }) ?? -1
+      switch code {
+      case 0:
+        let body = Data(sent.output[..<marker.lowerBound].utf8)
+        guard let pending = try? JSONDecoder().decode(PendingQuestions.self, from: body) else {
+          return .failure(QuestionLoadError("\(sent.machine) sent a question this app can’t read."))
+        }
+        return .success(pending)
+      case 3:
+        return .failure(QuestionLoadError("The question in “\(link.sessionId)” was already answered or has moved on."))
+      default:
+        return .failure(QuestionLoadError("Update tether-notify on \(sent.machine) to answer questions."))
+      }
+    }
+  }
+
+  /// Runs one command on the one saved machine the link names; its exit code follows
+  /// `exitMarker` in the output.
+  private func dial(_ link: SessionDeepLink, command: String) async -> Result<(output: String, machine: String), QuestionLoadError> {
     let attempt = UUID()
     let started = now()
     let admitted = outstanding.update { dials -> Bool in
@@ -182,34 +281,32 @@ public final class NotificationActionRunner {
       dials[attempt] = started
       return true
     }
-    guard admitted else { return "The previous action is still being sent; try again in a moment." }
+    guard admitted else { return .failure(QuestionLoadError("The previous action is still being sent; try again in a moment.")) }
     // Released once the dial really ends; a deadline alone doesn't.
     var handedOff = false
     defer { if !handedOff { outstanding.update { $0[attempt] = nil } } }
     model.reload()
-    let label = request.link.identityName
+    let label = link.identityName
     let matches = Self.candidates(for: label, in: model.profiles)
-    guard !matches.isEmpty else { return "No saved machine matches “\(label)”." }
+    guard !matches.isEmpty else { return .failure(QuestionLoadError("No saved machine matches “\(label)”.")) }
     // Two machines answering to one label could send the keystroke to the wrong host.
     guard matches.count == 1, let profile = matches.first else {
-      return "“\(label)” matches \(matches.count) saved machines; open the session to answer."
+      return .failure(QuestionLoadError("“\(label)” matches \(matches.count) saved machines; open the session to answer."))
     }
     guard let config = model.connectionConfig(for: profile) else {
-      return SSHConnectError.missingCredential(name: profile.name).errorDescription
+      return .failure(QuestionLoadError(SSHConnectError.missingCredential(name: profile.name).errorDescription ?? "No credentials for \(profile.name)."))
     }
-    let command = NotificationActions.command(notify: Self.notify, request: request)
-      + " 2>&1; echo \(Self.exitMarker)$?"
-    let output: String
+    let full = command + "; echo \(Self.exitMarker)$?"
     handedOff = true
     do {
-      output = try await withDeadline(timeout) { [exec, outstanding, store = model.hostKeyStore] in
+      let output = try await withDeadline(timeout) { [exec, outstanding, store = model.hostKeyStore] in
         defer { outstanding.update { $0[attempt] = nil } }
-        return try await exec(config, store, command)
+        return try await exec(config, store, full)
       }
+      return .success((output, profile.name))
     } catch {
-      return error.localizedDescription
+      return .failure(QuestionLoadError(error.localizedDescription))
     }
-    return Self.failure(output: output, session: request.link.sessionId, machine: profile.name)
   }
 
   /// The profiles a label could mean, by the same rules a tapped link uses.
@@ -265,6 +362,9 @@ public final class NotificationActionRunner {
       await notifyFailure(failure, session: request.link.sessionId, link: Self.link(for: request.link))
     case let .unanswerable(link, reason):
       await notifyFailure(reason, session: nil, link: link)
+    case .openQuestion:
+      // The tap router hands these to the app's answer sheet.
+      break
     }
   }
 

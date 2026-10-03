@@ -17,6 +17,19 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
   private var pendingURL: URL?
   public var hasPendingURL: Bool { pendingURL != nil }
 
+  /// Invoked when Answer… is tapped on a question; held like `onOpenURL` until the UI sets it.
+  public var onOpenQuestion: ((AgentQuestionTarget) -> Void)? {
+    didSet {
+      guard let onOpenQuestion, let pending = pendingQuestion else { return }
+      pendingQuestion = nil
+      onOpenQuestion(pending)
+    }
+  }
+  private var pendingQuestion: AgentQuestionTarget?
+  /// A launch from Answer… must not reopen the last machine: attaching its session would
+  /// release the question to the terminal.
+  public var hasPendingQuestion: Bool { pendingQuestion != nil }
+
   /// Set while a terminal is open: true when that terminal shows this push in-app.
   public var coversForegroundPush: (@MainActor (SessionDeepLink) async -> Bool)?
 
@@ -53,12 +66,15 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
   ) {
     if response.actionIdentifier != UNNotificationDefaultActionIdentifier {
       let text = (response as? UNTextInputNotificationResponse)?.userText
-      guard let onAction,
-            let attempt = NotificationActions.attempt(
-              actionIdentifier: response.actionIdentifier, text: text,
-              userInfo: response.notification.request.content.userInfo
-            )
-      else { return completionHandler() }
+      let attempt = NotificationActions.attempt(
+        actionIdentifier: response.actionIdentifier, text: text,
+        userInfo: response.notification.request.content.userInfo
+      )
+      if case let .openQuestion(link, expect) = attempt {
+        openQuestion(AgentQuestionTarget(link: link, expect: expect))
+        return completionHandler()
+      }
+      guard let onAction, let attempt else { return completionHandler() }
       // The system keeps a backgrounded app alive until the handler runs.
       Task { @MainActor in
         await onAction(attempt)
@@ -75,6 +91,10 @@ public final class NotificationTapRouter: NSObject, UNUserNotificationCenterDele
 
   func open(_ url: URL) {
     if let onOpenURL { onOpenURL(url) } else { pendingURL = url }
+  }
+
+  func openQuestion(_ target: AgentQuestionTarget) {
+    if let onOpenQuestion { onOpenQuestion(target) } else { pendingQuestion = target }
   }
 
   /// Only `tether://` URLs are accepted — the payload is server-influenced.
