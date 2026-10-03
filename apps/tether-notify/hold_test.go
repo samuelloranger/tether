@@ -210,3 +210,49 @@ func TestHoldQuestionNeedsQuestions(t *testing.T) {
 		}
 	}
 }
+
+// A question also shows Claude's own dialog, so it is recorded whoever is attached; the
+// phone is only pushed when nobody is.
+func TestHoldQuestionWhileAttachedRecordsWithoutPushing(t *testing.T) {
+	d, pushes, out := holdFixture(t, "name=work\tclients=1\n", nil)
+	d.stdin = strings.NewReader(oneQuestion)
+	if err := runHold(questionArgs, d); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := readSession("work")
+	if s == nil || s.Pending == nil || s.Pending.Kind != "question" || strings.TrimSpace(out.String()) != s.Version {
+		t.Fatalf("record %+v out %q", s, out)
+	}
+	if len(*pushes) != 0 {
+		t.Fatalf("pushed while attached: %+v", *pushes)
+	}
+}
+
+func TestHoldQuestionWithoutAHostLabelRecordsWithoutPushing(t *testing.T) {
+	d, pushes, _ := holdFixture(t, "name=work\tclients=0\n", nil)
+	if err := os.Remove(hostLabelPath()); err != nil {
+		t.Fatal(err)
+	}
+	d.stdin = strings.NewReader(oneQuestion)
+	if err := runHold(questionArgs, d); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := readSession("work"); s == nil || s.Pending == nil {
+		t.Fatalf("record %+v", s)
+	}
+	if len(*pushes) != 0 {
+		t.Fatalf("pushes %+v", *pushes)
+	}
+}
+
+func TestHoldQuestionKeepsItsRecordWhenThePushFails(t *testing.T) {
+	d, _, out := holdFixture(t, "name=work\tclients=0\n", nil)
+	d.push = func(PushContent, string) error { return errors.New("no registered devices") }
+	d.stdin = strings.NewReader(oneQuestion)
+	if err := runHold(questionArgs, d); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := readSession("work"); s == nil || s.Pending == nil || strings.TrimSpace(out.String()) != s.Version {
+		t.Fatalf("record %+v out %q", s, out)
+	}
+}

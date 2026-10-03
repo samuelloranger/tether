@@ -257,3 +257,22 @@ func TestWaitPassesAnswersThrough(t *testing.T) {
 		t.Fatalf("result %+v", r)
 	}
 }
+
+// The dialog is already showing for a question, so attaching changes nothing.
+func TestWaitKeepsAQuestionWhenAClientAttaches(t *testing.T) {
+	question := &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 1000, Updated: 1000,
+		Version: "v1", Pending: &Pending{Kind: "question", Questions: []Question{{Question: "Q?", Options: []QuestionOption{{Label: "a"}}}}}}
+	w := waitFixture(t, question)
+	*w.onSleep = func(n int) {
+		*w.clients = 1
+		if n == 6 {
+			_ = writeAnswer("work", heldAnswer{Version: "v1", Action: "answers", Answers: map[string]string{"Q?": "a"}})
+		}
+	}
+	if err := runWait(waitArgs, w.deps); err != nil {
+		t.Fatal(err)
+	}
+	if r := result(t, w.out); r.Action != "answers" {
+		t.Fatalf("result %+v", r)
+	}
+}

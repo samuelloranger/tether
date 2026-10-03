@@ -108,12 +108,13 @@ func runWait(args []string, d waitDeps) error {
 	}
 	isHeld := func(s *SessionState) bool { return s != nil && s.Version == *version && s.Pending != nil }
 
-	claimed := false
+	claimed, heldQuestion := false, false
 	if err := locked(func(s *SessionState) error {
 		if !isHeld(s) {
 			return nil
 		}
 		s.Pending.WaiterPid = d.pid
+		heldQuestion = s.Pending.Kind == "question"
 		claimed = true
 		return writeSession(s)
 	}); err != nil {
@@ -180,7 +181,8 @@ func runWait(args []string, d waitDeps) error {
 			return emit(waitResult{Release: "stale"})
 		}
 
-		if i%attachCheckEvery == 0 {
+		// A question's dialog already shows beside it: attaching changes nothing.
+		if i%attachCheckEvery == 0 && !heldQuestion {
 			if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
 				got, _, err := end(true)
 				if err != nil {
