@@ -118,6 +118,11 @@ EOF
 chmod +x "$WRAPPER"
 echo "Installed hook wrapper: $WRAPPER"
 
+# `tether-notify hold` builds the phone's link from this; the mod can't learn the label.
+NOTIFY_HOME="${TETHER_NOTIFY_HOME:-${HOME}/.tether-notify}"
+mkdir -p "$NOTIFY_HOME"
+printf '%s\n' "$HOST_LABEL" > "${NOTIFY_HOME}/host-label"
+
 # --- config merges (idempotent; preserve existing hooks) -----------------------
 
 # Claude / Codex share a nested shape: hooks.<Event>[].hooks[].command.
@@ -156,6 +161,29 @@ merge_nested "${HOME}/.claude/settings.json" Stop             "'${WRAPPER}' clau
 merge_nested "${HOME}/.claude/settings.json" StopFailure      "'${WRAPPER}' claude failed"
 merge_nested "${HOME}/.claude/settings.json" SessionEnd       "'${WRAPPER}' claude clear"
 echo "Registered Claude Code hooks."
+
+version_at_least() { # <have> <want>, dotted numbers
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    split(a, x, "."); split(b, y, ".")
+    for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
+    exit 0 }'
+}
+
+# The mod answers permission prompts from the phone with a decision instead of keys.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+claude_version="$(claude --version 2>/dev/null | awk '{print $1}')"
+if [ -n "$claude_version" ] && [ -f "${REPO_ROOT}/.claude-plugin/marketplace.json" ] \
+  && version_at_least "$claude_version" 2.1.287; then
+  claude plugin marketplace add "$REPO_ROOT" >/dev/null 2>&1 \
+    || claude plugin marketplace update tether >/dev/null 2>&1 || true
+  if claude plugin install tether@tether >/dev/null 2>&1; then
+    echo "Installed the Tether mod for Claude Code."
+  else
+    echo "Couldn't install the Tether mod; run: claude plugin install tether@tether" >&2
+  fi
+elif [ -n "$claude_version" ]; then
+  echo "Claude Code ${claude_version} predates mods (2.1.287); phone answers type keys instead."
+fi
 
 # Codex — only if it's set up on this host.
 if [ -d "${HOME}/.codex" ]; then

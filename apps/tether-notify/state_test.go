@@ -35,6 +35,7 @@ func fakeDeps(t *testing.T, lsOut string, lsErr error) (stateDeps, *[]pushCall) 
 		},
 		now:    func() time.Time { return time.Unix(1000, 0) },
 		ppid:   100,
+		alive:  func(pid int) bool { return pid == 777 },
 		push:   func(c PushContent, col string) error { pushes = append(pushes, pushCall{c, col}); return nil },
 		stderr: &bytes.Buffer{},
 	}, &pushes
@@ -280,4 +281,36 @@ func TestStatusRunsZmxLsWithoutHoldingTheLock(t *testing.T) {
 		return "name=a\n", nil
 	}
 	statusOf(t, statusDeps{run: run, alive: func(int) bool { return true }})
+}
+
+func TestStateWorkingLeavesALiveHoldAlone(t *testing.T) {
+	d, _ := fakeDeps(t, "name=work\tclients=0\n", nil)
+	held := &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 900, Updated: 900,
+		Version: "v1", Pending: &Pending{Kind: "permission", Tool: "Bash", WaiterPid: 777}}
+	if err := withSessionsLock(func() error { return writeSession(held) }); err != nil {
+		t.Fatal(err)
+	}
+	// A parallel tool or a subagent reports working while the phone decides.
+	if err := runState(args("working"), d); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := readSession("work")
+	if s.State != stateWaiting || s.Version != "v1" || s.Pending == nil || s.Pending.WaiterPid != 777 {
+		t.Fatalf("hold dropped: %+v %+v", s, s.Pending)
+	}
+}
+
+func TestStateWorkingReplacesADeadHold(t *testing.T) {
+	d, _ := fakeDeps(t, "name=work\tclients=0\n", nil)
+	gone := &SessionState{Session: "work", Agent: "claude", State: stateWaiting, Since: 900, Updated: 900,
+		Version: "v1", Pending: &Pending{Kind: "permission", WaiterPid: 999}}
+	if err := withSessionsLock(func() error { return writeSession(gone) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := runState(args("working"), d); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := readSession("work"); s.State != stateWorking || s.Pending != nil {
+		t.Fatalf("stored %+v", s)
+	}
 }

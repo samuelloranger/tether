@@ -1,0 +1,14 @@
+{
+  "name": "tether",
+  "owner": {
+    "name": "Samuel Loranger"
+  },
+  "description": "Tether integrations for coding agents.",
+  "plugins": [
+    {
+      "name": "tether",
+      "source": "./integrations/claude-code/tether",
+      "description": "Answer Claude Code permission prompts from the Tether app while you're away from the terminal."
+    }
+  ]
+}

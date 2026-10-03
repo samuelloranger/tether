@@ -39,6 +39,14 @@ Wire it into agent hooks (Claude Code, Codex, Cursor) with
     tether-notify answer --session work --state waiting --version 3f9a… \
       --input DQ== [--submit]
 
+    # the Claude Code mod runs these when a permission prompt would show and no
+    # client is attached: hold records + pushes it (exit 3 when it won't hold),
+    # wait blocks until the phone answers, someone attaches, or it goes stale.
+    # `answer` then hands the decision to `wait` instead of typing keys.
+    tether-notify hold --session work --kind permission --tool Bash \
+      --body "Allow Bash: npm test?"
+    tether-notify wait --session work --version 3f9a…
+
     # the app runs this to badge sessions; prunes dead agents and gone sessions:
     tether-notify status
 

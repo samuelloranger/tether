@@ -25,6 +25,16 @@ type SessionState struct {
 	Message  string `json:"message,omitempty"`
 	Link     string `json:"link,omitempty"`
 	AgentPid int    `json:"agentPid,omitempty"`
+	// Pending is set while the Claude Code mod holds a permission request for the phone.
+	Pending *Pending `json:"pending,omitempty"`
+}
+
+// Pending is a request the mod holds instead of letting the agent draw its dialog.
+// `answer` hands it a decision through the answer file while WaiterPid (`wait`) lives.
+type Pending struct {
+	Kind      string `json:"kind"`
+	Tool      string `json:"tool,omitempty"`
+	WaiterPid int    `json:"waiterPid,omitempty"`
 }
 
 const (

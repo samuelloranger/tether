@@ -53,3 +53,6 @@ apps/tether-notify/tether-notify
 .tether-install-stage/
 .tether-install-backup/
 .tether-install-lock/
+
+# Written by Claude Code when it loads a mod; regenerated per build.
+integrations/claude-code/*/.claude-plugin/types/

@@ -54,6 +54,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, "tether-notify: typed, but the agent moved on before Return")
 			os.Exit(4)
 		}
+	case "hold":
+		err = runHold(os.Args[2:], defaultHoldDeps())
+		if errors.Is(err, errNotHeld) {
+			os.Exit(3)
+		}
+	case "wait":
+		err = runWait(os.Args[2:], defaultWaitDeps())
 	default:
 		usage()
 		os.Exit(2)
@@ -78,6 +85,13 @@ func usage() {
                                              type a notification action's input, only while the
                                              agent is still in state ST version V (exit 3 if not;
                                              exit 4 if it moved on before Return)
+  hold --session S --kind permission --tool T --body B
+                                             hold a permission request for the phone: record it and
+                                             push it, printing its version (exit 3 if not held: a
+                                             client is attached, no host label, or the push failed)
+  wait --session S --version V               block until the phone answers held request V; prints one
+                                             JSON line: {"action":"approve|deny|reply","text":…} or
+                                             {"release":"attached|stale"}
   list                                       list registered phones
   remove <token>                             forget a phone
 `)
