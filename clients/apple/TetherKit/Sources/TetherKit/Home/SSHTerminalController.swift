@@ -706,8 +706,27 @@ public final class SSHTerminalController {
   }
 
   public func enterForeground() async {
+    guard questionSession != attach else { return }
     isSuspended = false
     await reconnectIfNeeded()
+  }
+
+  /// The session whose held question the answer sheet is answering. Attaching it would
+  /// hand the question back to the terminal, so the foreground redial waits for the sheet.
+  private var questionSession: String?
+
+  /// Answer… brings the app forward before its response arrives, so a redial may already
+  /// be under way: suspending now stops it before it attaches.
+  public func beginAnsweringQuestion(in session: String) async {
+    questionSession = session
+    guard session == attach else { return }
+    await suspendNow()
+  }
+
+  public func finishAnsweringQuestion() async {
+    guard let session = questionSession else { return }
+    questionSession = nil
+    if session == attach { await enterForeground() }
   }
 
   /// Watch the network path for this screen. Redials only when a path *becomes*

@@ -12,7 +12,7 @@ import (
 
 func TestEncryptRoundTrips(t *testing.T) {
 	key := generateSecretKeyBase64()
-	content := PushContent{Title: "homelab · claude", Body: "Waiting for input", Link: "tether://x", Options: []string{"Postgres", "SQLite"}}
+	content := PushContent{Title: "devbox · claude", Body: "Waiting for input", Link: "tether://x", Options: []string{"Postgres", "SQLite"}}
 
 	sealed, err := encryptPushContent(key, content)
 	if err != nil {

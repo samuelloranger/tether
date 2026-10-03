@@ -304,4 +304,15 @@ final class NotificationActionsTests: XCTestCase {
     guard case let .failure(error) = result else { return XCTFail("loaded") }
     XCTAssertEqual(error.message, "The question in “work” was already answered or has moved on.")
   }
+
+  func test_shell_startup_output_does_not_hide_the_question() async {
+    let runner = NotificationActionRunner(model: model()) { _, _, _ in
+      "Welcome to devbox!\nlast login: yesterday\n"
+        + #"{"session":"work","state":"waiting","version":"v7","kind":"question","questions":[{"question":"Which DB?","header":"DB","multiSelect":false,"options":[{"label":"Postgres"},{"label":"SQLite"}]}]}"#
+        + "\n__tether_sent=0\n"
+    }
+    guard case let .success(pending) = await runner.pendingQuestions(for: SessionDeepLink(sessionId: "work", identityName: "devbox"))
+    else { return XCTFail("rc output broke the decode") }
+    XCTAssertEqual(pending.version, "v7")
+  }
 }

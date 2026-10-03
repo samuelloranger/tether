@@ -7,6 +7,7 @@ import UserNotifications
 class NotificationService: UNNotificationServiceExtension {
   private var contentHandler: ((UNNotificationContent) -> Void)?
   private var bestAttempt: UNMutableNotificationContent?
+  private let lock = NSLock()
 
   override func didReceive(
     _ request: UNNotificationRequest,
@@ -56,8 +57,18 @@ class NotificationService: UNNotificationServiceExtension {
       if let perPush = await Self.registerQuestionCategory(version: version, options: options) {
         content.categoryIdentifier = perPush
       }
-      contentHandler(content)
+      deliver(content)
     }
+  }
+
+  /// The expiry handler and the category registration can both finish the push; iOS takes
+  /// exactly one answer.
+  private func deliver(_ content: UNNotificationContent) {
+    lock.lock()
+    let handler = contentHandler
+    contentHandler = nil
+    lock.unlock()
+    handler?(content)
   }
 
   /// A question's one-tap options can only be buttons through a category made for this
@@ -92,9 +103,7 @@ class NotificationService: UNNotificationServiceExtension {
 
   /// iOS gives the extension ~30s. If it expires, show the untouched fallback.
   override func serviceExtensionTimeWillExpire() {
-    if let handler = contentHandler, let content = bestAttempt {
-      handler(content)
-    }
+    if let content = bestAttempt { deliver(content) }
   }
 
   private struct PushContent: Decodable {

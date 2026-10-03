@@ -49,7 +49,7 @@ public struct AppRootView: View {
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller == nil)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .onOpenURL { handle($0) }
-    .sheet(item: $question) { target in
+    .sheet(item: $question, onDismiss: { Task { await controller?.finishAnsweringQuestion() } }) { target in
       if let questionRunner {
         AgentQuestionSheet(target: target, runner: questionRunner) { question = nil }
       }
@@ -58,12 +58,22 @@ public struct AppRootView: View {
       // A tap that launched the app outranks reopening the last machine.
       let linkWaiting = notificationRouter?.hasPendingURL == true || notificationRouter?.hasPendingQuestion == true
       notificationRouter?.onOpenURL = { handle($0) }
-      notificationRouter?.onOpenQuestion = { question = $0 }
+      notificationRouter?.onOpenQuestion = { openQuestion($0) }
       guard !didAutoConnect, !linkWaiting else { return }
       didAutoConnect = true
       if autoOpenFirst, let first = model.profiles.first { open(first) }
       else if let last = model.lastHostProfile { open(last) }
     }
+  }
+
+  private func openQuestion(_ target: AgentQuestionTarget) {
+    question = target
+    guard let controller else { return }
+    let label = target.link.identityName
+    let open = model.profiles.filter { $0.id == openProfileID }
+    guard controller.answers(toHostLabel: label) || !NotificationActionRunner.candidates(for: label, in: open).isEmpty
+    else { return }
+    Task { await controller.beginAnsweringQuestion(in: target.link.sessionId) }
   }
 
   private func handle(_ url: URL) {

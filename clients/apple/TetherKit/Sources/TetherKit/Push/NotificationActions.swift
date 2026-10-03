@@ -257,8 +257,9 @@ public final class NotificationActionRunner {
       let code = Int(sent.output[marker.upperBound...].prefix { $0.isNumber }) ?? -1
       switch code {
       case 0:
-        let body = Data(sent.output[..<marker.lowerBound].utf8)
-        guard let pending = try? JSONDecoder().decode(PendingQuestions.self, from: body) else {
+        // A login shell may print before the command; the JSON is the last line.
+        let line = sent.output[..<marker.lowerBound].split(separator: "\n").last { $0.hasPrefix("{") } ?? ""
+        guard let pending = try? JSONDecoder().decode(PendingQuestions.self, from: Data(line.utf8)) else {
           return .failure(QuestionLoadError("\(sent.machine) sent a question this app can’t read."))
         }
         return .success(pending)

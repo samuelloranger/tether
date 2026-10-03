@@ -80,4 +80,55 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
     XCTAssertNotEqual(controller.status, .connected)
     await controller.leave()
   }
+
+  // Answer… brings the app forward while a question is held in this very session: the
+  // foreground redial would attach it and hand the question back to the terminal.
+  func test_answering_a_question_in_the_open_session_keeps_it_detached_until_done() async {
+    let first = ScriptedByteStream()
+    let script = DialScript([first, ScriptedByteStream()])
+    let controller = makeController(script)
+    await controller.connect()
+    await controller.beginAnsweringQuestion(in: "work")
+    XCTAssertTrue(first.closed)
+    await controller.enterForeground()
+    XCTAssertEqual(script.dials, 1, "the sheet's session must not be re-attached")
+    XCTAssertTrue(controller.isSuspended)
+    await controller.finishAnsweringQuestion()
+    XCTAssertEqual(script.dials, 2)
+    XCTAssertEqual(controller.status, .connected)
+    await controller.leave()
+  }
+
+  func test_a_question_in_another_session_leaves_the_terminal_alone() async {
+    let stream = ScriptedByteStream()
+    let script = DialScript([stream])
+    let controller = makeController(script)
+    await controller.connect()
+    await controller.beginAnsweringQuestion(in: "elsewhere")
+    await controller.enterForeground()
+    XCTAssertFalse(stream.closed)
+    XCTAssertEqual(script.dials, 1)
+    XCTAssertEqual(controller.status, .connected)
+    await controller.finishAnsweringQuestion()
+    XCTAssertEqual(script.dials, 1)
+    await controller.leave()
+  }
+
+  func test_answer_tapped_during_the_foreground_redial_stops_the_attach() async {
+    let stream = ScriptedByteStream()
+    let script = DialScript([ScriptedByteStream(), stream])
+    let controller = makeController(script)
+    await controller.connect()
+    await controller.suspendNow()
+    script.close()
+    let redial = Task { await controller.enterForeground() }
+    let entered = await eventually { script.hasEntered }
+    XCTAssertTrue(entered)
+    await controller.beginAnsweringQuestion(in: "work")
+    script.open()
+    await redial.value
+    XCTAssertTrue(stream.closed, "a redial that lands after Answer… must not stay attached")
+    XCTAssertNotEqual(controller.status, .connected)
+    await controller.leave()
+  }
 }

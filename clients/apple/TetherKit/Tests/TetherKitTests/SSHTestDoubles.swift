@@ -182,6 +182,14 @@ final class DialScript: @unchecked Sendable {
   var dials: Int { lock.lock(); defer { lock.unlock() }; return dialCount }
   var hasEntered: Bool { lock.lock(); defer { lock.unlock() }; return entered }
 
+  /// Holds the next dials until `open()`, as `held: true` does from the start.
+  func close() {
+    lock.lock()
+    gateOpen = false
+    entered = false
+    lock.unlock()
+  }
+
   func open() {
     lock.lock()
     gateOpen = true
