@@ -338,6 +338,19 @@ public final class SSHTerminalController {
 
   public func dismissAgentAlert() { agentAlert = nil }
 
+  /// Claude's question held in this very session: its dialog shows in the terminal, and the
+  /// answer sheet can answer it instead.
+  public var heldQuestion: AgentStatus? {
+    guard let status = agentStatuses[attach], status.held == "question",
+          status.version != dismissedQuestionVersion
+    else { return nil }
+    return status
+  }
+
+  private var dismissedQuestionVersion: String?
+
+  public func dismissHeldQuestion() { dismissedQuestionVersion = heldQuestion?.version }
+
   /// Whether a push or link labelled `label` is about this host, as learnt from status reads.
   public func answers(toHostLabel label: String) -> Bool { knownHostLabels.contains(label) }
 

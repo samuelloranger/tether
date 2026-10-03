@@ -39,7 +39,7 @@ public struct AppRootView: View {
   public var body: some View {
     ZStack {
       if let controller {
-        SSHTerminalView(controller: controller, preferences: preferences, onHome: leaveTerminal)
+        SSHTerminalView(controller: controller, preferences: preferences, questionRunner: questionRunner, onHome: leaveTerminal)
           .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       } else {
         HomeView(model: model, onOpen: { open($0) })
