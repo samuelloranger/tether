@@ -23,6 +23,8 @@ type heldAnswer struct {
 
 // waitResult is the one line `wait` prints for the mod.
 type waitResult struct {
+	// Claimed comes first, alone: the request is now protected from the agent's own hooks.
+	Claimed bool              `json:"claimed,omitempty"`
 	Action  string            `json:"action,omitempty"`
 	Text    string            `json:"text,omitempty"`
 	Answers map[string]string `json:"answers,omitempty"`
@@ -122,6 +124,9 @@ func runWait(args []string, d waitDeps) error {
 	}
 	if !claimed {
 		return emit(waitResult{Release: "stale"})
+	}
+	if err := emit(waitResult{Claimed: true}); err != nil {
+		return err
 	}
 
 	// take ends the hold: with the phone's answer when one is in (the call moves on to

@@ -2,22 +2,25 @@ import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { decide, holdsInMode, questionBody, summarize } from './hold'
 
-type World = { runs: string[][]; stdins: (string | undefined)[]; spawns: string[][]; calls: unknown[] }
+type World = { runs: string[][]; stdins: (string | undefined)[]; spawns: string[][]; calls: unknown[]; waitsEnded: number }
 
 function world(
   on: On,
-  { wait = '', holdExit = 0, verdict = 'ask', env = { ZMX_SESSION: 'work', HOME: '/home/u' }, defaultMode }:
-    { wait?: string; holdExit?: number; verdict?: 'ask' | 'allow' | 'deny'; env?: Record<string, string>; defaultMode?: string } = {},
+  { wait = '', holdExit = 0, verdict = 'ask', env = { ZMX_SESSION: 'work', HOME: '/home/u' }, defaultMode, dialog = 'answers', waitHangs = false }:
+    { wait?: string; holdExit?: number; verdict?: 'ask' | 'allow' | 'deny'; env?: Record<string, string>; defaultMode?: string;
+      dialog?: 'answers' | 'never'; waitHangs?: boolean } = {},
 ): World {
-  const w: World = { runs: [], stdins: [], spawns: [], calls: [] }
+  const w: World = { runs: [], stdins: [], spawns: [], calls: [], waitsEnded: 0 }
   mock.env(on, env)
   on('session.start', () => ({ cwd: '/x' }))
   on('settings.read', () => ({ value: defaultMode ? { permissions: { defaultMode } } : {} }) as never)
   on('classic.UserPromptSubmit', () => ({}))
   on('classic.PostToolUse', () => ({}))
   on('tool.check', () => ({ decision: verdict, reason: 'needs approval' }))
+  // Beneath the mod's tool.call is Claude's own dialog.
   on('tool.call', (_$, e) => {
     w.calls.push(e)
+    if (dialog === 'never') return new Promise(() => {}) as never
     return { result: 'the dialog answered' } as never
   })
   on('process.run', (_$, e) => {
@@ -28,8 +31,16 @@ function world(
   })
   on('process.spawn', async function* (_$, e) {
     w.spawns.push([...e.argv])
-    if (wait) yield { stream: 'stdout' as const, text: wait }
-    return { value: { code: 0, signal: null } }
+    try {
+      // `wait` announces its claim first, unless it found nothing to hold.
+      if (!wait.includes('"release"')) yield { stream: 'stdout' as const, text: '{"claimed":true}\n' }
+      // A live `wait` that never answers: it only ends when the mod stops it.
+      while (waitHangs) yield { stream: 'stderr' as const, text: '.' }
+      if (wait) yield { stream: 'stdout' as const, text: wait }
+      return { value: { code: 0, signal: null } }
+    } finally {
+      w.waitsEnded += 1
+    }
   })
   return w
 }
@@ -218,12 +229,12 @@ const ASK = { tool: 'AskUserQuestion', questions: QUESTIONS, tool_use_id: 'toolu
 const ANSWERS = { 'Which fruits?': 'Apple, Pear', 'Which color?': 'Blue' }
 
 describe('AskUserQuestion', () => {
-  test('answers from the phone become the tool result; the dialog never opens', async ($, on) => {
-    const w = world(on, { wait: JSON.stringify({ action: 'answers', answers: ANSWERS }) + '\n' })
+  test('the phone answering first becomes the tool result and closes the dialog', async ($, on) => {
+    const w = world(on, { wait: JSON.stringify({ action: 'answers', answers: ANSWERS }) + '\n', dialog: 'never' })
     await start($)
     const r = await $.tool.call(ASK)
     expect(r).toEqual({ result: { questions: QUESTIONS, answers: ANSWERS } })
-    expect(w.calls).toEqual([])
+    expect(w.calls.length).toBe(1)
     expect(w.runs).toEqual([[
       '/home/u/.local/bin/tether-notify', 'hold', '--session', 'work', '--kind', 'question',
       '--tool', 'AskUserQuestion', '--body', '2 questions: Fruit, Color', '--questions-stdin',
@@ -236,28 +247,38 @@ describe('AskUserQuestion', () => {
     ])
   })
 
-  test('a release opens the dialog', async ($, on) => {
-    const w = world(on, { wait: '{"release":"attached"}\n' })
+  test('the dialog answering first wins and the wait is stopped', async ($, on) => {
+    const w = world(on, { waitHangs: true })
+    await start($)
+    expect(await $.tool.call(ASK)).toEqual({ result: 'the dialog answered' })
+    expect(w.spawns.length).toBe(1)
+    // Stopping the child is asynchronous; give it a few turns.
+    for (let i = 0; i < 200 && w.waitsEnded === 0; i++) await Promise.resolve()
+    expect(w.waitsEnded).toBe(1)
+  })
+
+  test('a release leaves the answer to the dialog', async ($, on) => {
+    const w = world(on, { wait: '{"release":"stale"}\n' })
     await start($)
     expect(await $.tool.call(ASK)).toEqual({ result: 'the dialog answered' })
     expect(w.calls.length).toBe(1)
   })
 
-  test('a refused hold opens the dialog', async ($, on) => {
+  test('a refused hold just shows the dialog', async ($, on) => {
     const w = world(on, { holdExit: 3 })
     await start($)
     expect(await $.tool.call(ASK)).toEqual({ result: 'the dialog answered' })
     expect(w.spawns).toEqual([])
   })
 
-  test('questions are held in bypass mode too: a question always needs a person', async ($, on) => {
-    const w = world(on, { wait: JSON.stringify({ action: 'answers', answers: ANSWERS }) + '\n', defaultMode: 'bypassPermissions' })
+  test('questions are recorded in bypass mode too: a question always needs a person', async ($, on) => {
+    const w = world(on, { wait: JSON.stringify({ action: 'answers', answers: ANSWERS }) + '\n', dialog: 'never', defaultMode: 'bypassPermissions' })
     await start($)
     expect(await $.tool.call(ASK)).toEqual({ result: { questions: QUESTIONS, answers: ANSWERS } })
     expect(w.runs.length).toBe(1)
   })
 
-  test('a non-interactive session asks in the terminal', async ($, on) => {
+  test('a non-interactive session asks in the terminal only', async ($, on) => {
     const w = world(on, { wait: '{"action":"answers","answers":{}}\n' })
     await start($, false)
     await $.tool.call(ASK)
@@ -265,21 +286,21 @@ describe('AskUserQuestion', () => {
     expect(w.calls.length).toBe(1)
   })
 
-  test('inside tmux the dialog stays', async ($, on) => {
+  test('inside tmux the dialog stays alone', async ($, on) => {
     const w = world(on, { env: { ZMX_SESSION: 'work', HOME: '/home/u', TMUX: '/tmp/t,1,0' } })
     await start($)
     await $.tool.call(ASK)
     expect(w.runs).toEqual([])
   })
 
-  test('outside zmx the dialog stays', async ($, on) => {
+  test('outside zmx the dialog stays alone', async ($, on) => {
     const w = world(on, { env: { HOME: '/home/u' } })
     await start($)
     await $.tool.call(ASK)
     expect(w.runs).toEqual([])
   })
 
-  test('answers that are not an object fall back to the dialog', async ($, on) => {
+  test('answers that are not an object leave the answer to the dialog', async ($, on) => {
     const w = world(on, { wait: '{"action":"answers","answers":"nope"}\n' })
     await start($)
     expect(await $.tool.call(ASK)).toEqual({ result: 'the dialog answered' })
