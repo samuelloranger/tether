@@ -41,3 +41,26 @@ const PERSON_DECIDES = new Set(['default', 'acceptEdits', 'plan'])
 export function holdsInMode(mode: string | undefined): boolean {
   return mode === undefined || PERSON_DECIDES.has(mode)
 }
+
+export type HeldQuestion = { question: string; header: string }
+
+export function questionBody(questions: readonly HeldQuestion[]): string {
+  if (questions.length === 1) return oneLine(questions[0]?.question ?? '')
+  return oneLine(`${questions.length} questions: ${questions.map(q => q.header).join(', ')}`)
+}
+
+// `wait`'s answers line, or null when it is anything else (a release, a crash).
+export function answersFrom(output: string): Record<string, string> | null {
+  const line = output.trim().split('\n').pop() ?? ''
+  let parsed: { action?: string; answers?: unknown }
+  try {
+    parsed = JSON.parse(line)
+  } catch {
+    return null
+  }
+  const answers = parsed.answers
+  if (parsed.action !== 'answers' || typeof answers !== 'object' || answers === null || Array.isArray(answers)) return null
+  const entries = Object.entries(answers)
+  if (entries.length === 0 || entries.some(([, v]) => typeof v !== 'string')) return null
+  return Object.fromEntries(entries) as Record<string, string>
+}
