@@ -71,4 +71,19 @@ final class NotificationTapRouterTests: XCTestCase {
     router.open(URL(string: "tether://session/b?host=devbox")!)
     XCTAssertEqual(opened.count, 1)
   }
+
+  func test_answer_tapped_before_the_app_is_ready_reaches_the_sheet_once_and_blocks_auto_reconnect() {
+    let router = NotificationTapRouter()
+    let target = AgentQuestionTarget(
+      link: SessionDeepLink(sessionId: "work", identityName: "devbox"),
+      expect: AgentExpectation(state: "waiting", version: "v7")
+    )
+    router.openQuestion(target)
+    XCTAssertTrue(router.hasPendingQuestion, "a cold launch from Answer… must not reopen the last machine")
+    var opened: [AgentQuestionTarget] = []
+    router.onOpenQuestion = { opened.append($0) }
+    router.onOpenQuestion = { opened.append($0) }
+    XCTAssertEqual(opened, [target])
+    XCTAssertFalse(router.hasPendingQuestion)
+  }
 }

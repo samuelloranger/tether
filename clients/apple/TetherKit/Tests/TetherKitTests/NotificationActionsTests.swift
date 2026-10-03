@@ -21,11 +21,77 @@ final class NotificationActionsTests: XCTestCase {
     XCTAssertEqual(Set(categories.keys), NotificationActions.categoryIdentifiers)
   }
 
-  func test_every_action_needs_an_unlocked_phone_and_none_opens_the_app() {
-    for action in NotificationActions.categories().flatMap(\.actions) {
+  func test_every_action_needs_an_unlocked_phone_and_only_answer_opens_the_app() {
+    let all = NotificationActions.categories().flatMap(\.actions)
+      + NotificationActions.questionCategory(version: "v1", options: ["a", "b"]).actions
+    for action in all {
       XCTAssertTrue(action.options.contains(.authenticationRequired), action.identifier)
-      XCTAssertFalse(action.options.contains(.foreground), action.identifier)
+      XCTAssertEqual(action.options.contains(.foreground), action.identifier == NotificationActions.answerAction, action.identifier)
     }
+  }
+
+  // MARK: - questions
+
+  private let questionInfo: [AnyHashable: Any] = [
+    "link": "tether://session/work?host=devbox",
+    "agentState": "waiting",
+    "agentVersion": "v7",
+  ]
+
+  func test_a_question_push_offers_its_options_then_answer() {
+    let category = NotificationActions.questionCategory(version: "v7", options: ["Postgres", "SQLite"])
+    XCTAssertEqual(category.identifier, "tether.agent.question.v7")
+    XCTAssertEqual(category.actions.map(\.identifier),
+                   ["tether.action.option.1", "tether.action.option.2", NotificationActions.answerAction])
+    XCTAssertEqual(category.actions.map(\.title), ["Postgres", "SQLite", "Answer…"])
+    let plain = NotificationActions.categories().first { $0.identifier == NotificationActions.questionCategory }
+    XCTAssertEqual(plain?.actions.map(\.identifier), [NotificationActions.answerAction])
+  }
+
+  func test_launch_categories_keep_per_push_question_categories() {
+    let perPush = NotificationActions.questionCategory(version: "v7", options: ["a", "b"])
+    let stranger = UNNotificationCategory(identifier: "other", actions: [], intentIdentifiers: [])
+    let merged = Set(NotificationActions.launchCategories(existing: [perPush, stranger]).map(\.identifier))
+    XCTAssertTrue(merged.contains("tether.agent.question.v7"))
+    XCTAssertFalse(merged.contains("other"))
+    XCTAssertTrue(NotificationActions.categoryIdentifiers.isSubset(of: merged))
+  }
+
+  func test_an_option_button_answers_with_its_index() {
+    XCTAssertEqual(
+      NotificationActions.attempt(actionIdentifier: "tether.action.option.2", text: nil, userInfo: questionInfo),
+      .answer(NotificationActionRequest(
+        link: SessionDeepLink(sessionId: "work", identityName: "devbox"),
+        expect: AgentExpectation(state: "waiting", version: "v7"), input: .option(2)
+      ))
+    )
+    XCTAssertNil(NotificationActions.attempt(actionIdentifier: "tether.action.option.0", text: nil, userInfo: questionInfo))
+    XCTAssertNil(NotificationActions.attempt(actionIdentifier: "tether.action.option.x", text: nil, userInfo: questionInfo))
+  }
+
+  func test_answer_opens_the_question_instead_of_sending() {
+    XCTAssertEqual(
+      NotificationActions.attempt(actionIdentifier: NotificationActions.answerAction, text: nil, userInfo: questionInfo),
+      .openQuestion(
+        link: SessionDeepLink(sessionId: "work", identityName: "devbox"),
+        expect: AgentExpectation(state: "waiting", version: "v7")
+      )
+    )
+  }
+
+  func test_option_and_answers_commands() {
+    let link = SessionDeepLink(sessionId: "work", identityName: "devbox")
+    let expect = AgentExpectation(state: "waiting", version: "v7")
+    XCTAssertEqual(
+      NotificationActions.command(notify: "tn", request: NotificationActionRequest(link: link, expect: expect, input: .option(2))),
+      "tn answer --session 'work' --state 'waiting' --version 'v7' --option 2"
+    )
+    let answers = ["Which color?": "Blue", "Which fruits?": "Apple, Pear"]
+    let json = #"{"Which color?":"Blue","Which fruits?":"Apple, Pear"}"#
+    XCTAssertEqual(
+      NotificationActions.command(notify: "tn", request: NotificationActionRequest(link: link, expect: expect, input: .answers(answers))),
+      "tn answer --session 'work' --state 'waiting' --version 'v7' --answers '\(Data(json.utf8).base64EncodedString())'"
+    )
   }
 
   func test_approve_is_return_and_deny_is_escape() {
@@ -215,5 +281,38 @@ final class NotificationActionsTests: XCTestCase {
     let failure = await runner.run(approve)
     XCTAssertEqual(failure, SSHConnectError.commandTimedOut.errorDescription)
     XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+  }
+
+  func test_the_runner_reads_the_pending_question() async {
+    let commands = LockedBox<[String]>([])
+    let runner = NotificationActionRunner(model: model()) { _, _, command in
+      commands.value.append(command)
+      return #"{"session":"work","state":"waiting","version":"v7","kind":"question","questions":[{"question":"Which DB?","header":"DB","multiSelect":false,"options":[{"label":"Postgres","description":"server"},{"label":"SQLite"}]}]}"#
+        + "\n__tether_sent=0\n"
+    }
+    let link = SessionDeepLink(sessionId: "work", identityName: "devbox")
+    guard case let .success(pending) = await runner.pendingQuestions(for: link) else { return XCTFail("not loaded") }
+    XCTAssertEqual(pending.version, "v7")
+    XCTAssertEqual(pending.questions.first?.options.map(\.label), ["Postgres", "SQLite"])
+    XCTAssertEqual(pending.questions.first?.options.first?.description, "server")
+    XCTAssertTrue(commands.value.first?.hasPrefix("~/.local/bin/tether-notify pending --session 'work'") == true)
+  }
+
+  func test_a_question_that_moved_on_says_so() async {
+    let runner = NotificationActionRunner(model: model()) { _, _, _ in "nothing\n__tether_sent=3\n" }
+    let result = await runner.pendingQuestions(for: SessionDeepLink(sessionId: "work", identityName: "devbox"))
+    guard case let .failure(error) = result else { return XCTFail("loaded") }
+    XCTAssertEqual(error.message, "The question in “work” was already answered or has moved on.")
+  }
+
+  func test_shell_startup_output_does_not_hide_the_question() async {
+    let runner = NotificationActionRunner(model: model()) { _, _, _ in
+      "Welcome to devbox!\nlast login: yesterday\n"
+        + #"{"session":"work","state":"waiting","version":"v7","kind":"question","questions":[{"question":"Which DB?","header":"DB","multiSelect":false,"options":[{"label":"Postgres"},{"label":"SQLite"}]}]}"#
+        + "\n__tether_sent=0\n"
+    }
+    guard case let .success(pending) = await runner.pendingQuestions(for: SessionDeepLink(sessionId: "work", identityName: "devbox"))
+    else { return XCTFail("rc output broke the decode") }
+    XCTAssertEqual(pending.version, "v7")
   }
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func TestHoldRecordsAndPushesWhenNobodyIsAttached(t *testing.T) {
 		Link:     "tether://session/work?host=devbox",
 		Category: "tether.agent.waiting", State: stateWaiting, Version: s.Version,
 	}
-	if p.content != want || p.collapse != "agent-work" {
+	if !reflect.DeepEqual(p.content, want) || p.collapse != "agent-work" {
 		t.Fatalf("push %+v %q", p.content, p.collapse)
 	}
 }
@@ -137,5 +138,75 @@ func TestHostLabelPathLivesInTheNotifyHome(t *testing.T) {
 	t.Setenv("TETHER_NOTIFY_HOME", dir)
 	if hostLabelPath() != filepath.Join(dir, "host-label") {
 		t.Fatal(hostLabelPath())
+	}
+}
+
+const oneQuestion = `[{"question":"Which DB?","header":"DB","multiSelect":false,"options":[{"label":"Postgres","description":"server"},{"label":"SQLite"}]}]`
+
+var questionArgs = []string{"--session", "work", "--kind", "question", "--tool", "AskUserQuestion",
+	"--body", "Which DB?", "--questions-stdin"}
+
+func TestHoldQuestionStoresTheQuestionsAndPushesTheQuestionCategory(t *testing.T) {
+	d, pushes, out := holdFixture(t, "name=work\tclients=0\n", nil)
+	d.stdin = strings.NewReader(oneQuestion)
+	if err := runHold(questionArgs, d); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := readSession("work")
+	want := &Pending{Kind: "question", Tool: "AskUserQuestion", Questions: []Question{{
+		Question: "Which DB?", Header: "DB",
+		Options: []QuestionOption{{Label: "Postgres", Description: "server"}, {Label: "SQLite"}},
+	}}}
+	if s == nil || s.State != stateWaiting || !reflect.DeepEqual(s.Pending, want) {
+		t.Fatalf("record %+v pending %+v", s, s.Pending)
+	}
+	if strings.TrimSpace(out.String()) != s.Version {
+		t.Fatalf("printed %q", out)
+	}
+	p := (*pushes)[0].content
+	if p.Category != "tether.agent.question" || p.State != stateWaiting || p.Version != s.Version ||
+		!reflect.DeepEqual(p.Options, []string{"Postgres", "SQLite"}) || p.Body != "Which DB?" {
+		t.Fatalf("push %+v", p)
+	}
+}
+
+func TestHoldQuestionOffersOptionsOnlyForOneSingleChoice(t *testing.T) {
+	five := `[{"question":"Q?","header":"H","multiSelect":false,"options":[{"label":"a"},{"label":"b"},{"label":"c"},{"label":"d"},{"label":"e"}]}]`
+	cases := map[string]string{
+		"multi-select":  `[{"question":"Q?","header":"H","multiSelect":true,"options":[{"label":"a"},{"label":"b"}]}]`,
+		"two questions": `[{"question":"Q1?","header":"H","multiSelect":false,"options":[{"label":"a"},{"label":"b"}]},{"question":"Q2?","header":"H","multiSelect":false,"options":[{"label":"c"},{"label":"d"}]}]`,
+		"five options":  five,
+	}
+	for name, qs := range cases {
+		d, pushes, _ := holdFixture(t, "name=work\tclients=0\n", nil)
+		d.stdin = strings.NewReader(qs)
+		if err := runHold(questionArgs, d); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if p := (*pushes)[0].content; p.Options != nil || p.Category != "tether.agent.question" {
+			t.Fatalf("%s: push %+v", name, p)
+		}
+	}
+}
+
+func TestHoldQuestionNeedsQuestions(t *testing.T) {
+	cases := map[string]string{
+		"empty":          "",
+		"not json":       "nope",
+		"no questions":   "[]",
+		"no options":     `[{"question":"Q?","header":"H","multiSelect":false,"options":[]}]`,
+		"empty label":    `[{"question":"Q?","header":"H","multiSelect":false,"options":[{"label":""},{"label":"b"}]}]`,
+		"empty question": `[{"question":"","header":"H","multiSelect":false,"options":[{"label":"a"}]}]`,
+	}
+	for name, qs := range cases {
+		d, pushes, _ := holdFixture(t, "name=work\tclients=0\n", nil)
+		d.stdin = strings.NewReader(qs)
+		err := runHold(questionArgs, d)
+		if err == nil || errors.Is(err, errNotHeld) {
+			t.Fatalf("%s: err %v", name, err)
+		}
+		if len(*pushes) != 0 {
+			t.Fatalf("%s: pushed", name)
+		}
 	}
 }

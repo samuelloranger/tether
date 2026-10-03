@@ -1,23 +1,28 @@
 import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { decide, holdsInMode, summarize } from './hold'
+import { decide, holdsInMode, questionBody, summarize } from './hold'
 
-type World = { runs: string[][]; spawns: string[][] }
+type World = { runs: string[][]; stdins: (string | undefined)[]; spawns: string[][]; calls: unknown[] }
 
 function world(
   on: On,
   { wait = '', holdExit = 0, verdict = 'ask', env = { ZMX_SESSION: 'work', HOME: '/home/u' }, defaultMode }:
     { wait?: string; holdExit?: number; verdict?: 'ask' | 'allow' | 'deny'; env?: Record<string, string>; defaultMode?: string } = {},
 ): World {
-  const w: World = { runs: [], spawns: [] }
+  const w: World = { runs: [], stdins: [], spawns: [], calls: [] }
   mock.env(on, env)
   on('session.start', () => ({ cwd: '/x' }))
   on('settings.read', () => ({ value: defaultMode ? { permissions: { defaultMode } } : {} }) as never)
   on('classic.UserPromptSubmit', () => ({}))
   on('classic.PostToolUse', () => ({}))
   on('tool.check', () => ({ decision: verdict, reason: 'needs approval' }))
+  on('tool.call', (_$, e) => {
+    w.calls.push(e)
+    return { result: 'the dialog answered' } as never
+  })
   on('process.run', (_$, e) => {
     w.runs.push([...e.argv])
+    w.stdins.push(e.init?.stdin as string | undefined)
     const stdout = holdExit === 0 ? 'v1\n' : ''
     return { value: { exitCode: holdExit, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -200,5 +205,91 @@ describe('decide', () => {
     expect(decide('not json', ask)).toEqual(ask)
     expect(decide('{"release":"stale"}\n', ask)).toEqual(ask)
     expect(decide('{"action":"maybe"}', ask)).toEqual(ask)
+  })
+})
+
+const QUESTIONS = [
+  { question: 'Which fruits?', header: 'Fruit', multiSelect: true,
+    options: [{ label: 'Apple', description: 'crisp' }, { label: 'Pear', description: 'soft', preview: 'x' }] },
+  { question: 'Which color?', header: 'Color', multiSelect: false,
+    options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }] },
+]
+const ASK = { tool: 'AskUserQuestion', questions: QUESTIONS, tool_use_id: 'toolu_q' } as never
+const ANSWERS = { 'Which fruits?': 'Apple, Pear', 'Which color?': 'Blue' }
+
+describe('AskUserQuestion', () => {
+  test('answers from the phone become the tool result; the dialog never opens', async ($, on) => {
+    const w = world(on, { wait: JSON.stringify({ action: 'answers', answers: ANSWERS }) + '\n' })
+    await start($)
+    const r = await $.tool.call(ASK)
+    expect(r).toEqual({ result: { questions: QUESTIONS, answers: ANSWERS } })
+    expect(w.calls).toEqual([])
+    expect(w.runs).toEqual([[
+      '/home/u/.local/bin/tether-notify', 'hold', '--session', 'work', '--kind', 'question',
+      '--tool', 'AskUserQuestion', '--body', '2 questions: Fruit, Color', '--questions-stdin',
+    ]])
+    expect(JSON.parse(w.stdins[0] ?? '')).toEqual([
+      { question: 'Which fruits?', header: 'Fruit', multiSelect: true,
+        options: [{ label: 'Apple', description: 'crisp' }, { label: 'Pear', description: 'soft' }] },
+      { question: 'Which color?', header: 'Color', multiSelect: false,
+        options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }] },
+    ])
+  })
+
+  test('a release opens the dialog', async ($, on) => {
+    const w = world(on, { wait: '{"release":"attached"}\n' })
+    await start($)
+    expect(await $.tool.call(ASK)).toEqual({ result: 'the dialog answered' })
+    expect(w.calls.length).toBe(1)
+  })
+
+  test('a refused hold opens the dialog', async ($, on) => {
+    const w = world(on, { holdExit: 3 })
+    await start($)
+    expect(await $.tool.call(ASK)).toEqual({ result: 'the dialog answered' })
+    expect(w.spawns).toEqual([])
+  })
+
+  test('questions are held in bypass mode too: a question always needs a person', async ($, on) => {
+    const w = world(on, { wait: JSON.stringify({ action: 'answers', answers: ANSWERS }) + '\n', defaultMode: 'bypassPermissions' })
+    await start($)
+    expect(await $.tool.call(ASK)).toEqual({ result: { questions: QUESTIONS, answers: ANSWERS } })
+    expect(w.runs.length).toBe(1)
+  })
+
+  test('a non-interactive session asks in the terminal', async ($, on) => {
+    const w = world(on, { wait: '{"action":"answers","answers":{}}\n' })
+    await start($, false)
+    await $.tool.call(ASK)
+    expect(w.runs).toEqual([])
+    expect(w.calls.length).toBe(1)
+  })
+
+  test('inside tmux the dialog stays', async ($, on) => {
+    const w = world(on, { env: { ZMX_SESSION: 'work', HOME: '/home/u', TMUX: '/tmp/t,1,0' } })
+    await start($)
+    await $.tool.call(ASK)
+    expect(w.runs).toEqual([])
+  })
+
+  test('outside zmx the dialog stays', async ($, on) => {
+    const w = world(on, { env: { HOME: '/home/u' } })
+    await start($)
+    await $.tool.call(ASK)
+    expect(w.runs).toEqual([])
+  })
+
+  test('answers that are not an object fall back to the dialog', async ($, on) => {
+    const w = world(on, { wait: '{"action":"answers","answers":"nope"}\n' })
+    await start($)
+    expect(await $.tool.call(ASK)).toEqual({ result: 'the dialog answered' })
+    expect(w.calls.length).toBe(1)
+  })
+})
+
+describe('questionBody', () => {
+  test('one question is its text; several name their headers', () => {
+    expect(questionBody([{ question: 'Which DB?', header: 'DB' }])).toBe('Which DB?')
+    expect(questionBody([{ question: 'a?', header: 'A' }, { question: 'b?', header: 'B' }])).toBe('2 questions: A, B')
   })
 })

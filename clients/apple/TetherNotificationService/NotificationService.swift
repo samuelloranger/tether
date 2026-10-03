@@ -7,6 +7,7 @@ import UserNotifications
 class NotificationService: UNNotificationServiceExtension {
   private var contentHandler: ((UNNotificationContent) -> Void)?
   private var bestAttempt: UNMutableNotificationContent?
+  private let lock = NSLock()
 
   override func didReceive(
     _ request: UNNotificationRequest,
@@ -38,20 +39,71 @@ class NotificationService: UNNotificationServiceExtension {
     }
     // Actions need a session link and the agent state to check against; without them the
     // buttons could do nothing.
-    if let category = payload.category, Self.categories.contains(category),
-       payload.link != nil, let state = payload.state, let version = payload.version, !version.isEmpty {
-      content.categoryIdentifier = category
-      content.userInfo["agentState"] = state
-      content.userInfo["agentVersion"] = version
+    guard let category = payload.category, Self.categories.contains(category),
+          payload.link != nil, let state = payload.state, let version = payload.version, !version.isEmpty
+    else {
+      contentHandler(content)
+      return
     }
-    contentHandler(content)
+    content.categoryIdentifier = category
+    content.userInfo["agentState"] = state
+    content.userInfo["agentVersion"] = version
+    guard category == Self.questionCategory, let options = payload.options, (2...4).contains(options.count) else {
+      contentHandler(content)
+      return
+    }
+    Task {
+      // Without the per-push category the push still offers Answer… from the static one.
+      if let perPush = await Self.registerQuestionCategory(version: version, options: options) {
+        content.categoryIdentifier = perPush
+      }
+      deliver(content)
+    }
+  }
+
+  /// The expiry handler and the category registration can both finish the push; iOS takes
+  /// exactly one answer.
+  private func deliver(_ content: UNNotificationContent) {
+    lock.lock()
+    let handler = contentHandler
+    contentHandler = nil
+    lock.unlock()
+    handler?(content)
+  }
+
+  /// A question's one-tap options can only be buttons through a category made for this
+  /// push. Mirrors `NotificationActions.questionCategory(version:options:)`; the extension
+  /// doesn't link TetherKit.
+  private static func registerQuestionCategory(version: String, options: [String]) async -> String? {
+    let center = UNUserNotificationCenter.current()
+    let identifier = questionCategoryPrefix + version
+    let picks = options.enumerated().map { index, label in
+      UNNotificationAction(identifier: "tether.action.option.\(index + 1)", title: label, options: [.authenticationRequired])
+    }
+    let answer = UNNotificationAction(
+      identifier: "tether.action.answer", title: "Answer…", options: [.authenticationRequired, .foreground],
+      icon: UNNotificationActionIcon(systemImageName: "list.bullet")
+    )
+    let category = UNNotificationCategory(identifier: identifier, actions: picks + [answer], intentIdentifiers: [])
+
+    // Keep the newest few per-push categories: an older question may still be on screen.
+    let defaults = UserDefaults.standard
+    var recent = (defaults.stringArray(forKey: recentKey) ?? []).filter { $0 != identifier }
+    recent.append(identifier)
+    recent = Array(recent.suffix(keptQuestionCategories))
+    defaults.set(recent, forKey: recentKey)
+
+    let existing = await center.notificationCategories()
+    let kept = existing.filter { !$0.identifier.hasPrefix(questionCategoryPrefix) || recent.contains($0.identifier) }
+    center.setNotificationCategories(kept.union([category]))
+    // The set lands asynchronously; reading it back waits for it before delivery.
+    let registered = await center.notificationCategories()
+    return registered.contains { $0.identifier == identifier } ? identifier : nil
   }
 
   /// iOS gives the extension ~30s. If it expires, show the untouched fallback.
   override func serviceExtensionTimeWillExpire() {
-    if let handler = contentHandler, let content = bestAttempt {
-      handler(content)
-    }
+    if let content = bestAttempt { deliver(content) }
   }
 
   private struct PushContent: Decodable {
@@ -61,10 +113,15 @@ class NotificationService: UNNotificationServiceExtension {
     let category: String?
     let state: String?
     let version: String?
+    let options: [String]?
   }
 
   // Mirrors NotificationActions.categoryIdentifiers; the extension doesn't link TetherKit.
-  private static let categories: Set<String> = ["tether.agent.waiting", "tether.agent.done"]
+  private static let questionCategory = "tether.agent.question"
+  private static let questionCategoryPrefix = "tether.agent.question."
+  private static let categories: Set<String> = ["tether.agent.waiting", "tether.agent.done", questionCategory]
+  private static let recentKey = "tether.recentQuestionCategories"
+  private static let keptQuestionCategories = 8
 
   // Reads the AES key PushRegistrar wrote, via the shared keychain group. The
   // extension has its own bundle id, so without that group this returns nothing.

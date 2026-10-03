@@ -47,6 +47,16 @@ Wire it into agent hooks (Claude Code, Codex, Cursor) with
       --body "Allow Bash: npm test?"
     tether-notify wait --session work --version 3f9a…
 
+    # a question (AskUserQuestion) is held the same way, in any permission mode;
+    # the questions go in as JSON on stdin. One single-choice question gets a
+    # button per option on the phone; every question push offers Answer…:
+    tether-notify hold --session work --kind question --tool AskUserQuestion \
+      --body "Which DB?" --questions-stdin < questions.json
+    tether-notify pending --session work      # the app's answer sheet reads this
+    tether-notify answer --session work --state waiting --version 3f9a… --option 2
+    tether-notify answer --session work --state waiting --version 3f9a… \
+      --answers <base64 JSON {"question": "answer"}>
+
     # the app runs this to badge sessions; prunes dead agents and gone sessions:
     tether-notify status
 
