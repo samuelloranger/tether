@@ -85,8 +85,9 @@ func usage() {
                                              type a notification action's input, only while the
                                              agent is still in state ST version V (exit 3 if not;
                                              exit 4 if it moved on before Return)
-  hold --session S --kind permission --tool T --body B
-                                             hold a permission request for the phone: record it and
+  hold --session S --kind permission|question --tool T --body B [--questions-stdin]
+                                             hold a permission request (or, with --kind question and the
+                                             questions as JSON on stdin, a question) for the phone: record it and
                                              push it, printing its version (exit 3 if not held: a
                                              client is attached, no host label, or the push failed)
   wait --session S --version V               block until the phone answers held request V; prints one

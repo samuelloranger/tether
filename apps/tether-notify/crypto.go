@@ -27,6 +27,9 @@ type PushContent struct {
 	// cannot type into a newer prompt.
 	State   string `json:"state,omitempty"`
 	Version string `json:"version,omitempty"`
+	// Options are a question's labels, for the phone's buttons; only for one
+	// single-choice question.
+	Options []string `json:"options,omitempty"`
 }
 
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {

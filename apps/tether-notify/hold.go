@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +22,7 @@ type holdDeps struct {
 	ppid   int
 	cwd    func() (string, error)
 	push   func(PushContent, string) error
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 }
@@ -32,6 +34,7 @@ func defaultHoldDeps() holdDeps {
 		ppid:   os.Getppid(),
 		cwd:    os.Getwd,
 		push:   func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },
+		stdin:  os.Stdin,
 		stdout: os.Stdout,
 		stderr: os.Stderr,
 	}
@@ -56,20 +59,32 @@ func runHold(args []string, d holdDeps) error {
 	fs := flag.NewFlagSet("hold", flag.ContinueOnError)
 	fs.SetOutput(d.stderr)
 	session := fs.String("session", "", "zmx session name")
-	kind := fs.String("kind", "permission", "what is held: permission")
+	kind := fs.String("kind", "permission", "what is held: permission|question")
 	tool := fs.String("tool", "", "tool the agent wants to run")
 	body := fs.String("body", "", "push body")
+	questionsStdin := fs.Bool("questions-stdin", false, "read the question kind's questions as JSON on stdin")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if !validSessionName(*session) {
 		return fmt.Errorf("hold requires a valid --session")
 	}
-	if *kind != "permission" {
-		return fmt.Errorf("hold supports --kind permission")
-	}
 	if *body == "" {
 		return fmt.Errorf("hold requires --body")
+	}
+	var questions []Question
+	switch *kind {
+	case "permission":
+	case "question":
+		if !*questionsStdin {
+			return fmt.Errorf("hold --kind question requires --questions-stdin")
+		}
+		var err error
+		if questions, err = readQuestions(d.stdin); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("hold supports --kind permission|question")
 	}
 
 	clients, err := zmxClients(d.run)
@@ -95,7 +110,7 @@ func runHold(args []string, d holdDeps) error {
 		return withSessionsLock(func() error {
 			prev, _ := readSession(*session)
 			next := nextState(prev, in, d.now().Unix())
-			next.Pending = &Pending{Kind: *kind, Tool: *tool}
+			next.Pending = &Pending{Kind: *kind, Tool: *tool, Questions: questions}
 			if err := writeSession(next); err != nil {
 				return err
 			}
@@ -111,6 +126,10 @@ func runHold(args []string, d holdDeps) error {
 	content := PushContent{
 		Title: project + " · needs you", Body: *body, Link: link,
 		Category: agentCategory(stateWaiting), State: stateWaiting, Version: stored.Version,
+	}
+	if *kind == "question" {
+		content.Category = questionCategory
+		content.Options = optionButtons(questions)
 	}
 	if err := d.push(content, "agent-"+*session); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
@@ -129,4 +148,44 @@ func runHold(args []string, d holdDeps) error {
 	}
 	fmt.Fprintln(d.stdout, stored.Version)
 	return nil
+}
+
+const questionCategory = "tether.agent.question"
+
+func readQuestions(r io.Reader) ([]Question, error) {
+	var questions []Question
+	if err := json.NewDecoder(r).Decode(&questions); err != nil {
+		return nil, fmt.Errorf("hold --questions-stdin: %w", err)
+	}
+	if len(questions) == 0 {
+		return nil, fmt.Errorf("hold --questions-stdin: no questions")
+	}
+	for _, q := range questions {
+		if q.Question == "" || len(q.Options) == 0 {
+			return nil, fmt.Errorf("hold --questions-stdin: a question needs its text and options")
+		}
+		for _, o := range q.Options {
+			if o.Label == "" {
+				return nil, fmt.Errorf("hold --questions-stdin: an option needs a label")
+			}
+		}
+	}
+	return questions, nil
+}
+
+// optionButtons are the phone's one-tap answers: only a single single-choice question
+// fits on a notification (a tap can't toggle, and iOS shows few actions).
+func optionButtons(questions []Question) []string {
+	if len(questions) != 1 || questions[0].MultiSelect {
+		return nil
+	}
+	opts := questions[0].Options
+	if len(opts) < 2 || len(opts) > 4 {
+		return nil
+	}
+	labels := make([]string, len(opts))
+	for i, o := range opts {
+		labels[i] = o.Label
+	}
+	return labels
 }

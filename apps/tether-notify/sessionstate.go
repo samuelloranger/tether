@@ -32,9 +32,23 @@ type SessionState struct {
 // Pending is a request the mod holds instead of letting the agent draw its dialog.
 // `answer` hands it a decision through the answer file while WaiterPid (`wait`) lives.
 type Pending struct {
-	Kind      string `json:"kind"`
-	Tool      string `json:"tool,omitempty"`
-	WaiterPid int    `json:"waiterPid,omitempty"`
+	Kind      string     `json:"kind"`
+	Tool      string     `json:"tool,omitempty"`
+	Questions []Question `json:"questions,omitempty"`
+	WaiterPid int        `json:"waiterPid,omitempty"`
+}
+
+// Question mirrors one of AskUserQuestion's questions.
+type Question struct {
+	Question    string           `json:"question"`
+	Header      string           `json:"header"`
+	MultiSelect bool             `json:"multiSelect"`
+	Options     []QuestionOption `json:"options"`
+}
+
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 const (

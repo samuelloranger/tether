@@ -5,13 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestEncryptRoundTrips(t *testing.T) {
 	key := generateSecretKeyBase64()
-	content := PushContent{Title: "homelab · claude", Body: "Waiting for input", Link: "tether://x"}
+	content := PushContent{Title: "homelab · claude", Body: "Waiting for input", Link: "tether://x", Options: []string{"Postgres", "SQLite"}}
 
 	sealed, err := encryptPushContent(key, content)
 	if err != nil {
@@ -21,7 +22,7 @@ func TestEncryptRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decrypt: %v", err)
 	}
-	if got != content {
+	if !reflect.DeepEqual(got, content) {
 		t.Fatalf("round-trip mismatch: %+v != %+v", got, content)
 	}
 }
