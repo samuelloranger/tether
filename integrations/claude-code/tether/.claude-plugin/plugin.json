@@ -1,6 +1,6 @@
 {
   "name": "tether",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Answer Claude Code permission prompts from the Tether app while you're away from the terminal.",
   "author": { "name": "Samuel Loranger" }
 }
