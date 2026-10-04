@@ -248,8 +248,11 @@ final class TerminalImageTests: XCTestCase {
     engine.feed(kitty("a=f,i=9,f=32,s=2,v=2,z=20,q=2", solidBlue))
     engine.feed(kitty("a=a,i=9,s=3,z=20,q=2"))
     let first = try XCTUnwrap(engine.frame().images.placements.first?.key)
+    // SwiftTerm ticks animations on a utility-QoS queue, which a loaded CI runner can starve
+    // for seconds: wait on a deadline, not a fixed number of polls.
+    let deadline = ContinuousClock.now + .seconds(10)
     var advanced = false
-    for _ in 0..<40 where !advanced {
+    while !advanced, ContinuousClock.now < deadline {
       try await Task.sleep(for: .milliseconds(25))
       advanced = engine.frame().images.placements.first?.key != first
     }
