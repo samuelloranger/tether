@@ -128,8 +128,9 @@ final class LinkSpansTests: XCTestCase {
   }
 
   func testShortUrlStoppingShortOfTheEdgeStaysWhole() {
+    // One column short of the edge is still short: the last cell is blank.
     let rows = ["see https://x.io", "foo/bar.txt here"]
-    let spans = LinkSpans.compute(texts: rows, wrapped: [false, false], cols: 40)
+    let spans = LinkSpans.compute(texts: rows, wrapped: [false, false], cols: rows[0].count + 1)
     XCTAssertEqual(spans[0].map(\.target), [.external(url: "https://x.io")])
     XCTAssertEqual(spans[1].map(\.target), [.file(path: "foo/bar.txt", line: nil, column: nil)])
   }

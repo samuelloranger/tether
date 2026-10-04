@@ -229,7 +229,7 @@ public enum LinkSpans {
       guard let match = urlAtEolRegex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) else { return -1 }
       // A URL cut at the edge wraps however little of it fits, even just `https://git`;
       // one that stops short of the edge needs some length to read as cut rather than done.
-      let reachesEdge = trailingBorder(row) > 0 || cols.map { row.count >= $0 - 1 } ?? false
+      let reachesEdge = trailingBorder(row) > 0 || cols.map { row.count >= $0 } ?? false
       guard reachesEdge || match.range(at: 1).length >= 8 else { return -1 }
     }
     let lead = next.prefix { $0.isWhitespace || borders.contains($0) }.count
