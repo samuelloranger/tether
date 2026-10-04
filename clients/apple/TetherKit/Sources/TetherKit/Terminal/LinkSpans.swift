@@ -40,7 +40,7 @@ public enum LinkSpans {
     pattern: #"^(.*?)(?::([1-9]\d*)(?::([1-9]\d*))?)?$"#
   )
   private static let hasFileExtRegex = try! NSRegularExpression(pattern: #"/[\w.@+-]*\.[\w-]+$"#)
-  private static let urlAtEolRegex = try! NSRegularExpression(pattern: #"(?:^|[\s│┃])https?://\S{8,}$"#)
+  private static let urlAtEolRegex = try! NSRegularExpression(pattern: #"(?:^|[\s│┃])https?://(\S*)$"#)
   private static let urlContRegex = try! NSRegularExpression(
     pattern: #"^[A-Za-z0-9\-._~%+:@]*[/?#&=][^\s]*"#
   )
@@ -80,8 +80,8 @@ public enum LinkSpans {
   }
 
   /// `texts[i]` is row i's plain text; `wrapped[i]` is true when row i soft-wraps
-  /// into row i+1. Returns one `[LinkSpan]` per row.
-  public static func compute(texts: [String], wrapped: [Bool]) -> [[LinkSpan]] {
+  /// into row i+1. `cols` is the grid width, when known. Returns one `[LinkSpan]` per row.
+  public static func compute(texts: [String], wrapped: [Bool], cols: Int? = nil) -> [[LinkSpan]] {
     var out: [[LinkSpan]] = texts.map { _ in [] }
     var i = 0
     while i < texts.count {
@@ -97,7 +97,7 @@ public enum LinkSpans {
         }
         // Past the first row, a URL keeps going only through rows as wide as the one it started on.
         let continued = j > i ? (lead: skips[skips.count - 1], edge: texts[i].count - trailingBorder(texts[i])) : nil
-        let skip = hardWrapSkip(row: texts[j], next: texts[j + 1], continuedFrom: continued)
+        let skip = hardWrapSkip(row: texts[j], next: texts[j + 1], continuedFrom: continued, cols: cols)
         if skip < 0 { break }
         skips.append(skip)
         tails.append(trailingBorder(texts[j]))
@@ -220,13 +220,17 @@ public enum LinkSpans {
     return row.count - body.count
   }
 
-  private static func hardWrapSkip(row: String, next: String, continuedFrom: (lead: Int, edge: Int)?) -> Int {
+  private static func hardWrapSkip(row: String, next: String, continuedFrom: (lead: Int, edge: Int)?, cols: Int?) -> Int {
     let body = String(row.dropLast(trailingBorder(row)))
     if let continuedFrom {
       let rest = body.dropFirst(continuedFrom.lead)
       guard !rest.isEmpty, !rest.contains(where: \.isWhitespace), body.count >= continuedFrom.edge - 1 else { return -1 }
     } else {
-      guard urlAtEolRegex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil else { return -1 }
+      guard let match = urlAtEolRegex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) else { return -1 }
+      // A URL cut at the edge wraps however little of it fits, even just `https://git`;
+      // one that stops short of the edge needs some length to read as cut rather than done.
+      let reachesEdge = trailingBorder(row) > 0 || cols.map { row.count >= $0 - 1 } ?? false
+      guard reachesEdge || match.range(at: 1).length >= 8 else { return -1 }
     }
     let lead = next.prefix { $0.isWhitespace || borders.contains($0) }.count
     let rest = String(next.dropFirst(lead))

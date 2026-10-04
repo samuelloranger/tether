@@ -115,4 +115,22 @@ final class LinkSpansTests: XCTestCase {
   func testDotfileInADirectoryIsDetected() {
     XCTAssertEqual(targets("edit src/.env now"), [.file(path: "src/.env", line: nil, column: nil)])
   }
+
+  func testUrlCutRightAfterTheSchemeAtTheEdgeJoins() {
+    let rows = [
+      "published: https://git",
+      "hub.com/owner/repo/releases/tag/v1.2.3",
+    ]
+    let spans = LinkSpans.compute(texts: rows, wrapped: [false, false], cols: rows[0].count)
+    let url = LinkTarget.external(url: "https://github.com/owner/repo/releases/tag/v1.2.3")
+    XCTAssertEqual(spans[0], [LinkSpan(start: 11, end: rows[0].count, target: url)])
+    XCTAssertEqual(spans[1], [LinkSpan(start: 0, end: rows[1].count, target: url)])
+  }
+
+  func testShortUrlStoppingShortOfTheEdgeStaysWhole() {
+    let rows = ["see https://x.io", "foo/bar.txt here"]
+    let spans = LinkSpans.compute(texts: rows, wrapped: [false, false], cols: 40)
+    XCTAssertEqual(spans[0].map(\.target), [.external(url: "https://x.io")])
+    XCTAssertEqual(spans[1].map(\.target), [.file(path: "foo/bar.txt", line: nil, column: nil)])
+  }
 }

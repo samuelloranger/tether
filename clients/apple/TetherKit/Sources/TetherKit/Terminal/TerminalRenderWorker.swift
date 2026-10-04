@@ -58,7 +58,9 @@ final class TerminalRenderWorker {
     // LinkSpans still runs.
     lastLinkSpans = LinkSpans.merging(
       explicit: frame.hyperlinks,
-      detected: LinkSpans.compute(texts: lastRowTexts, wrapped: Array(repeating: false, count: lastRowTexts.count))
+      detected: LinkSpans.compute(
+        texts: lastRowTexts, wrapped: Array(repeating: false, count: lastRowTexts.count), cols: cols
+      )
     )
     return rasterize(metrics: metrics)
   }
