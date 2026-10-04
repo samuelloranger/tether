@@ -77,4 +77,32 @@ final class LinkSpansTests: XCTestCase {
     XCTAssertEqual(LinkTarget.file(path: "src/a.rs", line: 3, column: 1).text, "src/a.rs:3:1")
     XCTAssertEqual(LinkTarget.file(path: "/tmp/a", line: nil, column: nil).text, "/tmp/a")
   }
+
+  func testPaddedBoxRowDoesNotJoinTheNextRow() {
+    let rows = [
+      "│ https://example.com/docs        │",
+      "│ /tmp/out/file.txt               │",
+    ]
+    let spans = LinkSpans.compute(texts: rows, wrapped: [false, false])
+    XCTAssertEqual(spans[0].map(\.target), [.external(url: "https://example.com/docs")])
+    XCTAssertEqual(spans[1].map(\.target), [.file(path: "/tmp/out/file.txt", line: nil, column: nil)])
+  }
+
+  func testUrlWrappedOverThreeRowsJoins() {
+    let rows = [
+      "see https://example.com/aaaa",
+      "bbbb/cccc/dddd/eeee/ffff/gg",
+      "hh/end then text",
+    ]
+    let spans = LinkSpans.compute(texts: rows, wrapped: [false, false, false])
+    let url = LinkTarget.external(url: "https://example.com/aaaabbbb/cccc/dddd/eeee/ffff/gghh/end")
+    XCTAssertEqual(spans[0].map(\.target), [url])
+    XCTAssertEqual(spans[1].map(\.target), [url])
+    XCTAssertEqual(spans[2], [LinkSpan(start: 0, end: 6, target: url)])
+  }
+
+  func testDotfileAndTildeUserPathsNeedAnExtensionOrAnchor() {
+    XCTAssertEqual(targets("in .git/config"), [])
+    XCTAssertEqual(targets("in ~user/notes.txt"), [])
+  }
 }

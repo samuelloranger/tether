@@ -30,17 +30,17 @@ public struct LinkSpan: Equatable, Sendable {
 }
 
 public enum LinkSpans {
-  private static let urlRegex = try! NSRegularExpression(pattern: #"https?://[^\s│┃]+"#)
+  private static let urlRegex = try! NSRegularExpression(pattern: #"https?://[^\s│┃⎿]+"#)
   // The lookbehind keeps a match from starting mid-token, so a URL's own path is not re-read
   // as a file. Absolute paths need two components, so a lone `/help` stays plain text.
   private static let fileRegex = try! NSRegularExpression(
-    pattern: #"(?<![\w/.:@+-])((?:(?:~|\.{1,2})(?:/[\w.@+-]+)+|(?:/[\w.@+-]+){2,}|(?:[\w.@+-]+/)+[\w.@+-]+)(?::[1-9]\d*(?::[1-9]\d*)?)?)(?![\w/@+-])"#
+    pattern: #"(?<![\w/.:@+~-])((?:(?:~|\.{1,2})(?:/[\w.@+-]+)+|(?:/[\w.@+-]+){2,}|(?:[\w.@+-]+/)+[\w.@+-]+)(?::[1-9]\d*(?::[1-9]\d*)?)?)(?![\w/@+-])"#
   )
   private static let filePathRegex = try! NSRegularExpression(
     pattern: #"^(.*?)(?::([1-9]\d*)(?::([1-9]\d*))?)?$"#
   )
   private static let hasFileExtRegex = try! NSRegularExpression(pattern: #"/[\w.@+-]+\.[\w-]+$"#)
-  private static let urlAtEolRegex = try! NSRegularExpression(pattern: #"(?:^|\s)https?://\S{8,}$"#)
+  private static let urlAtEolRegex = try! NSRegularExpression(pattern: #"(?:^|[\s│┃])https?://\S{8,}$"#)
   private static let urlContRegex = try! NSRegularExpression(
     pattern: #"^[A-Za-z0-9\-._~%+:@]*[/?#&=][^\s]*"#
   )
@@ -64,7 +64,7 @@ public enum LinkSpans {
     let path = String(clean[pathRange])
     guard path.contains("/") else { return nil }
     // A bare relative `a/b` is as likely prose or a date as a path; only an extension makes it one.
-    let anchored = path.hasPrefix("/") || path.hasPrefix("~") || path.hasPrefix(".")
+    let anchored = path.hasPrefix("/") || path.hasPrefix("~/") || path.hasPrefix("./") || path.hasPrefix("../")
     if !anchored, hasFileExtRegex.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) == nil {
       return nil
     }
@@ -95,7 +95,8 @@ public enum LinkSpans {
           j += 1
           continue
         }
-        let skip = hardWrapSkip(row: texts[j], next: texts[j + 1])
+        // Past the first row, a URL keeps going only through rows it fills edge to edge.
+        let skip = hardWrapSkip(row: texts[j], next: texts[j + 1], continuedFrom: j > i ? skips.last : nil)
         if skip < 0 { break }
         skips.append(skip)
         tails.append(trailingBorder(texts[j]))
@@ -207,19 +208,25 @@ public enum LinkSpans {
   /// continues past these, not through them.
   private static let borders: Set<Character> = ["│", "┃", "⎿"]
 
-  /// Characters to drop from the end of a row that closes on a box border.
+  /// Characters to drop from the end of a row that closes on a box border: the border and one
+  /// gutter space. Wider padding means the text stopped short of the edge, so nothing wrapped.
   private static func trailingBorder(_ row: String) -> Int {
     var body = Substring(row)
     while let last = body.last, last.isWhitespace { body.removeLast() }
     guard let last = body.last, borders.contains(last), last != "⎿" else { return 0 }
     body.removeLast()
-    while let last = body.last, last.isWhitespace { body.removeLast() }
+    if body.last == " " { body.removeLast() }
     return row.count - body.count
   }
 
-  private static func hardWrapSkip(row: String, next: String) -> Int {
+  private static func hardWrapSkip(row: String, next: String, continuedFrom lead: Int?) -> Int {
     let body = String(row.dropLast(trailingBorder(row)))
-    guard urlAtEolRegex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil else { return -1 }
+    if let lead {
+      let rest = body.dropFirst(lead)
+      guard !rest.isEmpty, !rest.contains(where: \.isWhitespace) else { return -1 }
+    } else {
+      guard urlAtEolRegex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil else { return -1 }
+    }
     let lead = next.prefix { $0.isWhitespace || borders.contains($0) }.count
     let rest = String(next.dropFirst(lead))
     guard !rest.isEmpty else { return -1 }
