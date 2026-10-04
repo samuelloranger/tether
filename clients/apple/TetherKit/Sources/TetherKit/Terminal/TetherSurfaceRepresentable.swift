@@ -18,6 +18,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var onSelectionText: (String?) -> Void
   public var onOpenURL: (URL) -> Void
   public var onOpenFile: (String, Int?, Int?) -> Void
+  public var onCopyLink: (String) -> Void
   public var onMouseBytes: (String) -> Void
   public var mouseMode: MouseMode
   public var mouseSgr: Bool
@@ -39,6 +40,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     onSelectionText: @escaping (String?) -> Void = { _ in },
     onOpenURL: @escaping (URL) -> Void = { _ in },
     onOpenFile: @escaping (String, Int?, Int?) -> Void = { _, _, _ in },
+    onCopyLink: @escaping (String) -> Void = { _ in },
     onMouseBytes: @escaping (String) -> Void = { _ in },
     mouseMode: MouseMode = .off,
     mouseSgr: Bool = true
@@ -59,6 +61,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.onSelectionText = onSelectionText
     self.onOpenURL = onOpenURL
     self.onOpenFile = onOpenFile
+    self.onCopyLink = onCopyLink
     self.onMouseBytes = onMouseBytes
     self.mouseMode = mouseMode
     self.mouseSgr = mouseSgr
@@ -136,6 +139,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
         coordinator.parent.onOpenFile(path, line, column)
       }
     }
+    view.onCopyLink = { target in coordinator.parent.onCopyLink(target.text) }
     view.onMouseBytes = { bytes in coordinator.parent.onMouseBytes(bytes) }
   }
 

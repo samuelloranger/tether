@@ -5,6 +5,16 @@ import Foundation
 public enum LinkTarget: Equatable, Sendable {
   case external(url: String)
   case file(path: String, line: Int?, column: Int?)
+
+  /// What a copy of the link puts on the pasteboard: the URL, or `path:line:column`.
+  public var text: String {
+    switch self {
+    case let .external(url):
+      return url
+    case let .file(path, line, column):
+      return [path, line.map(String.init), column.map(String.init)].compactMap { $0 }.joined(separator: ":")
+    }
+  }
 }
 
 public struct LinkSpan: Equatable, Sendable {
@@ -20,35 +30,44 @@ public struct LinkSpan: Equatable, Sendable {
 }
 
 public enum LinkSpans {
-  private static let urlRegex = try! NSRegularExpression(pattern: #"https?://[^\s]+"#)
+  private static let urlRegex = try! NSRegularExpression(pattern: #"https?://[^\s│┃]+"#)
+  // The lookbehind keeps a match from starting mid-token, so a URL's own path is not re-read
+  // as a file. Absolute paths need two components, so a lone `/help` stays plain text.
   private static let fileRegex = try! NSRegularExpression(
-    pattern: #"(?:^|\s)((?:[\w.-]+/)+[\w.-]+\.[\w-]+(?::[1-9]\d*(?::[1-9]\d*)?)?)(?=$|\s|[)\],;.])"#
+    pattern: #"(?<![\w/.:@+-])((?:(?:~|\.{1,2})(?:/[\w.@+-]+)+|(?:/[\w.@+-]+){2,}|(?:[\w.@+-]+/)+[\w.@+-]+)(?::[1-9]\d*(?::[1-9]\d*)?)?)(?![\w/@+-])"#
   )
   private static let filePathRegex = try! NSRegularExpression(
     pattern: #"^(.*?)(?::([1-9]\d*)(?::([1-9]\d*))?)?$"#
   )
-  private static let hasFileExtRegex = try! NSRegularExpression(pattern: #"/[\w.-]+\.[\w-]+$"#)
+  private static let hasFileExtRegex = try! NSRegularExpression(pattern: #"/[\w.@+-]+\.[\w-]+$"#)
   private static let urlAtEolRegex = try! NSRegularExpression(pattern: #"(?:^|\s)https?://\S{8,}$"#)
   private static let urlContRegex = try! NSRegularExpression(
     pattern: #"^[A-Za-z0-9\-._~%+:@]*[/?#&=][^\s]*"#
   )
 
-  public static func parseFileTarget(_ token: String) -> LinkTarget? {
+  private static func trimFileEnd(_ token: String) -> String {
     var clean = token
     let trailing: Set<Character> = [")", "]", ",", ";", "."]
     while let last = clean.last, trailing.contains(last) {
       clean.removeLast()
     }
+    return clean
+  }
+
+  public static func parseFileTarget(_ token: String) -> LinkTarget? {
+    let clean = trimFileEnd(token)
     let range = NSRange(clean.startIndex..., in: clean)
     guard let match = filePathRegex.firstMatch(in: clean, range: range),
           match.numberOfRanges >= 2,
           let pathRange = Range(match.range(at: 1), in: clean)
     else { return nil }
     let path = String(clean[pathRange])
-    guard path.contains("/"),
-          hasFileExtRegex.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil
-    else { return nil }
-    if path.hasPrefix("/") || path.split(separator: "/").contains("..") { return nil }
+    guard path.contains("/") else { return nil }
+    // A bare relative `a/b` is as likely prose or a date as a path; only an extension makes it one.
+    let anchored = path.hasPrefix("/") || path.hasPrefix("~") || path.hasPrefix(".")
+    if !anchored, hasFileExtRegex.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) == nil {
+      return nil
+    }
     var line: Int?
     var column: Int?
     if match.numberOfRanges > 2, let r = Range(match.range(at: 2), in: clean) {
@@ -68,43 +87,47 @@ public enum LinkSpans {
     while i < texts.count {
       var j = i
       var skips: [Int] = [0]
+      var tails: [Int] = []
       while j + 1 < texts.count {
         if j < wrapped.count, wrapped[j] {
           skips.append(0)
+          tails.append(0)
           j += 1
           continue
         }
         let skip = hardWrapSkip(row: texts[j], next: texts[j + 1])
         if skip < 0 { break }
         skips.append(skip)
+        tails.append(trailingBorder(texts[j]))
         j += 1
       }
+      tails.append(0)
 
       var parts: [String] = []
       var offs: [Int] = []
       var acc = 0
       for k in i...j {
         let skip = skips[k - i]
+        let tail = tails[k - i]
         let text = texts[k]
-        let part: String
-        if skip > 0, skip <= text.count {
-          part = String(text.dropFirst(skip))
-        } else {
-          part = text
-        }
-        parts.append(part)
+        var part = Substring(text)
+        if skip > 0, skip <= part.count { part = part.dropFirst(skip) }
+        if tail > 0, tail <= part.count { part = part.dropLast(tail) }
+        parts.append(String(part))
         offs.append(acc)
         acc += part.count
       }
       let joined = parts.joined()
       let fullRange = NSRange(joined.startIndex..., in: joined)
 
+      var urlRanges: [Range<Int>] = []
       for match in urlRegex.matches(in: joined, range: fullRange) {
         guard let r = Range(match.range, in: joined) else { continue }
         let url = trimUrlEnd(String(joined[r]))
         guard !url.isEmpty else { continue }
         let s = joined.distance(from: joined.startIndex, to: r.lowerBound)
         let e = s + url.count
+        urlRanges.append(s..<e)
         push(target: .external(url: url), s: s, e: e, i: i, j: j, skips: skips, parts: parts, offs: offs, out: &out)
       }
 
@@ -115,7 +138,8 @@ public enum LinkSpans {
         let raw = String(joined[rawRange])
         guard let target = parseFileTarget(raw) else { continue }
         let s = joined.distance(from: joined.startIndex, to: rawRange.lowerBound)
-        let e = s + raw.count
+        let e = s + trimFileEnd(raw).count
+        guard !urlRanges.contains(where: { $0.overlaps(s..<e) }) else { continue }
         push(target: target, s: s, e: e, i: i, j: j, skips: skips, parts: parts, offs: offs, out: &out)
       }
 
@@ -179,13 +203,27 @@ public enum LinkSpans {
     return url
   }
 
+  /// Box-drawing a TUI frames its output with (`│ … │`, Claude Code's `⎿`): a URL it wraps
+  /// continues past these, not through them.
+  private static let borders: Set<Character> = ["│", "┃", "⎿"]
+
+  /// Characters to drop from the end of a row that closes on a box border.
+  private static func trailingBorder(_ row: String) -> Int {
+    var body = Substring(row)
+    while let last = body.last, last.isWhitespace { body.removeLast() }
+    guard let last = body.last, borders.contains(last), last != "⎿" else { return 0 }
+    body.removeLast()
+    while let last = body.last, last.isWhitespace { body.removeLast() }
+    return row.count - body.count
+  }
+
   private static func hardWrapSkip(row: String, next: String) -> Int {
-    let rowRange = NSRange(row.startIndex..., in: row)
-    guard urlAtEolRegex.firstMatch(in: row, range: rowRange) != nil else { return -1 }
-    let trimmed = next.trimmingCharacters(in: .whitespaces)
-    guard !trimmed.isEmpty else { return -1 }
-    let bodyRange = NSRange(trimmed.startIndex..., in: trimmed)
-    guard urlContRegex.firstMatch(in: trimmed, range: bodyRange) != nil else { return -1 }
-    return next.count - trimmed.count
+    let body = String(row.dropLast(trailingBorder(row)))
+    guard urlAtEolRegex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil else { return -1 }
+    let lead = next.prefix { $0.isWhitespace || borders.contains($0) }.count
+    let rest = String(next.dropFirst(lead))
+    guard !rest.isEmpty else { return -1 }
+    guard urlContRegex.firstMatch(in: rest, range: NSRange(rest.startIndex..., in: rest)) != nil else { return -1 }
+    return lead
   }
 }
