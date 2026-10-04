@@ -61,6 +61,9 @@ public final class TetherSurfaceView: UIView {
 
   /// Tap on a detected link target.
   public var onOpenLink: ((LinkTarget) -> Void)?
+  /// "Copy" from a link's long-press menu.
+  public var onCopyLink: ((LinkTarget) -> Void)?
+  private var menuLink: LinkTarget?
 
   /// When non-`.off`, pans/taps emit mouse sequences instead of scroll/select.
   public var mouseMode: MouseMode = .off
@@ -210,6 +213,8 @@ public final class TetherSurfaceView: UIView {
     tap.numberOfTapsRequired = 1
     tap.require(toFail: doubleTap)
     addGestureRecognizer(tap)
+
+    addInteraction(UIEditMenuInteraction(delegate: self))
   }
 
   // MARK: - Snapshot intake
@@ -651,7 +656,10 @@ public final class TetherSurfaceView: UIView {
   }
 
   @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-    if mouseMode != .off { return }
+    if mouseMode != .off {
+      if gesture.state == .began { presentLinkMenu(at: gesture.location(in: self)) }
+      return
+    }
     let point = gesture.location(in: self)
     guard let cell = cellAt(point) else { return }
     switch gesture.state {
@@ -683,6 +691,13 @@ public final class TetherSurfaceView: UIView {
     // Before the mouse-mode return, or a tap in a mouse-mode TUI never re-raises the keyboard.
     onTapCell?(cell.col, cell.row)
 
+    // Ahead of mouse reporting: a phone has no modifier-click, and a mouse-mode TUI
+    // (Claude Code's fullscreen one among them) would otherwise swallow every link.
+    if let target = LinkSpans.target(atColumn: cell.col, row: cell.row, spans: linkSpans) {
+      onOpenLink?(target)
+      return
+    }
+
     if mouseMode != .off {
       let oneBasedCol = cell.col + 1
       let oneBasedRow = cell.row + 1
@@ -691,11 +706,6 @@ public final class TetherSurfaceView: UIView {
       ) {
         onMouseBytes?(seq)
       }
-      return
-    }
-
-    if let target = LinkSpans.target(atColumn: cell.col, row: cell.row, spans: linkSpans) {
-      onOpenLink?(target)
       return
     }
 
@@ -719,6 +729,41 @@ public final class TetherSurfaceView: UIView {
       onSelectionChanged?(selection)
     }
     onDoubleTapCell?(cell.col, cell.row)
+  }
+}
+
+extension TetherSurfaceView: UIEditMenuInteractionDelegate {
+  /// Mouse mode leaves long-press without selection; on a link it offers Open and Copy instead.
+  private func presentLinkMenu(at point: CGPoint) {
+    guard let cell = cellAt(point),
+          let target = LinkSpans.target(atColumn: cell.col, row: cell.row, spans: linkSpans),
+          let interaction = interactions.compactMap({ $0 as? UIEditMenuInteraction }).first
+    else { return }
+    menuLink = target
+    interaction.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point))
+  }
+
+  public func editMenuInteraction(
+    _ interaction: UIEditMenuInteraction,
+    menuFor configuration: UIEditMenuConfiguration,
+    suggestedActions: [UIMenuElement]
+  ) -> UIMenu? {
+    guard let target = menuLink else { return nil }
+    let copy = UIAction(title: "Copy") { [weak self] _ in self?.onCopyLink?(target) }
+    // A host file has nothing to open on the phone; its tap already copies the path.
+    guard case .external = target else { return UIMenu(children: [copy]) }
+    return UIMenu(children: [
+      UIAction(title: "Open") { [weak self] _ in self?.onOpenLink?(target) },
+      copy,
+    ])
+  }
+
+  public func editMenuInteraction(
+    _ interaction: UIEditMenuInteraction,
+    willDismissMenuFor configuration: UIEditMenuConfiguration,
+    animator: UIEditMenuInteractionAnimating
+  ) {
+    menuLink = nil
   }
 }
 
