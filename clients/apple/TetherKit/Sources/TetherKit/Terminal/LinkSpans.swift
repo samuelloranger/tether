@@ -39,7 +39,7 @@ public enum LinkSpans {
   private static let filePathRegex = try! NSRegularExpression(
     pattern: #"^(.*?)(?::([1-9]\d*)(?::([1-9]\d*))?)?$"#
   )
-  private static let hasFileExtRegex = try! NSRegularExpression(pattern: #"/[\w.@+-]+\.[\w-]+$"#)
+  private static let hasFileExtRegex = try! NSRegularExpression(pattern: #"/[\w.@+-]*\.[\w-]+$"#)
   private static let urlAtEolRegex = try! NSRegularExpression(pattern: #"(?:^|[\s│┃])https?://\S{8,}$"#)
   private static let urlContRegex = try! NSRegularExpression(
     pattern: #"^[A-Za-z0-9\-._~%+:@]*[/?#&=][^\s]*"#
@@ -95,8 +95,9 @@ public enum LinkSpans {
           j += 1
           continue
         }
-        // Past the first row, a URL keeps going only through rows it fills edge to edge.
-        let skip = hardWrapSkip(row: texts[j], next: texts[j + 1], continuedFrom: j > i ? skips.last : nil)
+        // Past the first row, a URL keeps going only through rows as wide as the one it started on.
+        let continued = j > i ? (lead: skips[skips.count - 1], edge: texts[i].count - trailingBorder(texts[i])) : nil
+        let skip = hardWrapSkip(row: texts[j], next: texts[j + 1], continuedFrom: continued)
         if skip < 0 { break }
         skips.append(skip)
         tails.append(trailingBorder(texts[j]))
@@ -219,11 +220,11 @@ public enum LinkSpans {
     return row.count - body.count
   }
 
-  private static func hardWrapSkip(row: String, next: String, continuedFrom lead: Int?) -> Int {
+  private static func hardWrapSkip(row: String, next: String, continuedFrom: (lead: Int, edge: Int)?) -> Int {
     let body = String(row.dropLast(trailingBorder(row)))
-    if let lead {
-      let rest = body.dropFirst(lead)
-      guard !rest.isEmpty, !rest.contains(where: \.isWhitespace) else { return -1 }
+    if let continuedFrom {
+      let rest = body.dropFirst(continuedFrom.lead)
+      guard !rest.isEmpty, !rest.contains(where: \.isWhitespace), body.count >= continuedFrom.edge - 1 else { return -1 }
     } else {
       guard urlAtEolRegex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil else { return -1 }
     }

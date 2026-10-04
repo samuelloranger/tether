@@ -105,4 +105,14 @@ final class LinkSpansTests: XCTestCase {
     XCTAssertEqual(targets("in .git/config"), [])
     XCTAssertEqual(targets("in ~user/notes.txt"), [])
   }
+
+  func testShortRowsAfterAUrlDoNotChainOn() {
+    let rows = ["https://example.com/users/alice", "bob/carol", "dave/erin.txt"]
+    let spans = LinkSpans.compute(texts: rows, wrapped: [false, false, false])
+    XCTAssertEqual(spans[2].map(\.target), [.file(path: "dave/erin.txt", line: nil, column: nil)])
+  }
+
+  func testDotfileInADirectoryIsDetected() {
+    XCTAssertEqual(targets("edit src/.env now"), [.file(path: "src/.env", line: nil, column: nil)])
+  }
 }
