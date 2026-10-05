@@ -193,7 +193,9 @@ impl TerminalModel {
             fx.push(Effect::ResizeAll(size));
         }
     }
-    pub(crate) fn tick_toasts(&mut self, _now: Duration, _fx: &mut Vec<Effect>) {}
+    pub(crate) fn tick_toasts(&mut self, now: Duration, fx: &mut Vec<Effect>) {
+        self.toast_due(now, fx);
+    }
 }
 
 #[cfg(test)]

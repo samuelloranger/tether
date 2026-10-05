@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tether_core::connect::ConnectError;
-use tether_core::keymap::{KeyInput, Mods};
+use tether_core::keymap::{KeyInput, Mods, TetherCommand};
 use tether_core::lock::LockGrace;
 use tether_core::osc::Progress;
 use tether_core::paste::ClipboardSnapshot;
@@ -19,11 +19,12 @@ use crate::terminal::status::{ConnStatus, Lamp};
 
 mod events;
 mod input;
+mod pointer;
 mod reconnect;
-mod send;
+pub(crate) mod send;
 mod tabs;
 
-pub use send::SendJob;
+pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
 pub const REFRESH_EVERY: Duration = Duration::from_secs(10);
@@ -59,6 +60,7 @@ pub enum PointerShape {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuRequest {
     /// Right-click on a tab.
+    #[allow(dead_code)] // Slint tab menu → glue::apply_on_ui
     Tab { name: String },
     /// Right-click on a link: Copy link, plus the click's usual Copy or Paste.
     Link { url: String, copy_selection: bool },
@@ -87,6 +89,7 @@ pub enum Msg {
     Focus(bool),
     Modifiers(Mods),
     SelectTab(String),
+    #[allow(dead_code)] // Slint shortcuts + unit tests
     TabShortcut(TabJump),
     NewSessionBegin,
     NewSessionCommit(String),
@@ -145,6 +148,8 @@ pub enum Msg {
     SendFileFailed {
         reason: String,
     },
+    CopySelection,
+    PasteClipboard,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,6 +204,7 @@ pub enum UiEffect {
     Pointer(PointerShape),
     Tooltip(Option<String>),
     Menu(MenuRequest),
+    #[allow(dead_code)] // send-file dialog path (platform::pick_files in glue)
     PickFiles,
 }
 
@@ -281,11 +287,12 @@ pub struct TerminalModel {
     layout: Option<Layout>,
     well_px: Option<(u32, u32, f32)>,
     toasts: ToastThrottle,
+    session_cwds: HashMap<String, String>,
     send: Option<send::SendState>,
     /// When a finished send's capsule appeared; it leaves after CAPSULE_LINGER or a keystroke.
     capsule_shown: Option<Duration>,
-    pointer: Option<crate::terminal::mouse::PointerState>,
-    hover: Option<(usize, usize, usize)>,
+    pointer: crate::terminal::mouse::PointerState,
+    pub(crate) hover: Option<(usize, usize, usize)>,
     blink_on: bool,
     blink_at: Duration,
 }
@@ -318,9 +325,10 @@ impl TerminalModel {
             layout: None,
             well_px: None,
             toasts: ToastThrottle::default(),
+            session_cwds: HashMap::new(),
             send: None,
             capsule_shown: None,
-            pointer: None,
+            pointer: crate::terminal::mouse::PointerState::default(),
             hover: None,
             blink_on: true,
             blink_at: Duration::ZERO,
@@ -398,6 +406,16 @@ impl TerminalModel {
             Msg::SendFileStarted { index } => self.on_send_file_started(index),
             Msg::SendFileDone { remote } => self.on_send_file_done(&remote, now, &mut fx),
             Msg::SendFileFailed { reason } => self.on_send_file_failed(reason, now),
+            Msg::CopySelection => self.on_command(
+                TetherCommand::Copy,
+                Mods {
+                    shift: false,
+                    alt: false,
+                    ctrl: true,
+                },
+                &mut fx,
+            ),
+            Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
         }
         fx
     }
@@ -448,9 +466,15 @@ impl TerminalModel {
         fx: &mut Vec<Effect>,
     ) {
         self.last_refresh = now;
+        if let Ok(sessions) = &result {
+            self.session_cwds = sessions
+                .iter()
+                .map(|s| (s.name.clone(), s.display_cwd().to_string()))
+                .collect();
+        }
         if self.strip.is_none() {
             let strip = match result {
-                Ok(sessions) => TabStrip::from_sessions(&sessions),
+                Ok(sessions) => TabStrip::from_sessions(sessions.as_slice()),
                 Err(_) => TabStrip::from_ls_failure(),
             };
             let first = strip.active.clone();
@@ -539,7 +563,7 @@ impl TerminalModel {
                         progress: self
                             .tabs
                             .get(&t.name)
-                            .and_then(|x| x.term.reports().progress.clone()),
+                            .and_then(|x| x.term.reports().progress),
                     })
                     .collect()
             })
@@ -574,7 +598,7 @@ impl TerminalModel {
             progress: self
                 .active_name()
                 .and_then(|n| self.tabs.get(n))
-                .and_then(|t| t.term.reports().progress.clone()),
+                .and_then(|t| t.term.reports().progress),
             title: self.window_title(),
         }
     }
@@ -625,6 +649,7 @@ impl TerminalModel {
         })
     }
 
+    #[allow(dead_code)] // resize / pointer unit tests
     pub fn layout(&self) -> Option<Layout> {
         self.layout
     }

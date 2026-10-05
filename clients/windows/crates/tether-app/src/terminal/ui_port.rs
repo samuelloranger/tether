@@ -76,16 +76,26 @@ impl UiPort for SlintUi {
                     send(Msg::Paste { clip, now_unix });
                 });
             }
-            UiEffect::FlashTaskbar => platform.flash_taskbar(),
-            UiEffect::Taskbar(p) => platform.set_progress(p.as_ref()),
-            UiEffect::Toast {
-                session,
-                title,
-                body,
-            } => platform.toast(&session, &title, &body),
-            UiEffect::OpenUrl(url) => platform.open_url(&url),
-            UiEffect::SetClipboard(text) => platform.set_clipboard(&text),
-            UiEffect::BringToFront => platform.bring_to_front(),
+            fx @ (UiEffect::FlashTaskbar
+            | UiEffect::Taskbar(_)
+            | UiEffect::Toast { .. }
+            | UiEffect::OpenUrl(_)
+            | UiEffect::SetClipboard(_)
+            | UiEffect::BringToFront) => {
+                let _ = slint::invoke_from_event_loop(move || match fx {
+                    UiEffect::FlashTaskbar => platform.flash_taskbar(),
+                    UiEffect::Taskbar(p) => platform.set_progress(p.as_ref()),
+                    UiEffect::Toast {
+                        session,
+                        title,
+                        body,
+                    } => platform.toast(&session, &title, &body),
+                    UiEffect::OpenUrl(url) => platform.open_url(&url),
+                    UiEffect::SetClipboard(text) => platform.set_clipboard(&text),
+                    UiEffect::BringToFront => platform.bring_to_front(),
+                    _ => {}
+                });
+            }
             other => {
                 let _ = self
                     .window
@@ -206,11 +216,13 @@ mod mapping_tests {
 
     #[test]
     fn style_from_prefs_falls_back_and_clamps() {
-        let mut p = tether_core::prefs::TerminalPrefs::default();
-        p.scheme = "no-such-theme".into();
-        p.font = "menlo".into();
-        p.size_pt = 99.0;
-        let s = crate::terminal::geometry::TermStyle::from_prefs(&p);
+        let s =
+            crate::terminal::geometry::TermStyle::from_prefs(&tether_core::prefs::TerminalPrefs {
+                scheme: "no-such-theme".into(),
+                font: "menlo".into(),
+                size_pt: 99.0,
+                ..Default::default()
+            });
         assert_eq!(s.theme.id, "tether");
         assert_eq!(s.font.id, "cascadia-mono");
         assert_eq!(s.size_pt, 24.0);

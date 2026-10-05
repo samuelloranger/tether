@@ -2,19 +2,16 @@ use std::path::PathBuf;
 use tether_core::osc::Progress;
 use tether_core::paste::ClipboardSnapshot;
 
-#[cfg(windows)]
 pub mod aumid;
 #[cfg(windows)]
 pub mod clipboard;
 #[cfg(windows)]
 pub mod file_dialog;
-#[cfg(windows)]
 pub mod network;
 #[cfg(windows)]
+pub mod platform;
 pub mod shell;
-#[cfg(windows)]
 pub mod taskbar;
-#[cfg(windows)]
 pub mod toast;
 #[cfg(windows)]
 pub mod wic;

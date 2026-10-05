@@ -126,6 +126,22 @@ jobs:
       - name: Release build of the app
         run: cargo build --release -p tether-app
 
+      - name: Package (portable zip + unsigned MSIX)
+        shell: pwsh
+        run: ./packaging/package.ps1 -Version 0.0.${{ github.run_number }} -SkipBuild
+
+      - name: Check the package
+        shell: pwsh
+        run: ./packaging/check-package.ps1 -Version 0.0.${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-windows-${{ github.run_number }}
+          path: |
+            dist/Tether-*-x64-portable.zip
+            dist/Tether-*-x64.msix
+          if-no-files-found: error
+
   # The Windows client's library crates hold no Win32 code outside cfg(windows),
   # so they must also build and pass on Linux.
   windows-libs-linux:

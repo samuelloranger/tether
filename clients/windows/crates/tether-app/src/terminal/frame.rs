@@ -44,6 +44,7 @@ use crate::{AppWindow, TerminalVm};
 
 pub const BLINK: Duration = Duration::from_millis(530);
 
+#[allow(clippy::large_enum_variant)]
 pub enum FrameJob {
     Grid {
         snapshot: Snapshot,
@@ -307,9 +308,13 @@ mod frame_tests {
     fn blink_toggles_the_cursor_only_when_enabled() {
         let mut m = live(vec![session("a", 1)]);
         assert_eq!(redraws(&m.handle(Msg::Tick, t(600))), 0);
-        let mut style = crate::terminal::geometry::TermStyle::default();
-        style.blink = true;
-        m.handle(Msg::StyleChanged(style), t(700));
+        m.handle(
+            Msg::StyleChanged(crate::terminal::geometry::TermStyle {
+                blink: true,
+                ..Default::default()
+            }),
+            t(700),
+        );
         assert_eq!(redraws(&m.handle(Msg::Tick, t(1_300))), 1);
     }
 }

@@ -89,9 +89,13 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         width_px: 640,
         height_px: 384,
     };
+    #[cfg(windows)]
+    let network_target = (machine.host.clone(), machine.port);
     let (model, initial) = TerminalModel::new(machine, style, size);
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
+    #[cfg(windows)]
+    crate::win32::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
     if !WIRED.replace(true) {
         wire_callbacks(&app.ui);
@@ -166,6 +170,78 @@ fn wire_callbacks(ui: &AppWindow) {
     let cv = ui.global::<ConnectVm>();
     cv.on_retry(|| send(Msg::Retry));
     cv.on_back_home(|| send(Msg::Back));
+
+    use crate::terminal::mouse::{Button, MouseKind, MouseMsg};
+    let started = std::time::Instant::now();
+    let weak = ui.as_weak();
+    vm.on_pointer(move |kind, button, shift, ctrl, alt, x, y| {
+        let Some(w) = weak.upgrade() else {
+            return;
+        };
+        let scale = w.window().scale_factor();
+        let vm = w.global::<TerminalVm>();
+        vm.set_pointer_x(x);
+        vm.set_pointer_y(y);
+        let kind = match kind {
+            0 => MouseKind::Down,
+            1 => MouseKind::Up,
+            _ => MouseKind::Move,
+        };
+        let button = match button {
+            0 => Button::Left,
+            1 => Button::Right,
+            2 => Button::Middle,
+            _ => Button::None,
+        };
+        if kind == MouseKind::Down && button == Button::Right {
+            vm.set_menu_x(x);
+            vm.set_menu_y(y + 52.0 + 34.0);
+        }
+        let mods = tether_core::keymap::Mods { shift, alt, ctrl };
+        send(Msg::Mouse(MouseMsg {
+            kind,
+            button,
+            mods,
+            x_px: x * scale,
+            y_px: y * scale,
+            at_ms: started.elapsed().as_millis() as u64,
+        }));
+    });
+    let weak = ui.as_weak();
+    vm.on_wheel(move |delta, shift, ctrl, alt, x, y| {
+        let Some(w) = weak.upgrade() else {
+            return;
+        };
+        let scale = w.window().scale_factor();
+        send(Msg::Wheel {
+            delta_px: delta * scale,
+            mods: tether_core::keymap::Mods { shift, alt, ctrl },
+            x_px: x * scale,
+            y_px: y * scale,
+        });
+    });
+    let (weak, p) = (ui.as_weak(), platform());
+    vm.on_copy_link(move || {
+        let Some(w) = weak.upgrade() else {
+            return;
+        };
+        let vm = w.global::<TerminalVm>();
+        p.set_clipboard(vm.get_menu_link().as_str());
+        vm.set_menu_link("".into());
+    });
+    let weak = ui.as_weak();
+    vm.on_menu_primary(move || {
+        let Some(w) = weak.upgrade() else {
+            return;
+        };
+        let vm = w.global::<TerminalVm>();
+        send(if vm.get_menu_copy() {
+            Msg::CopySelection
+        } else {
+            Msg::PasteClipboard
+        });
+        vm.set_menu_link("".into());
+    });
 }
 
 /// Keys go to the PTY only on the terminal page, with no name field, dialog, or menu open.
@@ -211,6 +287,15 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
         }
         WindowEvent::Focused(focused) => {
             send(Msg::Focus(*focused));
+            #[cfg(windows)]
+            if *focused {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    if let Some(h) = crate::platform::hwnd_of(app.ui.window()) {
+                        crate::win32::wndproc::install(h);
+                    }
+                });
+            }
             if *focused && keys_to_pty(app) {
                 let _ = app
                     .ui

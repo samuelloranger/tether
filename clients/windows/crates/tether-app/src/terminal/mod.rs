@@ -1,3 +1,5 @@
+pub mod clip;
+pub mod dib;
 pub mod driver;
 pub mod files;
 pub mod frame;

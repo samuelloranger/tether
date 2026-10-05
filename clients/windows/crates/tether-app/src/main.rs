@@ -27,6 +27,15 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         .backend_name("winit".into())
         .select()?;
     let app = app::App::new()?;
+    #[cfg(windows)]
+    terminal::files::set_codec(std::sync::Arc::new(win32::wic::WicCodec));
+    #[cfg(windows)]
+    let platform: std::sync::Arc<dyn win32::Platform> = {
+        let p = std::sync::Arc::new(win32::platform::WindowsPlatform::new(app.ui.as_weak()));
+        p.prepare_identity();
+        p
+    };
+    #[cfg(not(windows))]
     let platform: std::sync::Arc<dyn win32::Platform> = std::sync::Arc::new(win32::NullPlatform);
     terminal::glue::init(&app, platform);
     app.ui.window().on_close_requested({

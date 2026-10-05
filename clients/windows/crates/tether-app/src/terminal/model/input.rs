@@ -1,7 +1,8 @@
+use super::send::SendSource;
 use super::*;
 use crate::terminal::geometry::{TermStyle, layout};
-use crate::terminal::mouse::MouseMsg;
 use tether_core::keymap::{KeyAction, TetherCommand, encode_key};
+use tether_core::paste::{PasteAction, paste_action, paste_bytes};
 
 impl TerminalModel {
     pub(crate) fn on_modifiers(&mut self, mods: Mods, fx: &mut Vec<Effect>) {
@@ -91,24 +92,30 @@ impl TerminalModel {
         }
     }
 
-    /// Task 11 fills this in: re-evaluate the Ctrl-hover link when modifiers change.
-    pub(crate) fn refresh_hover(&mut self, _fx: &mut Vec<Effect>) {}
     pub(crate) fn on_paste(
         &mut self,
-        _clip: ClipboardSnapshot,
-        _now_unix: i64,
-        _fx: &mut Vec<Effect>,
+        clip: ClipboardSnapshot,
+        now_unix: i64,
+        fx: &mut Vec<Effect>,
     ) {
-    }
-    pub(crate) fn on_mouse(&mut self, _m: MouseMsg, _fx: &mut Vec<Effect>) {}
-    pub(crate) fn on_wheel(
-        &mut self,
-        _delta_px: f32,
-        _mods: Mods,
-        _x_px: f32,
-        _y_px: f32,
-        _fx: &mut Vec<Effect>,
-    ) {
+        match paste_action(clip, now_unix) {
+            PasteAction::PasteText(text) => {
+                let Some(name) = self.active_name().map(str::to_string) else {
+                    return;
+                };
+                let Some(tab) = self.tabs.get_mut(&name) else {
+                    return;
+                };
+                let bytes = paste_bytes(&text, tab.term.bracketed_paste());
+                tab.term.scroll_to_bottom();
+                self.write_active(bytes, fx);
+            }
+            PasteAction::UploadImage { name, png } => {
+                self.start_send(vec![SendSource::Bytes { name, data: png }], fx);
+            }
+            PasteAction::SendFiles(paths) => self.on_send_files(paths, fx),
+            PasteAction::Nothing => {}
+        }
     }
 
     pub(crate) fn on_well_resized(
@@ -241,9 +248,13 @@ mod resize_tests {
         );
         m.handle(Msg::Tick, t(200));
         let cols = m.layout().unwrap().size.cols;
-        let mut style = TermStyle::default();
-        style.size_pt = 20.0;
-        m.handle(Msg::StyleChanged(style), t(1_000));
+        m.handle(
+            Msg::StyleChanged(TermStyle {
+                size_pt: 20.0,
+                ..Default::default()
+            }),
+            t(1_000),
+        );
         assert!(m.layout().unwrap().size.cols < cols);
         assert_eq!(resizes(&m.handle(Msg::Tick, t(1_200))).len(), 1);
     }
@@ -260,9 +271,13 @@ mod resize_tests {
             t(0),
         );
         m.handle(Msg::Tick, t(200));
-        let mut style = TermStyle::default();
-        style.theme = tether_core::theme::theme_named("dracula");
-        let fx = m.handle(Msg::StyleChanged(style), t(1_000));
+        let fx = m.handle(
+            Msg::StyleChanged(TermStyle {
+                theme: tether_core::theme::theme_named("dracula"),
+                ..Default::default()
+            }),
+            t(1_000),
+        );
         assert!(fx.contains(&Effect::Redraw));
         assert!(resizes(&m.handle(Msg::Tick, t(1_300))).is_empty());
     }
@@ -559,6 +574,130 @@ mod key_tests {
         assert_eq!(
             writes(&m.handle(Msg::Ime("日本".into()), t(10))),
             vec!["日本".as_bytes().to_vec()]
+        );
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::super::tests::{live, t};
+    use super::*;
+    use crate::terminal::model::send::{SendJob, SendSource};
+    use crate::terminal::testkit::session;
+    use std::path::PathBuf;
+
+    fn writes(fx: &[Effect]) -> Vec<Vec<u8>> {
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::Write { bytes, .. } => Some(bytes.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn text_pastes_with_cr_newlines() {
+        let mut m = live(vec![session("a", 1)]);
+        let fx = m.handle(
+            Msg::Paste {
+                clip: ClipboardSnapshot::Text("a\nb".into()),
+                now_unix: 0,
+            },
+            t(10),
+        );
+        assert_eq!(writes(&fx), vec![b"a\rb".to_vec()]);
+    }
+
+    #[test]
+    fn text_pastes_bracketed_when_the_program_asked() {
+        let mut m = live(vec![session("a", 1)]);
+        m.handle(
+            Msg::PtyData {
+                name: "a".into(),
+                bytes: b"\x1b[?2004h".to_vec(),
+            },
+            t(5),
+        );
+        let fx = m.handle(
+            Msg::Paste {
+                clip: ClipboardSnapshot::Text("x\x1b[201~y".into()),
+                now_unix: 0,
+            },
+            t(10),
+        );
+        assert_eq!(writes(&fx), vec![b"\x1b[200~xy\x1b[201~".to_vec()]);
+    }
+
+    #[test]
+    fn an_image_becomes_an_upload_named_by_the_time() {
+        let mut m = live(vec![session("a", 1)]);
+        let fx = m.handle(
+            Msg::Paste {
+                clip: ClipboardSnapshot::Image(vec![1, 2]),
+                now_unix: 1_791_082_819,
+            },
+            t(10),
+        );
+        let job = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::StartSend(j) => Some(j.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            job.sources,
+            vec![SendSource::Bytes {
+                name: "paste-1791082819.png".into(),
+                data: vec![1, 2]
+            }]
+        );
+        assert!(writes(&fx).is_empty());
+    }
+
+    #[test]
+    fn copied_files_are_sent_like_a_drop() {
+        let mut m = live(vec![session("a", 1)]);
+        let fx = m.handle(
+            Msg::Paste {
+                clip: ClipboardSnapshot::Files(vec![PathBuf::from("a.txt")]),
+                now_unix: 0,
+            },
+            t(10),
+        );
+        assert!(fx.iter().any(|e| matches!(
+            e,
+            Effect::StartSend(SendJob { sources, .. })
+                if sources == &vec![SendSource::Path("a.txt".into())]
+        )));
+    }
+
+    #[test]
+    fn the_fallback_directory_is_the_sessions_cwd() {
+        let mut m = live(vec![session("a", 1)]);
+        let fx = m.handle(Msg::SendFiles(vec![PathBuf::from("a.txt")]), t(10));
+        let job = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::StartSend(j) => Some(j.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(job.fallback_dir.as_deref(), Some("/home/sam/a"));
+    }
+
+    #[test]
+    fn an_empty_clipboard_pastes_nothing() {
+        let mut m = live(vec![session("a", 1)]);
+        assert!(
+            m.handle(
+                Msg::Paste {
+                    clip: ClipboardSnapshot::Empty,
+                    now_unix: 0,
+                },
+                t(10),
+            )
+            .is_empty()
         );
     }
 }

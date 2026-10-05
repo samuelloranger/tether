@@ -13,11 +13,9 @@ impl TerminalModel {
         if let Some(evicted) = strip.select(name, self.view_tick) {
             self.close_channel(&evicted, fx);
         }
+        self.toasts.forget(name);
         self.open_channel(name, fx);
-        let progress = self
-            .tabs
-            .get(name)
-            .and_then(|t| t.term.reports().progress.clone());
+        let progress = self.tabs.get(name).and_then(|t| t.term.reports().progress);
         fx.push(Effect::Ui(UiEffect::Taskbar(progress)));
         fx.push(Effect::Ui(UiEffect::SetTitle(self.window_title())));
         fx.push(Effect::Redraw);
@@ -75,6 +73,9 @@ impl TerminalModel {
         self.focused = focused;
         if !focused {
             return;
+        }
+        if let Some(a) = self.active_name().map(str::to_string) {
+            self.toasts.forget(&a);
         }
         if self.status == ConnStatus::Connected {
             self.last_refresh = now;
