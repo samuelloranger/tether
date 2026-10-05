@@ -129,10 +129,13 @@ describe('POST /push', () => {
 
   test('an urgent push falls back to the shared bucket when the urgent binding is missing', async () => {
     const { sent, fetchImpl } = apnsStub(ok);
-    const env = fakeEnv(pem, { PER_TOKEN_URGENT: undefined as unknown as Env['PER_TOKEN_URGENT'] });
+    const env = fakeEnv(pem, {
+      PER_TOKEN: limiter(false),
+      PER_TOKEN_URGENT: undefined as unknown as Env['PER_TOKEN_URGENT'],
+    });
     const res = await push(env, fetchImpl, { ...cleartext, level: 'urgent' });
-    expect(res.status).toBe(200);
-    expect(sent).toHaveLength(1);
+    expect(res.status).toBe(429);
+    expect(sent).toHaveLength(0);
   });
 
   test('rejects malformed and oversized bodies', async () => {
