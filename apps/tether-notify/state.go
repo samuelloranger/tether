@@ -101,6 +101,9 @@ func runState(args []string, d stateDeps) error {
 	}
 	// A failed check pushes: losing a notification is worse than a duplicate.
 	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
+		if stored != nil {
+			markSuppressed(*session, stored.Version, *title)
+		}
 		return nil
 	}
 	content := PushContent{Title: *title, Body: *body, Link: *link, Session: *session, Level: pushLevel(agentCategory(*state))}
@@ -112,6 +115,80 @@ func runState(args []string, d stateDeps) error {
 	}
 	if err := d.push(content, *collapse); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
+	}
+	return nil
+}
+
+// markSuppressed records that the push for this exact state version was skipped, so
+// `flush` can send it once the phone detaches. A state that moved on is left alone.
+func markSuppressed(session, version, title string) {
+	_ = withSessionLock(session, func() error {
+		return withSessionsLock(func() error {
+			s, _ := readSession(session)
+			if s == nil || s.Version != version {
+				return nil
+			}
+			s.Title = title
+			s.Suppressed = true
+			return writeSession(s)
+		})
+	})
+}
+
+// runFlush sends the push `state` or `hold` skipped while a client was attached, once that
+// client is gone. Anything else is a no-op, so the phone can call it blindly on detach.
+func runFlush(args []string, d stateDeps) error {
+	fs := flag.NewFlagSet("flush", flag.ContinueOnError)
+	fs.SetOutput(d.stderr)
+	session := fs.String("session", "", "zmx session name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if !validSessionName(*session) {
+		return fmt.Errorf("flush requires a valid --session")
+	}
+	cur, _ := readSession(*session)
+	if cur == nil || !cur.Suppressed || (cur.State != stateWaiting && cur.State != stateDone) {
+		return nil
+	}
+	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
+		return nil
+	}
+	// Claimed before sending, so a concurrent or repeated flush can't push it twice.
+	var claimed *SessionState
+	_ = withSessionLock(*session, func() error {
+		return withSessionsLock(func() error {
+			s, _ := readSession(*session)
+			if s == nil || s.Version != cur.Version || !s.Suppressed {
+				return nil
+			}
+			s.Suppressed = false
+			if err := writeSession(s); err != nil {
+				return err
+			}
+			claimed = s
+			return nil
+		})
+	})
+	if claimed == nil {
+		return nil
+	}
+	content := PushContent{Title: claimed.Title, Body: claimed.Message, Link: claimed.Link}
+	if content.Title == "" || content.Body == "" {
+		return nil
+	}
+	if claimed.Version != "" && actionableLink(claimed.Link, *session) {
+		content.Category = agentCategory(claimed.State)
+		content.State = claimed.State
+		content.Version = claimed.Version
+		if claimed.Pending != nil && claimed.Pending.Kind == "question" {
+			content.Category = questionCategory
+			content.Options = optionButtons(claimed.Pending.Questions)
+		}
+	}
+	if err := d.push(content, "agent-"+*session); err != nil {
+		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
+		markSuppressed(*session, claimed.Version, claimed.Title)
 	}
 	return nil
 }

@@ -93,6 +93,7 @@ func runHold(args []string, d holdDeps) error {
 	question := *kind == "question"
 	clients, err := zmxClients(d.run)
 	detached := err == nil && clients[*session] == 0
+	attached := err == nil && clients[*session] > 0
 	label := hostLabel()
 	if !question && (!detached || label == "") {
 		return errNotHeld
@@ -117,6 +118,10 @@ func runHold(args []string, d holdDeps) error {
 			prev, _ := readSession(*session)
 			next := nextState(prev, in, d.now().Unix())
 			next.Pending = &Pending{Kind: *kind, Tool: *tool, Questions: questions}
+			if question && label != "" && attached {
+				next.Title = project + " · needs you"
+				next.Suppressed = true
+			}
 			if err := writeSession(next); err != nil {
 				return err
 			}

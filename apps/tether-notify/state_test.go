@@ -351,3 +351,91 @@ func TestStateWaitingLeavesALiveHoldAloneAndDoesNotPush(t *testing.T) {
 		t.Fatalf("pushed beside the held request: %+v", *pushes)
 	}
 }
+
+func flushArgs() []string { return []string{"--session", "work"} }
+
+func TestFlushSendsASuppressedPushOnceAfterDetach(t *testing.T) {
+	d, pushes := fakeDeps(t, "name=work\tclients=1\n", nil)
+	link := "tether://session/work?host=h"
+	if err := runState(args("waiting", "--title", "t", "--body", "b", "--link", link), d); err != nil {
+		t.Fatal(err)
+	}
+	if len(*pushes) != 0 {
+		t.Fatalf("attached session must not push: %+v", *pushes)
+	}
+	d.run = zmxOnly("name=work\tclients=0\n", nil)
+	for i := 0; i < 2; i++ {
+		if err := runFlush(flushArgs(), d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(*pushes) != 1 {
+		t.Fatalf("want exactly one push, got %+v", *pushes)
+	}
+	got := (*pushes)[0]
+	if got.content.Title != "t" || got.content.Body != "b" || got.content.Category != "tether.agent.waiting" || got.content.Version == "" || got.collapse != "agent-work" {
+		t.Fatalf("push %+v", got)
+	}
+}
+
+func TestFlushWaitsWhileStillAttached(t *testing.T) {
+	d, pushes := fakeDeps(t, "name=work\tclients=1\n", nil)
+	_ = runState(args("done", "--title", "t", "--body", "b"), d)
+	if err := runFlush(flushArgs(), d); err != nil {
+		t.Fatal(err)
+	}
+	if len(*pushes) != 0 {
+		t.Fatalf("still attached: %+v", *pushes)
+	}
+	d.run = zmxOnly("name=work\tclients=0\n", nil)
+	_ = runFlush(flushArgs(), d)
+	if len(*pushes) != 1 {
+		t.Fatalf("detached flush must push: %+v", *pushes)
+	}
+}
+
+func TestFlushIgnoresAStateThatMovedOn(t *testing.T) {
+	for _, next := range []string{"working", "clear"} {
+		d, pushes := fakeDeps(t, "name=work\tclients=1\n", nil)
+		_ = runState(args("waiting", "--title", "t", "--body", "b"), d)
+		_ = runState(args(next), d)
+		d.run = zmxOnly("name=work\tclients=0\n", nil)
+		if err := runFlush(flushArgs(), d); err != nil {
+			t.Fatal(err)
+		}
+		if len(*pushes) != 0 {
+			t.Fatalf("%s: moved-on state must not push: %+v", next, *pushes)
+		}
+	}
+}
+
+func TestFlushDoesNothingWhenThePushWasNotSuppressed(t *testing.T) {
+	d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+	_ = runState(args("done", "--title", "t", "--body", "b"), d)
+	if len(*pushes) != 1 {
+		t.Fatalf("setup: %+v", *pushes)
+	}
+	_ = runFlush(flushArgs(), d)
+	if len(*pushes) != 1 {
+		t.Fatalf("already delivered: %+v", *pushes)
+	}
+	if err := runFlush([]string{}, d); err == nil {
+		t.Fatal("flush without a session must be a usage error")
+	}
+}
+
+func TestFlushSendsAHeldQuestionSkippedWhileAttached(t *testing.T) {
+	d, pushes := fakeDeps(t, "name=work\tclients=1\n", nil)
+	_ = pushes
+	s := SessionState{
+		Session: "work", State: stateWaiting, Version: "v1", Message: "q?", Title: "p · needs you",
+		Link: "tether://session/work?host=h", Suppressed: true,
+		Pending: &Pending{Kind: "question", Questions: []Question{{Question: "q?", Options: []QuestionOption{{Label: "A"}, {Label: "B"}}}}},
+	}
+	seed(t, s)
+	d.run = zmxOnly("name=work\tclients=0\n", nil)
+	_ = runFlush(flushArgs(), d)
+	if len(*pushes) != 1 || (*pushes)[0].content.Category != questionCategory || len((*pushes)[0].content.Options) == 0 {
+		t.Fatalf("push %+v", *pushes)
+	}
+}

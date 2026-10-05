@@ -720,14 +720,37 @@ public final class SSHTerminalController {
   public func detachAfterGrace(_ grace: TimeInterval = backgroundGrace) async {
     try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
     guard !Task.isCancelled else { return }
-    await suspendNow()
+    await suspendNow(flushingPush: true)
   }
 
-  public func suspendNow() async {
+  /// Runs on the control connection after the terminal channel is closed: a push the host
+  /// skipped while this phone was attached goes out now. The pause lets the host see the
+  /// attach client exit; `tether-notify` missing or failing is not an error.
+  nonisolated static func flushPushCommand(session: String) -> String {
+    "sleep 2; command -v \(notify) >/dev/null && \(notify) flush --session \(shellQuote(session)) >/dev/null 2>&1 || true"
+  }
+
+  private static let flushPushTimeout: TimeInterval = 6
+
+  private func flushPush() async {
+    let command = Self.flushPushCommand(session: attach)
+    let control = control
+    let work = Task { _ = try? await control.exec(command) }
+    // reset() cuts a command stuck on a dead path, so the detach can't hang on this.
+    let cutoff = Task {
+      try? await Task.sleep(nanoseconds: UInt64(Self.flushPushTimeout * 1_000_000_000))
+      if !Task.isCancelled { control.reset() }
+    }
+    await work.value
+    cutoff.cancel()
+  }
+
+  public func suspendNow(flushingPush: Bool = false) async {
     guard !left, !isSuspended else { return }
     isSuspended = true
     status = .disconnected
     await pipeline.disconnect()
+    if flushingPush { await flushPush() }
     await control.close()
   }
 
