@@ -9,6 +9,7 @@ pub mod prefs;
 pub mod profiles;
 pub mod secrets;
 pub mod store;
+pub mod tabs;
 pub mod theme;
 pub mod osc;
 pub mod throttle;
