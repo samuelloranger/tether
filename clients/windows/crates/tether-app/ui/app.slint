@@ -1,0 +1,64 @@
+import { Palette } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
+import { ConfirmDialog } from "components.slint";
+import { HomePage } from "home.slint";
+import { ServerFormPage, KeyGeneratePage, KeyMaterialPage } from "forms.slint";
+import { SettingsPage } from "settings.slint";
+import { SchemePickerPage, FontPickerPage } from "pickers.slint";
+
+import "../../../assets/fonts/CascadiaMono-Regular.ttf";
+import "../../../assets/fonts/CascadiaMono-Bold.ttf";
+import "../../../assets/fonts/CascadiaCode-Regular.ttf";
+import "../../../assets/fonts/CascadiaCode-Bold.ttf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/JetBrainsMono-Regular.ttf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/JetBrainsMono-Bold.ttf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/MonaspaceNeon-Regular.otf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/MonaspaceNeon-Bold.otf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/MonaspaceRadon-Regular.otf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/MonaspaceRadon-Bold.otf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/MapleMono-Regular.ttf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/MapleMono-Bold.ttf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/ComicMono.ttf";
+import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/ComicMono-Bold.ttf";
+
+export { Tokens } from "tokens.slint";
+export { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
+
+export component AppWindow inherits Window {
+    title: "Tether";
+    min-width: 640px;
+    min-height: 420px;
+    preferred-width: 1040px;
+    preferred-height: 680px;
+    background: Tokens.background;
+    default-font-family: Tokens.ui-font;
+
+    property <bool> dark-scene: Tokens.dark;
+    init => { Palette.color-scheme = Tokens.dark ? ColorScheme.dark : ColorScheme.light; }
+    changed dark-scene => { Palette.color-scheme = self.dark-scene ? ColorScheme.dark : ColorScheme.light; }
+
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape && AppBridge.escape()) { return accept; }
+            reject
+        }
+        Rectangle { background: Tokens.background; }
+        if AppBridge.page == PageKind.home: HomePage { }
+        if AppBridge.page == PageKind.server-form: ServerFormPage { }
+        if AppBridge.page == PageKind.key-generate: KeyGeneratePage { }
+        if AppBridge.page == PageKind.key-import || AppBridge.page == PageKind.key-paste: KeyMaterialPage { }
+        if AppBridge.page == PageKind.settings: SettingsPage { }
+        if AppBridge.page == PageKind.scheme-picker: SchemePickerPage { }
+        if AppBridge.page == PageKind.font-picker: FontPickerPage { }
+        if AppBridge.dialog-open: ConfirmDialog {
+            title: AppBridge.dialog-title;
+            body: AppBridge.dialog-body;
+            extra: AppBridge.dialog-extra;
+            action: AppBridge.dialog-action;
+            confirmed => { AppBridge.dialog-confirmed(); }
+            cancelled => { AppBridge.dialog-cancelled(); }
+        }
+    }
+}

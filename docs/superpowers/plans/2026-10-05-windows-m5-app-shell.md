@@ -4820,3 +4820,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 | `TerminalThemes-LICENSE.txt`, `LICENSES.md`, Cascadia license shipped | 1 |
 
 Left to M6, by the roadmap: the terminal page, Couldn't connect (including "This machine's key was deleted…" on Open), Host key refused, Ctrl+= / Ctrl+- / Ctrl+0 (they call `TerminalPrefs::{bigger, smaller, reset_size}` and then `App::on_prefs_changed`), and the gear in the terminal header (it calls `App::open_settings`).
+
+## Deviations
+
+No Rust public name from a Produces block was renamed.
+
+- Slint 1.18: `SchemeRowView` and `FontRowView` use property `entry` instead of `row` (`row` clashes with `ListView`). Scroll views use `content-width` / `content-height` instead of the deprecated `viewport-*` properties.
+- `preview::geometry` rounds total padding as `(2.0 * pt_to_px(padding, scale)).round()` so a doubled scale still matches the test.
+- `Router::home`, `App::runtime`, and `AppState::hostkeys` allow `dead_code`. They are part of the M6 surface.
+
