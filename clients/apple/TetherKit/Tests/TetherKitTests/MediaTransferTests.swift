@@ -17,15 +17,25 @@ final class MediaTransferTests: XCTestCase {
   }
 #endif
 
-  func test_the_uploads_directory_is_the_last_absolute_line_printed() {
-    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "/home/u/.tether/uploads\n"), "/home/u/.tether/uploads")
-    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "motd noise\n/srv/u/.tether/uploads\n"), "/srv/u/.tether/uploads")
+  func test_the_uploads_directory_is_the_path_printed_before_the_marker() {
+    let ok = MediaTransfer.uploadsResolvedMarker
+    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "/home/u/.tether/uploads\n\(ok)\n"), "/home/u/.tether/uploads")
+    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "motd noise\n/srv/u/.tether/uploads\n\(ok)\n"), "/srv/u/.tether/uploads")
   }
 
   func test_an_unusable_resolve_result_falls_back_to_the_cwd() {
     XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: nil))
     XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: ""))
     XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: "mkdir: cannot create directory\n"))
+    XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: "/home/u\n"), "a startup line is not proof that pwd ran")
+  }
+
+  func test_only_formats_a_tui_cannot_attach_are_renamed_to_jpeg() {
+    XCTAssertEqual(MediaTransfer.jpegName(for: "photo-1.heic"), "photo-1.jpg")
+    XCTAssertEqual(MediaTransfer.jpegName(for: "photo-1.HEIF"), "photo-1.jpg")
+    XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.png"))
+    XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.JPG"))
+    XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.webp"))
   }
 
   func test_the_remote_path_joins_directory_and_name_once() {
