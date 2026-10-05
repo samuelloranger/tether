@@ -31,14 +31,20 @@ func status(code int, retryAfter string) func(http.ResponseWriter) {
 	}
 }
 
-func recordingRetrier() (*retrier, *[]time.Duration) {
+// recordingRetrier runs on a fake clock that only moves when it sleeps.
+func recordingRetrier() (*retrier, *[]time.Duration, *time.Time) {
 	var waits []time.Duration
-	return &retrier{sleep: func(d time.Duration) { waits = append(waits, d) }}, &waits
+	clock := time.Now()
+	r := newRetrier(func() time.Time { return clock }, func(d time.Duration) {
+		waits = append(waits, d)
+		clock = clock.Add(d)
+	})
+	return r, &waits, &clock
 }
 
 func TestDeliverUrgentRetriesRateLimitHonoringRetryAfter(t *testing.T) {
 	url, calls := scripted(t, status(429, "2"), status(429, "30"), status(200, ""))
-	r, waits := recordingRetrier()
+	r, waits, _ := recordingRetrier()
 	if got := deliver(http.DefaultClient, url, relayRequest{}, r); got != delivered {
 		t.Fatalf("got %v, want delivered", got)
 	}
@@ -52,7 +58,7 @@ func TestDeliverUrgentRetriesRateLimitHonoringRetryAfter(t *testing.T) {
 
 func TestDeliverUrgentRetries503WithBackoffWhenNoRetryAfter(t *testing.T) {
 	url, _ := scripted(t, status(503, ""), status(200, ""))
-	r, waits := recordingRetrier()
+	r, waits, _ := recordingRetrier()
 	if got := deliver(http.DefaultClient, url, relayRequest{}, r); got != delivered {
 		t.Fatalf("got %v, want delivered", got)
 	}
@@ -63,7 +69,7 @@ func TestDeliverUrgentRetries503WithBackoffWhenNoRetryAfter(t *testing.T) {
 
 func TestDeliverUrgentGivesUpAfterMaxRetries(t *testing.T) {
 	url, calls := scripted(t, status(429, "1"))
-	r, _ := recordingRetrier()
+	r, _, _ := recordingRetrier()
 	if got := deliver(http.DefaultClient, url, relayRequest{}, r); got != failed {
 		t.Fatalf("got %v, want failed", got)
 	}
@@ -74,8 +80,8 @@ func TestDeliverUrgentGivesUpAfterMaxRetries(t *testing.T) {
 
 func TestDeliverStopsWhenTimeBudgetIsSpent(t *testing.T) {
 	url, calls := scripted(t, status(429, "5"))
-	r, waits := recordingRetrier()
-	r.waited = retryBudget - 6*time.Second
+	r, waits, clock := recordingRetrier()
+	*clock = r.deadline.Add(-6 * time.Second)
 	if got := deliver(http.DefaultClient, url, relayRequest{}, r); got != failed {
 		t.Fatalf("got %v, want failed", got)
 	}
@@ -88,7 +94,7 @@ func TestDeliverRetriesTransportErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := srv.URL
 	srv.Close()
-	r, waits := recordingRetrier()
+	r, waits, _ := recordingRetrier()
 	if got := deliver(http.DefaultClient, url, relayRequest{}, r); got != failed {
 		t.Fatalf("got %v, want failed", got)
 	}
@@ -109,7 +115,7 @@ func TestDeliverWithoutRetrierMakesOneAttempt(t *testing.T) {
 
 func TestDeliverDoesNotRetryClientErrors(t *testing.T) {
 	url, calls := scripted(t, status(400, ""), status(200, ""))
-	r, waits := recordingRetrier()
+	r, waits, _ := recordingRetrier()
 	if got := deliver(http.DefaultClient, url, relayRequest{}, r); got != failed {
 		t.Fatalf("got %v, want failed", got)
 	}
@@ -120,8 +126,26 @@ func TestDeliverDoesNotRetryClientErrors(t *testing.T) {
 
 func TestDeliverGoneIsNotRetried(t *testing.T) {
 	url, calls := scripted(t, status(410, ""))
-	r, _ := recordingRetrier()
+	r, _, _ := recordingRetrier()
 	if got := deliver(http.DefaultClient, url, relayRequest{}, r); got != gone || calls.Load() != 1 {
 		t.Fatalf("got %v after %d calls", got, calls.Load())
+	}
+}
+
+func TestDeliverStalledRelayIsCutOffAtTheDeadline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	t.Cleanup(srv.Close)
+	r := &retrier{sleep: time.Sleep, now: time.Now, deadline: time.Now().Add(300 * time.Millisecond)}
+	start := time.Now()
+	if got := deliver(&http.Client{Timeout: 5 * time.Second}, srv.URL, relayRequest{}, r); got != failed {
+		t.Fatalf("got %v, want failed", got)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("took %v; the deadline should cut a stalled request off", elapsed)
 	}
 }
