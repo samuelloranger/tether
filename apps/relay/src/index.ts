@@ -94,7 +94,8 @@ export function createApp(fetchImpl: typeof fetch = fetch) {
     }
     const req = parsed.data;
 
-    const bucket = req.level === 'urgent' ? c.env.PER_TOKEN_URGENT : c.env.PER_TOKEN;
+    // A deploy that hasn't attached the urgent binding falls back to the shared bucket.
+    const bucket = (req.level === 'urgent' && c.env.PER_TOKEN_URGENT) || c.env.PER_TOKEN;
     if (!(await bucket.limit({ key: req.token })).success) {
       return c.json({ error: 'rate_limited' }, 429, { 'Retry-After': String(RETRY_AFTER_SECONDS) });
     }

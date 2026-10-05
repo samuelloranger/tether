@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -224,7 +225,7 @@ func sendPush(content PushContent, collapse string, dryRun bool) error {
 
 	var retry *retrier
 	if content.Level == levelUrgent && !dryRun {
-		retry = &retrier{sleep: time.Sleep}
+		retry = newRetrier(time.Now, time.Sleep)
 	}
 
 	var sent int
@@ -272,11 +273,17 @@ const (
 	defaultBackoff = time.Second
 )
 
-// retrier bounds how long urgent pushes may stall the calling hook. waited is
-// shared across devices so the budget covers one sendPush call.
+// retrier bounds how long urgent pushes may stall the calling hook. The deadline
+// covers request time as well as waits, and is shared across devices so it bounds
+// one sendPush call: a relay that accepts and then stalls can't stretch a hold.
 type retrier struct {
-	sleep  func(time.Duration)
-	waited time.Duration
+	sleep    func(time.Duration)
+	now      func() time.Time
+	deadline time.Time
+}
+
+func newRetrier(now func() time.Time, sleep func(time.Duration)) *retrier {
+	return &retrier{sleep: sleep, now: now, deadline: now().Add(retryBudget)}
 }
 
 // next reports how long to wait before retry attempt (0-based), or false once
@@ -292,10 +299,9 @@ func (r *retrier) next(attempt int, retryAfter time.Duration) (time.Duration, bo
 	if wait > maxRetryWait {
 		wait = maxRetryWait
 	}
-	if r.waited+wait > retryBudget {
+	if r.now().Add(wait).After(r.deadline) {
 		return 0, false
 	}
-	r.waited += wait
 	return wait, true
 }
 
@@ -311,8 +317,14 @@ func parseRetryAfter(v string) time.Duration {
 // 429, 503 and transport errors are retried within the retrier's bounds.
 func deliver(client *http.Client, url string, req relayRequest, retry *retrier) deliveryResult {
 	body, _ := json.Marshal(req)
+	ctx := context.Background()
+	if retry != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, retry.deadline)
+		defer cancel()
+	}
 	for attempt := 0; ; attempt++ {
-		result, transient, retryAfter := post(client, url, body)
+		result, transient, retryAfter := post(ctx, client, url, body)
 		if !transient || retry == nil {
 			return result
 		}
@@ -324,8 +336,13 @@ func deliver(client *http.Client, url string, req relayRequest, retry *retrier) 
 	}
 }
 
-func post(client *http.Client, url string, body []byte) (result deliveryResult, transient bool, retryAfter time.Duration) {
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+func post(ctx context.Context, client *http.Client, url string, body []byte) (result deliveryResult, transient bool, retryAfter time.Duration) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return failed, false, 0
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "relay post failed: %v\n", err)
 		return failed, true, 0
