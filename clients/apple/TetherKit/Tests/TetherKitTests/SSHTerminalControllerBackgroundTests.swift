@@ -154,7 +154,7 @@ final class FlushPushCommandTests: XCTestCase {
     let tool = "~/.local/bin/tether-notify"
     XCTAssertEqual(
       command,
-      "command -v \(tool) >/dev/null && nohup \(tool) flush --session \(shellQuote("it's work")) >/dev/null 2>&1 </dev/null &"
+      "command -v \(tool) >/dev/null && { nohup \(tool) flush --session \(shellQuote("it's work")) >/dev/null 2>&1 </dev/null & }"
     )
   }
 }

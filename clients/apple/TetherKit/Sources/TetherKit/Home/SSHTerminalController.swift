@@ -383,6 +383,7 @@ public final class SSHTerminalController {
     let connected = { if case .connected = status { return true } else { return false } }()
     guard case let .type(typing) = ZmxSwitch.strategy(connected: connected, attached: wasAttached) else {
       await connect()
+      if wasAttached && departing != name { flushPushInBackground(session: departing) }
       return
     }
     for (index, write) in ZmxSwitch.writes(typing: typing, zmx: Self.zmx, name: name).enumerated() {
@@ -729,7 +730,7 @@ public final class SSHTerminalController {
   /// the attach client to be gone, then sends the push the host skipped while this phone was
   /// attached. A missing `tether-notify` is not an error.
   nonisolated static func flushPushCommand(session: String) -> String {
-    "command -v \(notify) >/dev/null && nohup \(notify) flush --session \(shellQuote(session)) >/dev/null 2>&1 </dev/null &"
+    "command -v \(notify) >/dev/null && { nohup \(notify) flush --session \(shellQuote(session)) >/dev/null 2>&1 </dev/null & }"
   }
 
   private static let flushPushTimeout: TimeInterval = 2

@@ -155,9 +155,8 @@ func runFlush(args []string, d stateDeps) error {
 	if !validSessionName(*session) {
 		return fmt.Errorf("flush requires a valid --session")
 	}
-	if cur, _ := readSession(*session); !flushable(cur) {
-		return nil
-	}
+	// No early "nothing suppressed" exit: the detach can beat the hook that is about to mark
+	// the record, so wait first and let the locked claim decide.
 	if !waitDetached(*session, d) {
 		return nil
 	}
