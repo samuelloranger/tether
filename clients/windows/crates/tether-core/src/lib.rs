@@ -1,11 +1,13 @@
 //! Tether's rules, with no UI and no network.
 
+pub mod hints;
 pub mod keys;
 pub mod profiles;
 pub mod secrets;
 pub mod store;
 #[cfg(windows)]
 pub use secrets::DpapiSecretStore;
+pub use hints::{AuthChoice, KeyForm, ServerForm, generate_hint};
 pub use keys::{
     KEYS_FILE, KeyError, KeyOrigin, KeyRecord, KeyRecords, algorithm_of, derive_public_line,
     fingerprint, fingerprint_digest, generate_ed25519, import_record, is_encrypted, normalize_pem,
