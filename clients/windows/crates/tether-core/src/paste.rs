@@ -85,10 +85,7 @@ mod tests {
     #[test]
     fn markers_inside_text_are_stripped() {
         let evil = "safe\x1b[201~rm -rf ~\n\x1b[200~";
-        assert_eq!(
-            paste_bytes(evil, true),
-            b"\x1b[200~saferm -rf ~\r\x1b[201~"
-        );
+        assert_eq!(paste_bytes(evil, true), b"\x1b[200~saferm -rf ~\r\x1b[201~");
         assert_eq!(paste_bytes(evil, false), b"saferm -rf ~\r");
     }
 
@@ -109,7 +106,10 @@ mod tests {
             }
         );
         let snap = ClipboardSnapshot::from_formats(Some(String::new()), None, Some(vec![9]));
-        assert!(matches!(paste_action(snap, 1), PasteAction::UploadImage { .. }));
+        assert!(matches!(
+            paste_action(snap, 1),
+            PasteAction::UploadImage { .. }
+        ));
     }
 
     #[test]
@@ -125,6 +125,9 @@ mod tests {
             paste_action(ClipboardSnapshot::from_formats(None, Some(vec![]), None), 1),
             PasteAction::Nothing
         );
-        assert_eq!(paste_action(ClipboardSnapshot::Empty, 1), PasteAction::Nothing);
+        assert_eq!(
+            paste_action(ClipboardSnapshot::Empty, 1),
+            PasteAction::Nothing
+        );
     }
 }

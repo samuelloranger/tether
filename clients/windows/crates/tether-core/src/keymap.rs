@@ -128,19 +128,16 @@ fn tilde(n: u8, m: u8) -> Vec<u8> {
 }
 
 fn with_alt(alt: bool, byte: u8) -> Vec<u8> {
-    if alt {
-        vec![ESC, byte]
-    } else {
-        vec![byte]
-    }
+    if alt { vec![ESC, byte] } else { vec![byte] }
 }
 
 fn encode_named(key: NamedKey, mods: Mods, ctx: &KeyContext) -> KeyAction {
     let m = mods.param();
-    let only_shift = mods == Mods {
-        shift: true,
-        ..Mods::default()
-    };
+    let only_shift = mods
+        == Mods {
+            shift: true,
+            ..Mods::default()
+        };
     let bytes = match key {
         NamedKey::Up => cursor('A', m, ctx.app_cursor),
         NamedKey::Down => cursor('B', m, ctx.app_cursor),
@@ -277,7 +274,9 @@ fn encode_char(
             Some(byte) => KeyAction::Send(with_alt(mods.alt, byte)),
             None if !mods.alt => produced
                 .filter(|t| is_printable(t))
-                .map_or(KeyAction::Ignore, |t| KeyAction::Send(t.as_bytes().to_vec())),
+                .map_or(KeyAction::Ignore, |t| {
+                    KeyAction::Send(t.as_bytes().to_vec())
+                }),
             None => KeyAction::Ignore,
         };
     }
@@ -291,7 +290,9 @@ fn encode_char(
     }
     produced
         .filter(|t| is_printable(t))
-        .map_or(KeyAction::Ignore, |t| KeyAction::Send(t.as_bytes().to_vec()))
+        .map_or(KeyAction::Ignore, |t| {
+            KeyAction::Send(t.as_bytes().to_vec())
+        })
 }
 
 #[cfg(test)]
@@ -447,10 +448,7 @@ mod named_tests {
             (Divide, "/", "o"),
         ];
         for (k, plain, ss3) in cases {
-            assert_eq!(
-                send(NamedKey::Numpad(k), NONE, &normal()),
-                plain.as_bytes()
-            );
+            assert_eq!(send(NamedKey::Numpad(k), NONE, &normal()), plain.as_bytes());
             assert_eq!(
                 send(NamedKey::Numpad(k), NONE, &app()),
                 format!("\x1bO{ss3}").into_bytes()
@@ -523,11 +521,7 @@ mod char_tests {
     }
 
     fn m(shift: bool, alt: bool, ctrl: bool) -> Mods {
-        Mods {
-            shift,
-            alt,
-            ctrl,
-        }
+        Mods { shift, alt, ctrl }
     }
 
     fn enc(input: KeyInput, mods: Mods) -> KeyAction {
@@ -577,8 +571,14 @@ mod char_tests {
 
     #[test]
     fn alt_is_an_escape_prefix_and_ctrl_alt_does_both() {
-        assert_eq!(enc(ch('b', Some("b")), m(false, true, false)), sent(b"\x1bb"));
-        assert_eq!(enc(ch('b', Some("B")), m(true, true, false)), sent(b"\x1bB"));
+        assert_eq!(
+            enc(ch('b', Some("b")), m(false, true, false)),
+            sent(b"\x1bb")
+        );
+        assert_eq!(
+            enc(ch('b', Some("B")), m(true, true, false)),
+            sent(b"\x1bB")
+        );
         assert_eq!(enc(ch('.', None), m(false, true, false)), sent(b"\x1b."));
         assert_eq!(enc(ch('a', None), m(false, true, true)), sent(b"\x1b\x01"));
     }
@@ -603,7 +603,10 @@ mod char_tests {
     fn paste_and_copy_shortcuts() {
         let ctrl = m(false, false, true);
         let ctrl_shift = m(true, false, true);
-        assert_eq!(enc(ch('v', None), ctrl), KeyAction::Tether(TetherCommand::Paste));
+        assert_eq!(
+            enc(ch('v', None), ctrl),
+            KeyAction::Tether(TetherCommand::Paste)
+        );
         assert_eq!(
             enc(ch('v', None), ctrl_shift),
             KeyAction::Tether(TetherCommand::Paste)

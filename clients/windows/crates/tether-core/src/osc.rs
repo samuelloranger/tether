@@ -109,7 +109,13 @@ impl OscScanner {
                     self.state = State::StrEscape;
                 }
             }
-            State::StrEscape => self.state = if b == b'\\' { State::Ground } else { State::Str },
+            State::StrEscape => {
+                self.state = if b == b'\\' {
+                    State::Ground
+                } else {
+                    State::Str
+                }
+            }
         }
         None
     }
@@ -251,8 +257,12 @@ fn notify_777(body: &[u8]) -> Option<Notification> {
     if parts.next()? != "notify" {
         return None;
     }
-    let title = parts.next().and_then(|t| sanitize(t.as_bytes(), TITLE_LIMIT));
-    let body = parts.next().and_then(|b| sanitize(b.as_bytes(), NOTIFY_LIMIT));
+    let title = parts
+        .next()
+        .and_then(|t| sanitize(t.as_bytes(), TITLE_LIMIT));
+    let body = parts
+        .next()
+        .and_then(|b| sanitize(b.as_bytes(), NOTIFY_LIMIT));
     match (title, body) {
         (title, Some(body)) => Some(Notification { title, body }),
         (Some(title), None) => Some(Notification {
@@ -411,7 +421,10 @@ mod report_tests {
         apply_all(&mut r, "\x1b]2; ok\u{202e}\u{200b}\u{1}\x07".as_bytes());
         assert_eq!(r.title.as_deref(), Some("ok"));
         apply_all(&mut r, format!("\x1b]0;{}\x07", "x".repeat(300)).as_bytes());
-        assert_eq!(r.title.as_ref().map(|t| t.chars().count()), Some(TITLE_LIMIT));
+        assert_eq!(
+            r.title.as_ref().map(|t| t.chars().count()),
+            Some(TITLE_LIMIT)
+        );
         apply_all(&mut r, b"\x1b]2;   \x07");
         assert_eq!(r.title, None);
     }

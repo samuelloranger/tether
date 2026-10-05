@@ -10,8 +10,10 @@ pub struct LinkSpan {
 }
 
 static URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://[^\s│┃⎿]+").unwrap());
-static URL_AT_EOL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[\s│┃])https?://(\S*)$").unwrap());
-static URL_CONT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9\-._~%+:@]*[/?#&=][^\s]*").unwrap());
+static URL_AT_EOL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[\s│┃])https?://(\S*)$").unwrap());
+static URL_CONT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9\-._~%+:@]*[/?#&=][^\s]*").unwrap());
 
 /// Box drawing a TUI frames output with (`│ … │`, Claude Code's `⎿`): a URL it wraps
 /// continues past these, not through them.
@@ -34,7 +36,12 @@ fn trailing_border(row: &[char]) -> usize {
     row.len() - end
 }
 
-fn hard_wrap_skip(row: &[char], next: &[char], continued: Option<(usize, usize)>, cols: Option<usize>) -> Option<usize> {
+fn hard_wrap_skip(
+    row: &[char],
+    next: &[char],
+    continued: Option<(usize, usize)>,
+    cols: Option<usize>,
+) -> Option<usize> {
     let body = &row[..row.len() - trailing_border(row)];
     match continued {
         Some((lead, edge)) => {
@@ -55,7 +62,10 @@ fn hard_wrap_skip(row: &[char], next: &[char], continued: Option<(usize, usize)>
             }
         }
     }
-    let lead = next.iter().take_while(|c| c.is_whitespace() || BORDERS.contains(c)).count();
+    let lead = next
+        .iter()
+        .take_while(|c| c.is_whitespace() || BORDERS.contains(c))
+        .count();
     let rest: String = next[lead..].iter().collect();
     (!rest.is_empty() && URL_CONT.is_match(&rest)).then_some(lead)
 }
@@ -93,8 +103,15 @@ pub fn detect_links(texts: &[String], wrapped: &[bool], cols: Option<usize>) -> 
                 continue;
             }
             // Past the first row, a URL keeps going only through rows as wide as its first.
-            let continued = (j > i).then(|| (*skips.last().unwrap(), rows[i].len() - trailing_border(&rows[i])));
-            let Some(skip) = hard_wrap_skip(&rows[j], &rows[j + 1], continued, cols) else { break };
+            let continued = (j > i).then(|| {
+                (
+                    *skips.last().unwrap(),
+                    rows[i].len() - trailing_border(&rows[i]),
+                )
+            });
+            let Some(skip) = hard_wrap_skip(&rows[j], &rows[j + 1], continued, cols) else {
+                break;
+            };
             skips.push(skip);
             tails.push(trailing_border(&rows[j]));
             j += 1;
@@ -132,7 +149,11 @@ pub fn detect_links(texts: &[String], wrapped: &[bool], cols: Option<usize>) -> 
                 let (a, b) = (s.max(row_start), e.min(row_end));
                 if a < b {
                     let skip = skips[k - i];
-                    out[k].push(LinkSpan { start: a - row_start + skip, end: b - row_start + skip, url: url.clone() });
+                    out[k].push(LinkSpan {
+                        start: a - row_start + skip,
+                        end: b - row_start + skip,
+                        url: url.clone(),
+                    });
                 }
             }
         }
@@ -142,7 +163,10 @@ pub fn detect_links(texts: &[String], wrapped: &[bool], cols: Option<usize>) -> 
 }
 
 /// OSC 8 links come first in each row, so `link_at` finds them before detected text.
-pub fn merge_links(explicit: Vec<Vec<LinkSpan>>, detected: Vec<Vec<LinkSpan>>) -> Vec<Vec<LinkSpan>> {
+pub fn merge_links(
+    explicit: Vec<Vec<LinkSpan>>,
+    detected: Vec<Vec<LinkSpan>>,
+) -> Vec<Vec<LinkSpan>> {
     let rows = explicit.len().max(detected.len());
     let mut explicit = explicit.into_iter();
     let mut detected = detected.into_iter();
@@ -156,7 +180,10 @@ pub fn merge_links(explicit: Vec<Vec<LinkSpan>>, detected: Vec<Vec<LinkSpan>>) -
 }
 
 pub fn link_at(spans: &[Vec<LinkSpan>], row: usize, col: usize) -> Option<&LinkSpan> {
-    spans.get(row)?.iter().find(|s| col >= s.start && col < s.end)
+    spans
+        .get(row)?
+        .iter()
+        .find(|s| col >= s.start && col < s.end)
 }
 
 pub fn is_openable(url: &str) -> bool {
@@ -173,15 +200,24 @@ mod tests {
     }
 
     fn urls(spans: &[Vec<LinkSpan>]) -> Vec<Vec<(usize, usize, &str)>> {
-        spans.iter().map(|r| r.iter().map(|s| (s.start, s.end, s.url.as_str())).collect()).collect()
+        spans
+            .iter()
+            .map(|r| r.iter().map(|s| (s.start, s.end, s.url.as_str())).collect())
+            .collect()
     }
 
     #[test]
     fn finds_a_url_and_trims_trailing_punctuation() {
         let t = rows(&["see https://example.com/a?b=1)."]);
-        assert_eq!(urls(&detect_links(&t, &[false], None)), vec![vec![(4, 29, "https://example.com/a?b=1")]]);
+        assert_eq!(
+            urls(&detect_links(&t, &[false], None)),
+            vec![vec![(4, 29, "https://example.com/a?b=1")]]
+        );
         let t = rows(&["(https://en.wikipedia.org/wiki/Rust_(language))"]);
-        assert_eq!(detect_links(&t, &[false], None)[0][0].url, "https://en.wikipedia.org/wiki/Rust_(language)");
+        assert_eq!(
+            detect_links(&t, &[false], None)[0][0].url,
+            "https://en.wikipedia.org/wiki/Rust_(language)"
+        );
     }
 
     #[test]
@@ -194,11 +230,28 @@ mod tests {
 
     #[test]
     fn a_url_cut_by_claude_code_box_borders_resolves_whole() {
-        let t = rows(&["│ see https://example.com/very/long/pa │", "│ th/to/file                           │"]);
+        let t = rows(&[
+            "│ see https://example.com/very/long/pa │",
+            "│ th/to/file                           │",
+        ]);
         let spans = detect_links(&t, &[false, false], Some(40));
         let full = "https://example.com/very/long/path/to/file";
-        assert_eq!(spans[0], vec![LinkSpan { start: 6, end: 38, url: full.into() }]);
-        assert_eq!(spans[1], vec![LinkSpan { start: 2, end: 12, url: full.into() }]);
+        assert_eq!(
+            spans[0],
+            vec![LinkSpan {
+                start: 6,
+                end: 38,
+                url: full.into()
+            }]
+        );
+        assert_eq!(
+            spans[1],
+            vec![LinkSpan {
+                start: 2,
+                end: 12,
+                url: full.into()
+            }]
+        );
     }
 
     #[test]
@@ -220,7 +273,11 @@ mod tests {
     #[test]
     fn osc8_wins_over_detected_text() {
         let detected = detect_links(&rows(&["https://shown.example"]), &[false], None);
-        let explicit = vec![vec![LinkSpan { start: 0, end: 21, url: "https://real.example".into() }]];
+        let explicit = vec![vec![LinkSpan {
+            start: 0,
+            end: 21,
+            url: "https://real.example".into(),
+        }]];
         let merged = merge_links(explicit, detected);
         assert_eq!(link_at(&merged, 0, 5).unwrap().url, "https://real.example");
         assert!(link_at(&merged, 0, 21).is_none());

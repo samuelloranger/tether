@@ -156,9 +156,7 @@ impl TabStrip {
         if len == 0 {
             return None;
         }
-        let i = self
-            .active_index()
-            .map_or(len - 1, |i| (i + len - 1) % len);
+        let i = self.active_index().map_or(len - 1, |i| (i + len - 1) % len);
         Some(&self.tabs[i].name)
     }
 
@@ -328,7 +326,9 @@ mod tests {
         );
         assert_eq!(first_tab(&[]), None);
         assert_eq!(
-            TabStrip::from_sessions(&[s("old", 1), s("new", 3)]).active.as_deref(),
+            TabStrip::from_sessions(&[s("old", 1), s("new", 3)])
+                .active
+                .as_deref(),
             Some("new")
         );
         assert_eq!(TabStrip::from_sessions(&[]).active, None);
@@ -347,11 +347,8 @@ mod tests {
         assert_eq!(TabStrip::from_sessions(&[]).new_session_name(), "default");
         let two = TabStrip::from_sessions(&[s("default", 1), s("x", 2)]);
         assert_eq!(two.new_session_name(), "session-3");
-        let taken = TabStrip::from_sessions(&[
-            s("default", 1),
-            s("session-3", 2),
-            s("session-4", 3),
-        ]);
+        let taken =
+            TabStrip::from_sessions(&[s("default", 1), s("session-3", 2), s("session-4", 3)]);
         assert_eq!(taken.new_session_name(), "session-5");
     }
 
@@ -423,10 +420,7 @@ mod tests {
         strip.select("t0", 200);
         assert_eq!(strip.select("t12", 201).as_deref(), Some("t1"));
         assert!(!strip.tab("t1").unwrap().attached);
-        assert_eq!(
-            strip.tabs.iter().filter(|t| t.attached).count(),
-            ATTACH_CAP
-        );
+        assert_eq!(strip.tabs.iter().filter(|t| t.attached).count(), ATTACH_CAP);
         assert_eq!(strip.select("t1", 202).as_deref(), Some("t2"));
     }
 
@@ -520,10 +514,7 @@ mod tests {
         );
         let mut strip = TabStrip::from_sessions(&[s("a", 1), s("b", 2)]);
         strip.select("a", 1);
-        assert_eq!(
-            strip.begin_kill("a").new_active.as_deref(),
-            Some("b")
-        );
+        assert_eq!(strip.begin_kill("a").new_active.as_deref(), Some("b"));
     }
 
     #[test]

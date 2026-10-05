@@ -8,8 +8,7 @@ use crate::zmx::shell_quote;
 pub const BYTE_LIMIT: u64 = 200 * 1024 * 1024;
 const UPLOADS_MARKER: &str = "__TETHER_UPLOADS_OK__";
 /// Resolves `$HOME` on the host: the pasted path must be absolute for a TUI in any cwd.
-pub const UPLOADS_COMMAND: &str =
-    r#"mkdir -p "$HOME/.tether/uploads" && cd "$HOME/.tether/uploads" && pwd && echo __TETHER_UPLOADS_OK__"#;
+pub const UPLOADS_COMMAND: &str = r#"mkdir -p "$HOME/.tether/uploads" && cd "$HOME/.tether/uploads" && pwd && echo __TETHER_UPLOADS_OK__"#;
 pub const FOLDER_REFUSAL: &str = "Tether sends files, not folders.";
 /// Formats a TUI like Claude Code attaches from a pasted path.
 pub const ATTACHABLE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "webp"];
@@ -183,9 +182,7 @@ impl SendQueue {
                 .last_remote
                 .as_deref()
                 .map(|r| format!("Sent {}", display_remote(r))),
-            QueueState::Failed { name, reason } => {
-                Some(format!("Couldn't send {name}: {reason}"))
-            }
+            QueueState::Failed { name, reason } => Some(format!("Couldn't send {name}: {reason}")),
         }
     }
 }
@@ -256,9 +253,11 @@ mod tests {
             Err("Tether sends files, not folders.".to_string())
         );
         assert_eq!(preflight(false, 10), Ok(()));
-        assert!(preflight(false, BYTE_LIMIT + 1)
-            .unwrap_err()
-            .starts_with("That's 200 MB"));
+        assert!(
+            preflight(false, BYTE_LIMIT + 1)
+                .unwrap_err()
+                .starts_with("That's 200 MB")
+        );
     }
 
     #[test]
@@ -316,10 +315,7 @@ mod tests {
         );
         assert!(q.is_finished());
         assert_eq!(q.current(), None);
-        assert_eq!(
-            q.capsule().as_deref(),
-            Some("Sent ~/.tether/uploads/d.png")
-        );
+        assert_eq!(q.capsule().as_deref(), Some("Sent ~/.tether/uploads/d.png"));
     }
 
     #[test]
@@ -339,10 +335,7 @@ mod tests {
     #[test]
     fn a_quote_in_a_filename_stays_one_path() {
         let mut q = SendQueue::new(files(&["it's.png"]), "t".into());
-        assert_eq!(
-            q.on_sent("/h/it's.png", false),
-            br#"'/h/it'"'"'s.png'"#
-        );
+        assert_eq!(q.on_sent("/h/it's.png", false), br#"'/h/it'"'"'s.png'"#);
     }
 
     #[test]

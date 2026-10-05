@@ -14,7 +14,10 @@ pub struct BellThrottle {
 
 impl BellThrottle {
     pub fn should_ring(&mut self, now: Duration) -> bool {
-        if self.last.is_some_and(|last| now.saturating_sub(last) < BELL_WINDOW) {
+        if self
+            .last
+            .is_some_and(|last| now.saturating_sub(last) < BELL_WINDOW)
+        {
             return false;
         }
         self.last = Some(now);
@@ -124,7 +127,10 @@ mod tests {
         assert_eq!(t.poll(ms(5000)), vec![("a".to_string(), n("3"))]);
         assert!(t.poll(ms(6000)).is_empty());
         assert_eq!(t.offer("a", n("4"), ms(6000)), ToastDecision::Pending);
-        assert_eq!(t.offer("a", n("5"), ms(10_000)), ToastDecision::Show(n("5")));
+        assert_eq!(
+            t.offer("a", n("5"), ms(10_000)),
+            ToastDecision::Show(n("5"))
+        );
     }
 
     #[test]
