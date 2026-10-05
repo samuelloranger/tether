@@ -45,7 +45,7 @@ func runState(args []string, d stateDeps) error {
 	title := fs.String("title", "", "push title")
 	body := fs.String("body", "", "push body / status message")
 	link := fs.String("link", "", "tether:// deep link")
-	collapse := fs.String("collapse", "", "APNs collapse id (default agent-<session>)")
+	collapse := fs.String("collapse", "", "APNs collapse id (default: a hashed per-session id)")
 	dryRun := fs.Bool("dry-run", false, "print the push instead of sending it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -60,7 +60,7 @@ func runState(args []string, d stateDeps) error {
 		d.push = func(c PushContent, col string) error { return sendPush(c, col, true) }
 	}
 	if *collapse == "" {
-		*collapse = "agent-" + *session
+		*collapse = agentCollapseID(*session)
 	}
 
 	in := SessionState{Session: *session, Agent: *agent, State: *state, Message: *body, Link: *link, Version: newVersion()}
@@ -103,7 +103,7 @@ func runState(args []string, d stateDeps) error {
 	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
 		return nil
 	}
-	content := PushContent{Title: *title, Body: *body, Link: *link}
+	content := PushContent{Title: *title, Body: *body, Link: *link, Session: *session, Level: pushLevel(agentCategory(*state))}
 	// Actions need a session link to answer and a saved state to check against.
 	if stored != nil && stored.Version != "" && actionableLink(*link, *session) {
 		content.Category = agentCategory(*state)

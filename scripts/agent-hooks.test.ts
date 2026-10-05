@@ -42,6 +42,7 @@ test('claude working records state without reading the transcript', () => {
   hook(env, 'claude', 'working', { cwd: '/src/proj', hook_event_name: 'PreToolUse' });
   const [call] = calls(env.log);
   expect(call).toStartWith('state --session work --agent claude --state working');
+  expect(call).not.toContain('--collapse');
 });
 
 test('claude permission prompt is waiting; idle reminder changes nothing', () => {

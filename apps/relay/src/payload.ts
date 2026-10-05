@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 // A push is either Phase 1 (cleartext) or Phase 2 (ciphertext the NSE decrypts);
 // never both, or a caller leaked readable text alongside the encrypted copy.
+export type PushLevel = 'urgent' | 'normal' | 'quiet';
+
 export const pushRequestSchema = z
   .object({
     token: z.string().regex(/^[0-9a-fA-F]{64}$/, 'token must be a 64-char hex APNs device token'),
@@ -10,6 +12,17 @@ export const pushRequestSchema = z
     ciphertext: z.string().min(1).max(3000).optional(),
     collapseId: z.string().min(1).max(64).optional(),
     deepLink: z.string().max(500).optional(),
+    // Anything but urgent/quiet (absent, unknown, from an older caller) is normal.
+    level: z
+      .unknown()
+      .optional()
+      .transform((v): PushLevel => (v === 'urgent' || v === 'quiet' ? v : 'normal')),
+    // Opaque hash of the session; the relay never sees the session name itself.
+    threadKey: z
+      .string()
+      .regex(/^[0-9a-zA-Z]{1,64}$/)
+      .optional()
+      .catch(undefined),
   })
   .refine((v) => (v.ciphertext === undefined) !== (v.body === undefined), {
     message: 'provide exactly one of body (cleartext) or ciphertext (encrypted)',
@@ -26,7 +39,14 @@ export interface ApnsPayload {
 // schema bounds it well under that, so this is a guard, not a limit callers hit.
 export const APNS_MAX_PAYLOAD_BYTES = 4096;
 
-export function buildApnsPayload(req: PushRequest): ApnsPayload {
+const LEVEL_APS: Record<PushLevel, Record<string, unknown>> = {
+  urgent: { 'interruption-level': 'time-sensitive', 'relevance-score': 1, sound: 'default' },
+  normal: { 'interruption-level': 'active', sound: 'default' },
+  quiet: { 'interruption-level': 'passive', 'relevance-score': 0 },
+};
+
+export function buildApnsPayload(req: Omit<PushRequest, 'level'> & { level?: PushLevel }): ApnsPayload {
+  const tier = { ...LEVEL_APS[req.level ?? 'normal'], ...(req.threadKey ? { 'thread-id': req.threadKey } : {}) };
   if (req.ciphertext !== undefined) {
     return {
       aps: {
@@ -34,7 +54,7 @@ export function buildApnsPayload(req: PushRequest): ApnsPayload {
         // shows if decryption fails, so it must reveal nothing.
         alert: { title: 'Tether', body: 'New activity' },
         'mutable-content': 1,
-        sound: 'default',
+        ...tier,
       },
       e: req.ciphertext,
       ...(req.deepLink ? { link: req.deepLink } : {}),
@@ -43,7 +63,7 @@ export function buildApnsPayload(req: PushRequest): ApnsPayload {
   return {
     aps: {
       alert: { title: req.title ?? 'Tether', body: req.body },
-      sound: 'default',
+      ...tier,
     },
     ...(req.deepLink ? { link: req.deepLink } : {}),
   };

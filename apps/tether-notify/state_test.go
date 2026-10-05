@@ -65,7 +65,7 @@ func TestStateDonePushesWhenNobodyAttached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(*pushes) != 1 || (*pushes)[0].collapse != "agent-work" || (*pushes)[0].content.Link != "tether://session/work?host=h" {
+	if len(*pushes) != 1 || (*pushes)[0].collapse != agentCollapseID("work") || (*pushes)[0].content.Link != "tether://session/work?host=h" {
 		t.Fatalf("pushes %+v", *pushes)
 	}
 	s, _ := readSession("work")
@@ -87,6 +87,21 @@ func TestStatePushesCarryTheAgentCategoryAndState(t *testing.T) {
 		stored, _ := readSession("work")
 		if got.Category != want || got.State != state || got.Version == "" || stored == nil || got.Version != stored.Version {
 			t.Fatalf("%s: content %+v stored %+v", state, got, stored)
+		}
+	}
+}
+
+func TestStatePushesCarryTheSessionAndALevel(t *testing.T) {
+	for state, want := range map[string]string{"waiting": "urgent", "done": "quiet"} {
+		for _, link := range []string{"tether://session/work?host=h", ""} {
+			d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+			if err := runState(args(state, "--title", "t", "--body", "b", "--link", link), d); err != nil {
+				t.Fatal(err)
+			}
+			got := (*pushes)[0].content
+			if got.Session != "work" || got.Level != want {
+				t.Fatalf("%s link %q: session %q level %q", state, link, got.Session, got.Level)
+			}
 		}
 	}
 }

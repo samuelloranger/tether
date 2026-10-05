@@ -58,6 +58,14 @@ describe('POST /push', () => {
     expect(payload.aps['mutable-content']).toBe(1);
   });
 
+  test('tiers the APNs envelope from level and threadKey', async () => {
+    const { sent, fetchImpl } = apnsStub(ok);
+    await push(fakeEnv(pem), fetchImpl, { token: TOKEN, ciphertext: 'c2VjcmV0', level: 'urgent', threadKey: 'abc123' });
+    const { aps } = JSON.parse(String(sent[0]?.init.body));
+    expect(aps['interruption-level']).toBe('time-sensitive');
+    expect(aps['thread-id']).toBe('abc123');
+  });
+
   test('retries a BadDeviceToken once on the other environment', async () => {
     const { sent, fetchImpl } = apnsStub((url) =>
       url.startsWith('https://api.push.apple.com')

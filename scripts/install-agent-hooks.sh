@@ -105,8 +105,7 @@ fi
 link="tether://session/${sess:-default}?host=${host}"
 if [ -n "$sess" ]; then
   "$notify_bin" state --session "$sess" --agent "$agent" --state "$state_out" \
-    --title "$project · $verb" --body "$body" --link "$link" \
-    --collapse "agent-${sess}" >/dev/null 2>&1 || true
+    --title "$project · $verb" --body "$body" --link "$link" >/dev/null 2>&1 || true
 else
   "$notify_bin" notify --title "$project · $verb" --body "$body" --link "$link" \
     --collapse "agent-default" >/dev/null 2>&1 || true

@@ -25,6 +25,21 @@ describe('pushRequestSchema', () => {
     expect(pushRequestSchema.safeParse({ token: TOKEN }).success).toBe(false);
   });
 
+  test('an absent or unknown level parses as normal so older callers keep working', () => {
+    for (const level of [undefined, 'loud', '', 7]) {
+      const r = pushRequestSchema.safeParse({ token: TOKEN, ciphertext: 'x', level });
+      expect(r.success && r.data.level).toBe('normal');
+    }
+    expect(pushRequestSchema.safeParse({ token: TOKEN, ciphertext: 'x', level: 'urgent' }).data?.level).toBe('urgent');
+    expect(pushRequestSchema.safeParse({ token: TOKEN, ciphertext: 'x', level: 'quiet' }).data?.level).toBe('quiet');
+  });
+
+  test('a malformed thread key is dropped rather than rejecting the push', () => {
+    const r = pushRequestSchema.safeParse({ token: TOKEN, ciphertext: 'x', threadKey: 'my session!' });
+    expect(r.success && r.data.threadKey).toBeUndefined();
+    expect(pushRequestSchema.safeParse({ token: TOKEN, ciphertext: 'x', threadKey: 'ab12' }).data?.threadKey).toBe('ab12');
+  });
+
   test.each([
     ['too short', 'a'.repeat(63)],
     ['too long', 'a'.repeat(65)],
@@ -49,6 +64,32 @@ describe('buildApnsPayload', () => {
     expect(payload.aps.alert).toEqual({ title: 'alpha', body: 'Waiting for input' });
     expect(payload.aps['mutable-content']).toBeUndefined();
     expect(payload.e).toBeUndefined();
+  });
+
+  test('urgent pushes are time-sensitive with full relevance and a sound', () => {
+    const { aps } = buildApnsPayload({ token: TOKEN, ciphertext: 'x', level: 'urgent' });
+    expect(aps['interruption-level']).toBe('time-sensitive');
+    expect(aps['relevance-score']).toBe(1);
+    expect(aps.sound).toBe('default');
+  });
+
+  test('normal pushes are active with a sound, and the default when level is absent', () => {
+    for (const level of ['normal', undefined] as const) {
+      const { aps } = buildApnsPayload({ token: TOKEN, ciphertext: 'x', level });
+      expect(aps['interruption-level']).toBe('active');
+      expect(aps.sound).toBe('default');
+    }
+  });
+
+  test('quiet pushes are passive and silent', () => {
+    const { aps } = buildApnsPayload({ token: TOKEN, body: 'x', level: 'quiet' });
+    expect(aps['interruption-level']).toBe('passive');
+    expect(aps.sound).toBeUndefined();
+  });
+
+  test('thread-id is set from the opaque key only when given', () => {
+    expect(buildApnsPayload({ token: TOKEN, ciphertext: 'x', threadKey: 'abc123' }).aps['thread-id']).toBe('abc123');
+    expect(buildApnsPayload({ token: TOKEN, ciphertext: 'x' }).aps['thread-id']).toBeUndefined();
   });
 
   test('deep link rides alongside the payload when present', () => {

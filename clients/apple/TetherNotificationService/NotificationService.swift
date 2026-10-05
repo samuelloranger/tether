@@ -37,6 +37,12 @@ class NotificationService: UNNotificationServiceExtension {
     if let link = payload.link {
       content.userInfo["link"] = link
     }
+    // Older hosts send neither field: the relay's thread-id and tier stay as delivered.
+    if let session = payload.session, !session.isEmpty {
+      content.subtitle = session
+      if content.threadIdentifier.isEmpty { content.threadIdentifier = session }
+    }
+    Self.applyLevel(payload.level, to: content)
     // Actions need a session link and the agent state to check against; without them the
     // buttons could do nothing.
     guard let category = payload.category, Self.categories.contains(category),
@@ -58,6 +64,24 @@ class NotificationService: UNNotificationServiceExtension {
         content.categoryIdentifier = perPush
       }
       deliver(content)
+    }
+  }
+
+  /// Re-states the tier the relay put in `aps` so the extension's copy doesn't flatten it.
+  /// Time-sensitive only takes effect once the app has that entitlement.
+  private static func applyLevel(_ level: String?, to content: UNMutableNotificationContent) {
+    switch level {
+    case "urgent":
+      content.interruptionLevel = .timeSensitive
+      content.relevanceScore = 1
+    case "quiet":
+      content.interruptionLevel = .passive
+      content.relevanceScore = 0
+      content.sound = nil
+    case "normal":
+      content.interruptionLevel = .active
+    default:
+      break
     }
   }
 
@@ -114,6 +138,8 @@ class NotificationService: UNNotificationServiceExtension {
     let state: String?
     let version: String?
     let options: [String]?
+    let session: String?
+    let level: String?
   }
 
   // Mirrors NotificationActions.categoryIdentifiers; the extension doesn't link TetherKit.

@@ -65,8 +65,9 @@ func TestHoldRecordsAndPushesWhenNobodyIsAttached(t *testing.T) {
 		Title: "project · needs you", Body: "Allow Bash: npm test?",
 		Link:     "tether://session/work?host=devbox",
 		Category: "tether.agent.waiting", State: stateWaiting, Version: s.Version,
+		Session: "work", Level: "urgent",
 	}
-	if !reflect.DeepEqual(p.content, want) || p.collapse != "agent-work" {
+	if !reflect.DeepEqual(p.content, want) || p.collapse != agentCollapseID("work") {
 		t.Fatalf("push %+v %q", p.content, p.collapse)
 	}
 }

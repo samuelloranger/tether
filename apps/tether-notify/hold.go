@@ -136,12 +136,13 @@ func runHold(args []string, d holdDeps) error {
 	content := PushContent{
 		Title: project + " · needs you", Body: *body, Link: link,
 		Category: agentCategory(stateWaiting), State: stateWaiting, Version: stored.Version,
+		Session: *session, Level: levelUrgent,
 	}
 	if *kind == "question" {
 		content.Category = questionCategory
 		content.Options = optionButtons(questions)
 	}
-	if err := d.push(content, "agent-"+*session); err != nil {
+	if err := d.push(content, agentCollapseID(*session)); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
 		if question {
 			fmt.Fprintln(d.stdout, stored.Version)
