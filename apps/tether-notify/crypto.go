@@ -30,6 +30,11 @@ type PushContent struct {
 	// Options are a question's labels, for the phone's buttons; only for one
 	// single-choice question.
 	Options []string `json:"options,omitempty"`
+	// Session is the zmx session name; it stays inside the ciphertext, so the relay
+	// never reads it. The phone shows it as the subtitle and groups by it.
+	Session string `json:"session,omitempty"`
+	// Level is the push's urgency (urgent|normal|quiet); see pushLevel.
+	Level string `json:"level,omitempty"`
 }
 
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {

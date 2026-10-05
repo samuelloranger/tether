@@ -103,7 +103,7 @@ func runState(args []string, d stateDeps) error {
 	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
 		return nil
 	}
-	content := PushContent{Title: *title, Body: *body, Link: *link}
+	content := PushContent{Title: *title, Body: *body, Link: *link, Session: *session, Level: pushLevel(agentCategory(*state))}
 	// Actions need a session link to answer and a saved state to check against.
 	if stored != nil && stored.Version != "" && actionableLink(*link, *session) {
 		content.Category = agentCategory(*state)

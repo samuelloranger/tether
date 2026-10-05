@@ -91,6 +91,21 @@ func TestStatePushesCarryTheAgentCategoryAndState(t *testing.T) {
 	}
 }
 
+func TestStatePushesCarryTheSessionAndALevel(t *testing.T) {
+	for state, want := range map[string]string{"waiting": "urgent", "done": "quiet"} {
+		for _, link := range []string{"tether://session/work?host=h", ""} {
+			d, pushes := fakeDeps(t, "name=work\tclients=0\n", nil)
+			if err := runState(args(state, "--title", "t", "--body", "b", "--link", link), d); err != nil {
+				t.Fatal(err)
+			}
+			got := (*pushes)[0].content
+			if got.Session != "work" || got.Level != want {
+				t.Fatalf("%s link %q: session %q level %q", state, link, got.Session, got.Level)
+			}
+		}
+	}
+}
+
 func TestStateWithoutASessionLinkOffersNoActions(t *testing.T) {
 	for _, link := range []string{
 		"", "https://example.com", "tether://session/work", "tether://session/other?host=h",

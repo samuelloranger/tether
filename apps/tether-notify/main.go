@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -23,6 +25,38 @@ type relayRequest struct {
 	Token      string `json:"token"`
 	Ciphertext string `json:"ciphertext"`
 	CollapseID string `json:"collapseId"`
+	// Level and ThreadKey are the only new cleartext: an urgency tier and an opaque
+	// hash, never the session name.
+	Level     string `json:"level,omitempty"`
+	ThreadKey string `json:"threadKey,omitempty"`
+}
+
+const (
+	levelUrgent = "urgent"
+	levelNormal = "normal"
+	levelQuiet  = "quiet"
+)
+
+// pushLevel tiers a push by what the user must do: a question or permission wants an
+// answer, a finished turn can wait, anything else keeps the default.
+func pushLevel(category string) string {
+	switch category {
+	case "tether.agent.waiting", questionCategory:
+		return levelUrgent
+	case "tether.agent.done":
+		return levelQuiet
+	}
+	return levelNormal
+}
+
+// threadKey groups one session's pushes on the phone without telling the relay which
+// session it is: a truncated hash of the host label and session name.
+func threadKey(host, session string) string {
+	if session == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(host + "\x00" + session))
+	return hex.EncodeToString(sum[:8])
 }
 
 func main() {
@@ -154,6 +188,7 @@ func cmdNotify(args []string) error {
 	body := fs.String("body", "", "notification body")
 	link := fs.String("link", "", "tether:// deep link (optional)")
 	category := fs.String("category", "", "iOS notification category (optional)")
+	session := fs.String("session", "", "zmx session name, shown as the subtitle and used to group pushes (optional)")
 	collapse := fs.String("collapse", "tether-notify", "APNs collapse id")
 	dryRun := fs.Bool("dry-run", false, "print requests instead of sending")
 	if err := fs.Parse(args); err != nil {
@@ -162,7 +197,7 @@ func cmdNotify(args []string) error {
 	if *title == "" || *body == "" {
 		return fmt.Errorf("notify requires --title and --body")
 	}
-	return sendPush(PushContent{Title: *title, Body: *body, Link: *link, Category: *category}, *collapse, *dryRun)
+	return sendPush(PushContent{Title: *title, Body: *body, Link: *link, Category: *category, Session: *session}, *collapse, *dryRun)
 }
 
 func sendPush(content PushContent, collapse string, dryRun bool) error {
@@ -173,6 +208,10 @@ func sendPush(content PushContent, collapse string, dryRun bool) error {
 	if len(devices) == 0 {
 		return fmt.Errorf("no registered devices")
 	}
+	if content.Level == "" {
+		content.Level = pushLevel(content.Category)
+	}
+	thread := threadKey(hostLabel(), content.Session)
 	url := strings.TrimRight(relayURL(), "/") + "/push"
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -183,7 +222,7 @@ func sendPush(content PushContent, collapse string, dryRun bool) error {
 			fmt.Fprintf(os.Stderr, "encrypt for %s failed: %v\n", shortToken(device.Token), err)
 			continue
 		}
-		req := relayRequest{Token: device.Token, Ciphertext: ciphertext, CollapseID: collapse}
+		req := relayRequest{Token: device.Token, Ciphertext: ciphertext, CollapseID: collapse, Level: content.Level, ThreadKey: thread}
 		if dryRun {
 			out, _ := json.Marshal(req)
 			fmt.Println(string(out))

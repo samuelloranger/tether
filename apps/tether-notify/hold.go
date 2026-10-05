@@ -136,6 +136,7 @@ func runHold(args []string, d holdDeps) error {
 	content := PushContent{
 		Title: project + " · needs you", Body: *body, Link: link,
 		Category: agentCategory(stateWaiting), State: stateWaiting, Version: stored.Version,
+		Session: *session, Level: levelUrgent,
 	}
 	if *kind == "question" {
 		content.Category = questionCategory
