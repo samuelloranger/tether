@@ -1,9 +1,10 @@
 [package]
 name = "tether-term"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-publish.workspace = true
+version = "0.1.0"
+edition = "2024"
+publish = false
 
 [dependencies]
-tether-core.workspace = true
+tether-core = { path = "../tether-core" }
+alacritty_terminal = { version = "=0.26.0", default-features = false }
+swash = "=0.2.10"
