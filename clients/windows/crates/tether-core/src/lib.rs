@@ -1,15 +1,18 @@
 //! Tether's rules, with no UI and no network.
 
 pub mod edit;
+pub mod fonts;
 pub mod hints;
 pub mod keys;
 pub mod prefs;
 pub mod profiles;
 pub mod secrets;
 pub mod store;
+pub mod theme;
 #[cfg(windows)]
 pub use secrets::DpapiSecretStore;
 pub use edit::{PasswordAction, apply_server_form};
+pub use fonts::{FONTS, FontFace, font_named};
 pub use hints::{AuthChoice, KeyForm, ServerForm, generate_hint};
 pub use keys::{
     KEYS_FILE, KeyError, KeyOrigin, KeyRecord, KeyRecords, algorithm_of, derive_public_line,
@@ -23,3 +26,4 @@ pub use profiles::{
 };
 pub use secrets::{MemorySecretStore, SecretError, SecretStore, key_account, password_account};
 pub use store::DataDir;
+pub use theme::{THEMES_LICENSE, TerminalTheme, catalog, theme_named};
