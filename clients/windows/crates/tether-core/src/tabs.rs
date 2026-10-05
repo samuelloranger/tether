@@ -233,12 +233,15 @@ impl TabStrip {
         }
         self.tabs.sort_by_key(|t| t.created);
 
-        if let Some(next) = neighbor {
+        if let Some(Some(next)) = neighbor {
+            self.active = Some(next);
+            out.active_changed = true;
+        } else if neighbor.is_some() || self.active.is_none() {
+            let next = first_tab(sessions).or_else(|| self.tabs.first().map(|t| t.name.clone()));
+            if self.active != next {
+                out.active_changed = true;
+            }
             self.active = next;
-            out.active_changed = true;
-        } else if self.active.is_none() && !self.tabs.is_empty() {
-            self.active = first_tab(sessions).or_else(|| self.tabs.first().map(|t| t.name.clone()));
-            out.active_changed = true;
         }
         out
     }
@@ -452,6 +455,15 @@ mod tests {
         strip.merge(&[]);
         assert_eq!(strip.active, None);
         assert!(strip.tabs.is_empty());
+    }
+
+    #[test]
+    fn vanished_active_with_no_neighbor_picks_the_reported_session() {
+        let mut strip = TabStrip::from_sessions(&[s("default", 1)]);
+        strip.select("default", 1);
+        let out = strip.merge(&[s("session-2", 2)]);
+        assert_eq!(strip.active.as_deref(), Some("session-2"));
+        assert!(out.active_changed);
     }
 
     #[test]

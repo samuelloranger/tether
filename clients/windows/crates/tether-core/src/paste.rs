@@ -4,12 +4,16 @@ const START: &str = "\x1b[200~";
 const END: &str = "\x1b[201~";
 
 /// Markers in the text are stripped so a paste cannot close the bracket and type commands.
+/// Repeat until stable: stripping one marker can assemble another (`\x1b[201` + `\x1b[201~` + `~`).
 pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
-    let body = text
-        .replace(START, "")
-        .replace(END, "")
-        .replace("\r\n", "\r")
-        .replace('\n', "\r");
+    let mut body = text.replace("\r\n", "\r").replace('\n', "\r");
+    loop {
+        let next = body.replace(START, "").replace(END, "");
+        if next == body {
+            break;
+        }
+        body = next;
+    }
     if bracketed {
         format!("{START}{body}{END}").into_bytes()
     } else {
@@ -87,6 +91,17 @@ mod tests {
         let evil = "safe\x1b[201~rm -rf ~\n\x1b[200~";
         assert_eq!(paste_bytes(evil, true), b"\x1b[200~saferm -rf ~\r\x1b[201~");
         assert_eq!(paste_bytes(evil, false), b"saferm -rf ~\r");
+    }
+
+    #[test]
+    fn nested_markers_cannot_reassemble() {
+        let end = "\x1b[201~";
+        for evil in ["\x1b[201\x1b[201~~", "\x1b[20\x1b[200~1~"] {
+            let out = String::from_utf8(paste_bytes(evil, true)).unwrap();
+            let count = out.matches(end).count();
+            assert_eq!(count, 1, "{evil:?} -> {out:?}");
+            assert!(out.ends_with(end), "{evil:?} -> {out:?}");
+        }
     }
 
     #[test]

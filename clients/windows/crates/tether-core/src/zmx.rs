@@ -65,7 +65,8 @@ pub fn shell_quote(s: &str) -> String {
 /// The attach line is typed into a shell, so a control character (a newline above all)
 /// would end or alter the command line before the quote closes.
 pub fn valid_session_name(name: &str) -> bool {
-    !name.trim().is_empty() && !name.chars().any(char::is_control)
+    let name = name.trim();
+    !name.is_empty() && !name.starts_with('-') && !name.chars().any(char::is_control)
 }
 
 pub fn ls_command() -> String {
@@ -169,5 +170,8 @@ mod tests {
         assert!(!valid_session_name("a\rb"));
         assert!(!valid_session_name("a\u{1b}b"));
         assert!(!valid_session_name("a\u{7f}"));
+        assert!(!valid_session_name("-rf"));
+        assert!(!valid_session_name("--force"));
+        assert!(valid_session_name("session-2"));
     }
 }

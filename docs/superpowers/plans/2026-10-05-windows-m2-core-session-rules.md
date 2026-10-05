@@ -3447,4 +3447,5 @@ No public name from the roadmap contract or a task's Produces block was renamed.
 
 - `Auth::Unknown` (added in the M1 review) is not in the Task 14 match. `load_credential` returns `ConnectError::AuthRejected` and does not dial. The failure is not retryable.
 - `osc.rs` writes the APC/PM/SOS introducers as `*b"P_^X"` so `clippy::byte_char_slices` stays denied. Same four bytes.
+- Review: `paste_bytes` strips bracketed-paste markers until the text stops changing. `TabStrip::merge` uses `first_tab` when the active tab vanishes and no neighbor survives. `valid_session_name` rejects a name that starts with `-`. No signature changes.
 
