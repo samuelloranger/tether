@@ -133,13 +133,16 @@ func TestDeliverGoneIsNotRetried(t *testing.T) {
 }
 
 func TestDeliverStalledRelayIsCutOffAtTheDeadline(t *testing.T) {
+	done := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
+		case <-done:
 		case <-time.After(30 * time.Second):
 		}
 	}))
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(done) })
 	r := &retrier{sleep: time.Sleep, now: time.Now, deadline: time.Now().Add(300 * time.Millisecond)}
 	start := time.Now()
 	if got := deliver(&http.Client{Timeout: 5 * time.Second}, srv.URL, relayRequest{}, r); got != failed {
