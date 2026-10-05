@@ -1,17 +1,98 @@
 use super::*;
-use crate::terminal::geometry::{layout, TermStyle};
+use crate::terminal::geometry::{TermStyle, layout};
 use crate::terminal::mouse::MouseMsg;
+use tether_core::keymap::{KeyAction, TetherCommand, encode_key};
 
 impl TerminalModel {
-    pub(crate) fn on_modifiers(&mut self, _mods: Mods, _fx: &mut Vec<Effect>) {}
+    pub(crate) fn on_modifiers(&mut self, mods: Mods, fx: &mut Vec<Effect>) {
+        self.mods = mods;
+        self.refresh_hover(fx);
+    }
+
     pub(crate) fn on_key(
         &mut self,
-        _input: &KeyInput,
-        _mods: Mods,
-        _now: Duration,
-        _fx: &mut Vec<Effect>,
+        input: &KeyInput,
+        mods: Mods,
+        now: Duration,
+        fx: &mut Vec<Effect>,
     ) {
+        self.dismiss_finished_capsule();
+        let ctx = self
+            .active_name()
+            .and_then(|n| self.tabs.get(n))
+            .map(|t| t.term.context())
+            .unwrap_or_default();
+        match encode_key(input, mods, &ctx) {
+            KeyAction::Send(bytes) => {
+                self.blink_on = true;
+                self.blink_at = now;
+                self.snap_active_to_bottom();
+                self.write_active(bytes, fx);
+                fx.push(Effect::Redraw);
+            }
+            KeyAction::Tether(cmd) => self.on_command(cmd, mods, fx),
+            KeyAction::Ignore => {}
+        }
     }
+
+    pub(crate) fn on_command(&mut self, cmd: TetherCommand, mods: Mods, fx: &mut Vec<Effect>) {
+        let active = self.active_name().map(str::to_string);
+        match cmd {
+            TetherCommand::Paste => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
+            TetherCommand::Copy => {
+                let Some(tab) = active.and_then(|n| self.tabs.get_mut(&n)) else {
+                    return;
+                };
+                if let Some(text) = tab.term.selection_text() {
+                    fx.push(Effect::Ui(UiEffect::SetClipboard(text)));
+                    if mods.ctrl && !mods.shift {
+                        tab.term.clear_selection();
+                        fx.push(Effect::Redraw);
+                    }
+                }
+            }
+            TetherCommand::FontBigger => fx.push(Effect::Ui(UiEffect::FontStep(FontStep::Bigger))),
+            TetherCommand::FontSmaller => {
+                fx.push(Effect::Ui(UiEffect::FontStep(FontStep::Smaller)))
+            }
+            TetherCommand::FontReset => fx.push(Effect::Ui(UiEffect::FontStep(FontStep::Reset))),
+            TetherCommand::NextTab => self.on_jump(TabJump::Next, fx),
+            TetherCommand::PrevTab => self.on_jump(TabJump::Prev, fx),
+            TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), fx),
+            TetherCommand::LastTab => self.on_jump(TabJump::Last, fx),
+            TetherCommand::NewTab => self.on_new_begin(),
+            TetherCommand::ScrollPageUp | TetherCommand::ScrollPageDown => {
+                let rows = self.size.rows as i32;
+                let Some(tab) = active.and_then(|n| self.tabs.get_mut(&n)) else {
+                    return;
+                };
+                tab.term.scroll(if cmd == TetherCommand::ScrollPageUp {
+                    rows
+                } else {
+                    -rows
+                });
+                fx.push(Effect::Redraw);
+            }
+        }
+    }
+
+    pub(crate) fn dismiss_finished_capsule(&mut self) {
+        if self.capsule_shown.is_some() {
+            self.capsule_shown = None;
+            self.send = None;
+        }
+    }
+
+    pub(crate) fn snap_active_to_bottom(&mut self) {
+        if let Some(name) = self.active_name().map(str::to_string) {
+            if let Some(tab) = self.tabs.get_mut(&name) {
+                tab.term.scroll_to_bottom();
+            }
+        }
+    }
+
+    /// Task 11 fills this in: re-evaluate the Ctrl-hover link when modifiers change.
+    pub(crate) fn refresh_hover(&mut self, _fx: &mut Vec<Effect>) {}
     pub(crate) fn on_paste(
         &mut self,
         _clip: ClipboardSnapshot,
@@ -199,6 +280,285 @@ mod resize_tests {
         );
         let size = m.layout().unwrap().size;
         let fx = m.handle(Msg::SelectTab("a".into()), t(10));
-        assert!(fx.iter().any(|e| matches!(e, Effect::Attach { size: s, .. } if *s == size)));
+        assert!(
+            fx.iter()
+                .any(|e| matches!(e, Effect::Attach { size: s, .. } if *s == size))
+        );
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::super::tests::{live, t};
+    use super::*;
+    use crate::terminal::testkit::session;
+    use tether_core::keymap::{KeyInput, Mods, NamedKey};
+    use tether_term::{Cell, SelectKind};
+
+    fn ch(c: char, produced: Option<&str>) -> KeyInput {
+        KeyInput::Char {
+            unmodified: c,
+            produced: produced.map(Into::into),
+            digit: None,
+        }
+    }
+    fn digit(d: u8, c: char) -> KeyInput {
+        KeyInput::Char {
+            unmodified: c,
+            produced: Some(c.to_string()),
+            digit: Some(d),
+        }
+    }
+    const CTRL: Mods = Mods {
+        shift: false,
+        alt: false,
+        ctrl: true,
+    };
+    const CTRL_SHIFT: Mods = Mods {
+        shift: true,
+        alt: false,
+        ctrl: true,
+    };
+    const SHIFT: Mods = Mods {
+        shift: true,
+        alt: false,
+        ctrl: false,
+    };
+
+    fn writes(fx: &[Effect]) -> Vec<Vec<u8>> {
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::Write { bytes, .. } => Some(bytes.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn select_hello(m: &mut TerminalModel) {
+        m.handle(
+            Msg::PtyData {
+                name: "a".into(),
+                bytes: b"hello".to_vec(),
+            },
+            t(5),
+        );
+        let tab = m.tabs.get_mut("a").unwrap();
+        tab.term
+            .selection_start(Cell { row: 0, col: 0 }, SelectKind::Simple);
+        tab.term.selection_update(Cell { row: 0, col: 4 });
+    }
+
+    #[test]
+    fn typing_writes_to_the_active_tab() {
+        let mut m = live(vec![session("a", 1)]);
+        assert_eq!(
+            writes(&m.handle(
+                Msg::Key {
+                    input: ch('a', Some("a")),
+                    mods: Mods::default()
+                },
+                t(10)
+            )),
+            vec![b"a".to_vec()]
+        );
+    }
+
+    #[test]
+    fn ctrl_v_reads_the_clipboard_and_never_sends_0x16() {
+        let mut m = live(vec![session("a", 1)]);
+        for mods in [CTRL, CTRL_SHIFT] {
+            let fx = m.handle(
+                Msg::Key {
+                    input: ch('v', None),
+                    mods,
+                },
+                t(10),
+            );
+            assert!(fx.contains(&Effect::Ui(UiEffect::ReadClipboard)));
+            assert!(writes(&fx).is_empty());
+        }
+        let fx = m.handle(
+            Msg::Key {
+                input: KeyInput::Named(NamedKey::Insert),
+                mods: SHIFT,
+            },
+            t(11),
+        );
+        assert!(fx.contains(&Effect::Ui(UiEffect::ReadClipboard)));
+    }
+
+    #[test]
+    fn ctrl_c_copies_and_clears_with_a_selection_and_interrupts_without() {
+        let mut m = live(vec![session("a", 1)]);
+        select_hello(&mut m);
+        let fx = m.handle(
+            Msg::Key {
+                input: ch('c', None),
+                mods: CTRL,
+            },
+            t(10),
+        );
+        assert!(fx.contains(&Effect::Ui(UiEffect::SetClipboard("hello".into()))));
+        assert!(writes(&fx).is_empty());
+        let fx = m.handle(
+            Msg::Key {
+                input: ch('c', None),
+                mods: CTRL,
+            },
+            t(11),
+        );
+        assert_eq!(writes(&fx), vec![vec![0x03]]);
+    }
+
+    #[test]
+    fn ctrl_shift_c_copies_and_keeps_the_selection() {
+        let mut m = live(vec![session("a", 1)]);
+        select_hello(&mut m);
+        m.handle(
+            Msg::Key {
+                input: ch('c', Some("C")),
+                mods: CTRL_SHIFT,
+            },
+            t(10),
+        );
+        assert_eq!(m.tabs["a"].term.selection_text().as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn ctrl_q_reaches_the_pty() {
+        let mut m = live(vec![session("a", 1)]);
+        assert_eq!(
+            writes(&m.handle(
+                Msg::Key {
+                    input: ch('q', None),
+                    mods: CTRL
+                },
+                t(10)
+            )),
+            vec![vec![0x11]]
+        );
+    }
+
+    #[test]
+    fn font_shortcuts_step_the_size() {
+        let mut m = live(vec![session("a", 1)]);
+        assert!(
+            m.handle(
+                Msg::Key {
+                    input: ch('=', Some("=")),
+                    mods: CTRL
+                },
+                t(10)
+            )
+            .contains(&Effect::Ui(UiEffect::FontStep(FontStep::Bigger)))
+        );
+        assert!(
+            m.handle(
+                Msg::Key {
+                    input: ch('-', Some("-")),
+                    mods: CTRL
+                },
+                t(11)
+            )
+            .contains(&Effect::Ui(UiEffect::FontStep(FontStep::Smaller)))
+        );
+        assert!(
+            m.handle(
+                Msg::Key {
+                    input: digit(0, '0'),
+                    mods: CTRL
+                },
+                t(12)
+            )
+            .contains(&Effect::Ui(UiEffect::FontStep(FontStep::Reset)))
+        );
+    }
+
+    #[test]
+    fn tab_shortcuts_switch_and_open_the_name_field() {
+        let mut m = live(vec![session("a", 1), session("b", 2), session("c", 3)]);
+        m.handle(
+            Msg::Key {
+                input: digit(1, '&'),
+                mods: CTRL_SHIFT,
+            },
+            t(10),
+        );
+        assert_eq!(m.view().header.session, "a");
+        m.handle(
+            Msg::Key {
+                input: digit(9, 'ç'),
+                mods: CTRL_SHIFT,
+            },
+            t(11),
+        );
+        assert_eq!(m.view().header.session, "c");
+        m.handle(
+            Msg::Key {
+                input: KeyInput::Named(NamedKey::Tab),
+                mods: CTRL,
+            },
+            t(12),
+        );
+        assert_eq!(m.view().header.session, "a");
+        m.handle(
+            Msg::Key {
+                input: ch('t', Some("T")),
+                mods: CTRL_SHIFT,
+            },
+            t(13),
+        );
+        assert_eq!(m.view().naming.as_deref(), Some("session-4"));
+    }
+
+    #[test]
+    fn ctrl_shift_t_works_on_an_empty_host() {
+        let mut m = live(vec![]);
+        m.handle(
+            Msg::Key {
+                input: ch('t', Some("T")),
+                mods: CTRL_SHIFT,
+            },
+            t(10),
+        );
+        assert_eq!(m.view().naming.as_deref(), Some("default"));
+    }
+
+    #[test]
+    fn shift_page_up_scrolls_locally_and_typing_snaps_back() {
+        let mut m = live(vec![session("a", 1)]);
+        m.handle(
+            Msg::PtyData {
+                name: "a".into(),
+                bytes: b"line\r\n".repeat(200),
+            },
+            t(5),
+        );
+        let fx = m.handle(
+            Msg::Key {
+                input: KeyInput::Named(NamedKey::PageUp),
+                mods: SHIFT,
+            },
+            t(10),
+        );
+        assert!(writes(&fx).is_empty());
+        assert!(m.tabs["a"].term.display_offset() > 0);
+        m.handle(
+            Msg::Key {
+                input: ch('x', Some("x")),
+                mods: Mods::default(),
+            },
+            t(11),
+        );
+        assert_eq!(m.tabs["a"].term.display_offset(), 0);
+    }
+
+    #[test]
+    fn ime_commits_utf8() {
+        let mut m = live(vec![session("a", 1)]);
+        assert_eq!(
+            writes(&m.handle(Msg::Ime("日本".into()), t(10))),
+            vec!["日本".as_bytes().to_vec()]
+        );
     }
 }

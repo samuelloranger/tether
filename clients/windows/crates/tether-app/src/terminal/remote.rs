@@ -1,14 +1,14 @@
 use std::future::Future;
 use std::sync::Arc;
-use tether_core::connect::{connect, ConnectError, ConnectRequest, Connection, Transport};
+use tether_core::connect::{ConnectError, ConnectRequest, Connection, Transport, connect};
 use tether_core::hostkey::HostKeyStore;
 use tether_core::profiles::Machine;
 use tether_core::resize::GridSize;
 use tether_core::secrets::SecretStore;
-use tether_core::upload::{uploads_directory, UPLOADS_COMMAND};
-use tether_core::zmx::{kill_command, ls_command, parse_ls, ZmxSession};
+use tether_core::upload::{UPLOADS_COMMAND, uploads_directory};
+use tether_core::zmx::{ZmxSession, kill_command, ls_command, parse_ls};
 use tether_ssh::{ConnectionEvent, PtyEvent};
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 pub trait PtySink: Clone + Send + Sync + 'static {
     fn write(&self, bytes: Vec<u8>) -> impl Future<Output = ()> + Send;
@@ -18,20 +18,37 @@ pub trait PtySink: Clone + Send + Sync + 'static {
 
 pub trait SessionConn: Connection + Sync + 'static {
     type Sink: PtySink;
-    fn open_pty(&self, size: GridSize) -> impl Future<Output = Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError>> + Send;
-    fn scp_send(&self, remote_path: &str, bytes: &[u8]) -> impl Future<Output = Result<(), ConnectError>> + Send;
+    fn open_pty(
+        &self,
+        size: GridSize,
+    ) -> impl Future<Output = Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError>> + Send;
+    fn scp_send(
+        &self,
+        remote_path: &str,
+        bytes: &[u8],
+    ) -> impl Future<Output = Result<(), ConnectError>> + Send;
     fn drops(&self) -> broadcast::Receiver<ConnectionEvent>;
     fn close(&self) -> impl Future<Output = ()> + Send;
 }
 
 pub trait Remote: Send + Sync + 'static {
     type Sink: PtySink;
-    fn open(&self) -> impl Future<Output = Result<broadcast::Receiver<ConnectionEvent>, ConnectError>> + Send;
+    fn open(
+        &self,
+    ) -> impl Future<Output = Result<broadcast::Receiver<ConnectionEvent>, ConnectError>> + Send;
     fn ls(&self) -> impl Future<Output = Result<Vec<ZmxSession>, ConnectError>> + Send;
     fn kill(&self, name: &str) -> impl Future<Output = Result<(), ConnectError>> + Send;
     fn uploads_dir(&self) -> impl Future<Output = Option<String>> + Send;
-    fn attach(&self, name: &str, size: GridSize) -> impl Future<Output = Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError>> + Send;
-    fn upload(&self, remote_path: &str, bytes: Vec<u8>) -> impl Future<Output = Result<(), ConnectError>> + Send;
+    fn attach(
+        &self,
+        name: &str,
+        size: GridSize,
+    ) -> impl Future<Output = Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError>> + Send;
+    fn upload(
+        &self,
+        remote_path: &str,
+        bytes: Vec<u8>,
+    ) -> impl Future<Output = Result<(), ConnectError>> + Send;
     fn close(&self) -> impl Future<Output = ()> + Send;
 }
 
@@ -47,16 +64,38 @@ pub struct SshRemote<T: Transport> {
 }
 
 impl<T: Transport> SshRemote<T> {
-    pub fn new(transport: T, machine: Machine, hostkeys: Arc<dyn HostKeyStore>, secrets: Arc<dyn SecretStore>) -> Self {
-        Self { transport, request: ConnectRequest { machine }, hostkeys, secrets, terminal: Mutex::new(None), control: Mutex::new(None) }
+    pub fn new(
+        transport: T,
+        machine: Machine,
+        hostkeys: Arc<dyn HostKeyStore>,
+        secrets: Arc<dyn SecretStore>,
+    ) -> Self {
+        Self {
+            transport,
+            request: ConnectRequest { machine },
+            hostkeys,
+            secrets,
+            terminal: Mutex::new(None),
+            control: Mutex::new(None),
+        }
     }
 
     async fn dial(&self) -> Result<T::Conn, ConnectError> {
-        connect(&self.transport, &self.request, self.hostkeys.as_ref(), self.secrets.as_ref()).await
+        connect(
+            &self.transport,
+            &self.request,
+            self.hostkeys.as_ref(),
+            self.secrets.as_ref(),
+        )
+        .await
     }
 
     async fn control(&self) -> Result<Arc<T::Conn>, ConnectError> {
-        self.control.lock().await.clone().ok_or(ConnectError::Transport("not connected".into()))
+        self.control
+            .lock()
+            .await
+            .clone()
+            .ok_or(ConnectError::Transport("not connected".into()))
     }
 }
 
@@ -81,16 +120,35 @@ where
     }
 
     async fn kill(&self, name: &str) -> Result<(), ConnectError> {
-        self.control().await?.exec(&kill_command(name)).await.map(|_| ())
+        self.control()
+            .await?
+            .exec(&kill_command(name))
+            .await
+            .map(|_| ())
     }
 
     async fn uploads_dir(&self) -> Option<String> {
-        let out = self.control().await.ok()?.exec(UPLOADS_COMMAND).await.ok()?;
+        let out = self
+            .control()
+            .await
+            .ok()?
+            .exec(UPLOADS_COMMAND)
+            .await
+            .ok()?;
         uploads_directory(&out)
     }
 
-    async fn attach(&self, _name: &str, size: GridSize) -> Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError> {
-        let conn = self.terminal.lock().await.clone().ok_or(ConnectError::Transport("not connected".into()))?;
+    async fn attach(
+        &self,
+        _name: &str,
+        size: GridSize,
+    ) -> Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError> {
+        let conn = self
+            .terminal
+            .lock()
+            .await
+            .clone()
+            .ok_or(ConnectError::Transport("not connected".into()))?;
         conn.open_pty(size).await
     }
 
@@ -111,35 +169,55 @@ where
 }
 
 impl PtySink for tether_ssh::PtyWriter {
-    async fn write(&self, bytes: Vec<u8>) { tether_ssh::PtyWriter::write(self, &bytes).await }
-    async fn resize(&self, size: GridSize) { tether_ssh::PtyWriter::resize(self, size).await }
-    async fn close(&self) { tether_ssh::PtyWriter::close(self).await }
+    async fn write(&self, bytes: Vec<u8>) {
+        tether_ssh::PtyWriter::write(self, &bytes).await
+    }
+    async fn resize(&self, size: GridSize) {
+        tether_ssh::PtyWriter::resize(self, size).await
+    }
+    async fn close(&self) {
+        tether_ssh::PtyWriter::close(self).await
+    }
 }
 
 impl SessionConn for tether_ssh::RusshConnection {
     type Sink = tether_ssh::PtyWriter;
-    async fn open_pty(&self, size: GridSize) -> Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError> {
+    async fn open_pty(
+        &self,
+        size: GridSize,
+    ) -> Result<(Self::Sink, mpsc::Receiver<PtyEvent>), ConnectError> {
         let ch = tether_ssh::RusshConnection::open_pty(self, size).await?;
         Ok((ch.writer, ch.events))
     }
     async fn scp_send(&self, remote_path: &str, bytes: &[u8]) -> Result<(), ConnectError> {
         tether_ssh::RusshConnection::scp_send(self, remote_path, bytes).await
     }
-    fn drops(&self) -> broadcast::Receiver<ConnectionEvent> { self.events() }
-    async fn close(&self) { tether_ssh::RusshConnection::close(self).await }
+    fn drops(&self) -> broadcast::Receiver<ConnectionEvent> {
+        self.events()
+    }
+    async fn close(&self) {
+        tether_ssh::RusshConnection::close(self).await
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::terminal::testkit::*;
-    use tether_core::hostkey::{hex_fingerprint, HostKeyStore, MemoryHostKeys};
-    use tether_core::secrets::{password_account, MemorySecretStore, SecretStore};
+    use tether_core::hostkey::{HostKeyStore, MemoryHostKeys, hex_fingerprint};
+    use tether_core::secrets::{MemorySecretStore, SecretStore, password_account};
     use tether_core::zmx::kill_command;
 
     fn remote(t: FakeTransport) -> SshRemote<FakeTransport> {
         let secrets = MemorySecretStore::default();
-        secrets.set(&password_account(machine().id), b"hunter2").unwrap();
-        SshRemote::new(t, machine(), Arc::new(MemoryHostKeys::default()), Arc::new(secrets))
+        secrets
+            .set(&password_account(machine().id), b"hunter2")
+            .unwrap();
+        SshRemote::new(
+            t,
+            machine(),
+            Arc::new(MemoryHostKeys::default()),
+            Arc::new(secrets),
+        )
     }
 
     #[tokio::test]
@@ -148,7 +226,12 @@ mod tests {
         let r = remote(t.clone());
         r.open().await.unwrap();
         let log = t.log.lock().unwrap().clone();
-        assert_eq!(log.iter().filter(|l| l.starts_with("dial devbox.lan:22")).count(), 2);
+        assert_eq!(
+            log.iter()
+                .filter(|l| l.starts_with("dial devbox.lan:22"))
+                .count(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -171,16 +254,27 @@ mod tests {
         let r = remote(t.clone());
         r.open().await.unwrap();
         r.kill("it's $(x)").await.unwrap();
-        assert!(t.log.lock().unwrap().contains(&format!("exec {}", kill_command("it's $(x)"))));
+        assert!(
+            t.log
+                .lock()
+                .unwrap()
+                .contains(&format!("exec {}", kill_command("it's $(x)")))
+        );
     }
 
     #[tokio::test]
     async fn uploads_dir_requires_the_marker() {
         let t = FakeTransport::default();
-        t.exec_replies.lock().unwrap().insert("mkdir -p".into(), Ok("motd line\n/home/sam/.tether/uploads\n__TETHER_UPLOADS_OK__\n".into()));
+        t.exec_replies.lock().unwrap().insert(
+            "mkdir -p".into(),
+            Ok("motd line\n/home/sam/.tether/uploads\n__TETHER_UPLOADS_OK__\n".into()),
+        );
         let r = remote(t.clone());
         r.open().await.unwrap();
-        assert_eq!(r.uploads_dir().await.as_deref(), Some("/home/sam/.tether/uploads"));
+        assert_eq!(
+            r.uploads_dir().await.as_deref(),
+            Some("/home/sam/.tether/uploads")
+        );
     }
 
     #[tokio::test]
@@ -188,7 +282,9 @@ mod tests {
         let t = FakeTransport::default();
         let r = remote(t.clone());
         r.open().await.unwrap();
-        r.upload("/home/sam/.tether/uploads/a.png", vec![1, 2, 3]).await.unwrap();
+        r.upload("/home/sam/.tether/uploads/a.png", vec![1, 2, 3])
+            .await
+            .unwrap();
         let log = t.log.lock().unwrap().clone();
         assert_eq!(log.iter().filter(|l| l.starts_with("dial")).count(), 3);
         assert!(log.contains(&"scp /home/sam/.tether/uploads/a.png 3".to_string()));
@@ -202,6 +298,9 @@ mod tests {
         let secrets = Arc::new(MemorySecretStore::default());
         secrets.set(&password_account(machine().id), b"x").unwrap();
         let r = SshRemote::new(t, machine(), hostkeys, secrets);
-        assert!(matches!(r.open().await, Err(ConnectError::HostKeyChanged { .. })));
+        assert!(matches!(
+            r.open().await,
+            Err(ConnectError::HostKeyChanged { .. })
+        ));
     }
 }

@@ -34,7 +34,12 @@ impl TerminalModel {
         }
     }
 
-    pub(crate) fn merge(&mut self, sessions: Vec<ZmxSession>, _now: Duration, fx: &mut Vec<Effect>) {
+    pub(crate) fn merge(
+        &mut self,
+        sessions: Vec<ZmxSession>,
+        _now: Duration,
+        fx: &mut Vec<Effect>,
+    ) {
         let Some(strip) = self.strip.as_mut() else {
             return;
         };
@@ -185,10 +190,7 @@ mod tests {
     fn a_vanished_active_tab_closes_its_channel_and_the_left_neighbor_takes_over() {
         let mut m = live(vec![session("a", 1), session("b", 2), session("c", 3)]);
         m.handle(Msg::SelectTab("b".into()), t(10));
-        let fx = m.handle(
-            Msg::Ls(Ok(vec![session("a", 1), session("c", 3)])),
-            t(20),
-        );
+        let fx = m.handle(Msg::Ls(Ok(vec![session("a", 1), session("c", 3)])), t(20));
         assert!(fx.contains(&Effect::Detach { name: "b".into() }));
         assert!(has_attach(&fx, "a"));
         assert_eq!(m.view().header.session, "a");
@@ -212,8 +214,13 @@ mod tests {
         assert!(has_attach(&fx, "build"));
         assert_eq!(m.view().naming, None);
         assert!(
-            m.handle(Msg::Attached { name: "build".into() }, t(7))
-                .contains(&Effect::Ls)
+            m.handle(
+                Msg::Attached {
+                    name: "build".into()
+                },
+                t(7)
+            )
+            .contains(&Effect::Ls)
         );
     }
 
@@ -222,7 +229,9 @@ mod tests {
         let mut m = live(vec![session("default", 1)]);
         m.handle(Msg::NewSessionCommit("build".into()), t(6));
         let fx = m.handle(Msg::Ls(Ok(vec![session("default", 1)])), t(500));
-        assert!(!fx.contains(&Effect::Detach { name: "build".into() }));
+        assert!(!fx.contains(&Effect::Detach {
+            name: "build".into()
+        }));
         assert_eq!(m.view().header.session, "build");
         // Once zmx reports it, it is an ordinary tab and leaves when zmx drops it.
         m.handle(
@@ -230,7 +239,9 @@ mod tests {
             t(1_000),
         );
         let fx = m.handle(Msg::Ls(Ok(vec![session("default", 1)])), t(2_000));
-        assert!(fx.contains(&Effect::Detach { name: "build".into() }));
+        assert!(fx.contains(&Effect::Detach {
+            name: "build".into()
+        }));
     }
 
     #[test]

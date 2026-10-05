@@ -54,10 +54,7 @@ impl TerminalModel {
     pub(crate) fn on_redial_failed(&mut self, err: ConnectError, fx: &mut Vec<Effect>) {
         if let ConnectError::HostKeyChanged { expected, got } = err {
             self.status = ConnStatus::Disconnected;
-            self.screen = Screen::Refused {
-                expected,
-                got,
-            };
+            self.screen = Screen::Refused { expected, got };
             fx.push(Effect::Close);
             fx.push(Effect::Ui(UiEffect::Navigate(self.screen.clone())));
             return;
@@ -162,7 +159,35 @@ impl TerminalModel {
         }
     }
 
-    pub(crate) fn tick_sync(&mut self, _now: Duration, _fx: &mut Vec<Effect>) {}
+    /// The frame timer: end synchronized updates past their deadline, and blink the cursor.
+    pub(crate) fn tick_sync(&mut self, now: Duration, fx: &mut Vec<Effect>) {
+        let wall = std::time::Instant::now();
+        let due: Vec<String> = self
+            .tabs
+            .iter()
+            .filter(|(_, t)| t.term.sync_deadline().is_some_and(|d| wall >= d))
+            .map(|(n, _)| n.clone())
+            .collect();
+        for name in due {
+            let active = self.active_name() == Some(name.as_str());
+            let events = self
+                .tabs
+                .get_mut(&name)
+                .map(|t| t.term.flush_sync())
+                .unwrap_or_default();
+            for ev in events {
+                self.on_term_event(&name, ev, active, now, fx);
+            }
+            if active {
+                fx.push(Effect::Redraw);
+            }
+        }
+        if self.style.blink && now.saturating_sub(self.blink_at) >= crate::terminal::frame::BLINK {
+            self.blink_at = now;
+            self.blink_on = !self.blink_on;
+            fx.push(Effect::Redraw);
+        }
+    }
     pub(crate) fn tick_resize(&mut self, now: Duration, fx: &mut Vec<Effect>) {
         if let Some(size) = self.resize.poll(now) {
             fx.push(Effect::ResizeAll(size));
@@ -198,16 +223,12 @@ mod tests {
             m.handle(Msg::RedialDue { generation: g }, t(1_100)),
             vec![Effect::Open]
         );
-        let (after, g) = redial(
-            &m.handle(Msg::OpenFailed(ConnectError::Timeout), t(1_200)),
-        )
-        .unwrap();
+        let (after, g) =
+            redial(&m.handle(Msg::OpenFailed(ConnectError::Timeout), t(1_200))).unwrap();
         assert_eq!(after, Duration::from_secs(2));
         m.handle(Msg::RedialDue { generation: g }, t(3_200));
-        let (after, g) = redial(
-            &m.handle(Msg::OpenFailed(ConnectError::Timeout), t(3_300)),
-        )
-        .unwrap();
+        let (after, g) =
+            redial(&m.handle(Msg::OpenFailed(ConnectError::Timeout), t(3_300))).unwrap();
         assert_eq!(after, Duration::from_secs(4));
         m.handle(Msg::RedialDue { generation: g }, t(7_300));
         let fx = m.handle(Msg::OpenFailed(ConnectError::Timeout), t(7_400));
@@ -243,7 +264,13 @@ mod tests {
             produced: Some("x".into()),
             digit: None,
         };
-        let fx = m.handle(Msg::Key { input: key, mods: Mods::default() }, t(200));
+        let fx = m.handle(
+            Msg::Key {
+                input: key,
+                mods: Mods::default(),
+            },
+            t(200),
+        );
         assert!(!fx.iter().any(|e| matches!(e, Effect::Write { .. })));
     }
 
@@ -252,19 +279,22 @@ mod tests {
         let mut m = live(vec![session("a", 1)]);
         let (_, g) = redial(&m.handle(Msg::Dropped, t(100))).unwrap();
         assert_eq!(
-            m.handle(Msg::Network {
-                online: true,
-                route_changed: false,
-            }, t(200)),
+            m.handle(
+                Msg::Network {
+                    online: true,
+                    route_changed: false,
+                },
+                t(200)
+            ),
             vec![Effect::Open]
         );
-        assert!(m.handle(Msg::RedialDue { generation: g }, t(1_100)).is_empty());
+        assert!(
+            m.handle(Msg::RedialDue { generation: g }, t(1_100))
+                .is_empty()
+        );
         m.handle(Msg::OpenFailed(ConnectError::Timeout), t(1_200));
         m.handle(Msg::Focus(false), t(1_300));
-        assert!(
-            m.handle(Msg::Focus(true), t(1_400))
-                .contains(&Effect::Open)
-        );
+        assert!(m.handle(Msg::Focus(true), t(1_400)).contains(&Effect::Open));
     }
 
     #[test]
@@ -273,10 +303,13 @@ mod tests {
         m.handle(Msg::Dropped, t(100));
         assert_eq!(m.handle(Msg::Resumed, t(200)), vec![Effect::Open]);
         assert!(
-            m.handle(Msg::Network {
-                online: true,
-                route_changed: false,
-            }, t(300))
+            m.handle(
+                Msg::Network {
+                    online: true,
+                    route_changed: false,
+                },
+                t(300)
+            )
             .is_empty()
         );
     }
@@ -293,17 +326,23 @@ mod tests {
     fn a_route_change_redials_but_a_same_route_blip_does_not() {
         let mut m = live(vec![session("a", 1)]);
         assert!(
-            m.handle(Msg::Network {
-                online: true,
-                route_changed: false,
-            }, t(100))
+            m.handle(
+                Msg::Network {
+                    online: true,
+                    route_changed: false,
+                },
+                t(100)
+            )
             .is_empty()
         );
         assert!(
-            m.handle(Msg::Network {
-                online: true,
-                route_changed: true,
-            }, t(200))
+            m.handle(
+                Msg::Network {
+                    online: true,
+                    route_changed: true,
+                },
+                t(200)
+            )
             .contains(&Effect::DropConnection)
         );
     }

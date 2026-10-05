@@ -5,10 +5,10 @@ use tether_core::zmx::attach_command;
 use tether_ssh::{ConnectionEvent, PtyEvent};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
-use tokio::time::{interval, Instant, MissedTickBehavior};
+use tokio::time::{Instant, MissedTickBehavior, interval};
 
 use crate::terminal::frame::FramePacer;
-use crate::terminal::model::{Effect, Msg, TerminalModel, TerminalView, TICK};
+use crate::terminal::model::{Effect, Msg, TICK, TerminalModel, TerminalView};
 use crate::terminal::remote::{PtySink, Remote};
 use crate::terminal::ui_port::UiPort;
 
@@ -303,10 +303,7 @@ mod tests {
         assert_eq!(remote.log()[..3], ["open", "ls", "attach default 80x24"]);
         assert_eq!(
             *remote.sink("default").log.lock().unwrap(),
-            [
-                "resize 80x24",
-                "write ~/.local/bin/zmx attach 'default'\n"
-            ]
+            ["resize 80x24", "write ~/.local/bin/zmx attach 'default'\n"]
         );
         assert_eq!(ui.last_view().header.word, "connected");
     }
@@ -326,13 +323,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let v = ui.last_view();
         assert_eq!(v.header.session, "a");
-        assert!(
-            v.tabs
-                .iter()
-                .find(|t| t.name == "b")
-                .unwrap()
-                .attention
-        );
+        assert!(v.tabs.iter().find(|t| t.name == "b").unwrap().attention);
     }
 
     #[tokio::test(start_paused = true)]

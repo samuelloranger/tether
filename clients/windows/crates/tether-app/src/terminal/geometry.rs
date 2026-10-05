@@ -1,8 +1,8 @@
-use tether_core::fonts::{font_named, FontFace};
+use tether_core::fonts::{FontFace, font_named};
 use tether_core::prefs::CursorShape;
 use tether_core::resize::GridSize;
-use tether_core::theme::{theme_named, TerminalTheme};
-use tether_term::{cell_metrics, grid_size, pt_to_px, Cell};
+use tether_core::theme::{TerminalTheme, theme_named};
+use tether_term::{Cell, cell_metrics, grid_size, pt_to_px};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TermStyle {
@@ -43,9 +43,9 @@ pub struct Layout {
 /// Points convert at the monitor's scale, so 14 pt is the same physical size at 100 % and 200 %.
 pub fn layout(width_px: u32, height_px: u32, scale: f32, style: &TermStyle) -> Layout {
     let size_px = pt_to_px(style.size_pt, scale);
-    // Round at 100 % then scale so padding and cell metrics stay consistent across DPI.
     let padding_px = (pt_to_px(style.padding_pt, 1.0).round() * scale).round() as u32;
-    let (base_w, base_h) = cell_metrics(style.font, pt_to_px(style.size_pt, 1.0), style.line_spacing);
+    let (base_w, base_h) =
+        cell_metrics(style.font, pt_to_px(style.size_pt, 1.0), style.line_spacing);
     let cell_w = base_w * scale;
     let cell_h = base_h * scale;
     let size = grid_size(width_px, height_px, padding_px, (cell_w, cell_h));
@@ -102,7 +102,10 @@ mod tests {
         let two = layout(3200, 2000, 2.0, &s);
         assert!((two.size_px - 2.0 * one.size_px).abs() < 0.01);
         assert_eq!(two.padding_px, 2 * one.padding_px);
-        assert_eq!((one.size.cols, one.size.rows), (two.size.cols, two.size.rows));
+        assert_eq!(
+            (one.size.cols, one.size.rows),
+            (two.size.cols, two.size.rows)
+        );
         assert_ne!(one.size.width_px, two.size.width_px);
     }
 

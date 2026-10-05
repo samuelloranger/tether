@@ -2,16 +2,23 @@ use std::path::PathBuf;
 use tether_core::osc::Progress;
 use tether_core::paste::ClipboardSnapshot;
 
-pub mod wndproc;
-#[cfg(windows)] pub mod aumid;
-#[cfg(windows)] pub mod clipboard;
+#[cfg(windows)]
+pub mod aumid;
+#[cfg(windows)]
+pub mod clipboard;
 #[cfg(windows)]
 pub mod file_dialog;
-#[cfg(windows)] pub mod network;
-#[cfg(windows)] pub mod shell;
-#[cfg(windows)] pub mod taskbar;
-#[cfg(windows)] pub mod toast;
-#[cfg(windows)] pub mod wic;
+#[cfg(windows)]
+pub mod network;
+#[cfg(windows)]
+pub mod shell;
+#[cfg(windows)]
+pub mod taskbar;
+#[cfg(windows)]
+pub mod toast;
+#[cfg(windows)]
+pub mod wic;
+pub mod wndproc;
 
 pub trait Platform: Send + Sync + 'static {
     fn flash_taskbar(&self);
@@ -34,7 +41,11 @@ impl Platform for NullPlatform {
     fn toast(&self, _s: &str, _t: &str, _b: &str) {}
     fn open_url(&self, _u: &str) {}
     fn set_clipboard(&self, _t: &str) {}
-    fn read_clipboard(&self) -> ClipboardSnapshot { ClipboardSnapshot::Empty }
+    fn read_clipboard(&self) -> ClipboardSnapshot {
+        ClipboardSnapshot::Empty
+    }
     fn bring_to_front(&self) {}
-    fn pick_files(&self) -> Vec<PathBuf> { Vec::new() }
+    fn pick_files(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }

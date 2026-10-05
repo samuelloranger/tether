@@ -296,7 +296,7 @@ impl App {
         let weak = Rc::downgrade(self);
         self.ui.window().on_winit_window_event(move |_, event| {
             if let Some(app) = weak.upgrade() {
-                app.on_winit_event(event);
+                return app.on_winit_event(event);
             }
             EventResult::Propagate
         });
@@ -365,7 +365,10 @@ impl App {
         self.refresh_pickers();
     }
 
-    pub fn on_winit_event(self: &Rc<Self>, event: &WindowEvent) {
+    pub fn on_winit_event(self: &Rc<Self>, event: &WindowEvent) -> EventResult {
+        if crate::terminal::glue::on_winit_event(self, event) == EventResult::PreventDefault {
+            return EventResult::PreventDefault;
+        }
         match event {
             WindowEvent::ThemeChanged(_) => {
                 self.system_light.set(platform::system_uses_light());
@@ -375,6 +378,7 @@ impl App {
             WindowEvent::ScaleFactorChanged { .. } => self.refresh_preview(),
             _ => {}
         }
+        EventResult::Propagate
     }
 
     fn parse_id(id: &SharedString) -> Option<Uuid> {

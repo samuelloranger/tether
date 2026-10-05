@@ -78,7 +78,11 @@ impl UiPort for SlintUi {
             }
             UiEffect::FlashTaskbar => platform.flash_taskbar(),
             UiEffect::Taskbar(p) => platform.set_progress(p.as_ref()),
-            UiEffect::Toast { session, title, body } => platform.toast(&session, &title, &body),
+            UiEffect::Toast {
+                session,
+                title,
+                body,
+            } => platform.toast(&session, &title, &body),
             UiEffect::OpenUrl(url) => platform.open_url(&url),
             UiEffect::SetClipboard(text) => platform.set_clipboard(&text),
             UiEffect::BringToFront => platform.bring_to_front(),
