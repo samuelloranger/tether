@@ -2,6 +2,10 @@ use crate::terminal::model::Msg;
 
 pub const WM_SYSCOMMAND: u32 = 0x0112;
 pub const SC_KEYMENU: usize = 0xF100;
+pub const WM_SYSCHAR: u32 = 0x0106;
+pub const WM_MENUCHAR: u32 = 0x0120;
+/// HIWORD of a WM_MENUCHAR result: close the menu without the default beep.
+pub const MNC_CLOSE: isize = 1;
 pub const WM_POWERBROADCAST: u32 = 0x0218;
 pub const PBT_APMRESUMEAUTOMATIC: usize = 0x0012;
 pub const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
@@ -11,6 +15,10 @@ pub const WTS_SESSION_UNLOCK: usize = 0x8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemEvent {
     SwallowKeyMenu,
+    /// Alt+letter with no menu to match: DefWindowProc would beep on every key.
+    SwallowSysChar,
+    /// A key while the window is in menu mode: answered with MNC_CLOSE, not a beep.
+    CloseMenuChar,
     Resumed,
     Locked,
     Unlocked,
@@ -19,6 +27,9 @@ pub enum SystemEvent {
 pub fn classify(msg: u32, wparam: usize) -> Option<SystemEvent> {
     match msg {
         WM_SYSCOMMAND if wparam & 0xFFF0 == SC_KEYMENU => Some(SystemEvent::SwallowKeyMenu),
+        // Alt+Space still opens the window menu.
+        WM_SYSCHAR if wparam != 0x20 => Some(SystemEvent::SwallowSysChar),
+        WM_MENUCHAR => Some(SystemEvent::CloseMenuChar),
         WM_POWERBROADCAST if wparam == PBT_APMRESUMEAUTOMATIC => Some(SystemEvent::Resumed),
         WM_WTSSESSION_CHANGE if wparam == WTS_SESSION_LOCK => Some(SystemEvent::Locked),
         WM_WTSSESSION_CHANGE if wparam == WTS_SESSION_UNLOCK => Some(SystemEvent::Unlocked),
@@ -28,7 +39,9 @@ pub fn classify(msg: u32, wparam: usize) -> Option<SystemEvent> {
 
 pub fn to_msg(ev: SystemEvent) -> Option<Msg> {
     match ev {
-        SystemEvent::SwallowKeyMenu => None,
+        SystemEvent::SwallowKeyMenu | SystemEvent::SwallowSysChar | SystemEvent::CloseMenuChar => {
+            None
+        }
         SystemEvent::Resumed => Some(Msg::Resumed),
         SystemEvent::Locked => Some(Msg::Locked),
         SystemEvent::Unlocked => Some(Msg::Unlocked),
@@ -51,6 +64,20 @@ mod tests {
         );
         assert_eq!(classify(WM_SYSCOMMAND, 0xF060), None);
         assert_eq!(classify(WM_SYSCOMMAND, 0xF020), None);
+    }
+
+    #[test]
+    fn keys_that_would_beep_are_swallowed() {
+        assert_eq!(
+            classify(WM_SYSCHAR, b'a' as usize),
+            Some(SystemEvent::SwallowSysChar)
+        );
+        assert_eq!(classify(WM_SYSCHAR, 0x20), None);
+        assert_eq!(
+            classify(WM_MENUCHAR, b'x' as usize),
+            Some(SystemEvent::CloseMenuChar)
+        );
+        assert!(to_msg(SystemEvent::SwallowSysChar).is_none());
     }
 
     #[test]
@@ -90,7 +117,8 @@ mod win {
         _data: usize,
     ) -> LRESULT {
         match classify(msg, wparam.0) {
-            Some(SystemEvent::SwallowKeyMenu) => return LRESULT(0),
+            Some(SystemEvent::SwallowKeyMenu | SystemEvent::SwallowSysChar) => return LRESULT(0),
+            Some(SystemEvent::CloseMenuChar) => return LRESULT(MNC_CLOSE << 16),
             Some(ev) => {
                 if let Some(m) = to_msg(ev) {
                     let _ = slint::invoke_from_event_loop(move || {
