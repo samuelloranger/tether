@@ -2,7 +2,7 @@
 mod win;
 
 #[cfg(windows)]
-pub use win::{apply_caption, placement_visible, system_uses_light};
+pub use win::{apply_caption, placement_visible, show_error_box, system_uses_light};
 
 #[cfg(not(windows))]
 pub fn apply_caption(_hwnd: isize, _dark: bool) {}
@@ -16,6 +16,9 @@ pub fn system_uses_light() -> bool {
 pub fn placement_visible(_p: &tether_core::WindowPlacement) -> bool {
     true
 }
+
+#[cfg(not(windows))]
+pub fn show_error_box(_message: &str) {}
 
 pub fn hwnd_of(window: &slint::Window) -> Option<isize> {
     use slint::winit_030::{

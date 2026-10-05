@@ -118,11 +118,11 @@ impl AppState {
 
     fn add_key(&mut self, record: tether_core::KeyRecord, secret: &[u8]) -> Result<Uuid, AppError> {
         let id = record.id;
+        self.secrets.set(&key_account(id), secret)?;
         let mut next = self.keys.clone();
         next.add(record);
-        self.data.save(KEYS_FILE, &next)?;
-        if let Err(e) = self.secrets.set(&key_account(id), secret) {
-            let _ = self.data.save(KEYS_FILE, &self.keys);
+        if let Err(e) = self.data.save(KEYS_FILE, &next) {
+            let _ = self.secrets.delete(&key_account(id));
             return Err(e.into());
         }
         self.keys = next;
@@ -172,7 +172,11 @@ mod tests {
             .unwrap();
         assert_eq!(s.profiles.machines[0].host, "192.0.2.10");
         assert_eq!(
-            secrets.get(&password_account(id)).unwrap().unwrap().as_slice(),
+            secrets
+                .get(&password_account(id))
+                .unwrap()
+                .unwrap()
+                .as_slice(),
             b"hunter2"
         );
         let (reloaded, _, _) = state(dir.path());
@@ -184,7 +188,9 @@ mod tests {
     fn edit_keeps_order_and_leaving_password_deletes_it() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, secrets, _) = state(dir.path());
-        let a = s.save_server(None, &form(AuthChoice::Password, "pw")).unwrap();
+        let a = s
+            .save_server(None, &form(AuthChoice::Password, "pw"))
+            .unwrap();
         let mut second = form(AuthChoice::Agent, "");
         second.name = "vps".into();
         s.save_server(None, &second).unwrap();
@@ -200,12 +206,18 @@ mod tests {
     fn empty_password_on_edit_keeps_the_saved_one() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, secrets, _) = state(dir.path());
-        let a = s.save_server(None, &form(AuthChoice::Password, "pw")).unwrap();
+        let a = s
+            .save_server(None, &form(AuthChoice::Password, "pw"))
+            .unwrap();
         let mut edit = form(AuthChoice::Password, "");
         edit.has_saved_password = true;
         s.save_server(Some(a), &edit).unwrap();
         assert_eq!(
-            secrets.get(&password_account(a)).unwrap().unwrap().as_slice(),
+            secrets
+                .get(&password_account(a))
+                .unwrap()
+                .unwrap()
+                .as_slice(),
             b"pw"
         );
     }
@@ -214,7 +226,9 @@ mod tests {
     fn remove_machine_forgets_password_but_keeps_the_pin() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, secrets, hostkeys) = state(dir.path());
-        let a = s.save_server(None, &form(AuthChoice::Password, "pw")).unwrap();
+        let a = s
+            .save_server(None, &form(AuthChoice::Password, "pw"))
+            .unwrap();
         hostkeys.pin("192.0.2.10", 22, "aa:bb");
         s.remove_machine(a).unwrap();
         assert!(s.profiles.machines.is_empty());
@@ -274,18 +288,39 @@ mod tests {
         let blocker = dir.path().join("not-a-dir");
         std::fs::write(&blocker, b"x").unwrap();
         s.data = DataDir::new(&blocker);
-        let err = s.save_server(None, &form(AuthChoice::Agent, "")).unwrap_err();
+        let err = s
+            .save_server(None, &form(AuthChoice::Agent, ""))
+            .unwrap_err();
         assert!(s.profiles.machines.is_empty());
         assert!(save_failed_hint(&err).starts_with("Couldn't save: "));
         assert!(s.generate_key("k", 1).is_err());
         assert!(s.keys.keys.is_empty());
+        let trace = Arc::new(super::trace_secrets::TraceSecrets::default());
+        s.secrets = trace.clone();
+        assert!(s.generate_key("k", 1).is_err());
+        assert!(s.keys.keys.is_empty());
+        let log = trace.log.lock().unwrap();
+        let set: Vec<_> = log
+            .iter()
+            .filter(|(_, op)| *op == "set")
+            .map(|(account, _)| account.clone())
+            .collect();
+        assert!(!set.is_empty());
+        for account in set {
+            assert!(
+                log.iter().any(|(a, op)| a == &account && *op == "delete"),
+                "secret {account} was stored and not removed"
+            );
+        }
     }
 
     #[test]
     fn failed_save_keeps_the_password() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, secrets, _) = state(dir.path());
-        let a = s.save_server(None, &form(AuthChoice::Password, "pw")).unwrap();
+        let a = s
+            .save_server(None, &form(AuthChoice::Password, "pw"))
+            .unwrap();
         let blocker = dir.path().join("blocked");
         std::fs::write(&blocker, b"x").unwrap();
         s.data = DataDir::new(&blocker);
@@ -293,12 +328,45 @@ mod tests {
         edit.has_saved_password = true;
         assert!(s.save_server(Some(a), &edit).is_err());
         assert_eq!(
-            secrets.get(&password_account(a)).unwrap().unwrap().as_slice(),
+            secrets
+                .get(&password_account(a))
+                .unwrap()
+                .unwrap()
+                .as_slice(),
             b"pw"
         );
-        assert_eq!(
-            s.profiles.get(a).unwrap().auth,
-            tether_core::Auth::Password
-        );
+        assert_eq!(s.profiles.get(a).unwrap().auth, tether_core::Auth::Password);
+    }
+}
+
+#[cfg(test)]
+mod trace_secrets {
+    use std::sync::Mutex;
+
+    use super::*;
+    use zeroize::Zeroizing;
+
+    #[derive(Default)]
+    pub struct TraceSecrets {
+        pub log: Mutex<Vec<(String, &'static str)>>,
+    }
+
+    impl SecretStore for TraceSecrets {
+        fn get(&self, _account: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+            Ok(None)
+        }
+
+        fn set(&self, account: &str, _secret: &[u8]) -> Result<(), SecretError> {
+            self.log.lock().unwrap().push((account.to_string(), "set"));
+            Ok(())
+        }
+
+        fn delete(&self, account: &str) -> Result<(), SecretError> {
+            self.log
+                .lock()
+                .unwrap()
+                .push((account.to_string(), "delete"));
+            Ok(())
+        }
     }
 }

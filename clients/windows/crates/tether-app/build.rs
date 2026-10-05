@@ -11,9 +11,15 @@ fn copy_licenses() {
     let windows = manifest.join("../..");
     let apple = windows.join("../apple/TetherKit/Sources/TetherKit/Resources");
     let sources = [
-        (apple.join("TerminalThemes-LICENSE.txt"), "TerminalThemes-LICENSE.txt"),
+        (
+            apple.join("TerminalThemes-LICENSE.txt"),
+            "TerminalThemes-LICENSE.txt",
+        ),
         (apple.join("Fonts/LICENSES.md"), "Fonts-LICENSES.md"),
-        (windows.join("assets/fonts/CascadiaCode-LICENSE.txt"), "CascadiaCode-LICENSE.txt"),
+        (
+            windows.join("assets/fonts/CascadiaCode-LICENSE.txt"),
+            "CascadiaCode-LICENSE.txt",
+        ),
     ];
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let licenses = out.ancestors().nth(3).unwrap().join("licenses");

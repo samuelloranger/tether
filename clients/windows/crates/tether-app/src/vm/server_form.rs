@@ -238,9 +238,6 @@ mod tests {
 
     #[test]
     fn key_names_are_in_vault_order() {
-        assert_eq!(
-            ServerFormVm::key_names(&keys()),
-            vec!["id_ed25519", "work"]
-        );
+        assert_eq!(ServerFormVm::key_names(&keys()), vec!["id_ed25519", "work"]);
     }
 }

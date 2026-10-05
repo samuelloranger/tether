@@ -103,7 +103,11 @@ impl KeyMaterialVm {
     }
 
     pub fn apply(&mut self, name: String, private: String, public: String) {
-        self.form = KeyForm { name, private, public };
+        self.form = KeyForm {
+            name,
+            private,
+            public,
+        };
         self.error = None;
     }
 
@@ -133,7 +137,11 @@ mod tests {
             "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n",
         )
         .unwrap();
-        fs::write(dir.path().join("id_ed25519.pub"), "ssh-ed25519 AAAA me@pc\n").unwrap();
+        fs::write(
+            dir.path().join("id_ed25519.pub"),
+            "ssh-ed25519 AAAA me@pc\n",
+        )
+        .unwrap();
         let loaded = load_key_file(&path).unwrap();
         assert!(loaded.private.contains("OPENSSH PRIVATE KEY"));
         assert_eq!(loaded.name.as_deref(), Some("id_ed25519"));
@@ -178,7 +186,11 @@ mod tests {
             },
         );
         assert_eq!(
-            (form.name.as_str(), form.private.as_str(), form.public.as_str()),
+            (
+                form.name.as_str(),
+                form.private.as_str(),
+                form.public.as_str()
+            ),
             ("laptop", "P", "ssh-rsa X")
         );
         let mut blank = KeyForm {

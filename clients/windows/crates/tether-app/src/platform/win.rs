@@ -9,11 +9,20 @@ use windows::{
             Gdi::{MONITOR_DEFAULTTONULL, MonitorFromRect},
         },
         System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW},
+        UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW},
     },
-    core::w,
+    core::{HSTRING, w},
 };
 
 use crate::vm::scene::caption_colorref;
+
+pub fn show_error_box(message: &str) {
+    let text = HSTRING::from(message);
+    let title = HSTRING::from("Tether");
+    unsafe {
+        let _ = MessageBoxW(None, &text, &title, MB_OK | MB_ICONERROR);
+    }
+}
 
 pub fn apply_caption(hwnd: isize, dark: bool) {
     let hwnd = HWND(hwnd as *mut c_void);

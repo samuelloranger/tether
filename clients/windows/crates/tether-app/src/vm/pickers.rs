@@ -26,7 +26,9 @@ pub fn scheme_rows(query: &str, active: &str) -> Vec<SchemeRowVm> {
             foreground: t.foreground,
             blue: t.ansi[4],
             green: t.ansi[2],
-            dots: [t.ansi[1], t.ansi[2], t.ansi[3], t.ansi[4], t.ansi[5], t.ansi[6]],
+            dots: [
+                t.ansi[1], t.ansi[2], t.ansi[3], t.ansi[4], t.ansi[5], t.ansi[6],
+            ],
             meta: if t.is_light() { "Light" } else { "Dark" },
             active: &t.id == active,
         })
@@ -80,12 +82,7 @@ mod tests {
         assert_eq!(
             row.dots,
             [
-                t.ansi[1],
-                t.ansi[2],
-                t.ansi[3],
-                t.ansi[4],
-                t.ansi[5],
-                t.ansi[6]
+                t.ansi[1], t.ansi[2], t.ansi[3], t.ansi[4], t.ansi[5], t.ansi[6]
             ]
         );
     }

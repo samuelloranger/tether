@@ -115,12 +115,9 @@ mod tests {
         let mut p = prefs();
         p.font = "menlo".into();
         let img = Preview::new().render(&p, 1.0, true);
-        assert_eq!(
-            (img.width, img.height),
-            {
-                let g = geometry(&prefs(), 1.0);
-                (g.width_px, g.height_px)
-            }
-        );
+        assert_eq!((img.width, img.height), {
+            let g = geometry(&prefs(), 1.0);
+            (g.width_px, g.height_px)
+        });
     }
 }

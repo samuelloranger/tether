@@ -39,7 +39,9 @@ impl DataDir {
         let bytes = match read_retry(&path) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(T::default()),
-            Err(e) => return Err(e),
+            Err(e) => {
+                return Err(io::Error::new(e.kind(), format!("{file}: {e}")));
+            }
         };
         match serde_json::from_slice(&bytes) {
             Ok(value) => Ok(value),

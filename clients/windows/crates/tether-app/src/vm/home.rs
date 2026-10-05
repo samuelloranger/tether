@@ -230,11 +230,11 @@ mod tests {
         let keys = KeyRecords {
             keys: vec![key(9, "id_ed25519")],
         };
+        assert_eq!(subtitle(HomeTab::Machines, &profiles, &keys), "2 machines");
         assert_eq!(
-            subtitle(HomeTab::Machines, &profiles, &keys),
-            "2 machines"
+            subtitle(HomeTab::Keys, &profiles, &keys),
+            "1 key · on this PC"
         );
-        assert_eq!(subtitle(HomeTab::Keys, &profiles, &keys), "1 key · on this PC");
         assert_eq!(
             subtitle(HomeTab::Machines, &Profiles::default(), &keys),
             "no machines yet"
@@ -248,8 +248,20 @@ mod tests {
         };
         let profiles = Profiles {
             machines: vec![
-                machine(1, "devbox", Auth::Key { id: Uuid::from_u128(9) }),
-                machine(2, "old", Auth::Key { id: Uuid::from_u128(8) }),
+                machine(
+                    1,
+                    "devbox",
+                    Auth::Key {
+                        id: Uuid::from_u128(9),
+                    },
+                ),
+                machine(
+                    2,
+                    "old",
+                    Auth::Key {
+                        id: Uuid::from_u128(8),
+                    },
+                ),
             ],
         };
         let cards = machine_cards(&profiles, &keys);
@@ -266,12 +278,17 @@ mod tests {
             keys: vec![key(9, "id_ed25519")],
         };
         let profiles = Profiles {
-            machines: vec![machine(1, "devbox", Auth::Key {
-                id: Uuid::from_u128(9),
-            })],
+            machines: vec![machine(
+                1,
+                "devbox",
+                Auth::Key {
+                    id: Uuid::from_u128(9),
+                },
+            )],
         };
-        let card = &key_cards(&keys, &profiles, |_| NaiveDate::from_ymd_opt(2026, 10, 5).unwrap())
-            [0];
+        let card = &key_cards(&keys, &profiles, |_| {
+            NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()
+        })[0];
         assert_eq!(card.origin, "generated");
         assert_eq!(card.meta, "ssh-ed25519 · created Oct 5");
         assert_eq!(card.fingerprint, "SHA256:Lq/BDv7G…McRfzA");

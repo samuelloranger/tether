@@ -86,10 +86,7 @@ mod tests {
             capture(p(-32000, -32000, 160, 28, false), true, Some(&normal)),
             Some(normal)
         );
-        assert_eq!(
-            capture(p(-32000, -32000, 160, 28, false), true, None),
-            None
-        );
+        assert_eq!(capture(p(-32000, -32000, 160, 28, false), true, None), None);
     }
 
     #[test]

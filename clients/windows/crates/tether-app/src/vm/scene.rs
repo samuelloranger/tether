@@ -18,7 +18,11 @@ pub fn colorref(rgb: u32) -> u32 {
 }
 
 pub fn caption_colorref(dark: bool) -> u32 {
-    colorref(if dark { NIGHT_BACKGROUND } else { LIGHT_BACKGROUND })
+    colorref(if dark {
+        NIGHT_BACKGROUND
+    } else {
+        LIGHT_BACKGROUND
+    })
 }
 
 #[cfg(test)]

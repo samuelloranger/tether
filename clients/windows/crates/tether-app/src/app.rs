@@ -1,9 +1,12 @@
-use std::{cell::{Cell, RefCell}, error::Error, rc::Rc, sync::Arc};
-
-use slint::{
-    ComponentHandle, ModelRc, SharedPixelBuffer, SharedString, VecModel,
+use std::{
+    cell::{Cell, RefCell},
+    error::Error,
+    rc::Rc,
+    sync::Arc,
 };
+
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
+use slint::{ComponentHandle, ModelRc, SharedPixelBuffer, SharedString, VecModel};
 use tether_core::{
     DataDir, JsonHostKeys, KeyOrigin, SecretStore, TerminalPrefs, WindowPlacement, theme_named,
 };
@@ -13,19 +16,17 @@ use crate::{
     AppBridge, AppWindow, FontRow, HomeBridge, KeyCard, KeyFormBridge, MachineCard, PageKind,
     PickerBridge, SchemeRow, ServerFormBridge, SettingsBridge, Tokens,
     open_machine::on_open_machine,
+    platform,
     preview::Preview,
     router::{Dialog, Page, Router},
     vm::{
-        app_state::{save_failed_hint, unix_now, AppState},
+        app_state::{AppState, save_failed_hint, unix_now},
         home::{self, HomeTab},
         key_forms::{self, GenerateVm, KeyMaterialVm},
-        pickers,
-        placement,
-        scene,
+        pickers, placement, scene,
         server_form::{ServerFormVm, ServerInput},
         settings,
     },
-    platform,
 };
 
 pub struct App {
@@ -79,10 +80,7 @@ fn on<F: Fn(&Rc<App>) + 'static>(app: &Rc<App>, f: F) -> impl Fn() + 'static {
     }
 }
 
-fn on_id<F: Fn(&Rc<App>, Uuid) + 'static>(
-    app: &Rc<App>,
-    f: F,
-) -> impl Fn(SharedString) + 'static {
+fn on_id<F: Fn(&Rc<App>, Uuid) + 'static>(app: &Rc<App>, f: F) -> impl Fn(SharedString) + 'static {
     let weak = Rc::downgrade(app);
     move |id| {
         if let (Some(app), Some(id)) = (weak.upgrade(), App::parse_id(&id)) {
@@ -244,7 +242,9 @@ impl App {
             }
         });
         s.on_open_schemes(on(self, |app| {
-            app.ui.global::<PickerBridge>().set_query(SharedString::new());
+            app.ui
+                .global::<PickerBridge>()
+                .set_query(SharedString::new());
             app.refresh_pickers();
             app.router.go(Page::SchemePicker);
             app.refresh_router();
@@ -339,9 +339,10 @@ impl App {
             let s = self.state.borrow();
             match d {
                 Dialog::RemoveMachine(id) => s.profiles.get(id).map(home::remove_machine_copy),
-                Dialog::DeleteKey(id) => {
-                    s.keys.get(id).map(|k| home::delete_key_copy(k, &s.profiles))
-                }
+                Dialog::DeleteKey(id) => s
+                    .keys
+                    .get(id)
+                    .map(|k| home::delete_key_copy(k, &s.profiles)),
             }
         });
         bridge.set_dialog_open(copy.is_some());
@@ -553,10 +554,7 @@ impl App {
         if !vm.can_save() {
             return;
         }
-        let result = self
-            .state
-            .borrow_mut()
-            .save_server(vm.editing, &vm.form);
+        let result = self.state.borrow_mut().save_server(vm.editing, &vm.form);
         match result {
             Ok(_) => {
                 *slot = None;
@@ -721,11 +719,9 @@ impl App {
             .borrow_mut()
             .render(&prefs, scale, self.cursor_on.get());
         let b = self.ui.global::<SettingsBridge>();
-        b.set_preview(slint::Image::from_rgba8(SharedPixelBuffer::clone_from_slice(
-            &img.pixels,
-            img.width,
-            img.height,
-        )));
+        b.set_preview(slint::Image::from_rgba8(
+            SharedPixelBuffer::clone_from_slice(&img.pixels, img.width, img.height),
+        ));
         b.set_preview_background(Self::rgb(theme_named(&prefs.scheme).background));
     }
 

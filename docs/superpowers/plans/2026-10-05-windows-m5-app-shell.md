@@ -4828,4 +4828,6 @@ No Rust public name from a Produces block was renamed.
 - Slint 1.18: `SchemeRowView` and `FontRowView` use property `entry` instead of `row` (`row` clashes with `ListView`). Scroll views use `content-width` / `content-height` instead of the deprecated `viewport-*` properties.
 - `preview::geometry` rounds total padding as `(2.0 * pt_to_px(padding, scale)).round()` so a doubled scale still matches the test.
 - `Router::home`, `App::runtime`, and `AppState::hostkeys` allow `dead_code`. They are part of the M6 surface.
+- Startup failures go through `startup_message`: a data-file error names that file; other errors keep their text. Release builds install a panic hook that shows the panic payload in the same box. `add_key` stores the secret before `keys.json` and deletes it if the save fails. No public signature changes.
+
 
