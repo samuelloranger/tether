@@ -47,8 +47,8 @@ public enum MediaTransfer {
   public static func uploadsDirectory(fromOutput output: String?) -> String? {
     guard let output else { return nil }
     let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-    guard lines.count >= 2, lines[lines.count - 1] == uploadsResolvedMarker else { return nil }
-    let path = lines[lines.count - 2]
+    guard let marker = lines.lastIndex(of: uploadsResolvedMarker), marker > 0 else { return nil }
+    let path = lines[marker - 1]
     return path.hasPrefix("/") ? path : nil
   }
 

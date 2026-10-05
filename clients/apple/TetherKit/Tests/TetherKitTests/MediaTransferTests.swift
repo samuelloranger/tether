@@ -21,6 +21,8 @@ final class MediaTransferTests: XCTestCase {
     let ok = MediaTransfer.uploadsResolvedMarker
     XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "/home/u/.tether/uploads\n\(ok)\n"), "/home/u/.tether/uploads")
     XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "motd noise\n/srv/u/.tether/uploads\n\(ok)\n"), "/srv/u/.tether/uploads")
+    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "/srv/u/.tether/uploads\n\(ok)\nlogout\n"), "/srv/u/.tether/uploads")
+    XCTAssertTrue(MediaTransfer.uploadsDirectoryCommand.hasSuffix("&& echo \(ok)"))
   }
 
   func test_an_unusable_resolve_result_falls_back_to_the_cwd() {
@@ -36,6 +38,7 @@ final class MediaTransferTests: XCTestCase {
     XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.png"))
     XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.JPG"))
     XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.webp"))
+    XCTAssertEqual(MediaTransfer.jpegName(for: "photo-1"), "photo-1.jpg")
   }
 
   func test_the_remote_path_joins_directory_and_name_once() {
