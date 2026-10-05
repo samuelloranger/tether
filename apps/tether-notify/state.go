@@ -60,7 +60,7 @@ func runState(args []string, d stateDeps) error {
 		d.push = func(c PushContent, col string) error { return sendPush(c, col, true) }
 	}
 	if *collapse == "" {
-		*collapse = "agent-" + *session
+		*collapse = agentCollapseID(*session)
 	}
 
 	in := SessionState{Session: *session, Agent: *agent, State: *state, Message: *body, Link: *link, Version: newVersion()}

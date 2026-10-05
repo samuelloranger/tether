@@ -59,6 +59,12 @@ func threadKey(host, session string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// agentCollapseID lets a session's newer agent push replace its older one. It reaches the
+// relay in cleartext as apns-collapse-id, so it carries the hash, not the session name.
+func agentCollapseID(session string) string {
+	return "agent-" + threadKey(hostLabel(), session)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()

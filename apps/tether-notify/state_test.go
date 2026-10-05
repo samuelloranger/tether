@@ -65,7 +65,7 @@ func TestStateDonePushesWhenNobodyAttached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(*pushes) != 1 || (*pushes)[0].collapse != "agent-work" || (*pushes)[0].content.Link != "tether://session/work?host=h" {
+	if len(*pushes) != 1 || (*pushes)[0].collapse != agentCollapseID("work") || (*pushes)[0].content.Link != "tether://session/work?host=h" {
 		t.Fatalf("pushes %+v", *pushes)
 	}
 	s, _ := readSession("work")
