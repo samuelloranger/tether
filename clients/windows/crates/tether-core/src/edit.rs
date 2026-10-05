@@ -10,7 +10,10 @@ pub enum PasswordAction {
     Delete,
 }
 
-pub fn apply_server_form(existing: Option<&Machine>, form: &ServerForm) -> (Machine, PasswordAction) {
+pub fn apply_server_form(
+    existing: Option<&Machine>,
+    form: &ServerForm,
+) -> (Machine, PasswordAction) {
     debug_assert!(form.hint().is_none(), "save is disabled while a hint shows");
     let auth = match form.auth {
         AuthChoice::Password => Auth::Password,
@@ -44,7 +47,14 @@ mod tests {
     use super::*;
 
     fn existing(auth: Auth) -> Machine {
-        Machine { id: Uuid::from_u128(5), name: "devbox".into(), host: "old".into(), port: 22, user: "sam".into(), auth }
+        Machine {
+            id: Uuid::from_u128(5),
+            name: "devbox".into(),
+            host: "old".into(),
+            port: 22,
+            user: "sam".into(),
+            auth,
+        }
     }
 
     fn form(auth: AuthChoice, password: &str, saved: bool) -> ServerForm {
@@ -62,7 +72,10 @@ mod tests {
     #[test]
     fn add_trims_host_and_user_and_falls_back_to_port_22() {
         let (m, action) = apply_server_form(None, &form(AuthChoice::Agent, "", false));
-        assert_eq!((m.host.as_str(), m.user.as_str(), m.port), ("10.0.0.9", "sam", 22));
+        assert_eq!(
+            (m.host.as_str(), m.user.as_str(), m.port),
+            ("10.0.0.9", "sam", 22)
+        );
         assert_eq!(m.auth, Auth::Agent);
         assert!(matches!(action, PasswordAction::Keep));
         assert_ne!(m.id, Uuid::nil());
@@ -100,17 +113,24 @@ mod tests {
     fn leaving_password_deletes_it() {
         let old = existing(Auth::Password);
         let key = Uuid::from_u128(9);
-        let (m, action) = apply_server_form(Some(&old), &form(AuthChoice::Key(Some(key)), "", true));
+        let (m, action) =
+            apply_server_form(Some(&old), &form(AuthChoice::Key(Some(key)), "", true));
         assert_eq!(m.auth, Auth::Key { id: key });
         assert!(matches!(action, PasswordAction::Delete));
-        let (_, action) = apply_server_form(Some(&old), &form(AuthChoice::Agent, "typed-but-ignored", true));
+        let (_, action) = apply_server_form(
+            Some(&old),
+            &form(AuthChoice::Agent, "typed-but-ignored", true),
+        );
         assert!(matches!(action, PasswordAction::Delete));
     }
 
     #[test]
     fn switching_between_key_and_agent_touches_no_password() {
         let old = existing(Auth::Agent);
-        let (_, action) = apply_server_form(Some(&old), &form(AuthChoice::Key(Some(Uuid::from_u128(1))), "", false));
+        let (_, action) = apply_server_form(
+            Some(&old),
+            &form(AuthChoice::Key(Some(Uuid::from_u128(1))), "", false),
+        );
         assert!(matches!(action, PasswordAction::Keep));
     }
 }

@@ -82,7 +82,8 @@ pub fn openssh_ed25519_line(public: &[u8; 32], comment: Option<&str>) -> String 
 /// RFC 8410 one-asymmetric-key wrapping of a raw seed, the same bytes iOS writes.
 pub fn pkcs8_pem_ed25519(seed: &[u8; 32]) -> Zeroizing<String> {
     const PREFIX: [u8; 16] = [
-        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
+        0x20,
     ];
     let mut der = Zeroizing::new(Vec::with_capacity(48));
     der.extend_from_slice(&PREFIX);
@@ -127,7 +128,10 @@ pub fn fingerprint_digest(public_line: &str) -> Option<[u8; 32]> {
 }
 
 pub fn fingerprint(public_line: &str) -> Option<String> {
-    Some(format!("SHA256:{}", STANDARD_NO_PAD.encode(fingerprint_digest(public_line)?)))
+    Some(format!(
+        "SHA256:{}",
+        STANDARD_NO_PAD.encode(fingerprint_digest(public_line)?)
+    ))
 }
 
 pub fn short_fingerprint(fingerprint: &str) -> String {
@@ -177,7 +181,10 @@ pub enum KeyError {
 }
 
 pub fn normalize_pem(text: &str) -> String {
-    let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n").replace('\r', "\n");
+    let text = text
+        .trim_start_matches('\u{feff}')
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
     format!("{}\n", text.trim())
 }
 
@@ -201,13 +208,18 @@ pub fn derive_public_line(private_pem: &str) -> Result<String, KeyError> {
         return Err(KeyError::Encrypted);
     }
     if pem.contains("BEGIN OPENSSH PRIVATE KEY") {
-        let key = ssh_key::PrivateKey::from_openssh(&pem).map_err(|e| KeyError::Invalid(e.to_string()))?;
-        let line = key.public_key().to_openssh().map_err(|e| KeyError::Invalid(e.to_string()))?;
+        let key = ssh_key::PrivateKey::from_openssh(&pem)
+            .map_err(|e| KeyError::Invalid(e.to_string()))?;
+        let line = key
+            .public_key()
+            .to_openssh()
+            .map_err(|e| KeyError::Invalid(e.to_string()))?;
         return public_key_body(&line).ok_or_else(|| KeyError::Invalid("empty public key".into()));
     }
     if pem.contains("BEGIN RSA PRIVATE KEY") {
         use rsa::pkcs1::DecodeRsaPrivateKey;
-        let key = rsa::RsaPrivateKey::from_pkcs1_pem(&pem).map_err(|e| KeyError::Invalid(e.to_string()))?;
+        let key = rsa::RsaPrivateKey::from_pkcs1_pem(&pem)
+            .map_err(|e| KeyError::Invalid(e.to_string()))?;
         return Ok(rsa_line(&key));
     }
     if pem.contains("BEGIN PRIVATE KEY") {
@@ -235,7 +247,9 @@ fn pkcs8_line(pem: &str) -> Result<String, KeyError> {
         let point = k.public_key().to_encoded_point(false);
         return Ok(ecdsa_line("nistp384", point.as_bytes()));
     }
-    Err(KeyError::Invalid("not an Ed25519, RSA, P-256 or P-384 PKCS#8 key".into()))
+    Err(KeyError::Invalid(
+        "not an Ed25519, RSA, P-256 or P-384 PKCS#8 key".into(),
+    ))
 }
 
 /// SSH mpint: big-endian, no leading zeros, a 0x00 pad when the high bit is set.
@@ -291,7 +305,10 @@ mod record_tests {
 
     #[test]
     fn origin_serializes_lowercase_and_labels_match_the_capsule() {
-        assert_eq!(serde_json::to_string(&KeyOrigin::Pasted).unwrap(), "\"pasted\"");
+        assert_eq!(
+            serde_json::to_string(&KeyOrigin::Pasted).unwrap(),
+            "\"pasted\""
+        );
         assert_eq!(KeyOrigin::Generated.label(), "generated");
         assert_eq!(KeyOrigin::Imported.label(), "imported");
     }
@@ -320,20 +337,26 @@ mod encoding_tests {
     use super::*;
 
     const SEED: [u8; 32] = [
-        0x0b, 0x8a, 0x44, 0x0c, 0x22, 0x48, 0x54, 0xfb, 0x4f, 0x88, 0x1b, 0x1b, 0xed, 0x94, 0x74, 0x57,
-        0xf9, 0x89, 0x5f, 0x09, 0xbc, 0x28, 0xe8, 0xf0, 0xe8, 0xfb, 0xff, 0x54, 0x36, 0x87, 0x70, 0x1b,
+        0x0b, 0x8a, 0x44, 0x0c, 0x22, 0x48, 0x54, 0xfb, 0x4f, 0x88, 0x1b, 0x1b, 0xed, 0x94, 0x74,
+        0x57, 0xf9, 0x89, 0x5f, 0x09, 0xbc, 0x28, 0xe8, 0xf0, 0xe8, 0xfb, 0xff, 0x54, 0x36, 0x87,
+        0x70, 0x1b,
     ];
     const PUB: [u8; 32] = [
-        0xba, 0xbf, 0x04, 0x3b, 0xfb, 0x1a, 0x9f, 0xf5, 0xc3, 0x30, 0x4c, 0x17, 0xe0, 0xef, 0x11, 0x7e,
-        0xa6, 0x58, 0x92, 0x11, 0xd0, 0xdf, 0x15, 0xc0, 0x10, 0xe8, 0x36, 0x2c, 0x8c, 0x71, 0x17, 0xf3,
+        0xba, 0xbf, 0x04, 0x3b, 0xfb, 0x1a, 0x9f, 0xf5, 0xc3, 0x30, 0x4c, 0x17, 0xe0, 0xef, 0x11,
+        0x7e, 0xa6, 0x58, 0x92, 0x11, 0xd0, 0xdf, 0x15, 0xc0, 0x10, 0xe8, 0x36, 0x2c, 0x8c, 0x71,
+        0x17, 0xf3,
     ];
-    const LINE: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILq/BDv7Gp/1wzBMF+DvEX6mWJIR0N8VwBDoNiyMcRfz";
+    const LINE: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILq/BDv7Gp/1wzBMF+DvEX6mWJIR0N8VwBDoNiyMcRfz";
     const FP: &str = "SHA256:qQubUJmzqluQ5lmjKUy3awN04Qv0ts1nr4pZWS2gI8o";
 
     #[test]
     fn builds_the_openssh_line_with_and_without_comment() {
         assert_eq!(openssh_ed25519_line(&PUB, None), LINE);
-        assert_eq!(openssh_ed25519_line(&PUB, Some("me@pc")), format!("{LINE} me@pc"));
+        assert_eq!(
+            openssh_ed25519_line(&PUB, Some("me@pc")),
+            format!("{LINE} me@pc")
+        );
         assert_eq!(openssh_ed25519_line(&PUB, Some("")), LINE);
     }
 
@@ -357,7 +380,10 @@ mod encoding_tests {
     fn algorithm_is_the_first_token() {
         assert_eq!(algorithm_of(LINE), Some("ssh-ed25519"));
         assert_eq!(algorithm_of("  ssh-rsa AAAAB3 x"), Some("ssh-rsa"));
-        assert_eq!(algorithm_of("ecdsa-sha2-nistp256 AAAAE2"), Some("ecdsa-sha2-nistp256"));
+        assert_eq!(
+            algorithm_of("ecdsa-sha2-nistp256 AAAAE2"),
+            Some("ecdsa-sha2-nistp256")
+        );
         assert_eq!(algorithm_of("   "), None);
     }
 
@@ -400,7 +426,10 @@ mod encoding_tests {
         assert_eq!(record.created, 1_791_082_819);
         assert_eq!(record.name, "laptop");
         assert!(record.public_line.ends_with(" laptop"));
-        assert_eq!(fingerprint(&record.public_line).unwrap(), record.fingerprint);
+        assert_eq!(
+            fingerprint(&record.public_line).unwrap(),
+            record.fingerprint
+        );
 
         let signing = ed25519_dalek::SigningKey::from_pkcs8_pem(&pem).unwrap();
         let blob = base64::Engine::decode(
@@ -463,8 +492,13 @@ mod parse_tests {
     #[test]
     fn encrypted_keys_are_detected() {
         assert!(is_encrypted(ED_ENC));
-        assert!(matches!(derive_public_line(ED_ENC), Err(KeyError::Encrypted)));
-        assert!(is_encrypted("-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIB\n-----END ENCRYPTED PRIVATE KEY-----\n"));
+        assert!(matches!(
+            derive_public_line(ED_ENC),
+            Err(KeyError::Encrypted)
+        ));
+        assert!(is_encrypted(
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIB\n-----END ENCRYPTED PRIVATE KEY-----\n"
+        ));
         let legacy = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAAAA\n-----END RSA PRIVATE KEY-----\n";
         assert!(is_encrypted(legacy));
         assert!(!is_encrypted(ED_PRIV));
@@ -474,22 +508,42 @@ mod parse_tests {
 
     #[test]
     fn garbage_and_unsupported_formats_are_errors() {
-        assert!(matches!(derive_public_line("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"), Err(KeyError::Invalid(_))));
-        assert!(matches!(derive_public_line("-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n"), Err(KeyError::Unsupported)));
-        assert!(matches!(derive_public_line("hello"), Err(KeyError::Unsupported)));
+        assert!(matches!(
+            derive_public_line("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"),
+            Err(KeyError::Invalid(_))
+        ));
+        assert!(matches!(
+            derive_public_line(
+                "-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n"
+            ),
+            Err(KeyError::Unsupported)
+        ));
+        assert!(matches!(
+            derive_public_line("hello"),
+            Err(KeyError::Unsupported)
+        ));
     }
 
     #[test]
     fn import_record_takes_algorithm_and_fingerprint_from_the_public_line() {
         let rec = import_record("work", &format!("  {RSA_PUB}\n"), KeyOrigin::Pasted, 7);
         assert_eq!(rec.algorithm, "ssh-rsa");
-        assert_eq!(rec.fingerprint, "SHA256:DknoHO6doCbLjndWJUmrVTVRygkrgBJxZAc407XOl5w");
+        assert_eq!(
+            rec.fingerprint,
+            "SHA256:DknoHO6doCbLjndWJUmrVTVRygkrgBJxZAc407XOl5w"
+        );
         assert_eq!(rec.public_line, RSA_PUB.trim());
         assert_eq!(rec.origin, KeyOrigin::Pasted);
         let ec = import_record("ec", EC_PUB, KeyOrigin::Imported, 7);
         assert_eq!(ec.algorithm, "ecdsa-sha2-nistp256");
-        assert_eq!(ec.fingerprint, "SHA256:EcxK1NjgZg6+rq6g+/PNTpzI2VVRNg79wsZp4QcxfbA");
+        assert_eq!(
+            ec.fingerprint,
+            "SHA256:EcxK1NjgZg6+rq6g+/PNTpzI2VVRNg79wsZp4QcxfbA"
+        );
         let ed = import_record("ed", ED_PUB, KeyOrigin::Imported, 7);
-        assert_eq!(ed.fingerprint, "SHA256:8Zpi+pF9V45agFQ8U8K94LzOkaACHmXfH0prkc8Ah20");
+        assert_eq!(
+            ed.fingerprint,
+            "SHA256:8Zpi+pF9V45agFQ8U8K94LzOkaACHmXfH0prkc8Ah20"
+        );
     }
 }

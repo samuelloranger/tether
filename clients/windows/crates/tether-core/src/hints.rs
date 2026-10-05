@@ -107,7 +107,9 @@ impl KeyForm {
             return Some("This key needs a passphrase — Tether can't use it yet");
         }
         match derive_public_line(&self.private) {
-            Err(KeyError::Encrypted) => Some("This key needs a passphrase — Tether can't use it yet"),
+            Err(KeyError::Encrypted) => {
+                Some("This key needs a passphrase — Tether can't use it yet")
+            }
             // The spec has no sentence for an unreadable key; it is not yet a private key Tether can use.
             Err(_) => Some("Paste the private key to save it"),
             Ok(derived) if public_key_body(public).as_deref() != Some(derived.as_str()) => {
@@ -147,27 +149,90 @@ mod tests {
     fn server_hints_in_field_order() {
         let empty = ServerForm::new_add();
         assert_eq!(empty.hint(), Some("Name this machine to save it"));
-        let f = ServerForm { name: "  ".into(), host: "".into(), ..ready() };
+        let f = ServerForm {
+            name: "  ".into(),
+            host: "".into(),
+            ..ready()
+        };
         assert_eq!(f.hint(), Some("Name this machine to save it"));
-        assert_eq!(ServerForm { host: " \t".into(), user: "".into(), ..ready() }.hint(), Some("Add a host to save it"));
-        assert_eq!(ServerForm { user: " ".into(), ..ready() }.hint(), Some("Add a user to save it"));
-        assert_eq!(ServerForm { auth: AuthChoice::Key(None), ..ready() }.hint(), Some("Choose a key to save it"));
+        assert_eq!(
+            ServerForm {
+                host: " \t".into(),
+                user: "".into(),
+                ..ready()
+            }
+            .hint(),
+            Some("Add a host to save it")
+        );
+        assert_eq!(
+            ServerForm {
+                user: " ".into(),
+                ..ready()
+            }
+            .hint(),
+            Some("Add a user to save it")
+        );
+        assert_eq!(
+            ServerForm {
+                auth: AuthChoice::Key(None),
+                ..ready()
+            }
+            .hint(),
+            Some("Choose a key to save it")
+        );
         assert_eq!(ready().hint(), None);
-        assert_eq!(ServerForm { auth: AuthChoice::Agent, ..ready() }.hint(), None);
+        assert_eq!(
+            ServerForm {
+                auth: AuthChoice::Agent,
+                ..ready()
+            }
+            .hint(),
+            None
+        );
     }
 
     #[test]
     fn password_hint_only_when_nothing_is_saved() {
-        let add = ServerForm { auth: AuthChoice::Password, ..ready() };
+        let add = ServerForm {
+            auth: AuthChoice::Password,
+            ..ready()
+        };
         assert_eq!(add.hint(), Some("Enter a password to save it"));
-        assert_eq!(ServerForm { password: "   ".into(), ..add.clone() }.hint(), Some("Enter a password to save it"));
-        assert_eq!(ServerForm { password: "pw".into(), ..add.clone() }.hint(), None);
-        assert_eq!(ServerForm { has_saved_password: true, ..add }.hint(), None);
+        assert_eq!(
+            ServerForm {
+                password: "   ".into(),
+                ..add.clone()
+            }
+            .hint(),
+            Some("Enter a password to save it")
+        );
+        assert_eq!(
+            ServerForm {
+                password: "pw".into(),
+                ..add.clone()
+            }
+            .hint(),
+            None
+        );
+        assert_eq!(
+            ServerForm {
+                has_saved_password: true,
+                ..add
+            }
+            .hint(),
+            None
+        );
     }
 
     #[test]
     fn port_falls_back_to_22() {
-        let port = |p: &str| ServerForm { port: p.into(), ..ready() }.port_value();
+        let port = |p: &str| {
+            ServerForm {
+                port: p.into(),
+                ..ready()
+            }
+            .port_value()
+        };
         assert_eq!(port("2222"), 2222);
         assert_eq!(port(" 2222 "), 2222);
         assert_eq!(port("1"), 1);
@@ -179,36 +244,79 @@ mod tests {
 
     #[test]
     fn edit_form_starts_from_the_machine_with_an_empty_password() {
-        let m = Machine { id: Uuid::nil(), name: "devbox".into(), host: "h".into(), port: 2200, user: "u".into(), auth: Auth::Password };
+        let m = Machine {
+            id: Uuid::nil(),
+            name: "devbox".into(),
+            host: "h".into(),
+            port: 2200,
+            user: "u".into(),
+            auth: Auth::Password,
+        };
         let f = ServerForm::from_machine(&m, true);
-        assert_eq!((f.name.as_str(), f.host.as_str(), f.port.as_str(), f.user.as_str()), ("devbox", "h", "2200", "u"));
+        assert_eq!(
+            (
+                f.name.as_str(),
+                f.host.as_str(),
+                f.port.as_str(),
+                f.user.as_str()
+            ),
+            ("devbox", "h", "2200", "u")
+        );
         assert_eq!(f.auth, AuthChoice::Password);
         assert!(f.password.is_empty() && f.has_saved_password);
         assert_eq!(f.hint(), None);
     }
 
     fn key_form(name: &str, private: &str, public: &str) -> KeyForm {
-        KeyForm { name: name.into(), private: private.into(), public: public.into() }
+        KeyForm {
+            name: name.into(),
+            private: private.into(),
+            public: public.into(),
+        }
     }
 
     #[test]
     fn key_hints_in_order() {
-        assert_eq!(key_form(" ", ED_PRIV, ED_PUB).hint(), Some("Name this key to save it"));
-        assert_eq!(key_form("k", "ssh-ed25519 AAAA", ED_PUB).hint(), Some("Paste the private key to save it"));
-        assert_eq!(key_form("k", ED_PRIV, "").hint(), Some("Paste the public key to save it"));
-        assert_eq!(key_form("k", ED_PRIV, "rsa AAAA").hint(), Some("Paste the public key to save it"));
         assert_eq!(
-            key_form("k", ED_ENC, include_str!("../fixtures/keys/ed25519_openssh.pub")).hint(),
+            key_form(" ", ED_PRIV, ED_PUB).hint(),
+            Some("Name this key to save it")
+        );
+        assert_eq!(
+            key_form("k", "ssh-ed25519 AAAA", ED_PUB).hint(),
+            Some("Paste the private key to save it")
+        );
+        assert_eq!(
+            key_form("k", ED_PRIV, "").hint(),
+            Some("Paste the public key to save it")
+        );
+        assert_eq!(
+            key_form("k", ED_PRIV, "rsa AAAA").hint(),
+            Some("Paste the public key to save it")
+        );
+        assert_eq!(
+            key_form(
+                "k",
+                ED_ENC,
+                include_str!("../fixtures/keys/ed25519_openssh.pub")
+            )
+            .hint(),
             Some("This key needs a passphrase — Tether can't use it yet")
         );
-        assert_eq!(key_form("k", ED_PRIV, RSA_PUB).hint(), Some("The public key doesn't match the private key"));
+        assert_eq!(
+            key_form("k", ED_PRIV, RSA_PUB).hint(),
+            Some("The public key doesn't match the private key")
+        );
         assert_eq!(key_form("k", ED_PRIV, ED_PUB).hint(), None);
     }
 
     #[test]
     fn public_key_comment_does_not_affect_match() {
         let bare = public_key_body(ED_PUB).unwrap();
-        for public in [bare.clone(), format!("{bare}\n"), format!("  {bare} someone@else\r\n")] {
+        for public in [
+            bare.clone(),
+            format!("{bare}\n"),
+            format!("  {bare} someone@else\r\n"),
+        ] {
             assert_eq!(key_form("k", ED_PRIV, &public).hint(), None, "{public:?}");
         }
     }
@@ -223,7 +331,10 @@ mod tests {
     #[test]
     fn unreadable_private_key_asks_for_the_private_key() {
         let junk = "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n";
-        assert_eq!(key_form("k", junk, ED_PUB).hint(), Some("Paste the private key to save it"));
+        assert_eq!(
+            key_form("k", junk, ED_PUB).hint(),
+            Some("Paste the private key to save it")
+        );
     }
 
     #[test]

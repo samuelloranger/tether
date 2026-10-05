@@ -36,8 +36,14 @@ pub fn password_account(id: Uuid) -> String {
 /// The account becomes a file name, so only the characters Tether's own names use pass.
 fn check_account(account: &str) -> Result<(), SecretError> {
     let ok = !account.is_empty()
-        && account.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    if ok { Ok(()) } else { Err(SecretError::BadAccount(account.to_string())) }
+        && account
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if ok {
+        Ok(())
+    } else {
+        Err(SecretError::BadAccount(account.to_string()))
+    }
 }
 
 #[derive(Default)]
@@ -53,7 +59,10 @@ impl SecretStore for MemorySecretStore {
 
     fn set(&self, account: &str, secret: &[u8]) -> Result<(), SecretError> {
         check_account(account)?;
-        self.secrets.lock().unwrap().insert(account.to_string(), Zeroizing::new(secret.to_vec()));
+        self.secrets
+            .lock()
+            .unwrap()
+            .insert(account.to_string(), Zeroizing::new(secret.to_vec()));
         Ok(())
     }
 
@@ -72,7 +81,9 @@ pub struct DpapiSecretStore {
 #[cfg(windows)]
 impl DpapiSecretStore {
     pub fn new(dir: &DataDir) -> Self {
-        Self { dir: dir.root().join("secrets") }
+        Self {
+            dir: dir.root().join("secrets"),
+        }
     }
 
     fn path(&self, account: &str) -> std::path::PathBuf {
@@ -122,7 +133,10 @@ mod dpapi {
     const ENTROPY: &[u8] = b"tether-windows-secrets-v1";
 
     fn blob(bytes: &[u8]) -> CRYPT_INTEGER_BLOB {
-        CRYPT_INTEGER_BLOB { cbData: bytes.len() as u32, pbData: bytes.as_ptr() as *mut u8 }
+        CRYPT_INTEGER_BLOB {
+            cbData: bytes.len() as u32,
+            pbData: bytes.as_ptr() as *mut u8,
+        }
     }
 
     /// Copies the LocalAlloc'd output out, wipes it, and frees it.
@@ -141,8 +155,16 @@ mod dpapi {
         let entropy = blob(ENTROPY);
         let mut out = CRYPT_INTEGER_BLOB::default();
         unsafe {
-            CryptProtectData(&input, PCWSTR::null(), Some(&entropy), None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
-                .map_err(|e| SecretError::Crypto(e.to_string()))?;
+            CryptProtectData(
+                &input,
+                PCWSTR::null(),
+                Some(&entropy),
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out,
+            )
+            .map_err(|e| SecretError::Crypto(e.to_string()))?;
             Ok(take(out).to_vec())
         }
     }
@@ -152,8 +174,16 @@ mod dpapi {
         let entropy = blob(ENTROPY);
         let mut out = CRYPT_INTEGER_BLOB::default();
         unsafe {
-            CryptUnprotectData(&input, None, Some(&entropy), None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
-                .map_err(|e| SecretError::Crypto(e.to_string()))?;
+            CryptUnprotectData(
+                &input,
+                None,
+                Some(&entropy),
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out,
+            )
+            .map_err(|e| SecretError::Crypto(e.to_string()))?;
             Ok(take(out))
         }
     }
@@ -167,7 +197,10 @@ mod tests {
         let account = key_account(Uuid::nil());
         assert!(store.get(&account).unwrap().is_none());
         store.set(&account, b"-----BEGIN PRIVATE KEY-----").unwrap();
-        assert_eq!(store.get(&account).unwrap().unwrap().as_slice(), b"-----BEGIN PRIVATE KEY-----");
+        assert_eq!(
+            store.get(&account).unwrap().unwrap().as_slice(),
+            b"-----BEGIN PRIVATE KEY-----"
+        );
         store.set(&account, b"second").unwrap();
         assert_eq!(store.get(&account).unwrap().unwrap().as_slice(), b"second");
         store.delete(&account).unwrap();
@@ -179,7 +212,10 @@ mod tests {
     fn account_names() {
         let id = Uuid::parse_str("6f1c8a52-0d0e-4b9e-9a37-0a6f8e8c1d11").unwrap();
         assert_eq!(key_account(id), "key-6f1c8a52-0d0e-4b9e-9a37-0a6f8e8c1d11");
-        assert_eq!(password_account(id), "host-password-6f1c8a52-0d0e-4b9e-9a37-0a6f8e8c1d11");
+        assert_eq!(
+            password_account(id),
+            "host-password-6f1c8a52-0d0e-4b9e-9a37-0a6f8e8c1d11"
+        );
     }
 
     #[test]
@@ -191,8 +227,14 @@ mod tests {
     fn account_names_cannot_escape_the_secrets_dir() {
         let store = MemorySecretStore::default();
         for bad in ["", "../profiles", "a\\b", "a/b", "key-x.bin", "key x"] {
-            assert!(matches!(store.set(bad, b"x"), Err(SecretError::BadAccount(_))), "{bad:?}");
-            assert!(matches!(store.get(bad), Err(SecretError::BadAccount(_))), "{bad:?}");
+            assert!(
+                matches!(store.set(bad, b"x"), Err(SecretError::BadAccount(_))),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(store.get(bad), Err(SecretError::BadAccount(_))),
+                "{bad:?}"
+            );
         }
     }
 
@@ -206,7 +248,8 @@ mod tests {
 
         let account = password_account(Uuid::nil());
         store.set(&account, b"hunter2-hunter2").unwrap();
-        let on_disk = std::fs::read(dir.path().join("secrets").join(format!("{account}.bin"))).unwrap();
+        let on_disk =
+            std::fs::read(dir.path().join("secrets").join(format!("{account}.bin"))).unwrap();
         assert!(!on_disk.windows(7).any(|w| w == b"hunter2"));
     }
 }

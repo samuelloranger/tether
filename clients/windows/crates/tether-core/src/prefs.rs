@@ -135,7 +135,10 @@ mod tests {
         let p = Preferences::default();
         assert_eq!(p.theme_mode, ThemeMode::Dark);
         let t = p.terminal;
-        assert_eq!((t.scheme.as_str(), t.font.as_str()), ("tether", "cascadia-mono"));
+        assert_eq!(
+            (t.scheme.as_str(), t.font.as_str()),
+            ("tether", "cascadia-mono")
+        );
         assert_eq!((t.size_pt, t.line_spacing, t.padding_pt), (14.0, 1.0, 8.0));
         assert_eq!((t.cursor, t.blink), (CursorShape::Block, false));
         assert!(p.window.is_none());
@@ -143,18 +146,42 @@ mod tests {
 
     #[test]
     fn clamps_and_snaps_to_steps() {
-        let t = TerminalPrefs { size_pt: 99.0, line_spacing: 0.2, padding_pt: 7.0, ..TerminalPrefs::default() }.clamped();
+        let t = TerminalPrefs {
+            size_pt: 99.0,
+            line_spacing: 0.2,
+            padding_pt: 7.0,
+            ..TerminalPrefs::default()
+        }
+        .clamped();
         assert_eq!((t.size_pt, t.line_spacing, t.padding_pt), (24.0, 1.0, 8.0));
-        let t = TerminalPrefs { size_pt: 3.0, line_spacing: 1.234, padding_pt: 99.0, ..TerminalPrefs::default() }.clamped();
+        let t = TerminalPrefs {
+            size_pt: 3.0,
+            line_spacing: 1.234,
+            padding_pt: 99.0,
+            ..TerminalPrefs::default()
+        }
+        .clamped();
         assert_eq!((t.size_pt, t.padding_pt), (8.0, 24.0));
         assert!((t.line_spacing - 1.25).abs() < 1e-6);
-        let t = TerminalPrefs { size_pt: 12.4, line_spacing: 9.0, padding_pt: -3.0, ..TerminalPrefs::default() }.clamped();
+        let t = TerminalPrefs {
+            size_pt: 12.4,
+            line_spacing: 9.0,
+            padding_pt: -3.0,
+            ..TerminalPrefs::default()
+        }
+        .clamped();
         assert_eq!((t.size_pt, t.line_spacing, t.padding_pt), (12.0, 1.6, 0.0));
     }
 
     #[test]
     fn non_finite_values_fall_back_to_defaults() {
-        let t = TerminalPrefs { size_pt: f32::NAN, line_spacing: f32::INFINITY, padding_pt: f32::NAN, ..TerminalPrefs::default() }.clamped();
+        let t = TerminalPrefs {
+            size_pt: f32::NAN,
+            line_spacing: f32::INFINITY,
+            padding_pt: f32::NAN,
+            ..TerminalPrefs::default()
+        }
+        .clamped();
         assert_eq!((t.size_pt, t.line_spacing, t.padding_pt), (14.0, 1.0, 8.0));
     }
 
@@ -197,10 +224,20 @@ mod tests {
     fn round_trips_through_the_data_dir() {
         let dir = tempfile::tempdir().unwrap();
         let data = DataDir::new(dir.path());
-        let mut p = Preferences::default();
-        p.theme_mode = ThemeMode::Light;
-        p.terminal.scheme = "dracula".into();
-        p.window = Some(WindowPlacement { x: -1200, y: 40, width: 1280, height: 800, maximized: false });
+        let p = Preferences {
+            theme_mode: ThemeMode::Light,
+            terminal: TerminalPrefs {
+                scheme: "dracula".into(),
+                ..TerminalPrefs::default()
+            },
+            window: Some(WindowPlacement {
+                x: -1200,
+                y: 40,
+                width: 1280,
+                height: 800,
+                maximized: false,
+            }),
+        };
         p.save(&data).unwrap();
         assert_eq!(Preferences::load(&data), p);
     }

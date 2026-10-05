@@ -85,7 +85,9 @@ mod tests {
     }
 
     fn doc(items: &[&str]) -> Doc {
-        Doc { items: items.iter().map(|s| s.to_string()).collect() }
+        Doc {
+            items: items.iter().map(|s| s.to_string()).collect(),
+        }
     }
 
     #[test]
@@ -130,7 +132,12 @@ mod tests {
         let quarantined: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().path())
-            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("profiles.json.corrupt-"))
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("profiles.json.corrupt-")
+            })
             .collect();
         assert_eq!(quarantined.len(), 1);
         assert_eq!(std::fs::read(&quarantined[0]).unwrap(), original);

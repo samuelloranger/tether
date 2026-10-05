@@ -6,7 +6,11 @@ pub struct FontFace {
 }
 
 const fn face(id: &'static str, name: &'static str, ligatures: bool) -> FontFace {
-    FontFace { id, name, ligatures }
+    FontFace {
+        id,
+        name,
+        ligatures,
+    }
 }
 
 pub const FONTS: [FontFace; 7] = [
@@ -32,7 +36,15 @@ mod tests {
         let ids: Vec<&str> = FONTS.iter().map(|f| f.id).collect();
         assert_eq!(
             ids,
-            ["cascadia-mono", "cascadia-code", "jetbrains-mono", "monaspace-neon", "monaspace-radon", "maple-mono", "comic-mono"]
+            [
+                "cascadia-mono",
+                "cascadia-code",
+                "jetbrains-mono",
+                "monaspace-neon",
+                "monaspace-radon",
+                "maple-mono",
+                "comic-mono"
+            ]
         );
         assert_eq!(FONTS[0].name, "Cascadia Mono");
     }

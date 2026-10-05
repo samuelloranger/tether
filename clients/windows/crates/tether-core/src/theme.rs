@@ -5,8 +5,9 @@ use serde::Deserialize;
 // One file for both clients, so the catalogs never drift.
 const THEMES_JSON: &str =
     include_str!("../../../../apple/TetherKit/Sources/TetherKit/Resources/TerminalThemes.json");
-pub const THEMES_LICENSE: &str =
-    include_str!("../../../../apple/TetherKit/Sources/TetherKit/Resources/TerminalThemes-LICENSE.txt");
+pub const THEMES_LICENSE: &str = include_str!(
+    "../../../../apple/TetherKit/Sources/TetherKit/Resources/TerminalThemes-LICENSE.txt"
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalTheme {
@@ -31,7 +32,9 @@ struct Entry {
 }
 
 fn hex(s: &str) -> Option<u32> {
-    (s.len() == 6).then(|| u32::from_str_radix(s, 16).ok()).flatten()
+    (s.len() == 6)
+        .then(|| u32::from_str_radix(s, 16).ok())
+        .flatten()
 }
 
 impl Entry {
@@ -78,7 +81,10 @@ pub fn catalog() -> &'static [TerminalTheme] {
 }
 
 pub fn theme_named(id: &str) -> &'static TerminalTheme {
-    catalog().iter().find(|t| t.id == id).unwrap_or(&catalog()[0])
+    catalog()
+        .iter()
+        .find(|t| t.id == id)
+        .unwrap_or(&catalog()[0])
 }
 
 impl TerminalTheme {
@@ -100,7 +106,10 @@ mod tests {
     #[test]
     fn tether_is_first_and_is_the_well_color() {
         let first = &catalog()[0];
-        assert_eq!((first.id.as_str(), first.name.as_str()), ("tether", "Tether"));
+        assert_eq!(
+            (first.id.as_str(), first.name.as_str()),
+            ("tether", "Tether")
+        );
         assert_eq!(first.background, 0x1E1E2E);
         assert_eq!(first.foreground, 0xCCCCCC);
         assert_eq!(first.cursor, 0xFFFFFF);
