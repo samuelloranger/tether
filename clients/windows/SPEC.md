@@ -1,0 +1,498 @@
+# Tether for Windows
+
+Date: 2026-10-05
+
+A native Windows client for the same hosts the iOS app already talks to. Rust, Slint, one window. It is a port of Home, terminal appearance, and file send. The visual source of truth stays `DESIGN.md`: night chrome, periwinkle accent, terminal well `#1E1E2E`.
+
+The screen map is `design-preview/index.html`, next to this file. Open it in a browser.
+
+Target: Windows 10 22H2 and Windows 11, x64. ARM64 is a later build target, not a later design.
+
+## What this is
+
+Someone at a Windows PC opens a machine they already SSH to. The host runs `zmx`. The session stays alive after the window closes, because `zmx` owns it. Tether on Windows is a client, the same way Tether on iOS is a client. It has no server of its own and adds nothing to the host.
+
+v1 is the loop they can do without the phone:
+
+1. Keep machines and keys on this PC.
+2. Open a machine and land in its `zmx` sessions, one tab per session: switch, create, and kill them.
+3. Change the terminal's colors, font, and cursor.
+4. Drop a file, or paste a screenshot, and have it uploaded and its remote path pasted into the session, so Claude Code attaches the image.
+5. Hear from a session that needs them: a Windows toast and a taskbar flash or progress bar, while the window is in the background.
+
+## Out of scope
+
+Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
+
+Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their place.
+
+## Window
+
+One window. On Windows 11 the platform title bar is painted with `DWMWA_CAPTION_COLOR` to the scene background (`#08080E` night, `#F1F1F6` light) so it meets the client area, caption "Tether". Windows 10 ignores caption color: there the bar only gets `DWMWA_USE_IMMERSIVE_DARK_MODE` in the night scene. Slint draws everything under that bar.
+
+Window size and position persist. Minimum client size is 640 × 420.
+
+Opening a machine replaces Home with the terminal. Back returns to Home and drops the SSH connection and every tab's channel; the remote `zmx` sessions keep running. Closing the window does the same. Settings is the same page from a gear on Home and from a gear in the terminal header. iOS only puts the gear on the terminal. On Windows, Home is where you are before any machine exists, and appearance applies there too.
+
+Destructive confirms (remove a machine, delete a key, kill a session) are dialogs. Every other form is a page in the window, with Back. Esc is Back on every page except the terminal, where Esc belongs to the PTY.
+
+Night is the default scene. Appearance can follow Windows, or stay Dark, or stay Light. Light uses the light column in `DESIGN.md`.
+
+## Home
+
+Header: "Home", and under it a mono line.
+
+- Machines, with at least one: `2 machines`
+- Machines, empty: `no machines yet`
+- Keys: `2 keys · on this PC`
+
+A plus on the right adds a machine, on either tab. A gear opens Settings.
+
+Tabs: Machines, Keys. The selected tab is a raised segment.
+
+### Machines
+
+A card per machine, in insertion order:
+
+- A periwinkle lamp, the name, and a `saved` capsule.
+- `user@host:port · <key name, "agent", or "password">` in mono.
+- `Open` in the accent, with a chevron.
+
+Click or Enter opens the machine. Right-click, or the keyboard menu key, offers **Edit** and **Remove**. Remove confirms:
+
+> Remove devbox?
+>
+> Its sessions keep running on the host — only this PC forgets it.
+
+Action: **Remove machine**. Cancel leaves it. Removing a machine deletes its stored password. The host-key pin stays, so adding the same host back is still protected.
+
+A machine whose key was deleted shows `key missing` in place of the key name. Open lands on Couldn't connect with "This machine's key was deleted. Edit the machine and choose another key."
+
+Empty:
+
+> No machines tethered yet
+>
+> Add a server to open a shell that stays alive between visits.
+
+Primary action: **Add a server**.
+
+### Add a server, Edit server
+
+One form, two titles. Add starts empty; Edit starts from the machine and its button reads **Save changes**.
+
+Fields, in order: Name, Host, Port (default `22`), User, then Authentication.
+
+Authentication is a segment: **Private key**, **SSH agent**, or **Password**. Private key is a picker of vault keys. With an empty vault the picker reads: "No keys in the vault — generate or paste one first." SSH agent has no field; its line reads "Uses the keys in the Windows OpenSSH agent, including 1Password's when it serves that agent." Password is a concealed field.
+
+On Edit, the password field starts empty and reads "Leave empty to keep the saved password". Switching away from Password deletes the stored password on save. Changing host or port means a different host-key pin: the old pin stays under the old `host:port`, and the new one is pinned on first connect. Edits apply the next time the machine is opened; an open machine keeps its connection.
+
+Under the fields, the trust note:
+
+> First connect pins this host's key. A later change is refused.
+
+**Save server** stays quiet until the form is ready. The hint under it is the first missing piece, in field order:
+
+| Missing | Hint |
+|---|---|
+| Name | Name this machine to save it |
+| Host | Add a host to save it |
+| User | Add a user to save it |
+| Password, when that segment is on (Add, or Edit of a machine without a saved password) | Enter a password to save it |
+| A key, when that segment is on and none is chosen | Choose a key to save it |
+
+Whitespace is empty. Host and User are trimmed before they are saved. A port that is not an integer from 1 to 65535 saves as 22.
+
+### Keys
+
+A card per key:
+
+- Randomart thumbnail, drawn from the public key the way the iOS card draws it.
+- Name, and an origin capsule: `generated`, `imported`, or `pasted`.
+- `<algorithm> · created Oct 5`. The algorithm is the first token of the public line (`ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp256`), not a constant. iOS records every key as `ssh-ed25519`; Windows does not copy that.
+- A shortened `SHA256:` fingerprint.
+- `used by devbox`, or `not used yet`.
+- **Copy public key**.
+
+The bottom bar is three actions: **Generate** (accent), **Import**, **Paste**.
+
+Right-click a card, or press Delete on a focused card, to confirm:
+
+> Delete key id_ed25519?
+>
+> The private key is erased from this PC and cannot be recovered.
+
+When machines use the key, a second line names them: "devbox won't be able to sign in until it gets another key."
+
+**Delete key** removes the record and the secret. It does not edit `authorized_keys` on any host. Cancel leaves it.
+
+Empty keys, in place of the list: "No keys yet. Generate one, or paste an existing key." The three actions stay.
+
+### Generate, import, paste
+
+**Generate.** A name. The line under it: "A new ed25519 key is created on this PC. Only its public half is shown — paste that into the host's authorized_keys." **Generate key** needs a name. Hint when it is missing: "Name this key to save it."
+
+**Import.** A name, **Load private key file…**, a private key field, and an OpenSSH public key field. Loading a file fills the private key and, when the name is still empty, the file's base name. When a `<file>.pub` sits beside it, that fills the public key too.
+
+**Paste.** The same fields, without the file button.
+
+Save hints, in order: "Name this key to save it", then "Paste the private key to save it" (the text must contain `PRIVATE KEY`), then "Paste the public key to save it" (the trimmed text must start with `ssh-` or `ecdsa-`), then "This key needs a passphrase — Tether can't use it yet" (an encrypted private key: OpenSSH with a cipher other than `none`, or `ENCRYPTED PRIVATE KEY`), then "The public key doesn't match the private key" (the public half derived from the private key differs from the pasted line).
+
+Accepted private formats: OpenSSH (`BEGIN OPENSSH PRIVATE KEY`), PKCS#8, and PKCS#1 RSA. Passphrase keys are a later slice.
+
+Generate stores an Ed25519 key. The record keeps the OpenSSH public line, the algorithm, the `SHA256:` fingerprint, and the origin. The PKCS#8 PEM goes to the secret store under that record's id. The public list is JSON and holds no secret.
+
+## Settings
+
+One page.
+
+**Appearance.** Theme: System, Dark, Light. System follows the Windows app theme and changes live when Windows does.
+
+**Terminal.**
+
+| Control | Range | Default on Windows |
+|---|---|---|
+| Color scheme | the shared catalog, Tether first | Tether |
+| Font | the faces below | Cascadia Mono |
+| Size | 8–24 pt, step 1 | 14 |
+| Line spacing | 1.00×–1.60×, step 0.05 | 1.00× |
+| Padding | 0–24 pt, step 2 | 8 |
+| Cursor | Block, Bar, Underline | Block |
+| Blink cursor | on or off | off |
+
+The phone default size is 11. Fourteen is the Windows default because the window sits on a monitor. Saved values still clamp to the same ranges. Points are converted at the monitor's scale factor, so 14 pt reads the same on a 100% and a 200% display. Ctrl+= and Ctrl+- (and Ctrl+wheel) change the size from the terminal and save it; Ctrl+0 resets to 14, as in Windows Terminal.
+
+A live preview sits beside the form when the window is at least 800 px wide, and under the blink toggle when it is narrower. The preview is a few lines in the chosen face, colors, spacing, padding, and cursor. It is not a live PTY.
+
+Color scheme and Font are their own pages, opened from those rows.
+
+### Color scheme
+
+A search field filters by name. Each row is a swatch and a name. The swatch is `~ git main` in that theme's blue, foreground, and green, plus six ANSI dots, on that theme's background. A secondary line says Light or Dark from the background luminance, same rule as iOS (relative luminance above 0.5 is Light). The active row has a check. Choosing a row applies it immediately.
+
+The catalog is the iOS `TerminalThemes.json`, embedded in the binary from its iOS path at build time, with Tether's own theme first. One file, so the two clients never drift. Its `TerminalThemes-LICENSE.txt` ships with the app. An unknown stored id falls back to Tether.
+
+### Font
+
+Rows: Cascadia Mono, Cascadia Code, JetBrains Mono, Monaspace Neon, Monaspace Radon, Maple Mono, Comic Mono. The name is drawn in that face. The active row has a check. Choosing a row applies it immediately. An unknown stored id falls back to Cascadia Mono.
+
+Every face is bundled in the binary, regular and bold, with the iOS font files and `LICENSES.md`. Cascadia is bundled too: it ships with Windows Terminal, not with every Windows install. Stored ids use the iOS form: `cascadia-mono`, `cascadia-code`, `jetbrains-mono`, `monaspace-neon`, `monaspace-radon`, `maple-mono`, `comic-mono`.
+
+Glyphs the chosen face lacks fall back to the bundled Symbols Nerd Font Mono (prompt and powerline glyphs), then to Segoe UI Emoji and the system fallback chain. Cascadia Code's ligatures are drawn; the others are drawn without ligatures, as on iOS.
+
+## Terminal
+
+The header is a surface bar:
+
+- **Back**, to Home.
+- A lamp and a status word. The word is always present; the lamp is not the only signal.
+- The machine name, and under it the active session name, a midpoint, and the status word in the lamp color.
+- **Send file…**
+- **Settings** (the gear).
+
+Under the header, a tab strip: one tab per `zmx` session on the host (see Sessions).
+
+The lamp follows the iOS connection lamp, not the agent heat ramp. Agent state is out of scope, and `waiting` red must not mean two things.
+
+| Status | Word | Lamp |
+|---|---|---|
+| TCP and auth in progress | connecting | warning `#F2B34C` |
+| Session up | connected | success `#6EE7A8` |
+| The socket died, redialing | reconnecting | warning `#F2B34C` |
+| Gave up | disconnected | danger `#FF7050` |
+
+Light scene uses the light column for each token.
+
+The grid fills the rest of the window. Its background is the active theme's background, which for Tether is `#1E1E2E`. Padding around the grid is the padding setting. The grid is bottom-anchored. A full repaint of the cell buffer, not a row diff, coalesced to at most one frame per display refresh. The grid itself does not animate, and padding does not animate: a resizing grid would report sizes the PTY then has to honor. A window drag-resize redraws the grid locally at once and sends the PTY resize only once the size settles (about 150 ms quiet), the same split iOS uses to avoid a SIGWINCH storm.
+
+### Input
+
+- Keys, paste, and resize go to the PTY. Keys follow the table under Keyboard below: xterm sequences, with the iOS `TerminalKeyMap` rules for Ctrl and Alt.
+- Paste is Ctrl+V, Ctrl+Shift+V, and Shift+Insert, as in Windows Terminal. Copy is Ctrl+Shift+C, and Ctrl+C copies too while a selection exists (the selection then clears); with no selection Ctrl+C sends `0x03`. Right-click pastes when nothing is selected and copies when something is. An image or files on the clipboard paste as an upload (see Files and images).
+- Ctrl+V never reaches the PTY as `0x16`. Ctrl+Q stays `0x11`, which vim already takes for block select and readline for quoted-insert, so nothing needs remapping.
+- Paste goes through bracketed paste when the program asked for it (`?2004h`). Newlines are sent as CR.
+- Mouse: drag selects; double-click selects a word, triple-click a line. When the program enables mouse reporting (`?1000/1002/1003/1006h`, e.g. Claude Code fullscreen), clicks, drags, and the wheel go to the program, and Shift held down selects locally instead.
+- Wheel without mouse reporting scrolls the local scrollback of this attach (alacritty's own buffer, 10 000 lines). On the alternate screen it sends arrow keys. `zmx history` stays out of scope.
+- IME composition (CJK, dead keys, emoji panel) commits text to the PTY as UTF-8.
+- OSC 52 copies to the Windows clipboard, only while the window has focus. Programs cannot read the clipboard.
+- The bell flashes the header lamp once in the active tab, marks a background tab, and flashes the taskbar button when the window is not focused. A burst rings once: at most once per 200 ms per session, the iOS `BellThrottle` window. No sound.
+- The window title is `<machine> · <session>`, followed by the active tab's OSC 0/2 title when it set one.
+
+### Keyboard
+
+The iOS map only covers what a phone keyboard can press. Windows needs the whole xterm set. `mod` below is the xterm modifier parameter: 1 + Shift 1 + Alt 2 + Ctrl 4.
+
+| Key | Sends | With modifiers |
+|---|---|---|
+| Up, Down, Right, Left | `CSI A`…`D`; `SS3 A`…`D` in application cursor mode (`?1h`) | `CSI 1;mod A`…`D` (Ctrl+Left is word-left in readline) |
+| Home, End | `CSI H`, `CSI F`; `SS3 H`, `SS3 F` in application cursor mode | `CSI 1;mod H`, `CSI 1;mod F` |
+| Insert, Delete | `CSI 2~`, `CSI 3~` | `CSI 2;mod~`, `CSI 3;mod~` |
+| PageUp, PageDown | `CSI 5~`, `CSI 6~` | `CSI 5;mod~`, `CSI 6;mod~`. Shift+PageUp/PageDown scroll local scrollback instead, outside the alternate screen and mouse reporting |
+| F1–F4 | `SS3 P`…`S` | `CSI 1;mod P`…`S` |
+| F5–F12 | `CSI 15~ 17~ 18~ 19~ 20~ 21~ 23~ 24~` | `CSI <n>;mod~` |
+| Tab | `0x09` | Shift+Tab `CSI Z` |
+| Enter | `0x0D` | Alt+Enter and Shift+Enter `ESC CR`, which Claude Code and readline-style prompts take as a newline without submitting |
+| Backspace | `0x7F` | Ctrl `0x08`, Alt `ESC 0x7F` (delete word back) |
+| Esc | `0x1B` | |
+| Space | `0x20` | Ctrl `0x00`, Alt `ESC SP` |
+| Numpad | digits and operators; `SS3 p`…`y`, `SS3 M` for Enter in application keypad mode (`DECKPAM`) | |
+
+Ctrl and Alt on everything else follow iOS `TerminalKeyMap`: Ctrl folds `@`–`_` and letters onto `0x00`–`0x1F` (so Ctrl+[ is Esc, Ctrl+\\ is `0x1C`, Ctrl+] `0x1D`, Ctrl+^ `0x1E`, Ctrl+_ and Ctrl+/ `0x1F`), Alt prefixes `ESC` (Meta), and Ctrl+Alt does both. Folding uses the character the layout produces without modifiers, not the physical key, so it works on any layout.
+
+**AltGr.** On Windows, AltGr arrives as Ctrl+Alt. When the layout turns Ctrl+Alt+key into a printable character (Canadian French AltGr+2 is `@`, AltGr+7 is `|`, AltGr+[ is `[`), that character is sent as text and no Ctrl/Alt rule applies. Only a Ctrl+Alt combination that produces no character is treated as Ctrl+Alt.
+
+**Alt alone.** Pressing and releasing Alt must not open the window's system menu, and F10 must not activate the menu bar. The app swallows `SC_KEYMENU`, so a tapped Alt or F10 reaches the PTY (F10 as `CSI 21~`) and focus stays on the grid.
+
+**Kept by Windows:** Alt+Tab, Alt+F4 (closes the window, same as the close button), the Windows key and its combos, Ctrl+Alt+Del, Print Screen.
+
+**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+click (open link). Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
+
+Key repeat sends repeats. Dead keys and IME go through text composition, never through this table. The kitty keyboard protocol and `modifyOtherKeys` are not advertised in v1.
+
+### Sessions
+
+Tether is the client for `zmx`, so its sessions are the window's tabs. iOS shows them in a drawer and moves one PTY between them; a desktop has the room to keep them all in view.
+
+**The strip.** One tab per session in `zmx ls`, ordered by `created`, oldest left. A tab shows the session name and, when its directory is known, the last path component of its cwd in mono. A `+` at the end adds a session. The strip scrolls sideways when it overflows; it never wraps.
+
+The list is refreshed on the control connection when the machine opens, after every create or kill, every 10 s while the window is focused, and on focus. A session that appears on the host (created from the phone or a shell) gets a tab at its place. A session that disappears loses its tab, and its channel closes; when it was the active tab, the neighbor to the left becomes active, else the right one, else the empty state.
+
+**One channel per open tab.** The terminal connection carries one PTY channel per tab that has been opened, each a login shell into which Tether types `~/.local/bin/zmx attach '<name>'`, the same attach iOS does. A tab is opened the first time it is selected, and stays attached until the machine is closed, so background tabs keep streaming: switching to one is instant and shows its live grid, not a replay, and its bell, notifications, and progress keep arriving. Each tab has its own `alacritty_terminal` grid, scrollback, and selection. At most 12 tabs are attached at once; opening a 13th detaches the least recently viewed one, which re-attaches when selected again.
+
+Typing the detach key and a second attach into one PTY, as iOS does, is not used: it needs a 250 ms settle between writes and lands in an agent's prompt when the timing slips. Separate channels have neither problem, and `russh` multiplexes them without the stall that made iOS avoid a second channel under libssh2.
+
+All attached channels are resized together when the window size settles.
+
+**Choosing the first tab.** On open, the iOS rule picks the active tab: `default` if it exists, else the newest by `created`. With no sessions, the strip is just `+` and the well shows the iOS empty state: "No session on devbox", "Nothing runs until you start one.", and **New session**. Keystrokes do not reach a bare shell.
+
+**New session.** `+`, Ctrl+Shift+T, or New session adds a tab with an inline name field, prefilled with the iOS rule: `default` on an empty host, else the first free `session-N`, counting from the number of sessions plus one. Enter attaches it, which makes `zmx` create it. Esc cancels. A name already in use selects that tab instead.
+
+**Switching.** Click a tab, Ctrl+Tab and Ctrl+Shift+Tab (next, previous, wrapping), Ctrl+Shift+1…8 (that position), Ctrl+Shift+9 (the last tab). Middle-click does nothing: closing a tab would only detach, and the tab would come back on the next refresh.
+
+**Kill.** Right-click a tab: **Kill session**. Confirm:
+
+> Kill session build?
+>
+> Everything running in it stops. This can't be undone.
+
+Action: **Kill session**. The client switches away first when it is the active tab, then runs `~/.local/bin/zmx kill '<name>' --force` on the control connection, as iOS does. Killing the last session leaves the empty state; nothing is recreated.
+
+**Attention.** A background tab that rang the bell or sent a notification shows a dot in the warning color until it is viewed. Plain output does not mark a tab: a clock or a spinner would mark it forever.
+
+**Leaving the PC.** An attached client tells the Claude Code mod someone is watching, so it does not hold a prompt for the phone. When Windows locks the workstation, every channel detaches after a 15 s grace (iOS `backgroundGrace`), and re-attaches on unlock. Minimizing does not detach.
+
+### Links
+
+Same rules as iOS `LinkSpans`: an OSC 8 hyperlink wins over text that only looks like one, and plain `http://` and `https://` URLs are detected in the grid, including a URL wrapped across rows and one cut by Claude Code's box characters (`│ ┃ ⎿`).
+
+Holding Ctrl underlines the link under the pointer and shows a hand. Ctrl+click opens it in the default browser with `ShellExecuteW`. This works under mouse reporting too: Ctrl+click is never sent to the program. Hovering an OSC 8 link with Ctrl held shows its target in a tooltip, since the visible text can differ from where it goes. Only `http`, `https`, and `mailto` targets open; anything else is ignored. Right-click on a link adds **Copy link**.
+
+### Replies to the program
+
+Programs ask the terminal questions, and a wrong or missing answer changes what they draw. Every reply `alacritty_terminal` produces (`PtyWrite`, `ColorRequest`, `TextAreaSizeRequest`) is written back to that tab's channel:
+
+- OSC 10, 11, 12 queries get the theme's foreground, background, and cursor color as `rgb:rrrr/gggg/bbbb`. Claude Code reads the background this way to choose its light or dark palette, so a theme change answers with the new color.
+- OSC 4 queries get the palette entry. OSC 4 sets and OSC 104 resets override the palette for that tab, like iOS `PaletteOverrides`; OSC 110/111/112 reset the dynamic colors. A theme change keeps the overrides.
+- Device attributes (DA1, DA2), cursor position (DSR 6), and window-size reports (CSI 14t / 18t) are answered. Title push/pop is supported; title reporting (CSI 21t) is not, so a program cannot echo a title back as input.
+
+### Notifications and progress
+
+Push stays out of scope; what reaches the window directly does not.
+
+**Notifications.** OSC 9 (`ESC ] 9 ; <text> BEL`, but not `9;4`) and OSC 777 (`ESC ] 777 ; notify ; <title> ; <body> BEL`) become a Windows toast when the window is not focused or the session is not the active tab. The toast reads `<machine> · <session>` over the text. Clicking it brings the window forward and selects that tab. At most one toast per session per 5 s; later ones in the window replace the pending one. With the window focused on that very tab, nothing shows: the user is looking at it. Focus Assist and the Windows notification settings apply as they do to any app.
+
+Toasts need an app identity. The MSIX install has one. The portable zip registers a Start menu shortcut with an AppUserModelID on first run; without it, toasts are skipped and only the taskbar flash remains.
+
+**Progress.** OSC 9;4 sets progress the way iOS reads it (`OSCReports`): state 1 with a percent is normal, 2 is error, 3 is indeterminate, 4 is paused, 0 clears, and a prompt mark (OSC 133;A) clears it too. The active tab's progress draws as a thin bar under the header in the accent (error in danger, paused in warning), and drives the taskbar button through `ITaskbarList3::SetProgressState` / `SetProgressValue`. A background tab's progress shows only on its tab, as a bar under the tab label.
+
+### Connect
+
+Opening a card:
+
+1. Dial `host:port` with a 10 s connect timeout.
+2. Read the server host key. Fingerprint is SHA-256 of the host key blob, lowercase hex, colon-separated bytes. The same string format the iOS client pins.
+3. Nothing pinned for this host and port: pin it and continue. Pinning happens before auth, as on iOS.
+4. Pinned and different: stop. Do not offer a way to replace the pin.
+5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth connects to `\\.\pipe\openssh-ssh-agent` and offers its identities in the agent's order; the private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
+6. Run `~/.local/bin/zmx ls` on a control connection (see below) to build the tab strip and choose the first tab (see Sessions). The binary path is `~/.local/bin/zmx`, same as iOS.
+7. For the chosen tab, open a PTY channel sized to the grid on the terminal connection, start the login shell, and push the current size.
+8. Type `~/.local/bin/zmx attach '<name>'` plus newline into that shell, name shell-quoted. Tether attaches by typing into the login shell, not by exec, exactly as iOS does, so the user lands in their shell if they detach.
+
+Transport failures retry up to three attempts, 500 ms apart. Auth failures and a host-key mismatch never retry.
+
+The connecting screen is the terminal header on an empty well, status `connecting`.
+
+### Reconnect
+
+A drop after the session was up keeps the terminal page, the strip, and every tab's grid. Status goes to `reconnecting`, input is dropped (not queued), and the client redials with the same steps, then re-attaches every tab that was attached, each on a fresh channel, active tab first. It tries three times with 1 s, 2 s, 4 s backoff, and again whenever Windows reports the network back, the window regains focus, or the PC resumes. After that the status is `disconnected` and a capsule on the grid offers **Reconnect** and **Back to Home**.
+
+A drop is a socket error, or two missed keepalive replies. A mismatch on redial lands on the refused page.
+
+**Sleep.** A socket that slept through a suspend often still looks open, and waiting for keepalives to notice takes 30 s. On `PBT_APMRESUMEAUTOMATIC` the client drops the connection and redials at once, without waiting for a failure. A network change (`INetworkListManager` connectivity event) does the same when the route to the host changed. Unlock after a lock re-attaches what the lock detached.
+
+### Host key refused
+
+This page uses Home chrome. The session never opened, so there is no terminal well.
+
+> Host key changed — refused.
+>
+> Expected
+> `aa:bb:…`
+>
+> Got
+> `11:22:…`
+
+Both fingerprints are selectable for copying. The only action is **Back to Home**.
+
+### Couldn't connect
+
+Same chrome. One sentence, then **Retry** and **Back to Home**.
+
+| Cause | Sentence |
+|---|---|
+| Auth rejected | Authentication failed. Check the key or password. |
+| Key deleted | This machine's key was deleted. Edit the machine and choose another key. |
+| Agent not running | The Windows SSH agent isn't running. Start the OpenSSH Authentication Agent service, or choose a key. |
+| Agent has no key the host accepts | The SSH agent has no key this host accepts. |
+| Connect timeout, or no reply after the handshake | The host stopped answering. |
+| TCP, handshake, or other transport | Could not connect: \<detail\> |
+
+`zmx ls` failing is not a connect failure: the client opens one `default` tab as if the list were empty of matches, and the next refresh fills the strip.
+
+## Files and images
+
+Three ways in, one path out: drop on the grid, **Send file…** (system picker, multi-select), and paste an image from the Windows clipboard. All three upload to the host and then paste the remote path into the session, the iOS photo trick: a TUI like Claude Code attaches an image when its path arrives as a paste, and leaves it as plain text when the same characters are typed.
+
+### Clipboard images
+
+Every paste (Ctrl+V, Ctrl+Shift+V, Shift+Insert, right-click) checks the clipboard first:
+
+| Clipboard holds | Paste does |
+|---|---|
+| Text | Pastes the text, as today |
+| An image and no text (a Win+Shift+S snip, Copy image in a browser) | Uploads it as `paste-<unix seconds>.png` and pastes its path |
+| Files copied in Explorer (`CF_HDROP`) | Sends them as if they were dropped |
+
+Text wins when the clipboard holds both text and an image. An empty clipboard pastes nothing.
+
+The image is read from the `PNG` clipboard format when present, else from `CF_DIBV5` / `CF_DIB`, and encoded as PNG so a screenshot stays lossless. Alpha is kept.
+
+### Image formats
+
+Same rule as iOS `MediaTransfer.jpegName`: `png`, `jpg`, `jpeg`, `gif`, and `webp` are sent as they are. Any other image a TUI would not attach (HEIC, HEIF, AVIF, BMP, TIFF, JXR) is decoded with WIC and re-encoded as JPEG at quality 0.9, under the same base name with `.jpg`. When WIC cannot decode it (HEIC without the Windows HEIF extension), the file is sent unchanged and its path still pasted. Non-image files are never touched.
+
+The 200 MB limit applies to what is sent, after re-encoding. A file over it is refused before it is read:
+
+> That's 214 MB — Tether sends up to 200 MB at a time.
+
+Folders are refused with "Tether sends files, not folders."
+
+### Upload
+
+Everything goes to the uploads folder, never into the shell's working directory, so a screenshot does not land in whatever repo the shell is in. The folder is resolved once per send on the control connection with the iOS command:
+
+```sh
+mkdir -p "$HOME/.tether/uploads" && cd "$HOME/.tether/uploads" && pwd && echo __TETHER_UPLOADS_OK__
+```
+
+The client trusts the line before the last `__TETHER_UPLOADS_OK__` marker only when it is an absolute path. The pasted path must be absolute so a TUI in any directory can open it. If that fails, the file goes to the active tab's session directory. The remote path is `directory/filename`, or the bare filename when no directory resolved. Transfer is SCP sink mode (`scp -t`) on its own SSH connection per file, shell-quoted target, so a large file does not block the live session or the others. A file with the same name is overwritten, as iOS does.
+
+### Paste back
+
+Each file that arrives is pasted, into the tab that was active when the send began, as soon as it lands: its shell-quoted absolute path, as one paste through the PTY paste path (bracketed when the program asked for it, markers in the text stripped), never as typed keystrokes. Files go in order; every paste after the first starts with a space, so several images become one line of quoted paths and each still arrives as its own paste, which is what makes Claude Code attach each one.
+
+While a send is in flight the header stays, and a capsule at the bottom of the grid reads `Sending paste-1791082819.png (2/3)`. On success it reads `Sent ~/.tether/uploads/paste-1791082819.png`. A failure stops the queue: files already sent stay on the host and stay pasted, and the capsule names the file that failed and why. The capsule leaves on the next keystroke, or after 4 seconds.
+
+## How it is built
+
+A Cargo workspace under `clients/windows/`:
+
+| Crate | Job |
+|---|---|
+| `tether-core` | Profiles, key records, key parsing and validation, host-key pin logic, form hints, theme catalog, font ids, preferences, upload path rules, the session list and tab rules (first tab, new-session name, refresh merge, kill order, attach cap), link detection, OSC notification and progress parsing, and the connection sequence behind a `Transport` trait. No UI, no network. |
+| `tether-ssh` | The `Transport` trait implemented with `russh` on a tokio runtime that the app owns. Terminal connection with one PTY channel per attached tab, control connection, one connection per upload, and the Windows OpenSSH agent client. |
+| `tether-term` | `alacritty_terminal` as the VT engine, plus a rasterizer that turns its grid into an RGBA buffer. Glyphs are shaped and rasterized with `swash` into a glyph atlas keyed by face, size, and scale. Themes, fonts, cursor, and padding are inputs to that buffer. |
+| `tether-app` | The Slint window. Fluent widget style, recolored to the Tether tokens. The terminal page shows the active tab's buffer as an image at physical pixel size. Win32 glue: caption color, `SC_KEYMENU`, clipboard formats, toasts, `ITaskbarList3`, power and session-lock notifications, `ShellExecuteW`. |
+
+Slint's default blue does not replace `#7C8CF8`.
+
+### Why `russh`, not `ssh2`
+
+The iOS app shares no Rust with this client, so libssh2 buys nothing here. On Windows, `libssh2-sys` builds against WinCNG unless OpenSSL is vendored in, and the WinCNG backend has no Ed25519, which is the only key Tether generates. `russh` is pure Rust: Ed25519, RSA-SHA2, ECDSA, ChaCha20-Poly1305, strict KEX, and OpenSSH, PKCS#8, and PKCS#1 key parsing, with no C toolchain or OpenSSL in the Windows build.
+
+The client keeps iOS's connection split: one terminal connection for the PTYs (one channel per attached tab), a separate control connection for `zmx ls`, `zmx kill`, and the uploads directory, and one connection per upload. A stalled upload or a slow exec then cannot hold up PTY output.
+
+### Stored on disk
+
+`%LOCALAPPDATA%\Tether\`. Local, not roaming: secrets are bound to this PC, and records that point at them must not roam without them.
+
+| File | Contents |
+|---|---|
+| `profiles.json` | Machine list. Auth is `password`, `agent`, or a key id. No passwords, no private keys. |
+| `keys.json` | Key records: id, name, algorithm, public line, fingerprint, origin, created. |
+| `preferences.json` | Appearance, terminal settings, window placement. |
+| `hostkeys.json` | `host:port` → fingerprint. Public host identity, same role as iOS UserDefaults. |
+| `secrets\<account>.bin` | One DPAPI blob per secret. |
+
+Writes go to a temp file and then rename, so a crash never leaves half a JSON file.
+
+Secrets are encrypted with DPAPI (`CryptProtectData`, current-user scope, the app's own entropy bytes). That binds them to this Windows user on this PC, the same role as an iOS Keychain item that does not sync. Credential Manager is not used. It caps a secret at 2560 bytes, which a 4096-bit RSA key exceeds, and enterprise-persisted entries roam with a roaming profile.
+
+| Account | Secret |
+|---|---|
+| `key-<uuid>` | Private key as imported, or PKCS#8 PEM when generated |
+| `host-password-<uuid>` | The machine's password |
+
+Deleting a machine deletes its password entry. Deleting a key deletes its secret.
+
+### Build, CI, and packaging
+
+- `ci.yml` gains a `windows-latest` job: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` for the workspace, and a release build of `tether-app`.
+- The `tether-core`, `tether-ssh`, and `tether-term` tests also run on Linux in CI. Only `tether-app` needs Windows.
+- Release ships a signed MSIX (per-user install, no admin) and a portable zip. Signing identity and SmartScreen reputation are decided in the release slice, not here.
+- Slint is used under GPLv3, which matches this repo's license.
+
+## Tests
+
+`tether-core`, `tether-ssh`, and `tether-term` test without a live host and without a window.
+
+- Form hints, in field order, including whitespace, port range, and the key hints: encrypted key, public/private mismatch.
+- Key parsing: OpenSSH, PKCS#8, and PKCS#1 accepted; the algorithm comes from the public line; a generated key round-trips through PKCS#8 and signs.
+- Upload path: marker required, relative lines ignored, join with the filename, 200 MB rejection copy, folders refused.
+- Image rule: attachable extensions pass through, others map to `.jpg`, an undecodable image is sent unchanged, the limit is checked after re-encoding.
+- Clipboard paste: text pastes text; image-only becomes `paste-<ts>.png`; `CF_HDROP` becomes a drop; text wins over an image; Ctrl+V and Ctrl+Shift+V behave the same; Ctrl+C copies with a selection and sends `0x03` without one; Ctrl+Q sends `0x11`.
+- Host key: first seen is pinned before auth, match continues, mismatch is the refused error, does not write, and is never retried.
+- Session choice: `default` wins, else newest by `created`, else none; `zmx ls` failure opens `default`.
+- Tabs: strip order by `created`; refresh adds and removes tabs and picks the neighbor when the active one vanishes; new-session name (`default`, then first free `session-N`); an existing name selects its tab; kill switches away first and leaves the empty state on the last one; the 13th attach detaches the least recently viewed; tab shortcuts wrap and Ctrl+Shift+9 is the last tab.
+- Attach command: name is shell-quoted; nothing is typed on an empty host; each tab gets its own channel and grid; reconnect re-attaches every attached tab, active first.
+- Lock: detach after the 15 s grace, not before; unlock re-attaches; minimize does nothing.
+- Links: OSC 8 wins over detected text; a URL wrapped across rows and one cut by `│ ┃ ⎿` resolve to the whole URL; only `http`, `https`, `mailto` open; Ctrl+click is never reported to the program.
+- Replies: OSC 10/11/12 and OSC 4 answer in `rgb:` form with the current theme and overrides; DA and DSR answered; CSI 21t ignored.
+- Notifications: OSC 9 and OSC 777 parse, `9;4` is never a toast, the 5 s per-session throttle, no toast for the focused active tab.
+- Progress: each OSC 9;4 state maps to the taskbar state; OSC 133;A clears it.
+- Edit: an empty password keeps the saved one; leaving Password deletes it; a new host or port leaves the old pin in place.
+- Theme lookup falls back to Tether. Font lookup falls back to Cascadia Mono. Size, spacing, and padding clamp.
+- The connection sequence against a fake transport: pin, refuse, auth failure, retry count, keepalive after auth, reconnect re-attaches the same name.
+- Send queue: order, one bracketed paste per file with a leading space after the first, stop on failure with earlier pastes kept.
+- Resize: local redraw per step, one PTY resize after the settle window.
+- Key table: every row above in normal and application cursor/keypad mode, each modifier parameter, Ctrl folding, Alt as `ESC` prefix, AltGr text on a Canadian French layout, Shift+Enter as `ESC CR`, and the keys Tether keeps never reaching the PTY.
+- Secret store: DPAPI round-trip and delete (Windows job only), and an in-memory store for the rest.
+- Rasterizer: a known cell buffer produces a buffer of the expected size at 1× and 2×, the theme background is the well color, and a missing glyph falls back to the symbols font.
+- `tether-ssh` against an in-process `russh` server: pin, auth by key, by agent (a fake agent pipe), and by password; several PTY channels on one connection, each with its own data; exec; SCP sink.
+
+Live SSH tests against a real host stay off unless an env var opts in, same policy as the iOS suite.
+
+## Decisions locked here
+
+- Rust and Slint, one window, platform title bar.
+- `russh`, not libssh2. Same connection shape as iOS.
+- Gear on Home and on the terminal.
+- Forms are pages. Only destructive confirms are dialogs.
+- Windows font default is Cascadia Mono at 14 pt. All faces bundled.
+- Secrets in DPAPI under `%LOCALAPPDATA%`, not Credential Manager.
+- Sessions are tabs: one per `zmx` session on the host, each on its own PTY channel, attached on first view and kept live; lock detaches after 15 s.
+- Attach by typing `zmx attach` into the login shell; an empty host waits for New session.
+- Ctrl+click opens `http`, `https`, and `mailto` links, also under mouse reporting.
+- OSC 9 and 777 become Windows toasts; OSC 9;4 drives the taskbar progress.
+- Auth is a vault key, the Windows OpenSSH agent, or a password. Machines can be edited.
+- Files and images come in by drop, picker, or clipboard paste; go to `~/.tether/uploads`, 200 MB each, own SSH connection per file; and come back as one paste per file, so a TUI attaches images. Non-attachable images are re-encoded to JPEG, clipboard images are PNG.
+- A changed host key cannot be accepted from this app.

@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tether for Windows</title>
+<style>
+  :root {
+    --bg: #08080e;
+    --surface: #12121d;
+    --raised: #191926;
+    --input: #0b0b13;
+    --text: #edeef6;
+    --secondary: #9797ac;
+    --faint: #8b8ba3;
+    --border: #232333;
+    --accent: #7c8cf8;
+    --on-accent: #08080e;
+    --success: #6ee7a8;
+    --warning: #f2b34c;
+    --danger: #ff7050;
+    --term: #1e1e2e;
+    --term-fg: #cccccc;
+    --blue: #89b4fa;
+    --green: #a6e3a1;
+    --red: #f38ba8;
+    --yellow: #f9e2af;
+    --mauve: #cba6f7;
+    --teal: #94e2d5;
+    --font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Mono", "Cascadia Code", ui-monospace, "SF Mono", Consolas, monospace;
+    --shadow: 0 28px 70px rgba(0, 0, 0, 0.45);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: grid;
+    grid-template-columns: 232px 1fr;
+    background: #07070b;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  ::selection { background: rgba(124, 140, 248, 0.35); color: var(--text); }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .rail {
+    border-right: 1px solid var(--border);
+    background: #0c0c12;
+    padding: 22px 12px 28px;
+    overflow: auto;
+  }
+  .rail h1 {
+    margin: 0 14px 18px;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+  .rail .group {
+    margin: 16px 14px 6px;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .rail button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: var(--secondary);
+    padding: 7px 12px;
+    margin: 1px 0;
+  }
+  .rail button:hover { background: rgba(255, 255, 255, 0.03); color: var(--text); }
+  .rail button[aria-current="true"] {
+    background: var(--raised);
+    color: var(--text);
+  }
+
+  .stage {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 22px 28px 26px;
+    gap: 14px;
+  }
+  .stage-head h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: -0.03em;
+  }
+  .caption {
+    margin: 4px 0 0;
+    max-width: 68ch;
+    color: var(--secondary);
+    font-size: 14px;
+  }
+  .frame {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .win {
+    width: min(1040px, 100%);
+    height: min(680px, calc(100dvh - 148px));
+    min-height: 520px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .titlebar {
+    height: 36px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    padding-left: 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+  }
+  .titlebar .name { font-size: 12px; font-weight: 600; color: var(--secondary); }
+  .caption-btns { margin-left: auto; display: flex; height: 100%; }
+  .caption-btns button {
+    width: 46px;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--secondary);
+    display: grid;
+    place-items: center;
+  }
+  .caption-btns button:hover { background: var(--raised); color: var(--text); }
+  .caption-btns button.close:hover { background: #c42b1c; color: white; }
+  .caption-btns svg { display: block; }
+
+  .client { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+  .aurora {
+    position: absolute;
+    left: 0; right: 0; top: -30px;
+    height: 200px;
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(124, 140, 248, 0.28), transparent 58%),
+      radial-gradient(ellipse at 30% 10%, rgba(110, 231, 168, 0.14), transparent 50%);
+    filter: blur(16px);
+    pointer-events: none;
+  }
+  .home, .page { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .col {
+    width: min(560px, calc(100% - 48px));
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+  }
+  .home-head, .page-head {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 22px 0 8px;
+  }
+  .home-head h3, .page-head h3 {
+    margin: 0;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1;
+  }
+  .sub {
+    margin: 5px 0 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--faint);
+  }
+  .head-actions { margin-left: auto; display: flex; gap: 8px; }
+  .icon-btn, .back {
+    border: 1px solid var(--border);
+    background: var(--raised);
+    color: var(--accent);
+    border-radius: 9px;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+  }
+  .icon-btn:hover, .back:hover { background: #222233; }
+  .back {
+    width: auto;
+    padding: 0 12px 0 8px;
+    gap: 4px;
+    display: inline-flex;
+    align-items: center;
+    color: var(--secondary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin: 10px 0 12px;
+  }
+  .tabs button {
+    flex: 1;
+    border: 0;
+    background: transparent;
+    border-radius: 9px;
+    padding: 8px 0;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--secondary);
+  }
+  .tabs button[aria-selected="true"] { background: var(--raised); color: var(--text); }
+
+  .list { display: flex; flex-direction: column; gap: 10px; overflow: auto; padding-bottom: 18px; }
+  .card {
+    text-align: left;
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 13px 14px;
+    color: var(--text);
+  }
+  .card:hover { background: #161624; }
+  .card-top, .card-detail, .open-row { display: flex; align-items: center; gap: 8px; }
+  .card-top { margin-bottom: 8px; }
+  .lamp {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--accent); opacity: 0.6; flex: none;
+  }
+  .lamp.on { opacity: 1; box-shadow: 0 0 8px rgba(124, 140, 248, 0.55); }
+  .lamp.ok { background: var(--success); opacity: 1; box-shadow: 0 0 8px rgba(110, 231, 168, 0.45); }
+  .lamp.warn { background: var(--warning); opacity: 1; box-shadow: 0 0 8px rgba(242, 179, 76, 0.45); }
+  .lamp.bad { background: var(--danger); opacity: 1; box-shadow: 0 0 8px rgba(255, 112, 80, 0.4); }
+  .card-name { font-size: 16px; font-weight: 650; }
+  .pill {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--faint);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 999px;
+    padding: 2px 8px;
+  }
+  .origin {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    background: rgba(124, 140, 248, 0.12);
+    border-radius: 6px;
+    padding: 2px 6px;
+  }
+  .mono { font-family: var(--mono); font-size: 12.5px; color: var(--secondary); }
+  .faint { color: var(--faint); }
+  .open-row { justify-content: flex-end; margin-top: 8px; color: var(--accent); font-size: 12px; font-weight: 650; gap: 4px; }
+
+  .key-card { display: flex; gap: 13px; align-items: flex-start; }
+  .art {
+    width: 78px; flex: none;
+    aspect-ratio: 17 / 9;
+    background: var(--term);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    display: grid;
+    grid-template-columns: repeat(17, 1fr);
+    gap: 1px;
+  }
+  .art i { display: block; border-radius: 1px; }
+  .art i.a { background: rgba(124, 140, 248, 0.35); }
+  .art i.b { background: var(--accent); }
+  .art i.c { background: var(--success); }
+  .art i.d { background: var(--warning); }
+  .art i.e { background: var(--danger); }
+  .key-copy {
+    margin-top: 6px;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--accent);
+    font-size: 12.5px;
+    font-weight: 650;
+  }
+  .key-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 9px;
+    padding: 10px 0 16px;
+  }
+  .key-actions button {
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--raised);
+    padding: 12px 8px;
+    font-size: 12.5px;
+    font-weight: 650;
+  }
+  .key-actions button.prime {
+    background: var(--accent);
+    color: var(--on-accent);
+    border-color: transparent;
+  }
+  .key-actions button:hover { filter: brightness(1.08); }
+
+  .empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+    padding: 0 24px 40px;
+  }
+  .empty h3 { margin: 6px 0 0; font-size: 20px; letter-spacing: -0.02em; }
+  .empty p { margin: 0; max-width: 28ch; color: var(--secondary); font-size: 14px; }
+
+  .btn {
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-weight: 650;
+    font-size: 14px;
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  .btn:hover { filter: brightness(1.06); }
+  .btn.block { width: 100%; }
+  .btn.quiet {
+    background: var(--raised);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn.danger { background: var(--danger); color: #1a0a07; }
+  .btn:disabled, .btn.dead {
+    background: var(--raised);
+    color: var(--faint);
+    cursor: default;
+  }
+
+  .form {
+    width: min(440px, calc(100% - 48px));
+    margin: 8px auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: auto;
+    padding-bottom: 28px;
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field span { font-size: 12px; font-weight: 600; color: var(--secondary); }
+  .field input, .field textarea {
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 10px 12px;
+    outline: none;
+  }
+  .field textarea { min-height: 88px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+  .field input:focus, .field textarea:focus { border-color: var(--accent); }
+  .split { display: flex; gap: 9px; }
+  .split input:last-child { width: 84px; flex: none; }
+  .seg {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+  }
+  .seg button {
+    flex: 1;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    padding: 7px 0;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--secondary);
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+  .note {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--faint);
+    border: 1px solid rgba(110, 231, 168, 0.28);
+    border-radius: 9px;
+    padding: 10px 12px;
+  }
+  .hint { text-align: center; color: var(--faint); font-size: 12px; margin: -4px 0 0; }
+  .file-btn {
+    width: 100%;
+    background: var(--raised);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    color: var(--accent);
+    font-weight: 650;
+    font-size: 13px;
+    padding: 10px;
+  }
+
+  .scrim {
+    position: absolute;
+    inset: 36px 0 0;
+    background: rgba(8, 8, 14, 0.62);
+    display: grid;
+    place-items: center;
+    z-index: 5;
+  }
+  .dialog {
+    width: min(420px, calc(100% - 48px));
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 20px 16px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  }
+  .dialog h3 { margin: 0 0 8px; font-size: 18px; letter-spacing: -0.02em; }
+  .dialog p { margin: 0 0 16px; color: var(--secondary); font-size: 14px; }
+  .dialog .row { display: flex; justify-content: flex-end; gap: 8px; }
+
+  .settings {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 28px;
+    width: min(860px, calc(100% - 56px));
+    margin: 6px auto 0;
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: 24px;
+  }
+  .section { margin: 8px 0 4px; font-size: 12px; font-weight: 650; color: var(--faint); }
+  .row-link, .stepper, .slider-row, .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 0;
+    text-align: left;
+  }
+  .row-link span:first-child, .stepper span:first-child, .slider-row span:first-child, .toggle-row span:first-child { font-weight: 600; }
+  .row-link .value, .stepper .value, .slider-row .value {
+    margin-left: auto;
+    color: var(--secondary);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .chev { color: var(--faint); }
+  .stepper button, .tiny {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--raised);
+    color: var(--text);
+  }
+  .slider {
+    margin-left: auto;
+    width: 140px;
+    accent-color: var(--accent);
+  }
+  .switch {
+    margin-left: auto;
+    width: 40px; height: 24px;
+    border-radius: 999px;
+    border: 0;
+    background: var(--raised);
+    position: relative;
+  }
+  .switch[aria-pressed="true"] { background: var(--accent); }
+  .switch i {
+    position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--text);
+  }
+  .switch[aria-pressed="true"] i { left: 19px; background: var(--on-accent); }
+  .preview {
+    background: var(--term);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--term-fg);
+    align-self: start;
+    margin-top: 28px;
+  }
+  .preview .cursor {
+    display: inline-block;
+    width: 0.62em;
+    height: 1.05em;
+    background: rgba(255, 255, 255, 0.85);
+    vertical-align: text-bottom;
+    margin-left: 1px;
+  }
+
+  .search {
+    margin: 0 0 8px;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 10px 12px;
+    width: 100%;
+  }
+  .theme-row, .font-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+    text-align: left;
+  }
+  .swatch {
+    width: 108px;
+    flex: none;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    padding: 7px 8px 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.3;
+  }
+  .dots { display: flex; gap: 3px; margin-top: 4px; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+  .theme-name { font-weight: 600; }
+  .theme-meta { display: block; font-size: 12px; color: var(--secondary); }
+  .check { margin-left: auto; color: var(--accent); font-weight: 700; }
+
+  .term-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .term-id { min-width: 0; padding-left: 4px; }
+  .term-id strong { display: block; font-size: 14px; font-weight: 650; }
+  .term-id em {
+    font-style: normal;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--faint);
+  }
+  .term-id em b { font-weight: 600; }
+  .term-head .spacer { flex: 1; }
+  .session-tabs {
+    flex: none;
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    padding: 4px 8px 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .stab {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 12px 6px;
+    border-radius: 8px 8px 0 0;
+    color: var(--text-secondary, #9797ac);
+    font-size: 12px;
+    white-space: nowrap;
+    position: relative;
+  }
+  .stab small { font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 10.5px; opacity: 0.7; }
+  .stab.active { background: #1e1e2e; color: var(--text, #edeef6); }
+  .stab.attn::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); align-self: center; }
+  .stab.add { color: var(--accent); font-weight: 600; }
+  .ghost {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 650;
+    padding: 6px 8px;
+    border-radius: 8px;
+  }
+  .ghost:hover { background: rgba(124, 140, 248, 0.1); }
+  .well {
+    flex: 1;
+    min-height: 0;
+    background: var(--term);
+    position: relative;
+    overflow: hidden;
+  }
+  .grid {
+    margin: 0;
+    padding: 16px 18px;
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--term-fg);
+    white-space: pre-wrap;
+  }
+  .grid .b { color: var(--blue); }
+  .grid .g { color: var(--green); }
+  .grid .y { color: var(--yellow); }
+  .cursor-block {
+    display: inline-block;
+    width: 0.62em;
+    height: 1.05em;
+    background: rgba(255, 255, 255, 0.88);
+    vertical-align: text-bottom;
+  }
+  .drop {
+    position: absolute;
+    inset: 16px;
+    border: 1.5px dashed var(--accent);
+    border-radius: 16px;
+    background: rgba(8, 8, 14, 0.72);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+  }
+  .drop strong { font-size: 20px; letter-spacing: -0.02em; }
+  .drop span { color: var(--secondary); font-family: var(--mono); font-size: 13px; }
+  .capsule {
+    position: absolute;
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    background: rgba(18, 18, 29, 0.95);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 13px;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+    white-space: nowrap;
+  }
+  .capsule.bad { border-color: rgba(255, 112, 80, 0.55); }
+
+  .block-page {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    gap: 8px;
+  }
+  .block-page h3 { margin: 8px 0 0; font-size: 22px; letter-spacing: -0.03em; }
+  .block-page .who { font-family: var(--mono); color: var(--secondary); font-size: 13px; }
+  .fp {
+    margin-top: 12px;
+    text-align: left;
+    width: min(460px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .fp div { margin-top: 8px; }
+  .fp small { display: block; color: var(--faint); font-size: 11px; font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase; }
+  .fp code { font-family: var(--mono); font-size: 12px; color: var(--text); word-break: break-all; }
+  .block-page .btn { margin-top: 16px; }
+
+  .screen { display: none; height: 100%; }
+  .screen.on { display: flex; flex-direction: column; height: 100%; }
+  .screen .client, .screen .home, .screen .page { height: 100%; }
+
+  @media (max-width: 860px) {
+    body { grid-template-columns: 1fr; }
+    .rail { display: flex; gap: 4px; overflow: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
+    .rail h1, .rail .group { display: none; }
+    .rail button { width: auto; white-space: nowrap; }
+    .settings { grid-template-columns: 1fr; }
+    .preview { margin-top: 8px; }
+    .win { min-height: 640px; height: auto; }
+  }
+</style>
+</head>
+<body>
+<nav class="rail" aria-label="Screens">
+  <h1>Tether for Windows</h1>
+  <div class="group">Home</div>
+  <button type="button" data-go="machines" aria-current="true">Machines</button>
+  <button type="button" data-go="empty">Empty</button>
+  <button type="button" data-go="keys">Keys</button>
+  <button type="button" data-go="add">Add a server</button>
+  <button type="button" data-go="generate">Generate key</button>
+  <button type="button" data-go="import">Import key</button>
+  <button type="button" data-go="paste">Paste key</button>
+  <button type="button" data-go="remove">Remove machine</button>
+  <button type="button" data-go="delete">Delete key</button>
+  <div class="group">Appearance</div>
+  <button type="button" data-go="settings">Settings</button>
+  <button type="button" data-go="themes">Color scheme</button>
+  <button type="button" data-go="fonts">Font</button>
+  <div class="group">Session</div>
+  <button type="button" data-go="connecting">Connecting</button>
+  <button type="button" data-go="terminal">Terminal</button>
+  <button type="button" data-go="drop">Drop a file</button>
+  <button type="button" data-go="sent">Sent</button>
+  <button type="button" data-go="failed">Send failed</button>
+  <button type="button" data-go="auth">Couldn't connect</button>
+  <button type="button" data-go="refused">Host key refused</button>
+</nav>
+
+<main class="stage">
+  <div class="stage-head">
+    <h2 id="title">Machines</h2>
+    <p class="caption" id="caption"></p>
+  </div>
+  <div class="frame">
+    <div class="win" id="win">
+
+      <section class="screen on" id="machines" data-title="Machines" data-caption="A card is a saved machine. Open dials it. The plus adds one. The gear is Settings, on Home as well as in the terminal, because appearance applies before you connect.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="home">
+            <div class="col">
+              <div class="home-head">
+                <div>
+                  <h3>Home</h3>
+                  <p class="sub">2 machines</p>
+                </div>
+                <div class="head-actions">
+                  <button class="icon-btn" data-go="settings" aria-label="Settings"></button>
+                  <button class="icon-btn" data-go="add" aria-label="Add a machine"></button>
+                </div>
+              </div>
+              <div class="tabs">
+                <button type="button" aria-selected="true">Machines</button>
+                <button type="button" data-go="keys">Keys</button>
+              </div>
+              <div class="list">
+                <button class="card" data-go="connecting">
+                  <div class="card-top"><i class="lamp"></i><span class="card-name">devbox</span><span class="pill">saved</span></div>
+                  <div class="card-detail"><span class="mono">dev@192.0.2.10:22</span><span class="mono faint">· id_ed25519</span></div>
+                  <div class="open-row">Open <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+                </button>
+                <button class="card" data-go="connecting">
+                  <div class="card-top"><i class="lamp"></i><span class="card-name">vps-paris</span><span class="pill">saved</span></div>
+                  <div class="card-detail"><span class="mono">root@203.0.113.9:22</span><span class="mono faint">· password</span></div>
+                  <div class="open-row">Open <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="empty" data-title="Empty" data-caption="First launch, and any time the last machine is removed. One action.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="home">
+            <div class="col">
+              <div class="home-head">
+                <div><h3>Home</h3><p class="sub">no machines yet</p></div>
+                <div class="head-actions">
+                  <button class="icon-btn" data-go="settings" aria-label="Settings"></button>
+                  <button class="icon-btn" data-go="add" aria-label="Add a machine"></button>
+                </div>
+              </div>
+              <div class="tabs">
+                <button type="button" aria-selected="true">Machines</button>
+                <button type="button" data-go="keys">Keys</button>
+              </div>
+              <div class="empty">
+                <svg width="46" height="46" viewBox="0 0 46 46" fill="none" aria-hidden="true">
+                  <path d="M10 32 23 12l13 20" stroke="#7c8cf8" stroke-width="1.4" stroke-linejoin="round" stroke-dasharray="2.2 2.4"/>
+                  <circle cx="10" cy="32" r="3" stroke="#7c8cf8" stroke-width="1.4"/>
+                  <circle cx="23" cy="12" r="3" stroke="#7c8cf8" stroke-width="1.4"/>
+                  <circle cx="36" cy="32" r="3" stroke="#7c8cf8" stroke-width="1.4"/>
+                </svg>
+                <h3>No machines tethered yet</h3>
+                <p>Add a server to open a shell that stays alive between visits.</p>
+                <button class="btn" data-go="add" style="margin-top:8px">Add a server</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="keys" data-title="Keys" data-caption="The public half lives on the card. The private half stays on this PC, encrypted with DPAPI. Copy is on the card. Delete is a confirm, from a right-click or the Delete key.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="home">
+            <div class="col">
+              <div class="home-head">
+                <div><h3>Home</h3><p class="sub">2 keys · on this PC</p></div>
+                <div class="head-actions">
+                  <button class="icon-btn" data-go="settings" aria-label="Settings"></button>
+                  <button class="icon-btn" data-go="add" aria-label="Add a machine"></button>
+                </div>
+              </div>
+              <div class="tabs">
+                <button type="button" data-go="machines">Machines</button>
+                <button type="button" aria-selected="true">Keys</button>
+              </div>
+              <div class="list">
+                <article class="card key-card">
+                  <div class="art" data-art="a"></div>
+                  <div>
+                    <div class="card-top" style="margin-bottom:4px"><span class="card-name" style="font-size:15px">id_ed25519</span><span class="origin">generated</span></div>
+                    <div class="mono faint">ssh-ed25519 · created Oct 2</div>
+                    <div class="mono">SHA256:Lq/BDv7G…cRfz</div>
+                    <div class="mono faint">used by devbox</div>
+                    <button class="key-copy" type="button">Copy public key</button>
+                  </div>
+                </article>
+                <article class="card key-card">
+                  <div class="art" data-art="b"></div>
+                  <div>
+                    <div class="card-top" style="margin-bottom:4px"><span class="card-name" style="font-size:15px">work-laptop</span><span class="origin">imported</span></div>
+                    <div class="mono faint">ssh-ed25519 · created Sep 18</div>
+                    <div class="mono">SHA256:n4kP0eR1…9QmA</div>
+                    <div class="mono faint">not used yet</div>
+                    <button class="key-copy" type="button">Copy public key</button>
+                  </div>
+                </article>
+              </div>
+              <div class="key-actions">
+                <button class="prime" data-go="generate" type="button">Generate</button>
+                <button data-go="import" type="button">Import</button>
+                <button data-go="paste" type="button">Paste</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="add" data-title="Add a server" data-caption="A page, not a dialog. Save stays quiet until name, host, user, and a key or password are all present. The note under the fields is the host-key rule.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="page">
+            <div class="col" style="width:min(480px, calc(100% - 48px))">
+              <div class="page-head">
+                <button class="back" data-go="machines" type="button">Back</button>
+                <h3 style="font-size:26px">Add a server</h3>
+              </div>
+              <div class="form">
+                <label class="field"><span>Name</span><input value="devbox"></label>
+                <div class="field"><span>Host and port</span>
+                  <div class="split"><input value="192.0.2.10"><input value="22" inputmode="numeric"></div>
+                </div>
+                <label class="field"><span>User</span><input value="dev"></label>
+                <div class="field"><span>Authentication</span>
+                  <div class="seg">
+                    <button type="button">Password</button>
+                    <button type="button" aria-pressed="true">Private key</button>
+                  </div>
+                </div>
+                <label class="field"><span>Key</span><input value="id_ed25519" readonly></label>
+                <p class="note">First connect pins this host's key. A later change is refused.</p>
+                <button class="btn block" data-go="machines" type="button">Save server</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="generate" data-title="Generate key" data-caption="Ed25519, created on this PC. The PEM is encrypted with DPAPI on this PC. The card then shows only the public half.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="page">
+            <div class="col" style="width:min(480px, calc(100% - 48px))">
+              <div class="page-head">
+                <button class="back" data-go="keys" type="button">Back</button>
+                <h3 style="font-size:26px">Generate key</h3>
+              </div>
+              <div class="form">
+                <label class="field"><span>Name</span><input placeholder="phone" value="desktop"></label>
+                <p class="mono faint" style="margin:0">A new ed25519 key is created on this PC. Only its public half is shown — paste that into the host's authorized_keys.</p>
+                <button class="btn block" data-go="keys" type="button">Generate key</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="import" data-title="Import key" data-caption="Load a file to fill the PEM. The public line is still required, and it has to start with ssh-.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="page">
+            <div class="col" style="width:min(480px, calc(100% - 48px))">
+              <div class="page-head">
+                <button class="back" data-go="keys" type="button">Back</button>
+                <h3 style="font-size:26px">Import key</h3>
+              </div>
+              <div class="form">
+                <label class="field"><span>Name</span><input value="work-laptop"></label>
+                <button class="file-btn" type="button">Load private key file…</button>
+                <label class="field"><span>Private key (PEM)</span><textarea>-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIG…
+-----END PRIVATE KEY-----</textarea></label>
+                <label class="field"><span>Public key (OpenSSH)</span><textarea>ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILq/BDv7Gp/1wzBMF+DvEX6mWJIR0N8VwBDoNiyMcRfz work-laptop</textarea></label>
+                <button class="btn block" data-go="keys" type="button">Save key</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="paste" data-title="Paste key" data-caption="Same material as import, without the file button. The private field must contain PRIVATE KEY.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="page">
+            <div class="col" style="width:min(480px, calc(100% - 48px))">
+              <div class="page-head">
+                <button class="back" data-go="keys" type="button">Back</button>
+                <h3 style="font-size:26px">Paste key</h3>
+              </div>
+              <div class="form">
+                <label class="field"><span>Name</span><input placeholder="work-laptop"></label>
+                <label class="field"><span>Private key (PEM)</span><textarea placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label>
+                <label class="field"><span>Public key (OpenSSH)</span><textarea placeholder="ssh-ed25519 AAAA…"></textarea></label>
+                <button class="btn block dead" type="button">Save key</button>
+                <p class="hint">Name this key to save it</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="remove" data-title="Remove machine" data-caption="The PC forgets the machine and its saved password. Sessions on the host keep running.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="home" style="opacity:0.45">
+            <div class="col">
+              <div class="home-head"><div><h3>Home</h3><p class="sub">2 machines</p></div></div>
+            </div>
+          </div>
+          <div class="scrim">
+            <div class="dialog" role="dialog" aria-labelledby="rm-title">
+              <h3 id="rm-title">Remove devbox?</h3>
+              <p>Its sessions keep running on the host — only this PC forgets it.</p>
+              <div class="row">
+                <button class="btn quiet" data-go="machines" type="button">Cancel</button>
+                <button class="btn danger" data-go="machines" type="button">Remove machine</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="delete" data-title="Delete key" data-caption="The record and the PEM are both removed. Nothing on the host is edited.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="home" style="opacity:0.45"><div class="col"><div class="home-head"><div><h3>Home</h3><p class="sub">2 keys · on this PC</p></div></div></div></div>
+          <div class="scrim">
+            <div class="dialog" role="dialog" aria-labelledby="del-title">
+              <h3 id="del-title">Delete key id_ed25519?</h3>
+              <p>The private key is erased from this PC and cannot be recovered.</p>
+              <div class="row">
+                <button class="btn quiet" data-go="keys" type="button">Cancel</button>
+                <button class="btn danger" data-go="keys" type="button">Delete key</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="settings" data-title="Settings" data-caption="Appearance is the window. The terminal block is the grid. The preview uses the current face, size, spacing, and cursor. Wide windows put it beside the form.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="page">
+            <div style="width:min(860px, calc(100% - 56px)); margin:0 auto">
+              <div class="page-head">
+                <button class="back" data-go="machines" type="button">Back</button>
+                <h3 style="font-size:26px">Settings</h3>
+              </div>
+            </div>
+            <div class="settings">
+              <div>
+                <div class="section">Appearance</div>
+                <div class="field" style="margin:8px 0 16px">
+                  <span>Theme</span>
+                  <div class="seg">
+                    <button type="button">System</button>
+                    <button type="button" aria-pressed="true">Dark</button>
+                    <button type="button">Light</button>
+                  </div>
+                </div>
+                <div class="section">Terminal</div>
+                <button class="row-link" data-go="themes" type="button"><span>Color scheme</span><span class="value">Tether</span><span class="chev">›</span></button>
+                <button class="row-link" data-go="fonts" type="button"><span>Font</span><span class="value">Cascadia Mono</span><span class="chev">›</span></button>
+                <div class="stepper"><span>Size</span><span class="value">14 pt</span><button type="button" aria-label="Smaller">−</button><button type="button" aria-label="Larger">+</button></div>
+                <div class="slider-row"><span>Line spacing</span><span class="value">1.00×</span><input class="slider" type="range" min="1" max="1.6" step="0.05" value="1" aria-label="Line spacing"></div>
+                <div class="stepper"><span>Padding</span><span class="value">8 pt</span><button type="button" aria-label="Less padding">−</button><button type="button" aria-label="More padding">+</button></div>
+                <div class="field" style="margin-top:12px">
+                  <span>Cursor</span>
+                  <div class="seg">
+                    <button type="button" aria-pressed="true">Block</button>
+                    <button type="button">Bar</button>
+                    <button type="button">Underline</button>
+                  </div>
+                </div>
+                <div class="toggle-row"><span>Blink cursor</span><button class="switch" type="button" aria-pressed="false" aria-label="Blink cursor"><i></i></button></div>
+              </div>
+              <div class="preview" aria-hidden="true">me@devbox ~ $ ls
+src  README.md
+me@devbox ~ $ <i class="cursor"></i></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="themes" data-title="Color scheme" data-caption="Tether first, then the same bundled catalog as iOS. A row applies immediately. Light or Dark comes from the background, not from a tag in the file.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="page">
+            <div class="col" style="width:min(560px, calc(100% - 48px))">
+              <div class="page-head">
+                <button class="back" data-go="settings" type="button">Back</button>
+                <h3 style="font-size:26px">Color scheme</h3>
+              </div>
+              <input class="search" placeholder="Search" aria-label="Search color schemes">
+              <div class="list">
+                <button class="theme-row" type="button">
+                  <span class="swatch" style="background:#1e1e2e;color:#cccccc"><span style="color:#89b4fa">~ </span>git <span style="color:#a6e3a1">main</span><span class="dots"><i style="background:#f38ba8"></i><i style="background:#a6e3a1"></i><i style="background:#f9e2af"></i><i style="background:#89b4fa"></i><i style="background:#cba6f7"></i><i style="background:#94e2d5"></i></span></span>
+                  <span><span class="theme-name">Tether</span><span class="theme-meta">Dark</span></span>
+                  <span class="check">✓</span>
+                </button>
+                <button class="theme-row" type="button">
+                  <span class="swatch" style="background:#1e1e2e;color:#cdd6f4"><span style="color:#89b4fa">~ </span>git <span style="color:#a6e3a1">main</span><span class="dots"><i style="background:#f38ba8"></i><i style="background:#a6e3a1"></i><i style="background:#f9e2af"></i><i style="background:#89b4fa"></i><i style="background:#cba6f7"></i><i style="background:#94e2d5"></i></span></span>
+                  <span><span class="theme-name">Catppuccin Mocha</span><span class="theme-meta">Dark</span></span>
+                </button>
+                <button class="theme-row" type="button">
+                  <span class="swatch" style="background:#282a36;color:#f8f8f2"><span style="color:#bd93f9">~ </span>git <span style="color:#50fa7b">main</span><span class="dots"><i style="background:#ff5555"></i><i style="background:#50fa7b"></i><i style="background:#f1fa8c"></i><i style="background:#bd93f9"></i><i style="background:#ff79c6"></i><i style="background:#8be9fd"></i></span></span>
+                  <span><span class="theme-name">Dracula</span><span class="theme-meta">Dark</span></span>
+                </button>
+                <button class="theme-row" type="button">
+                  <span class="swatch" style="background:#1a1b26;color:#c0caf5"><span style="color:#7aa2f7">~ </span>git <span style="color:#9ece6a">main</span><span class="dots"><i style="background:#f7768e"></i><i style="background:#9ece6a"></i><i style="background:#e0af68"></i><i style="background:#7aa2f7"></i><i style="background:#bb9af7"></i><i style="background:#7dcfff"></i></span></span>
+                  <span><span class="theme-name">Tokyo Night</span><span class="theme-meta">Dark</span></span>
+                </button>
+                <button class="theme-row" type="button">
+                  <span class="swatch" style="background:#eff1f5;color:#4c4f69"><span style="color:#1e66f5">~ </span>git <span style="color:#40a02b">main</span><span class="dots"><i style="background:#d20f39"></i><i style="background:#40a02b"></i><i style="background:#df8e1d"></i><i style="background:#1e66f5"></i><i style="background:#8839ef"></i><i style="background:#179299"></i></span></span>
+                  <span><span class="theme-name">Catppuccin Latte</span><span class="theme-meta">Light</span></span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="fonts" data-title="Font" data-caption="Cascadia Mono is the Windows default. The other rows are the faces already bundled with the iOS app. Apple's system faces are not on this list.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="page">
+            <div class="col" style="width:min(520px, calc(100% - 48px))">
+              <div class="page-head">
+                <button class="back" data-go="settings" type="button">Back</button>
+                <h3 style="font-size:26px">Font</h3>
+              </div>
+              <div class="list" style="font-family:var(--mono)">
+                <button class="font-row" type="button"><span>Cascadia Mono</span><span class="check">✓</span></button>
+                <button class="font-row" type="button"><span>Cascadia Code</span></button>
+                <button class="font-row" type="button"><span>JetBrains Mono</span></button>
+                <button class="font-row" type="button"><span>Monaspace Neon</span></button>
+                <button class="font-row" type="button"><span>Monaspace Radon</span></button>
+                <button class="font-row" type="button"><span>Maple Mono</span></button>
+                <button class="font-row" type="button"><span>Comic Mono</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="connecting" data-title="Connecting" data-caption="The terminal frame is already up. The well stays empty until the session is attached. The word connecting is the status, not only the lamp.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="term-head">
+            <button class="back" data-go="machines" type="button">Home</button>
+            <i class="lamp warn"></i>
+            <div class="term-id"><strong>devbox</strong><em>default · <b style="color:var(--warning)">connecting</b></em></div>
+          </div>
+          <div class="well"></div>
+        </div>
+      </section>
+
+      <section class="screen" id="terminal" data-title="Terminal" data-caption="One tab per zmx session on the host, each live on its own channel; the dot marks a bell or notification in a background tab. Back leaves the SSH connection and returns Home. The remote zmx sessions keep running. Send file… is the picker for the same path as a drop.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="term-head">
+            <button class="back" data-go="machines" type="button">Home</button>
+            <i class="lamp ok"></i>
+            <div class="term-id"><strong>devbox</strong><em>default · <b style="color:var(--success)">connected</b></em></div>
+            <span class="spacer"></span>
+            <button class="ghost" type="button">Send file…</button>
+            <button class="icon-btn" data-go="settings" aria-label="Settings"></button>
+          </div>
+          <div class="session-tabs" role="tablist">
+            <span class="stab active" role="tab">default <small>app</small></span>
+            <span class="stab attn" role="tab">build <small>api</small></span>
+            <span class="stab" role="tab">claude <small>web</small></span>
+            <span class="stab add" aria-label="New session">+</span>
+          </div>
+          <div class="well">
+            <pre class="grid"><span class="g">dev@devbox</span>:<span class="b">~</span>$ ls
+src  README.md
+
+<span class="g">dev@devbox</span>:<span class="b">~</span>$ <i class="cursor-block"></i></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="drop" data-title="Drop a file" data-caption="The grid is the drop target. Release sends on a second SSH connection, to ~/.tether/uploads, then pastes the quoted path.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="term-head">
+            <button class="back" data-go="terminal" type="button">Home</button>
+            <i class="lamp ok"></i>
+            <div class="term-id"><strong>devbox</strong><em>default · <b style="color:var(--success)">connected</b></em></div>
+            <span class="spacer"></span>
+            <button class="ghost" type="button">Send file…</button>
+            <button class="icon-btn" data-go="settings" aria-label="Settings"></button>
+          </div>
+          <div class="session-tabs" role="tablist">
+            <span class="stab active" role="tab">default <small>app</small></span>
+            <span class="stab attn" role="tab">build <small>api</small></span>
+            <span class="stab" role="tab">claude <small>web</small></span>
+            <span class="stab add" aria-label="New session">+</span>
+          </div>
+          <div class="well">
+            <pre class="grid"><span class="g">dev@devbox</span>:<span class="b">~</span>$ <i class="cursor-block"></i></pre>
+            <div class="drop">
+              <strong>Release to send</strong>
+              <span>notes.md</span>
+              <span>~/.tether/uploads on devbox</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="sent" data-title="Sent" data-caption="The capsule names the absolute path. That same path is pasted into the session as one paste, not typed out.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="term-head">
+            <button class="back" data-go="terminal" type="button">Home</button>
+            <i class="lamp ok"></i>
+            <div class="term-id"><strong>devbox</strong><em>default · <b style="color:var(--success)">connected</b></em></div>
+            <span class="spacer"></span>
+            <button class="ghost" type="button">Send file…</button>
+            <button class="icon-btn" data-go="settings" aria-label="Settings"></button>
+          </div>
+          <div class="session-tabs" role="tablist">
+            <span class="stab active" role="tab">default <small>app</small></span>
+            <span class="stab attn" role="tab">build <small>api</small></span>
+            <span class="stab" role="tab">claude <small>web</small></span>
+            <span class="stab add" aria-label="New session">+</span>
+          </div>
+          <div class="well">
+            <pre class="grid"><span class="g">dev@devbox</span>:<span class="b">~</span>$ <i class="cursor-block"></i></pre>
+            <div class="capsule">Sent /home/dev/.tether/uploads/notes.md</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="failed" data-title="Send failed" data-caption="Over 200 MB is refused before the file is read. The live session was never the connection that would have carried it.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="term-head">
+            <button class="back" data-go="terminal" type="button">Home</button>
+            <i class="lamp ok"></i>
+            <div class="term-id"><strong>devbox</strong><em>default · <b style="color:var(--success)">connected</b></em></div>
+            <span class="spacer"></span>
+            <button class="ghost" type="button">Send file…</button>
+            <button class="icon-btn" data-go="settings" aria-label="Settings"></button>
+          </div>
+          <div class="session-tabs" role="tablist">
+            <span class="stab active" role="tab">default <small>app</small></span>
+            <span class="stab attn" role="tab">build <small>api</small></span>
+            <span class="stab" role="tab">claude <small>web</small></span>
+            <span class="stab add" aria-label="New session">+</span>
+          </div>
+          <div class="well">
+            <pre class="grid"><span class="g">dev@devbox</span>:<span class="b">~</span>$ <i class="cursor-block"></i></pre>
+            <div class="capsule bad">That's 214 MB — Tether sends up to 200 MB at a time.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="auth" data-title="Couldn't connect" data-caption="Auth failed before a session existed, so this stays on Home chrome. There is no terminal well behind it.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="block-page">
+            <i class="lamp bad" style="width:14px;height:14px"></i>
+            <h3>Authentication failed. Check the key or password.</h3>
+            <div class="who">devbox · dev@192.0.2.10:22</div>
+            <button class="btn" data-go="machines" type="button">Back to Home</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="refused" data-title="Host key refused" data-caption="The pinned fingerprint and the one just seen. Back is the only action. The pin is not replaced from this window.">
+        <div class="titlebar" data-chrome></div>
+        <div class="client">
+          <div class="aurora"></div>
+          <div class="block-page">
+            <i class="lamp bad" style="width:14px;height:14px"></i>
+            <h3>Host key changed — refused.</h3>
+            <div class="who">devbox · dev@192.0.2.10:22</div>
+            <div class="fp">
+              <div><small>Expected</small><code>7c:4a:91:e2:10:bb:03:6d:aa:17:4e:90:c1:55:08:3b:6e:d2:11:90:4c:ab:77:01:9a:32:08:f6:b4:21:d0</code></div>
+              <div><small>Got</small><code>11:02:ee:44:90:aa:13:7c:02:19:88:d0:41:77:10:02:6a:c3:90:14:08:55:21:77:ab:09:14:66:02:19:c8</code></div>
+            </div>
+            <button class="btn" data-go="machines" type="button">Back to Home</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<script>
+  const chrome = `<span class="name">Tether</span><div class="caption-btns" aria-hidden="true">
+    <button type="button" tabindex="-1"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5.5h8" stroke="currentColor" stroke-width="1.1"/></svg></button>
+    <button type="button" tabindex="-1"><svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.4" y="1.4" width="7.2" height="7.2" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button>
+    <button type="button" class="close" tabindex="-1"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2L2 8" stroke="currentColor" stroke-width="1.1"/></svg></button>
+  </div>`;
+  const gear = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.4 3.4l1.2 1.2M11.4 11.4l1.2 1.2M12.6 3.4l-1.2 1.2M4.6 11.4l-1.2 1.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+  const plus = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2.2v9.6M2.2 7h9.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+  document.querySelectorAll("[data-chrome]").forEach((el) => { el.innerHTML = chrome; });
+  document.querySelectorAll(".icon-btn[aria-label='Settings']").forEach((el) => { el.innerHTML = gear; });
+  document.querySelectorAll(".icon-btn[aria-label='Add a machine']").forEach((el) => { el.innerHTML = plus; });
+
+  const patterns = {
+    a: "0a0b00c000d0e000b00a0c00b000a00",
+    b: "00b0a00c000e0d000a00b0c000a000b0"
+  };
+  function paintArt(el, seed) {
+    const cells = [];
+    let n = 0;
+    for (let i = 0; i < 17 * 9; i++) {
+      n = (n * 17 + seed.charCodeAt(i % seed.length) + i) % 23;
+      const k = n < 10 ? "" : n < 14 ? "a" : n < 17 ? "b" : n < 20 ? "c" : n < 22 ? "d" : "e";
+      cells.push(k ? `<i class="${k}"></i>` : "<i></i>");
+    }
+    el.innerHTML = cells.join("");
+  }
+  document.querySelectorAll("[data-art]").forEach((el) => paintArt(el, el.dataset.art === "a" ? "devbox-key" : "work-laptop"));
+
+  const title = document.getElementById("title");
+  const caption = document.getElementById("caption");
+  function show(id) {
+    const screen = document.getElementById(id);
+    if (!screen) return;
+    document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.id === id));
+    document.querySelectorAll(".rail button").forEach((b) => b.setAttribute("aria-current", b.dataset.go === id ? "true" : "false"));
+    title.textContent = screen.dataset.title;
+    caption.textContent = screen.dataset.caption;
+    const railBtn = document.querySelector(`.rail button[data-go="${id}"]`);
+    if (railBtn) railBtn.scrollIntoView({ block: "nearest" });
+  }
+  document.body.addEventListener("click", (event) => {
+    const go = event.target.closest("[data-go]");
+    if (!go) return;
+    show(go.dataset.go);
+  });
+  show("machines");
+</script>
+</body>
+</html>
