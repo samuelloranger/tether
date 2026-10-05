@@ -33,6 +33,9 @@ function required(env: Env, name: keyof Env): string {
   return value;
 }
 
+// The binding doesn't expose when its window resets, so this is a fixed, short hint.
+const RETRY_AFTER_SECONDS = 5;
+
 export function createApp(fetchImpl: typeof fetch = fetch) {
   // One per isolate, so the signed JWT is reused across requests as Apple asks.
   let relay: Relay | null = null;
@@ -91,7 +94,10 @@ export function createApp(fetchImpl: typeof fetch = fetch) {
     }
     const req = parsed.data;
 
-    if (!(await c.env.PER_TOKEN.limit({ key: req.token })).success) return c.json({ error: 'rate_limited' }, 429);
+    const bucket = req.level === 'urgent' ? c.env.PER_TOKEN_URGENT : c.env.PER_TOKEN;
+    if (!(await bucket.limit({ key: req.token })).success) {
+      return c.json({ error: 'rate_limited' }, 429, { 'Retry-After': String(RETRY_AFTER_SECONDS) });
+    }
 
     const { primary, other, topic } = relayFor(c.env);
     let result: Awaited<ReturnType<ApnsClient['send']>>;
