@@ -21,6 +21,8 @@ type stateDeps struct {
 	push   func(PushContent, string) error
 	alive  func(int) bool
 	stderr io.Writer
+	// sleep paces flush's wait for the client to leave; nil means time.Sleep.
+	sleep func(time.Duration)
 }
 
 func defaultStateDeps(dryRun bool) stateDeps {
@@ -68,6 +70,15 @@ func runState(args []string, d stateDeps) error {
 		in.AgentPid = agentPid(d.run, d.ppid)
 	}
 	now := d.now().Unix()
+	pushable := (*state == stateWaiting || *state == stateDone) && *title != "" && *body != ""
+	// Decided before the write so Suppressed lands with the state: a flush between the
+	// two would otherwise find nothing to send. A failed check pushes: losing a
+	// notification is worse than a duplicate.
+	attached := false
+	if pushable {
+		clients, err := zmxClients(d.run)
+		attached = err == nil && clients[*session] > 0
+	}
 	var stored *SessionState
 	preserved := false
 	err := withSessionLock(*session, func() error {
@@ -85,6 +96,10 @@ func runState(args []string, d stateDeps) error {
 			if next == nil {
 				return removeSession(*session)
 			}
+			if attached {
+				next.Title = *title
+				next.Suppressed = true
+			}
 			if err := writeSession(next); err != nil {
 				return err
 			}
@@ -96,14 +111,7 @@ func runState(args []string, d stateDeps) error {
 		fmt.Fprintf(d.stderr, "tether-notify: state for %s not saved: %v\n", *session, err)
 	}
 
-	if preserved || (*state != stateWaiting && *state != stateDone) || *title == "" || *body == "" {
-		return nil
-	}
-	// A failed check pushes: losing a notification is worse than a duplicate.
-	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
-		if stored != nil {
-			markSuppressed(*session, stored.Version, *title)
-		}
+	if preserved || !pushable || attached {
 		return nil
 	}
 	content := PushContent{Title: *title, Body: *body, Link: *link, Session: *session, Level: pushLevel(agentCategory(*state))}
@@ -119,8 +127,8 @@ func runState(args []string, d stateDeps) error {
 	return nil
 }
 
-// markSuppressed records that the push for this exact state version was skipped, so
-// `flush` can send it once the phone detaches. A state that moved on is left alone.
+// markSuppressed re-arms the push for this exact state version after a failed send, so a
+// later `flush` can retry it. A state that moved on is left alone.
 func markSuppressed(session, version, title string) {
 	_ = withSessionLock(session, func() error {
 		return withSessionsLock(func() error {
@@ -147,19 +155,19 @@ func runFlush(args []string, d stateDeps) error {
 	if !validSessionName(*session) {
 		return fmt.Errorf("flush requires a valid --session")
 	}
-	cur, _ := readSession(*session)
-	if cur == nil || !cur.Suppressed || (cur.State != stateWaiting && cur.State != stateDone) {
+	if cur, _ := readSession(*session); !flushable(cur) {
 		return nil
 	}
-	if clients, err := zmxClients(d.run); err == nil && clients[*session] > 0 {
+	if !waitDetached(*session, d) {
 		return nil
 	}
-	// Claimed before sending, so a concurrent or repeated flush can't push it twice.
+	// Claimed before sending, so a concurrent or repeated flush can't push it twice. Whatever
+	// is current now is what goes: a hook may have replaced the record during the wait.
 	var claimed *SessionState
 	_ = withSessionLock(*session, func() error {
 		return withSessionsLock(func() error {
 			s, _ := readSession(*session)
-			if s == nil || s.Version != cur.Version || !s.Suppressed {
+			if !flushable(s) {
 				return nil
 			}
 			s.Suppressed = false
@@ -191,6 +199,42 @@ func runFlush(args []string, d stateDeps) error {
 		markSuppressed(*session, claimed.Version, claimed.Title)
 	}
 	return nil
+}
+
+func flushable(s *SessionState) bool {
+	return s != nil && s.Suppressed && (s.State == stateWaiting || s.State == stateDone)
+}
+
+const (
+	flushPollInterval = 250 * time.Millisecond
+	flushMaxPolls     = 20
+)
+
+// waitDetached polls until the session has no attached client. The phone fires flush as it
+// lets go, so the host may not have seen the client exit yet. A session zmx no longer lists
+// is gone, so there is nobody to tell; a failed check goes ahead, as `state` does.
+func waitDetached(session string, d stateDeps) bool {
+	sleep := d.sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	for i := 0; ; i++ {
+		clients, err := zmxClients(d.run)
+		if err != nil {
+			return true
+		}
+		n, listed := clients[session]
+		if !listed {
+			return false
+		}
+		if n == 0 {
+			return true
+		}
+		if i >= flushMaxPolls {
+			return false
+		}
+		sleep(flushPollInterval)
+	}
 }
 
 // actionableLink is a tether://session/<session>?host=<label> link for this very session:

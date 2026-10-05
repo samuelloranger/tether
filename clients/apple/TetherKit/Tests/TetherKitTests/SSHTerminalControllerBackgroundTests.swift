@@ -149,10 +149,12 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
 }
 
 final class FlushPushCommandTests: XCTestCase {
-  func test_the_command_quotes_the_session_and_tolerates_a_missing_tool() {
+  func test_the_command_runs_detached_quotes_the_session_and_tolerates_a_missing_tool() {
     let command = SSHTerminalController.flushPushCommand(session: "it's work")
-    XCTAssertTrue(command.contains("flush --session \(shellQuote("it's work"))"))
-    XCTAssertTrue(command.contains("command -v ~/.local/bin/tether-notify >/dev/null &&"))
-    XCTAssertTrue(command.hasSuffix("|| true"))
+    let tool = "~/.local/bin/tether-notify"
+    XCTAssertEqual(
+      command,
+      "command -v \(tool) >/dev/null && nohup \(tool) flush --session \(shellQuote("it's work")) >/dev/null 2>&1 </dev/null &"
+    )
   }
 }
