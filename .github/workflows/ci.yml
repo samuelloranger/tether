@@ -138,8 +138,8 @@ jobs:
         with:
           name: tether-windows-${{ github.run_number }}
           path: |
-            dist/Tether-*-x64-portable.zip
-            dist/Tether-*-x64.msix
+            clients/windows/dist/Tether-*-x64-portable.zip
+            clients/windows/dist/Tether-*-x64.msix
           if-no-files-found: error
 
   # The Windows client's library crates hold no Win32 code outside cfg(windows),

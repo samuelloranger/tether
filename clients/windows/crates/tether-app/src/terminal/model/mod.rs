@@ -70,12 +70,17 @@ pub enum MenuRequest {
 pub enum Msg {
     Opened,
     OpenFailed(ConnectError),
-    Ls(Result<Vec<ZmxSession>, ConnectError>),
+    Ls {
+        id: u64,
+        result: Result<Vec<ZmxSession>, ConnectError>,
+    },
     Attached {
         name: String,
     },
     AttachFailed {
         name: String,
+        id: u64,
+        reason: String,
     },
     PtyData {
         name: String,
@@ -127,8 +132,12 @@ pub enum Msg {
         online: bool,
         route_changed: bool,
     },
-    ToastClicked(String),
+    ToastClicked {
+        machine: String,
+        name: String,
+    },
     Retry,
+    RetrySession,
     Reconnect,
     Back,
     RedialDue {
@@ -195,6 +204,7 @@ pub enum UiEffect {
     ReadClipboard,
     OpenUrl(String),
     Toast {
+        machine: String,
         session: String,
         title: String,
         body: String,
@@ -206,6 +216,7 @@ pub enum UiEffect {
     Menu(MenuRequest),
     #[allow(dead_code)] // send-file dialog path (platform::pick_files in glue)
     PickFiles,
+    AllowIme,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -244,6 +255,8 @@ pub struct TerminalView {
     pub kill_prompt: Option<String>,
     pub capsule: Option<CapsuleView>,
     pub progress: Option<Progress>,
+    pub session_error: Option<String>,
+    pub app_keypad: bool,
     pub title: String,
 }
 
@@ -257,6 +270,7 @@ pub(crate) struct TabState {
     pub term: TabTerminal,
     pub osc_title: Option<String>,
     pub bell: BellThrottle,
+    pub attach_error: Option<String>,
 }
 
 pub struct TerminalModel {
@@ -283,6 +297,7 @@ pub struct TerminalModel {
     generation: u64,
     lock: LockGrace,
     lock_detached: bool,
+    ls_seen: u64,
     resize: ResizeDebouncer,
     layout: Option<Layout>,
     well_px: Option<(u32, u32, f32)>,
@@ -321,6 +336,7 @@ impl TerminalModel {
             generation: 0,
             lock: LockGrace::default(),
             lock_detached: false,
+            ls_seen: 0,
             resize: ResizeDebouncer::default(),
             layout: None,
             well_px: None,
@@ -341,10 +357,15 @@ impl TerminalModel {
         match msg {
             Msg::Opened => self.on_opened(now, &mut fx),
             Msg::OpenFailed(err) => self.on_open_failed(err, &mut fx),
-            Msg::Ls(result) => self.on_ls(result, now, &mut fx),
+            Msg::Ls { id, result } => {
+                if id > self.ls_seen {
+                    self.ls_seen = id;
+                    self.on_ls(result, now, &mut fx);
+                }
+            }
             Msg::Attached { name } => self.on_attached(&name, &mut fx),
-            Msg::AttachFailed { name } => {
-                self.channels.remove(&name);
+            Msg::AttachFailed { name, id, reason } => {
+                self.on_attach_failed(&name, id, &reason, &mut fx);
             }
             Msg::PtyData { name, bytes } => self.on_pty_data(&name, &bytes, now, &mut fx),
             Msg::PtyClosed { name } => {
@@ -368,6 +389,7 @@ impl TerminalModel {
             Msg::Ime(text) => {
                 self.snap_active_to_bottom();
                 self.write_active(text.into_bytes(), &mut fx);
+                fx.push(Effect::Ui(UiEffect::AllowIme));
             }
             Msg::Paste { clip, now_unix } => self.on_paste(clip, now_unix, &mut fx),
             Msg::Mouse(m) => self.on_mouse(m, &mut fx),
@@ -390,13 +412,17 @@ impl TerminalModel {
                 online,
                 route_changed,
             } => self.on_network(online, route_changed, &mut fx),
-            Msg::ToastClicked(name) => {
+            Msg::ToastClicked { machine, name } => {
                 fx.push(Effect::Ui(UiEffect::BringToFront));
-                self.activate(&name, &mut fx);
+                if machine == self.machine.id.to_string() {
+                    self.activate(&name, &mut fx);
+                }
             }
             Msg::Retry => self.on_retry(&mut fx),
+            Msg::RetrySession => self.retry_session(&mut fx),
             Msg::Reconnect => self.on_reconnect_clicked(&mut fx),
             Msg::Back => {
+                fx.push(Effect::Ui(UiEffect::Taskbar(None)));
                 fx.push(Effect::Close);
                 fx.push(Effect::Ui(UiEffect::Home));
             }
@@ -430,8 +456,10 @@ impl TerminalModel {
         self.attempt = 0;
         self.last_refresh = now;
         fx.push(Effect::Ls);
-        if was_reconnect {
+        if was_reconnect && !self.lock_detached {
             self.reattach_all(fx);
+        }
+        if was_reconnect {
             fx.push(Effect::Redraw);
         }
     }
@@ -448,6 +476,7 @@ impl TerminalModel {
             },
         };
         self.screen = screen.clone();
+        fx.push(Effect::Ui(UiEffect::Taskbar(None)));
         fx.push(Effect::Ui(UiEffect::Navigate(screen)));
     }
 
@@ -494,9 +523,63 @@ impl TerminalModel {
         if let Some(Chan::Opening(id)) = self.channels.get(name).copied() {
             self.channels.insert(name.to_string(), Chan::Live(id));
         }
+        if let Some(bytes) = self
+            .send
+            .as_mut()
+            .and_then(|s| (s.target == name).then(|| s.pending_paste.take()).flatten())
+        {
+            fx.push(Effect::Write {
+                name: name.to_string(),
+                bytes,
+            });
+        }
         if self.created_here.remove(name) {
             fx.push(Effect::Ls);
         }
+    }
+
+    fn on_attach_failed(&mut self, name: &str, id: u64, reason: &str, fx: &mut Vec<Effect>) {
+        match self.channels.get(name) {
+            Some(Chan::Opening(current) | Chan::Live(current)) if *current == id => {}
+            _ => return,
+        }
+        self.channels.remove(name);
+        if let Some(tab) = self.tabs.get_mut(name) {
+            tab.attach_error = Some(format!("Couldn't open this session: {reason}"));
+        }
+        if self
+            .send
+            .as_ref()
+            .is_some_and(|s| s.target == name && s.pending_paste.is_some())
+        {
+            if let Some(state) = self.send.as_mut() {
+                state.pending_paste = None;
+            }
+            self.capsule_shown = Some(Duration::ZERO);
+            if let Some(queue) = self.send.as_mut().and_then(|s| s.queue.as_mut()) {
+                queue.on_failed("the session isn't open");
+            }
+        }
+        fx.push(Effect::Redraw);
+    }
+
+    fn retry_session(&mut self, fx: &mut Vec<Effect>) {
+        let Some(name) = self.active_name().map(str::to_string) else {
+            return;
+        };
+        if self
+            .tabs
+            .get(&name)
+            .is_none_or(|t| t.attach_error.is_none())
+        {
+            return;
+        }
+        if let Some(tab) = self.tabs.get_mut(&name) {
+            tab.attach_error = None;
+        }
+        self.channels.remove(&name);
+        self.open_channel(&name, fx);
+        fx.push(Effect::Redraw);
     }
 
     pub(crate) fn active_name(&self) -> Option<&str> {
@@ -528,6 +611,7 @@ impl TerminalModel {
                 term: TabTerminal::new(self.size, self.style.theme),
                 osc_title: None,
                 bell: BellThrottle::default(),
+                attach_error: None,
             });
         self.next_channel += 1;
         self.channels
@@ -582,6 +666,13 @@ impl TerminalModel {
         } else {
             self.send_capsule().map(CapsuleView::Send)
         };
+        let session_error = self
+            .active_name()
+            .and_then(|n| self.tabs.get(n).and_then(|t| t.attach_error.clone()));
+        let app_keypad = self
+            .active_name()
+            .and_then(|n| self.tabs.get(n))
+            .is_some_and(|t| t.term.context().app_keypad);
         TerminalView {
             screen: self.screen.clone(),
             header: HeaderView {
@@ -599,6 +690,8 @@ impl TerminalModel {
                 .active_name()
                 .and_then(|n| self.tabs.get(n))
                 .and_then(|t| t.term.reports().progress),
+            session_error,
+            app_keypad,
             title: self.window_title(),
         }
     }
@@ -649,7 +742,11 @@ impl TerminalModel {
         })
     }
 
-    #[allow(dead_code)] // resize / pointer unit tests
+    pub(crate) fn grid(&self) -> GridSize {
+        self.size
+    }
+
+    #[allow(dead_code)] // pointer tests read the computed layout
     pub fn layout(&self) -> Option<Layout> {
         self.layout
     }
@@ -675,7 +772,13 @@ pub(crate) mod tests {
         let (mut m, fx) = TerminalModel::new(machine(), TermStyle::default(), grid());
         assert!(matches!(fx.as_slice(), [Effect::Open, ..]));
         m.handle(Msg::Opened, t(0));
-        let fx = m.handle(Msg::Ls(Ok(sessions)), t(1));
+        let fx = m.handle(
+            Msg::Ls {
+                id: 1,
+                result: Ok(sessions),
+            },
+            t(1),
+        );
         for e in fx {
             if let Effect::Attach { name, .. } = e {
                 m.handle(Msg::Attached { name }, t(2));
@@ -707,7 +810,10 @@ pub(crate) mod tests {
         let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
         m.handle(Msg::Opened, t(0));
         let fx = m.handle(
-            Msg::Ls(Ok(vec![session("build", 300), session("default", 100)])),
+            Msg::Ls {
+                id: 1,
+                result: Ok(vec![session("build", 300), session("default", 100)]),
+            },
             t(1),
         );
         assert!(has_attach(&fx, "default"));
@@ -727,7 +833,10 @@ pub(crate) mod tests {
         let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
         m.handle(Msg::Opened, t(0));
         let fx = m.handle(
-            Msg::Ls(Ok(vec![session("a", 100), session("b", 200)])),
+            Msg::Ls {
+                id: 1,
+                result: Ok(vec![session("a", 100), session("b", 200)]),
+            },
             t(1),
         );
         assert!(has_attach(&fx, "b"));
@@ -765,7 +874,13 @@ pub(crate) mod tests {
     fn ls_failure_opens_default() {
         let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
         m.handle(Msg::Opened, t(0));
-        let fx = m.handle(Msg::Ls(Err(ConnectError::Transport("exec".into()))), t(1));
+        let fx = m.handle(
+            Msg::Ls {
+                id: 1,
+                result: Err(ConnectError::Transport("exec".into())),
+            },
+            t(1),
+        );
         assert!(has_attach(&fx, "default"));
     }
 
@@ -813,7 +928,11 @@ pub(crate) mod tests {
         assert_eq!(m.view().header.word, "connecting");
         assert_eq!(
             m.handle(Msg::Back, t(2)),
-            vec![Effect::Close, Effect::Ui(UiEffect::Home)]
+            vec![
+                Effect::Ui(UiEffect::Taskbar(None)),
+                Effect::Close,
+                Effect::Ui(UiEffect::Home)
+            ]
         );
     }
 
@@ -822,5 +941,94 @@ pub(crate) mod tests {
         let m = live(vec![session("default", 1)]);
         assert_eq!(m.view().title, "devbox · default");
         assert_eq!(m.view().header.session, "default");
+    }
+
+    #[test]
+    fn an_older_ls_is_dropped() {
+        let mut m = live(vec![session("default", 1)]);
+        m.handle(
+            Msg::Ls {
+                id: 3,
+                result: Ok(vec![session("default", 1), session("later", 2)]),
+            },
+            t(10),
+        );
+        assert_eq!(m.view().tabs.len(), 2);
+        m.handle(
+            Msg::Ls {
+                id: 2,
+                result: Ok(vec![session("default", 1)]),
+            },
+            t(11),
+        );
+        assert_eq!(m.view().tabs.len(), 2);
+    }
+
+    #[test]
+    fn a_failed_attach_names_the_reason_and_a_stale_id_is_ignored() {
+        let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
+        m.handle(Msg::Opened, t(0));
+        let fx = m.handle(
+            Msg::Ls {
+                id: 1,
+                result: Ok(vec![session("default", 1)]),
+            },
+            t(1),
+        );
+        let id = fx.iter().find_map(|e| match e {
+            Effect::Attach { name, id, .. } if name == "default" => Some(*id),
+            _ => None,
+        });
+        let id = id.unwrap();
+        m.handle(
+            Msg::AttachFailed {
+                name: "default".into(),
+                id: id + 1,
+                reason: "stale".into(),
+            },
+            t(2),
+        );
+        assert_eq!(m.view().session_error, None);
+        m.handle(
+            Msg::AttachFailed {
+                name: "default".into(),
+                id,
+                reason: "no space".into(),
+            },
+            t(3),
+        );
+        assert_eq!(
+            m.view().session_error.as_deref(),
+            Some("Couldn't open this session: no space")
+        );
+        assert!(has_attach(&m.handle(Msg::RetrySession, t(4)), "default"));
+        assert_eq!(m.view().session_error, None);
+    }
+
+    #[test]
+    fn unlock_reattaches_when_a_reconnect_arrived_while_locked() {
+        let mut m = live(vec![session("default", 1)]);
+        m.handle(Msg::Locked, t(0));
+        m.handle(Msg::Dropped, t(100));
+        m.handle(Msg::Tick, t(15_100));
+        let fx = m.handle(Msg::Opened, t(16_000));
+        assert!(!has_attach(&fx, "default"));
+        assert!(has_attach(&m.handle(Msg::Unlocked, t(17_000)), "default"));
+    }
+
+    #[test]
+    fn failed_and_refused_clear_taskbar_progress() {
+        let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
+        let fx = m.handle(Msg::OpenFailed(ConnectError::Timeout), t(0));
+        assert!(fx.contains(&Effect::Ui(UiEffect::Taskbar(None))));
+        let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
+        let fx = m.handle(
+            Msg::OpenFailed(ConnectError::HostKeyChanged {
+                expected: "a".into(),
+                got: "b".into(),
+            }),
+            t(0),
+        );
+        assert!(fx.contains(&Effect::Ui(UiEffect::Taskbar(None))));
     }
 }

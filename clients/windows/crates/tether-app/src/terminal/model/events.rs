@@ -114,6 +114,7 @@ impl TerminalModel {
             _ => n.body,
         };
         fx.push(Effect::Ui(UiEffect::Toast {
+            machine: self.machine.id.to_string(),
             session: session.into(),
             title: format!("{} · {}", self.machine.name, session),
             body,
@@ -164,6 +165,7 @@ mod tests {
                     session,
                     title,
                     body,
+                    ..
                 }) => Some((session.clone(), title.clone(), body.clone())),
                 _ => None,
             })
@@ -332,7 +334,22 @@ mod tests {
     #[test]
     fn a_toast_click_brings_the_window_forward_on_that_tab() {
         let mut m = two();
-        let fx = m.handle(Msg::ToastClicked("b".into()), t(10));
+        let fx = m.handle(
+            Msg::ToastClicked {
+                machine: m.machine.id.to_string(),
+                name: "b".into(),
+            },
+            t(10),
+        );
+        assert!(fx.contains(&Effect::Ui(UiEffect::BringToFront)));
+        assert_eq!(m.view().header.session, "b");
+        let fx = m.handle(
+            Msg::ToastClicked {
+                machine: "other-machine".into(),
+                name: "a".into(),
+            },
+            t(11),
+        );
         assert!(fx.contains(&Effect::Ui(UiEffect::BringToFront)));
         assert_eq!(m.view().header.session, "b");
     }

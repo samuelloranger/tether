@@ -20,7 +20,7 @@ pub mod wndproc;
 pub trait Platform: Send + Sync + 'static {
     fn flash_taskbar(&self);
     fn set_progress(&self, p: Option<&Progress>);
-    fn toast(&self, session: &str, title: &str, body: &str);
+    fn toast(&self, machine: &str, session: &str, title: &str, body: &str);
     fn open_url(&self, url: &str);
     fn set_clipboard(&self, text: &str);
     /// Blocking; called off the UI thread.
@@ -35,7 +35,7 @@ pub struct NullPlatform;
 impl Platform for NullPlatform {
     fn flash_taskbar(&self) {}
     fn set_progress(&self, _p: Option<&Progress>) {}
-    fn toast(&self, _s: &str, _t: &str, _b: &str) {}
+    fn toast(&self, _m: &str, _s: &str, _t: &str, _b: &str) {}
     fn open_url(&self, _u: &str) {}
     fn set_clipboard(&self, _t: &str) {}
     fn read_clipboard(&self) -> ClipboardSnapshot {

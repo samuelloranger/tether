@@ -22,6 +22,13 @@ fn main() {
 }
 
 fn start() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(
+            None,
+            windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+        );
+    }
     tracing_subscriber::fmt::init();
     slint::BackendSelector::new()
         .backend_name("winit".into())
@@ -38,14 +45,6 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(windows))]
     let platform: std::sync::Arc<dyn win32::Platform> = std::sync::Arc::new(win32::NullPlatform);
     terminal::glue::init(&app, platform);
-    app.ui.window().on_close_requested({
-        move || {
-            if let Some(s) = terminal::glue::current() {
-                s(terminal::model::Msg::Back);
-            }
-            slint::CloseRequestResponse::HideWindow
-        }
-    });
     app.run()?;
     Ok(())
 }

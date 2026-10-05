@@ -35,6 +35,17 @@ pub trait Remote: Send + Sync + 'static {
     type Sink: PtySink;
     fn open(
         &self,
+    ) -> impl Future<
+        Output = Result<
+            (
+                broadcast::Receiver<ConnectionEvent>,
+                broadcast::Receiver<ConnectionEvent>,
+            ),
+            ConnectError,
+        >,
+    > + Send;
+    fn redial_control(
+        &self,
     ) -> impl Future<Output = Result<broadcast::Receiver<ConnectionEvent>, ConnectError>> + Send;
     fn ls(&self) -> impl Future<Output = Result<Vec<ZmxSession>, ConnectError>> + Send;
     fn kill(&self, name: &str) -> impl Future<Output = Result<(), ConnectError>> + Send;
@@ -106,12 +117,30 @@ where
 {
     type Sink = <T::Conn as SessionConn>::Sink;
 
-    async fn open(&self) -> Result<broadcast::Receiver<ConnectionEvent>, ConnectError> {
+    async fn open(
+        &self,
+    ) -> Result<
+        (
+            broadcast::Receiver<ConnectionEvent>,
+            broadcast::Receiver<ConnectionEvent>,
+        ),
+        ConnectError,
+    > {
         let terminal = Arc::new(self.dial().await?);
         let control = Arc::new(self.dial().await?);
-        let drops = terminal.drops();
+        let terminal_drops = terminal.drops();
+        let control_drops = control.drops();
         *self.terminal.lock().await = Some(terminal);
         *self.control.lock().await = Some(control);
+        Ok((terminal_drops, control_drops))
+    }
+
+    async fn redial_control(&self) -> Result<broadcast::Receiver<ConnectionEvent>, ConnectError> {
+        let conn = Arc::new(self.dial().await?);
+        let drops = conn.drops();
+        if let Some(old) = self.control.lock().await.replace(conn) {
+            old.close().await;
+        }
         Ok(drops)
     }
 

@@ -1,7 +1,7 @@
 use crate::osc::Progress;
 use crate::zmx::ZmxSession;
 
-pub const ATTACH_CAP: usize = 12;
+pub const ATTACH_CAP: usize = 10;
 pub const DEFAULT_SESSION: &str = "default";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -415,13 +415,17 @@ mod tests {
 
     #[test]
     fn the_thirteenth_attach_detaches_the_least_recently_viewed() {
-        let sessions: Vec<_> = (0..13).map(|i| s(&format!("t{i}"), i)).collect();
+        let extra = ATTACH_CAP;
+        let sessions: Vec<_> = (0..=extra).map(|i| s(&format!("t{i}"), i as i64)).collect();
         let mut strip = TabStrip::from_sessions(&sessions);
-        for i in 0..12 {
+        for i in 0..ATTACH_CAP {
             assert_eq!(strip.select(&format!("t{i}"), 100 + i as u64), None);
         }
         strip.select("t0", 200);
-        assert_eq!(strip.select("t12", 201).as_deref(), Some("t1"));
+        assert_eq!(
+            strip.select(&format!("t{extra}"), 201).as_deref(),
+            Some("t1")
+        );
         assert!(!strip.tab("t1").unwrap().attached);
         assert_eq!(strip.tabs.iter().filter(|t| t.attached).count(), ATTACH_CAP);
         assert_eq!(strip.select("t1", 202).as_deref(), Some("t2"));

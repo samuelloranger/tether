@@ -14,7 +14,10 @@ use crate::terminal::ui_port::UiPort;
 
 pub enum DriverMsg<S> {
     Model(Msg),
-    Opened(broadcast::Receiver<ConnectionEvent>),
+    Opened {
+        terminal: broadcast::Receiver<ConnectionEvent>,
+        control: broadcast::Receiver<ConnectionEvent>,
+    },
     Sink {
         name: String,
         id: u64,
@@ -22,6 +25,43 @@ pub enum DriverMsg<S> {
         reader: JoinHandle<()>,
     },
     Presented,
+}
+
+enum ChanOp {
+    Resize(tether_core::resize::GridSize),
+    Write(Vec<u8>),
+    /// Typed only when this attach id is still the one the tab wants.
+    Attach {
+        id: u64,
+        bytes: Vec<u8>,
+    },
+    Close,
+}
+
+fn spawn_writer<S: PtySink>(
+    sink: S,
+    mut rx: mpsc::UnboundedReceiver<ChanOp>,
+    wanted: Arc<std::sync::Mutex<HashMap<String, u64>>>,
+    name: String,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(op) = rx.recv().await {
+            match op {
+                ChanOp::Resize(size) => sink.resize(size).await,
+                ChanOp::Write(bytes) => sink.write(bytes).await,
+                ChanOp::Attach { id, bytes } => {
+                    let still = wanted.lock().unwrap().get(&name).copied() == Some(id);
+                    if still {
+                        sink.write(bytes).await;
+                    }
+                }
+                ChanOp::Close => {
+                    sink.close().await;
+                    break;
+                }
+            }
+        }
+    })
 }
 
 pub type MsgSink = Arc<dyn Fn(Msg) + Send + Sync>;
@@ -44,9 +84,12 @@ pub struct Driver<R: Remote, U: UiPort> {
     remote: Arc<R>,
     ui: U,
     tx: mpsc::UnboundedSender<DriverMsg<R::Sink>>,
-    wanted: HashMap<String, u64>,
-    sinks: HashMap<String, (R::Sink, JoinHandle<()>)>,
+    wanted: Arc<std::sync::Mutex<HashMap<String, u64>>>,
+    readers: HashMap<String, JoinHandle<()>>,
+    writers: HashMap<String, (mpsc::UnboundedSender<ChanOp>, JoinHandle<()>)>,
     drop_watch: Option<JoinHandle<()>>,
+    control_watch: Option<JoinHandle<()>>,
+    ls_seq: u64,
     pacer: FramePacer,
     last_view: Option<TerminalView>,
 }
@@ -57,9 +100,12 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
             remote,
             ui,
             tx,
-            wanted: HashMap::new(),
-            sinks: HashMap::new(),
+            wanted: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            readers: HashMap::new(),
+            writers: HashMap::new(),
             drop_watch: None,
+            control_watch: None,
+            ls_seq: 0,
             pacer: FramePacer::default(),
             last_view: None,
         }
@@ -84,8 +130,9 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
             let now = start.elapsed();
             let fx = match msg {
                 DriverMsg::Model(m) => model.handle(m, now),
-                DriverMsg::Opened(drops) => {
-                    self.watch_drops(drops);
+                DriverMsg::Opened { terminal, control } => {
+                    self.watch_drops(terminal);
+                    self.watch_control(control);
                     model.handle(Msg::Opened, now)
                 }
                 DriverMsg::Sink {
@@ -94,13 +141,20 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                     sink,
                     reader,
                 } => {
-                    if self.wanted.get(&name) == Some(&id) {
-                        if let Some((old, h)) = self.sinks.insert(name.clone(), (sink, reader)) {
-                            h.abort();
-                            tokio::spawn(async move {
-                                old.close().await;
-                            });
+                    let current = self.wanted.lock().unwrap().get(&name).copied();
+                    if current == Some(id) {
+                        if let Some(old) = self.readers.insert(name.clone(), reader) {
+                            old.abort();
                         }
+                        self.retire_writer(&name);
+                        let (wtx, wrx) = mpsc::unbounded_channel();
+                        let writer = spawn_writer(sink, wrx, self.wanted.clone(), name.clone());
+                        let _ = wtx.send(ChanOp::Resize(model.grid()));
+                        let _ = wtx.send(ChanOp::Attach {
+                            id,
+                            bytes: attach_command(&name).into_bytes(),
+                        });
+                        self.writers.insert(name.clone(), (wtx, writer));
                         model.handle(Msg::Attached { name }, now)
                     } else {
                         // Detached (or re-attached) while this channel was still opening.
@@ -135,6 +189,39 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
         }));
     }
 
+    fn watch_control(&mut self, drops: broadcast::Receiver<ConnectionEvent>) {
+        if let Some(h) = self.control_watch.take() {
+            h.abort();
+        }
+        let tx = self.tx.clone();
+        let remote = self.remote.clone();
+        self.control_watch = Some(tokio::spawn(async move {
+            let mut drops = drops;
+            loop {
+                match drops.recv().await {
+                    Ok(_) => match remote.redial_control().await {
+                        Ok(next) => drops = next,
+                        Err(_) => {
+                            let _ = tx.send(DriverMsg::Model(Msg::Dropped));
+                            break;
+                        }
+                    },
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }));
+    }
+
+    fn retire_writer(&mut self, name: &str) {
+        if let Some((tx, handle)) = self.writers.remove(name) {
+            let _ = tx.send(ChanOp::Close);
+            tokio::spawn(async move {
+                let _ = handle.await;
+            });
+        }
+    }
+
     fn render(&mut self, model: &TerminalModel) {
         match model.frame_job() {
             Some(job) => self.ui.render(job),
@@ -154,10 +241,17 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
         if let Some(h) = self.drop_watch.take() {
             h.abort();
         }
-        self.wanted.clear();
-        for (_, (sink, reader)) in self.sinks.drain() {
+        if let Some(h) = self.control_watch.take() {
+            h.abort();
+        }
+        self.wanted.lock().unwrap().clear();
+        for (_, reader) in self.readers.drain() {
             reader.abort();
-            sink.close().await;
+        }
+        let writers = std::mem::take(&mut self.writers);
+        for (tx, handle) in writers.into_values() {
+            let _ = tx.send(ChanOp::Close);
+            let _ = handle.await;
         }
     }
 
@@ -170,7 +264,7 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                     let (r, tx) = (self.remote.clone(), self.tx.clone());
                     tokio::spawn(async move {
                         let msg = match r.open().await {
-                            Ok(drops) => DriverMsg::Opened(drops),
+                            Ok((terminal, control)) => DriverMsg::Opened { terminal, control },
                             Err(e) => DriverMsg::Model(Msg::OpenFailed(e)),
                         };
                         let _ = tx.send(msg);
@@ -186,9 +280,14 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                     self.remote.close().await;
                 }
                 Effect::Ls => {
+                    self.ls_seq += 1;
+                    let id = self.ls_seq;
                     let (r, tx) = (self.remote.clone(), self.tx.clone());
                     tokio::spawn(async move {
-                        let _ = tx.send(DriverMsg::Model(Msg::Ls(r.ls().await)));
+                        let _ = tx.send(DriverMsg::Model(Msg::Ls {
+                            id,
+                            result: r.ls().await,
+                        }));
                     });
                 }
                 Effect::Kill { name } => {
@@ -199,13 +298,11 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                     });
                 }
                 Effect::Attach { name, id, size } => {
-                    self.wanted.insert(name.clone(), id);
+                    self.wanted.lock().unwrap().insert(name.clone(), id);
                     let (r, tx) = (self.remote.clone(), self.tx.clone());
                     tokio::spawn(async move {
                         match r.attach(&name, size).await {
                             Ok((sink, mut events)) => {
-                                sink.resize(size).await;
-                                sink.write(attach_command(&name).into_bytes()).await;
                                 let (txr, n) = (tx.clone(), name.clone());
                                 // Drain without pause: M3's queue holds 1024 events, and a
                                 // full queue in one tab stalls every channel on the connection.
@@ -225,29 +322,31 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                                     reader,
                                 });
                             }
-                            Err(_) => {
-                                let _ = tx.send(DriverMsg::Model(Msg::AttachFailed { name }));
+                            Err(e) => {
+                                let _ = tx.send(DriverMsg::Model(Msg::AttachFailed {
+                                    name,
+                                    id,
+                                    reason: e.sentence(),
+                                }));
                             }
                         }
                     });
                 }
                 Effect::Detach { name } => {
-                    self.wanted.remove(&name);
-                    if let Some((sink, reader)) = self.sinks.remove(&name) {
+                    self.wanted.lock().unwrap().remove(&name);
+                    if let Some(reader) = self.readers.remove(&name) {
                         reader.abort();
-                        tokio::spawn(async move {
-                            sink.close().await;
-                        });
                     }
+                    self.retire_writer(&name);
                 }
                 Effect::Write { name, bytes } => {
-                    if let Some((sink, _)) = self.sinks.get(&name) {
-                        sink.write(bytes).await;
+                    if let Some((tx, _)) = self.writers.get(&name) {
+                        let _ = tx.send(ChanOp::Write(bytes));
                     }
                 }
                 Effect::ResizeAll(size) => {
-                    for (sink, _) in self.sinks.values() {
-                        sink.resize(size).await;
+                    for (tx, _) in self.writers.values() {
+                        let _ = tx.send(ChanOp::Resize(size));
                     }
                 }
                 Effect::ScheduleRedial { after, generation } => {
@@ -379,5 +478,53 @@ mod tests {
         remote.drop_connection();
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(ui.last_view().header.word, "reconnecting");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_write_that_never_finishes_does_not_stop_ticks() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        let (ui, send, _h) = start(remote.clone()).await;
+        remote
+            .sink("default")
+            .hang_writes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        send(Msg::Ime("x".into()));
+        send(Msg::NewSessionBegin);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(ui.last_view().naming.as_deref(), Some("session-2"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_killed_attach_is_not_typed() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        let gate = Arc::new(tokio::sync::Notify::new());
+        *remote.hold_attach.lock().unwrap() = Some(gate.clone());
+        let (_ui, send, _h) = start(remote.clone()).await;
+        send(Msg::KillRequested("default".into()));
+        send(Msg::KillConfirmed);
+        *remote.sessions.lock().unwrap() = Ok(vec![]);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        gate.notify_one();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let log = remote.sink("default").log.lock().unwrap().clone();
+        assert!(
+            log.iter().any(|l| l == "close"),
+            "sink={log:?} remote={:?}",
+            remote.log()
+        );
+        assert!(!log.iter().any(|l| l.contains("zmx attach")), "{log:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_control_connection_is_redialed() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        let (ui, _send, _h) = start(remote.clone()).await;
+        remote.drop_control();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(remote.log().contains(&"redial-control".to_string()));
+        assert_eq!(ui.last_view().header.word, "connected");
     }
 }

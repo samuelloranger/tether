@@ -55,7 +55,8 @@ impl TerminalModel {
         if let ConnectError::HostKeyChanged { expected, got } = err {
             self.status = ConnStatus::Disconnected;
             self.screen = Screen::Refused { expected, got };
-            fx.push(Effect::Close);
+            fx.push(Effect::DropConnection);
+            fx.push(Effect::Ui(UiEffect::Taskbar(None)));
             fx.push(Effect::Ui(UiEffect::Navigate(self.screen.clone())));
             return;
         }
@@ -360,7 +361,9 @@ mod tests {
             }),
             t(1_200),
         );
-        assert!(fx.contains(&Effect::Close));
+        assert!(fx.contains(&Effect::DropConnection));
+        assert!(fx.contains(&Effect::Ui(UiEffect::Taskbar(None))));
+        assert!(!fx.contains(&Effect::Close));
         assert!(matches!(m.view().screen, Screen::Refused { .. }));
     }
 

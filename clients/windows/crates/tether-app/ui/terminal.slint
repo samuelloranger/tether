@@ -23,6 +23,7 @@ export global TerminalVm {
     in property <string> kill-name;
     in property <bool> disconnected;
     in property <string> send-capsule;
+    in property <string> session-error;
     in property <bool> has-progress;
     in property <float> progress;
     in property <int> progress-state;    // 0 normal, 1 error, 2 indeterminate, 3 paused
@@ -50,6 +51,7 @@ export global TerminalVm {
     callback copy-link();
     callback menu-primary();
     callback reconnect();
+    callback retry-session();
     callback home();
     callback well-resized(length, length);
     // kind: 0 down, 1 up, 2 move. button: 0 left, 1 right, 2 middle, 3 none.
@@ -170,12 +172,17 @@ export component TerminalPage inherits Rectangle {
             changed width => { TerminalVm.well-resized(self.width, self.height); }
             changed height => { TerminalVm.well-resized(self.width, self.height); }
             init => { TerminalVm.well-resized(self.width, self.height); }
-            Image {
+            if TerminalVm.session-error == "": Image {
                 x: 0; y: 0;
                 width: TerminalVm.frame-width * 1phx;
                 height: TerminalVm.frame-height * 1phx;
                 source: TerminalVm.frame;
                 image-rendering: pixelated;
+            }
+            if TerminalVm.session-error != "": VerticalLayout {
+                alignment: center; spacing: 8px;
+                Text { text: TerminalVm.session-error; color: Tokens.text; font-size: 14px; horizontal-alignment: center; }
+                HorizontalLayout { alignment: center; PrimaryButton { text: "Retry"; clicked => { TerminalVm.retry-session(); } } }
             }
             TouchArea {
                 mouse-cursor: TerminalVm.hand-cursor ? MouseCursor.pointer : MouseCursor.text;

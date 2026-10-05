@@ -7,6 +7,7 @@ use image::{ExtendedColorType, ImageEncoder};
 pub enum DibError {
     Truncated,
     Unsupported(u16, u32),
+    TooLarge,
 }
 
 const BI_RGB: u32 = 0;
@@ -81,11 +82,19 @@ pub fn dib_to_png(d: &[u8]) -> Result<Vec<u8>, DibError> {
         width.unsigned_abs() as usize,
         height.unsigned_abs() as usize,
     );
-    let stride = (w * bpp as usize).div_ceil(32) * 4;
-    let pixels = d
-        .get(offset..offset + stride * h)
-        .ok_or(DibError::Truncated)?;
-    let mut rgba = vec![0u8; w * h * 4];
+    const MAX_DIM: usize = 16384;
+    if w > MAX_DIM || h > MAX_DIM {
+        return Err(DibError::TooLarge);
+    }
+    let bpp = bpp as usize;
+    let stride = (w.checked_mul(bpp).ok_or(DibError::TooLarge)?).div_ceil(32) * 4;
+    let bytes = stride.checked_mul(h).ok_or(DibError::TooLarge)?;
+    let pixels = d.get(offset..offset + bytes).ok_or(DibError::Truncated)?;
+    let rgba_len = w
+        .checked_mul(h)
+        .and_then(|n| n.checked_mul(4))
+        .ok_or(DibError::TooLarge)?;
+    let mut rgba = vec![0u8; rgba_len];
     for y in 0..h {
         let src_row = if height > 0 { h - 1 - y } else { y };
         let row = &pixels[src_row * stride..src_row * stride + stride];
@@ -196,6 +205,18 @@ mod tests {
         assert_eq!(
             decode(&dib_to_png(&d).unwrap()).get_pixel(0, 0).0,
             [0x10, 0x20, 0x30, 0xFF]
+        );
+    }
+
+    #[test]
+    fn a_huge_dimension_is_refused() {
+        assert_eq!(
+            dib_to_png(&header(40, 100_000, 1, 32, 0)),
+            Err(DibError::TooLarge)
+        );
+        assert_eq!(
+            dib_to_png(&header(40, 1, 100_000, 32, 0)),
+            Err(DibError::TooLarge)
         );
     }
 

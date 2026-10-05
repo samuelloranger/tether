@@ -46,10 +46,14 @@ pub fn grid() -> GridSize {
 #[derive(Clone, Default)]
 pub struct FakeSink {
     pub log: Arc<Mutex<Vec<String>>>,
+    pub hang_writes: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl PtySink for FakeSink {
     async fn write(&self, bytes: Vec<u8>) {
+        if self.hang_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         self.log
             .lock()
             .unwrap()
@@ -155,8 +159,10 @@ pub struct FakeRemote {
     pub sessions: Mutex<Result<Vec<ZmxSession>, ConnectError>>,
     pub ptys: Mutex<HashMap<String, (FakeSink, mpsc::Sender<PtyEvent>)>>,
     pub drop_tx: broadcast::Sender<ConnectionEvent>,
+    pub control_tx: broadcast::Sender<ConnectionEvent>,
     pub uploads_dir: Mutex<Option<String>>,
     pub upload_results: Mutex<VecDeque<Result<(), ConnectError>>>,
+    pub hold_attach: Mutex<Option<Arc<tokio::sync::Notify>>>,
 }
 
 impl Default for FakeRemote {
@@ -167,8 +173,10 @@ impl Default for FakeRemote {
             sessions: Mutex::new(Ok(vec![])),
             ptys: Mutex::default(),
             drop_tx: broadcast::channel(4).0,
+            control_tx: broadcast::channel(4).0,
             uploads_dir: Mutex::new(Some("/home/sam/.tether/uploads".into())),
             upload_results: Mutex::default(),
+            hold_attach: Mutex::default(),
         }
     }
 }
@@ -187,14 +195,29 @@ impl FakeRemote {
     pub fn drop_connection(&self) {
         let _ = self.drop_tx.send(ConnectionEvent::Dropped);
     }
+    pub fn drop_control(&self) {
+        let _ = self.control_tx.send(ConnectionEvent::Dropped);
+    }
 }
 
 impl Remote for FakeRemote {
     type Sink = FakeSink;
-    async fn open(&self) -> Result<broadcast::Receiver<ConnectionEvent>, ConnectError> {
+    async fn open(
+        &self,
+    ) -> Result<
+        (
+            broadcast::Receiver<ConnectionEvent>,
+            broadcast::Receiver<ConnectionEvent>,
+        ),
+        ConnectError,
+    > {
         self.log.lock().unwrap().push("open".into());
         self.opens.lock().unwrap().pop_front().unwrap_or(Ok(()))?;
-        Ok(self.drop_tx.subscribe())
+        Ok((self.drop_tx.subscribe(), self.control_tx.subscribe()))
+    }
+    async fn redial_control(&self) -> Result<broadcast::Receiver<ConnectionEvent>, ConnectError> {
+        self.log.lock().unwrap().push("redial-control".into());
+        Ok(self.control_tx.subscribe())
     }
     async fn ls(&self) -> Result<Vec<ZmxSession>, ConnectError> {
         self.log.lock().unwrap().push("ls".into());
@@ -222,6 +245,10 @@ impl Remote for FakeRemote {
             .lock()
             .unwrap()
             .insert(name.into(), (sink.clone(), tx));
+        let gate = self.hold_attach.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.notified().await;
+        }
         Ok((sink, rx))
     }
     async fn upload(&self, remote_path: &str, bytes: Vec<u8>) -> Result<(), ConnectError> {

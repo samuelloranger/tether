@@ -6,7 +6,7 @@ pub fn escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-pub fn toast_xml(header: &str, body: &str, session: &str) -> String {
+pub fn toast_xml(header: &str, body: &str, machine: &str, session: &str) -> String {
     let lines: String = body
         .lines()
         .filter(|l| !l.is_empty())
@@ -15,7 +15,7 @@ pub fn toast_xml(header: &str, body: &str, session: &str) -> String {
         .collect();
     format!(
         "<toast launch=\"{}\"><visual><binding template=\"ToastGeneric\"><text>{}</text>{}</binding></visual><audio silent=\"true\"/></toast>",
-        escape(&format!("tether:tab={session}")),
+        escape(&format!("tether:machine={machine}&tab={session}")),
         escape(header),
         lines
     )
@@ -37,16 +37,16 @@ mod tests {
 
     #[test]
     fn xml_escapes_program_text() {
-        let xml = toast_xml("devbox · b", "a <b> & \"c\"", "b");
+        let xml = toast_xml("devbox · b", "a <b> & \"c\"", "m1", "b");
         assert!(xml.contains("<text>devbox · b</text>"));
         assert!(xml.contains("<text>a &lt;b&gt; &amp; &quot;c&quot;</text>"));
-        assert!(xml.contains("launch=\"tether:tab=b\""));
+        assert!(xml.contains("launch=\"tether:machine=m1&amp;tab=b\""));
         assert!(xml.contains("<audio silent=\"true\"/>"));
     }
 
     #[test]
     fn a_two_line_body_becomes_two_texts() {
-        let xml = toast_xml("h", "Claude\nNeeds you", "s");
+        let xml = toast_xml("h", "Claude\nNeeds you", "m", "s");
         assert!(xml.contains("<text>Claude</text><text>Needs you</text>"));
     }
 
@@ -89,19 +89,21 @@ mod win {
             })
         }
 
-        pub fn show(&self, session: &str, header: &str, body: &str) {
+        pub fn show(&self, machine: &str, session: &str, header: &str, body: &str) {
             let shown = (|| -> windows::core::Result<()> {
                 let doc = XmlDocument::new()?;
-                doc.LoadXml(&HSTRING::from(toast_xml(header, body, session)))?;
+                doc.LoadXml(&HSTRING::from(toast_xml(header, body, machine, session)))?;
                 let toast = ToastNotification::CreateToastNotification(&doc)?;
                 toast.SetTag(&HSTRING::from(toast_tag(session)))?;
                 toast.SetGroup(&HSTRING::from("tether"))?;
+                let machine = machine.to_string();
                 let name = session.to_string();
                 toast.Activated(&TypedEventHandler::new(move |_, _| {
+                    let machine = machine.clone();
                     let name = name.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(s) = crate::terminal::glue::current() {
-                            s(crate::terminal::model::Msg::ToastClicked(name));
+                            s(crate::terminal::model::Msg::ToastClicked { machine, name });
                         }
                     });
                     Ok(())

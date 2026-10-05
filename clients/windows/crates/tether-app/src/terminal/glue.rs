@@ -170,6 +170,7 @@ fn wire_callbacks(ui: &AppWindow) {
     let cv = ui.global::<ConnectVm>();
     cv.on_retry(|| send(Msg::Retry));
     cv.on_back_home(|| send(Msg::Back));
+    vm.on_retry_session(|| send(Msg::RetrySession));
 
     use crate::terminal::mouse::{Button, MouseKind, MouseMsg};
     let started = std::time::Instant::now();
@@ -271,6 +272,8 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
                     event.text_with_all_modifiers(),
                     event.physical_key,
                     event.location,
+                    MODS.get(),
+                    crate::terminal::keys::app_keypad(),
                 );
                 if let Some(input) = input {
                     send(Msg::Key {
@@ -399,6 +402,11 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
         | UiEffect::SetClipboard(_)
         | UiEffect::BringToFront
         | UiEffect::PickFiles => {}
+        UiEffect::AllowIme => {
+            app.ui
+                .window()
+                .with_winit_window(|w| w.set_ime_allowed(true));
+        }
     }
 }
 

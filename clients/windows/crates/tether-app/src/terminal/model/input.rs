@@ -27,8 +27,13 @@ impl TerminalModel {
             KeyAction::Send(bytes) => {
                 self.blink_on = true;
                 self.blink_at = now;
+                let name = self.active_name().map(str::to_string);
+                if let Some(tab) = name.as_deref().and_then(|n| self.tabs.get_mut(n)) {
+                    tab.term.clear_selection();
+                }
                 self.snap_active_to_bottom();
                 self.write_active(bytes, fx);
+                fx.push(Effect::Ui(UiEffect::AllowIme));
                 fx.push(Effect::Redraw);
             }
             KeyAction::Tether(cmd) => self.on_command(cmd, mods, fx),
@@ -566,6 +571,34 @@ mod key_tests {
             t(11),
         );
         assert_eq!(m.tabs["a"].term.display_offset(), 0);
+    }
+
+    #[test]
+    fn sending_a_key_clears_the_selection() {
+        let mut m = live(vec![session("a", 1)]);
+        m.handle(
+            Msg::PtyData {
+                name: "a".into(),
+                bytes: b"hello".to_vec(),
+            },
+            t(3),
+        );
+        {
+            let tab = m.tabs.get_mut("a").unwrap();
+            tab.term
+                .selection_start(Cell { row: 0, col: 0 }, SelectKind::Simple);
+            tab.term.selection_update(Cell { row: 0, col: 4 });
+            assert!(tab.term.selection_text().is_some());
+        }
+        let fx = m.handle(
+            Msg::Key {
+                input: ch('x', Some("x")),
+                mods: Mods::default(),
+            },
+            t(4),
+        );
+        assert_eq!(m.tabs["a"].term.selection_text(), None);
+        assert!(fx.contains(&Effect::Ui(UiEffect::AllowIme)));
     }
 
     #[test]

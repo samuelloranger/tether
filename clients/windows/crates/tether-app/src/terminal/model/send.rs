@@ -19,6 +19,7 @@ pub(crate) struct SendState {
     /// The tab that was active when the send began. Every path is pasted there.
     pub target: String,
     pub queue: Option<SendQueue>,
+    pub pending_paste: Option<Vec<u8>>,
 }
 
 impl TerminalModel {
@@ -47,6 +48,7 @@ impl TerminalModel {
         self.send = Some(SendState {
             target,
             queue: None,
+            pending_paste: None,
         });
         fx.push(Effect::StartSend(SendJob {
             sources,
@@ -93,6 +95,8 @@ impl TerminalModel {
                 name: target,
                 bytes,
             });
+        } else if let Some(state) = self.send.as_mut() {
+            state.pending_paste = Some(bytes);
         }
         if finished {
             self.capsule_shown = Some(now);
@@ -356,6 +360,25 @@ mod tests {
         assert!(
             writes(&fx).is_empty(),
             "input stays dropped until the channel is live again"
+        );
+    }
+
+    #[test]
+    fn a_paste_waits_until_its_tab_is_live() {
+        let mut m = sending(&["a.png"]);
+        m.channels
+            .insert("a".into(), super::super::Chan::Opening(1));
+        let fx = m.handle(
+            Msg::SendFileDone {
+                remote: format!("{UP}/a.png"),
+            },
+            t(10),
+        );
+        assert!(writes(&fx).is_empty());
+        let fx = m.handle(Msg::Attached { name: "a".into() }, t(11));
+        assert_eq!(
+            writes(&fx),
+            vec![("a".into(), format!("'{UP}/a.png'").into_bytes())]
         );
     }
 }

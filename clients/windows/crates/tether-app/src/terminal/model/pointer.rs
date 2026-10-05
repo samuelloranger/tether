@@ -56,8 +56,14 @@ impl TerminalModel {
             return;
         };
         let cell = cell_at(&l, m.x_px, m.y_px);
+        let prev = self.pointer.cell;
         self.pointer.cell = Some(cell);
         self.mods = m.mods;
+        match m.kind {
+            MouseKind::Down => self.pointer.held = Some(m.button),
+            MouseKind::Up | MouseKind::Cancel => self.pointer.held = None,
+            MouseKind::Move => {}
+        }
         if m.mods.ctrl {
             let link = self.link_under(cell);
             self.set_hover(link.clone().map(|(s, e)| (s, e, cell.row)), fx);
@@ -75,14 +81,13 @@ impl TerminalModel {
         };
         let mode = tab.term.mouse_mode();
         if mode.tracking != MouseTracking::None && !m.mods.shift {
-            let held = self.pointer.held;
-            if let Some(bytes) = encode_mouse(mode, m.kind, m.button, cell, m.mods, held) {
-                self.write_active(bytes, fx);
+            if m.kind == MouseKind::Move && prev == Some(cell) {
+                return;
             }
-            match m.kind {
-                MouseKind::Down => self.pointer.held = Some(m.button),
-                MouseKind::Up => self.pointer.held = None,
-                MouseKind::Move => {}
+            if let Some(bytes) =
+                encode_mouse(mode, m.kind, m.button, cell, m.mods, self.pointer.held)
+            {
+                self.write_active(bytes, fx);
             }
             return;
         }
@@ -101,7 +106,7 @@ impl TerminalModel {
                 tab.term.selection_update(cell);
                 fx.push(Effect::Redraw);
             }
-            (MouseKind::Up, Button::Left) => self.pointer.held = None,
+            (MouseKind::Up | MouseKind::Cancel, Button::Left) => {}
             (MouseKind::Down, Button::Right) => {
                 let selected = tab.term.selection_text();
                 if let Some((span, _)) = self.link_under(cell) {
@@ -132,12 +137,23 @@ impl TerminalModel {
         fx: &mut Vec<Effect>,
     ) {
         if mods.ctrl {
-            let step = if delta_px > 0.0 {
+            if delta_px == 0.0 {
+                return;
+            }
+            self.pointer.ctrl_wheel += delta_px;
+            let steps = (self.pointer.ctrl_wheel / 120.0).trunc() as i32;
+            if steps == 0 {
+                return;
+            }
+            self.pointer.ctrl_wheel -= steps as f32 * 120.0;
+            let step = if steps > 0 {
                 FontStep::Bigger
             } else {
                 FontStep::Smaller
             };
-            fx.push(Effect::Ui(UiEffect::FontStep(step)));
+            for _ in 0..steps.unsigned_abs() {
+                fx.push(Effect::Ui(UiEffect::FontStep(step)));
+            }
             return;
         }
         let Some(l) = self.layout else {
@@ -427,17 +443,90 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_wheel_changes_the_font_size() {
+    fn ctrl_wheel_steps_once_per_120_and_ignores_zero() {
         let mut m = ready(b"");
-        let fx = m.handle(
+        let none = m.handle(
             Msg::Wheel {
-                delta_px: 40.0,
+                delta_px: 0.0,
                 mods: CTRL,
                 x_px: 10.0,
                 y_px: 10.0,
             },
             t(10),
         );
-        assert!(fx.contains(&Effect::Ui(UiEffect::FontStep(FontStep::Bigger))));
+        assert!(
+            !none
+                .iter()
+                .any(|e| matches!(e, Effect::Ui(UiEffect::FontStep(_))))
+        );
+        let partial = m.handle(
+            Msg::Wheel {
+                delta_px: 40.0,
+                mods: CTRL,
+                x_px: 10.0,
+                y_px: 10.0,
+            },
+            t(11),
+        );
+        assert!(
+            !partial
+                .iter()
+                .any(|e| matches!(e, Effect::Ui(UiEffect::FontStep(_))))
+        );
+        let fx = m.handle(
+            Msg::Wheel {
+                delta_px: 80.0,
+                mods: CTRL,
+                x_px: 10.0,
+                y_px: 10.0,
+            },
+            t(12),
+        );
+        assert_eq!(
+            fx.iter()
+                .filter(|e| matches!(e, Effect::Ui(UiEffect::FontStep(FontStep::Bigger))))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn ctrl_down_records_the_held_button() {
+        let mut m = ready(b"hello world");
+        mouse(&mut m, MouseKind::Down, Button::Left, 0, 0, CTRL, 10);
+        assert_eq!(m.pointer.held, Some(Button::Left));
+    }
+
+    #[test]
+    fn cancel_releases_the_button() {
+        let mut m = ready(b"hello world");
+        mouse(&mut m, MouseKind::Down, Button::Left, 0, 0, NONE, 10);
+        let started = selection(&m);
+        mouse(&mut m, MouseKind::Cancel, Button::Left, 0, 1, NONE, 20);
+        mouse(&mut m, MouseKind::Move, Button::None, 0, 4, NONE, 30);
+        assert_eq!(m.pointer.held, None);
+        assert_eq!(selection(&m), started);
+    }
+
+    #[test]
+    fn motion_is_reported_only_when_the_cell_changes() {
+        let mut m = ready(b"\x1b[?1002h\x1b[?1006h");
+        let fx = mouse(&mut m, MouseKind::Down, Button::Left, 0, 1, NONE, 10);
+        assert_eq!(writes(&fx).len(), 1);
+        let (x, y) = at(&m, 0, 1);
+        let fx = m.handle(
+            Msg::Mouse(MouseMsg {
+                kind: MouseKind::Move,
+                button: Button::None,
+                mods: NONE,
+                x_px: x + 0.1,
+                y_px: y,
+                at_ms: 20,
+            }),
+            t(20),
+        );
+        assert!(writes(&fx).is_empty());
+        let fx = mouse(&mut m, MouseKind::Move, Button::None, 0, 2, NONE, 30);
+        assert_eq!(writes(&fx).len(), 1);
     }
 }

@@ -305,6 +305,9 @@ impl App {
             if let Some(app) = weak.upgrade() {
                 app.capture_placement();
             }
+            if let Some(s) = crate::terminal::glue::current() {
+                s(crate::terminal::model::Msg::Back);
+            }
             slint::CloseRequestResponse::HideWindow
         });
         let weak = Rc::downgrade(self);

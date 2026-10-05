@@ -86,10 +86,11 @@ impl UiPort for SlintUi {
                     UiEffect::FlashTaskbar => platform.flash_taskbar(),
                     UiEffect::Taskbar(p) => platform.set_progress(p.as_ref()),
                     UiEffect::Toast {
+                        machine,
                         session,
                         title,
                         body,
-                    } => platform.toast(&session, &title, &body),
+                    } => platform.toast(&machine, &session, &title, &body),
                     UiEffect::OpenUrl(url) => platform.open_url(&url),
                     UiEffect::SetClipboard(text) => platform.set_clipboard(&text),
                     UiEffect::BringToFront => platform.bring_to_front(),
@@ -128,6 +129,7 @@ impl UiPort for SlintUi {
                 Some(CapsuleView::Send(s)) => s.as_str().into(),
                 _ => "".into(),
             });
+            vm.set_session_error(view.session_error.clone().unwrap_or_default().into());
             vm.set_has_progress(view.progress.is_some());
             vm.set_progress(
                 view.progress
@@ -142,6 +144,7 @@ impl UiPort for SlintUi {
                     .unwrap_or(0),
             );
             w.set_window_title(view.title.as_str().into());
+            crate::terminal::keys::set_app_keypad(view.app_keypad);
         });
     }
 

@@ -11,6 +11,16 @@ pub fn mods_of(state: ModifiersState) -> Mods {
     }
 }
 
+static APP_KEYPAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_app_keypad(on: bool) {
+    APP_KEYPAD.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn app_keypad() -> bool {
+    APP_KEYPAD.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn digit_of(physical: PhysicalKey) -> Option<u8> {
     let PhysicalKey::Code(code) = physical else {
         return None;
@@ -51,6 +61,8 @@ pub fn translate(
     text: Option<&str>,
     physical: PhysicalKey,
     location: KeyLocation,
+    mods: tether_core::keymap::Mods,
+    app_keypad: bool,
 ) -> Option<KeyInput> {
     if let Key::Named(n) = logical {
         let key = match n {
@@ -68,7 +80,19 @@ pub fn translate(
             W::Backspace => NamedKey::Backspace,
             W::Escape => NamedKey::Escape,
             W::Space => NamedKey::Space,
-            W::Enter if location == KeyLocation::Numpad => NamedKey::Numpad(NumpadKey::Enter),
+            W::Enter if location == KeyLocation::Numpad => {
+                if app_keypad || !(mods.ctrl || mods.alt) {
+                    NamedKey::Numpad(NumpadKey::Enter)
+                } else {
+                    return text
+                        .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))
+                        .map(|t| KeyInput::Char {
+                            unmodified: '\r',
+                            produced: Some(t.to_string()),
+                            digit: None,
+                        });
+                }
+            }
             W::Enter => NamedKey::Enter,
             W::F1 => NamedKey::F(1),
             W::F2 => NamedKey::F(2),
@@ -90,7 +114,8 @@ pub fn translate(
         return None;
     };
     let unmodified = base.chars().next()?;
-    if location == KeyLocation::Numpad {
+    let named_numpad = app_keypad || !(mods.ctrl || mods.alt);
+    if location == KeyLocation::Numpad && named_numpad {
         if let Some(k) = numpad(unmodified) {
             return Some(KeyInput::Named(NamedKey::Numpad(k)));
         }
@@ -111,7 +136,7 @@ mod tests {
     use slint::winit_030::winit::keyboard::{
         Key, KeyCode, KeyLocation, NamedKey as W, PhysicalKey, SmolStr,
     };
-    use tether_core::keymap::{KeyInput, NamedKey, NumpadKey};
+    use tether_core::keymap::{KeyInput, Mods, NamedKey, NumpadKey};
 
     fn ch(s: &str) -> Key {
         Key::Character(SmolStr::new(s))
@@ -119,10 +144,27 @@ mod tests {
     fn code(c: KeyCode) -> PhysicalKey {
         PhysicalKey::Code(c)
     }
+    fn plain(
+        logical: &Key,
+        unmodified: &Key,
+        text: Option<&str>,
+        physical: PhysicalKey,
+        location: KeyLocation,
+    ) -> Option<KeyInput> {
+        translate(
+            logical,
+            unmodified,
+            text,
+            physical,
+            location,
+            Mods::default(),
+            false,
+        )
+    }
 
     #[test]
     fn ctrl_letter_keeps_the_unmodified_char_and_drops_the_control_text() {
-        let got = translate(
+        let got = plain(
             &ch("a"),
             &ch("a"),
             Some("\u{1}"),
@@ -141,7 +183,7 @@ mod tests {
 
     #[test]
     fn altgr_on_canadian_french_produces_the_symbol() {
-        let got = translate(
+        let got = plain(
             &ch("@"),
             &ch("2"),
             Some("@"),
@@ -160,7 +202,7 @@ mod tests {
 
     #[test]
     fn azerty_top_row_reports_its_digit() {
-        let got = translate(
+        let got = plain(
             &ch("&"),
             &ch("&"),
             Some("&"),
@@ -180,7 +222,7 @@ mod tests {
     #[test]
     fn named_keys_map_to_the_table() {
         let named = |k: W| {
-            translate(
+            plain(
                 &Key::Named(k),
                 &Key::Named(k),
                 None,
@@ -198,7 +240,7 @@ mod tests {
 
     #[test]
     fn numpad_keys_carry_their_location() {
-        let five = translate(
+        let five = plain(
             &ch("5"),
             &ch("5"),
             Some("5"),
@@ -209,7 +251,7 @@ mod tests {
             five,
             Some(KeyInput::Named(NamedKey::Numpad(NumpadKey::Digit(5))))
         );
-        let enter = translate(
+        let enter = plain(
             &Key::Named(W::Enter),
             &Key::Named(W::Enter),
             Some("\r"),
@@ -220,7 +262,7 @@ mod tests {
             enter,
             Some(KeyInput::Named(NamedKey::Numpad(NumpadKey::Enter)))
         );
-        let plus = translate(
+        let plus = plain(
             &ch("+"),
             &ch("+"),
             Some("+"),
@@ -234,9 +276,51 @@ mod tests {
     }
 
     #[test]
+    fn altgr_numpad_decimal_sends_the_produced_comma() {
+        let got = translate(
+            &ch(","),
+            &ch("."),
+            Some(","),
+            code(KeyCode::NumpadDecimal),
+            KeyLocation::Numpad,
+            Mods {
+                shift: false,
+                alt: true,
+                ctrl: true,
+            },
+            false,
+        );
+        assert_eq!(
+            got,
+            Some(KeyInput::Char {
+                unmodified: '.',
+                produced: Some(",".into()),
+                digit: None,
+            })
+        );
+        let app = translate(
+            &ch(","),
+            &ch("."),
+            Some(","),
+            code(KeyCode::NumpadDecimal),
+            KeyLocation::Numpad,
+            Mods {
+                shift: false,
+                alt: true,
+                ctrl: true,
+            },
+            true,
+        );
+        assert_eq!(
+            app,
+            Some(KeyInput::Named(NamedKey::Numpad(NumpadKey::Decimal)))
+        );
+    }
+
+    #[test]
     fn dead_keys_and_bare_modifiers_are_not_keys() {
         assert_eq!(
-            translate(
+            plain(
                 &Key::Dead(Some('^')),
                 &Key::Dead(Some('^')),
                 None,
@@ -246,7 +330,7 @@ mod tests {
             None
         );
         assert_eq!(
-            translate(
+            plain(
                 &Key::Named(W::Shift),
                 &Key::Named(W::Shift),
                 None,
@@ -256,7 +340,7 @@ mod tests {
             None
         );
         assert_eq!(
-            translate(
+            plain(
                 &Key::Named(W::Alt),
                 &Key::Named(W::Alt),
                 None,

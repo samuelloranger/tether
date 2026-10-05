@@ -10,7 +10,7 @@ use crate::win32::{Platform, aumid, clipboard, file_dialog, shell, taskbar, toas
 /// Every method except `read_clipboard` runs on the UI thread (`SlintUi` routes them there).
 pub struct WindowsPlatform {
     window: slint::Weak<AppWindow>,
-    toaster: OnceLock<Option<toast::Toaster>>,
+    toaster: OnceLock<toast::Toaster>,
 }
 
 impl WindowsPlatform {
@@ -26,13 +26,15 @@ impl WindowsPlatform {
     }
 
     fn toaster(&self) -> Option<&toast::Toaster> {
-        self.toaster
-            .get_or_init(|| {
-                let packaged = aumid::is_packaged();
-                let shortcut = !packaged && aumid::register_portable();
-                aumid::toast_identity(packaged, shortcut).and_then(toast::Toaster::new)
-            })
-            .as_ref()
+        if self.toaster.get().is_none() {
+            let packaged = aumid::is_packaged();
+            let shortcut = !packaged && aumid::register_portable();
+            if let Some(t) = aumid::toast_identity(packaged, shortcut).and_then(toast::Toaster::new)
+            {
+                let _ = self.toaster.set(t);
+            }
+        }
+        self.toaster.get()
     }
 
     /// Call once at startup so the AUMID is set before the first window shows.
@@ -52,9 +54,9 @@ impl Platform for WindowsPlatform {
             taskbar::set_progress(h, p);
         }
     }
-    fn toast(&self, session: &str, title: &str, body: &str) {
+    fn toast(&self, machine: &str, session: &str, title: &str, body: &str) {
         if let Some(t) = self.toaster() {
-            t.show(session, title, body);
+            t.show(machine, session, title, body);
         }
     }
     fn open_url(&self, url: &str) {

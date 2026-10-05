@@ -6808,5 +6808,6 @@ No public name from a Produces block was renamed.
 - `on_ls` passes `sessions.as_slice()` into `TabStrip::from_sessions`.
 - `package.ps1` copies `tether.exe` when `tether-app.exe` is absent, because the bin name is `tether`.
 - Clippy allows: `dead_code` on `MenuRequest::Tab`, `Msg::TabShortcut`, `UiEffect::PickFiles`, and `layout()`; `large_enum_variant` on `FrameJob`.
+- `ATTACH_CAP` is 10, sshd's default `MaxSessions`. The spec says 12. `Msg::AttachFailed` carries `id` and `reason`; a mismatch with the tab's channel is ignored. `Msg::Ls` carries the request `id`. `Msg::ToastClicked` carries the machine id. `UiEffect::Toast` carries it too, and `UiEffect::AllowIme` asks the window to re-enable IME. `Remote::open` returns the terminal and control drop receivers, and `redial_control` replaces the control connection.
 
 

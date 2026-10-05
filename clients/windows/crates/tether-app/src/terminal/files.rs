@@ -29,6 +29,12 @@ fn codec() -> Arc<dyn ImageCodec> {
     CODEC.get().cloned().unwrap_or_else(|| Arc::new(NoCodec))
 }
 
+const REENCODE_LIMIT: u64 = 1024 * 1024 * 1024;
+
+pub fn reencode_too_large(len: u64) -> bool {
+    len > REENCODE_LIMIT
+}
+
 fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -49,6 +55,9 @@ pub fn plan(src: &SendSource) -> Result<String, (String, String)> {
                     .map_err(|r| (name, r));
             }
             match jpeg_name(&name) {
+                Some(_) if reencode_too_large(meta.len()) => {
+                    Err((name, "image is larger than 1 GB".into()))
+                }
                 Some(jpg) => Ok(jpg),
                 None => preflight(false, meta.len())
                     .map(|_| name.clone())
@@ -61,7 +70,16 @@ pub fn plan(src: &SendSource) -> Result<String, (String, String)> {
 pub fn prepare(src: SendSource, codec: &dyn ImageCodec) -> Result<(String, Vec<u8>), String> {
     let (name, data) = match src {
         SendSource::Bytes { name, data } => (name, data),
-        SendSource::Path(p) => (file_name(&p), std::fs::read(&p).map_err(|e| e.to_string())?),
+        SendSource::Path(p) => {
+            let name = file_name(&p);
+            if jpeg_name(&name).is_some() {
+                let len = std::fs::metadata(&p).map_err(|e| e.to_string())?.len();
+                if reencode_too_large(len) {
+                    return Err("image is larger than 1 GB".into());
+                }
+            }
+            (name, std::fs::read(&p).map_err(|e| e.to_string())?)
+        }
     };
     let original_name = name.clone();
     let (name, data) = match jpeg_name(&name) {
@@ -136,6 +154,12 @@ mod tests {
     use crate::terminal::model::Msg;
     use crate::terminal::testkit::FakeRemote;
     use std::sync::Mutex;
+
+    #[test]
+    fn reencode_refuses_a_file_over_one_gigabyte() {
+        assert!(!reencode_too_large(1024 * 1024 * 1024));
+        assert!(reencode_too_large(1024 * 1024 * 1024 + 1));
+    }
 
     struct Jpeg(Option<Vec<u8>>);
     impl ImageCodec for Jpeg {

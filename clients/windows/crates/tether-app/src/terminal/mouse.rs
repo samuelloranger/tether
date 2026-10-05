@@ -8,6 +8,10 @@ pub enum MouseKind {
     Down,
     Up,
     Move,
+    /// A cancelled press. Slint's pointer callback only emits down, up, and move;
+    /// tests and any future cancel event take this path, which releases like up.
+    #[allow(dead_code)]
+    Cancel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +59,7 @@ pub struct PointerState {
     pub held: Option<Button>,
     pub clicks: ClickCounter,
     pub wheel_acc: f32,
+    pub ctrl_wheel: f32,
 }
 
 fn code(b: Button) -> u8 {
@@ -93,7 +98,7 @@ pub fn encode_mouse(
         (MouseTracking::None, _) => return None,
         (_, MouseKind::Down) if button == Button::None => return None,
         (_, MouseKind::Down) => (code(button), false),
-        (_, MouseKind::Up) => (if mode.sgr { code(button) } else { 3 }, true),
+        (_, MouseKind::Up | MouseKind::Cancel) => (if mode.sgr { code(button) } else { 3 }, true),
         (MouseTracking::Motion, MouseKind::Move) => (32 + held.map_or(3, code), false),
         (MouseTracking::Drag, MouseKind::Move) if held.is_some() => {
             (32 + held.map_or(3, code), false)

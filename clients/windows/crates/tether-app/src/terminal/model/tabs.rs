@@ -180,7 +180,10 @@ mod tests {
     fn a_session_from_elsewhere_gets_a_tab_without_attaching() {
         let mut m = live(vec![session("default", 1)]);
         let fx = m.handle(
-            Msg::Ls(Ok(vec![session("default", 1), session("phone", 5)])),
+            Msg::Ls {
+                id: 2,
+                result: Ok(vec![session("default", 1), session("phone", 5)]),
+            },
             t(100),
         );
         assert!(!has_attach(&fx, "phone"));
@@ -191,7 +194,13 @@ mod tests {
     fn a_vanished_active_tab_closes_its_channel_and_the_left_neighbor_takes_over() {
         let mut m = live(vec![session("a", 1), session("b", 2), session("c", 3)]);
         m.handle(Msg::SelectTab("b".into()), t(10));
-        let fx = m.handle(Msg::Ls(Ok(vec![session("a", 1), session("c", 3)])), t(20));
+        let fx = m.handle(
+            Msg::Ls {
+                id: 2,
+                result: Ok(vec![session("a", 1), session("c", 3)]),
+            },
+            t(20),
+        );
         assert!(fx.contains(&Effect::Detach { name: "b".into() }));
         assert!(has_attach(&fx, "a"));
         assert_eq!(m.view().header.session, "a");
@@ -229,17 +238,32 @@ mod tests {
     fn new_session_survives_early_refresh() {
         let mut m = live(vec![session("default", 1)]);
         m.handle(Msg::NewSessionCommit("build".into()), t(6));
-        let fx = m.handle(Msg::Ls(Ok(vec![session("default", 1)])), t(500));
+        let fx = m.handle(
+            Msg::Ls {
+                id: 2,
+                result: Ok(vec![session("default", 1)]),
+            },
+            t(500),
+        );
         assert!(!fx.contains(&Effect::Detach {
             name: "build".into()
         }));
         assert_eq!(m.view().header.session, "build");
         // Once zmx reports it, it is an ordinary tab and leaves when zmx drops it.
         m.handle(
-            Msg::Ls(Ok(vec![session("default", 1), session("build", 9)])),
+            Msg::Ls {
+                id: 3,
+                result: Ok(vec![session("default", 1), session("build", 9)]),
+            },
             t(1_000),
         );
-        let fx = m.handle(Msg::Ls(Ok(vec![session("default", 1)])), t(2_000));
+        let fx = m.handle(
+            Msg::Ls {
+                id: 4,
+                result: Ok(vec![session("default", 1)]),
+            },
+            t(2_000),
+        );
         assert!(fx.contains(&Effect::Detach {
             name: "build".into()
         }));
