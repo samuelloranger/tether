@@ -32,6 +32,7 @@ export { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages
 export component AppWindow inherits Window {
     in property <string> window-title: "Tether";
     title: root.window-title;
+    icon: @image-url("../../../assets/icons/tether-256.png");
     min-width: 640px;
     min-height: 420px;
     preferred-width: 1040px;
@@ -40,8 +41,12 @@ export component AppWindow inherits Window {
     default-font-family: Tokens.ui-font;
 
     property <bool> dark-scene: Tokens.dark;
-    init => { Palette.color-scheme = Tokens.dark ? ColorScheme.dark : ColorScheme.light; }
-    changed dark-scene => { Palette.color-scheme = self.dark-scene ? ColorScheme.dark : ColorScheme.light; }
+    init => {
+        Palette.color-scheme = Tokens.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed dark-scene => {
+        Palette.color-scheme = self.dark-scene ? ColorScheme.dark : ColorScheme.light;
+    }
 
     forward-focus: keys;
     keys := FocusScope {

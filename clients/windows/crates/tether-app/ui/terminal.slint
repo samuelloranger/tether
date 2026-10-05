@@ -1,5 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { ConfirmDialog, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
+import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
 
 export struct TermTab {
     name: string, cwd: string, active: bool, attention: bool,
@@ -75,8 +75,9 @@ component Header inherits Rectangle {
     Timer { interval: 180ms; running: flashing; triggered => { flashing = false; } }
     height: 52px;
     background: Tokens.surface;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
     HorizontalLayout {
-        padding-left: 8px; padding-right: 8px; spacing: 8px;
+        padding-left: 8px; padding-right: 8px; padding-top: 9px; padding-bottom: 9px; spacing: 8px;
         IconButton { icon: @image-url("icons/back.svg"); clicked => { TerminalVm.back(); } }
         VerticalLayout { alignment: center; Lamp { lamp: TerminalVm.lamp; flashing: flashing; } }
         VerticalLayout {
@@ -93,7 +94,7 @@ component Header inherits Rectangle {
             }
         }
         Rectangle { horizontal-stretch: 1; }
-        SecondaryButton { text: "Send file…"; clicked => { TerminalVm.send-file(); } }
+        VerticalLayout { alignment: center; GhostButton { text: "Send file…"; clicked => { TerminalVm.send-file(); } } }
         IconButton { icon: @image-url("icons/gear.svg"); clicked => { TerminalVm.settings(); } }
     }
 }

@@ -1,7 +1,7 @@
-import { ComboBox, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
 import { AppBridge, KeyFormBridge, ServerFormBridge } from "bridge.slint";
-import { AreaField, Field, Hint, Note, PageChrome, PrimaryButton, SecondaryButton, Segment } from "components.slint";
+import { AreaField, Field, Hint, Note, PageChrome, PrimaryButton, SecondaryButton, Segment, Select } from "components.slint";
 
 component Label inherits Text {
     font-size: 12px;
@@ -38,7 +38,8 @@ export component ServerFormPage inherits PageChrome {
             if ServerFormBridge.auth == 0 && ServerFormBridge.key-names.length > 0: VerticalLayout {
                 spacing: 5px;
                 Label { text: "Key"; }
-                ComboBox {
+                Select {
+                    placeholder: "Choose a key";
                     model: ServerFormBridge.key-names;
                     current-index <=> ServerFormBridge.key-index;
                     selected => { ServerFormBridge.edited(); }

@@ -63,7 +63,7 @@ impl Transport for RusshTransport {
         let handshake = async {
             let tcp = TcpStream::connect((host, port))
                 .await
-                .map_err(|e| ConnectError::Transport(e.to_string()))?;
+                .map_err(|e| tcp_error(&e))?;
             let _ = tcp.set_nodelay(true);
             client::connect_stream(Self::config(), tcp, handler)
                 .await
@@ -91,5 +91,54 @@ impl Transport for RusshTransport {
 
     async fn sleep(&self, d: Duration) {
         tokio::time::sleep(d).await;
+    }
+}
+
+/// Windows formats socket errors in the system language with an OS code; the page wants a
+/// short sentence. Anything unrecognised keeps the system's own text.
+pub(crate) fn tcp_error(e: &std::io::Error) -> ConnectError {
+    use std::io::ErrorKind;
+    // WSAHOST_NOT_FOUND, WSANO_DATA: the name did not resolve.
+    if matches!(e.raw_os_error(), Some(11001 | 11004)) {
+        return ConnectError::Transport("no host by that name".into());
+    }
+    match e.kind() {
+        ErrorKind::ConnectionRefused => {
+            ConnectError::Transport("the host refused the connection".into())
+        }
+        ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable => {
+            ConnectError::Transport("the host can't be reached from this network".into())
+        }
+        ErrorKind::TimedOut => ConnectError::Timeout,
+        _ => ConnectError::Transport(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tcp_error_tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn common_failures_read_as_short_sentences() {
+        let refused = tcp_error(&Error::from(ErrorKind::ConnectionRefused));
+        assert_eq!(
+            refused,
+            ConnectError::Transport("the host refused the connection".into())
+        );
+        assert_eq!(
+            tcp_error(&Error::from(ErrorKind::TimedOut)),
+            ConnectError::Timeout
+        );
+        assert_eq!(
+            tcp_error(&Error::from_raw_os_error(11001)),
+            ConnectError::Transport("no host by that name".into())
+        );
+    }
+
+    #[test]
+    fn an_unknown_error_keeps_its_text() {
+        let e = Error::other("odd");
+        assert_eq!(tcp_error(&e), ConnectError::Transport("odd".into()));
     }
 }

@@ -28,7 +28,7 @@ Compress-Archive -Path $portable -DestinationPath (Join-Path $dist "Tether-$Vers
 $msix = Join-Path $dist 'msix'
 Copy-Item $portable $msix -Recurse
 Add-Type -AssemblyName System.Drawing
-$icon = [System.Drawing.Image]::FromFile("$repo/clients/apple/TetherIOS/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
+$icon = [System.Drawing.Image]::FromFile("$root/assets/icons/tether-256.png")
 foreach ($logo in @{ 'Square44x44Logo.png' = 44; 'Square150x150Logo.png' = 150; 'StoreLogo.png' = 50 }.GetEnumerator()) {
     $bmp = New-Object System.Drawing.Bitmap $logo.Value, $logo.Value
     $g = [System.Drawing.Graphics]::FromImage($bmp)

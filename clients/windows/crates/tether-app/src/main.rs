@@ -45,6 +45,7 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(windows))]
     let platform: std::sync::Arc<dyn win32::Platform> = std::sync::Arc::new(win32::NullPlatform);
     terminal::glue::init(&app, platform);
+    app.apply_dev_screen();
     app.run()?;
     Ok(())
 }

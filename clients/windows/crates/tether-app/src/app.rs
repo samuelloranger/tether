@@ -62,6 +62,15 @@ fn page_kind(page: &Page) -> PageKind {
     }
 }
 
+/// Debug builds only: lets `packaging/screenshots.ps1` open any page against sample data.
+fn dev_env(name: &str) -> Option<String> {
+    if cfg!(debug_assertions) {
+        std::env::var(name).ok().filter(|v| !v.is_empty())
+    } else {
+        None
+    }
+}
+
 fn secret_store(data: &DataDir) -> Arc<dyn SecretStore> {
     #[cfg(windows)]
     {
@@ -94,7 +103,10 @@ fn on_id<F: Fn(&Rc<App>, Uuid) + 'static>(app: &Rc<App>, f: F) -> impl Fn(Shared
 
 impl App {
     pub fn new() -> Result<Rc<Self>, Box<dyn Error>> {
-        let data = DataDir::default_windows()?;
+        let data = match dev_env("TETHER_DEV_DATA") {
+            Some(dir) => DataDir::new(dir),
+            None => DataDir::default_windows()?,
+        };
         let secrets = secret_store(&data);
         let hostkeys = Arc::new(JsonHostKeys::new(DataDir::new(data.root()))?);
         let state = AppState::load(data, secrets, hostkeys)?;
@@ -336,6 +348,88 @@ impl App {
             platform::apply_caption(hwnd, dark);
         }
         self.refresh_home();
+    }
+
+    /// `TETHER_DEV_THEME` (dark|light), `TETHER_DEV_SIZE` (WxH logical px) and `TETHER_DEV_PAGE`
+    /// put a debug build on one screen for a screenshot. Nothing here is saved.
+    pub fn apply_dev_screen(self: &Rc<Self>) {
+        if let Some(theme) = dev_env("TETHER_DEV_THEME") {
+            self.state.borrow_mut().prefs.theme_mode = match theme.as_str() {
+                "light" => tether_core::ThemeMode::Light,
+                _ => tether_core::ThemeMode::Dark,
+            };
+            self.refresh_scene();
+        }
+        if let Some((w, h)) = dev_env("TETHER_DEV_SIZE").and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?))
+        }) {
+            self.ui.window().set_size(slint::LogicalSize::new(w, h));
+        }
+        let Some(page) = dev_env("TETHER_DEV_PAGE") else {
+            return;
+        };
+        let (first_machine, first_key) = {
+            let s = self.state.borrow();
+            (
+                s.profiles.machines.first().cloned(),
+                s.keys.keys.first().map(|k| k.id),
+            )
+        };
+        match page.as_str() {
+            "keys" => {
+                self.home_tab.set(HomeTab::Keys);
+                self.refresh_home();
+            }
+            "add-server" => self.open_server_form(None),
+            "edit-server" => self.open_server_form(first_machine.as_ref().map(|m| m.id)),
+            "key-generate" => self.open_key_page(Page::KeyGenerate),
+            "key-import" => self.open_key_page(Page::KeyImport),
+            "key-paste" => self.open_key_page(Page::KeyPaste),
+            "settings" => self.open_settings(),
+            "schemes" => {
+                self.open_settings();
+                self.refresh_pickers();
+                self.router.go(Page::SchemePicker);
+                self.refresh_router();
+            }
+            "fonts" => {
+                self.open_settings();
+                self.refresh_pickers();
+                self.router.go(Page::FontPicker);
+                self.refresh_router();
+            }
+            "remove-machine" => {
+                if let Some(m) = &first_machine {
+                    self.router.open_dialog(Dialog::RemoveMachine(m.id));
+                    self.refresh_router();
+                }
+            }
+            "delete-key" => {
+                self.home_tab.set(HomeTab::Keys);
+                self.refresh_home();
+                if let Some(id) = first_key {
+                    self.router.open_dialog(Dialog::DeleteKey(id));
+                    self.refresh_router();
+                }
+            }
+            "open" => {
+                let name = dev_env("TETHER_DEV_MACHINE");
+                let machine = {
+                    let s = self.state.borrow();
+                    s.profiles
+                        .machines
+                        .iter()
+                        .find(|m| Some(&m.name) == name.as_ref())
+                        .cloned()
+                        .or(first_machine)
+                };
+                if let Some(m) = machine {
+                    on_open_machine(self, m);
+                }
+            }
+            _ => {}
+        }
     }
 
     pub fn refresh_router(&self) {

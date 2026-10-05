@@ -241,9 +241,9 @@ export component HomePage inherits Rectangle {
                 spacing: 9px;
                 padding-top: 10px;
                 padding-bottom: 16px;
-                PrimaryButton { horizontal-stretch: 1; text: "Generate"; clicked => { HomeBridge.generate-key(); } }
-                SecondaryButton { horizontal-stretch: 1; text: "Import"; clicked => { HomeBridge.import-key(); } }
-                SecondaryButton { horizontal-stretch: 1; text: "Paste"; clicked => { HomeBridge.paste-key(); } }
+                PrimaryButton { horizontal-stretch: 1; min-width: 0; preferred-width: 0; text: "Generate"; clicked => { HomeBridge.generate-key(); } }
+                SecondaryButton { horizontal-stretch: 1; min-width: 0; preferred-width: 0; text: "Import"; clicked => { HomeBridge.import-key(); } }
+                SecondaryButton { horizontal-stretch: 1; min-width: 0; preferred-width: 0; text: "Paste"; clicked => { HomeBridge.paste-key(); } }
             }
         }
     }

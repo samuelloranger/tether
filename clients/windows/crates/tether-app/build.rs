@@ -4,6 +4,23 @@ fn main() {
     let config = slint_build::CompilerConfiguration::new().with_style("fluent".into());
     slint_build::compile_with_config("ui/app.slint", config).expect("compile ui/app.slint");
     copy_licenses();
+    embed_icon();
+}
+
+/// The .exe icon is what Explorer, the Start menu, and the taskbar pin show.
+fn embed_icon() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let icon = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("../../assets/icons/tether.ico");
+    println!("cargo:rerun-if-changed={}", icon.display());
+    winresource::WindowsResource::new()
+        .set_icon(icon.to_str().unwrap())
+        .set("ProductName", "Tether")
+        .set("FileDescription", "Tether")
+        .compile()
+        .expect("embed the app icon");
 }
 
 fn copy_licenses() {

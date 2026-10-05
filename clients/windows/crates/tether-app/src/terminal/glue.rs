@@ -91,6 +91,13 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     };
     #[cfg(windows)]
     let network_target = (machine.host.clone(), machine.port);
+    app.ui.global::<ConnectVm>().set_who(
+        format!(
+            "{} · {}@{}:{}",
+            machine.name, machine.user, machine.host, machine.port
+        )
+        .into(),
+    );
     let (model, initial) = TerminalModel::new(machine, style, size);
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
