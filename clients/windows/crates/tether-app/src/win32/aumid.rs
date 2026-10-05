@@ -51,6 +51,11 @@ mod win {
             if SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(AUMID)).is_err() {
                 return false;
             }
+            // The shortcut follows the last exe that ran; a debug build must not take it over,
+            // or the Start menu opens the console build.
+            if cfg!(debug_assertions) {
+                return true;
+            }
             let Some(appdata) = std::env::var_os("APPDATA") else {
                 return false;
             };

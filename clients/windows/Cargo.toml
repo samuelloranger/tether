@@ -38,3 +38,12 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.image]
 opt-level = 3
+
+# The terminal is rasterized on the CPU every frame: unoptimized, a full-screen frame takes
+# ~60 ms instead of ~5 ms, which makes debug builds feel broken. Keep our own crates
+# debuggable but optimize the renderer and every dependency.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.tether-term]
+opt-level = 3
