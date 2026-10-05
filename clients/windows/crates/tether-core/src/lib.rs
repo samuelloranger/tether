@@ -1,24 +1,25 @@
 //! Tether's rules, with no UI and no network.
 
+pub mod connect;
 pub mod edit;
 pub mod fonts;
 pub mod hints;
 pub mod hostkey;
+pub mod keymap;
 pub mod keys;
+pub mod links;
+pub mod lock;
+pub mod osc;
+pub mod paste;
 pub mod prefs;
 pub mod profiles;
+pub mod resize;
 pub mod secrets;
 pub mod store;
 pub mod tabs;
 pub mod theme;
-pub mod osc;
 pub mod throttle;
-pub mod links;
-pub mod keymap;
-pub mod paste;
 pub mod upload;
-pub mod resize;
-pub mod lock;
 pub mod zmx;
 pub use edit::{PasswordAction, apply_server_form};
 pub use fonts::{FONTS, FontFace, font_named};
