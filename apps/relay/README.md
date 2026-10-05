@@ -48,7 +48,7 @@ added in the dashboard survives later deploys.
 | `APNS_PRIVATE_KEY` | yes | Contents of the `.p8` |
 | `APNS_ENV` | no | Environment tried first: `production` (default) or `sandbox`. A `BadDeviceToken` is retried once on the other, so TestFlight and development-signed builds both work |
 
-Rate limits (`PER_IP` 60/min, `PER_TOKEN` 10/min) are Cloudflare Rate Limiting
+Rate limits (`PER_IP` 60/min, `PER_TOKEN` 10/min, `PER_TOKEN_URGENT` 30/min for urgent pushes) are Cloudflare Rate Limiting
 bindings in `wrangler.jsonc`, keyed on the `CF-Connecting-IP` the edge sets.
 Workers logs stay off, so nothing about a request is kept.
 

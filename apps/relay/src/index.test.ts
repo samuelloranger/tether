@@ -107,6 +107,37 @@ describe('POST /push', () => {
     expect(sent).toHaveLength(0);
   });
 
+  test('an exhausted normal bucket still lets an urgent push through', async () => {
+    const perToken = limiter(false);
+    const urgent = limiter();
+    const env = fakeEnv(pem, { PER_TOKEN: perToken, PER_TOKEN_URGENT: urgent });
+    const { sent, fetchImpl } = apnsStub(ok);
+    expect((await push(env, fetchImpl, { ...cleartext, level: 'normal' })).status).toBe(429);
+    expect((await push(env, fetchImpl, { ...cleartext, level: 'urgent' })).status).toBe(200);
+    expect(urgent.keys).toEqual([TOKEN]);
+    expect(sent).toHaveLength(1);
+  });
+
+  test('an exhausted urgent bucket returns 429 with Retry-After', async () => {
+    const urgent = limiter(false);
+    const { sent, fetchImpl } = apnsStub(ok);
+    const res = await push(fakeEnv(pem, { PER_TOKEN_URGENT: urgent }), fetchImpl, { ...cleartext, level: 'urgent' });
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  test('an urgent push falls back to the shared bucket when the urgent binding is missing', async () => {
+    const { sent, fetchImpl } = apnsStub(ok);
+    const env = fakeEnv(pem, {
+      PER_TOKEN: limiter(false),
+      PER_TOKEN_URGENT: undefined as unknown as Env['PER_TOKEN_URGENT'],
+    });
+    const res = await push(env, fetchImpl, { ...cleartext, level: 'urgent' });
+    expect(res.status).toBe(429);
+    expect(sent).toHaveLength(0);
+  });
+
   test('rejects malformed and oversized bodies', async () => {
     const { fetchImpl } = apnsStub(ok);
     expect((await push(fakeEnv(pem), fetchImpl, '{')).status).toBe(400);

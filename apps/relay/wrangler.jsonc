@@ -21,6 +21,13 @@
       "name": "PER_TOKEN",
       "namespace_id": "2002",
       "simple": { "limit": 10, "period": 60 }
+    },
+    // Urgent pushes (prompts, questions) get their own bucket so a burst of
+    // routine ones can't lock them out.
+    {
+      "name": "PER_TOKEN_URGENT",
+      "namespace_id": "2003",
+      "simple": { "limit": 30, "period": 60 }
     }
   ]
 }
