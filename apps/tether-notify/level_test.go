@@ -46,3 +46,13 @@ func TestRelayRequestCarriesOnlyLevelAndOpaqueKeyInCleartext(t *testing.T) {
 		t.Fatalf("empty fields must be omitted: %s", old)
 	}
 }
+
+func TestAgentCollapseIDHidesTheSessionAndSeparatesSessions(t *testing.T) {
+	work := agentCollapseID("work")
+	if strings.Contains(work, "work") || work != "agent-"+threadKey(hostLabel(), "work") {
+		t.Fatalf("collapse id %q must be the hashed form", work)
+	}
+	if work == agentCollapseID("other") {
+		t.Fatal("two sessions share a collapse id")
+	}
+}

@@ -45,7 +45,7 @@ func runState(args []string, d stateDeps) error {
 	title := fs.String("title", "", "push title")
 	body := fs.String("body", "", "push body / status message")
 	link := fs.String("link", "", "tether:// deep link")
-	collapse := fs.String("collapse", "", "APNs collapse id (default agent-<session>)")
+	collapse := fs.String("collapse", "", "APNs collapse id (default: a hashed per-session id)")
 	dryRun := fs.Bool("dry-run", false, "print the push instead of sending it")
 	if err := fs.Parse(args); err != nil {
 		return err
