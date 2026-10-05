@@ -84,6 +84,8 @@ func main() {
 		err = cmdRemove(os.Args[2:])
 	case "state":
 		err = runState(os.Args[2:], defaultStateDeps(false))
+	case "flush":
+		err = runFlush(os.Args[2:], defaultStateDeps(false))
 	case "status":
 		err = runStatus(os.Stdout, defaultStatusDeps())
 	case "answer":
@@ -128,6 +130,8 @@ func usage() {
         [--title T --body B --link L] [--collapse ID] [--dry-run]
                                              record a session's agent state; pushes waiting/done
                                              unless the session has an attached zmx client
+  flush --session S                          send the waiting/done push that was skipped while a client
+                                             was attached, once none is (no-op otherwise; sent once)
   status                                     print every session's agent state as JSON
   answer --session S --state ST --version V (--input B64 [--submit] | --option N | --answers B64)
                                              type a notification action's input, only while the

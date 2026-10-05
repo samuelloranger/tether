@@ -375,6 +375,7 @@ public final class SSHTerminalController {
     // session yet (empty-state host), attach even if the name equals `attach`.
     guard name != attach || !hasSession else { return }
     let wasAttached = hasSession
+    let departing = attach
     attach = name
     if agentAlert?.session == name { agentAlert = nil }
     pendingNoSession = false
@@ -382,6 +383,7 @@ public final class SSHTerminalController {
     let connected = { if case .connected = status { return true } else { return false } }()
     guard case let .type(typing) = ZmxSwitch.strategy(connected: connected, attached: wasAttached) else {
       await connect()
+      if wasAttached && departing != name { flushPushInBackground(session: departing) }
       return
     }
     for (index, write) in ZmxSwitch.writes(typing: typing, zmx: Self.zmx, name: name).enumerated() {
@@ -389,6 +391,7 @@ public final class SSHTerminalController {
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
       pipeline.outbound.yield(.input(write, key: sessionKey))
     }
+    if wasAttached { flushPushInBackground(session: departing) }
     await refreshSessions()
   }
 
@@ -720,14 +723,50 @@ public final class SSHTerminalController {
   public func detachAfterGrace(_ grace: TimeInterval = backgroundGrace) async {
     try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
     guard !Task.isCancelled else { return }
-    await suspendNow()
+    await suspendNow(flushingPush: true)
   }
 
-  public func suspendNow() async {
+  /// Starts `tether-notify flush` detached on the host and returns at once: it waits there for
+  /// the attach client to be gone, then sends the push the host skipped while this phone was
+  /// attached. A missing `tether-notify` is not an error.
+  nonisolated static func flushPushCommand(session: String) -> String {
+    "command -v \(notify) >/dev/null && { nohup \(notify) flush --session \(shellQuote(session)) >/dev/null 2>&1 </dev/null & }"
+  }
+
+  private static let flushPushTimeout: TimeInterval = 2
+
+  /// Bounds only the exec round trip; the flush itself outlives the connection.
+  private func flushPush(session: String) async {
+    let control = control
+    let command = Self.flushPushCommand(session: session)
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      let once = ResumeOnce(continuation)
+      Task {
+        _ = try? await control.exec(command)
+        once.resume()
+      }
+      Task {
+        try? await Task.sleep(nanoseconds: UInt64(Self.flushPushTimeout * 1_000_000_000))
+        once.resume()
+      }
+    }
+  }
+
+  /// For a session this phone is leaving while the connection stays up.
+  private func flushPushInBackground(session: String) {
+    Task { await flushPush(session: session) }
+  }
+
+  public func suspendNow(flushingPush: Bool = false) async {
     guard !left, !isSuspended else { return }
     isSuspended = true
     status = .disconnected
+    let session = attach
     await pipeline.disconnect()
+    // Foregrounded meanwhile: the redial owns the control connection now.
+    guard isSuspended, !left else { return }
+    if flushingPush && hasSession { await flushPush(session: session) }
+    guard isSuspended, !left else { return }
     await control.close()
   }
 
@@ -746,7 +785,7 @@ public final class SSHTerminalController {
   public func beginAnsweringQuestion(in session: String) async {
     questionSession = session
     guard session == attach else { return }
-    await suspendNow()
+    await suspendNow(flushingPush: true)
   }
 
   public func finishAnsweringQuestion() async {
@@ -876,6 +915,7 @@ public final class SSHTerminalController {
     stopNetworkWatch()
     // Terminal first: the control queue may be held by a command on a dead path.
     await pipeline.disconnect()
+    if !isSuspended && hasSession { await flushPush(session: attach) }
     await control.close()
   }
 
@@ -923,5 +963,20 @@ public final class SSHTerminalController {
 
   private static func describe(_ error: Error) -> String {
     (error as? LocalizedError)?.errorDescription ?? "Could not connect: \(error)"
+  }
+}
+
+private final class ResumeOnce: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Never>?
+
+  init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+
+  func resume() {
+    lock.lock()
+    let pending = continuation
+    continuation = nil
+    lock.unlock()
+    pending?.resume()
   }
 }

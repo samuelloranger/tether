@@ -10,9 +10,10 @@ final class BackgroundDetach {
   func begin(controller: SSHTerminalController) {
     end(controller: controller)
     taskID = UIApplication.shared.beginBackgroundTask(withName: "tether.detach") { [weak self] in
-      // iOS is taking the time back: let go now rather than stay counted as a viewer.
+      // iOS is taking the time back: let go now rather than stay counted as a viewer. The
+      // flush is a short fire-and-forget exec; the host finishes it after we are gone.
       Task { @MainActor in
-        await controller.suspendNow()
+        await controller.suspendNow(flushingPush: true)
         self?.finish()
       }
     }

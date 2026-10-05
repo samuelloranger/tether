@@ -25,6 +25,10 @@ type SessionState struct {
 	Message  string `json:"message,omitempty"`
 	Link     string `json:"link,omitempty"`
 	AgentPid int    `json:"agentPid,omitempty"`
+	// Title and Suppressed let `flush` send a push that was skipped because a client was
+	// attached: Suppressed is set when that happens and cleared once the push goes out.
+	Title      string `json:"title,omitempty"`
+	Suppressed bool   `json:"suppressed,omitempty"`
 	// Pending is set while the Claude Code mod holds a permission request for the phone.
 	Pending *Pending `json:"pending,omitempty"`
 }

@@ -25,6 +25,21 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
     await controller.leave()
   }
 
+  func test_the_grace_detach_flushes_the_missed_push_after_closing_the_session() async {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    let store = InMemoryHostKeyStore()
+    let controller = SSHTerminalController(
+      title: "test", config: config, hostKeyStore: store, attach: "work",
+      dial: { try await DialScript([stream]).dial($0, $1) },
+      control: ControlConnection(config: config, store: store) { ops })
+    await controller.connect()
+    await controller.detachAfterGrace(0.05)
+    XCTAssertTrue(stream.closed)
+    XCTAssertTrue(ops.commands.contains { $0.contains("tether-notify flush --session 'work'") })
+    await controller.leave()
+  }
+
   func test_returning_within_the_grace_period_keeps_the_connection() async {
     let stream = ScriptedByteStream()
     let script = DialScript([stream])
@@ -130,5 +145,16 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
     XCTAssertTrue(stream.closed, "a redial that lands after Answer… must not stay attached")
     XCTAssertNotEqual(controller.status, .connected)
     await controller.leave()
+  }
+}
+
+final class FlushPushCommandTests: XCTestCase {
+  func test_the_command_runs_detached_quotes_the_session_and_tolerates_a_missing_tool() {
+    let command = SSHTerminalController.flushPushCommand(session: "it's work")
+    let tool = "~/.local/bin/tether-notify"
+    XCTAssertEqual(
+      command,
+      "command -v \(tool) >/dev/null && { nohup \(tool) flush --session \(shellQuote("it's work")) >/dev/null 2>&1 </dev/null & }"
+    )
   }
 }

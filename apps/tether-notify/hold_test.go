@@ -227,6 +227,21 @@ func TestHoldQuestionWhileAttachedRecordsWithoutPushing(t *testing.T) {
 	if len(*pushes) != 0 {
 		t.Fatalf("pushed while attached: %+v", *pushes)
 	}
+	if !s.Suppressed || s.Title == "" || !strings.HasSuffix(s.Title, " · needs you") {
+		t.Fatalf("suppressed push not recorded: %+v", s)
+	}
+	fd := stateDeps{run: zmxOnly("name=work\tclients=0\n", nil), now: d.now, push: d.push, stderr: d.stderr}
+	if err := runFlush(flushArgs(), fd); err != nil {
+		t.Fatal(err)
+	}
+	if len(*pushes) != 1 {
+		t.Fatalf("flush must re-send the question: %+v", *pushes)
+	}
+	p := (*pushes)[0].content
+	if p.Category != questionCategory || !reflect.DeepEqual(p.Options, []string{"Postgres", "SQLite"}) ||
+		p.Version != s.Version || p.Title != s.Title {
+		t.Fatalf("push %+v", p)
+	}
 }
 
 func TestHoldQuestionWithoutAHostLabelRecordsWithoutPushing(t *testing.T) {
