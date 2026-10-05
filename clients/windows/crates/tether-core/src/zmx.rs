@@ -12,7 +12,9 @@ pub struct ZmxSession {
 impl ZmxSession {
     /// The cwd as a path: zmx may report an OSC 7 style `file://host/path`.
     pub fn display_cwd(&self) -> &str {
-        let Some(rest) = self.cwd.strip_prefix("file://") else { return &self.cwd };
+        let Some(rest) = self.cwd.strip_prefix("file://") else {
+            return &self.cwd;
+        };
         match rest.find('/') {
             Some(slash) => &rest[slash..],
             None => rest,
@@ -38,7 +40,9 @@ pub fn parse_ls(output: &str) -> Vec<ZmxSession> {
             let mut s = ZmxSession::default();
             let mut name = None;
             for pair in line.split('\t') {
-                let Some((key, value)) = pair.trim().split_once('=') else { continue };
+                let Some((key, value)) = pair.trim().split_once('=') else {
+                    continue;
+                };
                 match key {
                     "name" => name = Some(value.to_owned()),
                     "pid" => s.pid = value.parse().unwrap_or(0),
@@ -88,7 +92,13 @@ mod tests {
         assert_eq!(s.len(), 2);
         assert_eq!(
             s[0],
-            ZmxSession { name: "default".into(), pid: 41, clients: 1, created: 1_700_000_000, cwd: "/home/u/src".into() }
+            ZmxSession {
+                name: "default".into(),
+                pid: 41,
+                clients: 1,
+                created: 1_700_000_000,
+                cwd: "/home/u/src".into()
+            }
         );
         assert_eq!(s[1].display_cwd(), "/home/u/build");
         assert_eq!(s[1].cwd_leaf(), Some("build"));
@@ -97,12 +107,21 @@ mod tests {
     #[test]
     fn lines_without_a_name_are_skipped_and_numbers_default_to_zero() {
         let s = parse_ls("garbage line\n name=x \tpid=nope\n\nname=\tpid=3\n");
-        assert_eq!(s, vec![ZmxSession { name: "x".into(), ..Default::default() }]);
+        assert_eq!(
+            s,
+            vec![ZmxSession {
+                name: "x".into(),
+                ..Default::default()
+            }]
+        );
     }
 
     #[test]
     fn cwd_leaf_handles_root_trailing_slash_and_empty() {
-        let mut s = ZmxSession { name: "a".into(), ..Default::default() };
+        let mut s = ZmxSession {
+            name: "a".into(),
+            ..Default::default()
+        };
         assert_eq!(s.cwd_leaf(), None);
         s.cwd = "/".into();
         assert_eq!(s.cwd_leaf(), Some("/"));
@@ -115,15 +134,27 @@ mod tests {
     #[test]
     fn commands_use_the_ios_binary_path() {
         assert_eq!(ls_command(), "~/.local/bin/zmx ls");
-        assert_eq!(attach_command("default"), "~/.local/bin/zmx attach 'default'\n");
-        assert_eq!(kill_command("build"), "~/.local/bin/zmx kill 'build' --force");
+        assert_eq!(
+            attach_command("default"),
+            "~/.local/bin/zmx attach 'default'\n"
+        );
+        assert_eq!(
+            kill_command("build"),
+            "~/.local/bin/zmx kill 'build' --force"
+        );
     }
 
     #[test]
     fn hostile_names_stay_one_argument() {
         assert_eq!(shell_quote("it's"), r#"'it'"'"'s'"#);
-        assert_eq!(attach_command("my session"), "~/.local/bin/zmx attach 'my session'\n");
-        assert_eq!(kill_command("$(rm -rf ~)"), "~/.local/bin/zmx kill '$(rm -rf ~)' --force");
+        assert_eq!(
+            attach_command("my session"),
+            "~/.local/bin/zmx attach 'my session'\n"
+        );
+        assert_eq!(
+            kill_command("$(rm -rf ~)"),
+            "~/.local/bin/zmx kill '$(rm -rf ~)' --force"
+        );
         assert_eq!(shell_quote("日本"), "'日本'");
         assert_eq!(shell_quote(""), "''");
     }
