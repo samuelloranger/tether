@@ -5,6 +5,7 @@ slint::include_modules!();
 mod app;
 mod open_machine;
 mod platform;
+mod terminal;
 mod preview;
 mod router;
 mod startup;
