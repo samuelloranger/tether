@@ -1,0 +1,58 @@
+import { Tokens } from "tokens.slint";
+import { PrimaryButton, SecondaryButton } from "components.slint";
+
+export global ConnectVm {
+    in property <string> expected;
+    in property <string> got;
+    in property <string> sentence;
+    callback back-home();
+    callback retry();
+}
+
+component Fingerprint inherits TextInput {
+    read-only: true;
+    font-family: Tokens.mono-font;
+    font-size: 12px;
+    color: Tokens.text;
+    wrap: word-wrap;
+}
+
+export component HostKeyRefusedPage inherits Rectangle {
+    background: Tokens.background;
+    FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) { ConnectVm.back-home(); return accept; }
+            reject
+        }
+        VerticalLayout {
+            padding: 32px; spacing: 12px; alignment: start;
+            Text { text: "Host key changed — refused."; color: Tokens.danger; font-size: 20px; font-weight: 600; }
+            Text { text: "Expected"; color: Tokens.text-secondary; font-size: 12px; }
+            Fingerprint { text: ConnectVm.expected; }
+            Text { text: "Got"; color: Tokens.text-secondary; font-size: 12px; }
+            Fingerprint { text: ConnectVm.got; }
+            HorizontalLayout { alignment: start; PrimaryButton { text: "Back to Home"; clicked => { ConnectVm.back-home(); } } }
+        }
+    }
+}
+
+export component CouldntConnectPage inherits Rectangle {
+    background: Tokens.background;
+    FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) { ConnectVm.back-home(); return accept; }
+            reject
+        }
+        VerticalLayout {
+            padding: 32px; spacing: 16px; alignment: start;
+            Text { text: ConnectVm.sentence; color: Tokens.text; font-size: 15px; wrap: word-wrap; }
+            HorizontalLayout {
+                spacing: 8px; alignment: start;
+                PrimaryButton { text: "Retry"; clicked => { ConnectVm.retry(); } }
+                SecondaryButton { text: "Back to Home"; clicked => { ConnectVm.back-home(); } }
+            }
+        }
+    }
+}

@@ -1,0 +1,241 @@
+import { Tokens } from "tokens.slint";
+import { ConfirmDialog, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
+
+export struct TermTab {
+    name: string, cwd: string, active: bool, attention: bool,
+    has-progress: bool, progress: float, progress-state: int,
+}
+
+export global TerminalVm {
+    in property <string> machine;
+    in property <string> session;
+    in property <string> word;
+    in property <int> lamp;              // 0 warning, 1 success, 2 danger
+    in property <int> lamp-flash-seq;
+    in property <[TermTab]> tabs;
+    in property <image> frame;
+    in property <int> frame-width;
+    in property <int> frame-height;
+    in property <bool> empty;
+    in property <string> empty-title;
+    in property <bool> naming;
+    in property <string> naming-text;
+    in property <string> kill-name;
+    in property <bool> disconnected;
+    in property <string> send-capsule;
+    in property <bool> has-progress;
+    in property <float> progress;
+    in property <int> progress-state;    // 0 normal, 1 error, 2 indeterminate, 3 paused
+    in property <string> tooltip;
+    in property <length> pointer-x;
+    in property <length> pointer-y;
+    in property <bool> hand-cursor;
+    in property <string> menu-link;
+    in property <bool> menu-copy;        // the link menu's second item: Copy (a selection exists) or Paste
+    in property <string> menu-tab;
+    in property <length> menu-x;
+    in property <length> menu-y;
+    callback back();
+    callback send-file();
+    callback settings();
+    callback select-tab(string);
+    callback tab-menu(string, length, length);
+    callback new-session();
+    callback commit-name(string);
+    callback cancel-name();
+    callback kill-from-menu();
+    callback kill-confirmed();
+    callback kill-cancelled();
+    callback close-menu();
+    callback copy-link();
+    callback menu-primary();
+    callback reconnect();
+    callback home();
+    callback well-resized(length, length);
+    // kind: 0 down, 1 up, 2 move. button: 0 left, 1 right, 2 middle, 3 none.
+    callback pointer(int, int, bool, bool, bool, length, length);
+    callback wheel(length, bool, bool, bool, length, length);
+}
+
+component Lamp inherits Rectangle {
+    in property <int> lamp;
+    in property <bool> flashing;
+    width: 8px; height: 8px; border-radius: 4px;
+    background: lamp == 0 ? Tokens.warning : lamp == 1 ? Tokens.success : Tokens.danger;
+    opacity: flashing ? 0.25 : 1;
+    animate opacity { duration: 90ms; }
+}
+
+component Header inherits Rectangle {
+    property <bool> flashing;
+    property <int> flash-seq: TerminalVm.lamp-flash-seq;
+    changed flash-seq => { flashing = true; }
+    Timer { interval: 180ms; running: flashing; triggered => { flashing = false; } }
+    height: 52px;
+    background: Tokens.surface;
+    HorizontalLayout {
+        padding-left: 8px; padding-right: 8px; spacing: 8px;
+        IconButton { icon: @image-url("icons/back.svg"); clicked => { TerminalVm.back(); } }
+        VerticalLayout { alignment: center; Lamp { lamp: TerminalVm.lamp; flashing: flashing; } }
+        VerticalLayout {
+            alignment: center;
+            Text { text: TerminalVm.machine; color: Tokens.text; font-size: 14px; font-weight: 600; }
+            HorizontalLayout {
+                spacing: 4px;
+                Text { text: TerminalVm.session; color: Tokens.text-secondary; font-size: 12px; }
+                Text { text: "·"; color: Tokens.text-secondary; font-size: 12px; visible: TerminalVm.session != ""; }
+                Text {
+                    text: TerminalVm.word; font-size: 12px;
+                    color: TerminalVm.lamp == 0 ? Tokens.warning : TerminalVm.lamp == 1 ? Tokens.success : Tokens.danger;
+                }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        SecondaryButton { text: "Send file…"; clicked => { TerminalVm.send-file(); } }
+        IconButton { icon: @image-url("icons/gear.svg"); clicked => { TerminalVm.settings(); } }
+    }
+}
+
+component ProgressBar inherits Rectangle {
+    in property <float> value;
+    in property <int> state;
+    height: 2px;
+    Rectangle {
+        x: 0; height: parent.height;
+        // Indeterminate is a steady partial bar: the chrome has no looping motion (DESIGN.md).
+        width: state == 2 ? parent.width * 0.4 : parent.width * value;
+        background: state == 1 ? Tokens.danger : state == 3 ? Tokens.warning : Tokens.accent;
+        opacity: state == 2 ? 0.6 : 1;
+    }
+}
+
+component TabStrip inherits Rectangle {
+    height: 34px;
+    background: Tokens.background;
+    Flickable {
+        viewport-width: row.preferred-width;
+        row := HorizontalLayout {
+            spacing: 2px; padding-left: 6px;
+            for tab in TerminalVm.tabs: Rectangle {
+                width: label.preferred-width;
+                background: tab.active ? Tokens.raised : transparent;
+                border-radius: Tokens.radius-control;
+                label := HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px; spacing: 6px;
+                    VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; visible: tab.attention; } }
+                    Text { text: tab.name; color: tab.active ? Tokens.text : Tokens.text-secondary; font-size: 13px; vertical-alignment: center; }
+                    if tab.cwd != "": Text { text: tab.cwd; color: Tokens.text-secondary; font-family: Tokens.mono-font; font-size: 11px; vertical-alignment: center; }
+                }
+                if tab.has-progress: ProgressBar { y: parent.height - 2px; width: parent.width; value: tab.progress; state: tab.progress-state; }
+                TouchArea {
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                            TerminalVm.tab-menu(tab.name, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                        }
+                    }
+                    clicked => { TerminalVm.select-tab(tab.name); }
+                }
+            }
+            if TerminalVm.naming: Rectangle {
+                width: 160px;
+                background: Tokens.raised;
+                border-radius: Tokens.radius-control;
+                TextInput {
+                    x: 10px; width: parent.width - 20px;
+                    text: TerminalVm.naming-text;
+                    color: Tokens.text; font-size: 13px; vertical-alignment: center;
+                    single-line: true;
+                    init => { self.focus(); self.select-all(); }
+                    accepted => { TerminalVm.commit-name(self.text); }
+                    key-pressed(e) => {
+                        if (e.text == Key.Escape) { TerminalVm.cancel-name(); return accept; }
+                        reject
+                    }
+                }
+            }
+            IconButton { icon: @image-url("icons/plus.svg"); clicked => { TerminalVm.new-session(); } }
+        }
+    }
+}
+
+export component TerminalPage inherits Rectangle {
+    background: Tokens.background;
+    VerticalLayout {
+        Header { }
+        if TerminalVm.has-progress: ProgressBar { value: TerminalVm.progress; state: TerminalVm.progress-state; }
+        TabStrip { }
+        Rectangle {
+            vertical-stretch: 1;
+            background: #1E1E2E;   // the Tether well; the rendered frame covers it with the theme background
+            changed width => { TerminalVm.well-resized(self.width, self.height); }
+            changed height => { TerminalVm.well-resized(self.width, self.height); }
+            init => { TerminalVm.well-resized(self.width, self.height); }
+            Image {
+                x: 0; y: 0;
+                width: TerminalVm.frame-width * 1phx;
+                height: TerminalVm.frame-height * 1phx;
+                source: TerminalVm.frame;
+                image-rendering: pixelated;
+            }
+            TouchArea {
+                mouse-cursor: TerminalVm.hand-cursor ? MouseCursor.pointer : MouseCursor.text;
+                pointer-event(e) => {
+                    TerminalVm.pointer(
+                        e.kind == PointerEventKind.down ? 0 : e.kind == PointerEventKind.up ? 1 : 2,
+                        e.button == PointerEventButton.left ? 0 : e.button == PointerEventButton.right ? 1 : e.button == PointerEventButton.middle ? 2 : 3,
+                        e.modifiers.shift, e.modifiers.control, e.modifiers.alt, self.mouse-x, self.mouse-y);
+                }
+                scroll-event(e) => {
+                    TerminalVm.wheel(e.delta-y, e.modifiers.shift, e.modifiers.control, e.modifiers.alt, self.mouse-x, self.mouse-y);
+                    accept
+                }
+            }
+            if TerminalVm.empty: VerticalLayout {
+                alignment: center; spacing: 8px;
+                Text { text: TerminalVm.empty-title; color: Tokens.text; font-size: 18px; horizontal-alignment: center; }
+                Text { text: "Nothing runs until you start one."; color: Tokens.text-secondary; font-size: 13px; horizontal-alignment: center; }
+                HorizontalLayout { alignment: center; PrimaryButton { text: "New session"; clicked => { TerminalVm.new-session(); } } }
+            }
+            if TerminalVm.disconnected: Rectangle {
+                y: parent.height - 64px; height: 44px; width: capsule.preferred-width; x: (parent.width - self.width) / 2;
+                background: Tokens.surface; border-radius: 22px; border-width: 1px; border-color: Tokens.border;
+                capsule := HorizontalLayout {
+                    padding: 6px; spacing: 6px;
+                    PrimaryButton { text: "Reconnect"; clicked => { TerminalVm.reconnect(); } }
+                    SecondaryButton { text: "Back to Home"; clicked => { TerminalVm.home(); } }
+                }
+            }
+            if TerminalVm.send-capsule != "" && !TerminalVm.disconnected: Rectangle {
+                y: parent.height - 56px; height: 32px; width: send-text.preferred-width + 32px; x: (parent.width - self.width) / 2;
+                background: Tokens.surface; border-radius: 16px; border-width: 1px; border-color: Tokens.border;
+                send-text := Text { text: TerminalVm.send-capsule; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
+            }
+            if TerminalVm.tooltip != "": Rectangle {
+                x: TerminalVm.pointer-x + 12px; y: TerminalVm.pointer-y + 16px;
+                width: tip.preferred-width + 16px; height: 24px;
+                background: Tokens.surface; border-radius: 6px; border-width: 1px; border-color: Tokens.border;
+                tip := Text { text: TerminalVm.tooltip; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
+            }
+        }
+    }
+    if TerminalVm.menu-link != "" || TerminalVm.menu-tab != "": TouchArea {
+        clicked => { TerminalVm.close-menu(); }
+        Rectangle {
+            x: TerminalVm.menu-x; y: TerminalVm.menu-y; width: 160px; height: items.preferred-height;
+            background: Tokens.surface; border-radius: 8px; border-width: 1px; border-color: Tokens.border;
+            items := VerticalLayout {
+                padding: 4px;
+                if TerminalVm.menu-tab != "": SecondaryButton { text: "Kill session"; clicked => { TerminalVm.kill-from-menu(); } }
+                if TerminalVm.menu-link != "": SecondaryButton { text: "Copy link"; clicked => { TerminalVm.copy-link(); } }
+                if TerminalVm.menu-link != "": SecondaryButton { text: TerminalVm.menu-copy ? "Copy" : "Paste"; clicked => { TerminalVm.menu-primary(); } }
+            }
+        }
+    }
+    if TerminalVm.kill-name != "": ConfirmDialog {
+        title: "Kill session " + TerminalVm.kill-name + "?";
+        body: "Everything running in it stops. This can't be undone.";
+        action: "Kill session";
+        confirmed => { TerminalVm.kill-confirmed(); }
+        cancelled => { TerminalVm.kill-cancelled(); }
+    }
+}

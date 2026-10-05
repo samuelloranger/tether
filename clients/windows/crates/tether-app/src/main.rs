@@ -5,11 +5,12 @@ slint::include_modules!();
 mod app;
 mod open_machine;
 mod platform;
-mod terminal;
 mod preview;
 mod router;
 mod startup;
+mod terminal;
 mod vm;
+mod win32;
 
 fn main() {
     #[cfg(not(debug_assertions))]
@@ -26,6 +27,17 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         .backend_name("winit".into())
         .select()?;
     let app = app::App::new()?;
+    let platform: std::sync::Arc<dyn win32::Platform> =
+        std::sync::Arc::new(win32::NullPlatform);
+    terminal::glue::init(&app, platform);
+    app.ui.window().on_close_requested({
+        move || {
+            if let Some(s) = terminal::glue::current() {
+                s(terminal::model::Msg::Back);
+            }
+            slint::CloseRequestResponse::HideWindow
+        }
+    });
     app.run()?;
     Ok(())
 }

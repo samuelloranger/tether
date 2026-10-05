@@ -6,6 +6,8 @@ import { HomePage } from "home.slint";
 import { ServerFormPage, KeyGeneratePage, KeyMaterialPage } from "forms.slint";
 import { SettingsPage } from "settings.slint";
 import { SchemePickerPage, FontPickerPage } from "pickers.slint";
+import { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
+import { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
 
 import "../../../assets/fonts/CascadiaMono-Regular.ttf";
 import "../../../assets/fonts/CascadiaMono-Bold.ttf";
@@ -24,9 +26,12 @@ import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/ComicMono-
 
 export { Tokens } from "tokens.slint";
 export { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
+export { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
+export { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
 
 export component AppWindow inherits Window {
-    title: "Tether";
+    in property <string> window-title: "Tether";
+    title: root.window-title;
     min-width: 640px;
     min-height: 420px;
     preferred-width: 1040px;
@@ -52,6 +57,9 @@ export component AppWindow inherits Window {
         if AppBridge.page == PageKind.settings: SettingsPage { }
         if AppBridge.page == PageKind.scheme-picker: SchemePickerPage { }
         if AppBridge.page == PageKind.font-picker: FontPickerPage { }
+        if AppBridge.page == PageKind.terminal: TerminalPage { }
+        if AppBridge.page == PageKind.host-key-refused: HostKeyRefusedPage { }
+        if AppBridge.page == PageKind.couldnt-connect: CouldntConnectPage { }
         if AppBridge.dialog-open: ConfirmDialog {
             title: AppBridge.dialog-title;
             body: AppBridge.dialog-body;

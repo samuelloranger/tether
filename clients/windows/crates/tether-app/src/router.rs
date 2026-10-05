@@ -12,6 +12,9 @@ pub enum Page {
     Settings,
     SchemePicker,
     FontPicker,
+    Terminal,
+    HostKeyRefused,
+    CouldntConnect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,9 +23,12 @@ pub enum Dialog {
     DeleteKey(Uuid),
 }
 
-/// Pages that Esc leaves. M6 adds `Page::Terminal` to the `false` side: there Esc is the PTY's.
+/// Pages that Esc leaves. Terminal and connect pages handle Esc themselves.
 pub fn escape_is_back(page: &Page) -> bool {
-    !matches!(page, Page::Home)
+    !matches!(
+        page,
+        Page::Home | Page::Terminal | Page::HostKeyRefused | Page::CouldntConnect
+    )
 }
 
 pub struct Router {
@@ -143,5 +149,10 @@ mod tests {
         assert_eq!(r.current(), Page::Home);
         r.back();
         assert_eq!(r.current(), Page::Home);
+    }
+
+    #[test]
+    fn escape_on_terminal_is_not_back() {
+        assert!(!escape_is_back(&Page::Terminal));
     }
 }

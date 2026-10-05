@@ -1,0 +1,179 @@
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
+
+use slint::ComponentHandle;
+use tether_core::profiles::Machine;
+use tether_core::resize::GridSize;
+
+use crate::app::App;
+use crate::router::Page;
+use crate::terminal::driver::{msg_sink, presented_sink, Driver, MsgSink};
+use crate::terminal::geometry::TermStyle;
+use crate::terminal::model::{FontStep, MenuRequest, Msg, PointerShape, Screen, TerminalModel, UiEffect};
+use crate::terminal::remote::SshRemote;
+use crate::terminal::ui_port::SlintUi;
+use crate::win32::Platform;
+use crate::{AppWindow, ConnectVm, TerminalVm};
+
+thread_local! {
+    static CURRENT: RefCell<Option<MsgSink>> = const { RefCell::new(None) };
+    static APP: RefCell<Weak<App>> = const { RefCell::new(Weak::new()) };
+    static PLATFORM: RefCell<Option<Arc<dyn Platform>>> = const { RefCell::new(None) };
+    static WIRED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn current() -> Option<MsgSink> { CURRENT.with(|c| c.borrow().clone()) }
+
+fn send(m: Msg) { if let Some(s) = current() { s(m); } }
+
+fn app() -> Option<Rc<App>> { APP.with(|a| a.borrow().upgrade()) }
+
+/// Called once from `main.rs`, before `app.run()`.
+pub fn init(app: &Rc<App>, platform: Arc<dyn Platform>) {
+    APP.with(|a| *a.borrow_mut() = Rc::downgrade(app));
+    PLATFORM.with(|p| *p.borrow_mut() = Some(platform));
+}
+
+fn platform() -> Arc<dyn Platform> {
+    PLATFORM.with(|p| p.borrow().clone()).unwrap_or_else(|| Arc::new(crate::win32::NullPlatform))
+}
+
+/// The body of M5's `open_machine::on_open_machine`.
+pub fn open_machine(app: &Rc<App>, machine: Machine) {
+    let (style, hostkeys, secrets) = {
+        let s = app.state.borrow();
+        (TermStyle::from_prefs(&s.prefs.terminal), s.hostkeys.clone(), s.secrets.clone())
+    };
+    let rt = app.runtime.handle().clone();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let sink = msg_sink(tx.clone());
+    let ui = SlintUi { window: app.ui.as_weak(), platform: platform(), send: sink.clone() };
+    let transport = tether_ssh::RusshTransport::new(rt.clone());
+    let remote = Arc::new(SshRemote::new(transport, machine.clone(), hostkeys, secrets));
+    // The real size arrives with the first well-resized message. 80×24 covers an attach that races ahead of it.
+    let size = GridSize { cols: 80, rows: 24, width_px: 640, height_px: 384 };
+    let (model, initial) = TerminalModel::new(machine, style, size);
+    crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
+    rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
+    CURRENT.with(|c| *c.borrow_mut() = Some(sink));
+    if !WIRED.replace(true) { wire_callbacks(&app.ui); }
+    app.router.go(Page::Terminal);
+    app.refresh_router();
+}
+
+/// Callbacks route through `current()`, so wiring them once per window is enough:
+/// opening another machine only swaps the sink behind them.
+fn wire_callbacks(ui: &AppWindow) {
+    let vm = ui.global::<TerminalVm>();
+    vm.on_back(|| send(Msg::Back));
+    vm.on_home(|| send(Msg::Back));
+    vm.on_reconnect(|| send(Msg::Reconnect));
+    vm.on_select_tab(|n| send(Msg::SelectTab(n.into())));
+    vm.on_new_session(|| send(Msg::NewSessionBegin));
+    vm.on_commit_name(|n| send(Msg::NewSessionCommit(n.into())));
+    vm.on_cancel_name(|| send(Msg::NewSessionCancel));
+    vm.on_kill_confirmed(|| send(Msg::KillConfirmed));
+    vm.on_kill_cancelled(|| send(Msg::KillCancelled));
+    let weak = ui.as_weak();
+    vm.on_tab_menu(move |name, x, y| {
+        let Some(w) = weak.upgrade() else { return };
+        let vm = w.global::<TerminalVm>();
+        vm.set_menu_x(x); vm.set_menu_y(y); vm.set_menu_tab(name);
+    });
+    let weak = ui.as_weak();
+    vm.on_kill_from_menu(move || {
+        let Some(w) = weak.upgrade() else { return };
+        let vm = w.global::<TerminalVm>();
+        let name = vm.get_menu_tab().to_string();
+        vm.set_menu_tab("".into());
+        send(Msg::KillRequested(name));
+    });
+    let weak = ui.as_weak();
+    vm.on_close_menu(move || {
+        let Some(w) = weak.upgrade() else { return };
+        let vm = w.global::<TerminalVm>();
+        vm.set_menu_tab("".into());
+        vm.set_menu_link("".into());
+    });
+    vm.on_send_file(|| {
+        let files = platform().pick_files();
+        if !files.is_empty() { send(Msg::SendFiles(files)); }
+    });
+    vm.on_settings(|| {
+        if let Some(app) = app() { app.router.go(Page::Settings); app.refresh_router(); }
+    });
+    let weak = ui.as_weak();
+    vm.on_well_resized(move |w, h| {
+        let Some(win) = weak.upgrade() else { return };
+        let scale = win.window().scale_factor();
+        send(Msg::WellResized { width_px: (w * scale).round() as u32, height_px: (h * scale).round() as u32, scale });
+    });
+    let cv = ui.global::<ConnectVm>();
+    cv.on_retry(|| send(Msg::Retry));
+    cv.on_back_home(|| send(Msg::Back));
+    // Pointer, wheel, and the link menu: Task 11. Keys, IME, drops, focus: Task 9 and Task 13.
+}
+
+/// The UI-thread half of the `UiEffect`s that touch Slint or app state.
+pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
+    let vm = w.global::<TerminalVm>();
+    let Some(app) = app() else { return };
+    match fx {
+        // Couldn't connect → Retry: the terminal page comes back on top of Home.
+        UiEffect::Navigate(Screen::Terminal) => {
+            if app.router.current() != Page::Terminal { app.router.home(); app.router.go(Page::Terminal); }
+            app.refresh_router();
+        }
+        // The two connect pages replace the terminal page, so leaving them lands on Home.
+        UiEffect::Navigate(Screen::Refused { expected, got }) => {
+            let cv = w.global::<ConnectVm>();
+            cv.set_expected(expected.into());
+            cv.set_got(got.into());
+            app.router.home();
+            app.router.go(Page::HostKeyRefused);
+            app.refresh_router();
+        }
+        UiEffect::Navigate(Screen::Failed { sentence }) => {
+            w.global::<ConnectVm>().set_sentence(sentence.into());
+            app.router.home();
+            app.router.go(Page::CouldntConnect);
+            app.refresh_router();
+        }
+        UiEffect::Home => {
+            CURRENT.with(|c| *c.borrow_mut() = None);
+            w.set_window_title("Tether".into());
+            app.router.home();
+            app.refresh_router();
+        }
+        UiEffect::LampFlash => vm.set_lamp_flash_seq(vm.get_lamp_flash_seq() + 1),
+        UiEffect::SetTitle(t) => w.set_window_title(t.into()),
+        UiEffect::FontStep(step) => {
+            {
+                let mut s = app.state.borrow_mut();
+                match step {
+                    FontStep::Bigger => s.prefs.terminal.bigger(),
+                    FontStep::Smaller => s.prefs.terminal.smaller(),
+                    FontStep::Reset => s.prefs.terminal.reset_size(),
+                }
+            }
+            // Saves, re-skins, and (through `prefs_changed`) restyles every tab.
+            app.on_prefs_changed();
+        }
+        UiEffect::Pointer(shape) => vm.set_hand_cursor(shape == PointerShape::Hand),
+        UiEffect::Tooltip(tip) => vm.set_tooltip(tip.unwrap_or_default().into()),
+        UiEffect::Menu(MenuRequest::Tab { name }) => vm.set_menu_tab(name.into()),
+        UiEffect::Menu(MenuRequest::Link { url, copy_selection }) => {
+            vm.set_menu_copy(copy_selection);
+            vm.set_menu_link(url.into());
+        }
+        // SlintUi::apply handles these before they get here.
+        UiEffect::ReadClipboard | UiEffect::FlashTaskbar | UiEffect::Taskbar(_) | UiEffect::Toast { .. }
+        | UiEffect::OpenUrl(_) | UiEffect::SetClipboard(_) | UiEffect::BringToFront | UiEffect::PickFiles => {}
+    }
+}
+
+/// M6's line in `App::on_prefs_changed`: settings and font shortcuts restyle the open terminal.
+pub fn prefs_changed(prefs: &tether_core::prefs::TerminalPrefs) {
+    send(Msg::StyleChanged(TermStyle::from_prefs(prefs)));
+}

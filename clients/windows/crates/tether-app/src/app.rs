@@ -56,6 +56,9 @@ fn page_kind(page: &Page) -> PageKind {
         Page::Settings => PageKind::Settings,
         Page::SchemePicker => PageKind::SchemePicker,
         Page::FontPicker => PageKind::FontPicker,
+        Page::Terminal => PageKind::Terminal,
+        Page::HostKeyRefused => PageKind::HostKeyRefused,
+        Page::CouldntConnect => PageKind::CouldntConnect,
     }
 }
 
@@ -356,6 +359,7 @@ impl App {
 
     pub fn on_prefs_changed(&self) {
         self.state.borrow().save_prefs();
+        crate::terminal::glue::prefs_changed(&self.state.borrow().prefs.terminal);
         self.refresh_scene();
         self.refresh_settings();
         self.refresh_pickers();
