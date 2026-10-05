@@ -2920,8 +2920,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## Deviations
 
-No public name from the roadmap contract or any task's Produces block was changed.
+No public name from the roadmap contract or any task's Produces block was changed, except the signatures recorded below.
 
 - `prefs::tests::round_trips_through_the_data_dir` builds `Preferences` with struct update instead of assigning fields on `Preferences::default()`. `clippy::field_reassign_with_default` is denied by `-D warnings`. The saved values and the equality assertion are unchanged.
 - `cargo fmt` reflowed long lines from the plan so `cargo fmt --all --check` passes. No behavior change.
+- `DataDir::load` now returns `io::Result<T>`. NotFound is `Ok(Default)`. Any other read error is retried three times about 50 ms apart and then returned. A corrupt file is quarantined only when the rename succeeds; a failed rename is `Err`, so the next save cannot overwrite the original. `Preferences::load` and `JsonHostKeys::new` return that error and do not save. `Auth` gained `#[serde(other)] Unknown` so a newer auth kind loads with the other machines.
 

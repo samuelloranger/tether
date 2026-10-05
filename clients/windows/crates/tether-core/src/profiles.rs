@@ -10,7 +10,12 @@ pub const PROFILES_FILE: &str = "profiles.json";
 pub enum Auth {
     Password,
     Agent,
-    Key { id: Uuid },
+    Key {
+        id: Uuid,
+    },
+    /// An auth kind this build does not know. The machine still loads; it cannot connect.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +36,7 @@ impl Machine {
             Auth::Key { id } => keys
                 .get(*id)
                 .map_or_else(|| "key missing".into(), |k| k.name.clone()),
+            Auth::Unknown => "unknown".into(),
         }
     }
 
@@ -125,6 +131,7 @@ pub fn delete_key_warning(machines: &[&Machine]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DataDir;
     use crate::keys::{KeyOrigin, KeyRecord, KeyRecords};
 
     fn key(id: u128, name: &str) -> KeyRecord {
@@ -256,6 +263,39 @@ mod tests {
         assert_eq!(
             delete_key_warning(&p.using_key(k)).unwrap(),
             "devbox, nas and pi won't be able to sign in until they get another key."
+        );
+    }
+
+    #[test]
+    fn unknown_auth_kind_loads_the_other_machines() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = DataDir::new(dir.path());
+        let kept = Uuid::from_u128(1);
+        let newer = Uuid::from_u128(2);
+        std::fs::write(
+            dir.path().join(PROFILES_FILE),
+            format!(
+                r#"{{"machines":[
+                    {{"id":"{kept}","name":"devbox","host":"h","port":22,"user":"sam","auth":{{"kind":"agent"}}}},
+                    {{"id":"{newer}","name":"old","host":"h","port":22,"user":"sam","auth":{{"kind":"pageant"}}}}
+                ]}}"#
+            ),
+        )
+        .unwrap();
+
+        let profiles = data.load::<Profiles>(PROFILES_FILE).unwrap();
+        assert_eq!(profiles.machines.len(), 2);
+        assert_eq!(profiles.machines[0].name, "devbox");
+        assert_eq!(profiles.machines[0].auth, Auth::Agent);
+        assert_eq!(profiles.machines[1].name, "old");
+        assert_eq!(profiles.machines[1].auth, Auth::Unknown);
+        assert!(dir.path().join(PROFILES_FILE).is_file());
+        assert!(
+            std::fs::read_dir(dir.path()).unwrap().all(|e| !e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("corrupt"))
         );
     }
 }

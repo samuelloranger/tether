@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io;
 use std::sync::Mutex;
 
 use crate::DataDir;
@@ -73,12 +74,12 @@ pub struct JsonHostKeys {
 }
 
 impl JsonHostKeys {
-    pub fn new(dir: DataDir) -> Self {
-        let pins = dir.load(HOSTKEYS_FILE);
-        Self {
+    pub fn new(dir: DataDir) -> io::Result<Self> {
+        let pins = dir.load(HOSTKEYS_FILE)?;
+        Ok(Self {
             dir,
             pins: Mutex::new(pins),
-        }
+        })
     }
 }
 
@@ -151,12 +152,12 @@ mod tests {
     #[test]
     fn json_pins_persist_across_instances() {
         let dir = tempfile::tempdir().unwrap();
-        let a = JsonHostKeys::new(DataDir::new(dir.path()));
+        let a = JsonHostKeys::new(DataDir::new(dir.path())).unwrap();
         assert_eq!(
             verify_host_key("aa:bb", "10.0.0.5", 22, &a),
             HostKeyDecision::Pinned
         );
-        let b = JsonHostKeys::new(DataDir::new(dir.path()));
+        let b = JsonHostKeys::new(DataDir::new(dir.path())).unwrap();
         assert_eq!(b.pinned("10.0.0.5", 22).as_deref(), Some("aa:bb"));
         let raw = std::fs::read_to_string(dir.path().join(HOSTKEYS_FILE)).unwrap();
         assert!(raw.contains("\"10.0.0.5:22\""));
@@ -181,5 +182,17 @@ mod tests {
         let (edited, _) = apply_server_form(Some(&old), &form);
         assert_eq!(store.pinned("old", 22).as_deref(), Some("aa:bb"));
         assert_eq!(store.pinned(&edited.host, edited.port), None);
+    }
+
+    #[test]
+    fn unreadable_hostkeys_are_not_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(HOSTKEYS_FILE);
+        std::fs::create_dir(&path).unwrap();
+        let Err(err) = JsonHostKeys::new(DataDir::new(dir.path())) else {
+            panic!("unreadable hostkeys loaded");
+        };
+        assert_ne!(err.kind(), io::ErrorKind::NotFound);
+        assert!(path.is_dir());
     }
 }

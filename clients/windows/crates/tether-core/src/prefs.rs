@@ -115,10 +115,10 @@ pub struct Preferences {
 }
 
 impl Preferences {
-    pub fn load(dir: &DataDir) -> Self {
-        let mut p: Preferences = dir.load(PREFERENCES_FILE);
+    pub fn load(dir: &DataDir) -> io::Result<Self> {
+        let mut p: Preferences = dir.load(PREFERENCES_FILE)?;
         p.terminal = p.terminal.clamped();
-        p
+        Ok(p)
     }
 
     pub fn save(&self, dir: &DataDir) -> io::Result<()> {
@@ -212,7 +212,7 @@ mod tests {
             r#"{"terminal":{"size_pt":99,"line_spacing":null,"cursor":"bar","future_field":1},"unknown":true}"#,
         )
         .unwrap();
-        let p = Preferences::load(&data);
+        let p = Preferences::load(&data).unwrap();
         assert_eq!(p.theme_mode, ThemeMode::Dark);
         assert_eq!(p.terminal.size_pt, 24.0);
         assert_eq!(p.terminal.line_spacing, 1.0);
@@ -239,6 +239,6 @@ mod tests {
             }),
         };
         p.save(&data).unwrap();
-        assert_eq!(Preferences::load(&data), p);
+        assert_eq!(Preferences::load(&data).unwrap(), p);
     }
 }

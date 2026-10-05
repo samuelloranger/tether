@@ -51,6 +51,7 @@ impl ServerForm {
                 Auth::Password => AuthChoice::Password,
                 Auth::Agent => AuthChoice::Agent,
                 Auth::Key { id } => AuthChoice::Key(Some(id)),
+                Auth::Unknown => AuthChoice::Key(None),
             },
             password: String::new(),
             has_saved_password,
