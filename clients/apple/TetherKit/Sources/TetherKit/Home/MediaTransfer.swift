@@ -24,6 +24,22 @@ public enum MediaTransfer {
     return "\(isVideo ? "video" : "photo")-\(timestamp).\(ext)"
   }
 
+  /// Resolves `$HOME` on the host, since the pasted path must be absolute for a TUI in any cwd.
+  public static let uploadsDirectoryCommand =
+    "mkdir -p \"$HOME/.tether/uploads\" && cd \"$HOME/.tether/uploads\" && pwd"
+
+  /// The directory the resolve command printed, or nil when it failed and the cwd should be used.
+  public static func uploadsDirectory(fromOutput output: String?) -> String? {
+    guard let line = output?.split(whereSeparator: \.isNewline).last else { return nil }
+    let path = line.trimmingCharacters(in: .whitespaces)
+    return path.hasPrefix("/") ? path : nil
+  }
+
+  public static func remotePath(directory: String?, filename: String) -> String {
+    guard let directory, !directory.isEmpty else { return filename }
+    return directory.hasSuffix("/") ? directory + filename : "\(directory)/\(filename)"
+  }
+
   public static func rejectionReason(byteCount: Int) -> String? {
     guard byteCount > byteLimit else { return nil }
     let formatter = ByteCountFormatter()

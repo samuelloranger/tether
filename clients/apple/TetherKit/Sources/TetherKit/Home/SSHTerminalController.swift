@@ -434,11 +434,23 @@ public final class SSHTerminalController {
     return refreshed.displayCwd.hasPrefix("/") ? refreshed.displayCwd : nil
   }
 
-  /// SCP-sends to the current session's live cwd. Returns the remote path.
+  public enum SendDestination: Equatable {
+    case sessionCwd
+    /// A fixed folder on the host, so media doesn't land in whatever repo the shell is in.
+    case uploads
+  }
+
+  /// SCP-sends to the destination, falling back to the live cwd if the uploads folder
+  /// can't be resolved. Returns the remote path.
   @discardableResult
-  public func sendFile(data: Data, filename: String) async -> String? {
-    let dir = await currentCwd()
-    let remote = dir.map { "\($0)/\(filename)" } ?? filename
+  public func sendFile(data: Data, filename: String, to destination: SendDestination = .sessionCwd) async -> String? {
+    var dir: String?
+    if destination == .uploads {
+      let out = try? await control.exec(MediaTransfer.uploadsDirectoryCommand)
+      dir = MediaTransfer.uploadsDirectory(fromOutput: out)
+    }
+    if dir == nil { dir = await currentCwd() }
+    let remote = MediaTransfer.remotePath(directory: dir, filename: filename)
     transfer = .sending(filename)
     do {
       // Its own connection: commands are serialized on the control one, and a
@@ -457,8 +469,9 @@ public final class SSHTerminalController {
   public func sendPickedMedia(_ item: PhotosPickerItem, isVideo: Bool) async {
     switch await MediaTransfer.load(item, isVideo: isVideo) {
     case let .ready(name, data):
-      let remote = await sendFile(data: data, filename: name)
-      if let remote { sendInput(shellQuote(remote)) }
+      let remote = await sendFile(data: data, filename: name, to: .uploads)
+      // Typed keystrokes stay a raw path; only a paste makes a TUI attach the image.
+      if let remote { sendPaste(shellQuote(remote)) }
     case let .failed(message):
       reportTransferFailure(message)
     }
