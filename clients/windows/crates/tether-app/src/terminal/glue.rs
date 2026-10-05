@@ -91,6 +91,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     };
     #[cfg(windows)]
     let network_target = (machine.host.clone(), machine.port);
+    set_well_color(&app.ui, style.theme.background);
     app.ui.global::<ConnectVm>().set_who(
         format!(
             "{} · {}@{}:{}",
@@ -419,5 +420,19 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
 
 /// M6's line in `App::on_prefs_changed`: settings and font shortcuts restyle the open terminal.
 pub fn prefs_changed(prefs: &tether_core::prefs::TerminalPrefs) {
-    send(Msg::StyleChanged(TermStyle::from_prefs(prefs)));
+    let style = TermStyle::from_prefs(prefs);
+    if let Some(app) = app() {
+        set_well_color(&app.ui, style.theme.background);
+    }
+    send(Msg::StyleChanged(style));
+}
+
+/// The active tab is painted in the theme background so it reads as part of the grid below.
+fn set_well_color(ui: &AppWindow, rgb: u32) {
+    ui.global::<TerminalVm>()
+        .set_well_color(slint::Color::from_rgb_u8(
+            (rgb >> 16) as u8,
+            (rgb >> 8) as u8,
+            rgb as u8,
+        ));
 }

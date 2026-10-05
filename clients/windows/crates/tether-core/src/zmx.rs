@@ -26,11 +26,26 @@ impl ZmxSession {
         if path.is_empty() {
             return None;
         }
-        if path.trim_end_matches('/').is_empty() {
+        let path = path.trim_end_matches('/');
+        if path.is_empty() {
             return Some("/");
         }
-        path.trim_end_matches('/').rsplit('/').next()
+        // Every tab sitting in a home directory would otherwise repeat the user name.
+        if is_home(path) {
+            return Some("~");
+        }
+        path.rsplit('/').next()
     }
+}
+
+fn is_home(path: &str) -> bool {
+    if path == "/root" {
+        return true;
+    }
+    ["/home/", "/Users/"].iter().any(|base| {
+        path.strip_prefix(base)
+            .is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
+    })
 }
 
 pub fn parse_ls(output: &str) -> Vec<ZmxSession> {
@@ -127,7 +142,15 @@ mod tests {
         s.cwd = "/".into();
         assert_eq!(s.cwd_leaf(), Some("/"));
         s.cwd = "/home/u/".into();
-        assert_eq!(s.cwd_leaf(), Some("u"));
+        assert_eq!(s.cwd_leaf(), Some("~"));
+        s.cwd = "/Users/sam".into();
+        assert_eq!(s.cwd_leaf(), Some("~"));
+        s.cwd = "/root".into();
+        assert_eq!(s.cwd_leaf(), Some("~"));
+        s.cwd = "/home/u/src".into();
+        assert_eq!(s.cwd_leaf(), Some("src"));
+        s.cwd = "/home".into();
+        assert_eq!(s.cwd_leaf(), Some("home"));
         s.cwd = "file://host".into();
         assert_eq!(s.display_cwd(), "host");
     }
