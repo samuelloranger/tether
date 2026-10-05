@@ -7,8 +7,9 @@ pub mod store;
 #[cfg(windows)]
 pub use secrets::DpapiSecretStore;
 pub use keys::{
-    KEYS_FILE, KeyOrigin, KeyRecord, KeyRecords, algorithm_of, fingerprint, fingerprint_digest,
-    generate_ed25519, randomart, short_fingerprint,
+    KEYS_FILE, KeyError, KeyOrigin, KeyRecord, KeyRecords, algorithm_of, derive_public_line,
+    fingerprint, fingerprint_digest, generate_ed25519, import_record, is_encrypted, normalize_pem,
+    public_key_body, randomart, short_fingerprint,
 };
 pub use profiles::{
     PROFILES_FILE, Auth, Machine, Profiles, delete_key_warning, keys_subtitle, machines_subtitle,
