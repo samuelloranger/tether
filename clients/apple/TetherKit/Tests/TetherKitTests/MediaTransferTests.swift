@@ -17,6 +17,36 @@ final class MediaTransferTests: XCTestCase {
   }
 #endif
 
+  func test_the_uploads_directory_is_the_path_printed_before_the_marker() {
+    let ok = MediaTransfer.uploadsResolvedMarker
+    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "/home/u/.tether/uploads\n\(ok)\n"), "/home/u/.tether/uploads")
+    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "motd noise\n/srv/u/.tether/uploads\n\(ok)\n"), "/srv/u/.tether/uploads")
+    XCTAssertEqual(MediaTransfer.uploadsDirectory(fromOutput: "/srv/u/.tether/uploads\n\(ok)\nlogout\n"), "/srv/u/.tether/uploads")
+    XCTAssertTrue(MediaTransfer.uploadsDirectoryCommand.hasSuffix("&& echo \(ok)"))
+  }
+
+  func test_an_unusable_resolve_result_falls_back_to_the_cwd() {
+    XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: nil))
+    XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: ""))
+    XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: "mkdir: cannot create directory\n"))
+    XCTAssertNil(MediaTransfer.uploadsDirectory(fromOutput: "/home/u\n"), "a startup line is not proof that pwd ran")
+  }
+
+  func test_only_formats_a_tui_cannot_attach_are_renamed_to_jpeg() {
+    XCTAssertEqual(MediaTransfer.jpegName(for: "photo-1.heic"), "photo-1.jpg")
+    XCTAssertEqual(MediaTransfer.jpegName(for: "photo-1.HEIF"), "photo-1.jpg")
+    XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.png"))
+    XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.JPG"))
+    XCTAssertNil(MediaTransfer.jpegName(for: "photo-1.webp"))
+    XCTAssertEqual(MediaTransfer.jpegName(for: "photo-1"), "photo-1.jpg")
+  }
+
+  func test_the_remote_path_joins_directory_and_name_once() {
+    XCTAssertEqual(MediaTransfer.remotePath(directory: "/a/b", filename: "p.jpg"), "/a/b/p.jpg")
+    XCTAssertEqual(MediaTransfer.remotePath(directory: "/a/b/", filename: "p.jpg"), "/a/b/p.jpg")
+    XCTAssertEqual(MediaTransfer.remotePath(directory: nil, filename: "p.jpg"), "p.jpg")
+  }
+
   func test_a_still_is_named_as_a_photo_and_a_clip_as_a_video() {
     XCTAssertEqual(
       MediaTransfer.filename(preferredExtension: "heic", isVideo: false, timestamp: 1_790_044_951),

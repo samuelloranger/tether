@@ -24,6 +24,39 @@ public enum MediaTransfer {
     return "\(isVideo ? "video" : "photo")-\(timestamp).\(ext)"
   }
 
+  /// Formats a TUI like Claude Code attaches from a pasted path; anything else (HEIC from
+  /// the camera) is re-encoded as JPEG or it would paste as a bare path.
+  static let attachableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp"]
+
+  /// The `.jpg` name a photo is re-encoded under, or nil when it can be sent as is.
+  public static func jpegName(for name: String) -> String? {
+    let url = URL(fileURLWithPath: name)
+    guard !attachableImageExtensions.contains(url.pathExtension.lowercased()) else { return nil }
+    return url.deletingPathExtension().lastPathComponent + ".jpg"
+  }
+
+  static let uploadsResolvedMarker = "__TETHER_UPLOADS_OK__"
+
+  /// Resolves `$HOME` on the host, since the pasted path must be absolute for a TUI in any cwd.
+  public static let uploadsDirectoryCommand =
+    "mkdir -p \"$HOME/.tether/uploads\" && cd \"$HOME/.tether/uploads\" && pwd && echo \(uploadsResolvedMarker)"
+
+  /// The directory the resolve command printed, or nil when it failed and the cwd should be used.
+  /// The marker proves `pwd` ran: stderr is dropped, so a failed `cd` could otherwise leave a
+  /// startup line that merely looks like a path.
+  public static func uploadsDirectory(fromOutput output: String?) -> String? {
+    guard let output else { return nil }
+    let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+    guard let marker = lines.lastIndex(of: uploadsResolvedMarker), marker > 0 else { return nil }
+    let path = lines[marker - 1]
+    return path.hasPrefix("/") ? path : nil
+  }
+
+  public static func remotePath(directory: String?, filename: String) -> String {
+    guard let directory, !directory.isEmpty else { return filename }
+    return directory.hasSuffix("/") ? directory + filename : "\(directory)/\(filename)"
+  }
+
   public static func rejectionReason(byteCount: Int) -> String? {
     guard byteCount > byteLimit else { return nil }
     let formatter = ByteCountFormatter()
@@ -36,6 +69,9 @@ public enum MediaTransfer {
 import CoreTransferable
 import SwiftUI
 import PhotosUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public extension MediaTransfer {
   private static let unreadableVideoMessage = "Couldn't read that video from the library."
@@ -63,6 +99,11 @@ public extension MediaTransfer {
     guard let data = try? await item.loadTransferable(type: Data.self) else {
       return .failed("Couldn't read that photo from the library.")
     }
+    #if canImport(UIKit)
+    if let jpegName = jpegName(for: name), let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.9) {
+      return .ready(name: jpegName, data: jpeg)
+    }
+    #endif
     return .ready(name: name, data: data)
   }
 }
