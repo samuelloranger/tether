@@ -35,6 +35,7 @@ export function fakeEnv(pem: string, overrides: Partial<Env> = {}): Env {
     APNS_PRIVATE_KEY: pem,
     PER_IP: limiter(),
     PER_TOKEN: limiter(),
+    PER_TOKEN_URGENT: limiter(),
     ...overrides,
   };
 }

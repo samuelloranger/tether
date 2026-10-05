@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -215,6 +216,11 @@ func sendPush(content PushContent, collapse string, dryRun bool) error {
 	url := strings.TrimRight(relayURL(), "/") + "/push"
 	client := &http.Client{Timeout: 5 * time.Second}
 
+	var retry *retrier
+	if content.Level == levelUrgent && !dryRun {
+		retry = &retrier{sleep: time.Sleep}
+	}
+
 	var sent int
 	for _, device := range devices {
 		ciphertext, err := encryptPushContent(device.SecretKey, content)
@@ -229,7 +235,7 @@ func sendPush(content PushContent, collapse string, dryRun bool) error {
 			sent++
 			continue
 		}
-		switch deliver(client, url, req) {
+		switch deliver(client, url, req, retry) {
 		case delivered:
 			sent++
 		case gone:
@@ -253,22 +259,81 @@ const (
 	failed
 )
 
-func deliver(client *http.Client, url string, req relayRequest) deliveryResult {
+const (
+	maxRetries     = 3
+	maxRetryWait   = 5 * time.Second
+	retryBudget    = 12 * time.Second
+	defaultBackoff = time.Second
+)
+
+// retrier bounds how long urgent pushes may stall the calling hook. waited is
+// shared across devices so the budget covers one sendPush call.
+type retrier struct {
+	sleep  func(time.Duration)
+	waited time.Duration
+}
+
+// next reports how long to wait before retry attempt (0-based), or false once
+// the retry count or the time budget is spent.
+func (r *retrier) next(attempt int, retryAfter time.Duration) (time.Duration, bool) {
+	if attempt >= maxRetries {
+		return 0, false
+	}
+	wait := retryAfter
+	if wait <= 0 {
+		wait = defaultBackoff << attempt
+	}
+	if wait > maxRetryWait {
+		wait = maxRetryWait
+	}
+	if r.waited+wait > retryBudget {
+		return 0, false
+	}
+	r.waited += wait
+	return wait, true
+}
+
+func parseRetryAfter(v string) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// deliver posts one request. A nil retry means a single attempt; otherwise
+// 429, 503 and transport errors are retried within the retrier's bounds.
+func deliver(client *http.Client, url string, req relayRequest, retry *retrier) deliveryResult {
 	body, _ := json.Marshal(req)
+	for attempt := 0; ; attempt++ {
+		result, transient, retryAfter := post(client, url, body)
+		if !transient || retry == nil {
+			return result
+		}
+		wait, ok := retry.next(attempt, retryAfter)
+		if !ok {
+			return result
+		}
+		retry.sleep(wait)
+	}
+}
+
+func post(client *http.Client, url string, body []byte) (result deliveryResult, transient bool, retryAfter time.Duration) {
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "relay post failed: %v\n", err)
-		return failed
+		return failed, true, 0
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusGone:
-		return gone
+		return gone, false, 0
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		return delivered
+		return delivered, false, 0
 	default:
 		fmt.Fprintf(os.Stderr, "relay returned %d\n", resp.StatusCode)
-		return failed
+		busy := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable
+		return failed, busy, parseRetryAfter(resp.Header.Get("Retry-After"))
 	}
 }
 
