@@ -16,6 +16,8 @@ pub mod links;
 pub mod keymap;
 pub mod paste;
 pub mod upload;
+pub mod resize;
+pub mod lock;
 pub mod zmx;
 pub use edit::{PasswordAction, apply_server_form};
 pub use fonts::{FONTS, FontFace, font_named};
