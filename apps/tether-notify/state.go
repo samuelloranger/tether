@@ -181,7 +181,8 @@ func runFlush(args []string, d stateDeps) error {
 	if claimed == nil {
 		return nil
 	}
-	content := PushContent{Title: claimed.Title, Body: claimed.Message, Link: claimed.Link}
+	content := PushContent{Title: claimed.Title, Body: claimed.Message, Link: claimed.Link, Session: *session,
+		Level: pushLevel(agentCategory(claimed.State))}
 	if content.Title == "" || content.Body == "" {
 		return nil
 	}
@@ -192,9 +193,10 @@ func runFlush(args []string, d stateDeps) error {
 		if claimed.Pending != nil && claimed.Pending.Kind == "question" {
 			content.Category = questionCategory
 			content.Options = optionButtons(claimed.Pending.Questions)
+			content.Level = levelUrgent
 		}
 	}
-	if err := d.push(content, "agent-"+*session); err != nil {
+	if err := d.push(content, agentCollapseID(*session)); err != nil {
 		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
 		markSuppressed(*session, claimed.Version, claimed.Title)
 	}

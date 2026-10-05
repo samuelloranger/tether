@@ -374,7 +374,7 @@ func TestFlushSendsASuppressedPushOnceAfterDetach(t *testing.T) {
 		t.Fatalf("want exactly one push, got %+v", *pushes)
 	}
 	got := (*pushes)[0]
-	if got.content.Title != "t" || got.content.Body != "b" || got.content.Category != "tether.agent.waiting" || got.content.Version == "" || got.collapse != "agent-work" {
+	if got.content.Title != "t" || got.content.Body != "b" || got.content.Category != "tether.agent.waiting" || got.content.Version == "" || got.collapse != agentCollapseID("work") || got.content.Session != "work" || got.content.Level != levelUrgent {
 		t.Fatalf("push %+v", got)
 	}
 }
