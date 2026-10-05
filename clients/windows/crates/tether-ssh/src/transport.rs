@@ -35,6 +35,13 @@ impl RusshTransport {
     }
 }
 
+fn dial_host(host: &str) -> &str {
+    let host = host.trim();
+    host.strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(host)
+}
+
 impl Transport for RusshTransport {
     type Conn = RusshConnection;
 
@@ -52,9 +59,9 @@ impl Transport for RusshTransport {
             events: events.clone(),
             dropped: dropped.clone(),
         };
-        let addr = format!("{host}:{port}");
+        let host = dial_host(host);
         let handshake = async {
-            let tcp = TcpStream::connect(&addr)
+            let tcp = TcpStream::connect((host, port))
                 .await
                 .map_err(|e| ConnectError::Transport(e.to_string()))?;
             let _ = tcp.set_nodelay(true);

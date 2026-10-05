@@ -63,6 +63,8 @@ pub(crate) struct GlyphAtlas {
     glyphs: HashMap<GlyphKey, Option<RasterGlyph>>,
 }
 
+const ATLAS_CAP: usize = 4096;
+
 impl GlyphAtlas {
     pub fn new() -> Self {
         GlyphAtlas {
@@ -84,6 +86,9 @@ impl GlyphAtlas {
     }
 
     pub fn get(&mut self, ctx: &mut ScaleContext, key: GlyphKey) -> Option<&RasterGlyph> {
+        if !self.glyphs.contains_key(&key) && self.glyphs.len() >= ATLAS_CAP {
+            self.glyphs.clear();
+        }
         let size_px = self.size_px;
         self.glyphs
             .entry(key)
@@ -166,5 +171,21 @@ mod tests {
         assert_eq!(atlas.len(), 0);
         let w37 = atlas.get(&mut ctx, key).unwrap().width;
         assert!(w37 > w18 * 3 / 2, "{w18} → {w37}");
+    }
+
+    #[test]
+    fn the_atlas_never_exceeds_its_cap() {
+        let mut ctx = ScaleContext::new();
+        let mut atlas = GlyphAtlas::new();
+        atlas.prepare(12.0);
+        for glyph in 0..5_000u16 {
+            let key = GlyphKey {
+                font: "cascadia-mono",
+                slot: FaceSlot::Primary { bold: false },
+                glyph,
+            };
+            let _ = atlas.get(&mut ctx, key);
+            assert!(atlas.len() <= ATLAS_CAP, "atlas grew to {}", atlas.len());
+        }
     }
 }

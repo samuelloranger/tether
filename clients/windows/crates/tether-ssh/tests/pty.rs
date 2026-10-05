@@ -131,6 +131,30 @@ async fn slow_reader_does_not_stall_other_channel() {
 }
 
 #[tokio::test]
+async fn an_unread_burst_arrives_in_order() {
+    let (_server, conn) = signed_in().await;
+    let mut pty = conn.open_pty(SIZE).await.unwrap();
+    read_until(&mut pty.events, "ready").await;
+    pty.writer.write(b"flood").await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    const TOTAL: usize = 5 * 1024 * 1024;
+    let mut got = Vec::with_capacity(TOTAL);
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while got.len() < TOTAL {
+            match pty.events.recv().await {
+                Some(PtyEvent::Data(d)) => got.extend_from_slice(&d),
+                other => panic!("{other:?} after {} bytes", got.len()),
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("short read {}", got.len()));
+    assert_eq!(got.len(), TOTAL);
+    assert!(got.iter().enumerate().all(|(i, b)| *b == (i % 251) as u8));
+}
+
+#[tokio::test]
 async fn a_cloned_writer_writes_to_the_same_channel() {
     let (_server, conn) = signed_in().await;
     let mut pty = conn.open_pty(SIZE).await.unwrap();

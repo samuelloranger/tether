@@ -119,10 +119,8 @@ impl RusshConnection {
                 };
                 match msg {
                     ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
-                        match reader_tx.try_send(PtyEvent::Data(data.to_vec())) {
-                            Ok(()) => {}
-                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
-                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => return,
+                        if reader_tx.send(PtyEvent::Data(data.to_vec())).await.is_err() {
+                            return;
                         }
                     }
                     ChannelMsg::Close | ChannelMsg::Eof => break,

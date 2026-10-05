@@ -55,3 +55,22 @@ async fn a_closed_port_is_a_transport_error() {
         .unwrap();
     assert!(matches!(err, ConnectError::Transport(_)), "{err:?}");
 }
+
+#[tokio::test]
+async fn dial_accepts_a_bracketed_ipv6_literal() {
+    if tokio::net::TcpListener::bind("[::1]:0").await.is_err() {
+        eprintln!("skip: no IPv6 loopback");
+        return;
+    }
+    let server = start(Options {
+        listen: Some("::1".into()),
+        ..Default::default()
+    })
+    .await;
+    let conn = support::transport()
+        .dial("[::1]", server.addr.port(), support::TIMEOUT)
+        .await
+        .unwrap();
+    let expected: [u8; 32] = Sha256::digest(server.host_public.to_bytes().unwrap()).into();
+    assert_eq!(conn.host_key_sha256(), expected);
+}

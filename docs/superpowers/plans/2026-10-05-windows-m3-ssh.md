@@ -2208,4 +2208,6 @@ No public name from the roadmap contract or a task's Produces block was renamed.
 - Session channel buffers are 2048 so a slow PTY reader does not stall the other channel. The reader uses `try_send` and drops when the queue is full.
 - `PtyWriter::close` drops the write half and enqueues `PtyEvent::Closed`.
 - Dependencies are pinned in `tether-ssh/Cargo.toml` rather than the workspace table.
+- The PTY reader awaits `send` instead of dropping a full queue. `exec` returns `ConnectError::Timeout` after 15 s. `dial` connects with `(host, port)` after stripping a surrounding `[]`, so an IPv6 literal works. No signature changes.
+
 

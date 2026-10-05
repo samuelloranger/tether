@@ -24,6 +24,7 @@ pub struct Recorded {
 pub struct Options {
     pub password: Option<(String, String)>,
     pub allowed_keys: Vec<PublicKey>,
+    pub listen: Option<String>,
 }
 
 pub struct Running {
@@ -51,7 +52,8 @@ pub async fn start(opts: Options) -> Running {
         keys: vec![key],
         ..Default::default()
     });
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listen = opts.listen.clone().unwrap_or_else(|| "127.0.0.1".into());
+    let listener = TcpListener::bind((listen.as_str(), 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let state = Arc::new(Mutex::new(Recorded::default()));
     let home = tempfile::tempdir().unwrap();
@@ -188,6 +190,9 @@ impl server::Handler for ConnHandler {
             let _ = handle.data(channel, vec![0u8]).await;
             return Ok(());
         }
+        if command == "tether-hang" {
+            return Ok(());
+        }
         if let Some(rest) = command.strip_prefix("tether-echo ") {
             let out = format!("{rest}\n");
             tokio::spawn(async move {
@@ -282,6 +287,22 @@ impl server::Handler for ConnHandler {
     ) -> Result<(), Self::Error> {
         if let Some(sink) = self.scp.get_mut(&channel) {
             sink.feed(channel, data, session, &self.shared.state);
+            return Ok(());
+        }
+        if data == b"flood" {
+            let handle = session.handle();
+            tokio::spawn(async move {
+                const TOTAL: usize = 5 * 1024 * 1024;
+                let mut sent = 0;
+                while sent < TOTAL {
+                    let n = (TOTAL - sent).min(32 * 1024);
+                    let chunk: Vec<u8> = (0..n).map(|i| ((sent + i) % 251) as u8).collect();
+                    if handle.data(channel, chunk).await.is_err() {
+                        break;
+                    }
+                    sent += n;
+                }
+            });
             return Ok(());
         }
         let idx = self.index(channel);

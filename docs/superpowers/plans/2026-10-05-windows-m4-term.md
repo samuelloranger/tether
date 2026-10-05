@@ -2310,4 +2310,6 @@ No public name from the roadmap contract or a task's Produces block was renamed.
 - `ReportEvent::CwdChanged` (added in M2) is matched with an empty arm in `apply_report`. Cwd `TermEvent`s still come from the plan's before/after cwd check, so a report does not emit the event twice.
 - `GlyphAtlas::len` is allowed `dead_code` outside tests. `draw_char` and `draw_shaped_row` allow `clippy::too_many_arguments`.
 - `tether-term/Cargo.toml` pins `alacritty_terminal` and `swash` on the crate instead of the workspace dependency table, so M3 could edit that table at the same time.
+- The glyph atlas clears itself once it holds 4096 entries, before the next insert. No signature change.
+
 

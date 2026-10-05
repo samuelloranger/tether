@@ -185,25 +185,31 @@ impl Connection for RusshConnection {
     }
 
     async fn exec(&self, command: &str) -> Result<String, ConnectError> {
-        let mut channel = {
-            let handle = self.handle.read().await;
-            handle.channel_open_session().await.map_err(transport)?
-        };
-        channel.exec(true, command).await.map_err(transport)?;
-        let mut stdout = Vec::new();
-        while let Some(msg) = channel.wait().await {
-            match msg {
-                russh::ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
-                russh::ChannelMsg::Failure => {
-                    return Err(ConnectError::Transport(
-                        "the host refused the command".into(),
-                    ));
+        let run = async {
+            let mut channel = {
+                let handle = self.handle.read().await;
+                handle.channel_open_session().await.map_err(transport)?
+            };
+            channel.exec(true, command).await.map_err(transport)?;
+            let mut stdout = Vec::new();
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                    russh::ChannelMsg::Failure => {
+                        return Err(ConnectError::Transport(
+                            "the host refused the command".into(),
+                        ));
+                    }
+                    russh::ChannelMsg::Close => break,
+                    _ => {}
                 }
-                russh::ChannelMsg::Close => break,
-                _ => {}
             }
+            Ok(String::from_utf8_lossy(&stdout).into_owned())
+        };
+        match tokio::time::timeout(Duration::from_secs(15), run).await {
+            Ok(result) => result,
+            Err(_) => Err(ConnectError::Timeout),
         }
-        Ok(String::from_utf8_lossy(&stdout).into_owned())
     }
 }
 

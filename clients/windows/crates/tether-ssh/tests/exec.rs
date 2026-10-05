@@ -1,7 +1,9 @@
 mod support;
 
+use std::time::{Duration, Instant};
+
 use support::server::{Options, start};
-use tether_core::connect::{Connection, Credential, Transport};
+use tether_core::connect::{ConnectError, Connection, Credential, Transport};
 use zeroize::Zeroizing;
 
 async fn signed_in() -> (support::server::Running, tether_ssh::RusshConnection) {
@@ -38,6 +40,17 @@ async fn concurrent_execs_on_one_connection_do_not_mix() {
     let (a, b) = tokio::join!(conn.exec("tether-echo a"), conn.exec("tether-echo b"));
     assert_eq!(a.unwrap(), "a\n");
     assert_eq!(b.unwrap(), "b\n");
+}
+
+#[tokio::test]
+async fn an_exec_that_never_closes_times_out() {
+    let (_server, conn) = signed_in().await;
+    let started = Instant::now();
+    let err = conn.exec("tether-hang").await.unwrap_err();
+    assert_eq!(err, ConnectError::Timeout);
+    let elapsed = started.elapsed();
+    assert!(elapsed >= Duration::from_secs(14), "{elapsed:?}");
+    assert!(elapsed < Duration::from_secs(20), "{elapsed:?}");
 }
 
 #[cfg(unix)]
