@@ -687,6 +687,7 @@ impl GitPanel {
         let (added, removed) = git::diff_stat(&page.files);
         if !page.files.is_empty() {
             view.subtitle = format!("+{added}  \u{2212}{removed}");
+            view.stat = Some((added, removed));
         }
         for line in page.note.lines() {
             view.diff.push(DiffLine::plain(line));
@@ -740,6 +741,7 @@ impl GitPanel {
                 let (added, removed) = git::diff_stat(&ws.files);
                 if !ws.files.is_empty() {
                     view.subtitle = format!("+{added}  \u{2212}{removed}");
+                    view.stat = Some((added, removed));
                 }
                 for file in &ws.files {
                     view.rows.push(GitRow {
@@ -1086,6 +1088,8 @@ pub struct GitView {
     pub open: bool,
     pub title: String,
     pub subtitle: String,
+    /// Lines added and removed, drawn in the heat colors instead of `subtitle`.
+    pub stat: Option<(u32, u32)>,
     pub tab: GitTab,
     pub show_tabs: bool,
     pub can_back: bool,
