@@ -336,3 +336,37 @@ test('a settings file jq cannot parse is left untouched and warned about once', 
   expect(again.stderr.match(/not plain JSON/g)).toHaveLength(1);
   expect(JSON.parse(readFileSync(path.join(env.home, '.cursor/hooks.json'), 'utf8')).hooks.stop).toHaveLength(1);
 });
+
+const codexSnake = ['user_prompt_submit', 'pre_tool_use', 'post_tool_use', 'permission_request', 'stop', 'session_end'];
+
+function trustAll(home: string, index: (event: string) => number = () => 0) {
+  const hooksFile = path.join(home, '.codex/hooks.json');
+  const body = codexSnake
+    .map((e) => `[hooks.state."${hooksFile}:${e}:${index(e)}:0"]\ntrusted_hash = "sha256:00"\n`)
+    .join('\n');
+  writeFileSync(path.join(home, '.codex/config.toml'), `model = "m"\n\n[hooks.state]\n\n${body}`);
+}
+
+test('installer names the codex hooks that still need trust', () => {
+  const env = install();
+  const first = reinstall(env).stdout;
+  expect(first).toContain('Codex skips untrusted hooks');
+  for (const e of codexSnake) expect(first).toContain(e);
+  trustAll(env.home);
+  expect(reinstall(env).stdout).not.toContain('Codex skips untrusted hooks');
+});
+
+test('codex trust is checked at our position, after a foreign hook group', () => {
+  const env = install((home) => {
+    writeFileSync(
+      path.join(home, '.codex/hooks.json'),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'other-hook' }] }] } }),
+    );
+  });
+  trustAll(env.home); // every key at index 0, but our Stop entry sits at index 1
+  const out = reinstall(env).stdout;
+  expect(out).toContain('Codex skips untrusted hooks');
+  expect(out).toMatch(/\(stop\)/);
+  trustAll(env.home, (e) => (e === 'stop' ? 1 : 0));
+  expect(reinstall(env).stdout).not.toContain('Codex skips untrusted hooks');
+});

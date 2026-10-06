@@ -242,6 +242,24 @@ elif [ -n "$claude_version" ]; then
   echo "Claude Code ${claude_version} predates mods (2.1.287); phone answers type keys instead."
 fi
 
+# Codex runs a hook only once it is trusted in /hooks. Trust is keyed by file, event and the
+# entry's position, so an entry whose position moved needs trusting again. Presence only:
+# the trusted hash isn't recomputed.
+codex_untrusted() {
+  hooks="${HOME}/.codex/hooks.json"
+  config="${HOME}/.codex/config.toml"
+  for pair in UserPromptSubmit:user_prompt_submit PreToolUse:pre_tool_use PostToolUse:post_tool_use \
+    PermissionRequest:permission_request Stop:stop SessionEnd:session_end; do
+    event="${pair%%:*}"
+    snake="${pair#*:}"
+    idx="$(jq -r --arg ev "$event" '
+      (.hooks[$ev] // []) | map(any(.hooks[]?; .command | test("tether-notify-hook")))
+      | index(true) // empty' "$hooks" 2>/dev/null || true)"
+    [ -n "$idx" ] || continue
+    grep -qF "[hooks.state.\"${hooks}:${snake}:${idx}:0\"]" "$config" 2>/dev/null || printf '%s ' "$snake"
+  done
+}
+
 # Codex — only if it's set up on this host.
 if [ -d "${HOME}/.codex" ]; then
   merge_nested "${HOME}/.codex/hooks.json" UserPromptSubmit  "'${WRAPPER}' codex working"
@@ -251,7 +269,10 @@ if [ -d "${HOME}/.codex" ]; then
   merge_nested "${HOME}/.codex/hooks.json" Stop              "'${WRAPPER}' codex done"
   merge_nested "${HOME}/.codex/hooks.json" SessionEnd        "'${WRAPPER}' codex clear"
   REGISTERED="$REGISTERED codex"
-  echo "Registered Codex hooks — Codex will ask you to TRUST the new hooks on its next run."
+  echo "Registered Codex hooks."
+  untrusted="$(codex_untrusted)"
+  [ -z "$untrusted" ] \
+    || echo "Codex skips untrusted hooks: run codex, open /hooks and trust the tether entries (${untrusted% })."
 fi
 
 # Cursor — only if it's set up on this host. No preToolUse: it is a permission step, where
