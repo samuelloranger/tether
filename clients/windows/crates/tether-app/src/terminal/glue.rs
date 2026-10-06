@@ -59,12 +59,13 @@ fn platform() -> Arc<dyn Platform> {
 
 /// The body of M5's `open_machine::on_open_machine`.
 pub fn open_machine(app: &Rc<App>, machine: Machine) {
-    let (style, hostkeys, secrets) = {
+    let (style, hostkeys, secrets, jumps) = {
         let s = app.state.borrow();
         (
             TermStyle::from_prefs(&s.prefs.terminal),
             s.hostkeys.clone(),
             s.secrets.clone(),
+            tether_core::connect::jump_chain(&s.profiles.machines, &machine),
         )
     };
     let rt = app.runtime.handle().clone();
@@ -79,6 +80,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     let remote = Arc::new(SshRemote::new(
         transport,
         machine.clone(),
+        jumps,
         hostkeys,
         secrets,
     ));

@@ -160,6 +160,7 @@ mod tests {
             auth,
             password: password.into(),
             has_saved_password: false,
+            jump: None,
         }
     }
 

@@ -6,7 +6,7 @@ use tether_core::connect::{ConnectError, Transport};
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, broadcast};
 
-use crate::agent::{AgentConnector, NamedPipeAgent};
+use crate::agent::{AgentConnector, FallbackAgent};
 use crate::connection::RusshConnection;
 use crate::handler::ClientHandler;
 
@@ -17,7 +17,7 @@ pub struct RusshTransport {
 
 impl RusshTransport {
     pub fn new(runtime: tokio::runtime::Handle) -> Self {
-        Self::with_agent(runtime, Arc::new(NamedPipeAgent::default()))
+        Self::with_agent(runtime, Arc::new(FallbackAgent::windows()))
     }
 
     pub fn with_agent(runtime: tokio::runtime::Handle, agent: Arc<dyn AgentConnector>) -> Self {
@@ -32,6 +32,47 @@ impl RusshTransport {
             channel_buffer_size: 2048,
             ..Default::default()
         })
+    }
+}
+
+impl RusshTransport {
+    async fn handshake<F, Fut>(
+        &self,
+        timeout: Duration,
+        via: Option<RusshConnection>,
+        open: F,
+    ) -> Result<RusshConnection, ConnectError>
+    where
+        F: FnOnce(ClientHandler) -> Fut,
+        Fut: std::future::Future<Output = Result<client::Handle<ClientHandler>, ConnectError>>,
+    {
+        let host_key = Arc::new(Mutex::new(None));
+        let (events, _) = broadcast::channel(16);
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let handler = ClientHandler {
+            host_key: host_key.clone(),
+            events: events.clone(),
+            dropped: dropped.clone(),
+        };
+        let handle = tokio::time::timeout(timeout, open(handler))
+            .await
+            .map_err(|_| ConnectError::Timeout)??;
+        let digest = host_key
+            .lock()
+            .unwrap()
+            .ok_or_else(|| ConnectError::Transport("the host sent no key".into()))?;
+        let conn = RusshConnection {
+            handle: Arc::new(RwLock::new(handle)),
+            host_key: digest,
+            events,
+            runtime: self.runtime.clone(),
+            agent: self.agent.clone(),
+            dropped,
+            keepalive: Default::default(),
+            _via: via.map(Box::new),
+        };
+        conn.spawn_watcher();
+        Ok(conn)
     }
 }
 
@@ -51,42 +92,42 @@ impl Transport for RusshTransport {
         port: u16,
         timeout: Duration,
     ) -> Result<RusshConnection, ConnectError> {
-        let host_key = Arc::new(Mutex::new(None));
-        let (events, _) = broadcast::channel(16);
-        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let handler = ClientHandler {
-            host_key: host_key.clone(),
-            events: events.clone(),
-            dropped: dropped.clone(),
-        };
-        let host = dial_host(host);
-        let handshake = async {
-            let tcp = TcpStream::connect((host, port))
+        let host = dial_host(host).to_string();
+        self.handshake(timeout, None, move |handler| async move {
+            let tcp = TcpStream::connect((host.as_str(), port))
                 .await
                 .map_err(|e| tcp_error(&e))?;
             let _ = tcp.set_nodelay(true);
             client::connect_stream(Self::config(), tcp, handler)
                 .await
                 .map_err(|e| ConnectError::Transport(e.to_string()))
-        };
-        let handle = tokio::time::timeout(timeout, handshake)
-            .await
-            .map_err(|_| ConnectError::Timeout)??;
-        let digest = host_key
-            .lock()
-            .unwrap()
-            .ok_or_else(|| ConnectError::Transport("the host sent no key".into()))?;
-        let conn = RusshConnection {
-            handle: Arc::new(RwLock::new(handle)),
-            host_key: digest,
-            events,
-            runtime: self.runtime.clone(),
-            agent: self.agent.clone(),
-            dropped,
-            keepalive: Default::default(),
-        };
-        conn.spawn_watcher();
-        Ok(conn)
+        })
+        .await
+    }
+
+    async fn dial_via(
+        &self,
+        via: RusshConnection,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<RusshConnection, ConnectError> {
+        let host = dial_host(host).to_string();
+        let jump = via.handle.clone();
+        self.handshake(timeout, Some(via), move |handler| async move {
+            let channel = jump
+                .read()
+                .await
+                .channel_open_direct_tcpip(host.as_str(), port as u32, "127.0.0.1", 0)
+                .await
+                .map_err(|e| {
+                    ConnectError::Transport(format!("the jump host could not reach {host}: {e}"))
+                })?;
+            client::connect_stream(Self::config(), channel.into_stream(), handler)
+                .await
+                .map_err(|e| ConnectError::Transport(e.to_string()))
+        })
+        .await
     }
 
     async fn sleep(&self, d: Duration) {

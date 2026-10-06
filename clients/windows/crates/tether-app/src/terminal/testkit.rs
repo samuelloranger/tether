@@ -21,6 +21,7 @@ pub fn machine() -> Machine {
         port: 22,
         user: "sam".into(),
         auth: Auth::Password,
+        jump: None,
     }
 }
 
@@ -98,6 +99,16 @@ impl Transport for FakeTransport {
             t: self.clone(),
             drops: broadcast::channel(4).0,
         })
+    }
+    async fn dial_via(
+        &self,
+        _via: FakeConn,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<FakeConn, ConnectError> {
+        self.log.lock().unwrap().push(format!("via {host}:{port}"));
+        self.dial(host, port, timeout).await
     }
     async fn sleep(&self, _d: Duration) {}
 }

@@ -22,7 +22,7 @@ v1 is the loop they can do without the phone:
 
 ## Out of scope
 
-Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
+Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Keyboard-interactive auth is a later slice.
 
 Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their place.
 
@@ -82,7 +82,9 @@ One form, two titles. Add starts empty; Edit starts from the machine and its but
 
 Fields, in order: Name, Host, Port (default `22`), User, then Authentication.
 
-Authentication is a segment: **Private key**, **SSH agent**, or **Password**. Private key is a picker of vault keys. With an empty vault the picker reads: "No keys in the vault — generate or paste one first." SSH agent has no field; its line reads "Uses the keys in the Windows OpenSSH agent, including 1Password's when it serves that agent." Password is a concealed field.
+Authentication is a segment: **Private key**, **SSH agent**, or **Password**. Private key is a picker of vault keys. With an empty vault the picker reads: "No keys in the vault — generate or paste one first." SSH agent has no field; its line reads "Uses the keys in the Windows OpenSSH agent (1Password's too when it serves that agent), or in Pageant when that agent isn't running." Password is a concealed field.
+
+**Connect through** (shown once there is another machine) is a picker: **Direct**, then every other machine by name. Choosing one makes this machine a ProxyJump target: Tether connects to the chosen machine first and opens the session through it. The chosen machine may itself connect through another, up to 4 hops.
 
 On Edit, the password field starts empty and reads "Leave empty to keep the saved password". Switching away from Password deletes the stored password on save. Changing host or port means a different host-key pin: the old pin stays under the old `host:port`, and the new one is pinned on first connect. Edits apply the next time the machine is opened; an open machine keeps its connection.
 
@@ -312,7 +314,7 @@ Opening a card:
 2. Read the server host key. Fingerprint is SHA-256 of the host key blob, lowercase hex, colon-separated bytes. The same string format the iOS client pins.
 3. Nothing pinned for this host and port: pin it and continue. Pinning happens before auth, as on iOS.
 4. Pinned and different: stop. Do not offer a way to replace the pin.
-5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth connects to `\\.\pipe\openssh-ssh-agent` and offers its identities in the agent's order; the private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
+5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth connects to `\\.\pipe\openssh-ssh-agent` and offers its identities in the agent's order; when that pipe does not exist it tries Pageant instead. The private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
 6. Run `~/.local/bin/zmx ls` on a control connection (see below) to build the tab strip and choose the first tab (see Sessions). The binary path is `~/.local/bin/zmx`, same as iOS.
 7. For the chosen tab, open a PTY channel sized to the grid on the terminal connection, start the login shell, and push the current size.
 8. Type `~/.local/bin/zmx attach '<name>'` plus newline into that shell, name shell-quoted. Tether attaches by typing into the login shell, not by exec, exactly as iOS does, so the user lands in their shell if they detach.
@@ -320,6 +322,8 @@ Opening a card:
 Transport failures retry up to three attempts, 500 ms apart. Auth failures and a host-key mismatch never retry.
 
 The connecting screen is the terminal header on an empty well, status `connecting`.
+
+**Through a jump host.** With **Connect through** set, steps 1–5 run for each hop in turn, first hop first: dial it (directly, or through a `direct-tcpip` channel on the previous hop), pin or check its host key under its own `host:port`, and authenticate it with its own key, agent, or password. A refused key on any hop stops the chain there, before anything is sent to the next. The target's connection holds the chain open, and keepalive runs on the target only: its packets cross every hop, so a dead jump host drops the session like a dead network.
 
 ### Reconnect
 
@@ -351,7 +355,8 @@ Same chrome. One sentence, then **Retry** and **Back to Home**.
 |---|---|
 | Auth rejected | Authentication failed. Check the key or password. |
 | Key deleted | This machine's key was deleted. Edit the machine and choose another key. |
-| Agent not running | The Windows SSH agent isn't running. Start the OpenSSH Authentication Agent service, or choose a key. |
+| Agent not running | No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key. |
+| The machine to connect through was removed, or the jumps loop | The machine this one connects through is gone. Edit the machine and choose another, or Direct. |
 | Agent has no key the host accepts | The SSH agent has no key this host accepts. |
 | Connect timeout, or no reply after the handshake | The host stopped answering. |
 | TCP, handshake, or other transport | Could not connect: \<detail\> |

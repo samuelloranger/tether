@@ -216,6 +216,7 @@ mod tests {
             port: 22,
             user: "dev".into(),
             auth,
+            jump: None,
         }
     }
 

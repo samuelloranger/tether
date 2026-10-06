@@ -31,13 +31,15 @@ pub fn apply_server_form(
         _ if had_password => PasswordAction::Delete,
         _ => PasswordAction::Keep,
     };
+    let id = existing.map_or_else(Uuid::new_v4, |m| m.id);
     let machine = Machine {
-        id: existing.map_or_else(Uuid::new_v4, |m| m.id),
+        id,
         name: form.name.clone(),
         host: form.host.trim().to_string(),
         port: form.port_value(),
         user: form.user.trim().to_string(),
         auth,
+        jump: form.jump.filter(|j| *j != id),
     };
     (machine, action)
 }
@@ -54,6 +56,7 @@ mod tests {
             port: 22,
             user: "sam".into(),
             auth,
+            jump: None,
         }
     }
 
@@ -66,6 +69,7 @@ mod tests {
             auth,
             password: password.into(),
             has_saved_password: saved,
+            jump: None,
         }
     }
 

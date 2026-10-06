@@ -22,6 +22,7 @@ pub struct ServerForm {
     pub password: String,
     /// Edit of a machine whose password is already stored: an empty field keeps it.
     pub has_saved_password: bool,
+    pub jump: Option<uuid::Uuid>,
 }
 
 fn blank(s: &str) -> bool {
@@ -38,6 +39,7 @@ impl ServerForm {
             auth: AuthChoice::Key(None),
             password: String::new(),
             has_saved_password: false,
+            jump: None,
         }
     }
 
@@ -55,6 +57,7 @@ impl ServerForm {
             },
             password: String::new(),
             has_saved_password,
+            jump: m.jump,
         }
     }
 
@@ -143,6 +146,7 @@ mod tests {
             auth: AuthChoice::Key(Some(Uuid::from_u128(1))),
             password: String::new(),
             has_saved_password: false,
+            jump: None,
         }
     }
 
@@ -252,6 +256,7 @@ mod tests {
             port: 2200,
             user: "u".into(),
             auth: Auth::Password,
+            jump: None,
         };
         let f = ServerForm::from_machine(&m, true);
         assert_eq!(

@@ -626,6 +626,14 @@ impl App {
                 .collect();
             b.set_key_names(ModelRc::new(VecModel::from(names)));
             b.set_key_index(vm.key_index(keys));
+            let machines = &self.state.borrow().profiles.machines;
+            let jumps: Vec<SharedString> = vm
+                .jump_options(machines)
+                .into_iter()
+                .map(|(_, name)| name.into())
+                .collect();
+            b.set_jump_names(ModelRc::new(VecModel::from(jumps)));
+            b.set_jump_index(vm.jump_index(machines));
             b.set_password_placeholder(vm.password_placeholder().into());
         }
         b.set_hint(vm.hint().into());
@@ -642,12 +650,15 @@ impl App {
             segment: b.get_auth(),
             key_index: b.get_key_index(),
             password: b.get_password().into(),
+            jump_index: b.get_jump_index(),
         };
         let mut slot = self.server_form.borrow_mut();
         let Some(vm) = slot.as_mut() else {
             return;
         };
-        vm.apply(input, &self.state.borrow().keys);
+        let state = self.state.borrow();
+        vm.apply(input, &state.keys, &state.profiles.machines);
+        drop(state);
         self.push_server_form(vm, false);
     }
 

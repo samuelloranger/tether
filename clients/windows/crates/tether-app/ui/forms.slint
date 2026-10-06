@@ -52,7 +52,7 @@ export component ServerFormPage inherits PageChrome {
                 color: Tokens.text-secondary;
             }
             if ServerFormBridge.auth == 1: Text {
-                text: "Uses the keys in the Windows OpenSSH agent, including 1Password's when it serves that agent.";
+                text: "Uses the keys in the Windows OpenSSH agent (1Password's too when it serves that agent), or in Pageant when that agent isn't running.";
                 wrap: word-wrap;
                 font-size: 13px;
                 color: Tokens.text-secondary;
@@ -63,6 +63,15 @@ export component ServerFormPage inherits PageChrome {
                 placeholder: ServerFormBridge.password-placeholder;
                 text <=> ServerFormBridge.password;
                 edited => { ServerFormBridge.edited(); }
+            }
+            if ServerFormBridge.jump-names.length > 1: VerticalLayout {
+                spacing: 5px;
+                Label { text: "Connect through"; }
+                Select {
+                    model: ServerFormBridge.jump-names;
+                    current-index <=> ServerFormBridge.jump-index;
+                    selected => { ServerFormBridge.edited(); }
+                }
             }
             Note { text: "First connect pins this host's key. A later change is refused."; }
             PrimaryButton {

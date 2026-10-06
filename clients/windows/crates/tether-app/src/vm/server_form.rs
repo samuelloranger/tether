@@ -9,6 +9,7 @@ pub struct ServerInput {
     pub segment: i32,
     pub key_index: i32,
     pub password: String,
+    pub jump_index: i32,
 }
 
 pub struct ServerFormVm {
@@ -83,11 +84,33 @@ impl ServerFormVm {
         }
     }
 
+    /// "Direct", then every other machine, in Home's order.
+    pub fn jump_options(&self, machines: &[Machine]) -> Vec<(Option<Uuid>, String)> {
+        std::iter::once((None, "Direct".to_string()))
+            .chain(
+                machines
+                    .iter()
+                    .filter(|m| Some(m.id) != self.editing)
+                    .map(|m| (Some(m.id), m.name.clone())),
+            )
+            .collect()
+    }
+
+    pub fn jump_index(&self, machines: &[Machine]) -> i32 {
+        self.jump_options(machines)
+            .iter()
+            .position(|(id, _)| *id == self.form.jump)
+            .map_or(0, |i| i as i32)
+    }
+
     pub fn key_names(keys: &KeyRecords) -> Vec<String> {
         keys.keys.iter().map(|k| k.name.clone()).collect()
     }
 
-    pub fn apply(&mut self, input: ServerInput, keys: &KeyRecords) {
+    pub fn apply(&mut self, input: ServerInput, keys: &KeyRecords, machines: &[Machine]) {
+        self.form.jump = usize::try_from(input.jump_index)
+            .ok()
+            .and_then(|i| self.jump_options(machines).get(i).and_then(|o| o.0));
         self.form.name = input.name;
         self.form.host = input.host;
         self.form.port = input.port;
@@ -147,6 +170,7 @@ mod tests {
             segment,
             key_index,
             password: password.into(),
+            jump_index: 0,
         }
     }
 
@@ -166,9 +190,9 @@ mod tests {
     #[test]
     fn choosing_a_key_completes_the_form() {
         let mut vm = ServerFormVm::add();
-        vm.apply(input(0, -1, ""), &keys());
+        vm.apply(input(0, -1, ""), &keys(), &[]);
         assert_eq!(vm.hint(), "Choose a key to save it");
-        vm.apply(input(0, 1, ""), &keys());
+        vm.apply(input(0, 1, ""), &keys(), &[]);
         assert_eq!(vm.form.auth, AuthChoice::Key(Some(Uuid::from_u128(10))));
         assert!(vm.can_save());
         assert_eq!(vm.hint(), "");
@@ -177,12 +201,12 @@ mod tests {
     #[test]
     fn segments_map_to_agent_and_password() {
         let mut vm = ServerFormVm::add();
-        vm.apply(input(1, -1, ""), &keys());
+        vm.apply(input(1, -1, ""), &keys(), &[]);
         assert_eq!(vm.form.auth, AuthChoice::Agent);
         assert!(vm.can_save());
-        vm.apply(input(2, -1, ""), &keys());
+        vm.apply(input(2, -1, ""), &keys(), &[]);
         assert_eq!(vm.hint(), "Enter a password to save it");
-        vm.apply(input(2, -1, "hunter2"), &keys());
+        vm.apply(input(2, -1, "hunter2"), &keys(), &[]);
         assert!(vm.can_save());
     }
 
@@ -195,6 +219,7 @@ mod tests {
             port: 2222,
             user: "root".into(),
             auth: Auth::Password,
+            jump: None,
         };
         let vm = ServerFormVm::edit(&m, true, &keys());
         assert_eq!(vm.title(), "Edit server");
@@ -219,6 +244,7 @@ mod tests {
             auth: Auth::Key {
                 id: Uuid::from_u128(77),
             },
+            jump: None,
         };
         let vm = ServerFormVm::edit(&m, false, &keys());
         assert_eq!(vm.form.auth, AuthChoice::Key(None));
@@ -229,15 +255,67 @@ mod tests {
     #[test]
     fn a_save_error_shows_until_the_next_edit() {
         let mut vm = ServerFormVm::add();
-        vm.apply(input(1, -1, ""), &keys());
+        vm.apply(input(1, -1, ""), &keys(), &[]);
         vm.error = Some("Couldn't save: Access is denied.".into());
         assert_eq!(vm.hint(), "Couldn't save: Access is denied.");
-        vm.apply(input(1, -1, ""), &keys());
+        vm.apply(input(1, -1, ""), &keys(), &[]);
         assert_eq!(vm.hint(), "");
     }
 
     #[test]
     fn key_names_are_in_vault_order() {
         assert_eq!(ServerFormVm::key_names(&keys()), vec!["id_ed25519", "work"]);
+    }
+}
+
+#[cfg(test)]
+mod jump_tests {
+    use super::*;
+    use tether_core::Auth;
+
+    fn m(id: u128, name: &str) -> Machine {
+        Machine {
+            id: Uuid::from_u128(id),
+            name: name.into(),
+            host: "h".into(),
+            port: 22,
+            user: "u".into(),
+            auth: Auth::Agent,
+            jump: None,
+        }
+    }
+
+    #[test]
+    fn options_are_direct_then_other_machines_never_itself() {
+        let all = [m(1, "bastion"), m(2, "devbox")];
+        let vm = ServerFormVm::edit(&all[1], false, &KeyRecords::default());
+        let names: Vec<_> = vm.jump_options(&all).into_iter().map(|o| o.1).collect();
+        assert_eq!(names, ["Direct", "bastion"]);
+        assert_eq!(vm.jump_index(&all), 0);
+    }
+
+    #[test]
+    fn choosing_a_machine_sets_the_jump_and_edit_shows_it() {
+        let all = [m(1, "bastion"), m(2, "devbox")];
+        let mut vm = ServerFormVm::add();
+        vm.apply(
+            ServerInput {
+                name: "new".into(),
+                host: "10.0.0.9".into(),
+                port: "22".into(),
+                user: "u".into(),
+                segment: 1,
+                key_index: -1,
+                password: String::new(),
+                jump_index: 1,
+            },
+            &KeyRecords::default(),
+            &all,
+        );
+        assert_eq!(vm.form.jump, Some(Uuid::from_u128(1)));
+        let mut through = all[1].clone();
+        through.jump = Some(Uuid::from_u128(1));
+        let edit = ServerFormVm::edit(&through, false, &KeyRecords::default());
+        assert_eq!(edit.jump_index(&all), 1);
     }
 }

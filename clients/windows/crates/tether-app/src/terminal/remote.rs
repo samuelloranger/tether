@@ -67,7 +67,8 @@ pub trait Remote: Send + Sync + 'static {
 /// connection for exec, and a fresh connection per upload.
 pub struct SshRemote<T: Transport> {
     transport: T,
-    request: ConnectRequest,
+    /// A broken jump chain fails every dial with its error.
+    request: Result<ConnectRequest, ConnectError>,
     hostkeys: Arc<dyn HostKeyStore>,
     secrets: Arc<dyn SecretStore>,
     terminal: Mutex<Option<Arc<T::Conn>>>,
@@ -78,12 +79,13 @@ impl<T: Transport> SshRemote<T> {
     pub fn new(
         transport: T,
         machine: Machine,
+        jumps: Result<Vec<Machine>, ConnectError>,
         hostkeys: Arc<dyn HostKeyStore>,
         secrets: Arc<dyn SecretStore>,
     ) -> Self {
         Self {
             transport,
-            request: ConnectRequest { machine },
+            request: jumps.map(|jumps| ConnectRequest { machine, jumps }),
             hostkeys,
             secrets,
             terminal: Mutex::new(None),
@@ -94,7 +96,7 @@ impl<T: Transport> SshRemote<T> {
     async fn dial(&self) -> Result<T::Conn, ConnectError> {
         connect(
             &self.transport,
-            &self.request,
+            self.request.as_ref().map_err(Clone::clone)?,
             self.hostkeys.as_ref(),
             self.secrets.as_ref(),
         )
@@ -242,6 +244,7 @@ mod tests {
         SshRemote::new(
             t,
             machine(),
+            Ok(Vec::new()),
             Arc::new(MemoryHostKeys::default()),
             Arc::new(secrets),
         )
@@ -259,6 +262,56 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn a_jump_is_dialed_first_and_the_machine_through_it() {
+        let t = FakeTransport::default();
+        let secrets = MemorySecretStore::default();
+        secrets
+            .set(&password_account(machine().id), b"hunter2")
+            .unwrap();
+        let bastion = Machine {
+            id: uuid::Uuid::from_u128(7),
+            name: "bastion".into(),
+            host: "bastion.lan".into(),
+            port: 22,
+            user: "jump".into(),
+            auth: tether_core::profiles::Auth::Agent,
+            jump: None,
+        };
+        let r = SshRemote::new(
+            t.clone(),
+            machine(),
+            Ok(vec![bastion]),
+            Arc::new(MemoryHostKeys::default()),
+            Arc::new(secrets),
+        );
+        r.open().await.unwrap();
+        let log = t.log.lock().unwrap().clone();
+        assert_eq!(
+            log[..4],
+            [
+                "dial bastion.lan:22",
+                "auth jump",
+                "via devbox.lan:22",
+                "dial devbox.lan:22"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_broken_jump_chain_fails_without_dialing() {
+        let t = FakeTransport::default();
+        let r = SshRemote::new(
+            t.clone(),
+            machine(),
+            Err(ConnectError::JumpMissing),
+            Arc::new(MemoryHostKeys::default()),
+            Arc::new(MemorySecretStore::default()),
+        );
+        assert_eq!(r.open().await.err(), Some(ConnectError::JumpMissing));
+        assert!(t.log.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -337,7 +390,7 @@ mod tests {
             .unwrap();
         let secrets = Arc::new(MemorySecretStore::default());
         secrets.set(&password_account(machine().id), b"x").unwrap();
-        let r = SshRemote::new(t, machine(), hostkeys, secrets);
+        let r = SshRemote::new(t, machine(), Ok(Vec::new()), hostkeys, secrets);
         assert!(matches!(
             r.open().await,
             Err(ConnectError::HostKeyChanged { .. })
