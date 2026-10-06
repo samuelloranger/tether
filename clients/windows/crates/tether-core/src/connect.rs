@@ -10,6 +10,8 @@ use crate::secrets::{SecretStore, key_account, password_account};
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+/// The agent may wait on the user (a 1Password or Windows Hello prompt) before it signs.
+pub const AGENT_AUTH_TIMEOUT: Duration = Duration::from_secs(90);
 pub const KEEPALIVE_EVERY: Duration = Duration::from_secs(15);
 pub const TRANSPORT_ATTEMPTS: usize = 3;
 pub const RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -171,7 +173,11 @@ async fn attempt<T: Transport>(
     if let HostKeyDecision::Mismatch { expected, got } = decision {
         return Err(ConnectError::HostKeyChanged { expected, got });
     }
-    match within(conn.authenticate(&m.user, cred), || t.sleep(AUTH_TIMEOUT)).await {
+    let limit = match m.auth {
+        Auth::Agent => AGENT_AUTH_TIMEOUT,
+        _ => AUTH_TIMEOUT,
+    };
+    match within(conn.authenticate(&m.user, cred), || t.sleep(limit)).await {
         Some(result) => result?,
         None => return Err(ConnectError::Timeout),
     }
@@ -455,6 +461,19 @@ mod tests {
         assert_eq!(log(&w), ["dial h:22 10s"]);
         assert_eq!(w.pins.pinned("h", 22), Some(hex_fingerprint(&KEY_A)));
         assert!(!err.retryable());
+    }
+
+    #[test]
+    fn agent_auth_waits_longer_for_a_user_prompt() {
+        let mut w = world(vec![Ok(KEY_A), Ok(KEY_A), Ok(KEY_A)], vec![]);
+        w.transport.hang_auth = true;
+        assert_eq!(
+            run(&w, &machine(Auth::Agent)).err(),
+            Some(ConnectError::Timeout)
+        );
+        let agent = format!("sleep {}ms", AGENT_AUTH_TIMEOUT.as_millis());
+        assert!(log(&w).contains(&agent));
+        assert!(!log(&w).contains(&format!("sleep {}ms", AUTH_TIMEOUT.as_millis())));
     }
 
     #[test]
