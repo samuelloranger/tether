@@ -409,7 +409,7 @@ export component TerminalPage inherits Rectangle {
                 tip := Text { text: TerminalVm.tooltip; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
             }
         }
-        if GitVm.open: GitSidePanel { }
+        if GitVm.open: GitSidePanel { max-panel-width: root.width / 2; }
         }
     }
     if TerminalVm.menu-link != "" || TerminalVm.menu-tab != "": TouchArea {
@@ -426,6 +426,17 @@ export component TerminalPage inherits Rectangle {
             }
         }
     }
+    if HistoryVm.open: HistoryOverlay {
+        y: 52px;
+        width: parent.width;
+        height: parent.height - 52px;
+        well: TerminalVm.well-color;
+    }
+    if PaletteVm.open: PaletteOverlay {
+        width: parent.width;
+        height: parent.height;
+    }
+    if AgentVm.open: AgentSheet { }
     if TerminalVm.kill-name != "": ConfirmDialog {
         title: "Kill session " + TerminalVm.kill-name + "?";
         body: "Everything running in it stops. This can't be undone.";
