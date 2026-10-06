@@ -19,12 +19,31 @@ public final class MacSessionTabs {
 
   private let make: Factory
   private var refreshing = false
+  private var refreshQueued = false
   private var left = false
+  @ObservationIgnored private var sceneObserver: NSObjectProtocol?
 
   init(attach: String?, pushIdentity: PushRegistrar.PushIdentity?, make: @escaping Factory) {
     self.make = make
-    bare = make(attach ?? SSHTerminalController.defaultAttach, attach == nil, pushIdentity)
-    bare?.startNetworkWatch()
+    let boot = make(attach ?? SSHTerminalController.defaultAttach, attach == nil, pushIdentity)
+    track(boot)
+    bare = boot
+    // Closing the window leaves no UI to hold the connections, and nothing detaches on its own here.
+    sceneObserver = NotificationCenter.default.addObserver(
+      forName: UIScene.didDisconnectNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.leaveAll() }
+    }
+  }
+
+  /// Starts the controller's network watch and keeps background tabs off the pasteboard.
+  private func track(_ controller: SSHTerminalController) {
+    controller.startNetworkWatch()
+    let write = controller.writeClipboard
+    controller.writeClipboard = { [weak self, weak controller] text in
+      guard let self, let controller, self.activeController === controller else { return }
+      write(text)
+    }
   }
 
   var activeController: SSHTerminalController? {
@@ -46,9 +65,20 @@ public final class MacSessionTabs {
   }
 
   func refresh() async {
-    guard !left, !refreshing else { return }
+    guard !left else { return }
+    if refreshing {
+      refreshQueued = true
+      return
+    }
     refreshing = true
     defer { refreshing = false }
+    repeat {
+      refreshQueued = false
+      await refreshOnce()
+    } while refreshQueued && !left
+  }
+
+  private func refreshOnce() async {
     adoptBareIfAttached()
     guard let reader else { return }
     await reader.refreshSessions()
@@ -61,8 +91,12 @@ public final class MacSessionTabs {
 
   /// The bootstrap controller already attached a session on connect.
   private func adoptBareIfAttached() {
-    guard let boot = bare, boot.status == .connected, boot.hasSession, state.active == nil else { return }
+    guard let boot = bare, boot.status == .connected, boot.hasSession else { return }
     bare = nil
+    guard state.active == nil, controllers[boot.attach] == nil else {
+      Task { await boot.leave() }
+      return
+    }
     controllers[boot.attach] = boot
     teardown(state.open(boot.attach))
   }
@@ -70,7 +104,7 @@ public final class MacSessionTabs {
   private func restartBare() async {
     guard !left else { return }
     let fresh = make(SSHTerminalController.defaultAttach, true, nil)
-    fresh.startNetworkWatch()
+    track(fresh)
     bare = fresh
     await fresh.connect()
   }
@@ -89,14 +123,14 @@ public final class MacSessionTabs {
 
   private func ensureController(for name: String) {
     guard controllers[name] == nil else { return }
-    if let boot = bare, !boot.hasSession {
+    if let boot = bare, !boot.hasSession || boot.status == .connecting {
       bare = nil
       controllers[name] = boot
       Task { await boot.switchSession(to: name) }
       return
     }
     let controller = make(name, false, nil)
-    controller.startNetworkWatch()
+    track(controller)
     controllers[name] = controller
     Task { await controller.connect() }
   }
@@ -142,23 +176,32 @@ public final class MacSessionTabs {
   /// Never recreates: killing the last session leaves the empty state.
   func kill(_ name: String) {
     guard let victim = controllers[name] else {
-      if let reader { Task { await reader.killSession(name); await refresh() } }
+      state.markKilled(name)
+    if let reader { Task { await reader.killSession(name); await refresh() } }
       return
     }
     if state.names.count <= 1 {
       controllers[name] = nil
       state.remove(name)
+      state.markKilled(name)
+      if let old = bare { Task { await old.leave() } }
       bare = victim
       Task { await victim.killSession(name); await refresh() }
       return
     }
+    state.markKilled(name)
     let next = state.remove(name)
     controllers[name] = nil
     if let next { select(next) }
     let survivor = reader
     Task {
-      await victim.leave()
-      await (survivor ?? victim).killSession(name)
+      if let survivor {
+        await victim.leave()
+        await survivor.killSession(name)
+      } else {
+        await victim.killSession(name)
+        await victim.leave()
+      }
       await refresh()
     }
   }
@@ -175,6 +218,8 @@ public final class MacSessionTabs {
 
   func leaveAll() {
     left = true
+    if let sceneObserver { NotificationCenter.default.removeObserver(sceneObserver) }
+    sceneObserver = nil
     let all = allControllers
     controllers = [:]
     bare = nil

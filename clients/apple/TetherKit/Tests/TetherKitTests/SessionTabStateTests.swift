@@ -142,4 +142,30 @@ final class SessionTabStateTests: XCTestCase {
     XCTAssertNil(state.name(at: 1))
     XCTAssertNil(state.name(at: -1))
   }
+
+  func test_emptying_two_tabs_at_once_selects_nothing() {
+    var state = state([session("a", created: 1), session("b", created: 2)], active: "a")
+    let change = state.reconcile(listed: [])
+    XCTAssertEqual(Set(change.removed), ["a", "b"])
+    XCTAssertNil(change.newActive)
+    XCTAssertNil(state.active)
+    XCTAssertTrue(state.names.isEmpty)
+  }
+
+  func test_the_handover_skips_neighbours_that_vanish_in_the_same_listing() {
+    var state = state([session("a", created: 1), session("b", created: 2), session("c", created: 3)], active: "b")
+    let change = state.reconcile(listed: [session("c", created: 3)])
+    XCTAssertEqual(change.newActive, "c")
+    XCTAssertEqual(state.active, "c")
+  }
+
+  func test_a_killed_session_stays_out_until_a_listing_stops_showing_it() {
+    var state = state([session("a", created: 1), session("b", created: 2)], active: "a")
+    state.markKilled("b")
+    _ = state.reconcile(listed: [session("a", created: 1), session("b", created: 2)])
+    XCTAssertEqual(state.names, ["a"])
+    _ = state.reconcile(listed: [session("a", created: 1)])
+    _ = state.reconcile(listed: [session("a", created: 1), session("b", created: 9)])
+    XCTAssertEqual(state.names, ["a", "b"], "a new session reusing the name is a real one")
+  }
 }
