@@ -5,8 +5,8 @@ pub mod images;
 pub mod metrics;
 mod palette;
 pub mod raster;
-mod search;
 mod scrollback_text;
+mod search;
 pub mod snapshot;
 pub mod terminal;
 

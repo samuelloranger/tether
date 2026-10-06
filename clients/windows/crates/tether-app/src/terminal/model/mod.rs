@@ -26,8 +26,8 @@ mod search;
 pub(crate) mod send;
 mod tabs;
 
-pub use search::SearchView;
 pub use extras::{HistoryBody, HistoryView, PaletteView};
+pub use search::SearchView;
 pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
