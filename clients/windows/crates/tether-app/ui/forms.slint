@@ -1,0 +1,134 @@
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { AppBridge, KeyFormBridge, ServerFormBridge } from "bridge.slint";
+import { AreaField, Field, Hint, Note, PageChrome, PrimaryButton, SecondaryButton, Segment, Select } from "components.slint";
+
+component Label inherits Text {
+    font-size: 12px;
+    font-weight: 600;
+    color: Tokens.text-secondary;
+}
+
+export component ServerFormPage inherits PageChrome {
+    title: ServerFormBridge.title;
+    back => { AppBridge.back(); }
+    scroll := ScrollView {
+        content-width: self.visible-width;
+        content-height: col.preferred-height;
+        col := VerticalLayout {
+            width: scroll.visible-width;
+            spacing: 12px;
+            padding-bottom: 28px;
+            Field { label: "Name"; text <=> ServerFormBridge.name; edited => { ServerFormBridge.edited(); } }
+            HorizontalLayout {
+                spacing: 9px;
+                Field { label: "Host"; text <=> ServerFormBridge.host; edited => { ServerFormBridge.edited(); } }
+                Field { label: "Port"; width: 84px; text <=> ServerFormBridge.port; edited => { ServerFormBridge.edited(); } }
+            }
+            Field { label: "User"; text <=> ServerFormBridge.user; edited => { ServerFormBridge.edited(); } }
+            VerticalLayout {
+                spacing: 5px;
+                Label { text: "Authentication"; }
+                Segment {
+                    options: ["Private key", "SSH agent", "Password"];
+                    selected <=> ServerFormBridge.auth;
+                    changed => { ServerFormBridge.edited(); }
+                }
+            }
+            if ServerFormBridge.auth == 0 && ServerFormBridge.key-names.length > 0: VerticalLayout {
+                spacing: 5px;
+                Label { text: "Key"; }
+                Select {
+                    placeholder: "Choose a key";
+                    model: ServerFormBridge.key-names;
+                    current-index <=> ServerFormBridge.key-index;
+                    selected => { ServerFormBridge.edited(); }
+                }
+            }
+            if ServerFormBridge.auth == 0 && ServerFormBridge.key-names.length == 0: Text {
+                text: "No keys in the vault — generate or paste one first.";
+                wrap: word-wrap;
+                font-size: 13px;
+                color: Tokens.text-secondary;
+            }
+            if ServerFormBridge.auth == 1: Text {
+                text: "Uses the keys in the Windows OpenSSH agent, including 1Password's when it serves that agent.";
+                wrap: word-wrap;
+                font-size: 13px;
+                color: Tokens.text-secondary;
+            }
+            if ServerFormBridge.auth == 2: Field {
+                label: "Password";
+                password: true;
+                placeholder: ServerFormBridge.password-placeholder;
+                text <=> ServerFormBridge.password;
+                edited => { ServerFormBridge.edited(); }
+            }
+            Note { text: "First connect pins this host's key. A later change is refused."; }
+            PrimaryButton {
+                text: ServerFormBridge.save-label;
+                enabled: ServerFormBridge.can-save;
+                clicked => { ServerFormBridge.save(); }
+            }
+            if ServerFormBridge.hint != "": Hint { text: ServerFormBridge.hint; }
+        }
+    }
+}
+
+
+export component KeyGeneratePage inherits PageChrome {
+    title: "Generate key";
+    back => { AppBridge.back(); }
+    VerticalLayout {
+        alignment: start;
+        spacing: 12px;
+        Field {
+            label: "Name";
+            placeholder: "phone";
+            text <=> KeyFormBridge.gen-name;
+            edited => { KeyFormBridge.gen-edited(); }
+        }
+        Text {
+            text: "A new ed25519 key is created on this PC. Only its public half is shown — paste that into the host's authorized_keys.";
+            wrap: word-wrap;
+            font-family: Tokens.mono-font;
+            font-size: 12px;
+            color: Tokens.text-faint;
+        }
+        PrimaryButton { text: "Generate key"; enabled: KeyFormBridge.gen-can-save; clicked => { KeyFormBridge.generate(); } }
+        if KeyFormBridge.gen-hint != "": Hint { text: KeyFormBridge.gen-hint; }
+    }
+}
+
+export component KeyMaterialPage inherits PageChrome {
+    title: KeyFormBridge.title;
+    back => { AppBridge.back(); }
+    scroll := ScrollView {
+        content-width: self.visible-width;
+        content-height: col.preferred-height;
+        col := VerticalLayout {
+            width: scroll.visible-width;
+            spacing: 12px;
+            padding-bottom: 28px;
+            Field { label: "Name"; text <=> KeyFormBridge.name; edited => { KeyFormBridge.edited(); } }
+            if KeyFormBridge.show-file-button: SecondaryButton {
+                text: "Load private key file…";
+                clicked => { KeyFormBridge.load-file(); }
+            }
+            AreaField {
+                label: "Private key (PEM)";
+                placeholder: "-----BEGIN PRIVATE KEY-----";
+                text <=> KeyFormBridge.private-key;
+                edited => { KeyFormBridge.edited(); }
+            }
+            AreaField {
+                label: "Public key (OpenSSH)";
+                placeholder: "ssh-ed25519 AAAA…";
+                text <=> KeyFormBridge.public-key;
+                edited => { KeyFormBridge.edited(); }
+            }
+            PrimaryButton { text: "Save key"; enabled: KeyFormBridge.can-save; clicked => { KeyFormBridge.save(); } }
+            if KeyFormBridge.hint != "": Hint { text: KeyFormBridge.hint; }
+        }
+    }
+}

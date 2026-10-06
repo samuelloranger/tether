@@ -1,0 +1,250 @@
+import { ListView } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { HomeBridge, MachineCard, KeyCard } from "bridge.slint";
+import { Aurora, IconButton, Lamp, OriginTag, Pill, PrimaryButton, SecondaryButton, Segment } from "components.slint";
+
+component MachineCardView inherits Rectangle {
+    in property <MachineCard> card;
+    callback open();
+    callback edit();
+    callback remove();
+    height: body.preferred-height;
+    border-radius: Tokens.radius-card;
+    background: touch.has-hover ? Tokens.surface-hover : Tokens.surface;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    // Right-click, or the Menu key while the card has focus.
+    ContextMenuArea {
+        width: 100%;
+        height: 100%;
+        Menu {
+            MenuItem { title: "Edit"; activated => { root.edit(); } }
+            MenuItem { title: "Remove"; activated => { root.remove(); } }
+        }
+        focus := FocusScope {
+            width: 100%;
+            height: 100%;
+            key-pressed(event) => {
+                if (event.text == Key.Return) { root.open(); return accept; }
+                reject
+            }
+            touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { focus.focus(); root.open(); }
+            }
+        }
+    }
+    body := VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 13px;
+        padding-bottom: 13px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout { alignment: center; Lamp { dim: true; } }
+            Text { text: root.card.name; font-size: 16px; font-weight: 650; color: Tokens.text; vertical-alignment: center; overflow: elide; }
+            Rectangle { horizontal-stretch: 1; }
+            VerticalLayout { alignment: center; Pill { text: "saved"; } }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            Text { text: root.card.address; font-family: Tokens.mono-font; font-size: 12.5px; color: Tokens.text-secondary; overflow: elide; }
+            Text { text: "· " + root.card.auth; font-family: Tokens.mono-font; font-size: 12.5px; color: Tokens.text-faint; }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 4px;
+            Text { text: "Open"; color: Tokens.accent; font-size: 12px; font-weight: 650; }
+            VerticalLayout {
+                alignment: center;
+                Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.accent; width: 12px; height: 12px; }
+            }
+        }
+    }
+}
+
+component KeyCardView inherits Rectangle {
+    in property <KeyCard> card;
+    callback copy();
+    callback delete();
+    height: body.preferred-height;
+    border-radius: Tokens.radius-card;
+    background: Tokens.surface;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if (event.text == Key.Delete) { root.delete(); return accept; }
+            reject
+        }
+    }
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { focus.focus(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                focus.focus();
+                root.delete();
+            }
+        }
+    }
+    body := HorizontalLayout {
+        padding: 13px;
+        padding-left: 14px;
+        spacing: 13px;
+        alignment: start;
+        VerticalLayout {
+            alignment: start;
+            Rectangle {
+                width: 78px;
+                height: 50px;
+                background: Tokens.well;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Tokens.border;
+                Image {
+                    x: 4px;
+                    y: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    source: root.card.art;
+                    image-fit: fill;
+                }
+            }
+        }
+        VerticalLayout {
+            spacing: 4px;
+            alignment: start;
+            HorizontalLayout {
+                spacing: 7px;
+                alignment: start;
+                Text { text: root.card.name; font-size: 15px; font-weight: 650; color: Tokens.text; }
+                VerticalLayout { alignment: center; OriginTag { text: root.card.origin; } }
+            }
+            Text { text: root.card.meta; font-family: Tokens.mono-font; font-size: 12.5px; color: Tokens.text-faint; }
+            Text { text: root.card.fingerprint; font-family: Tokens.mono-font; font-size: 12.5px; color: Tokens.text-secondary; }
+            Text { text: root.card.usage; font-family: Tokens.mono-font; font-size: 12.5px; color: Tokens.text-faint; }
+            HorizontalLayout {
+                alignment: start;
+                padding-top: 3px;
+                Rectangle {
+                    width: link.preferred-width;
+                    height: link.preferred-height;
+                    link := Text { text: "Copy public key"; color: Tokens.accent; font-size: 12.5px; font-weight: 650; }
+                    TouchArea { mouse-cursor: pointer; clicked => { root.copy(); } }
+                }
+            }
+        }
+    }
+}
+
+component MachinesEmpty inherits VerticalLayout {
+    alignment: center;
+    spacing: 8px;
+    padding-bottom: 40px;
+    HorizontalLayout {
+        alignment: center;
+        Image { source: @image-url("icons/tether.svg"); colorize: Tokens.accent; width: 46px; height: 46px; }
+    }
+    Text { text: "No machines tethered yet"; font-size: 20px; font-weight: 650; color: Tokens.text; horizontal-alignment: center; }
+    Text {
+        text: "Add a server to open a shell that stays alive between visits.";
+        font-size: 14px;
+        color: Tokens.text-secondary;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        PrimaryButton { text: "Add a server"; clicked => { HomeBridge.add-machine(); } }
+    }
+}
+
+export component HomePage inherits Rectangle {
+    background: Tokens.background;
+    clip: true;
+    Aurora { }
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            width: min(560px, root.width - 48px);
+            HorizontalLayout {
+                padding-top: 22px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: end;
+                    spacing: 5px;
+                    Text { text: "Home"; font-size: 32px; font-weight: 700; color: Tokens.text; }
+                    Text { text: HomeBridge.subtitle; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-faint; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: end;
+                    IconButton { icon: @image-url("icons/gear.svg"); clicked => { HomeBridge.open-settings(); } }
+                }
+                VerticalLayout {
+                    alignment: end;
+                    IconButton { icon: @image-url("icons/plus.svg"); clicked => { HomeBridge.add-machine(); } }
+                }
+            }
+            VerticalLayout {
+                padding-top: 10px;
+                padding-bottom: 12px;
+                Segment {
+                    raised-style: true;
+                    options: ["Machines", "Keys"];
+                    selected <=> HomeBridge.tab;
+                    changed(i) => { HomeBridge.tab-changed(i); }
+                }
+            }
+            if HomeBridge.tab == 0 && HomeBridge.machines.length > 0: ListView {
+                vertical-stretch: 1;
+                for card in HomeBridge.machines: VerticalLayout {
+                    padding-bottom: 10px;
+                    MachineCardView {
+                        card: card;
+                        open => { HomeBridge.open-machine(card.id); }
+                        edit => { HomeBridge.edit-machine(card.id); }
+                        remove => { HomeBridge.remove-machine(card.id); }
+                    }
+                }
+            }
+            if HomeBridge.tab == 0 && HomeBridge.machines.length == 0: MachinesEmpty { vertical-stretch: 1; }
+            if HomeBridge.tab == 1 && HomeBridge.keys.length > 0: ListView {
+                vertical-stretch: 1;
+                for card in HomeBridge.keys: VerticalLayout {
+                    padding-bottom: 10px;
+                    KeyCardView {
+                        card: card;
+                        copy => { HomeBridge.copy-public-key(card.id); }
+                        delete => { HomeBridge.delete-key(card.id); }
+                    }
+                }
+            }
+            if HomeBridge.tab == 1 && HomeBridge.keys.length == 0: Text {
+                vertical-stretch: 1;
+                text: "No keys yet. Generate one, or paste an existing key.";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                font-size: 14px;
+                color: Tokens.text-secondary;
+            }
+            if HomeBridge.tab == 1: HorizontalLayout {
+                spacing: 9px;
+                padding-top: 10px;
+                padding-bottom: 16px;
+                PrimaryButton { horizontal-stretch: 1; min-width: 0; preferred-width: 0; text: "Generate"; clicked => { HomeBridge.generate-key(); } }
+                SecondaryButton { horizontal-stretch: 1; min-width: 0; preferred-width: 0; text: "Import"; clicked => { HomeBridge.import-key(); } }
+                SecondaryButton { horizontal-stretch: 1; min-width: 0; preferred-width: 0; text: "Paste"; clicked => { HomeBridge.paste-key(); } }
+            }
+        }
+    }
+}

@@ -95,3 +95,73 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
         working-directory: clients/apple/TetherKit
+
+  # The Windows client. Lints and tests the whole workspace and builds the app
+  # in release; tether-app is the only crate that needs Windows.
+  windows-build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: clients/windows
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/windows
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Release build of the app
+        run: cargo build --release -p tether-app
+
+      - name: Package (portable zip + unsigned MSIX)
+        shell: pwsh
+        run: ./packaging/package.ps1 -Version 0.0.${{ github.run_number }} -SkipBuild
+
+      - name: Check the package
+        shell: pwsh
+        run: ./packaging/check-package.ps1 -Version 0.0.${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-windows-${{ github.run_number }}
+          path: |
+            clients/windows/dist/Tether-*-x64-portable.zip
+            clients/windows/dist/Tether-*-x64.msix
+          if-no-files-found: error
+
+  # The Windows client's library crates hold no Win32 code outside cfg(windows),
+  # so they must also build and pass on Linux.
+  windows-libs-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/windows
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/windows
+
+      - name: Clippy
+        run: cargo clippy -p tether-core -p tether-ssh -p tether-term --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test -p tether-core -p tether-ssh -p tether-term

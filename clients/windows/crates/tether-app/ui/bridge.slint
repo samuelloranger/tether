@@ -1,0 +1,139 @@
+export enum PageKind { home, server-form, key-generate, key-import, key-paste, settings, scheme-picker, font-picker, terminal, host-key-refused, couldnt-connect }
+
+export global AppBridge {
+    in property <PageKind> page: PageKind.home;
+    in property <bool> dialog-open;
+    in property <string> dialog-title;
+    in property <string> dialog-body;
+    in property <string> dialog-extra;
+    in property <string> dialog-action;
+    callback escape() -> bool;
+    callback back();
+    callback dialog-confirmed();
+    callback dialog-cancelled();
+}
+
+export struct MachineCard {
+    id: string,
+    name: string,
+    address: string,
+    auth: string,
+    key-missing: bool,
+}
+
+export struct KeyCard {
+    id: string,
+    name: string,
+    origin: string,
+    meta: string,
+    fingerprint: string,
+    usage: string,
+    art: image,
+}
+
+export global HomeBridge {
+    in-out property <int> tab;
+    in property <string> subtitle;
+    in property <[MachineCard]> machines;
+    in property <[KeyCard]> keys;
+    callback tab-changed(int);
+    callback add-machine();
+    callback open-settings();
+    callback open-machine(string);
+    callback edit-machine(string);
+    callback remove-machine(string);
+    callback copy-public-key(string);
+    callback delete-key(string);
+    callback generate-key();
+    callback import-key();
+    callback paste-key();
+}
+
+export global ServerFormBridge {
+    in property <string> title;
+    in property <string> save-label;
+    in-out property <string> name;
+    in-out property <string> host;
+    in-out property <string> port;
+    in-out property <string> user;
+    in-out property <string> password;
+    in-out property <int> auth;
+    in-out property <int> key-index: -1;
+    in property <[string]> key-names;
+    in property <string> password-placeholder;
+    in property <string> hint;
+    in property <bool> can-save;
+    callback edited();
+    callback save();
+}
+
+export global KeyFormBridge {
+    in property <string> title;
+    in property <bool> show-file-button;
+    in-out property <string> name;
+    in-out property <string> private-key;
+    in-out property <string> public-key;
+    in property <string> hint;
+    in property <bool> can-save;
+    callback edited();
+    callback load-file();
+    callback save();
+    in-out property <string> gen-name;
+    in property <string> gen-hint;
+    in property <bool> gen-can-save;
+    callback gen-edited();
+    callback generate();
+}
+
+export global SettingsBridge {
+    in-out property <int> theme-mode;
+    in property <string> scheme-name;
+    in property <string> font-name;
+    in property <string> size-label;
+    in property <string> spacing-label;
+    in property <string> padding-label;
+    in-out property <float> spacing: 1.0;
+    in-out property <int> cursor;
+    in-out property <bool> blink;
+    in property <image> preview;
+    in property <color> preview-background: #1e1e2e;
+    in property <string> version-label;
+    in property <string> update-label;
+    in property <bool> update-ready;
+    callback restart-to-update();
+    callback theme-mode-changed(int);
+    callback size-step(int);
+    callback spacing-changed(float);
+    callback padding-step(int);
+    callback cursor-changed(int);
+    callback blink-changed(bool);
+    callback open-schemes();
+    callback open-fonts();
+}
+
+export struct SchemeRow {
+    id: string,
+    name: string,
+    background: color,
+    foreground: color,
+    blue: color,
+    green: color,
+    dots: [color],
+    meta: string,
+    active: bool,
+}
+
+export struct FontRow {
+    id: string,
+    name: string,
+    active: bool,
+}
+
+export global PickerBridge {
+    in-out property <string> query;
+    in property <[SchemeRow]> schemes;
+    in property <[FontRow]> fonts;
+    callback query-changed();
+    callback choose-scheme(string);
+    callback choose-font(string);
+}

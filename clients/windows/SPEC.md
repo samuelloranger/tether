@@ -256,7 +256,7 @@ Tether is the client for `zmx`, so its sessions are the window's tabs. iOS shows
 
 The list is refreshed on the control connection when the machine opens, after every create or kill, every 10 s while the window is focused, and on focus. A session that appears on the host (created from the phone or a shell) gets a tab at its place. A session that disappears loses its tab, and its channel closes; when it was the active tab, the neighbor to the left becomes active, else the right one, else the empty state.
 
-**One channel per open tab.** The terminal connection carries one PTY channel per tab that has been opened, each a login shell into which Tether types `~/.local/bin/zmx attach '<name>'`, the same attach iOS does. A tab is opened the first time it is selected, and stays attached until the machine is closed, so background tabs keep streaming: switching to one is instant and shows its live grid, not a replay, and its bell, notifications, and progress keep arriving. Each tab has its own `alacritty_terminal` grid, scrollback, and selection. At most 12 tabs are attached at once; opening a 13th detaches the least recently viewed one, which re-attaches when selected again.
+**One channel per open tab.** The terminal connection carries one PTY channel per tab that has been opened, each a login shell into which Tether types `~/.local/bin/zmx attach '<name>'`, the same attach iOS does. A tab is opened the first time it is selected, and stays attached until the machine is closed, so background tabs keep streaming: switching to one is instant and shows its live grid, not a replay, and its bell, notifications, and progress keep arriving. Each tab has its own `alacritty_terminal` grid, scrollback, and selection. At most 10 tabs are attached at once, the default `MaxSessions` of OpenSSH's sshd, so the host never refuses a channel; opening an 11th detaches the least recently viewed one, which re-attaches when selected again.
 
 Typing the detach key and a second attach into one PTY, as iOS does, is not used: it needs a 250 ms settle between writes and lands in an agent's prompt when the timing slips. Separate channels have neither problem, and `russh` multiplexes them without the stall that made iOS avoid a second channel under libssh2.
 
@@ -300,7 +300,7 @@ Push stays out of scope; what reaches the window directly does not.
 
 **Notifications.** OSC 9 (`ESC ] 9 ; <text> BEL`, but not `9;4`) and OSC 777 (`ESC ] 777 ; notify ; <title> ; <body> BEL`) become a Windows toast when the window is not focused or the session is not the active tab. The toast reads `<machine> · <session>` over the text. Clicking it brings the window forward and selects that tab. At most one toast per session per 5 s; later ones in the window replace the pending one. With the window focused on that very tab, nothing shows: the user is looking at it. Focus Assist and the Windows notification settings apply as they do to any app.
 
-Toasts need an app identity. The MSIX install has one. The portable zip registers a Start menu shortcut with an AppUserModelID on first run; without it, toasts are skipped and only the taskbar flash remains.
+Toasts need an app identity, `Tether.Terminal`. The installer's Start menu shortcut carries it. The portable zip registers its own `Tether (portable)` shortcut with it on first run, never the installer's; without one, toasts are skipped and only the taskbar flash remains.
 
 **Progress.** OSC 9;4 sets progress the way iOS reads it (`OSCReports`): state 1 with a percent is normal, 2 is error, 3 is indeterminate, 4 is paused, 0 clears, and a prompt mark (OSC 133;A) clears it too. The active tab's progress draws as a thin bar under the header in the accent (error in danger, paused in warning), and drives the taskbar button through `ITaskbarList3::SetProgressState` / `SetProgressValue`. A background tab's progress shows only on its tab, as a bar under the tab label.
 
@@ -448,7 +448,8 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 
 - `ci.yml` gains a `windows-latest` job: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` for the workspace, and a release build of `tether-app`.
 - The `tether-core`, `tether-ssh`, and `tether-term` tests also run on Linux in CI. Only `tether-app` needs Windows.
-- Release ships a signed MSIX (per-user install, no admin) and a portable zip. Signing identity and SmartScreen reputation are decided in the release slice, not here.
+- `windows-release.yml` releases on a `windows-vX.Y.Z` tag, whose version must equal the workspace version. It ships a Velopack installer (per-user, no admin, installed to `%LOCALAPPDATA%\TetherTerminal`, never the data folder) and a portable zip. Neither is code-signed yet; the MSIX is built but not shipped until it is.
+- Installed apps update themselves: at launch they read the rolling `windows-feed` release, download a newer version in the background, and apply it on the next launch or from **Settings → About → Restart**. The portable zip does not update.
 - Slint is used under GPLv3, which matches this repo's license.
 
 ## Tests
@@ -462,7 +463,7 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 - Clipboard paste: text pastes text; image-only becomes `paste-<ts>.png`; `CF_HDROP` becomes a drop; text wins over an image; Ctrl+V and Ctrl+Shift+V behave the same; Ctrl+C copies with a selection and sends `0x03` without one; Ctrl+Q sends `0x11`.
 - Host key: first seen is pinned before auth, match continues, mismatch is the refused error, does not write, and is never retried.
 - Session choice: `default` wins, else newest by `created`, else none; `zmx ls` failure opens `default`.
-- Tabs: strip order by `created`; refresh adds and removes tabs and picks the neighbor when the active one vanishes; new-session name (`default`, then first free `session-N`); an existing name selects its tab; kill switches away first and leaves the empty state on the last one; the 13th attach detaches the least recently viewed; tab shortcuts wrap and Ctrl+Shift+9 is the last tab.
+- Tabs: strip order by `created`; refresh adds and removes tabs and picks the neighbor when the active one vanishes; new-session name (`default`, then first free `session-N`); an existing name selects its tab; kill switches away first and leaves the empty state on the last one; the 11th attach detaches the least recently viewed; tab shortcuts wrap and Ctrl+Shift+9 is the last tab.
 - Attach command: name is shell-quoted; nothing is typed on an empty host; each tab gets its own channel and grid; reconnect re-attaches every attached tab, active first.
 - Lock: detach after the 15 s grace, not before; unlock re-attaches; minimize does nothing.
 - Links: OSC 8 wins over detected text; a URL wrapped across rows and one cut by `│ ┃ ⎿` resolve to the whole URL; only `http`, `https`, `mailto` open; Ctrl+click is never reported to the program.

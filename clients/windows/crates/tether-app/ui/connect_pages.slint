@@ -1,0 +1,105 @@
+import { Tokens } from "tokens.slint";
+import { Aurora, Lamp, PrimaryButton, SecondaryButton } from "components.slint";
+
+export global ConnectVm {
+    in property <string> expected;
+    in property <string> got;
+    in property <string> sentence;
+    in property <string> who;
+    callback back-home();
+    callback retry();
+}
+
+component Fingerprint inherits TextInput {
+    read-only: true;
+    font-family: Tokens.mono-font;
+    font-size: 12px;
+    color: Tokens.text;
+    wrap: char-wrap;
+}
+
+component Caption inherits Text {
+    font-size: 11px;
+    font-weight: 650;
+    color: Tokens.text-faint;
+}
+
+// Home chrome: the session never opened, so these pages have no terminal well.
+component BlockPage inherits Rectangle {
+    in property <string> heading;
+    in property <color> heading-color: Tokens.text;
+    background: Tokens.background;
+    clip: true;
+    Aurora { }
+    FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) { ConnectVm.back-home(); return accept; }
+            reject
+        }
+    }
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            width: min(460px, root.width - 48px);
+            alignment: center;
+            spacing: 8px;
+            HorizontalLayout { alignment: center; Lamp { lamp: Tokens.danger; width: 14px; height: 14px; border-radius: 7px; } }
+            Text {
+                text: root.heading;
+                color: root.heading-color;
+                font-size: 22px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Text {
+                text: ConnectVm.who;
+                font-family: Tokens.mono-font;
+                font-size: 13px;
+                color: Tokens.text-secondary;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+            @children
+        }
+    }
+}
+
+export component HostKeyRefusedPage inherits BlockPage {
+    heading: "Host key changed — refused.";
+    Rectangle {
+        background: Tokens.surface;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        VerticalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+            spacing: 4px;
+            Caption { text: "EXPECTED"; }
+            Fingerprint { text: ConnectVm.expected; }
+            Rectangle { height: 6px; }
+            Caption { text: "GOT"; }
+            Fingerprint { text: ConnectVm.got; }
+        }
+    }
+    HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        PrimaryButton { text: "Back to Home"; clicked => { ConnectVm.back-home(); } }
+    }
+}
+
+export component CouldntConnectPage inherits BlockPage {
+    heading: ConnectVm.sentence;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        padding-top: 8px;
+        PrimaryButton { text: "Retry"; clicked => { ConnectVm.retry(); } }
+        SecondaryButton { text: "Back to Home"; clicked => { ConnectVm.back-home(); } }
+    }
+}

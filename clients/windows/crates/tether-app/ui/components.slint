@@ -1,0 +1,617 @@
+import { Tokens } from "tokens.slint";
+
+component ButtonBase inherits Rectangle {
+    forward-focus: focus;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <color> fill;
+    in property <color> ink;
+    in property <bool> outlined: false;
+    callback clicked();
+    min-height: 44px;
+    min-width: label.preferred-width + 36px;
+    border-radius: Tokens.radius-button;
+    background: !root.enabled ? Tokens.raised : touch.pressed ? root.fill.darker(0.08) : touch.has-hover ? root.fill.brighter(0.06) : root.fill;
+    border-width: focus.has-focus ? 2px : root.outlined ? 1px : 0px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            reject
+        }
+    }
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { focus.focus(); root.clicked(); }
+    }
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        color: root.enabled ? root.ink : Tokens.text-faint;
+        font-size: 14px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component PrimaryButton inherits ButtonBase {
+    fill: Tokens.accent;
+    ink: Tokens.on-accent;
+}
+
+export component SecondaryButton inherits ButtonBase {
+    fill: Tokens.raised;
+    ink: Tokens.text;
+    outlined: true;
+}
+
+export component DangerButton inherits ButtonBase {
+    fill: Tokens.danger;
+    ink: Tokens.on-danger;
+}
+
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    callback clicked();
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            reject
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+    Image {
+        source: root.icon;
+        colorize: Tokens.accent;
+        width: 16px;
+        height: 16px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+export component BackButton inherits Rectangle {
+    in property <string> text: "Back";
+    callback clicked();
+    height: 34px;
+    width: row.preferred-width;
+    border-radius: 9px;
+    background: touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            reject
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+    row := HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 12px;
+        spacing: 4px;
+        Image { source: @image-url("icons/back.svg"); colorize: Tokens.text-secondary; width: 12px; height: 12px; y: (parent.height - self.height) / 2; }
+        Text { text: root.text; color: Tokens.text-secondary; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+    }
+}
+
+export component Lamp inherits Rectangle {
+    in property <color> lamp: Tokens.accent;
+    in property <bool> dim: false;
+    width: 11px;
+    height: 11px;
+    border-radius: 5.5px;
+    background: root.lamp;
+    opacity: root.dim ? 0.6 : 1.0;
+}
+
+export component Pill inherits Rectangle {
+    in property <string> text;
+    height: label.preferred-height + 4px;
+    width: label.preferred-width + 16px;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: Tokens.border;
+    background: Tokens.dark ? #ffffff0a : #0000000a;
+    label := Text {
+        x: 8px;
+        y: 2px;
+        text: root.text;
+        font-family: Tokens.mono-font;
+        font-size: 11px;
+        font-weight: 650;
+        color: Tokens.text-faint;
+    }
+}
+
+export component OriginTag inherits Rectangle {
+    in property <string> text;
+    height: label.preferred-height + 4px;
+    width: label.preferred-width + 12px;
+    border-radius: 6px;
+    background: Tokens.accent.with-alpha(0.12);
+    label := Text {
+        x: 6px;
+        y: 2px;
+        text: root.text;
+        font-family: Tokens.mono-font;
+        font-size: 11px;
+        font-weight: 700;
+        color: Tokens.accent;
+    }
+}
+
+export component Segment inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> selected;
+    // Home's Machines/Keys tabs are a raised segment; form segments fill with the accent.
+    in property <bool> raised-style: false;
+    callback changed(int);
+    background: Tokens.input;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    border-radius: root.raised-style ? 12px : 11px;
+    height: root.raised-style ? 42px : 38px;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow && root.selected > 0) {
+                root.selected -= 1;
+                root.changed(root.selected);
+                return accept;
+            }
+            if (event.text == Key.RightArrow && root.selected < root.options.length - 1) {
+                root.selected += 1;
+                root.changed(root.selected);
+                return accept;
+            }
+            reject
+        }
+    }
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 3px;
+        for option[i] in root.options: Rectangle {
+            horizontal-stretch: 1;
+            border-radius: root.raised-style ? 9px : 8px;
+            background: i == root.selected ? (root.raised-style ? Tokens.raised : Tokens.accent) : transparent;
+            Text {
+                width: 100%;
+                height: 100%;
+                text: option;
+                font-size: root.raised-style ? 13px : 12.5px;
+                font-weight: 650;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: i == root.selected ? (root.raised-style ? Tokens.text : Tokens.on-accent) : Tokens.text-secondary;
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    focus.focus();
+                    root.selected = i;
+                    root.changed(i);
+                }
+            }
+        }
+    }
+}
+
+export component Field inherits VerticalLayout {
+    in property <string> label;
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> password: false;
+    in property <bool> mono: false;
+    callback edited(string);
+    forward-focus: input;
+    spacing: 5px;
+    if root.label != "": Text { text: root.label; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+    Rectangle {
+        height: 40px;
+        background: Tokens.input;
+        border-radius: Tokens.radius-control;
+        border-width: 1px;
+        border-color: input.has-focus ? Tokens.accent : Tokens.border;
+        input := TextInput {
+            x: 12px;
+            width: parent.width - 24px;
+            height: parent.height;
+            vertical-alignment: center;
+            single-line: true;
+            text <=> root.text;
+            input-type: root.password ? InputType.password : InputType.text;
+            color: Tokens.text;
+            font-family: root.mono ? Tokens.mono-font : Tokens.ui-font;
+            font-size: 14px;
+            selection-background-color: #7c8cf859;
+            edited => { root.edited(self.text); }
+        }
+        if root.text == "" && root.placeholder != "": Text {
+            x: 12px;
+            height: parent.height;
+            vertical-alignment: center;
+            text: root.placeholder;
+            color: Tokens.placeholder;
+            font-size: 14px;
+        }
+    }
+}
+
+export component AreaField inherits VerticalLayout {
+    in property <string> label;
+    in-out property <string> text;
+    in property <string> placeholder;
+    callback edited(string);
+    forward-focus: area;
+    spacing: 5px;
+    Text { text: root.label; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+    Rectangle {
+        height: 104px;
+        clip: true;
+        background: Tokens.input;
+        border-radius: Tokens.radius-control;
+        border-width: 1px;
+        border-color: area.has-focus ? Tokens.accent : Tokens.border;
+        Flickable {
+            x: 12px;
+            y: 10px;
+            width: parent.width - 24px;
+            height: parent.height - 20px;
+            content-height: max(self.height, area.preferred-height);
+            area := TextInput {
+                width: parent.width;
+                single-line: false;
+                wrap: char-wrap;
+                text <=> root.text;
+                color: Tokens.text;
+                font-family: Tokens.mono-font;
+                font-size: 12px;
+                selection-background-color: #7c8cf859;
+                edited => { root.edited(self.text); }
+            }
+        }
+        if root.text == "" && root.placeholder != "": Text {
+            x: 12px;
+            y: 10px;
+            text: root.placeholder;
+            color: Tokens.placeholder;
+            font-family: Tokens.mono-font;
+            font-size: 12px;
+        }
+    }
+}
+
+export component Note inherits Rectangle {
+    in property <string> text;
+    height: label.preferred-height + 20px;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: Tokens.success.with-alpha(0.28);
+    label := Text {
+        x: 12px;
+        y: 10px;
+        width: parent.width - 24px;
+        text: root.text;
+        wrap: word-wrap;
+        font-family: Tokens.mono-font;
+        font-size: 11.5px;
+        color: Tokens.text-faint;
+    }
+}
+
+export component Hint inherits Text {
+    horizontal-alignment: center;
+    wrap: word-wrap;
+    color: Tokens.text-faint;
+    font-size: 12px;
+}
+
+// Slint gradients are circles only; an SVG ellipse keeps the glow inside its box instead of
+// ending in a hard edge on a wide window.
+export component Aurora inherits Rectangle {
+    y: -30px;
+    height: 200px;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("icons/aurora.svg");
+        image-fit: fill;
+        opacity: Tokens.dark ? 1 : 0.57;
+    }
+}
+
+export component PageChrome inherits Rectangle {
+    in property <string> title;
+    in property <length> column-width: 480px;
+    callback back();
+    background: Tokens.background;
+    VerticalLayout {
+        padding-top: 22px;
+        HorizontalLayout {
+            alignment: center;
+            vertical-stretch: 0;
+            HorizontalLayout {
+                width: min(root.column-width, root.width - 48px);
+                spacing: 12px;
+                alignment: start;
+                BackButton { clicked => { root.back(); } }
+                Text { text: root.title; font-size: 26px; font-weight: 700; color: Tokens.text; vertical-alignment: center; }
+            }
+        }
+        // Pages put a ScrollView or a top-aligned layout here; it gets the rest of the height.
+        HorizontalLayout {
+            alignment: center;
+            padding-top: 8px;
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: min(root.column-width, root.width - 48px);
+                @children
+            }
+        }
+    }
+}
+
+export component ConfirmDialog inherits Rectangle {
+    in property <string> title;
+    in property <string> body;
+    in property <string> extra;
+    in property <string> action;
+    callback confirmed();
+    callback cancelled();
+    // rgba(8, 8, 14, 0.62)
+    background: #08080e9e;
+    TouchArea { }
+    card := Rectangle {
+        width: min(460px, root.width - 48px);
+        height: col.preferred-height;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Tokens.surface;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        drop-shadow-blur: 50px;
+        drop-shadow-offset-y: 18px;
+        drop-shadow-color: #00000059;
+        col := VerticalLayout {
+            padding: 20px;
+            padding-bottom: 16px;
+            spacing: 8px;
+            Text { text: root.title; wrap: word-wrap; font-size: 18px; font-weight: 650; color: Tokens.text; }
+            Text { text: root.body; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
+            if root.extra != "": Text { text: root.extra; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                padding-top: 8px;
+                cancel := SecondaryButton { text: "Cancel"; clicked => { root.cancelled(); } }
+                DangerButton { text: root.action; clicked => { root.confirmed(); } }
+            }
+        }
+    }
+    init => { cancel.focus(); }
+}
+
+// Matches Field; the Fluent ComboBox is a different height, radius, and fill.
+export component Select inherits Rectangle {
+    in property <[string]> model;
+    in property <string> placeholder: "Choose…";
+    in-out property <int> current-index: -1;
+    callback selected(int);
+    height: 40px;
+    background: Tokens.input;
+    border-radius: Tokens.radius-control;
+    border-width: 1px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    forward-focus: focus;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { popup.show(); return accept; }
+            if (event.text == Key.DownArrow && root.current-index < root.model.length - 1) {
+                root.current-index += 1; root.selected(root.current-index); return accept;
+            }
+            if (event.text == Key.UpArrow && root.current-index > 0) {
+                root.current-index -= 1; root.selected(root.current-index); return accept;
+            }
+            reject
+        }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); popup.show(); } }
+    Text {
+        x: 12px;
+        width: parent.width - 44px;
+        height: parent.height;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: 14px;
+        text: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
+        color: root.current-index >= 0 ? Tokens.text : Tokens.placeholder;
+    }
+    Image {
+        x: parent.width - 26px;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        source: @image-url("icons/chevron.svg");
+        rotation-angle: 90deg;
+        colorize: Tokens.text-secondary;
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width;
+        Rectangle {
+            background: Tokens.surface;
+            border-radius: Tokens.radius-control;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000066;
+            VerticalLayout {
+                padding: 4px;
+                for item[i] in root.model: Rectangle {
+                    height: 34px;
+                    border-radius: 8px;
+                    background: ta.has-hover ? Tokens.raised : transparent;
+                    Text {
+                        x: 10px;
+                        width: parent.width - 40px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        text: item;
+                        font-size: 14px;
+                        color: Tokens.text;
+                    }
+                    if i == root.current-index: Text {
+                        x: parent.width - 26px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                        text: "✓";
+                        color: Tokens.accent;
+                        font-weight: 700;
+                    }
+                    ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.current-index = i; root.selected(i); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Tether's accent, not the Windows accent the Fluent slider would take.
+export component TetherSlider inherits Rectangle {
+    in property <float> minimum: 0;
+    in property <float> maximum: 1;
+    in property <float> step: 0.05;
+    in-out property <float> value;
+    callback changed(float);
+    height: 20px;
+    forward-focus: focus;
+    property <float> ratio: (root.value - root.minimum) / max(0.0001, root.maximum - root.minimum);
+    function set-from(px: length) {
+        root.value = root.minimum + max(0, min(1, (px - 8px) / max(1px, root.width - 16px))) * (root.maximum - root.minimum);
+        root.changed(root.value);
+    }
+    Rectangle {
+        x: 8px;
+        y: (parent.height - self.height) / 2;
+        width: parent.width - 16px;
+        height: 4px;
+        border-radius: 2px;
+        background: Tokens.border;
+    }
+    Rectangle {
+        x: 8px;
+        y: (parent.height - self.height) / 2;
+        width: (parent.width - 16px) * root.ratio;
+        height: 4px;
+        border-radius: 2px;
+        background: Tokens.accent;
+    }
+    Rectangle {
+        x: 8px + (parent.width - 16px) * root.ratio - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Tokens.accent;
+        border-width: focus.has-focus ? 3px : 2px;
+        border-color: focus.has-focus ? Tokens.text : Tokens.background;
+    }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.RightArrow || event.text == Key.UpArrow) {
+                root.value = min(root.maximum, root.value + root.step); root.changed(root.value); return accept;
+            }
+            if (event.text == Key.LeftArrow || event.text == Key.DownArrow) {
+                root.value = max(root.minimum, root.value - root.step); root.changed(root.value); return accept;
+            }
+            reject
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) { focus.focus(); root.set-from(self.mouse-x); }
+        }
+        moved => { if (self.pressed) { root.set-from(self.mouse-x); } }
+    }
+}
+
+export component TetherSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled();
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: root.checked ? Tokens.accent : Tokens.raised;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Tokens.text : root.checked ? Tokens.accent : Tokens.border;
+    forward-focus: focus;
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 4px : 4px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: root.checked ? Tokens.on-accent : Tokens.text-secondary;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) { root.checked = !root.checked; root.toggled(); return accept; }
+            reject
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); }
+    }
+}
+
+// The preview's .ghost: accent text, no fill until hover. Sized for the 34 px header row.
+export component GhostButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    height: 30px;
+    width: label.preferred-width + 16px;
+    border-radius: 8px;
+    background: touch.has-hover ? Tokens.accent.with-alpha(0.1) : transparent;
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: Tokens.accent;
+    forward-focus: focus;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            reject
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        color: Tokens.accent;
+        font-size: 13px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

@@ -1,0 +1,196 @@
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { AppBridge, SettingsBridge } from "bridge.slint";
+import { PageChrome, PrimaryButton, Segment, TetherSlider, TetherSwitch } from "components.slint";
+
+component Section inherits Text {
+    font-size: 12px;
+    font-weight: 650;
+    color: Tokens.text-faint;
+}
+
+component Label inherits Text {
+    font-size: 12px;
+    font-weight: 600;
+    color: Tokens.text-secondary;
+}
+
+component Row inherits Rectangle {
+    in property <string> label;
+    height: 50px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    HorizontalLayout {
+        spacing: 12px;
+        Text { text: root.label; font-weight: 600; color: Tokens.text; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        @children
+    }
+}
+
+component Value inherits Text {
+    font-family: Tokens.mono-font;
+    font-size: 13px;
+    color: Tokens.text-secondary;
+    vertical-alignment: center;
+}
+
+component SmallButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    background: touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            reject
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+    Text { width: 100%; height: 100%; text: root.text; color: Tokens.text; horizontal-alignment: center; vertical-alignment: center; }
+}
+
+// Not a Row: anything passed through Row's @children becomes a layout item, so a TouchArea
+// there would cover only its own slot, not the row.
+component LinkRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    callback clicked();
+    height: 50px;
+    forward-focus: focus;
+    Rectangle {
+        x: -8px;
+        width: parent.width + 16px;
+        border-radius: 8px;
+        background: touch.has-hover ? Tokens.surface-hover : transparent;
+        border-width: focus.has-focus ? 2px : 0px;
+        border-color: Tokens.accent;
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    HorizontalLayout {
+        spacing: 12px;
+        Text { text: root.label; font-weight: 600; color: Tokens.text; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        Value { text: root.value; }
+        Text { text: "›"; color: Tokens.text-faint; vertical-alignment: center; }
+    }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            reject
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+
+component StepperRow inherits Row {
+    in property <string> value;
+    callback step(int);
+    Value { text: root.value; }
+    VerticalLayout { alignment: center; SmallButton { text: "−"; clicked => { root.step(-1); } } }
+    VerticalLayout { alignment: center; SmallButton { text: "+"; clicked => { root.step(1); } } }
+}
+
+component SettingsForm inherits VerticalLayout {
+    Section { text: "Appearance"; }
+    VerticalLayout {
+        spacing: 5px;
+        padding-top: 8px;
+        padding-bottom: 16px;
+        Label { text: "Theme"; }
+        Segment {
+            options: ["System", "Dark", "Light"];
+            selected <=> SettingsBridge.theme-mode;
+            changed(i) => { SettingsBridge.theme-mode-changed(i); }
+        }
+    }
+    Section { text: "Terminal"; }
+    LinkRow { label: "Color scheme"; value: SettingsBridge.scheme-name; clicked => { SettingsBridge.open-schemes(); } }
+    LinkRow { label: "Font"; value: SettingsBridge.font-name; clicked => { SettingsBridge.open-fonts(); } }
+    StepperRow { label: "Size"; value: SettingsBridge.size-label; step(d) => { SettingsBridge.size-step(d); } }
+    Row {
+        label: "Line spacing";
+        Value { text: SettingsBridge.spacing-label; }
+        VerticalLayout {
+            alignment: center;
+            TetherSlider {
+                width: 140px;
+                minimum: 1.0;
+                maximum: 1.6;
+                value <=> SettingsBridge.spacing;
+                changed(v) => { SettingsBridge.spacing-changed(v); }
+            }
+        }
+    }
+    StepperRow { label: "Padding"; value: SettingsBridge.padding-label; step(d) => { SettingsBridge.padding-step(d); } }
+    VerticalLayout {
+        spacing: 5px;
+        padding-top: 12px;
+        padding-bottom: 4px;
+        Label { text: "Cursor"; }
+        Segment {
+            options: ["Block", "Bar", "Underline"];
+            selected <=> SettingsBridge.cursor;
+            changed(i) => { SettingsBridge.cursor-changed(i); }
+        }
+    }
+    Row {
+        label: "Blink cursor";
+        VerticalLayout {
+            alignment: center;
+            TetherSwitch { checked <=> SettingsBridge.blink; toggled => { SettingsBridge.blink-changed(self.checked); } }
+        }
+    }
+    VerticalLayout { padding-top: 20px; Section { text: "About"; } }
+    Row { label: "Version"; Value { text: SettingsBridge.version-label; } }
+    Row {
+        label: "Updates";
+        Value { text: SettingsBridge.update-label; }
+        if SettingsBridge.update-ready: VerticalLayout {
+            alignment: center;
+            PrimaryButton { min-height: 32px; text: "Restart"; clicked => { SettingsBridge.restart-to-update(); } }
+        }
+    }
+}
+
+// The image is drawn at physical pixel size so the preview's glyphs are the terminal's glyphs.
+component PreviewBox inherits Rectangle {
+    width: img.width;
+    height: img.height;
+    background: SettingsBridge.preview-background;
+    border-radius: 10px;
+    clip: true;
+    img := Image {
+        source: SettingsBridge.preview;
+        width: self.source.width * 1phx;
+        height: self.source.height * 1phx;
+        image-rendering: pixelated;
+    }
+}
+
+export component SettingsPage inherits PageChrome {
+    title: "Settings";
+    column-width: 860px;
+    back => { AppBridge.back(); }
+    scroll := ScrollView {
+        content-width: self.visible-width;
+        content-height: col.preferred-height;
+        col := VerticalLayout {
+            width: scroll.visible-width;
+            padding-bottom: 24px;
+            if root.width >= 800px: HorizontalLayout {
+                spacing: 28px;
+                SettingsForm { horizontal-stretch: 1; }
+                VerticalLayout { alignment: start; padding-top: 28px; PreviewBox { } }
+            }
+            if root.width < 800px: VerticalLayout {
+                spacing: 8px;
+                SettingsForm { }
+                HorizontalLayout { alignment: start; PreviewBox { } }
+            }
+        }
+    }
+}
