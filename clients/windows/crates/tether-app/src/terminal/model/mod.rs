@@ -17,6 +17,7 @@ use tether_term::TabTerminal;
 use crate::terminal::geometry::{Layout, TermStyle};
 use crate::terminal::status::{ConnStatus, Lamp};
 
+mod agents;
 mod events;
 mod input;
 mod pointer;
@@ -24,6 +25,7 @@ mod reconnect;
 pub(crate) mod send;
 mod tabs;
 
+pub use agents::{AgentBadge, AgentView, QuestionView, SheetPhase};
 pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -159,6 +161,31 @@ pub enum Msg {
     },
     CopySelection,
     PasteClipboard,
+    AgentStatusOut {
+        result: Result<String, ConnectError>,
+        now_unix: i64,
+    },
+    AgentPendingOut {
+        session: String,
+        result: Result<String, ConnectError>,
+    },
+    AgentAnswered {
+        result: Result<String, ConnectError>,
+    },
+    AgentOpen,
+    AgentDismiss,
+    AgentToggle {
+        question: usize,
+        option: usize,
+    },
+    AgentOther {
+        question: usize,
+        text: String,
+    },
+    AgentSubmit,
+    AgentApprove,
+    AgentDeny,
+    AgentReply(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -188,6 +215,13 @@ pub enum Effect {
         generation: u64,
     },
     StartSend(SendJob),
+    AgentPoll,
+    AgentPending {
+        session: String,
+    },
+    AgentAnswer {
+        command: String,
+    },
     Redraw,
     Ui(UiEffect),
 }
@@ -233,6 +267,7 @@ pub struct TabView {
     pub active: bool,
     pub attention: bool,
     pub progress: Option<Progress>,
+    pub agent: Option<AgentBadge>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmptyView {
@@ -258,6 +293,7 @@ pub struct TerminalView {
     pub session_error: Option<String>,
     pub app_keypad: bool,
     pub title: String,
+    pub agent: AgentView,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +346,7 @@ pub struct TerminalModel {
     pub(crate) hover: Option<(usize, usize, usize)>,
     blink_on: bool,
     blink_at: Duration,
+    agents: agents::AgentsState,
 }
 
 impl TerminalModel {
@@ -348,6 +385,7 @@ impl TerminalModel {
             hover: None,
             blink_on: true,
             blink_at: Duration::ZERO,
+            agents: agents::AgentsState::default(),
         };
         (m, vec![Effect::Open])
     }
@@ -442,6 +480,27 @@ impl TerminalModel {
                 &mut fx,
             ),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
+            Msg::AgentStatusOut { result, now_unix } => {
+                self.on_agent_status(result, now_unix, now, &mut fx);
+            }
+            Msg::AgentPendingOut { session, result } => {
+                self.on_agent_pending(&session, result, &mut fx);
+            }
+            Msg::AgentAnswered { result } => self.on_agent_answered(result, &mut fx),
+            Msg::AgentOpen => self.on_agent_open(&mut fx),
+            Msg::AgentDismiss => self.on_agent_dismiss(&mut fx),
+            Msg::AgentToggle { question, option } => self.on_agent_toggle(question, option),
+            Msg::AgentOther { question, text } => self.on_agent_other(question, &text),
+            Msg::AgentSubmit => self.on_agent_answer(None, &mut fx),
+            Msg::AgentApprove => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Approve), &mut fx);
+            }
+            Msg::AgentDeny => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Deny), &mut fx);
+            }
+            Msg::AgentReply(text) => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Reply(text)), &mut fx);
+            }
         }
         fx
     }
@@ -455,6 +514,7 @@ impl TerminalModel {
         self.status = ConnStatus::Connected;
         self.attempt = 0;
         self.last_refresh = now;
+        self.agents_on_opened();
         fx.push(Effect::Ls);
         if was_reconnect && !self.lock_detached {
             self.reattach_all(fx);
@@ -648,6 +708,7 @@ impl TerminalModel {
                             .tabs
                             .get(&t.name)
                             .and_then(|x| x.term.reports().progress),
+                        agent: self.agent_badge(&t.name),
                     })
                     .collect()
             })
@@ -693,6 +754,7 @@ impl TerminalModel {
             session_error,
             app_keypad,
             title: self.window_title(),
+            agent: self.agent_view(),
         }
     }
 

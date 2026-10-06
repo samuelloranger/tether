@@ -139,6 +139,7 @@ impl TerminalModel {
         self.tick_sync(now, fx);
         self.tick_resize(now, fx);
         self.tick_toasts(now, fx);
+        self.agents_tick(now, fx);
         if self.lock.poll(now) == LockAction::DetachAll {
             // The strip keeps these tabs logically attached; unlock opens them again.
             let names = self

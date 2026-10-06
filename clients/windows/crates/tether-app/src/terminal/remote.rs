@@ -50,6 +50,8 @@ pub trait Remote: Send + Sync + 'static {
     fn ls(&self) -> impl Future<Output = Result<Vec<ZmxSession>, ConnectError>> + Send;
     fn kill(&self, name: &str) -> impl Future<Output = Result<(), ConnectError>> + Send;
     fn uploads_dir(&self) -> impl Future<Output = Option<String>> + Send;
+    /// One command on the control connection, its stdout on success.
+    fn exec(&self, command: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
     fn attach(
         &self,
         name: &str,
@@ -163,6 +165,10 @@ where
             .await
             .ok()?;
         uploads_directory(&out)
+    }
+
+    async fn exec(&self, command: &str) -> Result<String, ConnectError> {
+        self.control().await?.exec(command).await
     }
 
     async fn attach(

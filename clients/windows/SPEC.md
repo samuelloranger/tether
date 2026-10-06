@@ -22,7 +22,7 @@ v1 is the loop they can do without the phone:
 
 ## Out of scope
 
-Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
+Push, notification actions on toasts, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
 
 Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their place.
 
@@ -303,6 +303,30 @@ Push stays out of scope; what reaches the window directly does not.
 Toasts need an app identity, `Tether.Terminal`. The installer's Start menu shortcut carries it. The portable zip registers its own `Tether (portable)` shortcut with it on first run, never the installer's; without one, toasts are skipped and only the taskbar flash remains.
 
 **Progress.** OSC 9;4 sets progress the way iOS reads it (`OSCReports`): state 1 with a percent is normal, 2 is error, 3 is indeterminate, 4 is paused, 0 clears, and a prompt mark (OSC 133;A) clears it too. The active tab's progress draws as a thin bar under the header in the accent (error in danger, paused in warning), and drives the taskbar button through `ITaskbarList3::SetProgressState` / `SetProgressValue`. A background tab's progress shows only on its tab, as a bar under the tab label.
+
+### Agents
+
+The host's `tether-notify` knows each zmx session's agent: `working`, `waiting` or `done`, since when, a message, and whether the Claude Code mod is holding a prompt. Windows reads it the way iOS does and shows it; it adds nothing to the host.
+
+**Reading.** On the control connection, every 10 s while connected (focused or not, unlike the `zmx ls` refresh: a toast for a background window needs the read), one exec: `if [ -x ~/.local/bin/tether-notify ]; then ~/.local/bin/tether-notify status 2>/dev/null; else echo __tether_notify_missing; fi`. The output is a JSON array; a banner ahead of it is ignored, a row that does not parse is skipped, and the rest still count. The first read after every connect is a baseline: nothing toasts for state that was already there.
+
+**Degrading.** Nothing here can break the terminal. A failed exec keeps the last read for 30 s, then shows no badges. A missing binary, or output that is not a status array (an older `tether-notify` without `status`), shows no badges and stops polling until the next connect. No error is shown for either.
+
+**Badges.** Every tab with an agent carries a small pill after its name, in words with colour only reinforcing them: `working` (accent), `needs you` (warning), `done 5m` (faint; the age is `now`, `Nm`, `Nh`, `Nd`, as on iOS). It is not the attention dot, which still means an OSC notification or bell arrived in a background tab. The active session's state and message also read in the header after the connection word: `· needs you · <message>`.
+
+**Held prompts.** When the mod holds a question or a permission request, nobody is attached to that session, so the terminal shows nothing to answer. The active tab's held prompt opens a sheet over the terminal, as the iOS answer sheet does:
+
+- A **question** loads with `tether-notify pending --session <name>` and lists every question with its options (radio for one choice, check for "Pick any") and an "Other" field. A typed answer replaces the pick on a single-choice question and is appended on a multi-select one. Send is enabled once every question has an answer; the answers go out as `tether-notify answer --session <name> --state <state> --version <version> --answers <base64 JSON by question text>`, multi-select labels joined with `, ` in option order. The host refuses the answer if the agent has moved on since the version the sheet names.
+- A **permission** shows the agent's message with **Approve** (Return), **Deny** (Esc) and a one-line reply (typed, then submitted), through `answer --input <base64>` and `--submit`. A reply is one line, at most 2000 characters.
+- Every argument is shell-quoted; typed text only ever travels as base64.
+
+Not now closes the sheet and leaves a bar under the tab strip ("The agent is asking a question" with Answer). Opening a tab again surfaces its held prompt even if it was closed. A prompt answered from another client, or replaced by a newer one, updates or closes the sheet on the next read. A refused answer (exit 3, "the agent has moved on") keeps the sheet open and says so. Keys do not reach the terminal while the sheet is up.
+
+A held prompt on a tab that is not active shows only its `needs you` pill and the toast; it opens when that tab does.
+
+**Toast.** A session entering `waiting` (or getting a new prompt while waiting) raises the usual toast: `<machine> · <session>` over `<Agent>` and the agent's message, under the same rule as OSC notifications (not shown for the focused, active tab), the same 5 s per-session throttle, and the same click: window forward, that tab selected. With the window unfocused the taskbar button also flashes. `working` and `done` never toast; this is narrower than iOS, which also alerts on `done`, because a desktop window left open would fire one for every finished prompt.
+
+**Not ported.** The iOS in-app banner for another session on the same host (the pill and the toast cover it), and Approve/Deny/Reply buttons on the toast itself: Windows toasts here carry no actions.
 
 ### Connect
 

@@ -7,6 +7,7 @@ import { ServerFormPage, KeyGeneratePage, KeyMaterialPage } from "forms.slint";
 import { SettingsPage } from "settings.slint";
 import { SchemePickerPage, FontPickerPage } from "pickers.slint";
 import { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
+import { AgentVm } from "agents.slint";
 import { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
 
 import "../../../assets/fonts/CascadiaMono-Regular.ttf";
@@ -27,6 +28,7 @@ import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/ComicMono-
 export { Tokens } from "tokens.slint";
 export { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
 export { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
+export { AgentVm, AgentQuestionRow, AgentOption } from "agents.slint";
 export { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
 
 export component AppWindow inherits Window {

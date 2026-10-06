@@ -1,9 +1,11 @@
 import { Tokens } from "tokens.slint";
 import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
+import { AgentVm, AgentChip, AgentBanner, AgentSheet } from "agents.slint";
 
 export struct TermTab {
     name: string, cwd: string, active: bool, attention: bool,
     has-progress: bool, progress: float, progress-state: int,
+    agent-state: int, agent-label: string,   // -1 when the session reports no agent
 }
 
 export global TerminalVm {
@@ -91,6 +93,13 @@ component Header inherits Rectangle {
                     text: TerminalVm.word; font-size: 12px;
                     color: TerminalVm.lamp == 0 ? Tokens.warning : TerminalVm.lamp == 1 ? Tokens.success : Tokens.danger;
                 }
+                if AgentVm.line != "": Text {
+                    text: "· " + AgentVm.line;
+                    font-size: 12px;
+                    max-width: 520px;
+                    overflow: elide;
+                    color: AgentVm.line-state == 1 ? Tokens.warning : AgentVm.line-state == 0 ? Tokens.accent : Tokens.text-faint;
+                }
             }
         }
         Rectangle { horizontal-stretch: 1; }
@@ -143,6 +152,10 @@ component SessionTab inherits Rectangle {
         if root.tab.attention: VerticalLayout {
             alignment: center;
             Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; }
+        }
+        if root.tab.agent-state >= 0: VerticalLayout {
+            alignment: center;
+            AgentChip { state: root.tab.agent-state; label: root.tab.agent-label; }
         }
     }
     if root.tab.has-progress: ProgressBar {
@@ -225,6 +238,7 @@ export component TerminalPage inherits Rectangle {
         Header { }
         if TerminalVm.has-progress: ProgressBar { value: TerminalVm.progress; state: TerminalVm.progress-state; }
         TabStrip { }
+        if AgentVm.banner != "": AgentBanner { }
         Rectangle {
             vertical-stretch: 1;
             background: TerminalVm.well-color;
@@ -297,6 +311,7 @@ export component TerminalPage inherits Rectangle {
             }
         }
     }
+    if AgentVm.open: AgentSheet { }
     if TerminalVm.kill-name != "": ConfirmDialog {
         title: "Kill session " + TerminalVm.kill-name + "?";
         body: "Everything running in it stops. This can't be undone.";
