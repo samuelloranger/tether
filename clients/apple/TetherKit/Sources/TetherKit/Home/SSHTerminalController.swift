@@ -180,6 +180,7 @@ public final class SSHTerminalController {
     attach: String = defaultAttach,
     pushIdentity: PushRegistrar.PushIdentity? = nil,
     theme: TerminalTheme = .tether,
+    choosesInitialSession: Bool = true,
     dial: @escaping Dialer = { try await SSHConnector.connect(config: $0, store: $1) },
     control: ControlConnection? = nil
   ) {
@@ -188,6 +189,7 @@ public final class SSHTerminalController {
     self.config = config
     self.hostKeyStore = hostKeyStore
     self.attach = attach
+    self.didChooseInitialSession = !choosesInitialSession
     self.pushIdentity = pushIdentity
     self.dial = dial
     self.control = control ?? ControlConnection(config: config, store: hostKeyStore)
