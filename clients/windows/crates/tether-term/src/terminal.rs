@@ -6,11 +6,13 @@ use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::{Config, Osc52, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+use tether_core::graphics::{Assembler, Segment, Splitter};
 use tether_core::keymap::KeyContext;
 use tether_core::osc::{Notification, OscEvent, OscScanner, ReportEvent, TabReports};
 use tether_core::resize::GridSize;
 use tether_core::theme::TerminalTheme;
 
+use crate::images::{ImageStore, strip_tags};
 use crate::palette;
 
 pub const SCROLLBACK: usize = 10_000;
@@ -91,12 +93,15 @@ impl Dimensions for Dims {
 
 pub struct TabTerminal {
     pub(crate) term: Term<Collector>,
-    parser: Processor<StdSyncHandler>,
+    pub(crate) parser: Processor<StdSyncHandler>,
     events: Collector,
     pub(crate) theme: TerminalTheme,
-    size: GridSize,
+    pub(crate) size: GridSize,
     scanner: OscScanner,
     reports: TabReports,
+    splitter: Splitter,
+    pub(crate) assembler: Assembler,
+    pub(crate) images: ImageStore,
 }
 
 impl TabTerminal {
@@ -116,13 +121,25 @@ impl TabTerminal {
             size,
             scanner: OscScanner::new(),
             reports: TabReports::default(),
+            splitter: Splitter::new(),
+            assembler: Assembler::default(),
+            images: ImageStore::new(),
         }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<TermEvent> {
-        let osc = self.scanner.feed(bytes);
-        self.parser.advance(&mut self.term, bytes);
-        let mut out = self.drain();
+        let mut out = Vec::new();
+        let mut osc = Vec::new();
+        for segment in self.splitter.feed(bytes) {
+            match segment {
+                Segment::Bytes(plain) => {
+                    osc.extend(self.scanner.feed(&plain));
+                    self.parser.advance(&mut self.term, &plain);
+                    out.extend(self.drain());
+                }
+                image => self.run_segment(image, &mut out),
+            }
+        }
         for event in &osc {
             out.extend(self.apply_report(event));
         }
@@ -212,7 +229,10 @@ impl TabTerminal {
     }
 
     pub fn selection_text(&self) -> Option<String> {
-        self.term.selection_to_string().filter(|s| !s.is_empty())
+        self.term
+            .selection_to_string()
+            .map(|s| strip_tags(&s))
+            .filter(|s| !s.is_empty())
     }
 
     pub fn clear_selection(&mut self) {

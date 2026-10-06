@@ -3,6 +3,7 @@
 pub mod connect;
 pub mod edit;
 pub mod fonts;
+pub mod graphics;
 pub mod hints;
 pub mod hostkey;
 pub mod keymap;
