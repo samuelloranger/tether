@@ -8,3 +8,6 @@ publish = false
 tether-core = { path = "../tether-core" }
 alacritty_terminal = { version = "=0.26.0", default-features = false }
 swash = "=0.2.10"
+base64.workspace = true
+miniz_oxide = "0.8"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }

@@ -24,6 +24,7 @@ v1 is the loop they can do without the phone:
 
 Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Keyboard-interactive auth is a later slice.
 Push, notification actions, agent questions, agent status, git, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar as a bar (snippets replace it, see Snippets), and the app-icon picker. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
+Push, notification actions, agent questions, agent status, git, `zmx history`, the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
 
 Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their place.
 
@@ -235,6 +236,27 @@ The grid fills the rest of the window. Its background is the active theme's back
 - OSC 52 copies to the Windows clipboard, only while the window has focus. Programs cannot read the clipboard.
 - The bell flashes the header lamp once in the active tab, marks a background tab, and flashes the taskbar button when the window is not focused. A burst rings once: at most once per 200 ms per session, the iOS `BellThrottle` window. No sound.
 - The window title is `<machine> · <session>`, followed by the active tab's OSC 0/2 title when it set one.
+
+### Inline images
+
+`alacritty_terminal` has no image support, so `tether-core::graphics::Splitter` lifts the sequences out of the PTY stream before the grid sees them, and `tether-term` places them. Everything else reaches the grid unchanged and in order. A byte that might start an image sequence (a trailing `ESC`, `ESC _`, a prefix of `ESC ] 1337 ; File =`) is held until the next read decides it, so a split read never half-feeds the grid.
+
+Supported:
+
+- **Kitty graphics** (`ESC _ G … ESC \`), direct transmission only (`t=d`): `a=t` transmit, `a=T` transmit and display, `a=p` display by `i` or `I`, `a=d` delete, `a=q` query. Formats `f=24`, `f=32` (with `s`/`v`) and `f=100` (PNG), optional `o=z`, chunked `m=1`. Placement keys `c`, `r`, `x`/`y`/`w`/`h` (source rectangle), `X`/`Y` (pixel offset), `C=1` (do not move the cursor), `p` (a repeated placement id replaces the old one), `z` (kept for deletes only), `q`. Deletes: `d=a`/`A` (placements on the live screen), `i`/`I`, `n`/`N`, `c`/`C`, `p`/`P`, `x`/`X`, `y`/`Y`, `z`/`Z`; an uppercase letter also frees the picture data.
+- **iTerm2** `OSC 1337 ; File=…:base64` with `inline=1` (PNG or JPEG), `width`/`height` as cells, `Npx`, `N%` or `auto`, and `preserveAspectRatio`. `inline=0` (a download) is swallowed and not shown.
+
+Answers are honest: `a=q` replies `OK` only when the same command would be accepted. A transmission by file, temp file or shared memory replies `ENOTSUP`, as do animation (`a=f`/`a=a`/`a=c`), Unicode placeholders (`U=1`) and unknown formats. Bad data replies `EINVAL`, a pixel size over the cap `EFBIG`, and a missing image `ENOENT`. Nothing is sent when the command carries no `i`/`I`; `q=1`/`q=2` silence OK/everything.
+
+Placement. The image goes at the cursor. Its box is the picture's natural size in whole cells, scaled down (never clipped) to the room left on the line and `MAX_IMAGE_ROWS` (64) rows. The cursor then moves down `rows - 1` lines (scrolling like a line feed) and to the column after the image, the same as kitty. A pending synchronized update (`?2026`) is flushed first, because the cursor has to be real.
+
+Anchoring. A placement is a set of private-use zero-width characters, one per image row, written into the first column of the image in the grid itself. They scroll into history with their lines, are dropped with them at the 10 000-line limit, reflow on resize, are erased by clear screen and live on the alternate screen only while it does. The anchors are stripped from snapshots and selected text. Text written over a row's cell erases that row's anchor; the image stays while any of its rows keeps one. A tag index is reused only after the grid is scrubbed of the old one.
+
+Drawing. The rasterizer composites each visible image after the text with a box filter, clipped to the viewport (a half-scrolled image is cut, not wrapped), with the scaled copy cached per size. Z-index below zero is not honored: images always draw over text.
+
+Limits. 128 MiB of decoded pixels and 128 pictures per tab, oldest evicted first, and a picture whose placements have all left the grid is freed before any eviction. One picture is at most 16 Mpixel and 8192 px a side; one transmission at most 48 MiB of base64. Over the cap, the sequence is swallowed to its terminator and replied to with an error.
+
+Known gaps: the inactive screen's anchors cannot be scrubbed while the alternate screen is up; text over every anchored row drops the image even where a program meant it to stay; images are not part of search or copy.
 
 ### Keyboard
 

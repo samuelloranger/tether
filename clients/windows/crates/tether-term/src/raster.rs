@@ -7,6 +7,7 @@ use tether_core::fonts::FontFace;
 use tether_core::prefs::CursorShape;
 use tether_core::theme::TerminalTheme;
 
+use crate::compose::ImageCache;
 use crate::glyphs::{FaceSlot, GlyphAtlas, GlyphKey, RasterGlyph, face_data, resolve};
 use crate::metrics::{FaceMetrics, face_metrics};
 use crate::snapshot::{RenderCell, Snapshot};
@@ -91,6 +92,7 @@ pub struct Rasterizer {
     shape: ShapeContext,
     atlas: GlyphAtlas,
     resolved: HashMap<(&'static str, bool, char), (FaceSlot, u16)>,
+    images: ImageCache,
 }
 
 impl Default for Rasterizer {
@@ -106,6 +108,7 @@ impl Rasterizer {
             shape: ShapeContext::new(),
             atlas: GlyphAtlas::new(),
             resolved: HashMap::new(),
+            images: ImageCache::default(),
         }
     }
 
@@ -200,6 +203,13 @@ impl Rasterizer {
             if ligatures {
                 self.draw_shaped_row(&mut img, snap, style, &m, row, cell_x(0), y);
             }
+        }
+        for view in &snap.images {
+            let x = cell_x(view.col) + view.offset.0 as i32;
+            let y = origin_y + (view.row as f32 * m.cell_h) as i32 + view.offset.1 as i32;
+            let dw = (view.cols as f32 * m.cell_w * view.fill_w) as i32;
+            let dh = (view.rows as f32 * m.cell_h * view.fill_h) as i32;
+            self.images.draw(&mut img, view, x, y, dw.max(1), dh.max(1));
         }
         self.draw_thin_cursor(&mut img, snap, style, &m, cell_x, cell_y);
         img
@@ -565,5 +575,67 @@ mod tests {
         let last = shaped.last().unwrap();
         assert_eq!(last.0, 5);
         assert_eq!(last.2, 5.0 * cw, "the last glyph sits exactly on its cell");
+    }
+    fn red_image(control: &str) -> Vec<u8> {
+        use base64::Engine;
+        let px = [255u8, 0, 0, 255].repeat(4);
+        let data = base64::engine::general_purpose::STANDARD.encode(px);
+        format!("\x1b_Ga=T,f=32,s=2,v=2,{control};{data}\x1b\\").into_bytes()
+    }
+
+    #[test]
+    fn images_are_drawn_over_their_cells_and_nowhere_else() {
+        let theme = theme_named("tether");
+        let st = style(theme, 1.0);
+        let (cw, ch) = cell_metrics(st.font, st.size_px, 1.0);
+        let mut t = TabTerminal::new(size(20, 4), theme_named("tether"));
+        t.feed(&red_image("c=4,r=2"));
+        let height = (4.0 * ch) as u32 + 2 * st.padding_px;
+        let img = Rasterizer::new().render(&t.snapshot(), &st, 300, height);
+        let top = height - st.padding_px - (4.0 * ch) as u32;
+        let (x, y) = (st.padding_px, top);
+        assert_eq!(img.pixel(x + 2, y + 2), rgba(0xFF0000));
+        assert_eq!(
+            img.pixel(x + (4.0 * cw) as u32 - 2, y + (2.0 * ch) as u32 - 2),
+            rgba(0xFF0000)
+        );
+        assert_eq!(
+            img.pixel(x + (4.0 * cw) as u32 + 2, y + 2),
+            rgba(theme.background)
+        );
+        assert_eq!(
+            img.pixel(x + 2, y + (2.0 * ch) as u32 + 2),
+            rgba(theme.background)
+        );
+    }
+
+    #[test]
+    fn a_half_scrolled_image_is_clipped_not_wrapped() {
+        let theme = theme_named("tether");
+        let st = style(theme, 1.0);
+        let (_, ch) = cell_metrics(st.font, st.size_px, 1.0);
+        let mut t = TabTerminal::new(size(20, 4), theme_named("tether"));
+        t.feed(&red_image("c=3,r=3"));
+        t.feed(b"\r\n\r\n\r\n");
+        let snap = t.snapshot();
+        assert!(snap.images[0].row < 0);
+        let height = (4.0 * ch) as u32 + 2 * st.padding_px;
+        let img = Rasterizer::new().render(&snap, &st, 300, height);
+        let top = height - st.padding_px - (4.0 * ch) as u32;
+        assert_eq!(img.pixel(st.padding_px + 2, top + 2), rgba(0xFF0000));
+        assert_eq!(
+            img.pixel(st.padding_px + 2, top + (2.0 * ch) as u32),
+            rgba(theme.background)
+        );
+    }
+
+    #[test]
+    fn scaling_averages_and_keeps_transparency() {
+        let mut t = TabTerminal::new(size(20, 4), theme_named("tether"));
+        t.feed(&red_image("c=1,r=1"));
+        let view = t.snapshot().images.pop().unwrap();
+        let out = crate::compose::scale(&view, 3, 5);
+        assert_eq!(out.len(), 3 * 5 * 4);
+        assert!(out.chunks(4).all(|p| p == [255, 0, 0, 255]));
     }
 }

@@ -4,6 +4,7 @@ pub mod connect;
 pub mod edit;
 pub mod fonts;
 pub mod googlefonts;
+pub mod graphics;
 pub mod hints;
 pub mod history;
 pub mod hostkey;

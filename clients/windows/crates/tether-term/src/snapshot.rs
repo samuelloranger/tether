@@ -4,6 +4,7 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::CursorShape as TermCursorShape;
 use tether_core::links::LinkSpan;
 
+use crate::images::{ImageView, is_tag};
 use crate::palette;
 use crate::search::SearchHit;
 use crate::terminal::{Cell, TabTerminal};
@@ -34,6 +35,7 @@ pub struct Snapshot {
     pub osc8: Vec<Vec<LinkSpan>>,
     pub display_offset: usize,
     pub background: u32,
+    pub images: Vec<ImageView>,
 }
 
 impl Snapshot {
@@ -117,7 +119,10 @@ impl TabTerminal {
                 }
                 cells.push(RenderCell {
                     ch,
-                    zerowidth: cell.zerowidth().map(<[char]>::to_vec).unwrap_or_default(),
+                    zerowidth: cell
+                        .zerowidth()
+                        .map(|z| z.iter().copied().filter(|c| !is_tag(*c)).collect())
+                        .unwrap_or_default(),
                     fg,
                     bg,
                     bold: flags.contains(Flags::BOLD),
@@ -155,6 +160,7 @@ impl TabTerminal {
             osc8,
             display_offset: offset,
             background: theme.background,
+            images: self.image_views(),
         }
     }
 }
