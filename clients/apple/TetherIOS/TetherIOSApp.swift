@@ -26,7 +26,9 @@ struct TetherIOSApp: App {
           if phase == .active { TetherMacWindow.configureScenes() }
         }
     }
+    #if targetEnvironment(macCatalyst)
     .commands { TetherCommands() }
+    #endif
   }
 
   @ViewBuilder private var content: some View {
@@ -87,10 +89,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     return true
   }
 
+  #if targetEnvironment(macCatalyst)
   override func buildMenu(with builder: any UIMenuBuilder) {
     super.buildMenu(with: builder)
     TetherMacWindow.removeDeadMenus(from: builder)
   }
+  #endif
 
   func application(
     _ application: UIApplication,

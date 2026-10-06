@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// True in the Mac Catalyst build. Mac-only layout and behaviour branch on this,
 /// so the iPhone app is unchanged.
@@ -15,7 +16,16 @@ extension View {
   /// header should look like the icon buttons beside it.
   @ViewBuilder public func macPlainMenu() -> some View {
     #if targetEnvironment(macCatalyst)
-    menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+    menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).macMenuIcons()
+    #else
+    self
+    #endif
+  }
+
+  /// Mac menus draw a `Label` as its title alone; the phone shows the icon too.
+  @ViewBuilder public func macMenuIcons() -> some View {
+    #if targetEnvironment(macCatalyst)
+    labelStyle(.titleAndIcon)
     #else
     self
     #endif
@@ -79,5 +89,60 @@ extension FocusedValues {
   public var appPreferences: AppPreferences? {
     get { self[AppPreferencesKey.self] }
     set { self[AppPreferencesKey.self] = newValue }
+  }
+}
+
+/// A menu item's title and icon. macOS 27 hides menu images unless asked: an app built
+/// with the 27 SDK opts in (`titleAndIcon`, `preferredImageVisibility`), while one built
+/// with an older SDK has its SF Symbols hidden for good, so it gets a pre-rendered bitmap.
+public struct MenuLabel: View {
+  private let title: LocalizedStringKey
+  private let systemImage: String
+
+  public init(_ title: LocalizedStringKey, systemImage: String) {
+    self.title = title
+    self.systemImage = systemImage
+  }
+
+  public var body: some View {
+    Label { Text(title) } icon: { MenuIcon.image(systemImage) }
+      .macMenuIcons()
+  }
+}
+
+public enum MenuIcon {
+  #if targetEnvironment(macCatalyst) && !compiler(>=6.4)
+  private static let symbolsHidden = true
+  #else
+  private static let symbolsHidden = false
+  #endif
+
+  public static func image(_ systemName: String) -> Image {
+    if symbolsHidden, let bitmap = uiImage(systemName) {
+      return Image(uiImage: bitmap).renderingMode(.template)
+    }
+    return Image(systemName: systemName)
+  }
+
+  public static func uiImage(_ systemName: String) -> UIImage? {
+    guard let symbol = UIImage(systemName: systemName) else { return nil }
+    guard symbolsHidden else { return symbol }
+    let config = UIImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+    guard let sized = UIImage(systemName: systemName, withConfiguration: config) else { return symbol }
+    return UIGraphicsImageRenderer(size: sized.size)
+      .image { _ in sized.draw(at: .zero) }
+      .withRenderingMode(.alwaysTemplate)
+  }
+
+  /// A UIKit menu action whose icon shows on the Mac.
+  public static func action(
+    _ title: String, systemImage: String, attributes: UIMenuElement.Attributes = [],
+    handler: @escaping UIActionHandler
+  ) -> UIAction {
+    let action = UIAction(title: title, image: uiImage(systemImage), attributes: attributes, handler: handler)
+    #if targetEnvironment(macCatalyst) && compiler(>=6.4)
+    if #available(macCatalyst 27.0, *) { action.preferredImageVisibility = .visible }
+    #endif
+    return action
   }
 }

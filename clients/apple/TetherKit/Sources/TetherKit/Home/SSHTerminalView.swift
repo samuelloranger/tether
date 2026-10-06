@@ -327,18 +327,21 @@ public struct SSHTerminalView: View {
       headerButton("arrow.triangle.branch", id: "sshTerminalGit", label: "Git changes") { showGit = true }
       headerButton("gearshape", id: "sshTerminalSettings", label: "Terminal settings") { showSettings = true }
       Menu {
-        Button(action: newSession) { Label("New session", systemImage: "plus") }
-        Button { showFileImporter = true } label: { Label("Send file…", systemImage: "square.and.arrow.up") }
-        Button { showPhotoPicker = true } label: { Label("Send photo or video…", systemImage: "photo") }
-        Button(action: copySelection) { Label("Copy selection", systemImage: "doc.on.doc") }
-          .disabled(selectionText?.isEmpty ?? true)
-        Button { showHistory = true } label: { Label("Terminal history", systemImage: "clock.arrow.circlepath") }
-        Divider()
-        Button { jump(.previous) } label: { Label("Previous prompt", systemImage: "chevron.up") }
-        Button { jump(.next) } label: { Label("Next prompt", systemImage: "chevron.down") }
-        Button(action: copyLastOutput) { Label("Copy last output", systemImage: "text.badge.checkmark") }
-        Divider()
-        Button(role: .destructive) { pendingKill = controller.attach } label: { Label("Kill \(controller.attach)", systemImage: "xmark.circle") }
+        Group {
+          Button(action: newSession) { MenuLabel("New session", systemImage: "plus") }
+          Button { showFileImporter = true } label: { MenuLabel("Send file…", systemImage: "square.and.arrow.up") }
+          Button { showPhotoPicker = true } label: { MenuLabel("Send photo or video…", systemImage: "photo") }
+          Button(action: copySelection) { MenuLabel("Copy selection", systemImage: "doc.on.doc") }
+            .disabled(selectionText?.isEmpty ?? true)
+          Button { showHistory = true } label: { MenuLabel("Terminal history", systemImage: "clock.arrow.circlepath") }
+          Divider()
+          Button { jump(.previous) } label: { MenuLabel("Previous prompt", systemImage: "chevron.up") }
+          Button { jump(.next) } label: { MenuLabel("Next prompt", systemImage: "chevron.down") }
+          Button(action: copyLastOutput) { MenuLabel("Copy last output", systemImage: "text.badge.checkmark") }
+          Divider()
+          Button(role: .destructive) { pendingKill = controller.attach } label: { MenuLabel("Kill \(controller.attach)", systemImage: "xmark.circle") }
+        }
+        .macMenuIcons()
       } label: {
         Image(systemName: "ellipsis").font(.title3.weight(.semibold))
           .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())

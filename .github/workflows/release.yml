@@ -2,7 +2,7 @@ name: Release builds
 
 # scripts/release.sh pushes the tag vX.Y.Z, which starts this workflow. The
 # `draft` job opens a DRAFT release, `ios` and `mac` upload their builds, and
-# only when both succeed does `publish` take it out of draft. A failed build therefore
+# only when the iOS one succeeds does `publish` take it out of draft. A failed build therefore
 # never becomes the public `releases/latest`. Manual runs are build-only: they
 # upload workflow artifacts without touching a release.
 #
@@ -348,6 +348,9 @@ jobs:
     needs: draft
     if: github.event_name == 'push' || inputs.scope == 'mac' || inputs.scope == 'mac-testflight'
     runs-on: macos-26
+    # The Mac app rides along with the iOS release; a Mac failure never holds the
+    # GitHub release in draft.
+    continue-on-error: true
     steps:
       - name: Check signing secrets
         id: signing
@@ -442,9 +445,9 @@ jobs:
           install_profile "$PROFILE_B64" APP_PROVISIONING_PROFILE_SPECIFIER
           install_profile "$NSE_PROFILE_B64" NSE_PROVISIONING_PROFILE_SPECIFIER
 
-          INSTALLER_ID="$(security find-identity -v "$KEYCHAIN" | awk '/3rd Party Mac Developer Installer/ {print $2; exit}')"
-          [ -n "$INSTALLER_ID" ] || { echo "::error::No installer identity in the keychain"; exit 1; }
-          echo "INSTALLER_ID=$INSTALLER_ID" >> "$GITHUB_ENV"
+          INSTALLER_IDENTITY="$(security find-identity -v "$KEYCHAIN" | sed -n 's/.*"\(3rd Party Mac Developer Installer[^"]*\)".*/\1/p' | head -1)"
+          [ -n "$INSTALLER_IDENTITY" ] || { echo "::error::No installer identity in the keychain"; exit 1; }
+          echo "INSTALLER_IDENTITY=$INSTALLER_IDENTITY" >> "$GITHUB_ENV"
           security find-identity -v "$KEYCHAIN" | sed 's/([0-9A-F]*)/(…)/'
 
       # A signed Release build, not an archive: archiving the Catalyst app with
@@ -478,10 +481,11 @@ jobs:
           set -euo pipefail
           APP=build/dd/Build/Products/Release-maccatalyst/TetherIOS.app
           codesign --verify --deep --strict "$APP"
-          codesign -d --entitlements - "$APP" 2>/dev/null | grep -q com.apple.security.app-sandbox \
+          codesign -d --entitlements - --xml "$APP" > build/entitlements.plist 2>/dev/null
+          grep -q com.apple.security.app-sandbox build/entitlements.plist \
             || { echo "::error::The Mac app is not sandboxed"; exit 1; }
           mkdir -p build/export
-          xcrun productbuild --sign "$INSTALLER_ID" --component "$APP" /Applications build/export/Tether.pkg
+          xcrun productbuild --sign "$INSTALLER_IDENTITY" --component "$APP" /Applications build/export/Tether.pkg
 
       - name: Remove the signing keychain
         if: always() && steps.signing.outputs.ready == 'true'
@@ -518,7 +522,8 @@ jobs:
           name: tether-mac-${{ github.sha }}
           path: build/export/Tether.pkg
 
-  # The gate: the ios and mac builds must succeed before the release leaves draft.
+  # The gate: the ios build must succeed before the release leaves draft. It also
+  # waits for mac, which is continue-on-error, so the Mac upload lands first.
   # Publishing is also what makes the tag public; until then `releases/latest`
   # still points at the previous good release.
   publish:

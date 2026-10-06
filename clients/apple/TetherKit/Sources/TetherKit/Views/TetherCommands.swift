@@ -32,35 +32,35 @@ public struct TetherCommands: Commands {
 
   public var body: some Commands {
     CommandGroup(replacing: .appSettings) {
-      Button("Settings…") { (terminal?.openSettings ?? home?.openSettings)?() }
+      Button { (terminal?.openSettings ?? home?.openSettings)?() } label: { MenuLabel("Settings…", systemImage: "gearshape") }
         .keyboardShortcut(",", modifiers: .command)
         .disabled(!available.settings)
     }
 
     CommandGroup(replacing: .newItem) {
-      Button("New Session") { terminal?.newSession?() }
+      Button { terminal?.newSession?() } label: { MenuLabel("New Session", systemImage: "plus") }
         .keyboardShortcut("t", modifiers: .command)
         .disabled(!available.newSession)
-      Button("Add Machine…") { home?.addMachine?() }
+      Button { home?.addMachine?() } label: { MenuLabel("Add Machine…", systemImage: "plus") }
         .keyboardShortcut("n", modifiers: .command)
         .disabled(!available.addMachine)
       Divider()
-      Button("Kill Session…") { terminal?.killSession?() }
+      Button { terminal?.killSession?() } label: { MenuLabel("Kill Session…", systemImage: "xmark.circle") }
         .disabled(terminal?.killSession == nil)
-      Button("Send File…") { terminal?.sendFile?() }
+      Button { terminal?.sendFile?() } label: { MenuLabel("Send File…", systemImage: "square.and.arrow.up") }
         .keyboardShortcut("u", modifiers: [.command, .shift])
         .disabled(terminal?.sendFile == nil)
       Divider()
-      Button("Back to Machines") { terminal?.backToMachines?() }
+      Button { terminal?.backToMachines?() } label: { MenuLabel("Back to Machines", systemImage: "chevron.left") }
         .keyboardShortcut("m", modifiers: [.command, .shift])
         .disabled(!available.backToMachines)
     }
 
     CommandMenu("Session") {
-      Button("Next Session") { terminal?.nextSession?() }
+      Button { terminal?.nextSession?() } label: { MenuLabel("Next Session", systemImage: "chevron.right") }
         .keyboardShortcut("]", modifiers: [.command, .shift])
         .disabled(terminal?.nextSession == nil)
-      Button("Previous Session") { terminal?.previousSession?() }
+      Button { terminal?.previousSession?() } label: { MenuLabel("Previous Session", systemImage: "chevron.left") }
         .keyboardShortcut("[", modifiers: [.command, .shift])
         .disabled(terminal?.previousSession == nil)
       Divider()
@@ -70,22 +70,22 @@ public struct TetherCommands: Commands {
           .disabled(!(terminal?.canSelectSession(at: index) ?? false))
       }
       Divider()
-      Button("History") { terminal?.showHistory?() }
+      Button { terminal?.showHistory?() } label: { MenuLabel("History", systemImage: "clock.arrow.circlepath") }
         .keyboardShortcut("h", modifiers: [.command, .shift])
         .disabled(terminal?.showHistory == nil)
-      Button("Git") { terminal?.showGit?() }
+      Button { terminal?.showGit?() } label: { MenuLabel("Git", systemImage: "arrow.triangle.branch") }
         .keyboardShortcut("g", modifiers: [.command, .shift])
         .disabled(terminal?.showGit == nil)
     }
 
     CommandGroup(before: .toolbar) {
-      Button("Bigger") { preferences?.makeTerminalTextBigger() }
+      Button { preferences?.makeTerminalTextBigger() } label: { MenuLabel("Bigger", systemImage: "textformat.size.larger") }
         .keyboardShortcut("+", modifiers: .command)
         .disabled(preferences == nil || terminal == nil)
-      Button("Smaller") { preferences?.makeTerminalTextSmaller() }
+      Button { preferences?.makeTerminalTextSmaller() } label: { MenuLabel("Smaller", systemImage: "textformat.size.smaller") }
         .keyboardShortcut("-", modifiers: .command)
         .disabled(preferences == nil || terminal == nil)
-      Button("Actual Size") { preferences?.resetTerminalTextSize() }
+      Button { preferences?.resetTerminalTextSize() } label: { MenuLabel("Actual Size", systemImage: "textformat.size") }
         .keyboardShortcut("0", modifiers: .command)
         .disabled(preferences == nil || terminal == nil)
       Divider()

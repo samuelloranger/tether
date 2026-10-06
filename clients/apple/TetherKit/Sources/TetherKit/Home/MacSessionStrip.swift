@@ -109,7 +109,7 @@ private struct MacSessionTab: View {
     }
     .buttonStyle(TetherPressStyle())
     .contextMenu {
-      Button(role: .destructive) { onKill(name) } label: { Label("Kill session…", systemImage: "xmark.circle") }
+      Button(role: .destructive) { onKill(name) } label: { MenuLabel("Kill session…", systemImage: "xmark.circle") }
     }
     .onChange(of: controller?.bellRings) { tabs.noteBell(name) }
     .accessibilityLabel(accessibilityText(agent: agent, attention: attention))

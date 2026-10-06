@@ -230,13 +230,18 @@ public struct HomeView: View {
         ForEach(model.profiles) { profile in
           MachineCardView(profile: profile, authLabel: model.authLabel(for: profile), onOpen: { onOpen(profile) })
             .contextMenu {
-              Button { onOpen(profile) } label: { Label("Open", systemImage: "terminal") }
-              Button { UIPasteboard.general.string = "\(profile.username)@\(profile.host):\(profile.port)" } label: {
-                Label("Copy address", systemImage: "doc.on.doc")
+              Group {
+                if TetherPlatform.isMac {
+                  Button { onOpen(profile) } label: { MenuLabel("Open", systemImage: "terminal") }
+                  Button { UIPasteboard.general.string = "\(profile.username)@\(profile.host):\(profile.port)" } label: {
+                    MenuLabel("Copy address", systemImage: "doc.on.doc")
+                  }
+                }
+                Button(role: .destructive) { pendingServerRemoval = profile } label: {
+                  MenuLabel("Remove", systemImage: "trash")
+                }
               }
-              Button(role: .destructive) { pendingServerRemoval = profile } label: {
-                Label("Remove", systemImage: "trash")
-              }
+              .macMenuIcons()
             }
         }
       }
@@ -251,12 +256,15 @@ public struct HomeView: View {
           ForEach(model.keys) { key in
             KeyCardView(record: key, usedBy: model.machinesUsing(keyId: key.id))
               .contextMenu {
-                Button { UIPasteboard.general.string = key.publicKey } label: {
-                  Label("Copy public key", systemImage: "doc.on.doc")
+                Group {
+                  Button { UIPasteboard.general.string = key.publicKey } label: {
+                    MenuLabel("Copy public key", systemImage: "doc.on.doc")
+                  }
+                  Button(role: .destructive) { pendingKeyDeletion = key } label: {
+                    MenuLabel("Delete key", systemImage: "trash")
+                  }
                 }
-                Button(role: .destructive) { pendingKeyDeletion = key } label: {
-                  Label("Delete key", systemImage: "trash")
-                }
+                .macMenuIcons()
               }
           }
           if model.keys.isEmpty {

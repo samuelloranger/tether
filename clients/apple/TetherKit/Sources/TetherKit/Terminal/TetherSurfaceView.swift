@@ -895,21 +895,21 @@ extension TetherSurfaceView: UIContextMenuInteractionDelegate {
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
       var items: [UIMenuElement] = []
       if let text {
-        items.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+        items.append(MenuIcon.action("Copy", systemImage: "doc.on.doc") { _ in
           UIPasteboard.general.string = text
         })
       }
-      items.append(UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { _ in
+      items.append(MenuIcon.action("Paste", systemImage: "doc.on.clipboard") { _ in
         // Down the responder chain from the focused input view, which owns bracketed paste.
         UIApplication.shared.sendAction(#selector(UIResponder.paste(_:)), to: nil, from: self, for: nil)
       })
       if let target {
         if case .external = target {
-          items.append(UIAction(title: "Open Link", image: UIImage(systemName: "safari")) { _ in
+          items.append(MenuIcon.action("Open Link", systemImage: "safari") { _ in
             self?.onOpenLink?(target)
           })
         }
-        items.append(UIAction(title: "Copy Link", image: UIImage(systemName: "link")) { _ in
+        items.append(MenuIcon.action("Copy Link", systemImage: "link") { _ in
           self?.onCopyLink?(target)
         })
       }
