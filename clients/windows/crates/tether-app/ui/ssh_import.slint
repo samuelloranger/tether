@@ -1,0 +1,85 @@
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { AppBridge, SshImportBridge, ImportRow } from "bridge.slint";
+import { Hint, PageChrome, PrimaryButton } from "components.slint";
+
+component ImportRowView inherits Rectangle {
+    in property <ImportRow> entry;
+    in property <int> index;
+    height: 58px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    focus := FocusScope {
+        enabled: !root.entry.existing;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) { SshImportBridge.toggle(root.index); return accept; }
+            reject
+        }
+    }
+    TouchArea {
+        enabled: !root.entry.existing;
+        mouse-cursor: root.entry.existing ? default : pointer;
+        clicked => { focus.focus(); SshImportBridge.toggle(root.index); }
+    }
+    Rectangle {
+        border-width: focus.has-focus ? 2px : 0px;
+        border-color: Tokens.accent;
+        border-radius: 6px;
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 6px;
+        padding-right: 6px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 18px; height: 18px; border-radius: 5px;
+                border-width: 1.5px;
+                border-color: root.entry.checked ? Tokens.accent : Tokens.border;
+                background: root.entry.checked ? Tokens.accent : transparent;
+                opacity: root.entry.existing ? 0.4 : 1;
+                Text { text: "✓"; visible: root.entry.checked; color: Tokens.on-accent; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: root.entry.label; color: Tokens.text; font-weight: 600; overflow: elide; }
+                if root.entry.via != "": Text { text: root.entry.via; color: Tokens.text-secondary; font-size: 12px; vertical-alignment: center; }
+                if root.entry.existing: Text { text: "already on Home"; color: Tokens.text-faint; font-size: 12px; vertical-alignment: center; }
+            }
+            Text { text: root.entry.detail + " · " + root.entry.auth; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-secondary; overflow: elide; }
+        }
+    }
+}
+
+export component SshImportPage inherits PageChrome {
+    title: "Import from SSH config";
+    column-width: 620px;
+    back => { AppBridge.back(); }
+    VerticalLayout {
+        spacing: 10px;
+        padding-bottom: 24px;
+        Text {
+            text: "Hosts from ~/.ssh/config. Keys named by IdentityFile come into the vault; a key with a passphrase, or none, uses the SSH agent. ProxyJump becomes Connect through.";
+            wrap: word-wrap; font-size: 13px; color: Tokens.text-secondary;
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                for row[i] in SshImportBridge.rows: ImportRowView { entry: row; index: i; }
+            }
+        }
+        HorizontalLayout {
+            alignment: start;
+            PrimaryButton {
+                text: SshImportBridge.import-label;
+                enabled: SshImportBridge.can-import;
+                clicked => { SshImportBridge.import(); }
+            }
+        }
+        if SshImportBridge.hint != "": Hint { text: SshImportBridge.hint; }
+    }
+}

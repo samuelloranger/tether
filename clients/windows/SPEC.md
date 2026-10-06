@@ -76,6 +76,19 @@ Empty:
 
 Primary action: **Add a server**.
 
+### Import from SSH config
+
+**Import** on Home (and **Import from SSH config** under the empty state) reads `%USERPROFILE%\.ssh\config` with the OpenSSH rules Tether needs: `Host` blocks with `*`, `?` and `!` patterns, first value wins, `Include` (relative to `.ssh`, with globs), and keywords in any case. `Match` blocks are skipped. Every alias written out in a `Host` line becomes a row; wildcard-only blocks only supply defaults.
+
+Each row shows the alias, `user@host:port`, how it authenticates, and `via <jump>`:
+
+- `HostName`, `Port`, and `User` fill the machine; with no `User`, the Windows user name.
+- `IdentityFile` brings that key into the vault (named after the file). A key already in the vault is reused, a key shared by several hosts comes in once, and a key with a passphrase, or a missing file, leaves the machine on the SSH agent; the row says why.
+- `ProxyJump` sets **Connect through**: an alias points at that alias's row, and `[user@]host[:port]` gets a row of its own. With a hop list, the last hop is the machine connected through; a hop that is not an alias passes through the hops before it.
+- A host whose user, host and port are already saved reads "already on Home" and can't be checked; a jump through it points at the saved machine.
+
+New hosts start checked. Unchecking a host that another checked host goes through keeps it checked. **Import N machines** saves the keys first, then the machines, and returns to Home; if saving the machines fails, the keys come back out.
+
 ### Add a server, Edit server
 
 One form, two titles. Add starts empty; Edit starts from the machine and its button reads **Save changes**.

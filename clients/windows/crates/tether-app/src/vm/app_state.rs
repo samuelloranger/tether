@@ -129,6 +129,46 @@ impl AppState {
         Ok(id)
     }
 
+    /// Keys first, then machines; a failed machine save takes the new keys back out.
+    pub fn import_hosts(
+        &mut self,
+        rows: &[tether_core::sshimport::ImportRow],
+        picked: &[usize],
+        now: i64,
+    ) -> Result<usize, AppError> {
+        use tether_core::sshimport::{keys_to_add, machines_to_add};
+        let mut added = Vec::new();
+        for k in keys_to_add(rows, picked) {
+            let mut record = import_record(&k.name, &k.public_line, KeyOrigin::Imported, now);
+            record.id = k.id;
+            match self.add_key(record, k.private.as_bytes()) {
+                Ok(id) => added.push(id),
+                Err(e) => {
+                    self.forget_keys(&added);
+                    return Err(e);
+                }
+            }
+        }
+        let machines = machines_to_add(rows, picked);
+        let count = machines.len();
+        let mut next = self.profiles.clone();
+        for m in machines {
+            next.add(m);
+        }
+        if let Err(e) = self.data.save(PROFILES_FILE, &next) {
+            self.forget_keys(&added);
+            return Err(e.into());
+        }
+        self.profiles = next;
+        Ok(count)
+    }
+
+    fn forget_keys(&mut self, ids: &[Uuid]) {
+        for id in ids {
+            let _ = self.delete_key(*id);
+        }
+    }
+
     pub fn delete_key(&mut self, id: Uuid) -> Result<(), AppError> {
         let mut next = self.keys.clone();
         next.remove(id);
@@ -149,6 +189,38 @@ mod tests {
         let hostkeys = Arc::new(MemoryHostKeys::default());
         let s = AppState::load(DataDir::new(dir), secrets.clone(), hostkeys.clone()).unwrap();
         (s, secrets, hostkeys)
+    }
+
+    #[test]
+    fn importing_hosts_adds_their_keys_and_machines_together() {
+        use tether_core::sshconfig::ConfigHost;
+        use tether_core::sshimport::plan;
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, secrets, _) = state(dir.path());
+        let (_, pem) = tether_core::generate_ed25519("k", 0);
+        let pem = pem.to_string();
+        let rows = plan(
+            &[ConfigHost {
+                alias: "devbox".into(),
+                host: "192.0.2.20".into(),
+                port: 22,
+                user: Some("dev".into()),
+                identity_file: Some("/k/id".into()),
+                jumps: Vec::new(),
+            }],
+            &[],
+            &s.keys,
+            "w",
+            &|_| Some(pem.clone()),
+        );
+        assert_eq!(s.import_hosts(&rows, &[0], 1).unwrap(), 1);
+        let key = &s.keys.keys[0];
+        assert_eq!(key.name, "id");
+        assert_eq!(
+            s.profiles.machines[0].auth,
+            tether_core::Auth::Key { id: key.id }
+        );
+        assert!(secrets.get(&key_account(key.id)).unwrap().is_some());
     }
 
     fn form(auth: AuthChoice, password: &str) -> ServerForm {

@@ -15,6 +15,8 @@ pub mod prefs;
 pub mod profiles;
 pub mod resize;
 pub mod secrets;
+pub mod sshconfig;
+pub mod sshimport;
 pub mod store;
 pub mod tabs;
 pub mod theme;

@@ -1,4 +1,4 @@
-export enum PageKind { home, server-form, key-generate, key-import, key-paste, settings, scheme-picker, font-picker, terminal, host-key-refused, couldnt-connect }
+export enum PageKind { home, ssh-import, server-form, key-generate, key-import, key-paste, settings, scheme-picker, font-picker, terminal, host-key-refused, couldnt-connect }
 
 export global AppBridge {
     in property <PageKind> page: PageKind.home;
@@ -38,6 +38,7 @@ export global HomeBridge {
     in property <[KeyCard]> keys;
     callback tab-changed(int);
     callback add-machine();
+    callback import-ssh-config();
     callback open-settings();
     callback open-machine(string);
     callback edit-machine(string);
@@ -138,4 +139,22 @@ export global PickerBridge {
     callback query-changed();
     callback choose-scheme(string);
     callback choose-font(string);
+}
+
+export struct ImportRow {
+    label: string,
+    detail: string,
+    auth: string,
+    via: string,
+    existing: bool,
+    checked: bool,
+}
+
+export global SshImportBridge {
+    in property <[ImportRow]> rows;
+    in property <string> import-label: "Import";
+    in property <bool> can-import;
+    in property <string> hint;
+    callback toggle(int);
+    callback import();
 }

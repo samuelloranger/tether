@@ -5,6 +5,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Page {
     Home,
+    SshImport,
     ServerForm { editing: Option<Uuid> },
     KeyGenerate,
     KeyImport,
