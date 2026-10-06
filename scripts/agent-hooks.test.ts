@@ -1,5 +1,15 @@
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -167,6 +177,17 @@ test('cursor postToolUse answers {} while beforeSubmitPrompt continues; gemini a
   });
   expect(hook(env, 'gemini', 'working', { cwd: '/src/proj', hook_event_name: 'BeforeAgent' }).trim()).toBe('{}');
   expect(hook(env, 'gemini', 'clear', { cwd: '/src/proj', hook_event_name: 'SessionEnd' }).trim()).toBe('{}');
+});
+
+test('codex waiting uses tool_name when tool_input is not an object', () => {
+  const env = install();
+  hook(env, 'codex', 'waiting', {
+    cwd: '/src/proj',
+    hook_event_name: 'PermissionRequest',
+    tool_name: 'Bash',
+    tool_input: 'x',
+  });
+  expect(calls(env.log)[0]).toContain('--body Bash');
 });
 
 test('codex permission body: description, else the command, argv joined', () => {
@@ -339,10 +360,14 @@ test('a settings file jq cannot parse is left untouched and warned about once', 
 
 const codexSnake = ['user_prompt_submit', 'pre_tool_use', 'post_tool_use', 'permission_request', 'stop', 'session_end'];
 
-function trustAll(home: string, index: (event: string) => number = () => 0) {
+function trustAll(
+  home: string,
+  index: (event: string) => number = () => 0,
+  handler: (event: string) => number = () => 0,
+) {
   const hooksFile = path.join(home, '.codex/hooks.json');
   const body = codexSnake
-    .map((e) => `[hooks.state."${hooksFile}:${e}:${index(e)}:0"]\ntrusted_hash = "sha256:00"\n`)
+    .map((e) => `[hooks.state."${hooksFile}:${e}:${index(e)}:${handler(e)}"]\ntrusted_hash = "sha256:00"\n`)
     .join('\n');
   writeFileSync(path.join(home, '.codex/config.toml'), `model = "m"\n\n[hooks.state]\n\n${body}`);
 }
@@ -354,6 +379,235 @@ test('installer names the codex hooks that still need trust', () => {
   for (const e of codexSnake) expect(first).toContain(e);
   trustAll(env.home);
   expect(reinstall(env).stdout).not.toContain('Codex skips untrusted hooks');
+});
+
+test('reinstall keeps a codex hook in place ahead of a foreign one', () => {
+  const env = install((home) => {
+    writeFileSync(
+      path.join(home, '.codex/hooks.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: 'command', command: '/old/tether-notify-hook codex done' }] },
+            { hooks: [{ type: 'command', command: 'foreign-hook' }] },
+          ],
+        },
+      }),
+    );
+  });
+  reinstall(env);
+  const stop = JSON.parse(readFileSync(path.join(env.home, '.codex/hooks.json'), 'utf8')).hooks.Stop;
+  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  expect(stop).toHaveLength(2);
+  expect(stop[0].hooks[0].command).toBe(`'${wrapper}' codex done`);
+  expect(stop[1].hooks[0].command).toBe('foreign-hook');
+});
+
+test('reinstall keeps a cursor hook in place ahead of a foreign one', () => {
+  const env = install((home) => {
+    writeFileSync(
+      path.join(home, '.cursor/hooks.json'),
+      JSON.stringify({
+        version: 1,
+        hooks: {
+          stop: [{ command: '/old/tether-notify-hook cursor done' }, { command: 'foreign-hook' }],
+        },
+      }),
+    );
+  });
+  reinstall(env);
+  const stop = JSON.parse(readFileSync(path.join(env.home, '.cursor/hooks.json'), 'utf8')).hooks.stop;
+  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  expect(stop).toHaveLength(2);
+  expect(stop[0].command).toBe(`'${wrapper}' cursor done`);
+  expect(stop[1].command).toBe('foreign-hook');
+});
+
+test('reinstall collapses duplicate tether groups onto the first one', () => {
+  const env = install((home) => {
+    writeFileSync(
+      path.join(home, '.codex/hooks.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: 'command', command: 'before' }] },
+            { hooks: [{ type: 'command', command: '/old/tether-notify-hook codex done' }] },
+            { hooks: [{ type: 'command', command: 'between' }] },
+            { hooks: [{ type: 'command', command: '/older/tether-notify-hook codex done' }] },
+          ],
+        },
+      }),
+    );
+  });
+  reinstall(env);
+  const stop = JSON.parse(readFileSync(path.join(env.home, '.codex/hooks.json'), 'utf8')).hooks.Stop;
+  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  expect(stop.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([
+    'before',
+    `'${wrapper}' codex done`,
+    'between',
+  ]);
+});
+
+test('reinstall keeps a foreign handler that shares a claude group with ours', () => {
+  const env = install((home) => {
+    mkdirSync(path.join(home, '.claude'));
+    writeFileSync(
+      path.join(home, '.claude/settings.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                { type: 'command', command: '/old/tether-notify-hook claude done' },
+                { type: 'command', command: 'other-hook' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+  });
+  reinstall(env);
+  const stop = JSON.parse(readFileSync(path.join(env.home, '.claude/settings.json'), 'utf8')).hooks.Stop;
+  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  expect(stop).toHaveLength(1);
+  expect(stop[0].hooks.map((h: { command: string }) => h.command)).toEqual([`'${wrapper}' claude done`, 'other-hook']);
+});
+
+test('reinstall updates a gemini hook in place, including matcher and name', () => {
+  const env = install((home) => {
+    writeFileSync(
+      path.join(home, '.gemini/settings.json'),
+      JSON.stringify({
+        hooks: {
+          AfterAgent: [
+            {
+              matcher: 'specific',
+              hooks: [
+                { type: 'command', name: 'old', command: '/old/tether-notify-hook gemini done' },
+                { type: 'command', command: 'other-hook' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+  });
+  reinstall(env);
+  const groups = JSON.parse(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8')).hooks.AfterAgent;
+  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  expect(groups).toHaveLength(1);
+  expect(groups[0].matcher).toBe('*');
+  expect(groups[0].hooks.map((h: { command: string; name?: string }) => h.command)).toEqual([
+    `'${wrapper}' gemini done`,
+    'other-hook',
+  ]);
+  expect(groups[0].hooks[0].name).toBe('tether');
+});
+
+test('a symlinked codex hooks file keeps its target and mode', () => {
+  let target = '';
+  const env = install((home) => {
+    target = path.join(home, 'codex-hooks.json');
+    writeFileSync(target, '{}\n');
+    chmodSync(target, 0o644);
+    symlinkSync(target, path.join(home, '.codex/hooks.json'));
+  });
+  const link = path.join(env.home, '.codex/hooks.json');
+  expect(lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(readlinkSync(link)).toBe(target);
+  expect(statSync(target).mode & 0o777).toBe(0o644);
+  const hooks = JSON.parse(readFileSync(target, 'utf8')).hooks;
+  for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PermissionRequest', 'Stop', 'SessionEnd']) {
+    expect(hooks[event]).toHaveLength(1);
+  }
+});
+
+test('empty gemini and cursor configs receive our hooks', () => {
+  const env = install((home) => {
+    writeFileSync(path.join(home, '.gemini/settings.json'), '');
+    writeFileSync(path.join(home, '.cursor/hooks.json'), ' \n\t');
+  });
+  const gemini = JSON.parse(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8'));
+  const cursor = JSON.parse(readFileSync(path.join(env.home, '.cursor/hooks.json'), 'utf8'));
+  for (const event of Object.keys(geminiEvents)) {
+    expect(gemini.hooks[event]).toHaveLength(1);
+  }
+  for (const event of ['beforeSubmitPrompt', 'postToolUse', 'stop', 'sessionEnd']) {
+    expect(cursor.hooks[event]).toHaveLength(1);
+  }
+});
+
+test('a claude prompt hook is kept and every tether event is registered', () => {
+  const env = install((home) => {
+    mkdirSync(path.join(home, '.claude'));
+    writeFileSync(
+      path.join(home, '.claude/settings.json'),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'prompt', prompt: 'x' }] }] } }),
+    );
+  });
+  const settings = JSON.parse(readFileSync(path.join(env.home, '.claude/settings.json'), 'utf8'));
+  for (const event of [
+    'UserPromptSubmit',
+    'PreToolUse',
+    'PostToolUse',
+    'Notification',
+    'Stop',
+    'StopFailure',
+    'SessionEnd',
+  ]) {
+    const ours = settings.hooks[event].filter((g: { hooks: { command?: string }[] }) =>
+      g.hooks.some((h) => (h.command ?? '').includes('tether-notify-hook')),
+    );
+    expect(ours).toHaveLength(1);
+  }
+  const stopHooks = settings.hooks.Stop.flatMap((g: { hooks: { type?: string; prompt?: string }[] }) => g.hooks);
+  expect(stopHooks).toContainEqual({ type: 'prompt', prompt: 'x' });
+});
+
+test('jsonc gemini settings stay unwired', () => {
+  const original = '// user comment\n{"hooks": {}}\n';
+  const env = install((home) => writeFileSync(path.join(home, '.gemini/settings.json'), original));
+  const again = reinstall(env);
+  expect(again.stdout).not.toContain('Registered Gemini CLI hooks.');
+  const wired = (again.stdout.match(/^Agents wired: (.*)\.$/m) ?? ['', ''])[1];
+  expect(wired.split(' ')).not.toContain('gemini');
+  expect(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8')).toBe(original);
+});
+
+test('codex trust key uses our handler index within the group', () => {
+  const env = install((home) => {
+    writeFileSync(
+      path.join(home, '.codex/hooks.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                { type: 'command', command: 'foreign-hook' },
+                { type: 'command', command: '/old/tether-notify-hook codex done' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+  });
+  const hooksFile = path.join(env.home, '.codex/hooks.json');
+  trustAll(env.home);
+  const missed = reinstall(env).stdout;
+  expect(missed).toContain('Codex skips untrusted hooks');
+  expect(missed).toMatch(/\(stop\)/);
+  trustAll(
+    env.home,
+    () => 0,
+    (event) => (event === 'stop' ? 1 : 0),
+  );
+  expect(reinstall(env).stdout).not.toContain('Codex skips untrusted hooks');
+  expect(readFileSync(path.join(env.home, '.codex/config.toml'), 'utf8')).toContain(
+    `[hooks.state."${hooksFile}:stop:0:1"]`,
+  );
 });
 
 test('codex trust is checked at our position, after a foreign hook group', () => {

@@ -108,7 +108,7 @@ if [ -n "$input" ]; then
       ;;
     codex:done)    body="$(field '.last_assistant_message // empty')" ;;
     codex:waiting)
-      body="$(field '.tool_input.description // (.tool_input.command | if type == "array" then join(" ") else . end) // .tool_name // empty')"
+      body="$(field '.tool_input.description? // (.tool_input.command? | if type == "array" then join(" ") else . end) // .tool_name // empty')"
       ;;
     gemini:waiting)
       if [ "$(field '.details.type // empty')" = ask_user ]; then
@@ -161,49 +161,142 @@ printf '%s\n' "$HOST_LABEL" > "${NOTIFY_HOME}/host-label"
 
 # --- config merges (idempotent; preserve existing hooks) -----------------------
 
-# Rewrites <file> through a jq program. A file jq can't parse (comments, say) is left as
-# is: the agent may accept it, and a rewrite would lose what jq can't read.
+# Rewrites <file> through a jq program. Unparseable files and failed merges stay untouched:
+# a rewrite would drop what jq can't read, or replace a good file with nothing.
 SKIPPED=" "
+REGISTERED=""
 jq_merge() { # <file> <empty document> <jq args…>
   file="$1"; empty="$2"; shift 2
   mkdir -p "$(dirname "$file")"
-  [ -f "$file" ] || printf '%s\n' "$empty" > "$file"
+  case "$SKIPPED" in
+    *" $file "*) return 0 ;;
+  esac
   tmp="$(mktemp)"
-  if jq "$@" "$file" > "$tmp" 2>/dev/null; then
-    mv "$tmp" "$file"
-  else
+  err="$(mktemp)"
+  feed="$file"
+  blank=""
+  existed=0
+  if [ -e "$file" ] || [ -L "$file" ]; then existed=1; fi
+  # A missing or whitespace-only file is the empty document. jq exits 0 on it and prints nothing.
+  if [ ! -f "$file" ] || ! grep -q '[^[:space:]]' "$file"; then
+    blank="$(mktemp)"
+    printf '%s\n' "$empty" > "$blank"
+    feed="$blank"
+  elif ! jq empty "$file" >/dev/null 2>"$err"; then
+    rm -f "$tmp" "$err"
+    SKIPPED="${SKIPPED}${file} "
+    echo "Skipped $file: not plain JSON." >&2
+    return 0
+  fi
+  if ! jq "$@" "$feed" > "$tmp" 2>"$err"; then
+    line=$(head -n 1 "$err")
+    rm -f "$tmp" "$err"
+    [ -n "$blank" ] && rm -f "$blank"
+    SKIPPED="${SKIPPED}${file} "
+    echo "Skipped $file: couldn't merge (${line})." >&2
+    return 0
+  fi
+  if ! grep -q '[^[:space:]]' "$tmp"; then
+    rm -f "$tmp" "$err"
+    [ -n "$blank" ] && rm -f "$blank"
+    SKIPPED="${SKIPPED}${file} "
+    echo "Skipped $file: couldn't merge (empty output)." >&2
+    return 0
+  fi
+  rm -f "$err"
+  [ -n "$blank" ] && rm -f "$blank"
+  # mv would replace a symlink with a regular file and reset the mode to mktemp's 0600.
+  if [ "$existed" -eq 1 ]; then
+    cat "$tmp" > "$file"
     rm -f "$tmp"
-    case "$SKIPPED" in
-      *" $file "*) ;;
-      *) SKIPPED="${SKIPPED}${file} "; echo "Skipped $file: not plain JSON." >&2 ;;
-    esac
+  else
+    mv "$tmp" "$file"
   fi
 }
 
+# A skipped file is reported once here, and that agent is left out of REGISTERED.
+finish_agent() { # <slug> <label> <file>
+  case "$SKIPPED" in
+    *" $3 "*) echo "Couldn't register $2 hooks in $3." ;;
+    *)
+      echo "Registered $2 hooks."
+      if [ -n "$REGISTERED" ]; then REGISTERED="$REGISTERED $1"; else REGISTERED="$1"; fi
+      ;;
+  esac
+}
+
 # Claude / Codex share a nested shape: hooks.<Event>[].hooks[].command.
-# Strip any prior tether-notify-hook entry for that event, then add ours.
+# An existing tether handler is replaced in place. Codex trusts a hook by group and
+# handler index, so deleting the group and appending it would move every later group.
 merge_nested() { # <file> <Event> <command>
   jq_merge "$1" '{}' --arg ev "$2" --arg cmd "$3" '
-    def clean(a): (a // []) | map(select(any(.hooks[]?; .command | test("tether-notify-hook")) | not));
-    .hooks = ((.hooks // {}) | .[$ev] = (clean(.[$ev]) + [{hooks: [{type: "command", command: $cmd}]}]))
+    def is_ours: ((.command // "") | tostring | test("tether-notify-hook"));
+    def handler: {type: "command", command: $cmd};
+    def first_hit:
+      [ range(0; length) as $gi
+        | range(0; (.[$gi].hooks // []) | length) as $hi
+        | select(.[$gi].hooks[$hi] | is_ours)
+        | {gi: $gi, hi: $hi}
+      ] | first;
+    def placed:
+      (first_hit) as $hit
+      | if $hit == null then . + [{hooks: [handler]}]
+        else to_entries | map(
+          .key as $gi | .value as $group | ($group.hooks // []) as $hooks
+          | [ $hooks | to_entries[]
+              | if $gi == $hit.gi and .key == $hit.hi then handler
+                elif (.value | is_ours) then empty
+                else .value end
+            ] as $kept
+          | if (($hooks | map(select(is_ours)) | length) > 0) and (($kept | length) == 0) then empty
+            else $group | .hooks = $kept end
+        ) end;
+    .hooks = ((.hooks // {}) | .[$ev] = ((.[$ev] // []) | placed))
   '
 }
 
 # Gemini CLI: the nested shape plus a matcher (required to match every tool) and a name.
 merge_gemini() { # <file> <Event> <command>
   jq_merge "$1" '{}' --arg ev "$2" --arg cmd "$3" '
-    def clean(a): (a // []) | map(select(any(.hooks[]?; .command | test("tether-notify-hook")) | not));
-    .hooks = ((.hooks // {}) | .[$ev] = (clean(.[$ev])
-      + [{matcher: "*", hooks: [{type: "command", name: "tether", command: $cmd}]}]))
+    def is_ours: ((.command // "") | tostring | test("tether-notify-hook"));
+    def handler: {type: "command", name: "tether", command: $cmd};
+    def first_hit:
+      [ range(0; length) as $gi
+        | range(0; (.[$gi].hooks // []) | length) as $hi
+        | select(.[$gi].hooks[$hi] | is_ours)
+        | {gi: $gi, hi: $hi}
+      ] | first;
+    def placed:
+      (first_hit) as $hit
+      | if $hit == null then . + [{matcher: "*", hooks: [handler]}]
+        else to_entries | map(
+          .key as $gi | .value as $group | ($group.hooks // []) as $hooks
+          | [ $hooks | to_entries[]
+              | if $gi == $hit.gi and .key == $hit.hi then handler
+                elif (.value | is_ours) then empty
+                else .value end
+            ] as $kept
+          | if (($hooks | map(select(is_ours)) | length) > 0) and (($kept | length) == 0) then empty
+            else $group | .hooks = $kept | if $gi == $hit.gi then .matcher = "*" else . end end
+        ) end;
+    .hooks = ((.hooks // {}) | .[$ev] = ((.[$ev] // []) | placed))
   '
 }
 
 # Cursor v1: hooks.<event>[].command (flat), lowercase events.
 merge_cursor() { # <file> <event> <command>
   jq_merge "$1" '{"version":1,"hooks":{}}' --arg ev "$2" --arg cmd "$3" '
-    def clean(a): (a // []) | map(select((.command // "") | test("tether-notify-hook") | not));
+    def is_ours: ((.command // "") | tostring | test("tether-notify-hook"));
+    def placed:
+      ([ range(0; length) as $i | select(.[$i] | is_ours) | $i ] | first) as $hit
+      | if $hit == null then . + [{command: $cmd}]
+        else to_entries | map(
+          if .key == $hit then {command: $cmd}
+          elif (.value | is_ours) then empty
+          else .value end
+        ) end;
     .version = (.version // 1)
-    | .hooks = ((.hooks // {}) | .[$ev] = (clean(.[$ev]) + [{command: $cmd}]))
+    | .hooks = ((.hooks // {}) | .[$ev] = ((.[$ev] // []) | placed))
   '
 }
 
@@ -216,8 +309,7 @@ merge_nested "${HOME}/.claude/settings.json" Notification     "'${WRAPPER}' clau
 merge_nested "${HOME}/.claude/settings.json" Stop             "'${WRAPPER}' claude done"
 merge_nested "${HOME}/.claude/settings.json" StopFailure      "'${WRAPPER}' claude failed"
 merge_nested "${HOME}/.claude/settings.json" SessionEnd       "'${WRAPPER}' claude clear"
-echo "Registered Claude Code hooks."
-REGISTERED="claude"
+finish_agent claude "Claude Code" "${HOME}/.claude/settings.json"
 
 version_at_least() { # <have> <want>, dotted numbers
   awk -v a="$1" -v b="$2" 'BEGIN {
@@ -242,9 +334,9 @@ elif [ -n "$claude_version" ]; then
   echo "Claude Code ${claude_version} predates mods (2.1.287); phone answers type keys instead."
 fi
 
-# Codex runs a hook only once it is trusted in /hooks. Trust is keyed by file, event and the
-# entry's position, so an entry whose position moved needs trusting again. Presence only:
-# the trusted hash isn't recomputed.
+# Codex runs a hook only once it is trusted in /hooks. Trust is keyed by
+# <file>:<event>:<group>:<handler>, so a moved entry needs trusting again.
+# Presence only: the trusted hash isn't recomputed.
 codex_untrusted() {
   hooks="${HOME}/.codex/hooks.json"
   config="${HOME}/.codex/config.toml"
@@ -252,11 +344,16 @@ codex_untrusted() {
     PermissionRequest:permission_request Stop:stop SessionEnd:session_end; do
     event="${pair%%:*}"
     snake="${pair#*:}"
-    idx="$(jq -r --arg ev "$event" '
-      (.hooks[$ev] // []) | map(any(.hooks[]?; .command | test("tether-notify-hook")))
-      | index(true) // empty' "$hooks" 2>/dev/null || true)"
-    [ -n "$idx" ] || continue
-    grep -qF "[hooks.state.\"${hooks}:${snake}:${idx}:0\"]" "$config" 2>/dev/null || printf '%s ' "$snake"
+    pos="$(jq -r --arg ev "$event" '
+      [ range(0; (.hooks[$ev] // []) | length) as $gi
+        | range(0; ((.hooks[$ev][$gi].hooks // []) | length)) as $hi
+        | select(((.hooks[$ev][$gi].hooks[$hi].command // "") | tostring | test("tether-notify-hook")))
+        | "\($gi) \($hi)"
+      ] | first // empty' "$hooks" 2>/dev/null || true)"
+    [ -n "$pos" ] || continue
+    gi="${pos%% *}"
+    hi="${pos##* }"
+    grep -qF "[hooks.state.\"${hooks}:${snake}:${gi}:${hi}\"]" "$config" 2>/dev/null || printf '%s ' "$snake"
   done
 }
 
@@ -268,8 +365,7 @@ if [ -d "${HOME}/.codex" ]; then
   merge_nested "${HOME}/.codex/hooks.json" PermissionRequest "'${WRAPPER}' codex waiting"
   merge_nested "${HOME}/.codex/hooks.json" Stop              "'${WRAPPER}' codex done"
   merge_nested "${HOME}/.codex/hooks.json" SessionEnd        "'${WRAPPER}' codex clear"
-  REGISTERED="$REGISTERED codex"
-  echo "Registered Codex hooks."
+  finish_agent codex Codex "${HOME}/.codex/hooks.json"
   untrusted="$(codex_untrusted)"
   [ -z "$untrusted" ] \
     || echo "Codex skips untrusted hooks: run codex, open /hooks and trust the tether entries (${untrusted% })."
@@ -283,8 +379,7 @@ if [ -d "${HOME}/.cursor" ]; then
   merge_cursor "${HOME}/.cursor/hooks.json" postToolUse        "'${WRAPPER}' cursor working"
   merge_cursor "${HOME}/.cursor/hooks.json" stop               "'${WRAPPER}' cursor done"
   merge_cursor "${HOME}/.cursor/hooks.json" sessionEnd         "'${WRAPPER}' cursor clear"
-  REGISTERED="$REGISTERED cursor"
-  echo "Registered Cursor hooks."
+  finish_agent cursor Cursor "${HOME}/.cursor/hooks.json"
 fi
 
 # Gemini CLI — only if it's set up on this host.
@@ -295,8 +390,7 @@ if [ -d "${HOME}/.gemini" ]; then
   merge_gemini "${HOME}/.gemini/settings.json" Notification "'${WRAPPER}' gemini waiting"
   merge_gemini "${HOME}/.gemini/settings.json" AfterAgent   "'${WRAPPER}' gemini done"
   merge_gemini "${HOME}/.gemini/settings.json" SessionEnd   "'${WRAPPER}' gemini clear"
-  REGISTERED="$REGISTERED gemini"
-  echo "Registered Gemini CLI hooks."
+  finish_agent gemini "Gemini CLI" "${HOME}/.gemini/settings.json"
 fi
 
 echo
