@@ -12,7 +12,7 @@ import { AgentVm } from "agents.slint";
 import { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
 import { SnippetsPage } from "snippets_page.slint";
 import { HistoryVm, PaletteVm, PaletteRowData } from "extras.slint";
-import { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow } from "extras_bridge.slint";
+import { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow, ChipRow } from "extras_bridge.slint";
 
 import "../../../assets/fonts/CascadiaMono-Regular.ttf";
 import "../../../assets/fonts/CascadiaMono-Bold.ttf";
@@ -36,7 +36,7 @@ export { AgentVm, AgentQuestionRow, AgentOption } from "agents.slint";
 export { GitVm, GitRowVm, DiffLineVm, CheckVm, MethodVm, MdLinkVm, MdItemVm } from "git.slint";
 export { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
 export { HistoryVm, PaletteVm, PaletteRowData } from "extras.slint";
-export { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow } from "extras_bridge.slint";
+export { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow, ChipRow } from "extras_bridge.slint";
 
 export component AppWindow inherits Window {
     in property <string> window-title: "Tether";

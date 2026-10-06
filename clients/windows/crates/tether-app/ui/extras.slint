@@ -1,6 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
-import { GhostButton, SecondaryButton } from "components.slint";
+import { GhostButton, IconButton, SecondaryButton } from "components.slint";
 
 export struct PaletteRowData {
     name: string,
@@ -61,9 +61,9 @@ export component HistoryOverlay inherits Rectangle {
                         overflow: elide;
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    VerticalLayout { alignment: center; GhostButton { text: "Copy all"; clicked => { HistoryVm.copy(); } } }
-                    VerticalLayout { alignment: center; GhostButton { text: "Reload"; clicked => { HistoryVm.reload(); } } }
-                    VerticalLayout { alignment: center; GhostButton { text: "Done"; clicked => { HistoryVm.close(); } } }
+                    VerticalLayout { alignment: center; IconButton { flat: true; size: 30px; icon: @image-url("icons/copy.svg"); tooltip: "Copy all"; clicked => { HistoryVm.copy(); } } }
+                    VerticalLayout { alignment: center; IconButton { flat: true; size: 30px; icon: @image-url("icons/refresh.svg"); tooltip: "Reload"; clicked => { HistoryVm.reload(); } } }
+                    VerticalLayout { alignment: center; IconButton { flat: true; size: 30px; icon: @image-url("icons/close.svg"); tooltip: "Close · Esc"; clicked => { HistoryVm.close(); } } }
                 }
             }
             if HistoryVm.note != "": Rectangle {
@@ -180,7 +180,9 @@ export component PaletteOverlay inherits Rectangle {
         drop-shadow-color: #00000059;
         clip: true;
         TouchArea { }
+        // y is explicit: an unplaced child is centred in the card and lands on the empty state.
         Rectangle {
+            y: 0px;
             height: 46px;
             Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
             query := TextInput {

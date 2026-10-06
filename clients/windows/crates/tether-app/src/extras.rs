@@ -320,12 +320,18 @@ pub fn install(app: &Rc<App>) {
     });
 
     let fonts = ui.global::<GoogleFontsBridge>();
-    fonts.set_suggestions(ModelRc::new(VecModel::from(
-        googlefonts::SUGGESTIONS
-            .iter()
-            .map(|s| SharedString::from(*s))
-            .collect::<Vec<_>>(),
-    )));
+    let rows: Vec<crate::ChipRow> = chip_rows(&googlefonts::SUGGESTIONS, SUGGESTION_WIDTH)
+        .into_iter()
+        .map(|names| crate::ChipRow {
+            names: ModelRc::new(VecModel::from(
+                names
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            )),
+        })
+        .collect();
+    fonts.set_suggestion_rows(ModelRc::new(VecModel::from(rows)));
     let weak = Rc::downgrade(app);
     fonts.on_download(move |input| {
         if let Some(app) = weak.upgrade() {
@@ -764,5 +770,53 @@ mod tests {
         assert_eq!((names, fonts), (1, 0));
         let on_disk = DownloadedFonts::load(&DataDir::new(&fonts_root)).unwrap();
         assert!(on_disk.items.is_empty());
+    }
+}
+
+/// The font page's column, less nothing: chips fill it edge to edge.
+const SUGGESTION_WIDTH: f32 = 520.0;
+
+/// Slint has no wrapping layout, so suggestions are packed into rows here. A chip is its
+/// label (about 6.7 px a character at 12 px) plus 20 px of padding, 6 px apart.
+pub fn chip_rows<'a>(names: &[&'a str], width: f32) -> Vec<Vec<&'a str>> {
+    let mut rows: Vec<Vec<&str>> = Vec::new();
+    let mut used = 0.0;
+    for &name in names {
+        let chip = name.chars().count() as f32 * 6.7 + 20.0;
+        match rows.last_mut() {
+            Some(row) if used + 6.0 + chip <= width => {
+                row.push(name);
+                used += 6.0 + chip;
+            }
+            _ => {
+                rows.push(vec![name]);
+                used = chip;
+            }
+        }
+    }
+    rows
+}
+
+#[cfg(test)]
+mod chip_tests {
+    use super::chip_rows;
+
+    #[test]
+    fn chips_wrap_to_the_column_and_keep_their_order() {
+        let names = [
+            "Fira Code",
+            "IBM Plex Mono",
+            "Source Code Pro",
+            "Victor Mono",
+            "Geist Mono",
+        ];
+        let rows = chip_rows(&names, 300.0);
+        assert!(rows.len() > 1);
+        assert_eq!(rows.concat(), names);
+        for row in &rows {
+            let w: f32 = row.iter().map(|n| n.len() as f32 * 6.7 + 20.0).sum::<f32>()
+                + 6.0 * (row.len() as f32 - 1.0);
+            assert!(w <= 300.0 || row.len() == 1);
+        }
     }
 }

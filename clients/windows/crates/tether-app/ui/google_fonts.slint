@@ -1,5 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { Field, PrimaryButton } from "components.slint";
+import { Field, PrimaryButton, SecondaryButton } from "components.slint";
 import { GoogleFontRow, GoogleFontsBridge } from "extras_bridge.slint";
 
 component Chip inherits Rectangle {
@@ -77,9 +77,10 @@ export component GoogleFontsSection inherits VerticalLayout {
         }
         VerticalLayout {
             alignment: end;
-            PrimaryButton {
+            if GoogleFontsBridge.input == "" && !GoogleFontsBridge.busy: SecondaryButton { text: "Download"; enabled: false; }
+            if GoogleFontsBridge.input != "" || GoogleFontsBridge.busy: PrimaryButton {
                 text: GoogleFontsBridge.busy ? "Downloading…" : "Download";
-                enabled: !GoogleFontsBridge.busy && GoogleFontsBridge.input != "";
+                enabled: !GoogleFontsBridge.busy;
                 clicked => { GoogleFontsBridge.download(GoogleFontsBridge.input); }
             }
         }
@@ -90,12 +91,12 @@ export component GoogleFontsSection inherits VerticalLayout {
         font-size: 13px;
         color: GoogleFontsBridge.status-error ? Tokens.danger : Tokens.success;
     }
-    Flickable {
-        height: 36px;
-        content-width: chips.preferred-width;
-        chips := HorizontalLayout {
+    VerticalLayout {
+        spacing: 6px;
+        for row in GoogleFontsBridge.suggestion-rows: HorizontalLayout {
             spacing: 6px;
-            for name in GoogleFontsBridge.suggestions: Chip { text: name; clicked => { GoogleFontsBridge.download(name); } }
+            alignment: start;
+            for name in row.names: Chip { text: name; clicked => { GoogleFontsBridge.download(name); } }
         }
     }
     if GoogleFontsBridge.installed.length > 0: VerticalLayout {

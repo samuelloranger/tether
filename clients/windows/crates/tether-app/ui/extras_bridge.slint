@@ -1,3 +1,7 @@
+export struct ChipRow {
+    names: [string],
+}
+
 export struct SnippetRow {
     id: string,
     name: string,
@@ -35,7 +39,7 @@ export global GoogleFontsBridge {
     in property <string> status;
     in property <bool> status-error;
     in property <bool> busy;
-    in property <[string]> suggestions;
+    in property <[ChipRow]> suggestion-rows;
     in property <[GoogleFontRow]> installed;
     callback download(string);
     callback remove(string);
