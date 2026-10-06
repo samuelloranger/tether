@@ -96,7 +96,10 @@ impl TerminalModel {
                 bytes,
             });
         } else if let Some(state) = self.send.as_mut() {
-            state.pending_paste = Some(bytes);
+            state
+                .pending_paste
+                .get_or_insert_with(Vec::new)
+                .extend(bytes);
         }
         if finished {
             self.capsule_shown = Some(now);
@@ -379,6 +382,30 @@ mod tests {
         assert_eq!(
             writes(&fx),
             vec![("a".into(), format!("'{UP}/a.png'").into_bytes())]
+        );
+    }
+
+    #[test]
+    fn uploads_finishing_while_not_live_are_all_pasted_once_in_order() {
+        let mut m = sending(&["a.png", "b.png", "c.png"]);
+        m.channels
+            .insert("a".into(), super::super::Chan::Opening(1));
+        for (i, n) in ["a.png", "b.png", "c.png"].iter().enumerate() {
+            let fx = m.handle(
+                Msg::SendFileDone {
+                    remote: format!("{UP}/{n}"),
+                },
+                t(10 + i as u64),
+            );
+            assert!(writes(&fx).is_empty());
+        }
+        let fx = m.handle(Msg::Attached { name: "a".into() }, t(20));
+        assert_eq!(
+            writes(&fx),
+            vec![(
+                "a".into(),
+                format!("'{UP}/a.png' '{UP}/b.png' '{UP}/c.png'").into_bytes()
+            )]
         );
     }
 }
