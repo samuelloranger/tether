@@ -62,7 +62,7 @@ jobs:
           go test ./...
 
   # The shipping product: the native Swift client. Builds TetherIOS for the
-  # simulator and runs the TetherKit tests. Signing is off — this proves the
+  # simulator and Mac Catalyst and runs the TetherKit tests. Signing is off — this proves the
   # sources compile and render, nothing more.
   ios-build:
     runs-on: macos-15
@@ -81,6 +81,18 @@ jobs:
             -project clients/apple/Tether.xcodeproj \
             -scheme TetherIOS \
             -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Build TetherIOS for Mac Catalyst
+        timeout-minutes: 30
+        run: |
+          xcodebuild build \
+            -skipPackagePluginValidation \
+            -project clients/apple/Tether.xcodeproj \
+            -scheme TetherIOS \
+            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
